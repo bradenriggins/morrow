@@ -15,7 +15,7 @@ describe("gateway configuration", () => {
       .toThrow("Missing environment variable MISSING");
   });
 
-  it("removes disabled upstreams and keeps publisher holds", () => {
+  it("removes disabled upstreams, keeps publisher holds, and expands the journal path", () => {
     const parsed = parseGatewayConfig({
       schema: "morrow.upstreams.v1",
       profile: "private-full",
@@ -36,9 +36,11 @@ describe("gateway configuration", () => {
           enabled: false,
         },
       ],
-    }, { SERVER: "/tmp/server.py" });
+      operationJournal: { path: "${STATE_ROOT}/morrow.sqlite3" },
+    }, { SERVER: "/tmp/server.py", STATE_ROOT: "/tmp/morrow-state" });
 
     expect(parsed.upstreams).toHaveLength(1);
     expect(parsed.filters.excludePrefixes).toEqual(["mindtap_", "connect_"]);
+    expect(parsed.operationJournal.path).toBe("/tmp/morrow-state/morrow.sqlite3");
   });
 });
