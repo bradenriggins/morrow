@@ -1,0 +1,30 @@
+{
+  "name": "@morrow/legacy-bridge-mcp",
+  "version": "1.0.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "example-legacy-bridge-mcp": "./dist/index.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "@morrow/bridge-loopback": "workspace:*",
+    "@morrow/bridge-protocol": "workspace:*",
+    "@morrow/contracts": "workspace:*",
+    "@morrow/gateway-core": "workspace:*",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "ws": "^8.18.3",
+    "@types/ws": "^8.18.1"
+  }
+}
