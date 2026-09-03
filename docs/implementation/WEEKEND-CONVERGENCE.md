@@ -2,7 +2,7 @@
 
 ## Current checkpoint
 
-This branch establishes Checkpoint A: a running Morrow MCP process that can connect to Meridian as an internal stdio upstream, import its typed tool list, remove held publisher tools, resolve name collisions, register the merged tools through the official TypeScript SDK, and forward calls back to the source that owns them.
+This branch establishes Checkpoint A: a running Morrow MCP process that can connect to one or more internal stdio MCP upstreams, import their typed tool lists, remove held MindTap and Connect tools, resolve name collisions, register the merged tools through the official TypeScript SDK, and forward calls back to the source that owns them.
 
 It also adds a deterministic exporter for the current Canvas-facing catalog in `morrow-legacy`. The exporter runs against an exact donor commit, refuses tracked donor changes, verifies the expected tool count, and writes an origin-bound catalog artifact outside the committed source tree.
 
@@ -12,13 +12,14 @@ It also adds a deterministic exporter for the current Canvas-facing catalog in `
 - Shared catalog and result contracts.
 - Deterministic catalog merge with stable aliases and a catalog digest.
 - MindTap and Connect prefix holds at catalog construction time.
-- Meridian stdio MCP client using the official client package.
-- Morrow stdio MCP server using the official server package.
+- Official MCP stdio clients for internal upstreams.
+- Official MCP stdio server for the public Morrow endpoint.
 - `morrow_health` and `morrow_catalog` inspection tools.
 - Upstream call forwarding with bounded source metadata.
 - Source configuration through a local ignored file or environment variables.
 - Morrow legacy Canvas catalog exporter.
 - Unit tests for collision handling, provider holds, digest stability, result wrapping, and configuration expansion.
+- A two-upstream process integration test that starts real fake MCP servers, lists tools, filters held providers, resolves a collision, forwards calls to both owners, checks source metadata, and closes both child processes.
 
 ## Local start sequence
 
