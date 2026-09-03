@@ -2,14 +2,18 @@
 
 ## Current checkpoint
 
-This branch establishes the gateway foundation and the catalog-reconciliation machinery. Morrow can connect to one or more internal stdio MCP upstreams, import typed tool lists, remove held MindTap and Connect tools, resolve exact-name collisions, register the merged tools through the official TypeScript SDK, and forward calls back to the source that owns them.
+This branch establishes the gateway foundation, donor catalog reconciliation, and the first executable Morrow legacy browser bridge.
+
+Morrow can connect to one or more internal stdio MCP upstreams, import typed tool lists, remove held MindTap and Connect tools, resolve exact-name collisions, register the merged tools through the official TypeScript SDK, and forward calls back to the source that owns them.
 
 It also contains deterministic tools to export the 270-row current Canvas-facing catalog from `morrow-legacy`, capture the live catalog of configured MCP upstreams, and reconcile exact names and explicitly reviewed semantic aliases.
+
+Checkpoint C adds an authenticated loopback WebSocket server and a reversible extension overlay. Read tools execute through the current donor runtime. Write tools are staged into the donor task store and remain blocked on the existing human approval surface.
 
 ## What is implemented
 
 - Clean pnpm and TypeScript workspace.
-- Shared catalog and result contracts.
+- Shared catalog, result, bridge-protocol, and bridge-health contracts.
 - Deterministic catalog merge with stable aliases and a catalog digest.
 - MindTap and Connect prefix holds at catalog construction time.
 - Official MCP stdio clients for internal upstreams.
@@ -21,10 +25,18 @@ It also contains deterministic tools to export the 270-row current Canvas-facing
 - Exact-revision Morrow legacy Canvas catalog exporter.
 - Live upstream catalog capture without persisting commands, environment variables, or local paths.
 - Deterministic reconciliation for exact-name compatibility, contract drift, explicit alias groups, source-only rows, and selected mappings.
-- Unit tests for collision handling, provider holds, digest stability, result wrapping, metadata refusal, source-catalog integrity, reconciliation, and configuration expansion.
-- A two-upstream process integration test that starts real fake MCP servers, lists tools, filters held providers, resolves a collision, forwards calls to both owners, checks source metadata, bounds catalog inspection output, and closes both child processes.
+- Loopback-only WebSocket bridge with first-message authentication, extension-origin checks, donor-revision binding, catalog-digest binding, connection generations, deadlines, and no automatic resend.
+- Internal Morrow legacy bridge MCP generated from the donor source catalog.
+- Native bridge health, binding, and task-inspection tools.
+- Reversible donor overlay installer and removal command.
+- Donor-side read routing through the existing execution runtime.
+- Donor-side write staging through `stageChatTask`, with no bridge approval command.
+- Unit tests for collision handling, provider holds, digest stability, result wrapping, metadata refusal, source-catalog integrity, reconciliation, bridge protocol validation, authentication, no-resend behavior, overlay patching, and configuration expansion.
+- Process integration tests for multi-upstream federation and fake-extension bridge routing.
 
 ## Local start sequence
+
+Meridian only:
 
 ```bash
 corepack enable
@@ -35,7 +47,21 @@ export MORROW_MERIDIAN_SERVER_PATH=/absolute/path/to/chcp-team-agent-kit/scripts
 pnpm start
 ```
 
-The server writes protocol messages only to standard output. Operational messages use standard error.
+Meridian plus Morrow legacy:
+
+```bash
+MORROW_LEGACY_ROOT=/absolute/path/to/morrow-legacy pnpm catalog:legacy
+export MORROW_NEW_REPO_ROOT=$PWD
+export MORROW_LEGACY_ROOT=/absolute/path/to/morrow-legacy
+export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/morrow-legacy.canvas.json
+export MORROW_LEGACY_BRIDGE_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
+pnpm bridge:legacy:install
+cp morrow.upstreams.with-legacy-bridge.example.json morrow.upstreams.json
+export MORROW_MERIDIAN_SERVER_PATH=/absolute/path/to/chcp-team-agent-kit/scripts/team/mcp/meridian_server.py
+pnpm start
+```
+
+The public server writes protocol messages only to standard output. Operational messages use standard error.
 
 ## Catalog sequence
 
@@ -50,25 +76,37 @@ pnpm catalog:reconcile -- \
 
 See `CATALOG-RECONCILIATION.md` for the artifact and decision rules.
 
-## Next checkpoints
+## Checkpoint status
 
-### Checkpoint B receipt
+### Checkpoint B: donor receipts
 
-- Run the capture and export commands against the pinned donor checkouts.
+Implemented in code, awaiting execution against Braden's pinned local donor checkouts.
+
+- Run the capture and export commands.
 - Review every initial alias and contract-drift row.
-- Commit only the public-safe decision map, not the raw private catalog artifacts.
+- Commit only the public-safe decision map, not raw private catalog artifacts.
 
 ### Checkpoint C: Morrow execution bridge
 
-- Add one local bridge contract for browser-dependent Morrow operations.
-- Expose only tools whose authority, approval, and readback paths are already active.
-- Keep the browser bridge below the catalog and above no provider route authority.
+Implemented behind a local overlay, awaiting packed-extension proof.
+
+- The bridge is loopback-only and authenticated.
+- Browser-dependent reads remain in the legacy runtime.
+- Browser-dependent writes become ordinary staged tasks.
+- The MCP caller cannot mint approval.
+- Connection loss after send is unknown and is never auto-replayed.
+
+See `MORROW-LEGACY-BRIDGE.md` for installation and proof commands.
 
 ### Checkpoint D: unified operation truth
 
-- Place gateway-level operations, batches, and source transitions behind one durable journal.
-- Reuse the donor effect and batch behavior without allowing the gateway to report success independently.
-- Add fault tests for process loss, ambiguous dispatch, partial batch completion, and restart.
+Next engineering checkpoint.
+
+- Add a gateway operation record for every forwarded call without replacing source-owned effect truth.
+- Persist source, catalog, request, bridge operation, staged-task, and upstream result digests.
+- Add durable batch manifests that reference source-owned child operations.
+- Recover gateway calls after process restart without replaying an ambiguous source command.
+- Add fault tests for process loss, ambiguous bridge delivery, partial batch completion, and source reconnect.
 
 ### Checkpoint E: candidate assembly
 
@@ -89,4 +127,7 @@ Stop the branch when any change would:
 - auto-select a contract-drift row;
 - infer a semantic alias without an explicit reviewed rule;
 - return an upstream error with unreviewed raw details;
+- expose the bridge pairing token through URLs, MCP output, logs, or committed source;
+- allow a non-loopback bridge listener;
+- let the MCP surface approve, resume, undo, or otherwise act on a donor task;
 - report a possibly applied write as successful without source-owned readback.
