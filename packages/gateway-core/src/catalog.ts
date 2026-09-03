@@ -22,6 +22,7 @@ export interface CatalogMergeOptions {
 const DEFAULT_RESERVED_NAMES = Object.freeze([
   "morrow_health",
   "morrow_catalog",
+  "morrow_batch_recover",
 ]);
 
 function compareAscii(left: string, right: string): number {
