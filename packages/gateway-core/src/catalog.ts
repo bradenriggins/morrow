@@ -19,10 +19,13 @@ export interface CatalogMergeOptions {
   readonly generatedAt?: string;
 }
 
+const DEFAULT_EXCLUDED_NAMES = Object.freeze([
+  "morrow_batch_recover",
+]);
+
 const DEFAULT_RESERVED_NAMES = Object.freeze([
   "morrow_health",
   "morrow_catalog",
-  "morrow_batch_recover",
 ]);
 
 function compareAscii(left: string, right: string): number {
@@ -41,7 +44,10 @@ export function mergeCatalog(
   sources: readonly CatalogSource[],
   options: CatalogMergeOptions = {},
 ): CatalogSnapshot {
-  const excludeNames = new Set((options.excludeNames ?? []).map(normalizeToolName));
+  const excludeNames = new Set([
+    ...DEFAULT_EXCLUDED_NAMES,
+    ...(options.excludeNames ?? []).map(normalizeToolName),
+  ]);
   const excludePrefixes = [...(options.excludePrefixes ?? [])]
     .map((value) => String(value).trim())
     .filter(Boolean)
