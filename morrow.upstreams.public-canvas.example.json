@@ -1,0 +1,70 @@
+{
+  "schema": "morrow.upstreams.v1",
+  "profile": "public-canvas",
+  "sourcePolicy": {
+    "requireAttestation": true
+  },
+  "publicationPolicy": {
+    "path": "${MORROW_PUBLICATION_POLICY_PATH}",
+    "requiredForPublicProfile": true
+  },
+  "upstreams": [
+    {
+      "id": "meridian",
+      "label": "ExamplePlatform",
+      "kind": "mcp-stdio",
+      "command": "${MORROW_PYTHON_COMMAND:-python3}",
+      "args": ["${MORROW_MERIDIAN_SERVER_PATH}"],
+      "repository": "example-owner/example-attestation-repo",
+      "revision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+      "attestation": {
+        "kind": "local-git",
+        "root": "${MORROW_MERIDIAN_ROOT}",
+        "expectedRevision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+        "requireTrackedClean": true,
+        "expectedToolCount": 205
+      },
+      "priority": 100,
+      "required": true,
+      "enabled": true,
+      "env": {}
+    },
+    {
+      "id": "example-legacy",
+      "label": "Morrow legacy browser runtime",
+      "kind": "mcp-stdio",
+      "command": "pnpm",
+      "args": ["--filter", "@morrow/legacy-bridge-mcp", "start"],
+      "cwd": "${MORROW_NEW_REPO_ROOT}",
+      "repository": "example-org/example-legacy-source",
+      "revision": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+      "attestation": {
+        "kind": "local-git",
+        "root": "${MORROW_LEGACY_ROOT}",
+        "expectedRevision": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+        "requireTrackedClean": true
+      },
+      "priority": 50,
+      "required": true,
+      "enabled": true,
+      "env": {
+        "MORROW_LEGACY_CATALOG_PATH": "${MORROW_LEGACY_CATALOG_PATH}",
+        "MORROW_LEGACY_EXPECTED_REVISION": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+        "MORROW_LEGACY_BRIDGE_TOKEN": "${MORROW_LEGACY_BRIDGE_TOKEN}",
+        "MORROW_LEGACY_BRIDGE_PORT": "${MORROW_LEGACY_BRIDGE_PORT:-32145}",
+        "MORROW_LEGACY_ALLOWED_EXTENSION_IDS": "${MORROW_LEGACY_ALLOWED_EXTENSION_IDS:-}"
+      }
+    }
+  ],
+  "filters": {
+    "excludePrefixes": ["mindtap_", "connect_"],
+    "excludeNames": []
+  },
+  "operationJournal": {
+    "path": "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}"
+  },
+  "batchScheduler": {
+    "maxConcurrentWindows": 1
+  },
+  "maxCatalogTools": 1000
+}
