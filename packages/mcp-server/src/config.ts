@@ -39,6 +39,10 @@ const GatewayConfigSchema = z.object({
   sourcePolicy: z.object({
     requireAttestation: z.boolean().default(false),
   }).default({ requireAttestation: false }),
+  publicationPolicy: z.object({
+    path: z.string().min(1).optional(),
+    requiredForPublicProfile: z.boolean().default(true),
+  }).default({ requiredForPublicProfile: true }),
   filters: z.object({
     excludePrefixes: z.array(z.string()).default(["mindtap_", "connect_"]),
     excludeNames: z.array(z.string()).default([]),
@@ -94,7 +98,7 @@ function expandUpstream(
       ? {
           attestation: {
             ...upstream.attestation,
-            root: expandEnvironmentTemplate(upstream.attestation.root, environment),
+            root: resolve(expandEnvironmentTemplate(upstream.attestation.root, environment)),
             expectedRevision: upstream.attestation.expectedRevision.toLowerCase(),
             ...(upstream.attestation.expectedCatalogDigest
               ? { expectedCatalogDigest: upstream.attestation.expectedCatalogDigest.toLowerCase() }
@@ -129,17 +133,36 @@ export function parseGatewayConfig(
   if (upstreams.length === 0) {
     throw new Error("At least one enabled upstream is required");
   }
+  const requireSourceAttestation = parsed.sourcePolicy.requireAttestation
+    || parsed.profile === "public-canvas";
   for (const upstream of upstreams) {
     validateSourceProvenance(upstream);
-    if (parsed.sourcePolicy.requireAttestation && !upstream.attestation) {
+    if (requireSourceAttestation && !upstream.attestation) {
       throw new Error(`Upstream ${upstream.id} requires a configured source attestation.`);
     }
+  }
+  const publicationPath = parsed.publicationPolicy.path
+    ? resolve(expandEnvironmentTemplate(parsed.publicationPolicy.path, environment))
+    : undefined;
+  if (
+    parsed.profile === "public-canvas"
+    && parsed.publicationPolicy.requiredForPublicProfile
+    && !publicationPath
+  ) {
+    throw new Error("public-canvas profile requires publicationPolicy.path");
   }
   return {
     ...parsed,
     upstreams,
+    sourcePolicy: {
+      requireAttestation: requireSourceAttestation,
+    },
+    publicationPolicy: {
+      requiredForPublicProfile: parsed.publicationPolicy.requiredForPublicProfile,
+      ...(publicationPath ? { path: publicationPath } : {}),
+    },
     operationJournal: {
-      path: expandEnvironmentTemplate(parsed.operationJournal.path, environment),
+      path: resolve(expandEnvironmentTemplate(parsed.operationJournal.path, environment)),
     },
   };
 }
@@ -188,6 +211,9 @@ export async function loadGatewayConfig(
         required: true,
         enabled: true,
       }],
+      publicationPolicy: {
+        requiredForPublicProfile: true,
+      },
       filters: {
         excludePrefixes: ["mindtap_", "connect_"],
         excludeNames: [],
