@@ -4,6 +4,8 @@ Models reason. Morrow safely operates learning systems.
 
 Morrow is a local, model-neutral LMS operations layer for MCP-compatible AI clients. It provides typed Canvas operations, bounded authority, reviewed plans, separate approval, durable effect records, fresh provider readback, multi-course execution, privacy controls, and evidence.
 
+Start with [WEEKEND-HANDOFF.md](WEEKEND-HANDOFF.md). Also see [ARCHITECTURE.md](ARCHITECTURE.md), [SOURCE-ORIGIN.md](SOURCE-ORIGIN.md), and [LIMITATIONS.md](LIMITATIONS.md).
+
 ## Current implementation
 
 The repository begins with a federation gateway because the capabilities already exist in two private donor systems:
@@ -91,7 +93,104 @@ pnpm catalog:reconcile -- \
 
 Generated donor catalogs and reconciliation output live under `artifacts/catalogs/` and are ignored by default. The donor export refuses the wrong commit or tracked changes. Contract drift cannot be auto-selected by source priority.
 
+## MCP client install
+
+The public Morrow endpoint is a local stdio server. After `pnpm install` and `pnpm build`, the root script `pnpm start` runs `@morrow/mcp-server` (`node dist/index.js`). That package declares the bin `morrow-mcp`. `packages/mcp-server/src/server.ts` calls `serveStdio`.
+
+Start the process from the repository root. The gateway loads `morrow.upstreams.json` from the process working directory, or from `MORROW_UPSTREAMS_FILE` when that variable is set. If that file is absent, set `MORROW_MERIDIAN_SERVER_PATH`. Optional `MORROW_PYTHON_COMMAND` defaults to `python3`.
+
+Example upstream files that exist in this repository:
+
+- `morrow.upstreams.example.json`
+- `morrow.upstreams.with-legacy-bridge.example.json`
+
+Named tools registered in this repository:
+
+- Gateway: `morrow_health`, `morrow_catalog`
+- Legacy bridge, when that upstream is enabled: `morrow_legacy_bridge_health`, `morrow_legacy_bindings`, `morrow_legacy_task_get`
+
+The gateway also forwards tools imported from connected upstreams. Do not add tool names that are not registered in code.
+
+A client config file path is not in this repository. The JSON below wraps the stdio command the server actually runs.
+
+### Codex
+
+Config file path not in repo; this is the stdio command the server actually runs.
+
+```json
+{
+  "mcpServers": {
+    "morrow": {
+      "command": "pnpm",
+      "args": ["start"],
+      "env": {
+        "MORROW_MERIDIAN_SERVER_PATH": "/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py"
+      }
+    }
+  }
+}
+```
+
+### Claude Code / Claude Desktop
+
+Config file path not in repo; this is the stdio command the server actually runs.
+
+```json
+{
+  "mcpServers": {
+    "morrow": {
+      "command": "pnpm",
+      "args": ["start"],
+      "env": {
+        "MORROW_MERIDIAN_SERVER_PATH": "/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py"
+      }
+    }
+  }
+}
+```
+
+### Gemini CLI
+
+Config file path not in repo; this is the stdio command the server actually runs.
+
+```json
+{
+  "mcpServers": {
+    "morrow": {
+      "command": "pnpm",
+      "args": ["start"],
+      "env": {
+        "MORROW_MERIDIAN_SERVER_PATH": "/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py"
+      }
+    }
+  }
+}
+```
+
+Equivalent bin after `pnpm build`, from the repository root:
+
+```json
+{
+  "command": "pnpm",
+  "args": ["exec", "morrow-mcp"],
+  "env": {
+    "MORROW_MERIDIAN_SERVER_PATH": "/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py"
+  }
+}
+```
+
+For the two-upstream example, copy `morrow.upstreams.with-legacy-bridge.example.json` to `morrow.upstreams.json` and add the environment variables already documented in the Quick start and bridge sections (`MORROW_NEW_REPO_ROOT`, `MORROW_LEGACY_CATALOG_PATH`, `MORROW_LEGACY_BRIDGE_TOKEN`).
+
 ## Documentation
+
+Named root files:
+
+- [Limitations](LIMITATIONS.md)
+- [Source origin](SOURCE-ORIGIN.md)
+- [Architecture](ARCHITECTURE.md)
+- [Weekend handoff](WEEKEND-HANDOFF.md)
+
+Implementation notes and ADRs:
 
 - [Weekend convergence implementation](docs/implementation/EXAMPLE-WORKTREE.md)
 - [Catalog capture and reconciliation](docs/implementation/CATALOG-RECONCILIATION.md)
