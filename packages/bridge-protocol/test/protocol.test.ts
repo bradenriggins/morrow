@@ -13,9 +13,9 @@ const digest = "a".repeat(64);
 describe("bridge protocol", () => {
   it("normalizes and sorts binding snapshots", () => {
     expect(normalizeBridgeBindings([
-      { sourceBindingId: "z-binding", provider: "canvas", courseId: "42", runtimeVerified: true },
+      { sourceBindingId: "canvas:22", provider: "canvas", courseId: "42", runtimeVerified: true },
       { sourceBindingId: "a-binding", provider: "canvas", runtimeVerified: false },
-    ]).map((binding) => binding.sourceBindingId)).toEqual(["a-binding", "z-binding"]);
+    ]).map((binding) => binding.sourceBindingId)).toEqual(["a-binding", "canvas:22"]);
   });
 
   it("validates an authenticated hello", () => {
