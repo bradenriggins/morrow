@@ -1,7 +1,12 @@
 import type { McpServer, CallToolResult } from "@modelcontextprotocol/server";
-import { BATCH_MODES, BATCH_STATES } from "@morrow/batch-engine";
+import {
+  BATCH_MODES,
+  BATCH_RECOVERY_MODES,
+  BATCH_STATES,
+} from "@morrow/batch-engine";
 import { sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
+import { recoverGatewayBatch } from "./batch-recovery.js";
 import type { MorrowRuntime } from "./morrow-runtime.js";
 
 function textAndStructured(summary: string, structuredContent: JsonObject): CallToolResult {
@@ -219,6 +224,43 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         const processed = typeof result.processed === "number" ? result.processed : 0;
         return textAndStructured(
           `Reconciled ${processed} source tasks. The batch source outcome is ${sourceOutcome}.`,
+          result,
+        );
+      } catch (error) {
+        return safeFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "morrow_batch_recover",
+    {
+      description: "Inspect or safely repair interrupted local batch orchestration. apply_safe may reset unknown read-only children for retry, recover a known staged task from the gateway journal, or settle a proven pre-send failure. It performs zero provider dispatches and never retries an uncertain write.",
+      inputSchema: z.object({
+        batch_id: z.string().min(8).max(160),
+        mode: z.enum(BATCH_RECOVERY_MODES).default("inspect"),
+        after_ordinal: z.number().int().min(0).default(0),
+        max_children: z.number().int().min(1).max(500).default(100),
+      }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ batch_id, mode, after_ordinal, max_children }) => {
+      try {
+        const result = recoverGatewayBatch(runtime, {
+          batchId: batch_id,
+          mode,
+          afterOrdinal: after_ordinal,
+          maxChildren: max_children,
+        });
+        return textAndStructured(
+          mode === "inspect"
+            ? `Inspected interrupted batch ${batch_id} without changing it.`
+            : `Applied safe local recovery to batch ${batch_id} with zero provider dispatches.`,
           result,
         );
       } catch (error) {
