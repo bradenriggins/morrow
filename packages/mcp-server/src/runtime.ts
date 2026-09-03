@@ -9,6 +9,7 @@ import {
   type GatewayCallMeta,
   type GatewayHealth,
   type JsonObject,
+  type SourceAttestationHealth,
   type ToolAnnotations,
 } from "@morrow/contracts";
 import {
@@ -26,6 +27,7 @@ import {
 } from "@morrow/operation-journal";
 import { StdioMcpUpstream } from "@morrow/upstream-mcp";
 import type { GatewayConfig } from "./config.js";
+import { verifyLocalGitSourceAttestation } from "./source-attestation.js";
 
 export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_health",
@@ -123,12 +125,23 @@ function withSourceOperationId(
   readonly sourceOperationId?: string;
   readonly idempotencyKey?: string;
 } {
+  const forwarded = structuredClone(args) as Record<string, unknown>;
   if (mapping.upstreamId !== "example-legacy") {
-    return { forwarded: structuredClone(args) };
+    return { forwarded };
   }
+
+  if (mapping.annotations?.readOnlyHint === true) {
+    if (isJsonObject(forwarded._morrow)) {
+      const routing = { ...forwarded._morrow };
+      delete routing.operation_id;
+      if (Object.keys(routing).length > 0) forwarded._morrow = routing;
+      else delete forwarded._morrow;
+    }
+    return { forwarded };
+  }
+
   const routing = legacyRouting(args);
   const sourceOperationId = routing.suppliedOperationId || `operation:${randomUUID()}`;
-  const forwarded = structuredClone(args) as Record<string, unknown>;
   forwarded._morrow = {
     ...(isJsonObject(forwarded._morrow) ? forwarded._morrow : {}),
     operation_id: sourceOperationId,
@@ -168,6 +181,8 @@ function attachOperationMeta(
       gatewayOperationId: operation.operationId,
       gatewayOperationState: operation.state,
       ...(operation.sourceOperationId ? { sourceOperationId: operation.sourceOperationId } : {}),
+      ...(operation.sourceResultState ? { sourceResultState: operation.sourceResultState } : {}),
+      ...(operation.sourceTaskId ? { sourceTaskId: operation.sourceTaskId } : {}),
     } satisfies GatewayCallMeta,
   };
   return output;
@@ -191,6 +206,22 @@ function replayResult(
       operation: operationRecordProjection(operation),
     },
   }, mapping, catalogDigest, operation);
+}
+
+function verifyConfiguredSources(
+  config: GatewayConfig,
+): ReadonlyMap<string, SourceAttestationHealth> {
+  const evidence = new Map<string, SourceAttestationHealth>();
+  for (const source of config.upstreams) {
+    if (!source.attestation) continue;
+    const verified = verifyLocalGitSourceAttestation(
+      source.id,
+      source.repository,
+      source.attestation,
+    );
+    evidence.set(source.id, verified);
+  }
+  return evidence;
 }
 
 export class GatewayRuntime {
@@ -218,6 +249,7 @@ export class GatewayRuntime {
     config: GatewayConfig,
     options: { readonly journalPath?: string } = {},
   ): Promise<GatewayRuntime> {
+    const sourceAttestations = verifyConfiguredSources(config);
     const journal = new GatewayOperationJournal({
       path: options.journalPath || config.operationJournal.path,
     });
@@ -227,6 +259,7 @@ export class GatewayRuntime {
     for (const upstreamConfig of [...config.upstreams].sort((left, right) => (
       right.priority - left.priority || compareAscii(left.id, right.id)
     ))) {
+      const attestation = sourceAttestations.get(upstreamConfig.id);
       const upstream = new StdioMcpUpstream({
         id: upstreamConfig.id,
         label: upstreamConfig.label,
@@ -236,6 +269,13 @@ export class GatewayRuntime {
         env: upstreamConfig.env,
         priority: upstreamConfig.priority,
         required: upstreamConfig.required,
+        ...(upstreamConfig.attestation?.expectedToolCount !== undefined
+          ? { expectedToolCount: upstreamConfig.attestation.expectedToolCount }
+          : {}),
+        ...(upstreamConfig.attestation?.expectedCatalogDigest
+          ? { expectedCatalogDigest: upstreamConfig.attestation.expectedCatalogDigest }
+          : {}),
+        ...(attestation ? { sourceAttestation: attestation } : {}),
       });
       upstreams.set(upstream.id, upstream);
 
