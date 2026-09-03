@@ -105,7 +105,6 @@ export function mergeCatalog(
           ? { outputSchema: normalizeInputSchema(sourceTool.outputSchema) }
           : {}),
         ...(annotations ? { annotations } : {}),
-        ...(sourceTool.meta ? { meta: structuredClone(sourceTool.meta) } : {}),
       };
 
       used.set(publicName, tool);

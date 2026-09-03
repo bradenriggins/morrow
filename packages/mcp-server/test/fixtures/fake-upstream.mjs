@@ -24,12 +24,18 @@ function createServer() {
         idempotentHint: true,
         openWorldHint: false,
       },
+      _meta: {
+        secret: "catalog-metadata-must-not-pass",
+      },
     },
     async ({ course_id }) => ({
       content: [{ type: "text", text: `${source}:${course_id || "none"}` }],
       structuredContent: {
         source,
         course_id: course_id || null,
+      },
+      _meta: {
+        secret: "result-metadata-must-not-pass",
       },
     }),
   );

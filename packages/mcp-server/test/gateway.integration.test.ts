@@ -50,6 +50,7 @@ describe("GatewayRuntime stdio federation", () => {
       expect(names).toContain("morrow_legacy_only");
       expect(names.some((name) => name.startsWith("mindtap_"))).toBe(false);
       expect(names.some((name) => name.startsWith("connect_"))).toBe(false);
+      expect(runtime.catalog.tools.every((tool) => !("meta" in tool))).toBe(true);
 
       expect(runtime.catalog.collisions).toEqual([{
         requestedName: "canvas_page_get",
@@ -63,13 +64,13 @@ describe("GatewayRuntime stdio federation", () => {
         source: "meridian",
         course_id: "101",
       });
-      expect(primary._meta).toMatchObject({
-        "io.morrow/gateway": {
+      expect(primary._meta).toEqual({
+        "io.morrow/gateway": expect.objectContaining({
           publicToolName: "canvas_page_get",
           upstreamId: "meridian",
           upstreamToolName: "canvas_page_get",
           catalogDigest: runtime.catalog.digest,
-        },
+        }),
       });
 
       const alias = await runtime.call("morrow_legacy__canvas_page_get", { course_id: "202" });
@@ -77,6 +78,16 @@ describe("GatewayRuntime stdio federation", () => {
         source: "example-legacy",
         course_id: "202",
       });
+
+      const search = runtime.searchCatalog({ query: "canvas", limit: 1 });
+      expect(search.returned).toBe(1);
+      expect(search.nextOffset).toBe(1);
+      expect(search.tools[0]).toMatchObject({
+        publicName: "canvas_page_get",
+        upstreamId: "meridian",
+        inputSchemaSha256: expect.stringMatching(/^[0-9a-f]{64}$/),
+      });
+      expect(search.tools[0]).not.toHaveProperty("inputSchema");
 
       expect(runtime.health()).toMatchObject({
         ready: true,

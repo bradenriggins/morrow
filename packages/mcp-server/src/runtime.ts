@@ -1,9 +1,12 @@
 import {
+  sha256Json,
+  sha256Text,
   type CatalogSnapshot,
   type CatalogSource,
   type CatalogTool,
   type GatewayHealth,
   type JsonObject,
+  type ToolAnnotations,
 } from "@morrow/contracts";
 import {
   mergeCatalog,
@@ -16,21 +19,58 @@ import type { GatewayConfig } from "./config.js";
 export interface CatalogSearchInput {
   readonly query?: string;
   readonly source?: string;
+  readonly offset?: number;
   readonly limit?: number;
+}
+
+export interface CatalogSearchTool {
+  readonly publicName: string;
+  readonly upstreamId: string;
+  readonly upstreamName: string;
+  readonly title?: string;
+  readonly description?: string;
+  readonly descriptionSha256?: string;
+  readonly inputSchemaSha256: string;
+  readonly outputSchemaSha256?: string;
+  readonly annotations?: ToolAnnotations;
 }
 
 export interface CatalogSearchResult {
   readonly schema: "morrow.catalog.search.v1";
   readonly catalogDigest: string;
   readonly totalMatches: number;
+  readonly offset: number;
   readonly returned: number;
-  readonly tools: readonly CatalogTool[];
+  readonly nextOffset: number | null;
+  readonly tools: readonly CatalogSearchTool[];
+  readonly collisionCount: number;
   readonly collisions: CatalogSnapshot["collisions"];
   readonly excludedCount: number;
 }
 
 function compareAscii(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function truncateText(value: string | undefined, maximum: number): string | undefined {
+  if (!value) return undefined;
+  return value.length <= maximum ? value : `${value.slice(0, maximum - 1)}…`;
+}
+
+function projectCatalogTool(tool: CatalogTool): CatalogSearchTool {
+  const description = truncateText(tool.description, 800);
+  const title = truncateText(tool.title, 200);
+  return {
+    publicName: tool.publicName,
+    upstreamId: tool.upstreamId,
+    upstreamName: tool.upstreamName,
+    ...(title ? { title } : {}),
+    ...(description ? { description } : {}),
+    ...(tool.description ? { descriptionSha256: sha256Text(tool.description) } : {}),
+    inputSchemaSha256: sha256Json(tool.inputSchema),
+    ...(tool.outputSchema ? { outputSchemaSha256: sha256Json(tool.outputSchema) } : {}),
+    ...(tool.annotations ? { annotations: tool.annotations } : {}),
+  };
 }
 
 export class GatewayRuntime {
@@ -122,7 +162,8 @@ export class GatewayRuntime {
   searchCatalog(input: CatalogSearchInput = {}): CatalogSearchResult {
     const query = input.query?.trim().toLowerCase() ?? "";
     const source = input.source?.trim().toLowerCase() ?? "";
-    const limit = Math.max(1, Math.min(input.limit ?? 100, 500));
+    const offset = Math.max(0, input.offset ?? 0);
+    const limit = Math.max(1, Math.min(input.limit ?? 50, 100));
     const matches = this.catalog.tools.filter((tool) => {
       if (source && tool.upstreamId !== source) return false;
       if (!query) return true;
@@ -130,14 +171,21 @@ export class GatewayRuntime {
         .filter((value): value is string => typeof value === "string")
         .some((value) => value.toLowerCase().includes(query));
     });
+    const page = matches.slice(offset, offset + limit);
+    const nextOffset = offset + page.length < matches.length
+      ? offset + page.length
+      : null;
 
     return {
       schema: "morrow.catalog.search.v1",
       catalogDigest: this.catalog.digest,
       totalMatches: matches.length,
-      returned: Math.min(matches.length, limit),
-      tools: matches.slice(0, limit),
-      collisions: this.catalog.collisions,
+      offset,
+      returned: page.length,
+      nextOffset,
+      tools: page.map(projectCatalogTool),
+      collisionCount: this.catalog.collisions.length,
+      collisions: this.catalog.collisions.slice(0, 50),
       excludedCount: this.catalog.excluded.length,
     };
   }
