@@ -1,9 +1,12 @@
+import { randomUUID } from "node:crypto";
 import {
+  isJsonObject,
   sha256Json,
   sha256Text,
   type CatalogSnapshot,
   type CatalogSource,
   type CatalogTool,
+  type GatewayCallMeta,
   type GatewayHealth,
   type JsonObject,
   type ToolAnnotations,
@@ -13,8 +16,23 @@ import {
   normalizeUpstreamResult,
   safeUpstreamFailure,
 } from "@morrow/gateway-core";
+import {
+  GatewayOperationConflictError,
+  GatewayOperationJournal,
+  classifySourceResult,
+  operationRecordProjection,
+  type GatewayOperationRecord,
+  type GatewayOperationState,
+} from "@morrow/operation-journal";
 import { StdioMcpUpstream } from "@morrow/upstream-mcp";
 import type { GatewayConfig } from "./config.js";
+
+export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
+  "morrow_health",
+  "morrow_catalog",
+  "morrow_operation_get",
+  "morrow_operations_recent",
+] as const);
 
 export interface CatalogSearchInput {
   readonly query?: string;
@@ -48,6 +66,13 @@ export interface CatalogSearchResult {
   readonly excludedCount: number;
 }
 
+export interface RecentOperationsInput {
+  readonly source?: string;
+  readonly tool?: string;
+  readonly state?: GatewayOperationState;
+  readonly limit?: number;
+}
+
 function compareAscii(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -73,25 +98,129 @@ function projectCatalogTool(tool: CatalogTool): CatalogSearchTool {
   };
 }
 
+function legacyRouting(args: Readonly<Record<string, unknown>>): {
+  readonly suppliedOperationId?: string;
+  readonly sourceBindingId?: string;
+} {
+  if (!isJsonObject(args._morrow)) return {};
+  const suppliedOperationId = typeof args._morrow.operation_id === "string"
+    ? args._morrow.operation_id.trim()
+    : "";
+  const sourceBindingId = typeof args._morrow.source_binding_id === "string"
+    ? args._morrow.source_binding_id.trim()
+    : "";
+  return {
+    ...(suppliedOperationId ? { suppliedOperationId } : {}),
+    ...(sourceBindingId ? { sourceBindingId } : {}),
+  };
+}
+
+function withSourceOperationId(
+  mapping: CatalogTool,
+  args: Readonly<Record<string, unknown>>,
+): {
+  readonly forwarded: Readonly<Record<string, unknown>>;
+  readonly sourceOperationId?: string;
+  readonly idempotencyKey?: string;
+} {
+  if (mapping.upstreamId !== "example-legacy") {
+    return { forwarded: structuredClone(args) };
+  }
+  const routing = legacyRouting(args);
+  const sourceOperationId = routing.suppliedOperationId || `operation:${randomUUID()}`;
+  const forwarded = structuredClone(args) as Record<string, unknown>;
+  forwarded._morrow = {
+    ...(isJsonObject(forwarded._morrow) ? forwarded._morrow : {}),
+    operation_id: sourceOperationId,
+  };
+  return {
+    forwarded,
+    sourceOperationId,
+    ...(routing.suppliedOperationId ? { idempotencyKey: routing.suppliedOperationId } : {}),
+  };
+}
+
+function attachOperationMeta(
+  result: JsonObject,
+  mapping: CatalogTool,
+  catalogDigest: string,
+  operation: GatewayOperationRecord,
+): JsonObject {
+  const output = structuredClone(result);
+  const existingMeta = isJsonObject(output._meta) ? output._meta : {};
+  const existingGatewayValue = existingMeta["io.morrow/gateway"];
+  const upstreamResultSha256 = isJsonObject(existingGatewayValue)
+    && typeof existingGatewayValue.upstreamResultSha256 === "string"
+    ? existingGatewayValue.upstreamResultSha256
+    : null;
+  output._meta = {
+    ...existingMeta,
+    "io.morrow/gateway": {
+      schema: "morrow.gateway.call.v1",
+      publicToolName: mapping.publicName,
+      upstreamId: mapping.upstreamId,
+      upstreamToolName: mapping.upstreamName,
+      catalogDigest,
+      upstreamResultSha256: upstreamResultSha256
+        || operation.upstreamResultDigest
+        || operation.errorDigest
+        || sha256Json(result),
+      gatewayOperationId: operation.operationId,
+      gatewayOperationState: operation.state,
+      ...(operation.sourceOperationId ? { sourceOperationId: operation.sourceOperationId } : {}),
+    } satisfies GatewayCallMeta,
+  };
+  return output;
+}
+
+function replayResult(
+  mapping: CatalogTool,
+  catalogDigest: string,
+  operation: GatewayOperationRecord,
+): JsonObject {
+  return attachOperationMeta({
+    content: [{
+      type: "text",
+      text: `Morrow did not resend ${mapping.publicName}; the supplied operation identity already has a gateway record.`,
+    }],
+    isError: true,
+    structuredContent: {
+      schema: "morrow.problem.v1",
+      code: "operation_already_recorded",
+      recoverable: operation.state === "failed_before_send",
+      operation: operationRecordProjection(operation),
+    },
+  }, mapping, catalogDigest, operation);
+}
+
 export class GatewayRuntime {
   readonly config: GatewayConfig;
   readonly catalog: CatalogSnapshot;
 
   private readonly upstreams: ReadonlyMap<string, StdioMcpUpstream>;
   private readonly toolByPublicName: ReadonlyMap<string, CatalogTool>;
+  private readonly journal: GatewayOperationJournal;
 
   private constructor(
     config: GatewayConfig,
     upstreams: ReadonlyMap<string, StdioMcpUpstream>,
     catalog: CatalogSnapshot,
+    journal: GatewayOperationJournal,
   ) {
     this.config = config;
     this.upstreams = upstreams;
     this.catalog = catalog;
+    this.journal = journal;
     this.toolByPublicName = new Map(catalog.tools.map((tool) => [tool.publicName, tool]));
   }
 
-  static async connect(config: GatewayConfig): Promise<GatewayRuntime> {
+  static async connect(
+    config: GatewayConfig,
+    options: { readonly journalPath?: string } = {},
+  ): Promise<GatewayRuntime> {
+    const journal = new GatewayOperationJournal({
+      path: options.journalPath || config.operationJournal.path,
+    });
     const upstreams = new Map<string, StdioMcpUpstream>();
     const sources: CatalogSource[] = [];
 
@@ -121,6 +250,7 @@ export class GatewayRuntime {
       } catch (error) {
         if (upstream.required) {
           await Promise.allSettled([...upstreams.values()].map((candidate) => candidate.close()));
+          journal.close();
           throw new Error(
             `Required upstream ${upstream.id} failed to connect`,
             { cause: error },
@@ -132,16 +262,18 @@ export class GatewayRuntime {
     const catalog = mergeCatalog(sources, {
       excludePrefixes: config.filters.excludePrefixes,
       excludeNames: config.filters.excludeNames,
+      reservedNames: MORROW_NATIVE_TOOL_NAMES,
     });
 
     if (catalog.tools.length > config.maxCatalogTools) {
       await Promise.allSettled([...upstreams.values()].map((candidate) => candidate.close()));
+      journal.close();
       throw new Error(
         `Catalog contains ${catalog.tools.length} tools, above maxCatalogTools=${config.maxCatalogTools}`,
       );
     }
 
-    return new GatewayRuntime(config, upstreams, catalog);
+    return new GatewayRuntime(config, upstreams, catalog, journal);
   }
 
   health(): GatewayHealth {
@@ -156,6 +288,7 @@ export class GatewayRuntime {
       collisionCount: this.catalog.collisions.length,
       excludedToolCount: this.catalog.excluded.length,
       sources,
+      operationJournal: this.journal.health(),
     };
   }
 
@@ -190,6 +323,24 @@ export class GatewayRuntime {
     };
   }
 
+  operationGet(operationId: string): JsonObject {
+    return operationRecordProjection(this.journal.get(operationId));
+  }
+
+  operationsRecent(input: RecentOperationsInput = {}): JsonObject {
+    const operations = this.journal.list({
+      ...(input.source ? { sourceId: input.source } : {}),
+      ...(input.tool ? { publicToolName: input.tool } : {}),
+      ...(input.state ? { state: input.state } : {}),
+      ...(input.limit !== undefined ? { limit: input.limit } : {}),
+    }).map(operationRecordProjection);
+    return {
+      schema: "morrow.gateway-operations.list.v1",
+      returned: operations.length,
+      operations,
+    };
+  }
+
   async call(publicName: string, args: Readonly<Record<string, unknown>>): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
     if (!mapping) {
@@ -203,9 +354,49 @@ export class GatewayRuntime {
       };
     }
 
+    const routed = withSourceOperationId(mapping, args);
+    const requestDigest = sha256Json(args);
+    const forwardedRequestDigest = sha256Json(routed.forwarded);
+    let prepared;
+    try {
+      prepared = this.journal.prepare({
+        publicToolName: mapping.publicName,
+        sourceId: mapping.upstreamId,
+        sourceToolName: mapping.upstreamName,
+        catalogDigest: this.catalog.digest,
+        requestDigest,
+        forwardedRequestDigest,
+        ...(routed.sourceOperationId ? { sourceOperationId: routed.sourceOperationId } : {}),
+        ...(routed.idempotencyKey ? { idempotencyKey: routed.idempotencyKey } : {}),
+        readOnly: mapping.annotations?.readOnlyHint === true,
+      });
+    } catch (error) {
+      if (error instanceof GatewayOperationConflictError) {
+        return {
+          content: [{ type: "text", text: "The operation identity is already bound to a different exact request." }],
+          isError: true,
+          structuredContent: {
+            schema: "morrow.problem.v1",
+            code: error.code,
+            recoverable: false,
+            detailDigest: sha256Text(error.message),
+          },
+        };
+      }
+      throw error;
+    }
+
+    if (!prepared.created) {
+      return replayResult(mapping, this.catalog.digest, prepared.record);
+    }
+
     const upstream = this.upstreams.get(mapping.upstreamId);
     if (!upstream) {
-      return {
+      const failed = this.journal.recordFailedBeforeSend(
+        prepared.record.operationId,
+        new Error("upstream unavailable"),
+      );
+      return attachOperationMeta({
         content: [{ type: "text", text: `The source for ${publicName} is unavailable.` }],
         isError: true,
         structuredContent: {
@@ -213,19 +404,35 @@ export class GatewayRuntime {
           code: "upstream_unavailable",
           source: mapping.upstreamId,
         },
-      };
+      }, mapping, this.catalog.digest, failed);
     }
 
-    const context = { mapping, catalogDigest: this.catalog.digest };
+    const dispatched = this.journal.markDispatched(prepared.record.operationId);
+    const baseContext = { mapping, catalogDigest: this.catalog.digest };
     try {
-      const result = await upstream.callTool(mapping.upstreamName, args);
-      return normalizeUpstreamResult(result, context);
+      const result = await upstream.callTool(mapping.upstreamName, routed.forwarded);
+      const normalized = normalizeUpstreamResult(result, baseContext);
+      const source = classifySourceResult(result);
+      const complete = this.journal.recordResponse(dispatched.operationId, {
+        upstreamResultDigest: sha256Json(result),
+        normalizedResultDigest: sha256Json(normalized),
+        ...(source.state ? { sourceResultState: source.state } : {}),
+        ...(source.taskId ? { sourceTaskId: source.taskId } : {}),
+      });
+      return attachOperationMeta(normalized, mapping, this.catalog.digest, complete);
     } catch (error) {
-      return safeUpstreamFailure(error, context);
+      const unknown = this.journal.recordSourceUnknown(dispatched.operationId, error);
+      return attachOperationMeta(
+        safeUpstreamFailure(error, baseContext),
+        mapping,
+        this.catalog.digest,
+        unknown,
+      );
     }
   }
 
   async close(): Promise<void> {
     await Promise.allSettled([...this.upstreams.values()].map((upstream) => upstream.close()));
+    this.journal.close();
   }
 }
