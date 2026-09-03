@@ -3,6 +3,7 @@ import {
   getLiveProviderBindings,
 } from './state.js';
 import { buildExecutionRuntimeSnapshot } from './execution-runtime.js';
+import { classifyOperationResult } from './chat-task-manager/helpers.js';
 import { bridgeError } from './morrow-gateway-bridge-protocol.js';
 
 export function normalizeMorrowBridgeExactId(value) {
@@ -128,11 +129,66 @@ export async function buildMorrowBridgeCommandRuntime(binding) {
   return { ...active, runtime };
 }
 
+const TASK_TERMINAL_STATUSES = new Set(['completed', 'failed', 'paused', 'cancelled', 'undone']);
+const RESULT_KEYS = Object.freeze([
+  'done',
+  'unconfirmed',
+  'failed',
+  'rollbackFailed',
+  'skipped',
+  'undone',
+  'notStarted',
+]);
+
+function taskResultCounts(task) {
+  const counts = Object.fromEntries(RESULT_KEYS.map((key) => [key, 0]));
+  for (const operation of Array.isArray(task?.operations) ? task.operations : []) {
+    const result = classifyOperationResult(operation?.runtime);
+    if (result === 'delegated' || !Object.prototype.hasOwnProperty.call(counts, result)) continue;
+    counts[result] += 1;
+  }
+  return counts;
+}
+
+function deriveTaskOutcome(status, counts) {
+  if (status === 'awaiting_confirmation') return 'awaiting_approval';
+  if (status === 'running' || status === 'undoing') return 'running';
+  if (status === 'cancelled') return 'cancelled';
+  if (status === 'undone') return 'reverted';
+  if (status === 'paused') return 'inspection_required';
+  const effectPossible = counts.done > 0
+    || counts.unconfirmed > 0
+    || counts.rollbackFailed > 0
+    || counts.undone > 0;
+  if (status === 'failed') return effectPossible ? 'failed_effect_possible' : 'failed_no_effect';
+  if (status === 'completed') {
+    if (
+      counts.unconfirmed > 0
+      || counts.failed > 0
+      || counts.rollbackFailed > 0
+      || counts.skipped > 0
+      || counts.notStarted > 0
+    ) return 'inspection_required';
+    if (counts.undone > 0 && counts.done === 0) return 'reverted';
+    return 'succeeded';
+  }
+  return 'unknown';
+}
+
 export function projectMorrowBridgeTask(task) {
   if (!task || typeof task !== 'object') return null;
+  const status = String(task.status || '').trim().toLowerCase() || 'unknown';
+  const resultCounts = taskResultCounts(task);
+  const verificationStatus = String(
+    task.completedRuntimeMetadata?.providerVerification?.status
+    || task.completedRuntimeMetadata?.verification?.status
+    || '',
+  ).trim().slice(0, 120) || null;
   return {
     taskId: String(task.taskId || task.id || '').trim() || null,
-    status: String(task.status || '').trim() || 'unknown',
+    status,
+    outcome: deriveTaskOutcome(status, resultCounts),
+    terminal: TASK_TERMINAL_STATUSES.has(status),
     title: String(task.title || task.planSummary?.title || '').trim().slice(0, 300),
     description: String(task.description || task.planSummary?.description || '').trim().slice(0, 500),
     affectedCount: Number(task.planSummary?.affectedCount || task.operations?.length || 0),
@@ -142,6 +198,8 @@ export function projectMorrowBridgeTask(task) {
     approvalRecorded: Boolean(task.approvalState?.confirmedAt),
     destructive: task.completedRuntimeMetadata?.destructive === true,
     riskTier: String(task.completedRuntimeMetadata?.riskTier || '').trim() || null,
+    verificationStatus,
+    resultCounts,
   };
 }
 
