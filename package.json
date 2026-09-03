@@ -19,6 +19,7 @@
     "catalog:legacy": "pnpm build && node scripts/export-example-legacy-catalog.mjs",
     "catalog:capture": "pnpm build && node scripts/capture-upstream-catalog.mjs",
     "catalog:reconcile": "pnpm build && node scripts/reconcile-catalogs.mjs",
+    "publication:build": "pnpm build && node scripts/create-publication-policy.mjs",
     "bridge:legacy:start": "pnpm build && pnpm --filter @morrow/legacy-bridge-mcp start",
     "bridge:legacy:install": "node scripts/install-example-legacy-bridge.mjs",
     "bridge:legacy:remove": "node scripts/remove-example-legacy-bridge.mjs"
