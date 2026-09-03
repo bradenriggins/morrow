@@ -4,6 +4,7 @@ import * as z from "zod/v4";
 
 const source = String(process.env.FAKE_SOURCE || "fake").trim().toLowerCase();
 const sourceToolName = `${source.replace(/[^a-z0-9]+/g, "_")}_only`;
+const sourceToolIsWrite = source === "morrow-legacy";
 
 function createServer() {
   const server = new McpServer({
@@ -43,18 +44,29 @@ function createServer() {
   server.registerTool(
     sourceToolName,
     {
-      description: `A source-only fake tool from ${source}.`,
-      inputSchema: z.object({}),
+      description: `A source-only fake ${sourceToolIsWrite ? "write" : "read"} tool from ${source}.`,
+      inputSchema: z.object({
+        value: z.string().optional(),
+        _morrow: z.object({
+          operation_id: z.string().optional(),
+          source_binding_id: z.string().optional(),
+        }).optional(),
+      }),
       annotations: {
-        readOnlyHint: true,
+        readOnlyHint: !sourceToolIsWrite,
         destructiveHint: false,
-        idempotentHint: true,
+        idempotentHint: !sourceToolIsWrite,
         openWorldHint: false,
       },
     },
-    async () => ({
+    async ({ value, _morrow }) => ({
       content: [{ type: "text", text: sourceToolName }],
-      structuredContent: { source, tool: sourceToolName },
+      structuredContent: {
+        source,
+        tool: sourceToolName,
+        value: value || null,
+        operation_id: _morrow?.operation_id || null,
+      },
     }),
   );
 
