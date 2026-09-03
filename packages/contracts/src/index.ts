@@ -48,7 +48,7 @@ export interface CatalogCollision {
 export interface ExcludedCatalogTool {
   readonly upstreamId: string;
   readonly upstreamName: string;
-  readonly reason: "excluded_name" | "excluded_prefix";
+  readonly reason: "excluded_name" | "excluded_prefix" | "publication_policy";
 }
 
 export interface CatalogSnapshot {
@@ -100,6 +100,16 @@ export interface GatewayOperationJournalHealth {
   readonly unknownOperations: number;
 }
 
+export interface PublicationPolicyHealth {
+  readonly schema: "morrow.publication-policy.health.v1";
+  readonly applied: true;
+  readonly profile: "public-canvas";
+  readonly manifestDigest: string;
+  readonly sourceCount: number;
+  readonly allowedToolCount: number;
+  readonly omittedToolCount: number;
+}
+
 export interface GatewayHealth {
   readonly schema: "morrow.health.v1";
   readonly version: string;
@@ -111,6 +121,7 @@ export interface GatewayHealth {
   readonly excludedToolCount: number;
   readonly sources: readonly GatewaySourceHealth[];
   readonly operationJournal: GatewayOperationJournalHealth;
+  readonly publicationPolicy?: PublicationPolicyHealth;
 }
 
 export interface GatewayCallMeta {
