@@ -77,6 +77,14 @@ export function expandEnvironmentTemplate(
   });
 }
 
+function resolveLocalPath(
+  value: string,
+  environment: Readonly<Record<string, string | undefined>>,
+): string {
+  const expanded = expandEnvironmentTemplate(value, environment).trim();
+  return expanded === ":memory:" ? expanded : resolve(expanded);
+}
+
 function expandUpstream(
   upstream: StdioUpstreamConfig,
   environment: Readonly<Record<string, string | undefined>>,
@@ -86,7 +94,7 @@ function expandUpstream(
     command: expandEnvironmentTemplate(upstream.command, environment),
     args: upstream.args.map((value) => expandEnvironmentTemplate(value, environment)),
     ...(upstream.cwd
-      ? { cwd: expandEnvironmentTemplate(upstream.cwd, environment) }
+      ? { cwd: resolveLocalPath(upstream.cwd, environment) }
       : {}),
     env: Object.fromEntries(
       Object.entries(upstream.env).map(([key, value]) => [
@@ -98,7 +106,7 @@ function expandUpstream(
       ? {
           attestation: {
             ...upstream.attestation,
-            root: resolve(expandEnvironmentTemplate(upstream.attestation.root, environment)),
+            root: resolveLocalPath(upstream.attestation.root, environment),
             expectedRevision: upstream.attestation.expectedRevision.toLowerCase(),
             ...(upstream.attestation.expectedCatalogDigest
               ? { expectedCatalogDigest: upstream.attestation.expectedCatalogDigest.toLowerCase() }
@@ -142,7 +150,7 @@ export function parseGatewayConfig(
     }
   }
   const publicationPath = parsed.publicationPolicy.path
-    ? resolve(expandEnvironmentTemplate(parsed.publicationPolicy.path, environment))
+    ? resolveLocalPath(parsed.publicationPolicy.path, environment)
     : undefined;
   if (
     parsed.profile === "public-canvas"
@@ -162,7 +170,7 @@ export function parseGatewayConfig(
       ...(publicationPath ? { path: publicationPath } : {}),
     },
     operationJournal: {
-      path: resolve(expandEnvironmentTemplate(parsed.operationJournal.path, environment)),
+      path: resolveLocalPath(parsed.operationJournal.path, environment),
     },
   };
 }
