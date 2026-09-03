@@ -7,12 +7,26 @@ import {
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
 import type { JsonObject } from "@morrow/contracts";
+import { GATEWAY_OPERATION_STATES } from "@morrow/operation-journal";
 import type { GatewayRuntime } from "./runtime.js";
 
 function textAndStructured(summary: string, structuredContent: JsonObject): CallToolResult {
   return {
     content: [{ type: "text", text: summary }],
     structuredContent,
+  };
+}
+
+function safeInspectionFailure(error: unknown): CallToolResult {
+  const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+  return {
+    content: [{ type: "text", text: "Morrow could not find the requested gateway operation." }],
+    isError: true,
+    structuredContent: {
+      schema: "morrow.problem.v1",
+      code: "gateway_operation_unavailable",
+      detailDigest: Buffer.from(detail, "utf8").toString("base64url").slice(0, 80),
+    },
   };
 }
 
@@ -25,7 +39,7 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
   server.registerTool(
     "morrow_health",
     {
-      description: "Return Morrow gateway readiness, catalog identity, and source status without exposing commands or credentials.",
+      description: "Return Morrow gateway readiness, catalog identity, source status, and durable operation-journal status without exposing commands or credentials.",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,
@@ -68,6 +82,56 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
         `Found ${result.totalMatches} matching tools and returned ${result.returned} from offset ${result.offset}.`,
         result as unknown as JsonObject,
       );
+    },
+  );
+
+  server.registerTool(
+    "morrow_operation_get",
+    {
+      description: "Inspect one durable gateway operation record by its opaque operation id. This does not query or change the source provider.",
+      inputSchema: z.object({
+        operation_id: z.string().min(8).max(160),
+      }),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ operation_id }) => {
+      try {
+        return textAndStructured(
+          `Loaded gateway operation ${operation_id}.`,
+          runtime.operationGet(operation_id),
+        );
+      } catch (error) {
+        return safeInspectionFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "morrow_operations_recent",
+    {
+      description: "List recent durable gateway operations with optional exact source, tool, and state filters. Stored records contain digests and bounded status, not raw provider payloads.",
+      inputSchema: z.object({
+        source: z.string().min(1).max(160).optional(),
+        tool: z.string().min(1).max(160).optional(),
+        state: z.enum(GATEWAY_OPERATION_STATES).optional(),
+        limit: z.number().int().min(1).max(200).default(50),
+      }),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (input) => {
+      const result = runtime.operationsRecent(input);
+      const returned = typeof result.returned === "number" ? result.returned : 0;
+      return textAndStructured(`Returned ${returned} gateway operations.`, result);
     },
   );
 
