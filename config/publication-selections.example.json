@@ -1,0 +1,11 @@
+{
+  "schema": "morrow.publication-selections.v1",
+  "release": "1.0.0-rc.0",
+  "selections": [
+    {
+      "publicName": "canvas_page_get",
+      "sourceId": "meridian",
+      "sourceToolName": "canvas_page_get"
+    }
+  ]
+}
