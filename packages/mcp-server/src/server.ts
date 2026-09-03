@@ -48,11 +48,12 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
   server.registerTool(
     "morrow_catalog",
     {
-      description: "Search the merged Morrow tool catalog and inspect exact upstream mappings, collisions, and exclusions.",
+      description: "Search a bounded projection of the merged Morrow tool catalog and inspect source mappings, collisions, and exclusions without returning full schemas.",
       inputSchema: z.object({
         query: z.string().optional().describe("Optional case-insensitive name or description search."),
         source: z.string().optional().describe("Optional upstream source id, such as meridian."),
-        limit: z.number().int().min(1).max(500).default(100),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(100).default(50),
       }),
       annotations: {
         readOnlyHint: true,
@@ -64,7 +65,7 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
     async (input) => {
       const result = runtime.searchCatalog(input);
       return textAndStructured(
-        `Found ${result.totalMatches} matching tools and returned ${result.returned}.`,
+        `Found ${result.totalMatches} matching tools and returned ${result.returned} from offset ${result.offset}.`,
         result as unknown as JsonObject,
       );
     },

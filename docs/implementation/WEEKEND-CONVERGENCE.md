@@ -14,12 +14,13 @@ It also adds a deterministic exporter for the current Canvas-facing catalog in `
 - MindTap and Connect prefix holds at catalog construction time.
 - Official MCP stdio clients for internal upstreams.
 - Official MCP stdio server for the public Morrow endpoint.
-- `morrow_health` and `morrow_catalog` inspection tools.
+- `morrow_health` and a paginated, schema-digest-only `morrow_catalog` inspection tool.
 - Upstream call forwarding with bounded source metadata.
+- Raw upstream tool metadata and result metadata are dropped at the gateway boundary.
 - Source configuration through a local ignored file or environment variables.
 - Morrow legacy Canvas catalog exporter.
-- Unit tests for collision handling, provider holds, digest stability, result wrapping, and configuration expansion.
-- A two-upstream process integration test that starts real fake MCP servers, lists tools, filters held providers, resolves a collision, forwards calls to both owners, checks source metadata, and closes both child processes.
+- Unit tests for collision handling, provider holds, digest stability, result wrapping, metadata refusal, and configuration expansion.
+- A two-upstream process integration test that starts real fake MCP servers, lists tools, filters held providers, resolves a collision, forwards calls to both owners, checks source metadata, bounds catalog inspection output, and closes both child processes.
 
 ## Local start sequence
 
@@ -79,5 +80,6 @@ Stop the branch when any change would:
 - add a direct Canvas route to the gateway;
 - let a tool bypass its owning authority or approval path;
 - silently replace a duplicate tool;
+- forward raw upstream metadata;
 - return an upstream error with unreviewed raw details;
 - report a possibly applied write as successful without source-owned readback.

@@ -42,7 +42,7 @@ export function normalizeUpstreamResult(value: unknown, context: ResultContext):
     upstreamResultSha256: upstreamDigest,
   };
 
-  const output: JsonObject = {
+  return {
     content: Array.isArray(value.content)
       ? structuredClone(value.content)
       : [{ type: "text", text: "The upstream returned no MCP content blocks." }],
@@ -51,12 +51,9 @@ export function normalizeUpstreamResult(value: unknown, context: ResultContext):
       ? { structuredContent: structuredClone(value.structuredContent) }
       : {}),
     _meta: {
-      ...(isJsonObject(value._meta) ? structuredClone(value._meta) : {}),
       "io.morrow/gateway": meta,
     },
   };
-
-  return output;
 }
 
 export function safeUpstreamFailure(error: unknown, context: ResultContext): JsonObject {

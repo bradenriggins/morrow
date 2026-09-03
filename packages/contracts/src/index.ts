@@ -17,7 +17,6 @@ export interface UpstreamTool {
   readonly inputSchema: JsonSchema;
   readonly outputSchema?: JsonSchema;
   readonly annotations?: ToolAnnotations;
-  readonly meta?: JsonObject;
 }
 
 export interface CatalogSource {
@@ -37,7 +36,6 @@ export interface CatalogTool {
   readonly inputSchema: JsonSchema;
   readonly outputSchema?: JsonSchema;
   readonly annotations?: ToolAnnotations;
-  readonly meta?: JsonObject;
 }
 
 export interface CatalogCollision {

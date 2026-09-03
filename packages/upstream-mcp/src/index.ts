@@ -88,7 +88,6 @@ export class StdioMcpUpstream {
             ? { outputSchema: normalizeInputSchema(raw.outputSchema) }
             : {}),
           ...(annotations ? { annotations } : {}),
-          ...(isJsonObject(raw._meta) ? { meta: structuredClone(raw._meta) } : {}),
         };
       });
 
