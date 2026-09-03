@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.0.0",
+    "@morrow/batch-engine": "workspace:*",
     "@morrow/contracts": "workspace:*",
     "@morrow/gateway-core": "workspace:*",
     "@morrow/operation-journal": "workspace:*",

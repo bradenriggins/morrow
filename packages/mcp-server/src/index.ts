@@ -1,32 +1,27 @@
 #!/usr/bin/env node
+import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { loadGatewayConfig } from "./config.js";
-import { GatewayRuntime } from "./runtime.js";
-import { serveMorrow } from "./server.js";
+import { createFullMorrowServer } from "./full-server.js";
+import { MorrowRuntime } from "./morrow-runtime.js";
 
-async function main(): Promise<void> {
-  const config = await loadGatewayConfig();
-  const runtime = await GatewayRuntime.connect(config);
+const config = await loadGatewayConfig();
+const runtime = await MorrowRuntime.connect(config);
+console.error(
+  `[morrow] connected ${runtime.gateway.catalog.tools.length} upstream tools; `
+    + `catalog=${runtime.gateway.catalog.digest}; state=${config.operationJournal.path}`,
+);
 
-  const shutdown = async (): Promise<void> => {
-    await runtime.close();
-  };
-
-  process.once("SIGINT", () => {
-    void shutdown().finally(() => process.exit(0));
-  });
-  process.once("SIGTERM", () => {
-    void shutdown().finally(() => process.exit(0));
-  });
-
-  const health = runtime.health();
-  console.error(
-    `[morrow] profile=${health.profile} tools=${health.publicToolCount} catalog=${health.catalogDigest.slice(0, 12)}`,
-  );
-  serveMorrow(runtime);
+let closing = false;
+async function close(): Promise<void> {
+  if (closing) return;
+  closing = true;
+  await runtime.close();
 }
 
-main().catch((error: unknown) => {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`[morrow] startup failed: ${message}`);
-  process.exitCode = 1;
+process.once("SIGINT", () => void close().finally(() => process.exit(0)));
+process.once("SIGTERM", () => void close().finally(() => process.exit(0)));
+process.once("exit", () => {
+  if (!closing) void runtime.close();
 });
+
+await serveStdio(() => createFullMorrowServer(runtime));
