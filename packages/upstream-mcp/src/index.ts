@@ -10,7 +10,10 @@ import {
   normalizeSourceId,
   normalizeToolName,
   sha256Text,
+  upstreamCatalogDigest,
+  type GatewaySourceHealth,
   type JsonObject,
+  type SourceAttestationHealth,
   type UpstreamTool,
 } from "@morrow/contracts";
 
@@ -23,15 +26,32 @@ export interface StdioUpstreamOptions {
   readonly env?: Readonly<Record<string, string>>;
   readonly priority?: number;
   readonly required?: boolean;
+  readonly expectedToolCount?: number;
+  readonly expectedCatalogDigest?: string;
+  readonly sourceAttestation?: SourceAttestationHealth;
 }
 
-export interface StdioUpstreamHealth {
-  readonly id: string;
-  readonly label: string;
-  readonly required: boolean;
-  readonly connected: boolean;
-  readonly toolCount: number;
-  readonly errorDigest?: string;
+export type StdioUpstreamHealth = GatewaySourceHealth;
+
+function compareAscii(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function exactExpectedToolCount(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isSafeInteger(value) || value < 1 || value > 5_000) {
+    throw new TypeError("expected upstream tool count must be a whole number from 1 through 5000");
+  }
+  return value;
+}
+
+function exactExpectedCatalogDigest(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(normalized)) {
+    throw new TypeError("expected upstream catalog digest must be a SHA-256 digest");
+  }
+  return normalized;
 }
 
 export class StdioMcpUpstream {
@@ -41,8 +61,12 @@ export class StdioMcpUpstream {
   readonly required: boolean;
 
   private readonly options: StdioUpstreamOptions;
+  private readonly expectedToolCount: number | undefined;
+  private readonly expectedCatalogDigest: string | undefined;
+  private readonly sourceAttestation: SourceAttestationHealth | undefined;
   private client: Client | null = null;
   private tools: readonly UpstreamTool[] = [];
+  private catalogDigest: string | undefined;
   private errorDigest: string | undefined;
 
   constructor(options: StdioUpstreamOptions) {
@@ -51,6 +75,9 @@ export class StdioMcpUpstream {
     this.label = options.label.trim() || this.id;
     this.priority = options.priority ?? 0;
     this.required = options.required ?? true;
+    this.expectedToolCount = exactExpectedToolCount(options.expectedToolCount);
+    this.expectedCatalogDigest = exactExpectedCatalogDigest(options.expectedCatalogDigest);
+    this.sourceAttestation = options.sourceAttestation;
   }
 
   async connect(): Promise<readonly UpstreamTool[]> {
@@ -89,14 +116,40 @@ export class StdioMcpUpstream {
             : {}),
           ...(annotations ? { annotations } : {}),
         };
-      });
+      }).sort((left, right) => compareAscii(left.name, right.name));
+
+      for (let index = 1; index < normalized.length; index += 1) {
+        if (normalized[index - 1]!.name === normalized[index]!.name) {
+          throw new Error(`Upstream ${this.id} published duplicate tool ${normalized[index]!.name}`);
+        }
+      }
+
+      const catalogDigest = upstreamCatalogDigest(this.id, normalized);
+      if (
+        this.expectedToolCount !== undefined
+        && normalized.length !== this.expectedToolCount
+      ) {
+        throw new Error(
+          `Upstream ${this.id} published ${normalized.length} tools, not the attested ${this.expectedToolCount}.`,
+        );
+      }
+      if (
+        this.expectedCatalogDigest
+        && catalogDigest !== this.expectedCatalogDigest
+      ) {
+        throw new Error(
+          `Upstream ${this.id} catalog digest ${catalogDigest} does not match the configured attestation.`,
+        );
+      }
 
       this.client = client;
       this.tools = normalized;
+      this.catalogDigest = catalogDigest;
       this.errorDigest = undefined;
       return this.tools;
     } catch (error) {
       this.errorDigest = sha256Text(error instanceof Error ? `${error.name}:${error.message}` : String(error));
+      this.catalogDigest = undefined;
       await client.close().catch(() => undefined);
       throw error;
     }
@@ -113,12 +166,29 @@ export class StdioMcpUpstream {
   }
 
   health(): StdioUpstreamHealth {
+    const hasCatalogExpectation = this.expectedToolCount !== undefined
+      || this.expectedCatalogDigest !== undefined;
     return {
       id: this.id,
       label: this.label,
       required: this.required,
       connected: this.client !== null,
       toolCount: this.tools.length,
+      ...(this.catalogDigest ? { catalogDigest: this.catalogDigest } : {}),
+      ...(this.expectedToolCount !== undefined
+        ? { expectedToolCount: this.expectedToolCount }
+        : {}),
+      ...(this.expectedCatalogDigest
+        ? { expectedCatalogDigest: this.expectedCatalogDigest }
+        : {}),
+      ...(hasCatalogExpectation
+        ? {
+            catalogAttested: this.client !== null
+              && (this.expectedToolCount === undefined || this.tools.length === this.expectedToolCount)
+              && (this.expectedCatalogDigest === undefined || this.catalogDigest === this.expectedCatalogDigest),
+          }
+        : {}),
+      ...(this.sourceAttestation ? { sourceAttestation: this.sourceAttestation } : {}),
       ...(this.errorDigest ? { errorDigest: this.errorDigest } : {}),
     };
   }
@@ -127,6 +197,7 @@ export class StdioMcpUpstream {
     const client = this.client;
     this.client = null;
     this.tools = [];
+    this.catalogDigest = undefined;
     if (client) await client.close();
   }
 }
