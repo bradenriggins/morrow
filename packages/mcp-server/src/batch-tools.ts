@@ -7,6 +7,7 @@ import {
 import { sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
 import { recoverGatewayBatch } from "./batch-recovery.js";
+import { BatchWindowScheduler } from "./batch-window-scheduler.js";
 import type { MorrowRuntime } from "./morrow-runtime.js";
 
 function textAndStructured(summary: string, structuredContent: JsonObject): CallToolResult {
@@ -38,10 +39,14 @@ const BatchOperationSchema = z.object({
 });
 
 export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): void {
+  const scheduler = new BatchWindowScheduler({
+    maxConcurrentWindows: runtime.gateway.config.batchScheduler.maxConcurrentWindows,
+  });
+
   server.registerTool(
     "morrow_batch_health",
     {
-      description: "Report bounded local batch-store and source-settlement status. This does not read or change Canvas.",
+      description: "Report bounded local batch-store, source-settlement, and scheduler status. This does not read or change Canvas.",
       inputSchema: z.object({}),
       annotations: {
         readOnlyHint: true,
@@ -50,7 +55,10 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         openWorldHint: false,
       },
     },
-    async () => textAndStructured("Loaded Morrow batch-store status.", runtime.batchHealth()),
+    async () => textAndStructured("Loaded Morrow batch-store status.", {
+      ...runtime.batchHealth(),
+      scheduler: scheduler.health(),
+    }),
   );
 
   server.registerTool(
@@ -152,7 +160,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_run",
     {
-      description: "Run or resume a bounded window of one frozen batch. read_only children perform reads. stage_writes children only stage existing Morrow tasks for separate human approval. Batch completion means orchestration finished, not that Canvas changes were approved or verified.",
+      description: "Run or resume a bounded window of one frozen batch. read_only children perform reads. stage_writes children only stage existing Morrow tasks for separate human approval. Batch completion means orchestration finished, not that Canvas changes were approved or verified. Morrow serializes control for one batch and caps active windows across batches.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         max_children: z.number().int().min(1).max(500).default(50),
@@ -166,10 +174,10 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     },
     async ({ batch_id, max_children }) => {
       try {
-        const result = await runtime.batchRun({
+        const result = await scheduler.run(batch_id, () => runtime.batchRun({
           batchId: batch_id,
           maxChildren: max_children,
-        });
+        }));
         const batch = result.batch;
         const state = batch && typeof batch === "object" && !Array.isArray(batch)
           ? String((batch as Record<string, unknown>).state || "unknown")
@@ -209,12 +217,12 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     },
     async ({ batch_id, offset, max_children, include_terminal }) => {
       try {
-        const result = await runtime.batchReconcile({
+        const result = await scheduler.run(batch_id, () => runtime.batchReconcile({
           batchId: batch_id,
           offset,
           maxChildren: max_children,
           includeTerminal: include_terminal,
-        });
+        }));
         const sourceSettlement = result.sourceSettlement;
         const sourceOutcome = sourceSettlement
           && typeof sourceSettlement === "object"
@@ -251,12 +259,12 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     },
     async ({ batch_id, mode, after_ordinal, max_children }) => {
       try {
-        const result = recoverGatewayBatch(runtime, {
+        const result = await scheduler.run(batch_id, async () => recoverGatewayBatch(runtime, {
           batchId: batch_id,
           mode,
           afterOrdinal: after_ordinal,
           maxChildren: max_children,
-        });
+        }));
         return textAndStructured(
           mode === "inspect"
             ? `Inspected interrupted batch ${batch_id} without changing it.`
@@ -283,9 +291,10 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     },
     async ({ batch_id }) => {
       try {
+        const result = await scheduler.run(batch_id, async () => runtime.batchPause(batch_id));
         return textAndStructured(
           `Paused batch ${batch_id} when its orchestration state allowed pausing.`,
-          runtime.batchPause(batch_id),
+          result,
         );
       } catch (error) {
         return safeFailure(error);
@@ -307,9 +316,10 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     },
     async ({ batch_id }) => {
       try {
+        const result = await scheduler.run(batch_id, async () => runtime.batchCancel(batch_id));
         return textAndStructured(
           `Cancelled undispatched children in batch ${batch_id}.`,
-          runtime.batchCancel(batch_id),
+          result,
         );
       } catch (error) {
         return safeFailure(error);
