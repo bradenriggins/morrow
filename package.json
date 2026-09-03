@@ -14,7 +14,9 @@
     "test": "pnpm build && pnpm -r --if-present test",
     "check": "pnpm test",
     "start": "pnpm --filter @morrow/mcp-server start",
-    "catalog:legacy": "node scripts/export-example-legacy-catalog.mjs"
+    "catalog:legacy": "pnpm build && node scripts/export-example-legacy-catalog.mjs",
+    "catalog:capture": "pnpm build && node scripts/capture-upstream-catalog.mjs",
+    "catalog:reconcile": "pnpm build && node scripts/reconcile-catalogs.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["esbuild"]

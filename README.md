@@ -6,12 +6,12 @@ Morrow is a local, model-neutral LMS operations layer for MCP-compatible AI clie
 
 ## Current implementation
 
-The repository is beginning with a federation gateway because the capabilities already exist in two private donor systems:
+The repository begins with a federation gateway because the capabilities already exist in two private donor systems:
 
 - `example-legacy` contains the existing Morrow Canvas catalog, planners, approval projections, privacy controls, workflows, reports, and browser-backed operations.
 - `example-attestation-repo` contains ExamplePlatform's typed MCP surface, provider binding, durable effect broker, batch recovery, workspace state, and failure history.
 
-The first branch connects ExamplePlatform as an internal stdio MCP upstream and exposes its permitted tools through a new official-SDK Morrow server. A deterministic exporter inventories the current Canvas-facing Morrow catalog for reconciliation. The gateway is then extended with one bounded Morrow execution bridge rather than recreating hundreds of working handlers.
+The current branch connects ExamplePlatform and other configured MCP processes as internal stdio upstreams and exposes their permitted tools through a new official-SDK Morrow server. Deterministic commands export the current Morrow Canvas catalog, capture live upstream catalogs, and generate an exact compatibility and source-selection report. The gateway will then add one bounded Morrow execution bridge rather than recreating hundreds of working handlers.
 
 ## Provider boundary
 
@@ -39,22 +39,27 @@ The local configuration file is ignored by Git. It may contain paths, but it mus
 ## Built-in inspection tools
 
 - `morrow_health` reports gateway readiness, source connection state, catalog counts, and the catalog digest.
-- `morrow_catalog` searches the merged catalog and shows the exact upstream mapping, aliases, and held-tool count.
+- `morrow_catalog` searches a paginated projection of the merged catalog. It returns source mappings and schema digests rather than full schemas or raw upstream metadata.
 
-Every forwarded result receives bounded `io.morrow/gateway` metadata containing the public tool name, source id, source tool name, catalog digest, and upstream result digest.
+Every forwarded result receives bounded `io.morrow/gateway` metadata containing the public tool name, source id, source tool name, catalog digest, and upstream result digest. Raw upstream `_meta` is discarded.
 
-## Morrow catalog export
+## Donor catalog workflow
 
 ```bash
-export MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy
-pnpm catalog:legacy
+MORROW_CAPTURE_SOURCE=meridian pnpm catalog:capture
+MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
+pnpm catalog:reconcile -- \
+  --source artifacts/catalogs/meridian.live.json \
+  --source artifacts/catalogs/example-legacy.canvas.json \
+  --aliases config/catalog-aliases.proposed.json
 ```
 
-The exporter refuses a donor checkout at the wrong commit or with tracked changes. Its output is written to `artifacts/catalogs/` and is not committed by default.
+Generated donor catalogs and reconciliation output live under `artifacts/catalogs/` and are ignored by default. The donor export refuses the wrong commit or tracked changes. Contract drift cannot be auto-selected by source priority.
 
 ## Documentation
 
 - [Weekend convergence implementation](docs/implementation/EXAMPLE-WORKTREE.md)
+- [Catalog capture and reconciliation](docs/implementation/CATALOG-RECONCILIATION.md)
 - [ADR-001: Federated convergence](docs/architecture/ADR-001-federated-convergence.md)
 - [Donor manifest](docs/sources/donor-manifest.json)
 

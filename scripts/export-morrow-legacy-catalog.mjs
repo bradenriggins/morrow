@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+
+import { buildSourceCatalog } from "../packages/gateway-core/dist/index.js";
 
 const PINNED_COMMIT = "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4";
 const EXPECTED_CANVAS_TOOL_COUNT = 270;
@@ -17,25 +18,6 @@ function requiredEnvironment(name) {
 
 function git(root, ...args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
-}
-
-function isPlainObject(value) {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function canonical(value) {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError("Catalog contains a non-finite number");
-    return value;
-  }
-  if (Array.isArray(value)) return value.map(canonical);
-  if (!isPlainObject(value)) throw new TypeError("Catalog contains a non-JSON value");
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])]));
-}
-
-function sha256Json(value) {
-  return createHash("sha256").update(JSON.stringify(canonical(value)), "utf8").digest("hex");
 }
 
 function capabilityAnnotations(capability) {
@@ -93,10 +75,6 @@ async function main() {
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     .map(([name, definition]) => {
       const capability = capabilityRows.get(name) || null;
-      const inputSchema = definition.input_schema || definition.parameters || {
-        type: "object",
-        properties: {},
-      };
       return {
         name,
         ...(typeof definition.title === "string" && definition.title.trim()
@@ -105,39 +83,21 @@ async function main() {
         ...(typeof definition.description === "string" && definition.description.trim()
           ? { description: definition.description.trim() }
           : {}),
-        inputSchema,
-        annotations: capabilityAnnotations(capability),
-        meta: {
-          provider: "canvas",
-          execution: String(definition.execution || "sw"),
-          sourceSurface: String(capability?.surface || "provider"),
-          read: capability?.read === true,
-          write: capability?.write === true,
-          lmsWrite: capability?.lmsWrite === true,
-          localWrite: capability?.localWrite === true,
-          requiresApproval: capability?.requiresApproval === true,
-          supportsReadback: capability?.supportsReadback === true,
-          supportsUndo: capability?.supportsUndo === true,
-          dataSensitivity: String(capability?.dataSensitivity || "course"),
-          modelVisible: capability?.modelVisible !== false,
-          capabilityListed: capabilityRegistry.getCapability("canvas", name) !== null,
+        inputSchema: definition.input_schema || definition.parameters || {
+          type: "object",
+          properties: {},
         },
+        annotations: capabilityAnnotations(capability),
       };
     });
 
-  const artifact = {
-    schema: "morrow.source-catalog.v1",
-    source: {
-      id: "example-legacy",
-      repository: "example-org/example-legacy-source",
-      commit,
-      exportedAt: new Date().toISOString(),
-    },
-    provider: "canvas",
-    count: tools.length,
-    tools,
-  };
-  artifact.digest = sha256Json({ ...artifact, source: { ...artifact.source, exportedAt: null } });
+  const artifact = buildSourceCatalog({
+    id: "example-legacy",
+    label: "Morrow legacy",
+    kind: "donor-export",
+    repository: "example-org/example-legacy-source",
+    revision: commit,
+  }, tools);
 
   await mkdir(dirname(outputPath), { recursive: true });
   const temporaryPath = `${outputPath}.tmp-${process.pid}`;
@@ -147,7 +107,7 @@ async function main() {
   process.stdout.write([
     `wrote=${outputPath}`,
     `sourceCommit=${commit}`,
-    `tools=${tools.length}`,
+    `tools=${artifact.count}`,
     `digest=${artifact.digest}`,
     "",
   ].join("\n"));

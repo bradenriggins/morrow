@@ -1,0 +1,56 @@
+{
+  "schema": "morrow.catalog-aliases.v1",
+  "status": "proposed-until-live-catalog-reconciliation",
+  "rules": [
+    {
+      "id": "canvas.pages.list",
+      "publicName": "canvas_pages_list",
+      "preferredSourceId": "meridian",
+      "reason": "Both donor tools list pages in one exact Canvas course. Contract compatibility must still pass against the captured schemas.",
+      "members": [
+        { "sourceId": "meridian", "toolName": "canvas_pages_list" },
+        { "sourceId": "example-legacy", "toolName": "list_pages" }
+      ]
+    },
+    {
+      "id": "canvas.page.get",
+      "publicName": "canvas_page_get",
+      "preferredSourceId": "meridian",
+      "reason": "Both donor tools read one Canvas page. Selection remains blocked when the captured input or output contracts differ.",
+      "members": [
+        { "sourceId": "meridian", "toolName": "canvas_page_get" },
+        { "sourceId": "example-legacy", "toolName": "get_page" }
+      ]
+    },
+    {
+      "id": "canvas.page.update",
+      "publicName": "canvas_page_update",
+      "preferredSourceId": "meridian",
+      "reason": "Both donor tools update one Canvas page, but their approval and readback contracts require separate review after schema comparison.",
+      "members": [
+        { "sourceId": "meridian", "toolName": "canvas_page_update" },
+        { "sourceId": "example-legacy", "toolName": "edit_page" }
+      ]
+    },
+    {
+      "id": "canvas.modules.list",
+      "publicName": "canvas_modules_list",
+      "preferredSourceId": "meridian",
+      "reason": "Both donor tools list modules in one exact Canvas course.",
+      "members": [
+        { "sourceId": "meridian", "toolName": "canvas_modules_list" },
+        { "sourceId": "example-legacy", "toolName": "list_modules" }
+      ]
+    },
+    {
+      "id": "canvas.module-items.list",
+      "publicName": "canvas_module_items_list",
+      "preferredSourceId": "meridian",
+      "reason": "Both donor tools list the items in one exact Canvas module.",
+      "members": [
+        { "sourceId": "meridian", "toolName": "canvas_module_items_list" },
+        { "sourceId": "example-legacy", "toolName": "list_module_items" }
+      ]
+    }
+  ]
+}
