@@ -49,6 +49,9 @@ const GatewayConfigSchema = z.object({
   operationJournal: z.object({
     path: z.string().min(1).default(".morrow/morrow.sqlite3"),
   }).default({ path: ".morrow/morrow.sqlite3" }),
+  batchScheduler: z.object({
+    maxConcurrentWindows: z.number().int().min(1).max(16).default(1),
+  }).default({ maxConcurrentWindows: 1 }),
   maxCatalogTools: z.number().int().positive().max(5000).default(1000),
 });
 
@@ -60,7 +63,7 @@ const TEMPLATE = /\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 
 export function expandEnvironmentTemplate(
   value: string,
-  environment: Readonly<Record<string, string | undefined>>,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
   return value.replace(TEMPLATE, (_match, rawName: string, rawFallback: string | undefined) => {
     const resolved = environment[rawName];
@@ -191,6 +194,9 @@ export async function loadGatewayConfig(
       },
       operationJournal: {
         path: "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}",
+      },
+      batchScheduler: {
+        maxConcurrentWindows: 1,
       },
       maxCatalogTools: 1000,
     }, environment);
