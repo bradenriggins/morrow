@@ -4,6 +4,17 @@ import { resolve } from "node:path";
 import * as z from "zod/v4";
 
 const EnvironmentName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
+const FullGitRevision = z.string().regex(/^[0-9a-fA-F]{40,64}$/);
+const Sha256Digest = z.string().regex(/^[0-9a-fA-F]{64}$/);
+
+const LocalGitAttestationSchema = z.object({
+  kind: z.literal("local-git"),
+  root: z.string().min(1),
+  expectedRevision: FullGitRevision,
+  requireTrackedClean: z.boolean().default(true),
+  expectedToolCount: z.number().int().min(1).max(5000).optional(),
+  expectedCatalogDigest: Sha256Digest.optional(),
+});
 
 const StdioUpstreamSchema = z.object({
   id: z.string().min(1),
@@ -15,6 +26,7 @@ const StdioUpstreamSchema = z.object({
   env: z.record(EnvironmentName, z.string()).default({}),
   repository: z.string().min(1).max(300).optional(),
   revision: z.string().min(1).max(300).optional(),
+  attestation: LocalGitAttestationSchema.optional(),
   priority: z.number().int().default(0),
   required: z.boolean().default(true),
   enabled: z.boolean().default(true),
@@ -24,6 +36,9 @@ const GatewayConfigSchema = z.object({
   schema: z.literal("morrow.upstreams.v1"),
   profile: z.enum(["private-full", "public-canvas"]).default("private-full"),
   upstreams: z.array(StdioUpstreamSchema).min(1),
+  sourcePolicy: z.object({
+    requireAttestation: z.boolean().default(false),
+  }).default({ requireAttestation: false }),
   filters: z.object({
     excludePrefixes: z.array(z.string()).default(["mindtap_", "connect_"]),
     excludeNames: z.array(z.string()).default([]),
@@ -39,6 +54,7 @@ const GatewayConfigSchema = z.object({
 
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
 export type StdioUpstreamConfig = z.infer<typeof StdioUpstreamSchema>;
+export type LocalGitAttestationConfig = z.infer<typeof LocalGitAttestationSchema>;
 
 const TEMPLATE = /\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 
@@ -71,7 +87,32 @@ function expandUpstream(
         expandEnvironmentTemplate(value, environment),
       ]),
     ),
+    ...(upstream.attestation
+      ? {
+          attestation: {
+            ...upstream.attestation,
+            root: expandEnvironmentTemplate(upstream.attestation.root, environment),
+            expectedRevision: upstream.attestation.expectedRevision.toLowerCase(),
+            ...(upstream.attestation.expectedCatalogDigest
+              ? { expectedCatalogDigest: upstream.attestation.expectedCatalogDigest.toLowerCase() }
+              : {}),
+          },
+        }
+      : {}),
   };
+}
+
+function validateSourceProvenance(upstream: StdioUpstreamConfig): void {
+  if (!upstream.attestation) return;
+  const declaredRevision = String(upstream.revision || "").trim().toLowerCase();
+  if (
+    declaredRevision
+    && declaredRevision !== upstream.attestation.expectedRevision.toLowerCase()
+  ) {
+    throw new Error(
+      `Upstream ${upstream.id} declares revision ${declaredRevision} but attests ${upstream.attestation.expectedRevision}.`,
+    );
+  }
 }
 
 export function parseGatewayConfig(
@@ -84,6 +125,12 @@ export function parseGatewayConfig(
     .map((upstream) => expandUpstream(upstream, environment));
   if (upstreams.length === 0) {
     throw new Error("At least one enabled upstream is required");
+  }
+  for (const upstream of upstreams) {
+    validateSourceProvenance(upstream);
+    if (parsed.sourcePolicy.requireAttestation && !upstream.attestation) {
+      throw new Error(`Upstream ${upstream.id} requires a configured source attestation.`);
+    }
   }
   return {
     ...parsed,
@@ -108,9 +155,13 @@ export async function loadGatewayConfig(
 
   const meridianServerPath = environment.MORROW_MERIDIAN_SERVER_PATH?.trim();
   if (meridianServerPath) {
+    const meridianRoot = environment.MORROW_MERIDIAN_ROOT?.trim();
     return parseGatewayConfig({
       schema: "morrow.upstreams.v1",
       profile: "private-full",
+      sourcePolicy: {
+        requireAttestation: Boolean(meridianRoot),
+      },
       upstreams: [{
         id: "meridian",
         label: "ExamplePlatform",
@@ -119,6 +170,17 @@ export async function loadGatewayConfig(
         args: [meridianServerPath],
         repository: "example-owner/example-attestation-repo",
         revision: "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+        ...(meridianRoot
+          ? {
+              attestation: {
+                kind: "local-git",
+                root: meridianRoot,
+                expectedRevision: "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+                requireTrackedClean: true,
+                expectedToolCount: 205,
+              },
+            }
+          : {}),
         priority: 100,
         required: true,
         enabled: true,
