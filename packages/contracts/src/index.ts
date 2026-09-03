@@ -61,12 +61,33 @@ export interface CatalogSnapshot {
   readonly countsBySource: Readonly<Record<string, number>>;
 }
 
+export interface SourceAttestationHealth {
+  readonly schema: "morrow.source-attestation.v1";
+  readonly kind: "local-git";
+  readonly verified: true;
+  readonly sourceId: string;
+  readonly repository?: string;
+  readonly expectedRevision: string;
+  readonly actualRevision: string;
+  readonly trackedClean: boolean;
+  readonly requireTrackedClean: boolean;
+  readonly rootDigest: string;
+  readonly verifiedAt: string;
+  readonly expectedToolCount?: number;
+  readonly expectedCatalogDigest?: string;
+}
+
 export interface GatewaySourceHealth {
   readonly id: string;
   readonly label: string;
   readonly required: boolean;
   readonly connected: boolean;
   readonly toolCount: number;
+  readonly catalogDigest?: string;
+  readonly expectedToolCount?: number;
+  readonly expectedCatalogDigest?: string;
+  readonly catalogAttested?: boolean;
+  readonly sourceAttestation?: SourceAttestationHealth;
   readonly errorDigest?: string;
 }
 
@@ -189,4 +210,15 @@ export function normalizeAnnotations(value: unknown): ToolAnnotations | undefine
     ...(typeof value.openWorldHint === "boolean" ? { openWorldHint: value.openWorldHint } : {}),
   };
   return Object.keys(annotations).length > 0 ? annotations : undefined;
+}
+
+export function upstreamCatalogDigest(
+  sourceId: string,
+  tools: readonly UpstreamTool[],
+): string {
+  return sha256Json({
+    schema: "morrow.upstream-catalog.v1",
+    sourceId: normalizeSourceId(sourceId),
+    tools,
+  });
 }
