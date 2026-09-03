@@ -6,3 +6,4 @@ export {
   type BatchStoreHealth,
 } from "./facade.js";
 export * from "./settlement.js";
+export * from "./recovery.js";
