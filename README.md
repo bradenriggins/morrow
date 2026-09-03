@@ -11,13 +11,15 @@ The repository begins with a federation gateway because the capabilities already
 - `example-legacy` contains the existing Morrow Canvas catalog, planners, approval projections, privacy controls, workflows, reports, and browser-backed operations.
 - `example-attestation-repo` contains ExamplePlatform's typed MCP surface, provider binding, durable effect broker, batch recovery, workspace state, and failure history.
 
-The current branch connects ExamplePlatform and other configured MCP processes as internal stdio upstreams and exposes their permitted tools through a new official-SDK Morrow server. Deterministic commands export the current Morrow Canvas catalog, capture live upstream catalogs, and generate an exact compatibility and source-selection report. The gateway will then add one bounded Morrow execution bridge rather than recreating hundreds of working handlers.
+The current branch connects ExamplePlatform and other configured MCP processes as internal stdio upstreams and exposes their permitted tools through a new official-SDK Morrow server. Deterministic commands export the current Morrow Canvas catalog, capture live upstream catalogs, and generate an exact compatibility and source-selection report.
+
+Checkpoint C now adds the bounded Morrow legacy extension bridge. It presents the donor's exported Canvas catalog as an internal MCP server, connects to the existing browser service worker over an authenticated loopback WebSocket, executes admitted reads through the donor runtime, and converts every write request into an ordinary donor task awaiting separate approval. It does not recreate or bypass the existing handlers.
 
 ## Provider boundary
 
 Canvas is the initial provider. MindTap and Connect are removed from the merged catalog and remain outside supported claims pending written permission or formal developer terms.
 
-## Quick start
+## Quick start with ExamplePlatform
 
 Requirements:
 
@@ -36,10 +38,43 @@ pnpm start
 
 The local configuration file is ignored by Git. It may contain paths, but it must not contain provider credentials. ExamplePlatform continues to own its existing credential and provider authority during this convergence checkpoint.
 
+## Add the Morrow legacy browser runtime
+
+First export the donor catalog while the legacy checkout is clean:
+
+```bash
+MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
+```
+
+Then create a pairing token, install the reversible extension overlay, and use the two-upstream example:
+
+```bash
+export MORROW_NEW_REPO_ROOT=$PWD
+export MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy
+export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
+export MORROW_LEGACY_BRIDGE_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
+pnpm bridge:legacy:install
+cp morrow.upstreams.with-legacy-bridge.example.json morrow.upstreams.json
+export MORROW_MERIDIAN_SERVER_PATH=/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py
+pnpm start
+```
+
+Reload the unpacked Morrow legacy extension after installing the overlay. The gateway starts the internal bridge MCP, which listens only on `127.0.0.1` and authenticates the extension before accepting binding or tool messages.
+
+A bridge write returns an approval-required task. Approve or deny it through the existing Morrow user surface. There is no model-callable bridge approval tool.
+
 ## Built-in inspection tools
+
+Gateway tools:
 
 - `morrow_health` reports gateway readiness, source connection state, catalog counts, and the catalog digest.
 - `morrow_catalog` searches a paginated projection of the merged catalog. It returns source mappings and schema digests rather than full schemas or raw upstream metadata.
+
+Morrow legacy bridge tools:
+
+- `morrow_legacy_bridge_health`
+- `morrow_legacy_bindings`
+- `morrow_legacy_task_get`
 
 Every forwarded result receives bounded `io.morrow/gateway` metadata containing the public tool name, source id, source tool name, catalog digest, and upstream result digest. Raw upstream `_meta` is discarded.
 
@@ -60,7 +95,9 @@ Generated donor catalogs and reconciliation output live under `artifacts/catalog
 
 - [Weekend convergence implementation](docs/implementation/EXAMPLE-WORKTREE.md)
 - [Catalog capture and reconciliation](docs/implementation/CATALOG-RECONCILIATION.md)
+- [Morrow legacy extension bridge](docs/implementation/MORROW-LEGACY-BRIDGE.md)
 - [ADR-001: Federated convergence](docs/architecture/ADR-001-federated-convergence.md)
+- [ADR-002: Authenticated legacy extension bridge](docs/architecture/ADR-002-local-extension-bridge.md)
 - [Donor manifest](docs/sources/donor-manifest.json)
 
 ## Source rule
