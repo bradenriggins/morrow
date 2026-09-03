@@ -226,4 +226,178 @@ export function parseBridgeHello(value: unknown): BridgeHello {
     throw new TypeError("bridge hello has an invalid schema");
   }
   if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
-    throw new TypeError
+    throw new TypeError("bridge protocol version is unsupported");
+  }
+  const token = requiredString(value.token, "token", MAX_BRIDGE_TOKEN_LENGTH);
+  if (token.length < MIN_BRIDGE_TOKEN_LENGTH) throw new TypeError("bridge token is too short");
+  const extensionId = requiredString(value.extensionId, "extensionId", 32);
+  if (!EXTENSION_ID.test(extensionId)) throw new TypeError("extensionId is invalid");
+  const catalogDigest = requiredString(value.catalogDigest, "catalogDigest", 64);
+  if (!HEX_SHA256.test(catalogDigest)) throw new TypeError("catalogDigest must be a SHA-256 digest");
+  return {
+    schema: BRIDGE_SCHEMAS.hello,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    token,
+    extensionId,
+    donorRevision: requiredString(value.donorRevision, "donorRevision", 160),
+    catalogDigest,
+    bindings: normalizeBridgeBindings(value.bindings),
+    sentAt: requiredInteger(value.sentAt, "sentAt"),
+  };
+}
+
+export function parseBridgeResult(value: unknown): BridgeResult {
+  if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.result) {
+    throw new TypeError("bridge result has an invalid schema");
+  }
+  if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
+    throw new TypeError("bridge protocol version is unsupported");
+  }
+  const requestId = requiredString(value.requestId, "requestId", 160);
+  const operationId = requiredString(value.operationId, "operationId", 160);
+  if (!REQUEST_ID.test(requestId) || !REQUEST_ID.test(operationId)) {
+    throw new TypeError("bridge request or operation id has an invalid format");
+  }
+  if (typeof value.ok !== "boolean") throw new TypeError("bridge result ok must be boolean");
+  const result = value.result === undefined ? undefined : value.result;
+  if (result !== undefined && !isJsonObject(result)) throw new TypeError("bridge result payload must be an object");
+  const problem = value.problem === undefined ? undefined : parseProblem(value.problem);
+  if (value.ok && !result) throw new TypeError("successful bridge result requires result");
+  if (!value.ok && !problem) throw new TypeError("failed bridge result requires problem");
+  return {
+    schema: BRIDGE_SCHEMAS.result,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    requestId,
+    operationId,
+    generation: requiredInteger(value.generation, "generation", 1),
+    ok: value.ok,
+    ...(result ? { result: structuredClone(result) } : {}),
+    ...(problem ? { problem } : {}),
+    completedAt: requiredInteger(value.completedAt, "completedAt"),
+  };
+}
+
+export function parseBridgeClientMessage(value: unknown): BridgeClientMessage {
+  if (!isJsonObject(value)) throw new TypeError("bridge client message must be an object");
+  if (value.schema === BRIDGE_SCHEMAS.hello) return parseBridgeHello(value);
+  if (value.schema === BRIDGE_SCHEMAS.result) return parseBridgeResult(value);
+  if (value.schema === BRIDGE_SCHEMAS.bindings) {
+    if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) throw new TypeError("bridge protocol version is unsupported");
+    return {
+      schema: BRIDGE_SCHEMAS.bindings,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      generation: requiredInteger(value.generation, "generation", 1),
+      bindings: normalizeBridgeBindings(value.bindings),
+      sentAt: requiredInteger(value.sentAt, "sentAt"),
+    };
+  }
+  if (value.schema === BRIDGE_SCHEMAS.pong) {
+    if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) throw new TypeError("bridge protocol version is unsupported");
+    return {
+      schema: BRIDGE_SCHEMAS.pong,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      generation: requiredInteger(value.generation, "generation", 1),
+      sentAt: requiredInteger(value.sentAt, "sentAt"),
+    };
+  }
+  throw new TypeError("unsupported bridge client message schema");
+}
+
+export function serializeBridgeMessage(value: BridgeClientMessage | BridgeServerMessage): string {
+  const text = JSON.stringify(value);
+  if (Buffer.byteLength(text, "utf8") > MAX_BRIDGE_MESSAGE_BYTES) {
+    throw new RangeError("bridge message exceeds the maximum size");
+  }
+  return text;
+}
+
+export function parseBridgeJson(text: string): unknown {
+  if (Buffer.byteLength(text, "utf8") > MAX_BRIDGE_MESSAGE_BYTES) {
+    throw new RangeError("bridge message exceeds the maximum size");
+  }
+  return JSON.parse(text) as unknown;
+}
+
+export function augmentBridgeInputSchema(inputSchema: JsonObject): JsonObject {
+  const schema = structuredClone(normalizeInputSchema(inputSchema));
+  const properties = isJsonObject(schema.properties) ? schema.properties : {};
+  return {
+    ...schema,
+    type: "object",
+    properties: {
+      ...properties,
+      _morrow: {
+        type: "object",
+        description: "Optional local Morrow routing controls. These never reach Canvas.",
+        properties: {
+          source_binding_id: {
+            type: "string",
+            minLength: 1,
+            maxLength: 160,
+            description: "Exact live Morrow source binding when more than one Canvas course is open.",
+          },
+          operation_id: {
+            type: "string",
+            minLength: 8,
+            maxLength: 160,
+            description: "Optional stable caller identity for this requested operation.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+  };
+}
+
+export function splitBridgeCallArguments(value: Readonly<Record<string, unknown>>): {
+  readonly arguments: JsonObject;
+  readonly options: MorrowBridgeCallOptions;
+} {
+  const input = { ...value };
+  const rawOptions = input._morrow;
+  delete input._morrow;
+  if (rawOptions === undefined || rawOptions === null) {
+    return { arguments: input as JsonObject, options: {} };
+  }
+  if (!isJsonObject(rawOptions)) throw new TypeError("_morrow must be an object");
+  const unknown = Object.keys(rawOptions).find((key) => !["source_binding_id", "operation_id"].includes(key));
+  if (unknown) throw new TypeError(`unsupported _morrow field ${unknown}`);
+  const sourceBindingId = optionalString(rawOptions.source_binding_id, "_morrow.source_binding_id", 160);
+  const operationId = optionalString(rawOptions.operation_id, "_morrow.operation_id", 160);
+  if (sourceBindingId && !TOOL_OR_SOURCE.test(sourceBindingId)) {
+    throw new TypeError("_morrow.source_binding_id has an invalid format");
+  }
+  if (operationId && !REQUEST_ID.test(operationId)) {
+    throw new TypeError("_morrow.operation_id has an invalid format");
+  }
+  return {
+    arguments: input as JsonObject,
+    options: {
+      ...(sourceBindingId ? { sourceBindingId } : {}),
+      ...(operationId ? { operationId } : {}),
+    },
+  };
+}
+
+export function createBridgeProblem(
+  code: string,
+  message: string,
+  recoverable: boolean,
+  detail?: unknown,
+): BridgeProblem {
+  return {
+    schema: "morrow.bridge.problem.v1",
+    code: requiredString(code, "problem code", 120),
+    message: requiredString(message, "problem message", 1000),
+    recoverable,
+    ...(detail === undefined ? {} : { detailDigest: sha256Json(detail) }),
+  };
+}
+
+export function normalizeBridgeToolName(value: unknown): string {
+  return normalizeToolName(value);
+}
+
+export function normalizeBridgeSourceId(value: unknown): string {
+  return normalizeSourceId(value);
+}
