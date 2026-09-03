@@ -10,6 +10,11 @@ import {
 export interface ResultContext {
   readonly mapping: CatalogTool;
   readonly catalogDigest: string;
+  readonly operation?: {
+    readonly operationId: string;
+    readonly state: string;
+    readonly sourceOperationId?: string;
+  };
 }
 
 function textError(text: string, detailDigest: string): JsonObject {
@@ -24,6 +29,27 @@ function textError(text: string, detailDigest: string): JsonObject {
   };
 }
 
+function callMeta(
+  context: ResultContext,
+  upstreamResultSha256: string,
+): GatewayCallMeta {
+  return {
+    schema: "morrow.gateway.call.v1",
+    publicToolName: context.mapping.publicName,
+    upstreamId: context.mapping.upstreamId,
+    upstreamToolName: context.mapping.upstreamName,
+    catalogDigest: context.catalogDigest,
+    upstreamResultSha256,
+    ...(context.operation ? {
+      gatewayOperationId: context.operation.operationId,
+      gatewayOperationState: context.operation.state,
+      ...(context.operation.sourceOperationId
+        ? { sourceOperationId: context.operation.sourceOperationId }
+        : {}),
+    } : {}),
+  };
+}
+
 export function normalizeUpstreamResult(value: unknown, context: ResultContext): JsonObject {
   if (!isJsonObject(value)) {
     return textError(
@@ -33,15 +59,6 @@ export function normalizeUpstreamResult(value: unknown, context: ResultContext):
   }
 
   const upstreamDigest = sha256Json(value);
-  const meta: GatewayCallMeta = {
-    schema: "morrow.gateway.call.v1",
-    publicToolName: context.mapping.publicName,
-    upstreamId: context.mapping.upstreamId,
-    upstreamToolName: context.mapping.upstreamName,
-    catalogDigest: context.catalogDigest,
-    upstreamResultSha256: upstreamDigest,
-  };
-
   return {
     content: Array.isArray(value.content)
       ? structuredClone(value.content)
@@ -51,7 +68,7 @@ export function normalizeUpstreamResult(value: unknown, context: ResultContext):
       ? { structuredContent: structuredClone(value.structuredContent) }
       : {}),
     _meta: {
-      "io.morrow/gateway": meta,
+      "io.morrow/gateway": callMeta(context, upstreamDigest),
     },
   };
 }
@@ -72,14 +89,7 @@ export function safeUpstreamFailure(error: unknown, context: ResultContext): Jso
       detailDigest: sha256Text(detail),
     },
     _meta: {
-      "io.morrow/gateway": {
-        schema: "morrow.gateway.call.v1",
-        publicToolName: context.mapping.publicName,
-        upstreamId: context.mapping.upstreamId,
-        upstreamToolName: context.mapping.upstreamName,
-        catalogDigest: context.catalogDigest,
-        upstreamResultSha256: sha256Text(detail),
-      } satisfies GatewayCallMeta,
+      "io.morrow/gateway": callMeta(context, sha256Text(detail)),
     },
   };
 }
