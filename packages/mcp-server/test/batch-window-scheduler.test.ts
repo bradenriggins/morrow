@@ -14,6 +14,14 @@ function deferred<T = void>() {
   return { promise, resolve, reject };
 }
 
+async function waitUntil(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("scheduler state did not become ready");
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
 describe("BatchWindowScheduler", () => {
   it("serializes work for the same batch and preserves submission order", async () => {
     const scheduler = new BatchWindowScheduler({ maxConcurrentWindows: 2 });
@@ -31,7 +39,7 @@ describe("BatchWindowScheduler", () => {
       return 2;
     });
 
-    await Promise.resolve();
+    await waitUntil(() => events.length === 1);
     expect(events).toEqual(["first:start"]);
     expect(scheduler.health()).toMatchObject({
       runningBatchCount: 1,
@@ -66,7 +74,7 @@ describe("BatchWindowScheduler", () => {
       return index;
     }));
 
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitUntil(() => scheduler.health().waitingWindows === 2);
     expect(scheduler.health()).toMatchObject({
       activeWindows: 2,
       waitingWindows: 2,
@@ -74,7 +82,7 @@ describe("BatchWindowScheduler", () => {
     });
     gates[0]!.resolve();
     gates[1]!.resolve();
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitUntil(() => scheduler.health().waitingWindows === 0);
     expect(scheduler.health()).toMatchObject({
       activeWindows: 2,
       waitingWindows: 0,
@@ -95,7 +103,7 @@ describe("BatchWindowScheduler", () => {
     const queued = scheduler.run("batch:queued", async () => {
       queuedStarted = true;
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitUntil(() => scheduler.health().waitingWindows === 1);
     expect(scheduler.health().waitingWindows).toBe(1);
     scheduler.close();
     await expect(queued).rejects.toBeInstanceOf(BatchWindowSchedulerClosedError);
