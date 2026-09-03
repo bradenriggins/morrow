@@ -70,6 +70,15 @@ export interface GatewaySourceHealth {
   readonly errorDigest?: string;
 }
 
+export interface GatewayOperationJournalHealth {
+  readonly schema: "morrow.gateway-operation-journal.health.v1";
+  readonly path: string;
+  readonly open: boolean;
+  readonly totalOperations: number;
+  readonly unresolvedOperations: number;
+  readonly unknownOperations: number;
+}
+
 export interface GatewayHealth {
   readonly schema: "morrow.health.v1";
   readonly version: string;
@@ -80,6 +89,7 @@ export interface GatewayHealth {
   readonly collisionCount: number;
   readonly excludedToolCount: number;
   readonly sources: readonly GatewaySourceHealth[];
+  readonly operationJournal: GatewayOperationJournalHealth;
 }
 
 export interface GatewayCallMeta {
@@ -89,6 +99,9 @@ export interface GatewayCallMeta {
   readonly upstreamToolName: string;
   readonly catalogDigest: string;
   readonly upstreamResultSha256: string;
+  readonly gatewayOperationId?: string;
+  readonly gatewayOperationState?: string;
+  readonly sourceOperationId?: string;
 }
 
 export function isJsonObject(value: unknown): value is JsonObject {
