@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+morrow.upstreams.json
+artifacts/catalogs/*.json
+!artifacts/catalogs/.gitkeep
+.DS_Store
+Thumbs.db
