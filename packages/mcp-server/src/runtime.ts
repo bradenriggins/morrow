@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   isJsonObject,
   sha256Json,
@@ -9,10 +10,12 @@ import {
   type GatewayCallMeta,
   type GatewayHealth,
   type JsonObject,
+  type PublicationPolicyHealth,
   type SourceAttestationHealth,
   type ToolAnnotations,
 } from "@morrow/contracts";
 import {
+  applyPublicationPolicy,
   mergeCatalog,
   normalizeUpstreamResult,
   safeUpstreamFailure,
@@ -224,6 +227,22 @@ function verifyConfiguredSources(
   return evidence;
 }
 
+function readPublicationManifest(path: string): unknown {
+  try {
+    return JSON.parse(readFileSync(path, "utf8")) as unknown;
+  } catch (error) {
+    throw new Error(`Morrow could not read publication policy ${path}`, { cause: error });
+  }
+}
+
+async function closeStartupResources(
+  upstreams: ReadonlyMap<string, StdioMcpUpstream>,
+  journal: GatewayOperationJournal,
+): Promise<void> {
+  await Promise.allSettled([...upstreams.values()].map((candidate) => candidate.close()));
+  journal.close();
+}
+
 export class GatewayRuntime {
   readonly config: GatewayConfig;
   readonly catalog: CatalogSnapshot;
@@ -231,17 +250,20 @@ export class GatewayRuntime {
   private readonly upstreams: ReadonlyMap<string, StdioMcpUpstream>;
   private readonly toolByPublicName: ReadonlyMap<string, CatalogTool>;
   private readonly journal: GatewayOperationJournal;
+  private readonly publicationPolicy: PublicationPolicyHealth | undefined;
 
   private constructor(
     config: GatewayConfig,
     upstreams: ReadonlyMap<string, StdioMcpUpstream>,
     catalog: CatalogSnapshot,
     journal: GatewayOperationJournal,
+    publicationPolicy?: PublicationPolicyHealth,
   ) {
     this.config = config;
     this.upstreams = upstreams;
     this.catalog = catalog;
     this.journal = journal;
+    this.publicationPolicy = publicationPolicy;
     this.toolByPublicName = new Map(catalog.tools.map((tool) => [tool.publicName, tool]));
   }
 
@@ -289,8 +311,7 @@ export class GatewayRuntime {
         });
       } catch (error) {
         if (upstream.required) {
-          await Promise.allSettled([...upstreams.values()].map((candidate) => candidate.close()));
-          journal.close();
+          await closeStartupResources(upstreams, journal);
           throw new Error(
             `Required upstream ${upstream.id} failed to connect`,
             { cause: error },
@@ -299,21 +320,59 @@ export class GatewayRuntime {
       }
     }
 
-    const catalog = mergeCatalog(sources, {
-      excludePrefixes: config.filters.excludePrefixes,
-      excludeNames: config.filters.excludeNames,
-      reservedNames: MORROW_NATIVE_TOOL_NAMES,
-    });
+    try {
+      const mergedCatalog = mergeCatalog(sources, {
+        excludePrefixes: config.filters.excludePrefixes,
+        excludeNames: config.filters.excludeNames,
+        reservedNames: MORROW_NATIVE_TOOL_NAMES,
+      });
+      let catalog = mergedCatalog;
+      let publicationPolicy: PublicationPolicyHealth | undefined;
 
-    if (catalog.tools.length > config.maxCatalogTools) {
-      await Promise.allSettled([...upstreams.values()].map((candidate) => candidate.close()));
-      journal.close();
-      throw new Error(
-        `Catalog contains ${catalog.tools.length} tools, above maxCatalogTools=${config.maxCatalogTools}`,
+      if (config.profile === "public-canvas") {
+        const policyPath = config.publicationPolicy.path;
+        if (!policyPath) throw new Error("public-canvas profile has no publication policy path");
+        const sourceEvidence = [...upstreams.values()].map((upstream) => {
+          const health = upstream.health();
+          if (!health.connected || !health.catalogDigest) {
+            throw new Error(`Publication source ${health.id} lacks a normalized catalog digest`);
+          }
+          return {
+            sourceId: health.id,
+            catalogDigest: health.catalogDigest,
+            toolCount: health.toolCount,
+          };
+        });
+        const applied = applyPublicationPolicy(
+          mergedCatalog,
+          readPublicationManifest(policyPath),
+          sourceEvidence,
+          {
+            reservedNames: MORROW_NATIVE_TOOL_NAMES,
+            deniedPrefixes: config.filters.excludePrefixes,
+          },
+        );
+        catalog = applied.catalog;
+        publicationPolicy = applied.receipt;
+      }
+
+      if (catalog.tools.length > config.maxCatalogTools) {
+        throw new Error(
+          `Catalog contains ${catalog.tools.length} tools, above maxCatalogTools=${config.maxCatalogTools}`,
+        );
+      }
+
+      return new GatewayRuntime(
+        config,
+        upstreams,
+        catalog,
+        journal,
+        publicationPolicy,
       );
+    } catch (error) {
+      await closeStartupResources(upstreams, journal);
+      throw error;
     }
-
-    return new GatewayRuntime(config, upstreams, catalog, journal);
   }
 
   health(): GatewayHealth {
@@ -329,6 +388,7 @@ export class GatewayRuntime {
       excludedToolCount: this.catalog.excluded.length,
       sources,
       operationJournal: this.journal.health(),
+      ...(this.publicationPolicy ? { publicationPolicy: this.publicationPolicy } : {}),
     };
   }
 
