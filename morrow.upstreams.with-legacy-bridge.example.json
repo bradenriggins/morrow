@@ -1,6 +1,9 @@
 {
   "schema": "morrow.upstreams.v1",
   "profile": "private-full",
+  "sourcePolicy": {
+    "requireAttestation": true
+  },
   "upstreams": [
     {
       "id": "meridian",
@@ -10,6 +13,13 @@
       "args": ["${MORROW_MERIDIAN_SERVER_PATH}"],
       "repository": "example-owner/example-attestation-repo",
       "revision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+      "attestation": {
+        "kind": "local-git",
+        "root": "${MORROW_MERIDIAN_ROOT}",
+        "expectedRevision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+        "requireTrackedClean": true,
+        "expectedToolCount": 205
+      },
       "priority": 100,
       "required": true,
       "enabled": true,
@@ -24,6 +34,12 @@
       "cwd": "${MORROW_NEW_REPO_ROOT}",
       "repository": "example-org/example-legacy-source",
       "revision": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+      "attestation": {
+        "kind": "local-git",
+        "root": "${MORROW_LEGACY_ROOT}",
+        "expectedRevision": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+        "requireTrackedClean": true
+      },
       "priority": 50,
       "required": true,
       "enabled": true,
@@ -39,6 +55,9 @@
   "filters": {
     "excludePrefixes": ["mindtap_", "connect_"],
     "excludeNames": []
+  },
+  "operationJournal": {
+    "path": "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}"
   },
   "maxCatalogTools": 1000
 }
