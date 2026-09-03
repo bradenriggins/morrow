@@ -19,5 +19,8 @@
   },
   "dependencies": {
     "@morrow/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@morrow/operation-journal": "workspace:*"
   }
 }
