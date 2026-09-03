@@ -1,0 +1,31 @@
+{
+  "name": "@morrow/mcp-server",
+  "version": "1.0.0-alpha.1",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "morrow-mcp": "./dist/index.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/server": "2.0.0",
+    "@morrow/contracts": "workspace:*",
+    "@morrow/gateway-core": "workspace:*",
+    "@morrow/upstream-mcp": "workspace:*",
+    "zod": "^4.2.0"
+  }
+}
