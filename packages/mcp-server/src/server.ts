@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
-import type { JsonObject } from "@morrow/contracts";
+import { sha256Text, type JsonObject } from "@morrow/contracts";
 import { GATEWAY_OPERATION_STATES } from "@morrow/operation-journal";
 import type { GatewayRuntime } from "./runtime.js";
 
@@ -25,7 +25,7 @@ function safeInspectionFailure(error: unknown): CallToolResult {
     structuredContent: {
       schema: "morrow.problem.v1",
       code: "gateway_operation_unavailable",
-      detailDigest: Buffer.from(detail, "utf8").toString("base64url").slice(0, 80),
+      detailDigest: sha256Text(detail),
     },
   };
 }
