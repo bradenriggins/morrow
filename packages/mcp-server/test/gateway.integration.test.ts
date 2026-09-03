@@ -82,13 +82,18 @@ describe("GatewayRuntime stdio federation", () => {
         course_id: "202",
       });
 
-      const firstDedupe = await runtime.call("morrow_legacy__canvas_page_get", {
-        course_id: "303",
+      const firstDedupe = await runtime.call("morrow_legacy_only", {
+        value: "write-once",
         _morrow: { operation_id: "operation:dedupe-1234" },
       });
       expect(firstDedupe.isError).not.toBe(true);
-      const replay = await runtime.call("morrow_legacy__canvas_page_get", {
-        course_id: "303",
+      expect(firstDedupe.structuredContent).toMatchObject({
+        source: "example-legacy",
+        tool: "morrow_legacy_only",
+        operation_id: "operation:dedupe-1234",
+      });
+      const replay = await runtime.call("morrow_legacy_only", {
+        value: "write-once",
         _morrow: { operation_id: "operation:dedupe-1234" },
       });
       expect(replay.isError).toBe(true);
