@@ -1,0 +1,27 @@
+{
+  "schema": "morrow.donor-manifest.v1",
+  "createdAt": "2026-09-03T00:00:00.000Z",
+  "sources": [
+    {
+      "id": "morrow-legacy",
+      "repository": "bradenriggins/morrow-legacy",
+      "commit": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+      "role": "Private donor for Canvas tools, planning, approval projections, verification, privacy, workflows, reports, and browser-backed execution.",
+      "defaultDisposition": "behavior-reference-and-reviewed-export"
+    },
+    {
+      "id": "meridian",
+      "repository": "bradenriggins/chcp-team-agent-kit",
+      "commit": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+      "role": "Private donor and initial internal MCP upstream for typed Canvas operations, scope binding, durable effects, batch recovery, and workspace state.",
+      "defaultDisposition": "private-upstream-and-behavior-reference"
+    }
+  ],
+  "heldProviders": ["mindtap", "connect"],
+  "rules": [
+    "No private repository history is merged into this repository.",
+    "Every copied or adapted source file requires an origin record and rights review.",
+    "Generated donor catalogs are build artifacts, not publication permission.",
+    "Private institution data, paths, identities, credentials, and provider responses are prohibited."
+  ]
+}

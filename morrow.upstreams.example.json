@@ -1,0 +1,22 @@
+{
+  "schema": "morrow.upstreams.v1",
+  "profile": "private-full",
+  "upstreams": [
+    {
+      "id": "meridian",
+      "label": "Meridian",
+      "kind": "mcp-stdio",
+      "command": "${MORROW_PYTHON_COMMAND:-python3}",
+      "args": ["${MORROW_MERIDIAN_SERVER_PATH}"],
+      "priority": 100,
+      "required": true,
+      "enabled": true,
+      "env": {}
+    }
+  ],
+  "filters": {
+    "excludePrefixes": ["mindtap_", "connect_"],
+    "excludeNames": []
+  },
+  "maxCatalogTools": 1000
+}
