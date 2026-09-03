@@ -59,5 +59,8 @@
   "operationJournal": {
     "path": "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}"
   },
+  "batchScheduler": {
+    "maxConcurrentWindows": 1
+  },
   "maxCatalogTools": 1000
 }
