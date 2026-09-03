@@ -15,6 +15,7 @@
     "scripts:test": "node --test scripts/test/*.test.mjs",
     "check": "pnpm test",
     "start": "pnpm --filter @morrow/mcp-server start",
+    "clients:render": "pnpm build && node packages/client-config/dist/cli.js",
     "catalog:legacy": "pnpm build && node scripts/export-example-legacy-catalog.mjs",
     "catalog:capture": "pnpm build && node scripts/capture-upstream-catalog.mjs",
     "catalog:reconcile": "pnpm build && node scripts/reconcile-catalogs.mjs",
