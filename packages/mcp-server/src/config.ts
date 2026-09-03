@@ -31,6 +31,9 @@ const GatewayConfigSchema = z.object({
     excludePrefixes: ["mindtap_", "connect_"],
     excludeNames: [],
   }),
+  operationJournal: z.object({
+    path: z.string().min(1).default(".morrow/morrow.sqlite3"),
+  }).default({ path: ".morrow/morrow.sqlite3" }),
   maxCatalogTools: z.number().int().positive().max(5000).default(1000),
 });
 
@@ -85,6 +88,9 @@ export function parseGatewayConfig(
   return {
     ...parsed,
     upstreams,
+    operationJournal: {
+      path: expandEnvironmentTemplate(parsed.operationJournal.path, environment),
+    },
   };
 }
 
@@ -120,6 +126,9 @@ export async function loadGatewayConfig(
       filters: {
         excludePrefixes: ["mindtap_", "connect_"],
         excludeNames: [],
+      },
+      operationJournal: {
+        path: "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}",
       },
       maxCatalogTools: 1000,
     }, environment);
