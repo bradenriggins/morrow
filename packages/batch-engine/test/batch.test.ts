@@ -7,7 +7,7 @@ import {
   DurableBatchStore,
   loadOrCreateBatchEncryptionKey,
   runBatchWindow,
-} from "../src/index.js";
+} from "../src/public.js";
 
 const roots: string[] = [];
 afterEach(() => {
