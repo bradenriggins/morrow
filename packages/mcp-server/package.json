@@ -25,6 +25,7 @@
     "@modelcontextprotocol/server": "2.0.0",
     "@morrow/contracts": "workspace:*",
     "@morrow/gateway-core": "workspace:*",
+    "@morrow/operation-journal": "workspace:*",
     "@morrow/upstream-mcp": "workspace:*",
     "zod": "^4.2.0"
   }
