@@ -102,6 +102,8 @@ export interface GatewayCallMeta {
   readonly gatewayOperationId?: string;
   readonly gatewayOperationState?: string;
   readonly sourceOperationId?: string;
+  readonly sourceResultState?: string;
+  readonly sourceTaskId?: string;
 }
 
 export function isJsonObject(value: unknown): value is JsonObject {
