@@ -2,9 +2,9 @@
 
 ## Current checkpoint
 
-This branch establishes Checkpoint A: a running Morrow MCP process that can connect to one or more internal stdio MCP upstreams, import their typed tool lists, remove held MindTap and Connect tools, resolve name collisions, register the merged tools through the official TypeScript SDK, and forward calls back to the source that owns them.
+This branch establishes the gateway foundation and the catalog-reconciliation machinery. Morrow can connect to one or more internal stdio MCP upstreams, import typed tool lists, remove held MindTap and Connect tools, resolve exact-name collisions, register the merged tools through the official TypeScript SDK, and forward calls back to the source that owns them.
 
-It also adds a deterministic exporter for the current Canvas-facing catalog in `morrow-legacy`. The exporter runs against an exact donor commit, refuses tracked donor changes, verifies the expected tool count, and writes an origin-bound catalog artifact outside the committed source tree.
+It also contains deterministic tools to export the 270-row current Canvas-facing catalog from `morrow-legacy`, capture the live catalog of configured MCP upstreams, and reconcile exact names and explicitly reviewed semantic aliases.
 
 ## What is implemented
 
@@ -18,8 +18,10 @@ It also adds a deterministic exporter for the current Canvas-facing catalog in `
 - Upstream call forwarding with bounded source metadata.
 - Raw upstream tool metadata and result metadata are dropped at the gateway boundary.
 - Source configuration through a local ignored file or environment variables.
-- Morrow legacy Canvas catalog exporter.
-- Unit tests for collision handling, provider holds, digest stability, result wrapping, metadata refusal, and configuration expansion.
+- Exact-revision Morrow legacy Canvas catalog exporter.
+- Live upstream catalog capture without persisting commands, environment variables, or local paths.
+- Deterministic reconciliation for exact-name compatibility, contract drift, explicit alias groups, source-only rows, and selected mappings.
+- Unit tests for collision handling, provider holds, digest stability, result wrapping, metadata refusal, source-catalog integrity, reconciliation, and configuration expansion.
 - A two-upstream process integration test that starts real fake MCP servers, lists tools, filters held providers, resolves a collision, forwards calls to both owners, checks source metadata, bounds catalog inspection output, and closes both child processes.
 
 ## Local start sequence
@@ -35,23 +37,26 @@ pnpm start
 
 The server writes protocol messages only to standard output. Operational messages use standard error.
 
-## Catalog export
+## Catalog sequence
 
 ```bash
-export MORROW_LEGACY_ROOT=/absolute/path/to/morrow-legacy
-pnpm catalog:legacy
+MORROW_CAPTURE_SOURCE=meridian pnpm catalog:capture
+MORROW_LEGACY_ROOT=/absolute/path/to/morrow-legacy pnpm catalog:legacy
+pnpm catalog:reconcile -- \
+  --source artifacts/catalogs/meridian.live.json \
+  --source artifacts/catalogs/morrow-legacy.canvas.json \
+  --aliases config/catalog-aliases.proposed.json
 ```
 
-The generated file is `artifacts/catalogs/morrow-legacy.canvas.json`. It is ignored by Git because it is a donor-derived build artifact and must pass source review before any part is admitted to a release.
+See `CATALOG-RECONCILIATION.md` for the artifact and decision rules.
 
 ## Next checkpoints
 
-### Checkpoint B: catalog reconciliation
+### Checkpoint B receipt
 
-- Export the current Morrow Canvas catalog.
-- Save the live Meridian catalog from `tools/list`.
-- Generate an exact same-name, alias, semantic-overlap, and source-only report.
-- Establish the first mapping table for shared Canvas operations.
+- Run the capture and export commands against the pinned donor checkouts.
+- Review every initial alias and contract-drift row.
+- Commit only the public-safe decision map, not the raw private catalog artifacts.
 
 ### Checkpoint C: Morrow execution bridge
 
@@ -81,5 +86,7 @@ Stop the branch when any change would:
 - let a tool bypass its owning authority or approval path;
 - silently replace a duplicate tool;
 - forward raw upstream metadata;
+- auto-select a contract-drift row;
+- infer a semantic alias without an explicit reviewed rule;
 - return an upstream error with unreviewed raw details;
 - report a possibly applied write as successful without source-owned readback.
