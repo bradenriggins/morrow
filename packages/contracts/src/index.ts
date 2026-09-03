@@ -70,7 +70,11 @@ export interface SourceAttestationHealth {
   readonly expectedRevision: string;
   readonly actualRevision: string;
   readonly trackedClean: boolean;
+  readonly trackedChangeCount: number;
   readonly requireTrackedClean: boolean;
+  readonly allowedTrackedPathsDigest?: string;
+  readonly trackedPatchDigest?: string;
+  readonly expectedTrackedPatchDigest?: string;
   readonly rootDigest: string;
   readonly verifiedAt: string;
   readonly expectedToolCount?: number;
