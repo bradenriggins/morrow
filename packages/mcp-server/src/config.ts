@@ -6,12 +6,15 @@ import * as z from "zod/v4";
 const EnvironmentName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 const FullGitRevision = z.string().regex(/^[0-9a-fA-F]{40,64}$/);
 const Sha256Digest = z.string().regex(/^[0-9a-fA-F]{64}$/);
+const RepositoryRelativePath = z.string().min(1).max(500);
 
 const LocalGitAttestationSchema = z.object({
   kind: z.literal("local-git"),
   root: z.string().min(1),
   expectedRevision: FullGitRevision,
   requireTrackedClean: z.boolean().default(true),
+  allowedTrackedPaths: z.array(RepositoryRelativePath).max(20).default([]),
+  expectedTrackedPatchDigest: Sha256Digest.optional(),
   expectedToolCount: z.number().int().min(1).max(5000).optional(),
   expectedCatalogDigest: Sha256Digest.optional(),
 });
@@ -108,6 +111,14 @@ function expandUpstream(
             ...upstream.attestation,
             root: resolveLocalPath(upstream.attestation.root, environment),
             expectedRevision: upstream.attestation.expectedRevision.toLowerCase(),
+            allowedTrackedPaths: upstream.attestation.allowedTrackedPaths.map((path) => (
+              expandEnvironmentTemplate(path, environment)
+            )),
+            ...(upstream.attestation.expectedTrackedPatchDigest
+              ? {
+                  expectedTrackedPatchDigest: upstream.attestation.expectedTrackedPatchDigest.toLowerCase(),
+                }
+              : {}),
             ...(upstream.attestation.expectedCatalogDigest
               ? { expectedCatalogDigest: upstream.attestation.expectedCatalogDigest.toLowerCase() }
               : {}),
@@ -126,6 +137,22 @@ function validateSourceProvenance(upstream: StdioUpstreamConfig): void {
   ) {
     throw new Error(
       `Upstream ${upstream.id} declares revision ${declaredRevision} but attests ${upstream.attestation.expectedRevision}.`,
+    );
+  }
+  if (
+    upstream.attestation.requireTrackedClean
+    && upstream.attestation.allowedTrackedPaths.length > 0
+  ) {
+    throw new Error(
+      `Upstream ${upstream.id} cannot require a clean tree while allowing tracked overlay paths.`,
+    );
+  }
+  if (
+    !upstream.attestation.requireTrackedClean
+    && upstream.attestation.allowedTrackedPaths.length === 0
+  ) {
+    throw new Error(
+      `Upstream ${upstream.id} must name every allowed tracked overlay path.`,
     );
   }
 }
@@ -211,6 +238,7 @@ export async function loadGatewayConfig(
                 root: meridianRoot,
                 expectedRevision: "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
                 requireTrackedClean: true,
+                allowedTrackedPaths: [],
                 expectedToolCount: 205,
               },
             }
