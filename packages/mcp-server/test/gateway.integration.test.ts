@@ -6,7 +6,7 @@ import { GatewayRuntime } from "../src/runtime.js";
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
 describe("GatewayRuntime stdio federation", () => {
-  it("merges, filters, aliases, and forwards through real MCP stdio clients", async () => {
+  it("merges, filters, aliases, journals, and forwards through real MCP stdio clients", async () => {
     const config = parseGatewayConfig({
       schema: "morrow.upstreams.v1",
       profile: "private-full",
@@ -38,10 +38,11 @@ describe("GatewayRuntime stdio federation", () => {
         excludePrefixes: ["mindtap_", "connect_"],
         excludeNames: [],
       },
+      operationJournal: { path: ":memory:" },
       maxCatalogTools: 20,
     });
 
-    const runtime = await GatewayRuntime.connect(config);
+    const runtime = await GatewayRuntime.connect(config, { journalPath: ":memory:" });
     try {
       const names = runtime.catalog.tools.map((tool) => tool.publicName);
       expect(names).toContain("canvas_page_get");
@@ -70,6 +71,8 @@ describe("GatewayRuntime stdio federation", () => {
           upstreamId: "meridian",
           upstreamToolName: "canvas_page_get",
           catalogDigest: runtime.catalog.digest,
+          gatewayOperationId: expect.stringMatching(/^gop:/),
+          gatewayOperationState: "response_received",
         }),
       });
 
@@ -77,6 +80,29 @@ describe("GatewayRuntime stdio federation", () => {
       expect(alias.structuredContent).toEqual({
         source: "morrow-legacy",
         course_id: "202",
+      });
+
+      const firstDedupe = await runtime.call("morrow_legacy__canvas_page_get", {
+        course_id: "303",
+        _morrow: { operation_id: "operation:dedupe-1234" },
+      });
+      expect(firstDedupe.isError).not.toBe(true);
+      const replay = await runtime.call("morrow_legacy__canvas_page_get", {
+        course_id: "303",
+        _morrow: { operation_id: "operation:dedupe-1234" },
+      });
+      expect(replay.isError).toBe(true);
+      expect(replay.structuredContent).toMatchObject({
+        code: "operation_already_recorded",
+      });
+
+      const recent = runtime.operationsRecent({ limit: 10 });
+      expect(recent.returned).toBe(3);
+      const operations = recent.operations as { operationId: string; state: string }[];
+      expect(operations.every((operation) => operation.state === "response_received")).toBe(true);
+      expect(runtime.operationGet(operations[0]!.operationId)).toMatchObject({
+        schema: "morrow.gateway-operation.v1",
+        terminal: true,
       });
 
       const search = runtime.searchCatalog({ query: "canvas", limit: 1 });
@@ -94,6 +120,11 @@ describe("GatewayRuntime stdio federation", () => {
         publicToolCount: 4,
         collisionCount: 1,
         excludedToolCount: 4,
+        operationJournal: {
+          totalOperations: 3,
+          unresolvedOperations: 0,
+          unknownOperations: 0,
+        },
         sources: [
           { id: "meridian", connected: true, toolCount: 4 },
           { id: "morrow-legacy", connected: true, toolCount: 4 },
