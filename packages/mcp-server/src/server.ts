@@ -9,6 +9,7 @@ import * as z from "zod/v4";
 import { sha256Text, type JsonObject } from "@morrow/contracts";
 import { GATEWAY_OPERATION_STATES } from "@morrow/operation-journal";
 import type { GatewayRuntime } from "./runtime.js";
+import { MORROW_SERVER_INSTRUCTIONS } from "./server-instructions.js";
 
 function textAndStructured(summary: string, structuredContent: JsonObject): CallToolResult {
   return {
@@ -31,10 +32,15 @@ function safeInspectionFailure(error: unknown): CallToolResult {
 }
 
 export function createMorrowServer(runtime: GatewayRuntime): McpServer {
-  const server = new McpServer({
-    name: "morrow",
-    version: "1.0.0-alpha.1",
-  });
+  const server = new McpServer(
+    {
+      name: "morrow",
+      version: "1.0.0-alpha.1",
+    },
+    {
+      instructions: MORROW_SERVER_INSTRUCTIONS,
+    },
+  );
 
   server.registerTool(
     "morrow_health",
