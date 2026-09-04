@@ -36,29 +36,86 @@ export interface CanonicalMorrowResultInput {
   readonly receipts?: JsonObject;
 }
 
+function canonicalContent(
+  input: CanonicalMorrowResultInput,
+  upstream: JsonObject,
+): readonly JsonObject[] {
+  if (input.effectState === "awaiting_approval") {
+    return [{
+      type: "text",
+      text: "Morrow prepared this change and is waiting for approval. Ask your AI app to check the existing request.",
+    }];
+  }
+  if (input.effectState === "awaiting_inner_approval") {
+    return [{
+      type: "text",
+      text: "Morrow is waiting for another required approval. Ask your AI app to check the existing request.",
+    }];
+  }
+  if (input.effectState === "approved") {
+    return [{
+      type: "text",
+      text: "This change is approved and waiting to be sent to Canvas. Ask your AI app to check the existing request.",
+    }];
+  }
+  if (input.effectState === "dispatching") {
+    return [{
+      type: "text",
+      text: "Morrow is sending this change to Canvas. Ask your AI app to check the existing request. Do not repeat this change.",
+    }];
+  }
+  if (input.effectState === "awaiting_verification") {
+    return [{
+      type: "text",
+      text: "Morrow could not confirm this change. Ask your AI app to check the existing request. Do not repeat this change.",
+    }];
+  }
+  if (input.effectState === "applied_or_unknown") {
+    return [{
+      type: "text",
+      text: "Morrow cannot confirm the result. Canvas may have received this change. Ask your AI app to check the existing request. Do not repeat this change.",
+    }];
+  }
+  if (input.effectState === "cancelled") {
+    return [{
+      type: "text",
+      text: "This change was cancelled before it was sent to Canvas.",
+    }];
+  }
+  if (input.effectState === "failed") {
+    return [{
+      type: "text",
+      text: "This request did not complete. Ask your AI app to check the existing request.",
+    }];
+  }
+  return Array.isArray(upstream.content)
+    ? structuredClone(upstream.content) as JsonObject[]
+    : [{ type: "text", text: `Morrow ${input.phase.replaceAll("_", " ")}.` }];
+}
+
 export function canonicalMorrowResult(input: CanonicalMorrowResultInput): JsonObject {
   const upstream = input.result ? structuredClone(input.result) : {};
   const structured = isJsonObject(upstream.structuredContent)
     ? structuredClone(upstream.structuredContent)
     : null;
   const meta = isJsonObject(upstream._meta) ? structuredClone(upstream._meta) : {};
-  const status = input.status || (upstream.isError === true
-    ? "failed"
-    : input.verificationStatus === "verified"
-      ? "verified"
-      : input.effectState === "awaiting_approval" || input.effectState === "awaiting_inner_approval"
-        ? "awaiting_approval"
-        : input.effectState === "applied_or_unknown"
-          ? "indeterminate"
-          : input.verificationStatus === "unconfirmed"
-            ? "unconfirmed"
-            : "succeeded");
+  const status = input.effectState === "applied_or_unknown"
+    ? "indeterminate"
+    : input.effectState === "cancelled" || input.effectState === "failed"
+      ? input.effectState
+      : input.status || (upstream.isError === true
+        ? "failed"
+        : input.verificationStatus === "verified"
+          ? "verified"
+          : input.effectState === "awaiting_approval" || input.effectState === "awaiting_inner_approval"
+            ? "awaiting_approval"
+            : input.verificationStatus === "unconfirmed"
+              ? "unconfirmed"
+              : "succeeded");
   const completeness = input.completeness
     || (upstream.isError === true ? "unknown" : input.limitations?.length ? "limited" : "complete");
   return {
-    content: Array.isArray(upstream.content)
-      ? structuredClone(upstream.content)
-      : [{ type: "text", text: `Morrow ${input.phase.replaceAll("_", " ")}.` }],
+    content: canonicalContent(input, upstream),
     ...(upstream.isError === true ? { isError: true } : {}),
     structuredContent: {
       schema: "morrow.result.v1",

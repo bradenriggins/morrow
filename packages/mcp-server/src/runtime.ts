@@ -47,6 +47,11 @@ import {
   verifyLocalGitSourceAttestation,
   verifyRemoteGitSshSourceAttestation,
 } from "./source-attestation.js";
+import {
+  resolveApprovalReviewContext,
+  type ApprovalReviewReadCache,
+  type ApprovalReviewContext,
+} from "./approval-context.js";
 
 export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_health",
@@ -723,6 +728,23 @@ export class GatewayRuntime {
       return effectOperationProjection(this.effects.get(operationId));
     }
     return operationRecordProjection(this.journal.get(operationId));
+  }
+
+  async operationReviewContext(
+    operationId: string,
+    cache?: ApprovalReviewReadCache,
+  ): Promise<ApprovalReviewContext> {
+    try {
+      const operation = this.effects.get(operationId);
+      return resolveApprovalReviewContext({
+        operation,
+        tools: this.catalog.tools,
+        ...(cache ? { cache } : {}),
+        read: (publicName, args, signal) => this.callSourceOwned(publicName, args, { signal }),
+      });
+    } catch {
+      return { targets: [] };
+    }
   }
 
   operationsRecent(input: RecentOperationsInput = {}): JsonObject {

@@ -338,7 +338,7 @@ async function status() {
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
     connected: state.socket?.readyState === WebSocket.OPEN && state.generation > 0,
     bindingCount: (stored.bindings || []).length,
-    bindings: (stored.bindings || []).map((binding) => ({ sourceBindingId: binding.sourceBindingId, origin: binding.origin, courseId: binding.courseId, runtimeVerified: binding.runtimeVerified })),
+    bindings: (stored.bindings || []).map((binding) => ({ sourceBindingId: binding.sourceBindingId, origin: binding.origin, courseId: binding.courseId, runtimeVerified: binding.runtimeVerified, lastSeenAt: binding.lastSeenAt })),
   };
 }
 

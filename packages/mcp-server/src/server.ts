@@ -101,6 +101,7 @@ export function createMorrowServer(
   server.registerTool(
     "morrow_health",
     {
+      title: "Check Morrow status",
       description: "Return Morrow gateway readiness, catalog identity, source status, and durable operation-journal status without exposing commands or credentials.",
       inputSchema: z.object({}),
       annotations: {
@@ -115,7 +116,7 @@ export function createMorrowServer(
       return textAndStructured(
         health.ready
           ? `Morrow is ready with ${health.publicToolCount} public tools.`
-          : "Morrow is not ready. Inspect the structured source status.",
+          : "Morrow is not ready. Review the source status.",
         health as unknown as JsonObject,
       );
     },
@@ -124,6 +125,7 @@ export function createMorrowServer(
   server.registerTool(
     "morrow_result_page",
     {
+      title: "Read a saved result",
       description: "Read one bounded page from a local Morrow large-result artifact. Artifacts are process-local and are not durable records.",
       inputSchema: z.object({
         handle: z.string().min(8).max(160),
@@ -141,7 +143,7 @@ export function createMorrowServer(
       try {
         const page = runtime.resultPage(handle, offset, limit);
         return textAndStructured(
-          `Returned ${page.returned} characters from local result artifact ${handle}.`,
+          `Read ${page.returned} characters from saved local result ${handle}.`,
           page,
         );
       } catch (error) {
@@ -153,6 +155,7 @@ export function createMorrowServer(
   server.registerTool(
     "morrow_catalog",
     {
+      title: "Browse Morrow tools",
       description: "Search a bounded projection of the merged Morrow tool catalog and inspect source mappings, collisions, and exclusions without returning full schemas.",
       inputSchema: z.object({
         query: z.string().optional().describe("Optional case-insensitive name or description search."),
@@ -170,7 +173,7 @@ export function createMorrowServer(
     async (input) => {
       const result = runtime.searchCatalog(input);
       return textAndStructured(
-        `Found ${result.totalMatches} matching tools and returned ${result.returned} from offset ${result.offset}.`,
+        `Found ${result.totalMatches} matching tools. Showing ${result.returned} from position ${result.offset}.`,
         result as unknown as JsonObject,
       );
     },
@@ -179,6 +182,7 @@ export function createMorrowServer(
   server.registerTool(
     "morrow_catalog_search",
     {
+      title: "Search Morrow tools",
       description: "Search the current profile's supported capability catalog without returning full schemas.",
       inputSchema: z.object({
         query: z.string().optional(),
@@ -191,7 +195,7 @@ export function createMorrowServer(
     async (input) => {
       const result = runtime.searchCatalog(input);
       return textAndStructured(
-        `Found ${result.totalMatches} matching capabilities and returned ${result.returned}.`,
+        `Found ${result.totalMatches} matching tools. Showing ${result.returned}.`,
         result as unknown as JsonObject,
       );
     },
@@ -200,12 +204,13 @@ export function createMorrowServer(
   server.registerTool(
     "morrow_capability_get",
     {
+      title: "Review a tool",
       description: "Return one canonical capability descriptor and its profile availability.",
       inputSchema: z.object({ name: z.string().min(1).max(128) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ name }) => textAndStructured(
-      `Loaded capability ${name}.`,
+      `Here is the tool ${name}.`,
       runtime.capabilityGet(name),
     ),
   );
@@ -213,16 +218,18 @@ export function createMorrowServer(
   server.registerTool(
     "morrow_profile_status",
     {
+      title: "Review Morrow profile",
       description: "Return active profile authority identity and the capabilities unavailable in that profile.",
       inputSchema: z.object({}),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async () => textAndStructured("Loaded current Morrow profile status.", runtime.profileStatus()),
+    async () => textAndStructured("Here is the current Morrow profile.", runtime.profileStatus()),
   );
 
   server.registerTool(
     "morrow_operation_get",
     {
+      title: "Review a saved request",
       description: "Inspect one durable gateway operation record by its opaque operation id. This does not query or change the source provider.",
       inputSchema: z.object({
         operation_id: z.string().min(8).max(160),
@@ -237,7 +244,7 @@ export function createMorrowServer(
     async ({ operation_id }) => {
       try {
         return textAndStructured(
-          `Loaded gateway operation ${operation_id}.`,
+          `Here is saved request ${operation_id}.`,
           runtime.operationGet(operation_id),
         );
       } catch (error) {
@@ -249,6 +256,7 @@ export function createMorrowServer(
   server.registerTool(
     "morrow_operations_recent",
     {
+      title: "Review recent requests",
       description: "List recent durable gateway operations with optional exact source, tool, and state filters. Stored records contain digests and bounded status, not raw provider payloads.",
       inputSchema: z.object({
         source: z.string().min(1).max(160).optional(),
@@ -266,7 +274,7 @@ export function createMorrowServer(
     async (input) => {
       const result = runtime.operationsRecent(input);
       const returned = typeof result.returned === "number" ? result.returned : 0;
-      return textAndStructured(`Returned ${returned} gateway operations.`, result);
+      return textAndStructured(`Found ${returned} saved requests.`, result);
     },
   );
 

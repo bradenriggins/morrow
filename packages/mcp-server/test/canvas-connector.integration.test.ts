@@ -136,7 +136,9 @@ describe("Canvas connector gateway path", () => {
             ok: true,
             sent: true,
             status: 200,
-            data: { id: "42", name: "Biology" },
+            data: command.toolName === "canvas_get_new_quiz"
+              ? { id: "77", course_id: "42", title: "Cell Structure Check" }
+              : { id: "42", name: "Biology" },
             ...(command.kind === "invoke_write" ? {
               verification: {
                 schema: "morrow.browser-verification.v1",
@@ -150,6 +152,17 @@ describe("Canvas connector gateway path", () => {
           completedAt: Date.now(),
         }));
       });
+
+      const reviewPlan = await runtime.call("canvas_create_quiz_item", {
+        course_id: "42", assignment_id: "77", item_entry_title: "Cell structure",
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(await runtime.operationReviewContext(operationId(reviewPlan))).toMatchObject({ targets: [
+        { field: "course_id", name: "Biology" },
+        { field: "assignment_id", label: "Quiz", name: "Cell Structure Check" },
+      ] });
+      expect(writeCommands).toBe(0);
+      runtime.cancelOperation(operationId(reviewPlan));
 
       const planned = await runtime.call("canvas_add_course_to_favorites", {
         id: "42",

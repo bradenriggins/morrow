@@ -126,9 +126,9 @@ describe("outer provider effects", () => {
       expect(typeof url).toBe("string");
       const view = await fetch(url as string);
       const body = await view.text();
-      expect(body).toContain("Review this operation");
-      expect(body).toContain("MCP tools cannot submit this decision");
-      expect(body).toContain("Show complete frozen plan");
+      expect(body).toContain("Before Morrow makes changes");
+      expect(body).toContain("Check that this matches what you asked for");
+      expect(body).toContain("Technical details");
       const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
       const cookie = view.headers.get("set-cookie")?.split(";", 1)[0];
       expect(nonce).toBeTruthy();
@@ -156,8 +156,20 @@ describe("outer provider effects", () => {
         body: new URLSearchParams({ nonce: validNonce! }),
       });
       expect(approval.status).toBe(200);
-      expect(await approval.text()).toContain("Canvas has not changed yet");
+      expect(await approval.text()).toContain("Return to your chat and say “Continue.”");
       expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "approved" });
+      const settled = await fetch(url as string);
+      const settledBody = await settled.text();
+      expect(settledBody).toContain("Already approved");
+      expect(settledBody).not.toContain('<button class="approve"');
+      const stale = await fetch(`${url}/approve`, {
+        method: "POST",
+        headers: { accept: "text/html", "content-type": "application/x-www-form-urlencoded" },
+      });
+      expect(stale.status).toBe(409);
+      const staleBody = await stale.text();
+      expect(staleBody).toContain("Review could not be completed");
+      expect(staleBody).not.toContain("nonce");
     } finally {
       await runtime.close();
     }

@@ -26,18 +26,18 @@ interface SharedOptions extends ClientConfigBundleOptions {
 function usage(): string {
   return [
     "Usage:",
-    "  morrow setup [--repository <path>] [--force] [--json]",
-    "  morrow mcp install <codex|claude|claude-desktop|gemini> [--scope project|user] [options]",
-    "  morrow doctor --json [--upstreams <absolute-path>] [--repository <path>]",
-    "  morrow profile show [--json] [--upstreams <absolute-path>]",
-    "  morrow catalog stats [--json] [--repository <path>]",
-    "  morrow backend status [--json] --upstreams <absolute-path>",
-    "  morrow operation <get|reconcile|cancel> <operation-id> [--json] --upstreams <absolute-path>",
-    "  morrow batch <get|pause|cancel> <batch-id> [--json] --upstreams <absolute-path>",
-    "  morrow batch resume <batch-id> --course-set-digest <sha256> --profile-digest <sha256> [--max-children <count>] [--json] --upstreams <absolute-path>",
-    "  morrow conformance report [--json] [--repository <path>]",
-    "  morrow clients render --upstreams <absolute-path> [options]",
-    "  morrow mcp print-config inspector --upstreams <absolute-path> [options]",
+    "  pnpm run setup -- [--repository <path>] [--force] [--json]",
+    "  pnpm morrow mcp install <codex|claude|claude-desktop|gemini> [--scope project|user] [--json] [options]",
+    "  pnpm morrow doctor [--json] [--upstreams <absolute-path>] [--repository <path>]",
+    "  pnpm morrow profile show [--json] [--upstreams <absolute-path>]",
+    "  pnpm morrow catalog stats [--json] [--repository <path>]",
+    "  pnpm morrow backend status [--json] --upstreams <absolute-path>",
+    "  pnpm morrow operation <get|reconcile|cancel> <operation-id> [--json] --upstreams <absolute-path>",
+    "  pnpm morrow batch <get|pause|cancel> <batch-id> [--json] --upstreams <absolute-path>",
+    "  pnpm morrow batch resume <batch-id> --course-set-digest <sha256> --profile-digest <sha256> [--max-children <count>] [--json] --upstreams <absolute-path>",
+    "  pnpm morrow conformance report [--json] [--repository <path>]",
+    "  pnpm morrow clients render --upstreams <absolute-path> [options]",
+    "  pnpm morrow mcp print-config inspector --upstreams <absolute-path> [options]",
     "",
     "Options:",
     "  --repository <path>       Morrow repository root. Defaults to the current directory.",
@@ -51,8 +51,93 @@ function usage(): string {
     "  --tool-timeout <sec>      Codex tool timeout. Defaults to 900.",
     "  --gemini-timeout <ms>     Gemini request timeout. Defaults to tool timeout in milliseconds.",
     "  --force                   Replace existing generated bundle files only.",
-    "  --json                    Emit machine-readable output for doctor or conformance.",
+    "  --json                    Emit machine-readable output where supported.",
     "  --help                    Show this help.",
+    "",
+  ].join("\n");
+}
+
+const ONE_APP_NOTE = "Use Morrow in one AI app at a time. Your AI app starts Morrow in the background. You do not open a separate Morrow app.";
+
+function setupMessage(configured: {
+  readonly path: string;
+  readonly extensionPath: string;
+  readonly changed: boolean;
+}): string {
+  return [
+    configured.changed ? "Morrow's local settings are ready." : "Morrow's local settings are already ready.",
+    `Local Morrow settings: ${configured.path}`,
+    "This step does not connect Canvas.",
+    "",
+    "Next steps:",
+    "1. In Chrome, open chrome://extensions. Turn on Developer mode. Select Load unpacked, then choose:",
+    `   ${configured.extensionPath}`,
+    "2. From this Morrow repository, configure one AI app:",
+    "   For Codex: pnpm morrow mcp install codex",
+    "   For Claude Code: pnpm morrow mcp install claude",
+    "   For Claude Desktop: pnpm morrow mcp install claude-desktop --scope user",
+    "   For Gemini CLI: pnpm morrow mcp install gemini",
+    "3. Open or restart that AI app before you use the extension.",
+    "4. In Chrome, open one signed-in Canvas course. Use Morrow Canvas Connector to connect it.",
+    "",
+    ONE_APP_NOTE,
+    "",
+  ].join("\n");
+}
+
+function installMessage(installed: {
+  readonly client: SupportedMorrowClient;
+  readonly path: string;
+  readonly changed: boolean;
+}): string {
+  const label = {
+    codex: "Codex",
+    "claude-code": "Claude Code",
+    "claude-desktop": "Claude Desktop",
+    "gemini-cli": "Gemini CLI",
+  }[installed.client];
+  return [
+    installed.changed ? `Morrow configuration was installed for ${label}.` : `Morrow configuration for ${label} is already current.`,
+    `Configuration file: ${installed.path}`,
+    "This did not open or test the AI app. This step does not connect Canvas.",
+    "",
+    "Next steps:",
+    `1. Close any other AI app using Morrow. Open or restart ${label}.`,
+    "2. Then in Chrome, open one signed-in Canvas course and use Morrow Canvas Connector to connect it.",
+    "",
+    ONE_APP_NOTE,
+    "",
+  ].join("\n");
+}
+
+function record(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function doctorMessage(value: Record<string, unknown>): string {
+  const runtime = record(value.runtime);
+  const components = record(runtime.components);
+  const bridge = record(components.extensionBridge);
+  const service = runtime.attempted !== true
+    ? "could not start for this check"
+    : runtime.ready === true ? "started and is ready for this check" : "did not become ready";
+  const canvas = bridge.connected === true
+    ? "the extension is connected. This does not confirm a usable Canvas course connection"
+    : "the extension is not connected";
+  const repositoryRoot = typeof value.repositoryRoot === "string" ? value.repositoryRoot : "<Morrow-repository>";
+  const upstreamConfigPath = typeof value.upstreamConfigPath === "string" ? value.upstreamConfigPath : "<morrow.upstreams.json>";
+  return [
+    "Morrow troubleshooting check.",
+    `Morrow program: ${value.serverEntryExists === true ? "found" : "not found"}.`,
+    `Local Morrow settings: ${value.upstreamConfigExists === true ? "found" : "not found"}.`,
+    `Morrow service: ${service}.`,
+    `Canvas connection: ${canvas}.`,
+    "",
+    "This optional check starts a temporary Morrow process. Close AI apps using Morrow before you run it.",
+    `Settings used: ${upstreamConfigPath}`,
+    `For technical details, run pnpm morrow doctor --json from: ${repositoryRoot}`,
     "",
   ].join("\n");
 }
@@ -351,13 +436,15 @@ async function run(): Promise<void> {
       ...(options.nodeCommand ? { nodeCommand: options.nodeCommand } : {}),
       force: options.force,
     });
-    emit({
+    const result = {
       schema: "morrow.setup.v1",
       ...configured,
       serverEntryPath: resolve(options.repositoryRoot, "packages/mcp-server/dist/index.js"),
       installs: ["Morrow MCP", "Morrow Canvas Connector extension"],
       credentialsCopied: false,
-    }, json);
+    };
+    if (json) emit(result, true);
+    else process.stdout.write(setupMessage(configured));
     return;
   }
 
@@ -367,7 +454,7 @@ async function run(): Promise<void> {
     const { options, json } = parseSharedOptions(optionArgs);
     const installed = installMorrowClient({ ...requireUpstreams(options), client, scope });
     if (json) process.stdout.write(`${JSON.stringify(installed)}\n`);
-    else process.stdout.write(`client=${installed.client}\nscope=${installed.scope}\npath=${installed.path}\nchanged=${installed.changed}\n`);
+    else process.stdout.write(installMessage(installed));
     return;
   }
 
@@ -387,8 +474,9 @@ async function run(): Promise<void> {
 
   if (command === "doctor") {
     const { options, json } = parseSharedOptions(rest);
-    if (!json) throw new Error("doctor requires --json");
-    process.stdout.write(`${JSON.stringify(await doctor(options))}\n`);
+    const result = await doctor(options);
+    if (json) process.stdout.write(`${JSON.stringify(result)}\n`);
+    else process.stdout.write(doctorMessage(result));
     return;
   }
 

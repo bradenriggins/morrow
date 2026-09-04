@@ -392,6 +392,7 @@ export class MorrowRuntime {
         const approval = new LoopbackApprovalServer({
           operationGet: (operationId) => gateway.operationGet(operationId),
           operationList: (limit) => gateway.operationList(limit),
+          operationReviewContext: (operationId, cache) => gateway.operationReviewContext(operationId, cache),
           approveOperation: (operationId) => gateway.approveOperation(operationId),
           cancelOperation: (operationId) => gateway.cancelOperation(operationId),
           setApprovalBaseUrl: (baseUrl) => gateway.setApprovalBaseUrl(baseUrl),
@@ -746,7 +747,9 @@ export class MorrowRuntime {
       manifestDigest: batch.manifestDigest,
       profileDigest: manifest.profileDigest,
       catalogDigest: manifest.catalogDigest,
-      expiresAt: manifest.expiresAt,
+      expiresAt: [manifest.expiresAt, ...children.map((child) => (child.operation as JsonObject).approvalExpiresAt)]
+        .filter((expiry): expiry is string => typeof expiry === "string" && Number.isFinite(Date.parse(expiry)))
+        .sort((left, right) => Date.parse(left) - Date.parse(right))[0] || manifest.expiresAt,
       approvalPreviewDigest: manifest.approvalPreviewDigest,
       approvalCoverageChildCount: manifest.approvalCoverageChildCount,
       targetCount: children.length,

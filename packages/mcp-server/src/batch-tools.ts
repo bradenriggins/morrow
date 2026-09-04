@@ -20,7 +20,7 @@ function textAndStructured(summary: string, structuredContent: JsonObject): Call
 function safeFailure(error: unknown): CallToolResult {
   const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
   return {
-    content: [{ type: "text", text: "Morrow could not complete the local batch operation." }],
+    content: [{ type: "text", text: "Morrow could not complete this action for the group. Check the saved requests before trying again." }],
     isError: true,
     structuredContent: {
       schema: "morrow.problem.v1",
@@ -84,6 +84,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_health",
     {
+      title: "Check group request status",
       description: "Report bounded local batch-store, source-settlement, and scheduler status. This does not read or change Canvas.",
       inputSchema: z.object({}),
       annotations: {
@@ -93,7 +94,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         openWorldHint: false,
       },
     },
-    async () => textAndStructured("Loaded Morrow batch-store status.", {
+    async () => textAndStructured("Here is the status of saved request groups.", {
       ...runtime.batchHealth(),
       scheduler: scheduler.health(),
     }),
@@ -102,6 +103,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_create",
     {
+      title: "Prepare a group of requests",
       description: "Freeze an explicit multi-operation manifest against the current Morrow catalog. Discovered course sets remain unavailable until a gateway-owned resolver receipt exists. stage_writes creates no provider mutation at this step.",
       inputSchema: z.object({
         name: z.string().min(1).max(200),
@@ -180,7 +182,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
           expiresAt: expires_at,
           ...(ratePolicy(rate_policy) ? { ratePolicy: ratePolicy(rate_policy)! } : {}),
         });
-        return textAndStructured("Created a frozen Morrow batch manifest.", result);
+        return textAndStructured("Prepared a group of requests. Canvas has not changed.", result);
       } catch (error) {
         return safeFailure(error);
       }
@@ -190,6 +192,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_get",
     {
+      title: "Review a group of requests",
       description: "Inspect one batch, an encrypted manifest reference, its source-settlement summary, and a bounded page of child records. The full manifest and decrypted child arguments are never returned.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
@@ -206,7 +209,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     async ({ batch_id, offset, limit }) => {
       try {
         return textAndStructured(
-          `Loaded batch ${batch_id}.`,
+          `Here is group ${batch_id}.`,
           runtime.batchGet({ batchId: batch_id, offset, limit }),
         );
       } catch (error) {
@@ -218,6 +221,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batches_recent",
     {
+      title: "Review recent request groups",
       description: "List recent durable Morrow batches with an optional exact orchestration-state filter. Each batch includes a separate source-settlement summary and never returns child arguments.",
       inputSchema: z.object({
         state: z.enum(BATCH_STATES).optional(),
@@ -237,7 +241,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
           limit,
         });
         const returned = typeof result.returned === "number" ? result.returned : 0;
-        return textAndStructured(`Returned ${returned} Morrow batches.`, result);
+        return textAndStructured(`Found ${returned} saved request groups.`, result);
       } catch (error) {
         return safeFailure(error);
       }
@@ -247,6 +251,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_results_page",
     {
+      title: "Review group request results",
       description: "Return one bounded page of durable child results and source-settlement facts for a frozen batch.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
@@ -263,7 +268,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
     async ({ batch_id, offset, limit }) => {
       try {
         const result = runtime.batchResultsPage({ batchId: batch_id, offset, limit });
-        return textAndStructured(`Loaded one bounded result page for batch ${batch_id}.`, result);
+        return textAndStructured(`Here is one saved result page for group ${batch_id}.`, result);
       } catch (error) {
         return safeFailure(error);
       }
@@ -273,6 +278,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_run",
     {
+      title: "Run a group of requests",
       description: "Run or resume a bounded window of one frozen batch. The approved manifest fixes concurrency and rate controls. read_only children perform reads. stage_writes children consume their approved provider-effect grants and dispatch once. A write batch succeeds only after every child has verified fresh readback. Morrow serializes control for one batch and caps active windows across batches.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
@@ -295,18 +301,8 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
           courseSetDigest: course_set_digest,
           profileDigest: profile_digest,
         }));
-        const batch = result.batch;
-        const state = batch && typeof batch === "object" && !Array.isArray(batch)
-          ? String((batch as Record<string, unknown>).state || "unknown")
-          : "unknown";
-        const sourceSettlement = result.sourceSettlement;
-        const sourceOutcome = sourceSettlement
-          && typeof sourceSettlement === "object"
-          && !Array.isArray(sourceSettlement)
-          ? String((sourceSettlement as Record<string, unknown>).outcome || "not_applicable")
-          : "not_applicable";
         return textAndStructured(
-          `Processed a bounded batch window. Orchestration is ${state}; source outcome is ${sourceOutcome}.`,
+          "Here is the current status of this group. Check each request's result before continuing.",
           result,
         );
       } catch (error) {
@@ -318,6 +314,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_resume",
     {
+      title: "Resume a group of requests",
       description: "Resume a paused frozen batch only after its supplied course-set and profile facts still match the encrypted manifest. The caller cannot replace its approved concurrency or rate controls.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
@@ -340,7 +337,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
           courseSetDigest: course_set_digest,
           profileDigest: profile_digest,
         }));
-        return textAndStructured(`Resumed a bounded batch window for ${batch_id}.`, result);
+        return textAndStructured(`Resumed part of group ${batch_id}.`, result);
       } catch (error) {
         return safeFailure(error);
       }
@@ -350,6 +347,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_reconcile",
     {
+      title: "Update group request status",
       description: "Update source-settlement evidence for staged writes that use a source-owned task. Direct Canvas connector writes settle from their verified readback and need no source-task poll. This tool never approves, denies, resumes, undoes, or dispatches a task.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
@@ -372,15 +370,9 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
           maxChildren: max_children,
           includeTerminal: include_terminal,
         }));
-        const sourceSettlement = result.sourceSettlement;
-        const sourceOutcome = sourceSettlement
-          && typeof sourceSettlement === "object"
-          && !Array.isArray(sourceSettlement)
-          ? String((sourceSettlement as Record<string, unknown>).outcome || "unknown")
-          : "unknown";
         const processed = typeof result.processed === "number" ? result.processed : 0;
         return textAndStructured(
-          `Reconciled ${processed} source tasks. The batch source outcome is ${sourceOutcome}.`,
+          `Checked ${processed} requests for updated results. Review each result before continuing.`,
           result,
         );
       } catch (error) {
@@ -392,6 +384,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_recover",
     {
+      title: "Recover an interrupted group",
       description: "Inspect or safely repair interrupted local batch orchestration. apply_safe may reset unknown read-only children for retry, recover a known staged task from the gateway journal, or settle a proven pre-send failure. It performs zero provider dispatches and never retries an uncertain write.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
@@ -416,8 +409,8 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         }));
         return textAndStructured(
           mode === "inspect"
-            ? `Inspected interrupted batch ${batch_id} without changing it.`
-            : `Applied safe local recovery to batch ${batch_id} with zero provider dispatches.`,
+            ? `Reviewed interrupted group ${batch_id} without changing it.`
+            : `Updated the saved records for group ${batch_id}. This action sent no changes to Canvas.`,
           result,
         );
       } catch (error) {
@@ -429,6 +422,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_pause",
     {
+      title: "Pause a group of requests",
       description: "Pause a planned or running batch before another child window is claimed. Already running children are not cancelled or repeated.",
       inputSchema: z.object({ batch_id: z.string().min(8).max(160) }),
       annotations: {
@@ -442,7 +436,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
       try {
         const result = await scheduler.run(batch_id, async () => runtime.batchPause(batch_id));
         return textAndStructured(
-          `Paused batch ${batch_id} when its orchestration state allowed pausing.`,
+          `Paused group ${batch_id} when its current status allowed pausing.`,
           result,
         );
       } catch (error) {
@@ -454,6 +448,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_cancel",
     {
+      title: "Cancel unsent group requests",
       description: "Cancel every undispatched child in a batch. Running, unknown, or already staged source tasks remain visible and retain their independent settlement state.",
       inputSchema: z.object({ batch_id: z.string().min(8).max(160) }),
       annotations: {
@@ -467,7 +462,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
       try {
         const result = await scheduler.run(batch_id, async () => runtime.batchCancel(batch_id));
         return textAndStructured(
-          `Cancelled undispatched children in batch ${batch_id}.`,
+          `Cancelled unsent requests in group ${batch_id}.`,
           result,
         );
       } catch (error) {

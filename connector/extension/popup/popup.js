@@ -1,13 +1,18 @@
 const primary = document.querySelector("#primary");
+const canvasAction = document.querySelector("#canvas-action");
 const disconnect = document.querySelector("#disconnect");
 const label = document.querySelector("#status-label");
 const value = document.querySelector("#status-value");
+const canvasValue = document.querySelector("#canvas-value");
 const pulse = document.querySelector("#pulse");
 const detail = document.querySelector("#detail");
 const error = document.querySelector("#error");
 const account = document.querySelector("#account");
 const accountOrigin = document.querySelector("#account-origin");
+const accountLastChecked = document.querySelector("#account-last-checked");
+const notice = document.querySelector("#notice");
 let current = null;
+let actionInFlight = false;
 
 async function message(type, fields = {}) {
   const response = await chrome.runtime.sendMessage({ type, ...fields });
@@ -18,23 +23,48 @@ async function message(type, fields = {}) {
 function render(status) {
   current = status;
   pulse.classList.toggle("online", status.connected);
-  label.textContent = status.connected || status.connecting ? "Local MCP" : status.pairing ? "Pairing" : status.paired ? "MCP offline" : "Setup";
-  value.textContent = status.connected ? "Ready" : status.pairing ? "Waiting for approval" : status.connecting ? "Connecting…" : status.paired ? "Waiting to reconnect" : "Not paired";
+  label.textContent = "Morrow";
+  value.textContent = status.connected ? "Connected" : status.pairing ? "Waiting for approval" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
   const binding = status.bindings?.at(-1);
   account.hidden = !binding;
-  accountOrigin.textContent = binding ? `${binding.origin}${binding.courseId ? ` · Course ${binding.courseId}` : ""}${status.bindingCount > 1 ? ` · ${status.bindingCount} accounts` : ""}` : "";
+  accountOrigin.textContent = binding ? `${binding.origin}${binding.courseId ? ` · Course ${binding.courseId}` : ""}${status.bindingCount > 1 ? ` · ${status.bindingCount} saved connections` : ""}` : "";
+  setLastChecked(binding?.lastSeenAt);
+  canvasValue.textContent = binding ? "Saved connection" : "Not connected";
   disconnect.hidden = !status.paired;
-  primary.disabled = Boolean(status.pairing || (status.paired && !status.connected));
-  primary.textContent = status.pairing ? "Waiting for approval" : !status.paired ? "Connect to Morrow MCP" : "Connect this Canvas tab";
+  primary.hidden = Boolean(status.connected && binding);
+  canvasAction.hidden = !(status.connected && binding);
+  primary.textContent = status.pairing ? "Waiting for approval" : !status.paired ? "Connect Morrow" : !status.connected ? "Waiting for your AI app" : "Connect Canvas course";
   detail.textContent = status.pairing
-    ? "Approve the local pairing page. This popup will update when you return."
+    ? "Confirm this connection on the Morrow page that opens. Then return to this popup."
     : !status.paired
-      ? "Start the Morrow MCP first. Then approve one local pairing page. No Canvas token is copied."
+      ? "Add Morrow to your AI app, then open the app. Select Connect Morrow to continue."
       : status.connecting
-        ? "Connecting to the Morrow MCP. This connector will update when the local bridge is ready."
+        ? "Connecting to Morrow. Keep this popup open or return in a moment."
         : !status.connected
-        ? "The Morrow MCP is offline. Start or restart it. This connector will reconnect automatically."
-        : "Open the exact signed-in Canvas course, then connect it. Morrow requests access only to that site.";
+        ? "Open the AI app where you added Morrow. This popup will reconnect when Morrow is ready."
+        : binding
+          ? "Return to your AI conversation. Morrow checks your Canvas sign-in before each request."
+          : "Morrow is connected. Open a signed-in Canvas course in Chrome, then select Connect Canvas course.";
+  updateControls(status);
+}
+
+function setLastChecked(lastSeenAt) {
+  const date = new Date(typeof lastSeenAt === "number" && Number.isFinite(lastSeenAt) ? lastSeenAt : NaN);
+  if (Number.isNaN(date.getTime())) {
+    accountLastChecked.textContent = "Last checked time is not available";
+    accountLastChecked.removeAttribute("datetime");
+    return;
+  }
+  accountLastChecked.dateTime = date.toISOString();
+  accountLastChecked.textContent = `Last checked ${new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" }).format(date)}`;
+}
+
+function updateControls(status = current) {
+  if (!status) return;
+  primary.disabled = actionInFlight || Boolean(status.pairing || (status.paired && !status.connected));
+  primary.setAttribute("aria-busy", String(actionInFlight || status.pairing || status.connecting));
+  canvasAction.disabled = actionInFlight;
+  disconnect.disabled = actionInFlight;
 }
 
 async function refresh() {
@@ -44,7 +74,27 @@ async function refresh() {
 
 function showError(cause) {
   error.hidden = false;
-  error.textContent = String(cause?.message || cause);
+  const message = String(cause?.message || cause || "").toLowerCase();
+  error.textContent = message.includes("signed-in canvas course") || message.includes("signed-in canvas page")
+    ? "Open a Canvas course in Chrome and sign in. Then use the Canvas connection button here."
+    : message.includes("access to this exact canvas site") || message.includes("permission") || message.includes("denied")
+      ? "Allow Morrow to access this Canvas site, then try again."
+      : "Morrow could not complete that step. Open the AI app where you added Morrow, then try again.";
+}
+
+function clearError() {
+  error.hidden = true;
+  error.textContent = "";
+}
+
+function showNotice(message) {
+  notice.hidden = false;
+  notice.textContent = message;
+}
+
+function clearNotice() {
+  notice.hidden = true;
+  notice.textContent = "";
 }
 
 function permissionPattern(value) {
@@ -67,34 +117,47 @@ async function authorizeActiveCanvasTab() {
   return tab.id;
 }
 
-primary.addEventListener("click", async () => {
-  primary.disabled = true;
-  error.hidden = true;
+async function runAction(action, onSuccess = () => {}) {
+  if (actionInFlight) return;
+  actionInFlight = true;
+  updateControls();
   try {
-    if (!current?.paired) await message("morrow_pair");
-    else {
-      const tabId = await authorizeActiveCanvasTab();
-      await message("morrow_connect_canvas", { tabId });
-    }
+    const result = await action();
+    clearError();
+    onSuccess(result);
     await refresh();
   } catch (cause) {
     showError(cause);
   } finally {
-    primary.disabled = Boolean(current?.pairing || (current?.paired && !current?.connected));
+    actionInFlight = false;
+    updateControls();
   }
+}
+
+async function connectCanvasCourse() {
+  const tabId = await authorizeActiveCanvasTab();
+  return await message("morrow_connect_canvas", { tabId });
+}
+
+primary.addEventListener("click", async () => {
+  await runAction(async () => {
+    if (!current?.paired) return await message("morrow_pair");
+    return await connectCanvasCourse();
+  }, () => clearNotice());
+});
+
+canvasAction.addEventListener("click", async () => {
+  await runAction(connectCanvasCourse, () => clearNotice());
 });
 
 disconnect.addEventListener("click", async () => {
-  disconnect.disabled = true;
-  error.hidden = true;
-  try {
-    await message("morrow_disconnect");
-    await refresh();
-  } catch (cause) {
-    showError(cause);
-  } finally {
-    disconnect.disabled = false;
-  }
+  await runAction(() => message("morrow_disconnect"), (result) => {
+    if (result?.permissionsRevoked === false) {
+      showNotice("Morrow is disconnected. Chrome site access still needs removal in this extension's settings.");
+    } else {
+      clearNotice();
+    }
+  });
 });
 
 document.addEventListener("visibilitychange", () => {

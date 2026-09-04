@@ -159,7 +159,7 @@ describe("project installation and hermetic parity", () => {
     }
   });
 
-  it("exposes the project-scoped unified CLI and JSON diagnostics", async () => {
+  it("explains local setup, one-app installation, and Canvas connection state while preserving JSON diagnostics", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-client-cli-"));
     const repositoryRoot = join(directory, "repo");
     const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
@@ -175,10 +175,21 @@ describe("project installation and hermetic parity", () => {
       await writeFile(join(repositoryRoot, "artifacts", "canvas-api", "canvas-api-catalog.json"), "{}\n", "utf8");
       await writeFile(join(repositoryRoot, "connector", "extension", "manifest.json"), "{}\n", "utf8");
       const setup = spawnSync(process.execPath, [
-        cliPath, "setup", "--json", "--repository", repositoryRoot,
+        cliPath, "setup", "--repository", repositoryRoot,
       ], { encoding: "utf8" });
       expect(setup.status).toBe(0);
-      expect(JSON.parse(setup.stdout)).toMatchObject({
+      expect(setup.stdout).toContain("Morrow's local settings are ready.");
+      expect(setup.stdout).toContain("This step does not connect Canvas.");
+      expect(setup.stdout).toContain("one AI app at a time");
+      expect(setup.stdout).toContain("chrome://extensions");
+      expect(setup.stdout).toContain("Open or restart that AI app before you use the extension.");
+      expect(setup.stdout).not.toContain('"schema"');
+
+      const setupJson = spawnSync(process.execPath, [
+        cliPath, "setup", "--json", "--repository", repositoryRoot,
+      ], { encoding: "utf8" });
+      expect(setupJson.status).toBe(0);
+      expect(JSON.parse(setupJson.stdout)).toMatchObject({
         schema: "morrow.setup.v1",
         path: upstreamConfigPath,
         credentialsCopied: false,
@@ -187,7 +198,19 @@ describe("project installation and hermetic parity", () => {
         cliPath, "mcp", "install", "gemini", "--repository", repositoryRoot,
       ], { encoding: "utf8" });
       expect(install.status).toBe(0);
-      expect(install.stdout).toContain("scope=project");
+      expect(install.stdout).toContain("Morrow configuration was installed for Gemini CLI.");
+      expect(install.stdout).toContain("did not open or test the AI app");
+      expect(install.stdout).toContain("You do not open a separate Morrow app");
+      expect(install.stdout).not.toContain("scope=project");
+
+      const doctorText = spawnSync(process.execPath, [
+        cliPath, "doctor", "--repository", repositoryRoot, "--upstreams", upstreamConfigPath,
+      ], { encoding: "utf8" });
+      expect(doctorText.status).toBe(0);
+      expect(doctorText.stdout).toContain("Morrow troubleshooting check.");
+      expect(doctorText.stdout).toContain("Morrow service: did not become ready.");
+      expect(doctorText.stdout).toContain("Canvas connection:");
+      expect(doctorText.stdout).not.toContain('"schema"');
 
       const doctor = spawnSync(process.execPath, [
         cliPath, "doctor", "--json", "--repository", repositoryRoot, "--upstreams", upstreamConfigPath,

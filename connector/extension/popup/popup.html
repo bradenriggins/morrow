@@ -3,20 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Morrow Canvas Connector</title>
+  <title>Morrow Canvas access</title>
   <link rel="stylesheet" href="../brand/theme.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <main>
-    <header class="brand"><img src="../brand/morrow.png" width="38" height="38" alt=""><div><h1>Morrow</h1><p>Canvas Connector</p></div><span id="pulse" aria-hidden="true"></span></header>
-    <section class="status" role="status"><span id="status-label">Checking local MCP…</span><strong id="status-value">—</strong></section>
-    <section id="account" class="account" hidden><span>Connected Canvas account</span><strong id="account-origin"></strong></section>
-    <button id="primary" type="button">Connect to Morrow MCP</button>
-    <button id="disconnect" class="secondary" type="button" hidden>Disconnect and revoke access</button>
-    <p id="detail">Morrow uses this connector for your signed-in Canvas session. Canvas credentials stay in Chrome.</p>
+    <header class="brand"><img src="../brand/morrow.png" width="38" height="38" alt=""><div><h1>Morrow</h1><p>Canvas access</p></div><span id="pulse" aria-hidden="true"></span></header>
+    <section class="status" aria-live="polite"><span id="status-label">Morrow</span><strong id="status-value">Checking…</strong></section>
+    <section class="status" aria-live="polite"><span>Canvas</span><strong id="canvas-value">Checking…</strong></section>
+    <section id="account" class="account" hidden><span>Saved Canvas connection</span><strong id="account-origin"></strong><time id="account-last-checked"></time></section>
+    <button id="primary" type="button" disabled>Connect Morrow</button>
+    <button id="canvas-action" class="secondary" type="button" hidden>Check or switch Canvas course</button>
+    <button id="disconnect" class="secondary" type="button" hidden>Disconnect Morrow</button>
+    <p id="detail">Checking the connection…</p>
     <p id="error" role="alert" hidden></p>
-    <footer>Canvas · New Quizzes · Item Banks<br>Uses your current Canvas permissions.</footer>
+    <p id="notice" role="status" aria-live="polite" hidden></p>
+    <details class="help">
+      <summary>How to connect</summary>
+      <ol>
+        <li>Add Morrow to your AI app, then open the app. Use one AI app at a time.</li>
+        <li>Open a Canvas course in Chrome and sign in.</li>
+        <li>Select Connect Morrow, then Connect Canvas course.</li>
+        <li>Ask Morrow for help from the AI app you chose.</li>
+      </ol>
+      <p>Chrome will ask for access to the Canvas site you select. If New Quizzes is open, it may also ask for access to that quiz site.</p>
+      <p>Disconnect Morrow stops this connection and removes its Canvas site access. It does not sign you out of Canvas or undo course changes.</p>
+    </details>
+    <footer>Canvas · New Quizzes · Item Banks<br>Uses the permissions available in your current Canvas role.</footer>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

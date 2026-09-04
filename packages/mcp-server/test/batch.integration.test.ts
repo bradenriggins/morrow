@@ -204,6 +204,17 @@ describe("MorrowRuntime durable batches", () => {
       expect(batch.concurrency).toBe(4);
       expect(String(created.note)).toContain("loopback page");
       expect(created.sourceSettlement).toMatchObject({ outcome: "not_started", notStarted: 2 });
+      const review = runtime.batchApprovalGet(batch.batchId);
+      const reviewChildren = review.children as { operation: { approvalExpiresAt: string; state: string } }[];
+      const earliestExpiry = Math.min(...reviewChildren.map((child) => Date.parse(child.operation.approvalExpiresAt)));
+      expect(Date.parse(String(review.expiresAt))).toBe(earliestExpiry);
+      const clock = vi.spyOn(Date, "now").mockReturnValue(earliestExpiry + 1);
+      try {
+        expect(() => runtime.approveBatch(batch.batchId)).toThrow("batch approval preview expired");
+        expect(runtime.batchApprovalGet(batch.batchId).children).toEqual(review.children);
+      } finally {
+        clock.mockRestore();
+      }
       const approvalBody = await approveBatch(String(created.approvalUrl));
       expect(approvalBody).toContain("course:41");
       expect(approvalBody).toContain("course:42");

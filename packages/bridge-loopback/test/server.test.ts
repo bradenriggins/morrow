@@ -102,6 +102,18 @@ describe("LoopbackBridgeServer", () => {
       body: JSON.stringify({ extensionId }),
     });
     expect(await status.json()).toMatchObject({ status: "approved", token });
+    const page = await fetch(pairing.approvalUrl);
+    expect(await page.text()).toContain("Chrome connection approved");
+    await fetch(`${pairing.approvalUrl}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(pairing.approvalUrl).origin },
+      body: "decision=deny",
+    });
+    const unchanged = await fetch(pairing.statusUrl, { headers: { origin } });
+    expect(await unchanged.json()).toMatchObject({ status: "approved" });
+    const expired = await fetch(pairing.approvalUrl.replace(/[0-9a-f-]{36}$/, "00000000-0000-0000-0000-000000000000"), { headers: { accept: "text/html" } });
+    expect(expired.status).toBe(404);
+    expect(await expired.text()).toContain("Start a new connection");
   });
 
   it("authenticates a Chrome extension and routes one command exactly once", async () => {

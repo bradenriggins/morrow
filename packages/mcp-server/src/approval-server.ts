@@ -1,14 +1,18 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { JsonObject } from "@morrow/contracts";
 import { brandHead, brandHeader, serveBrandAsset } from "@morrow/bridge-loopback";
+import type { ApprovalReviewContext, ApprovalReviewReadCache } from "./approval-context.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
+const PREVIEW_STYLE = "body{margin:8px;font:14px/1.6 system-ui;overflow-wrap:anywhere}p:first-child{margin-top:0}";
+const PREVIEW_STYLE_HASH = createHash("sha256").update(PREVIEW_STYLE).digest("base64");
 
 export interface ApprovalOperationController {
   operationGet(operationId: string): JsonObject;
   operationList(limit?: number): JsonObject;
+  operationReviewContext?(operationId: string, cache?: ApprovalReviewReadCache): Promise<ApprovalReviewContext>;
   approveOperation(operationId: string): JsonObject;
   cancelOperation(operationId: string): JsonObject;
   setApprovalBaseUrl(baseUrl: string): void;
@@ -42,14 +46,14 @@ function sendJson(response: ServerResponse, status: number, body: JsonObject): v
   response.end(JSON.stringify(body));
 }
 
-function sendHtml(response: ServerResponse, status: number, body: string, cookie: string): void {
+function sendHtml(response: ServerResponse, status: number, body: string, cookie?: string): void {
   response.writeHead(status, {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
-    "content-security-policy": "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "content-security-policy": `default-src 'none'; style-src 'self' 'sha256-${PREVIEW_STYLE_HASH}'; img-src 'self'; font-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
     "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
-    "set-cookie": cookie,
+    ...(cookie ? { "set-cookie": cookie } : {}),
   });
   response.end(body);
 }
@@ -64,41 +68,155 @@ function escapeHtml(value: unknown): string {
 }
 
 function pageShell(title: string, eyebrow: string, body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title>${brandHead}</head><body><main class="wrap">${brandHeader}<article class="card" aria-label="${escapeHtml(eyebrow)}">${body}</article><p class="foot">Local review · 127.0.0.1 · No Canvas credential is shown</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title>${brandHead}</head><body><main class="wrap">${brandHeader}<article class="card" aria-label="${escapeHtml(eyebrow)}">${body}</article><p class="foot">This review opens only on your computer.</p></main></body></html>`;
 }
 
-function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string): string {
+function object(value: unknown): JsonObject {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
+}
+
+function readableName(value: string): string {
+  const names: Record<string, string> = {
+    canvas_create_quiz_item: "Add a quiz question",
+    canvas_update_quiz_item: "Update a quiz question",
+    canvas_delete_quiz_item: "Delete a quiz question",
+    item_entry_title: "Question title",
+    item_entry_item_body: "Question text",
+    item_points_possible: "Points",
+    item_entry_interaction_type_slug: "Question type",
+    item_entry_scoring_algorithm: "Scoring method",
+    item_entry_scoring_data: "Scoring settings",
+    item_entry_interaction_data: "Answer options",
+    due_at: "Due date",
+    unlock_at: "Available from",
+    lock_at: "Available until",
+  };
+  if (Object.hasOwn(names, value)) return names[value]!;
+  const name = value.replace(/^canvas_/, "").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/[_\[\].]+/g, " ").trim()
+    .replace(/\bid\b/gi, "ID").replace(/\bids\b/gi, "IDs").replace(/\burl\b/gi, "URL");
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+function requestFields(request: JsonObject, omitted: readonly string[] = []): string {
+  return Object.entries(request).filter(([key]) => key !== "_morrow" && !omitted.includes(key)).map(([key, value]) => {
+    const richText = ["item_entry_item_body", "question_question_text", "wiki_page_body", "assignment_description"].includes(key) && typeof value === "string";
+    const preview = richText ? formattedTextPreview(readableName(key), value as string) : requestValue(value);
+    return `<div><dt>${escapeHtml(readableName(key))}</dt><dd>${preview}</dd></div>`;
+  }).join("");
+}
+
+function formattedTextPreview(label: string, value: string): string {
+  const document = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-${PREVIEW_STYLE_HASH}'; form-action 'none'; base-uri 'none'"><meta name="color-scheme" content="light dark"><style>${PREVIEW_STYLE}</style></head><body>${value}</body></html>`;
+  const mediaNotice = /<(?:img|video|audio|iframe|embed|object)\b/i.test(value)
+    ? '<span class="preview-note">Images and videos are not loaded in this preview.</span>' : "";
+  return `<iframe class="text-preview" title="${escapeHtml(label)} preview" sandbox referrerpolicy="no-referrer" srcdoc="${escapeHtml(document)}"></iframe>${mediaNotice}`;
+}
+
+function requestValue(value: unknown): string {
+  if (Array.isArray(value)) return value.length
+    ? `<ol class="values">${value.map((entry) => `<li>${requestValue(entry)}</li>`).join("")}</ol>` : "None";
+  if (value !== null && typeof value === "object") return `<dl class="request">${requestFields(object(value)) || "Not set"}</dl>`;
+  return escapeHtml(value === true ? "Yes" : value === false ? "No" : value === null ? "Not set" : value === "" ? "Empty" : value);
+}
+
+function reviewState(target: ApprovalTarget, snapshot: JsonObject): string {
+  if (target.kind === "operations") return String(snapshot.state || "unavailable");
+  const batch = object(snapshot.batch);
+  if (batch.state !== "planned") return String(batch.state || "unavailable");
+  const children = Array.isArray(snapshot.children) ? snapshot.children : [];
+  if (children.length > 0 && children.every((child) => object(object(child).operation).state === "approved")) return "approved";
+  return children.length > 0 && children.every((child) => object(object(child).operation).state === "awaiting_approval")
+    ? "awaiting_approval" : "unavailable";
+}
+
+function namedTargetsMissing(operations: readonly JsonObject[], contexts: ReadonlyMap<string, ApprovalReviewContext>): boolean {
+  return operations.some((operation) => {
+    const plan = object(operation.plan);
+    if (!String(plan.tool).startsWith("canvas_")) return false;
+    const request = object(plan.arguments);
+    const targets = contexts.get(String(operation.operationId))?.targets || [];
+    return targets.some((item) => !item.name.trim()) || ["course_id", "assignment_id", "quiz_id"].some((field) =>
+      field in request && !targets.some((item) => item.field === field && item.name.trim()));
+  });
+}
+
+function statePage(state: string): string {
+  const content: Record<string, [string, string]> = {
+    approved: ["Already approved", "Return to your AI conversation to continue and check the result. Approval does not mean the changes are complete."],
+    verified: ["Changes confirmed", "Morrow checked Canvas and confirmed the requested result. Return to your AI conversation for the full report."],
+    cancelled: ["Request cancelled", "Morrow will not start more changes for this request. Changes already sent may still finish. Return to your AI conversation to check the result."],
+    expired: ["This review has expired", "Return to your AI conversation and ask Morrow for a new review. Check the new request before approving it."],
+    dispatching: ["Changes are in progress", "Return to your AI conversation to check the result. Do not start the same request again while Morrow checks Canvas."],
+    running: ["Changes are in progress", "Return to your AI conversation to check the result. Do not start the same request again while Morrow checks Canvas."],
+    awaiting_verification: ["Waiting to confirm the result", "Morrow has not confirmed the changes in Canvas. Return to your AI conversation and ask Morrow to check this request. Do not repeat the change."],
+    awaiting_inner_approval: ["Another review is needed", "This request needs another approval before it can finish. Return to your AI conversation for the next review step."],
+    applied_or_unknown: ["The result is not yet confirmed", "Canvas may have received the changes. Return to your AI conversation and ask Morrow to check the result before trying again."],
+    inspection_required: ["Some results need checking", "Canvas may have received some changes. Return to your AI conversation and ask Morrow to check each result. Do not repeat the group of changes."],
+    partial: ["Some requests did not finish", "Return to your AI conversation to see which changes finished and which still need attention. Do not repeat the whole group."],
+    paused: ["Work is paused", "Morrow is not starting more changes. Work already sent may still finish. Return to your AI conversation to check the result or continue."],
+    completed: ["Work has finished", "Return to your AI conversation for the result of each request."],
+    failed: ["This request did not finish", "Return to your AI conversation to find out what happened. Check the result before starting a new request."],
+  };
+  const [title, detail] = content[state] || ["Check this request", "The request has changed or can no longer be approved here. Return to your AI conversation and ask Morrow to check its current status."];
+  return pageShell(title, "Request status", `<section class="outcome"><p class="eyebrow">Request status</p><h1>${title}</h1><p>${detail}</p></section>`);
+}
+
+function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, contexts: ReadonlyMap<string, ApprovalReviewContext>): string {
   const summary = escapeHtml(JSON.stringify(snapshot, null, 2));
   const escapedId = escapeHtml(encodeURIComponent(target.id));
-  const noun = target.kind === "batches" ? "batch" : "operation";
-  const plan = snapshot.plan && typeof snapshot.plan === "object" && !Array.isArray(snapshot.plan)
-    ? snapshot.plan as JsonObject
-    : snapshot;
-  const tool = typeof plan.tool === "string" ? plan.tool : target.kind === "batches" ? "Multi-course batch" : "Canvas operation";
-  const risk = plan.risk && typeof plan.risk === "object" && !Array.isArray(plan.risk)
-    ? String((plan.risk as JsonObject).approvalClass || "standard")
-    : target.kind === "batches" ? "Per operation" : "standard";
-  const request = plan.arguments && typeof plan.arguments === "object" && !Array.isArray(plan.arguments)
-    ? plan.arguments as JsonObject : {};
-  const changed = Object.entries(request).filter(([key]) => key !== "_morrow").map(([key, value]) =>
-    `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(typeof value === "string" ? value : JSON.stringify(value, null, 2))}</dd></div>`).join("");
+  const batch = target.kind === "batches";
+  const plan = object(snapshot.plan);
   const expiry = String(snapshot.approvalExpiresAt || snapshot.expiresAt || "");
+  const expired = Number.isFinite(Date.parse(expiry)) && Date.parse(expiry) <= Date.now();
+  const state = reviewState(target, snapshot);
+  if (expired || state !== "awaiting_approval") return statePage(state === "awaiting_approval" && expired ? "expired" : state);
   const expiresAt = Number.isFinite(Date.parse(expiry))
-    ? new Date(expiry).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "long" })
-    : "15 minutes after page load";
-  const targetCount = plan.targetSet && typeof plan.targetSet === "object" && !Array.isArray(plan.targetSet)
-    ? String((plan.targetSet as JsonObject).count || 1)
-    : String(snapshot.targetCount || 1);
-  return pageShell(`Review ${noun}`, `Awaiting your decision`, `<header class="hero"><p class="eyebrow">Awaiting your decision</p><h1>Review this ${noun}</h1><p>Morrow froze this request before any Canvas write. Approval applies only to the exact plan below and can be used once.</p><div class="notice">Review and approve this request yourself. MCP tools cannot submit this decision.</div></header><div class="facts"><div class="fact"><span>Operation</span><strong title="${escapeHtml(tool)}">${escapeHtml(tool)}</strong></div><div class="fact"><span>Targets</span><strong>${escapeHtml(targetCount)}</strong></div><div class="fact"><span>Risk</span><strong>${escapeHtml(risk)}</strong></div></div>${changed ? `<section class="section"><h2>Requested values and targets</h2><dl class="request">${changed}</dl></section>` : ""}<section class="section"><h2>Frozen evidence</h2><p>This plan expires at ${escapeHtml(expiresAt)}. Expand the record to inspect its complete targets, arguments, authority, catalog digest, and readback method.</p><details><summary>Show complete frozen plan</summary><pre>${summary}</pre></details></section><div class="actions"><form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">Approve once</button></form><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel request</button></form></div>`);
+    ? new Date(expiry).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+    : "15 minutes after you opened this page";
+  const operations = batch && Array.isArray(snapshot.children)
+    ? snapshot.children.map((child) => object(object(child).operation)) : [snapshot];
+  const plans = operations.map((operation) => object(operation.plan));
+  const missingNames = namedTargetsMissing(operations, contexts);
+  const limited = [...contexts.values()].some((context) => context.limited === true);
+  const warnings: Record<string, string> = {
+    destructive: "This removes content. It cannot be undone from this screen.",
+    learner: "This changes student information or access. Check who is included.",
+    grade: "This changes grades. Check each student and score.",
+    blueprint: "This also affects linked courses. Check which courses are included.",
+  };
+  const risks = [...new Set(plans.map((entry) => warnings[String(object(entry.risk).approvalClass)]).filter(Boolean))];
+  const changed = plans.map((entry, index) => {
+    const context = contexts.get(String(operations[index]?.operationId));
+    const targets = (context?.targets || []).filter((item) => item.name.trim());
+    const destination = targets.map((item) => {
+      const name = escapeHtml(item.name);
+      const linkedName = item.url?.startsWith("https://")
+        ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${name}<span class="sr-only"> (opens in Canvas)</span></a>` : name;
+      return `<div><dt>${escapeHtml(item.label)}</dt><dd>${linkedName}</dd></div>`;
+    }).join("");
+    const request = object(entry.arguments);
+    const name = typeof entry.tool === "string" ? readableName(entry.tool) : "Requested changes";
+    const hiddenFields = missingNames ? ["course_id", "assignment_id", "quiz_id", ...targets.map((item) => item.field)] : targets.map((item) => item.field);
+    return `<section class="section">${batch ? `<h2>${index + 1}. ${escapeHtml(name)}</h2>` : ""}${destination ? `<dl class="destination">${destination}</dl>` : ""}<dl class="request">${requestFields(request, hiddenFields)}</dl></section>`;
+  }).join("");
+  const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
+  const title = batch ? `Check these ${plans.length} changes` : addingQuestion ? "Add this quiz question?" : `${readableName(String(plan.tool || "Review this change"))}?`;
+  const approveLabel = batch ? "Approve changes" : addingQuestion ? "Approve question" : "Approve change";
+  const next = limited
+    ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Ask Morrow in your chat to split this into smaller groups. This page has not approved any changes.</p>'
+    : missingNames
+    ? '<p class="warning">Morrow could not identify the course or activity in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
+    : `<p>After you approve, return to your chat and say <strong>“Continue.”</strong></p><p>Morrow will make ${addingQuestion ? "this change" : "the changes"} and check that ${addingQuestion ? "it saved" : "they saved"} in Canvas.</p>`;
+  const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">${approveLabel}</button></form>`;
+  return pageShell(title, "Before Morrow makes changes", `<header class="hero"><p class="eyebrow">Before Morrow makes changes</p><h1>${escapeHtml(title)}</h1><p>${addingQuestion ? "Check the course, quiz, and question below." : "Check that this matches what you asked for."}</p>${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${changed}<section class="section next-step">${next}<details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></section><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div>`);
 }
 
-function outcomeHtml(target: ApprovalTarget, action: "approve" | "cancel"): string {
-  const noun = target.kind === "batches" ? "batch" : "operation";
+function outcomeHtml(action: "approve" | "cancel"): string {
   const approved = action === "approve";
   return pageShell(
     approved ? "Approved" : "Cancelled",
-    approved ? "Approval recorded" : "Request cancelled",
-    `<section class="outcome"><p class="eyebrow">${approved ? "Approval recorded" : "Request cancelled"}</p><h1>${approved ? "Approved once" : "Nothing will be sent"}</h1><p>${approved ? `Morrow recorded approval for this exact ${noun}. Canvas has not changed yet. Return to your AI conversation so Morrow can recheck authority, dispatch once, and verify the result.` : `Morrow cancelled this ${noun}. It cannot dispatch this request.`}</p></section>`,
+    approved ? "Approval saved" : "Request cancelled",
+    `<section class="outcome"><p class="eyebrow">${approved ? "Approval saved" : "Request cancelled"}</p><h1>${approved ? 'Return to your chat and say “Continue.”' : "Request cancelled"}</h1><p>${approved ? "Your chat will show whether the change saved in Canvas." : "Morrow will not start more changes for this request. Anything already sent may still finish. Check the result in your chat."}</p></section>`,
   );
 }
 
@@ -134,7 +252,7 @@ async function readFormNonce(request: IncomingMessage): Promise<string | null> {
 
 export class LoopbackApprovalServer {
   private readonly server: Server;
-  private readonly nonces = new Map<string, { value: string; expiresAt: number }>();
+  private readonly nonces = new Map<string, { value: string; expiresAt: number; canApprove: boolean }>();
   private port: number | null = null;
 
   constructor(private readonly controller: ApprovalOperationController) {
@@ -180,7 +298,8 @@ export class LoopbackApprovalServer {
       }
       const target = approvalPath(url.pathname);
       if (!target) {
-        sendJson(response, 404, { schema: "morrow.problem.v1", code: "not_found" });
+        if (String(request.headers.accept || "").includes("text/html")) sendHtml(response, 404, statePage("unavailable"));
+        else sendJson(response, 404, { schema: "morrow.problem.v1", code: "not_found" });
         return;
       }
       if (method === "GET" && !target.action) {
@@ -188,14 +307,31 @@ export class LoopbackApprovalServer {
           ? this.controller.batchApprovalGet?.(target.id)
           : this.controller.operationGet(target.id);
         if (!snapshot) throw new Error("batch approval is unavailable");
+        const contexts = new Map<string, ApprovalReviewContext>();
+        const operations = target.kind === "batches" && Array.isArray(snapshot.children)
+          ? snapshot.children.map((child) => object(object(child).operation)) : [snapshot];
+        const expiry = Date.parse(String(snapshot.approvalExpiresAt || snapshot.expiresAt || ""));
+        if (this.controller.operationReviewContext && reviewState(target, snapshot) === "awaiting_approval"
+          && (!Number.isFinite(expiry) || expiry > Date.now())) {
+          const readCache: ApprovalReviewReadCache = new Map();
+          for (let offset = 0; offset < operations.length; offset += 4) {
+            await Promise.all(operations.slice(offset, offset + 4).map(async (operation) => {
+              const operationId = String(operation.operationId || "");
+              if (!operationId) return;
+              try {
+                contexts.set(operationId, await this.controller.operationReviewContext!(operationId, readCache));
+              } catch { /* keep the exact request visible when Canvas cannot provide its name */ }
+            }));
+          }
+        }
         const nonce = randomBytes(32).toString("base64url");
         const nonceKey = `${target.kind}:${target.id}`;
-        this.nonces.set(nonceKey, { value: nonce, expiresAt: Date.now() + 15 * 60_000 });
+        this.nonces.set(nonceKey, { value: nonce, expiresAt: Date.now() + 15 * 60_000, canApprove: !namedTargetsMissing(operations, contexts) });
         const cookiePath = `/${target.kind}/${encodeURIComponent(target.id)}`;
         sendHtml(
           response,
           200,
-          html(target, snapshot, nonce),
+          html(target, snapshot, nonce, contexts),
           `morrow_approval=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900`,
         );
         return;
@@ -212,6 +348,7 @@ export class LoopbackApprovalServer {
         const cookieNonce = cookieValue(request, "morrow_approval");
         if (
           !expected
+          || (target.action === "approve" && !expected.canApprove)
           || expected.expiresAt <= Date.now()
           || !originValid
           || !refererValid
@@ -230,10 +367,12 @@ export class LoopbackApprovalServer {
             ? this.controller.approveOperation(target.id)
             : this.controller.cancelOperation(target.id);
         if (!result) throw new Error("batch approval action is unavailable");
+        const resultState = reviewState(target, result);
+        const approved = target.action === "approve" && resultState === "approved";
         sendHtml(
           response,
-          200,
-          outcomeHtml(target, target.action),
+          target.action === "approve" && !approved ? 409 : 200,
+          target.action === "approve" && !approved ? statePage(resultState) : outcomeHtml(target.action),
           `morrow_approval=; HttpOnly; SameSite=Strict; Path=/${target.kind}/${encodeURIComponent(target.id)}; Max-Age=0`,
         );
         return;
@@ -241,7 +380,9 @@ export class LoopbackApprovalServer {
       sendJson(response, 405, { schema: "morrow.problem.v1", code: "method_not_allowed" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "approval action failed";
-      sendJson(response, 409, { schema: "morrow.problem.v1", code: "approval_action_refused", message });
+      if (String(request.headers.accept || "").includes("text/html")) {
+        sendHtml(response, 409, pageShell("Review could not be completed", "Check this request", '<section class="outcome"><p class="eyebrow">Check this request</p><h1>Review could not be completed</h1><p>This review may have expired or the request may have changed. Return to your AI conversation and ask Morrow to check its current status.</p><p>Do not repeat the change until Morrow checks the result in Canvas.</p></section>'));
+      } else sendJson(response, 409, { schema: "morrow.problem.v1", code: "approval_action_refused", message });
     }
   }
 

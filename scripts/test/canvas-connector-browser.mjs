@@ -24,6 +24,7 @@ async function captureThemes(page, name, width = 900) {
   });
   assert.equal(await page.locator(".brand img").evaluate((image) => image.complete && image.naturalWidth > 0), true);
   assert.equal(await page.evaluate(() => document.fonts.check('13px "Google Sans Flex"')), true);
+  assert.doesNotMatch(await page.locator("body").innerText(), /\b(?:MCP|nonce|digest|dispatch|binding|frozen)\b/i);
   for (const colorScheme of ["light", "dark"]) {
     await page.emulateMedia({ colorScheme });
     await page.locator("main").screenshot({ path: join(OUTPUT, `${name}-${colorScheme}.png`) });
@@ -160,15 +161,35 @@ const approvalSnapshot = {
     changedFields: ["item_entry_title", "item_entry_item_body", "item_points_possible"],
     targetSet: { count: 1, digest: "b".repeat(64) },
     risk: { approvalClass: "standard" },
-    arguments: { course_id: "42", assignment_id: "77", item_entry_title: "Evidence question", item_points_possible: 5 },
+    arguments: { course_id: "42", assignment_id: "77", item_entry_title: "Red blood cell function", item_entry_item_body: "<p>What is the main function of red blood cells?</p>", item_points_possible: 5 },
     readback: { tool: "canvas_get_quiz_item", expectedDigest: "c".repeat(64) },
   },
 };
 const operationApproval = new LoopbackApprovalServer({
-  operationGet: () => approvalSnapshot,
+  operationGet: (id) => ({ ...approvalSnapshot, operationId: id,
+    ...(id === "op:expired-ui-test" ? { approvalExpiresAt: new Date(Date.now() - 60_000).toISOString() } : {}),
+  }),
+  operationReviewContext: async (id) => ({ targets: id === "op:missing-names"
+    ? [{ field: "course_id", label: "Course", name: "" }, { field: "assignment_id", label: "Quiz", name: "" }]
+    : id === "op:second-batch-item" ? [
+      { field: "course_id", label: "Course", name: "Human Anatomy", url: "https://canvas.example.edu/courses/84" },
+      { field: "assignment_id", label: "Quiz", name: "Week 2: Bones and Muscles", url: "https://canvas.example.edu/courses/84/assignments/99" },
+      { field: "item_id", label: "Question", name: "Outdated practice question" },
+    ] : [
+      { field: "course_id", label: "Course", name: "Introduction to Human Biology", url: "https://canvas.example.edu/courses/42" },
+      { field: "assignment_id", label: "Quiz", name: "Week 3: Blood and Circulation", url: "https://canvas.example.edu/courses/42/assignments/77" },
+    ],
+  }),
   operationList: () => ({ schema: "morrow.operations.v1", operations: [approvalSnapshot] }),
-  approveOperation: () => ({ ...approvalSnapshot, state: "approved" }),
+  approveOperation: (id) => ({ ...approvalSnapshot, state: id === "op:expired-on-submit" ? "cancelled" : "approved" }),
   cancelOperation: () => ({ ...approvalSnapshot, state: "cancelled" }),
+  batchApprovalGet: () => ({
+    batch: { state: "planned" }, expiresAt: approvalSnapshot.approvalExpiresAt,
+    children: [
+      { operation: approvalSnapshot },
+      { operation: { ...approvalSnapshot, operationId: "op:second-batch-item", plan: { ...approvalSnapshot.plan, tool: "canvas_delete_quiz_item", risk: { approvalClass: "destructive" }, arguments: { course_id: "84", assignment_id: "99", item_id: "19" } } } },
+    ],
+  }),
   setApprovalBaseUrl: () => undefined,
 });
 const operationApprovalBaseUrl = await operationApproval.start();
@@ -194,14 +215,46 @@ try {
 
   const operationApprovalPage = context.pages()[0] || await context.newPage();
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/${encodeURIComponent(approvalSnapshot.operationId)}`);
-  await operationApprovalPage.getByRole("heading", { name: "Review this operation" }).waitFor();
-  await operationApprovalPage.getByText("MCP tools cannot submit this decision").waitFor();
-  await operationApprovalPage.getByRole("button", { name: "Approve once" }).waitFor();
+  await operationApprovalPage.getByRole("heading", { name: "Add this quiz question?" }).waitFor();
+  await operationApprovalPage.getByRole("link", { name: "Introduction to Human Biology", exact: false }).waitFor();
+  await operationApprovalPage.getByRole("button", { name: "Approve question" }).waitFor();
+  assert.equal(await operationApprovalPage.locator("details").getAttribute("open"), null);
+  assert.equal(await operationApprovalPage.locator(".destination").innerText().then((text) => text.includes("Week 3: Blood and Circulation")), true);
+  assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Course ID|Assignment ID|Evidence question/);
+  assert.match(await operationApprovalPage.locator(".request").innerText(), /Red blood cell function/);
+  assert.equal(await operationApprovalPage.locator("iframe.text-preview").getAttribute("sandbox"), "");
+  await operationApprovalPage.frameLocator("iframe.text-preview").getByText("What is the main function of red blood cells?").waitFor();
   await captureThemes(operationApprovalPage, "approval-operation");
   await captureThemes(operationApprovalPage, "approval-operation-narrow", 320);
-  await operationApprovalPage.getByRole("button", { name: "Approve once" }).click();
-  await operationApprovalPage.getByRole("heading", { name: "Approved once" }).waitFor();
+  await operationApprovalPage.getByRole("button", { name: "Approve question" }).click();
+  await operationApprovalPage.getByRole("heading", { name: 'Return to your chat and say “Continue.”' }).waitFor();
   await captureThemes(operationApprovalPage, "approval-recorded");
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/batches/batch-ui-test`);
+  await operationApprovalPage.getByRole("heading", { name: "Check these 2 changes" }).waitFor();
+  assert.equal(await operationApprovalPage.locator(".request").count(), 2);
+  assert.equal(await operationApprovalPage.locator(".warning").innerText(), "This removes content. It cannot be undone from this screen.");
+  assert.match(await operationApprovalPage.locator(".destination").nth(1).innerText(), /Human Anatomy[\s\S]+Outdated practice question/);
+  await captureThemes(operationApprovalPage, "approval-batch");
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Amissing-names`);
+  assert.equal(await operationApprovalPage.getByRole("button", { name: "Approve question" }).count(), 0);
+  assert.match(await operationApprovalPage.locator("body").innerText(), /could not identify the course or activity/);
+  assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Course ID|Assignment ID/);
+  await captureThemes(operationApprovalPage, "approval-missing-names");
+  const blockedReviewUrl = operationApprovalPage.url();
+  const blockedNonce = await operationApprovalPage.locator('input[name="nonce"]').inputValue();
+  const blockedApproval = await operationApprovalPage.request.post(`${blockedReviewUrl}/approve`, {
+    form: { nonce: blockedNonce },
+    headers: { origin: new URL(blockedReviewUrl).origin, referer: blockedReviewUrl },
+  });
+  assert.equal(blockedApproval.status(), 409);
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aexpired-ui-test`);
+  await operationApprovalPage.getByRole("heading", { name: "This review has expired" }).waitFor();
+  assert.equal(await operationApprovalPage.locator("button").count(), 0);
+  await captureThemes(operationApprovalPage, "approval-expired");
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aexpired-on-submit`);
+  await operationApprovalPage.getByRole("button", { name: "Approve question" }).click();
+  await operationApprovalPage.getByRole("heading", { name: "Request cancelled" }).waitFor();
+  assert.equal(await operationApprovalPage.getByRole("heading", { name: 'Return to your chat and say “Continue.”' }).count(), 0);
   process.stderr.write("[browser-test] operation approval UI ready\n");
 
   const worker = await waitFor(
@@ -218,21 +271,22 @@ try {
 
   let popup = await context.newPage();
   await popup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
-  await popup.getByRole("button", { name: "Connect to Morrow MCP" }).waitFor();
+  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).waitFor();
   await captureThemes(popup, "popup-unpaired", 360);
   const approvalPromise = context.waitForEvent("page");
-  await popup.getByRole("button", { name: "Connect to Morrow MCP" }).click();
+  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
   const approval = await approvalPromise;
   await approval.waitForURL(/^http:\/\/127\.0\.0\.1:32147\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/);
-  await approval.getByText("Canvas credentials stay inside Chrome").waitFor();
+  await approval.getByText("Your Canvas password and sign-in details stay in Chrome", { exact: false }).waitFor();
   await captureThemes(approval, "pairing");
   process.stderr.write("[browser-test] pairing review ready\n");
   const pairingApprovedAt = performance.now();
-  await approval.getByRole("button", { name: "Approve" }).click();
+  await approval.getByRole("button", { name: "Allow connection", exact: true }).click();
   await approval.getByText(/approved/i).waitFor();
   await captureThemes(approval, "pairing-approved");
   await popup.bringToFront();
-  await popup.getByText("Ready", { exact: true }).waitFor({ timeout: 5_000 });
+  await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 5_000 });
+  assert.equal(await popup.locator("#canvas-value").innerText(), "Not connected");
   assert.equal(runtime.bridge.health().connected, true);
   const pairingReadyMs = Math.round(performance.now() - pairingApprovedAt);
   process.stderr.write(`[browser-test] pairing ready without restart in ${pairingReadyMs}ms\n`);
@@ -267,8 +321,14 @@ try {
   process.stderr.write("[browser-test] exact Canvas account bound\n");
 
   await popup.reload();
-  await popup.getByText("Connected Canvas account").waitFor();
+  await popup.locator("#account").waitFor();
+  assert.equal(await popup.locator("#canvas-value").innerText(), "Saved connection");
+  assert.equal(await popup.locator("#account-last-checked").getAttribute("datetime").then((value) => Number.isFinite(Date.parse(value))), true);
+  assert.equal(await popup.locator("#primary").isHidden(), true);
   await captureThemes(popup, "popup-paired", 360);
+  await popup.getByText("How to connect", { exact: true }).click();
+  await captureThemes(popup, "popup-help", 360);
+  await popup.getByText("How to connect", { exact: true }).click();
 
   await replacementWorker.evaluate(() => {
     globalThis.savedScriptExecutor = chrome.scripting.executeScript;
@@ -367,16 +427,16 @@ try {
     return !stored.token && !(stored.bindings || []).length;
   }, "rejected pairing did not clear stale authority", 10_000);
   await popup.bringToFront();
-  await popup.getByRole("button", { name: "Connect to Morrow MCP" }).waitFor();
+  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).waitFor();
   await captureThemes(popup, "popup-reconnect", 360);
   const replacementApprovalPromise = context.waitForEvent("page");
-  await popup.getByRole("button", { name: "Connect to Morrow MCP" }).click();
+  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
   const replacementApproval = await replacementApprovalPromise;
-  await replacementApproval.getByRole("button", { name: "Approve connector" }).click();
+  await replacementApproval.getByRole("button", { name: "Allow connection", exact: true }).click();
   await popup.bringToFront();
-  await popup.getByText("Ready", { exact: true }).waitFor({ timeout: 5_000 });
-  await popup.getByRole("button", { name: "Disconnect and revoke access" }).click();
-  await popup.getByText("Not paired").waitFor();
+  await popup.locator("#status-value").filter({ hasText: /^Connected$/ }).waitFor({ timeout: 5_000 });
+  await popup.getByRole("button", { name: "Disconnect Morrow", exact: true }).click();
+  await popup.locator("#status-value").filter({ hasText: /^Not connected$/ }).waitFor();
   await waitFor(() => !runtime.bridge.health().connected, "connector did not disconnect");
   const revoked = await replacementWorker.evaluate(async () => {
     const stored = await chrome.storage.local.get(["token", "bindings"]);

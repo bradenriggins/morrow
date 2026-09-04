@@ -298,10 +298,17 @@ export class LoopbackBridgeServer {
 
   private pairingPage(request: PairingRequest): string {
     const extension = request.extensionId.replace(/[<>&"']/g, "");
-    const status = request.status === "pending"
-      ? `<form class="actions" method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Approve connector</button><button class="secondary" name="decision" value="deny">Deny</button></form>`
-      : `<p class="settled">This pairing request is ${request.status}.</p>`;
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Chrome · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><p class="eyebrow">Connect your browser</p><h1>Connect Morrow to Chrome</h1><p>This allows the local Morrow MCP to use Canvas sessions from this extension. Canvas credentials stay inside Chrome.</p><p class="identity">Extension ${extension}</p>${status}</section></article><p class="foot">Local connection · 127.0.0.1</p></main></body></html>`;
+    const pending = request.status === "pending";
+    const title = pending ? "Connect Morrow to Chrome" : request.status === "approved" ? "Chrome connection approved" : "Connection cancelled";
+    const content = pending
+      ? `<p>Allow Morrow in your AI app to work with Canvas through this Chrome extension.</p><p>Your Canvas password and sign-in details stay in Chrome. You choose which Canvas site to connect next.</p><div class="notice">Only continue if you started this from the Morrow extension. Connecting does not approve changes to your courses.</div><details><summary>About this connection</summary><p class="details-help">This connection stays on your computer. You can disconnect in the Morrow extension at any time.</p><p class="details-help">Extension ID: ${extension}</p></details><form class="actions" method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Allow connection</button><button class="secondary" name="decision" value="deny">Cancel connection</button></form>`
+      : `<p>${request.status === "approved" ? "Open a Canvas course in Chrome and sign in. Then open the Morrow extension and select Connect Canvas course." : "Morrow did not connect through this request. You can start again from the Morrow extension when you are ready."}</p>`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><p class="eyebrow">Your browser connection</p><h1>${title}</h1>${content}</section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`;
+  }
+
+  private pairingUnavailable(response: ServerResponse, status: number): void {
+    response.writeHead(status, this.responseHeaders("text/html; charset=utf-8"));
+    response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Start a new connection · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><p class="eyebrow">Connection not completed</p><h1>Start a new connection</h1><p>This connection request has expired or is no longer available. Open the Morrow extension and select Connect Morrow to try again.</p></section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`);
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -354,7 +361,10 @@ export class LoopbackBridgeServer {
     const match = new RegExp(`^${BRIDGE_PATH}/pair/([0-9a-f-]{36})(?:/(status|decision))?$`).exec(url.pathname);
     if (!match) return this.json(response, 404, { error: "not_found" });
     const pairing = this.pairingRequests.get(match[1]!);
-    if (!pairing) return this.json(response, 404, { error: "pairing_not_found" });
+    if (!pairing) {
+      if (match[2] !== "status" && String(request.headers.accept || "").includes("text/html")) return this.pairingUnavailable(response, 404);
+      return this.json(response, 404, { error: "pairing_not_found" });
+    }
     if (match[2] === "status" && (request.method === "GET" || request.method === "POST")) {
       const identity = this.pairingOrigin(request);
       if (!identity || identity.extensionId !== pairing.extensionId) return this.json(response, 403, { error: "extension_identity_refused" });
@@ -382,7 +392,15 @@ export class LoopbackBridgeServer {
     }
     if (match[2] === "decision" && request.method === "POST") {
       const origin = String(request.headers.origin || "");
-      if (origin !== `http://${host}`) return this.json(response, 403, { error: "local_origin_required" });
+      if (origin !== `http://${host}`) {
+        if (String(request.headers.accept || "").includes("text/html")) return this.pairingUnavailable(response, 403);
+        return this.json(response, 403, { error: "local_origin_required" });
+      }
+      if (pairing.status !== "pending") {
+        response.writeHead(303, { location: `${BRIDGE_PATH}/pair/${pairing.pairingId}`, "cache-control": "no-store" });
+        response.end();
+        return;
+      }
       const bytes: Buffer[] = [];
       for await (const chunk of request) bytes.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       const decision = new URLSearchParams(Buffer.concat(bytes).toString("utf8")).get("decision");
