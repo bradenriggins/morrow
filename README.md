@@ -13,9 +13,11 @@ The repository begins with a federation gateway because the capabilities already
 - `example-legacy` contains the existing Morrow Canvas catalog, planners, approval projections, privacy controls, workflows, reports, and browser-backed operations.
 - `example-attestation-repo` contains ExamplePlatform's typed MCP surface, provider binding, durable effect broker, batch recovery, workspace state, and failure history.
 
-The current branch connects ExamplePlatform and other configured MCP processes as internal stdio upstreams and exposes their permitted tools through a new official-SDK Morrow server. Deterministic commands export the current Morrow Canvas catalog, capture live upstream catalogs, and generate an exact compatibility and source-selection report.
+The gateway connects ExamplePlatform and other configured MCP processes as internal stdio upstreams and exposes their permitted tools through one official-SDK Morrow server. Deterministic commands export both donor catalogs and generate the compatibility, alias, profile, and source-selection records.
 
-Checkpoint C now adds the bounded Morrow legacy extension bridge. It presents the donor's exported Canvas catalog as an internal MCP server, connects to the existing browser service worker over an authenticated loopback WebSocket, executes admitted reads through the donor runtime, and converts every write request into an ordinary donor task awaiting separate approval. It does not recreate or bypass the existing handlers.
+The bounded Morrow legacy extension bridge presents the donor's exported Canvas catalog as an internal MCP server. It connects to the existing browser service worker over an authenticated loopback WebSocket. Reads use the donor runtime. Writes require the outer gateway plan and approval before they can create a donor task for the donor's separate approval.
+
+Every ExamplePlatform write uses a new SSH process bound to the exact outer operation, course, plan, grant, and effect receipt. Batch writes freeze one outer operation per child and use one complete loopback batch approval before bounded dispatch.
 
 ## Provider boundary
 
@@ -35,7 +37,7 @@ are present. See [LIMITATIONS.md](LIMITATIONS.md).
 
 Requirements:
 
-- Node.js 22.12 or newer
+- Node.js 22.13 or newer
 - pnpm 10.6.1 through Corepack
 - SSH access through the `example-lms-vps` host alias
 - The generated ExamplePlatform source catalog at the pinned donor revision
@@ -51,7 +53,7 @@ pnpm start
 
 The default example is a hermetic, read-only catalog profile. It runs the frozen server only through `ssh -T example-lms-vps`. It checks the remote Git revision and tracked-clean state before launch. It then requires the generated 222-tool catalog truth. The gateway removes the 35 held MindTap and Connect tools and exposes 187 eligible tools.
 
-`morrow.upstreams.meridian-private.example.json` shows the private runtime profile and the generic-to-ExamplePlatform environment mapping. Replace its generic example identifiers and remote state paths with one exact private profile. Do not place raw tokens in the file. Use a ExamplePlatform-owned session, credential, or socket path.
+`morrow.upstreams.meridian-private.example.json` shows the private edit profile and the generic-to-ExamplePlatform environment mapping. Replace its example identifiers and remote state paths with one exact private profile. Do not place raw tokens in the file. Use a ExamplePlatform-owned session, credential, or socket path. Morrow replaces static operation fields with a fresh per-operation binding for each write.
 
 ## Add the Morrow legacy browser runtime
 
@@ -76,14 +78,17 @@ pnpm start
 
 Reload the unpacked Morrow legacy extension after installing the overlay. The gateway starts the internal bridge MCP, which listens only on `127.0.0.1` and authenticates the extension before accepting binding or tool messages.
 
-A bridge write returns an approval-required task. Approve or deny it through the existing Morrow user surface. There is no model-callable bridge approval tool.
+A bridge write first returns a frozen outer plan. Approve that plan through its loopback URL. Dispatch can then create an approval-required donor task. Approve or deny that task through the existing Morrow user surface. There is no model-callable approval tool.
 
 ## Built-in inspection tools
 
 Gateway tools:
 
-- `morrow_health` reports gateway readiness, source revision, generated catalog truth, tool counts and digests, connection generation, and bounded reconnect state.
-- `morrow_catalog` searches a paginated projection of the merged catalog. It returns source mappings and schema digests rather than full schemas or raw upstream metadata.
+- `morrow_health` reports the complete runtime component state.
+- `morrow_catalog` returns a bounded catalog page.
+- `morrow_catalog_search`, `morrow_capability_get`, and `morrow_profile_status` inspect the generated capability and profile records.
+- `morrow_operation_*` tools inspect, dispatch, cancel, reconcile, verify, or request a supported correction. They cannot approve an operation.
+- `morrow_batch_*` tools create, inspect, run, pause, recover, reconcile, cancel, and page durable batches. Batch approval remains on the loopback page.
 
 Morrow legacy bridge tools:
 
@@ -96,15 +101,13 @@ Every forwarded result receives bounded `io.morrow/gateway` metadata containing 
 ## Donor catalog workflow
 
 ```bash
-MORROW_CAPTURE_SOURCE=meridian pnpm catalog:capture
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
-pnpm catalog:reconcile -- \
-  --source artifacts/catalogs/meridian.live.json \
-  --source artifacts/catalogs/example-legacy.canvas.json \
-  --aliases config/catalog-aliases.proposed.json
+pnpm catalog:export
+pnpm catalog:merge
+pnpm catalog:check
+pnpm morrow catalog stats --json
 ```
 
-Generated donor catalogs and reconciliation output live under `artifacts/catalogs/` and are ignored by default. The donor export refuses the wrong commit or tracked changes. Contract drift cannot be auto-selected by source priority.
+Generated donor catalogs and reconciliation output live under `artifacts/catalogs/` and are ignored by default. Donor export refuses the wrong commit or tracked changes. Contract drift cannot be selected by source priority. Each accepted drift requires an explicit reviewed alias rule.
 
 ## MCP client install
 

@@ -1,139 +1,70 @@
 # Weekend convergence implementation
 
-## Current checkpoint
+This file records the current implementation against Revision 3 of the Morrow MCP V1.0 Weekend Example Plan.
 
-This branch establishes the gateway foundation, donor catalog reconciliation, and the first executable Morrow legacy browser bridge.
+## Catalog and profiles
 
-Morrow can connect to one or more internal stdio MCP upstreams, import typed tool lists, remove held MindTap and Connect tools, resolve exact-name collisions, register the merged tools through the official TypeScript SDK, and forward calls back to the source that owns them.
+- `pnpm catalog:export` captures both pinned donors.
+- Morrow legacy contributes 284 source tools.
+- ExamplePlatform contributes 222 source tools through `ssh -T example-lms-vps`.
+- The 35 MindTap and Connect rows receive `rights_hold` and never enter routing.
+- The merged catalog contains 471 enabled capabilities.
+- Five reviewed alias rules select an explicit schema and route.
+- Every enabled capability has source, behavior, authority, route, profile, schema, and digest evidence.
+- Runtime profiles fail closed when their source or publication evidence is absent.
 
-It also contains deterministic tools to export the current callable Canvas catalog from `example-legacy`, capture the live catalog of configured MCP upstreams, and reconcile exact names and explicitly reviewed semantic aliases. Live donor receipts, rather than the PDF estimates, set the count baseline.
+## Runtime
 
-Checkpoint C adds an authenticated loopback WebSocket server and a reversible extension overlay. Read tools execute through the current donor runtime. Write tools are staged into the donor task store and remain blocked on the existing human approval surface.
+- The public process uses the official MCP TypeScript SDK over strict stdio.
+- Current and legacy protocol initialization use the same server factory.
+- Health includes the gateway, donors, extension bridge, effect broker, batch ledger, approval server, profile, catalog, and source revisions.
+- Read results use `morrow.result.v1` and a durable compact gateway operation.
+- Output projection selects allowed fields before text inspection.
+- Sensitive free text, raw upstream metadata, learner identity, and unreviewed artifacts fail closed.
 
-## What is implemented
+## Writes and approval
 
-- Clean pnpm and TypeScript workspace.
-- Shared catalog, result, bridge-protocol, and bridge-health contracts.
-- Deterministic catalog merge with stable aliases and a catalog digest.
-- MindTap and Connect prefix holds at catalog construction time.
-- Official MCP stdio clients for internal upstreams.
-- First-class ExamplePlatform SSH stdio launch through `ssh -T example-lms-vps`.
-- Remote exact-revision and tracked-clean Git attestation without remote paths in health output.
-- Hermetic catalog and private runtime profile adapters for ExamplePlatform environment bindings.
-- Generated ExamplePlatform catalog truth enforcement before backend readiness.
-- Bounded startup and runtime reconnect with safe-read replay only.
-- Official MCP stdio server for the public Morrow endpoint.
-- `morrow_health` and a paginated, schema-digest-only `morrow_catalog` inspection tool.
-- Upstream call forwarding with bounded source metadata.
-- Raw upstream tool metadata and result metadata are dropped at the gateway boundary.
-- Source configuration through a local ignored file or environment variables.
-- Exact-revision Morrow legacy Canvas catalog exporter.
-- Live upstream catalog capture without persisting commands, environment variables, or local paths.
-- Deterministic reconciliation for exact-name compatibility, contract drift, explicit alias groups, source-only rows, and selected mappings.
-- Loopback-only WebSocket bridge with first-message authentication, extension-origin checks, donor-revision binding, catalog-digest binding, connection generations, deadlines, and no automatic resend.
-- Internal Morrow legacy bridge MCP generated from the donor source catalog.
-- Native bridge health, binding, and task-inspection tools.
-- Reversible donor overlay installer and removal command.
-- Donor-side read routing through the existing execution runtime.
-- Donor-side write staging through `stageChatTask`, with no bridge approval command.
-- Unit tests for collision handling, provider holds, digest stability, result wrapping, metadata refusal, source-catalog integrity, reconciliation, bridge protocol validation, authentication, no-resend behavior, overlay patching, and configuration expansion.
-- Process integration tests for multi-upstream federation and fake-extension bridge routing.
+1. The gateway validates the selected capability and freezes the exact request.
+2. The plan records target, changed and preserved fields, risk, request cost, authority, readback, and correction support.
+3. The operation enters `awaiting_approval` without a provider write.
+4. A loopback page shows the frozen operation and issues a one-use nonce.
+5. The approval grant binds the plan, profile, actor, provider principal, connection generation, catalog, approval class, and expiry.
+6. Dispatch revalidates the current authority and reserves one effect before send.
+7. ExamplePlatform writes start an ephemeral SSH process with the exact operation, course, and task-contract digest.
+8. Morrow legacy writes pass the outer grant to the extension bridge and can then enter donor approval.
+9. A successful send runs the frozen fresh readback immediately when no inner approval remains.
+10. An ambiguous send becomes `applied_or_unknown`. Reconciliation performs only the readback and never replays the write.
 
-## Local start sequence
+## Batches
 
-ExamplePlatform only:
+- Batch manifests contain an exact explicit course set, child order, target digests, dependencies, profile and catalog digests, approval coverage, request estimates, readback digests, correction facts, and expiry.
+- Arguments and the full manifest use AES-256-GCM at rest.
+- Every write child freezes its own outer effect operation at batch creation.
+- One loopback batch page renders the full child target set and approves all exact child plans.
+- A batch cannot dispatch until every pending child has a current outer grant.
+- Each child reserves and consumes one effect before source dispatch.
+- Provider approval and provider readback stay separate from orchestration progress.
+- A write batch stays nonterminal while any source result is awaiting approval or verification.
+- Restart recovery marks interrupted children for inspection and performs no automatic write replay.
+- Result pages read only bounded child rows and return an encrypted manifest reference.
+- Only explicit course sets are accepted in this release. Other source types require a future gateway-owned resolver receipt.
 
-```bash
-corepack enable
-pnpm install
-pnpm build
-cp morrow.upstreams.example.json morrow.upstreams.json
-export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
-pnpm start
-```
+## Clients and packages
 
-ExamplePlatform plus Morrow legacy:
+- `morrow mcp install` renders project-scoped Codex, Claude Code, and Gemini configuration.
+- Client files contain only the Morrow stdio command, repository working directory, and upstream-config path.
+- The CLI exposes doctor, profile, catalog, backend, operation, batch, conformance, install, config inspection, and render commands.
+- Private and public package profiles produce deterministic ZIP files, SHA-256 manifests, CycloneDX SBOMs, marker scans, and receipts.
+- The public package omits the private ExamplePlatform runtime adapter and requires explicit source-rights records.
 
-```bash
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
-export MORROW_NEW_REPO_ROOT=$PWD
-export MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy
-export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
-export MORROW_LEGACY_BRIDGE_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
-pnpm bridge:legacy:install
-cp morrow.upstreams.with-legacy-bridge.example.json morrow.upstreams.json
-export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
-pnpm start
-```
+## Remaining external gates
 
-The public server writes protocol messages only to standard output. Operational messages use standard error.
+The code cannot create these receipts.
 
-## Catalog sequence
+- Authorized Canvas live proof needs a current human-authenticated session. MFA currently blocks it.
+- Real Codex, Claude Code, and Gemini scenario parity has not completed.
+- The packed Morrow legacy extension needs live pairing and task proof.
+- Public source rights and publication authorization need an owner decision.
+- Independent clean-machine reproduction needs a separate machine or environment.
 
-```bash
-MORROW_CAPTURE_SOURCE=meridian pnpm catalog:capture
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
-pnpm catalog:reconcile -- \
-  --source artifacts/catalogs/meridian.live.json \
-  --source artifacts/catalogs/example-legacy.canvas.json \
-  --aliases config/catalog-aliases.proposed.json
-```
-
-See `CATALOG-RECONCILIATION.md` for the artifact and decision rules.
-
-## Checkpoint status
-
-### Checkpoint B: donor receipts
-
-Implemented in code. The ExamplePlatform donor is inspected and started only over SSH.
-
-- Run the capture and export commands.
-- Review every initial alias and contract-drift row.
-- Commit only the public-safe decision map, not raw private catalog artifacts.
-
-### Checkpoint C: Morrow execution bridge
-
-Implemented behind a local overlay, awaiting packed-extension proof.
-
-- The bridge is loopback-only and authenticated.
-- Browser-dependent reads remain in the legacy runtime.
-- Browser-dependent writes become ordinary staged tasks.
-- The MCP caller cannot mint approval.
-- Connection loss after send is unknown and is never auto-replayed.
-
-See `MORROW-LEGACY-BRIDGE.md` for installation and proof commands.
-
-### Checkpoint D: unified operation truth
-
-Next engineering checkpoint.
-
-- Add a gateway operation record for every forwarded call without replacing source-owned effect truth.
-- Persist source, catalog, request, bridge operation, staged-task, and upstream result digests.
-- Add durable batch manifests that reference source-owned child operations.
-- Recover gateway calls after process restart without replaying an ambiguous source command.
-- Add fault tests for process loss, ambiguous bridge delivery, partial batch completion, and source reconnect.
-- ExamplePlatform process-loss and source-reconnect fault tests are complete. Bridge delivery and partial-batch fault coverage remain separate lanes.
-
-### Checkpoint E: candidate assembly
-
-- Install in Codex, Claude Code, Gemini CLI, and an MCP inspection client.
-- Run the same read, planned write, approved write, readback, and multi-course scenarios through every client.
-- Produce the source, capability, privacy, and release receipts for `1.0.0-rc.0`.
-
-## Stop conditions
-
-Stop the branch when any change would:
-
-- copy private CHCP material into the new repository;
-- publish MindTap or Connect methods;
-- add a direct Canvas route to the gateway;
-- let a tool bypass its owning authority or approval path;
-- silently replace a duplicate tool;
-- forward raw upstream metadata;
-- auto-select a contract-drift row;
-- infer a semantic alias without an explicit reviewed rule;
-- return an upstream error with unreviewed raw details;
-- expose the bridge pairing token through URLs, MCP output, logs, or committed source;
-- allow a non-loopback bridge listener;
-- let the MCP surface approve, resume, undo, or otherwise act on a donor task;
-- report a possibly applied write as successful without source-owned readback.
+Morrow remains `1.0.0-rc.0` while any gate is missing.

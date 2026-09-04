@@ -15,7 +15,7 @@ try {
     : stageCandidate({ profileName: name, verifyRebuild: args.includes("--verify-rebuild") }));
   const result = results.length === 1 ? results[0] : { schema: "morrow.release-candidates.v1", candidates: results };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  const failed = results.some((entry) => args.includes("--scan") ? !entry.passed : entry.promotable !== true);
+  const failed = results.some((entry) => args.includes("--scan") ? !entry.passed : entry.candidateBuilt !== true);
   if (failed) {
     process.exitCode = 1;
   }
