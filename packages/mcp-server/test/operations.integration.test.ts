@@ -120,8 +120,34 @@ describe("outer provider effects", () => {
       const url = structured.receipts?.approvalUrl;
       expect(typeof url).toBe("string");
       const view = await fetch(url as string);
-      expect(await view.text()).toContain("Morrow approval");
-      const approval = await fetch(`${url}/approve`, { method: "POST" });
+      const body = await view.text();
+      expect(body).toContain("Morrow approval");
+      const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
+      const cookie = view.headers.get("set-cookie")?.split(";", 1)[0];
+      expect(nonce).toBeTruthy();
+      expect(cookie).toBeTruthy();
+      const refused = await fetch(`${url}/approve`, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookie! },
+        body: "nonce=wrong",
+      });
+      expect(refused.status).toBe(409);
+      expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "awaiting_approval" });
+
+      const refreshed = await fetch(url as string);
+      const refreshedBody = await refreshed.text();
+      const validNonce = /name="nonce" value="([^"]+)"/.exec(refreshedBody)?.[1];
+      const validCookie = refreshed.headers.get("set-cookie")?.split(";", 1)[0];
+      const approval = await fetch(`${url}/approve`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: validCookie!,
+          origin: new URL(url as string).origin,
+          referer: url as string,
+        },
+        body: new URLSearchParams({ nonce: validNonce! }),
+      });
       expect(approval.status).toBe(200);
       expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "approved" });
     } finally {

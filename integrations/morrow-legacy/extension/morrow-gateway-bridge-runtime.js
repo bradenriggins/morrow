@@ -41,7 +41,6 @@ function exactCommandInput(command) {
 
 function verifiedOuterGrant(command) {
   const grant = command && command.outerGrant;
-  if (grant === undefined) return null;
   const digest = /^[0-9a-f]{64}$/;
   const identifier = /^[A-Za-z0-9_.:@-]{8,160}$/;
   if (
@@ -148,7 +147,7 @@ async function stageWrite(command) {
         operation_type: toolName,
         source: 'morrow_gateway',
         bridge_operation_id: operationId,
-        ...(outerGrant || {}),
+        ...outerGrant,
       },
       lineage: courseId ? { course_id: courseId } : {},
     },
