@@ -100,10 +100,10 @@ Requirements:
 ```bash
 corepack enable
 pnpm install --frozen-lockfile
-pnpm setup
+pnpm run setup
 ```
 
-`pnpm setup` builds the workspace and writes a private local `morrow.upstreams.json` with absolute paths. It prints the unpacked extension directory.
+`pnpm run setup` builds the workspace and writes a private local `morrow.upstreams.json` with absolute paths. It prints the unpacked extension directory.
 
 Load `connector/extension` from `chrome://extensions` with **Developer mode** and **Load unpacked**. A deterministic distributable archive is also available after:
 
