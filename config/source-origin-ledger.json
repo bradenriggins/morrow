@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "9868f8210da9e5b34cf0bfee2707211cf750619f",
+  "candidateCommit": "055be1c57cfc412172097f4c1b5f15cbe2c2f23a",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -82,14 +82,14 @@
     },
     {
       "path": "README.md",
-      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "sourceCommit": "cd964e10216f5adda08644ab8ae17244adaf58c7",
       "originalPath": "README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cb9272b9cdcedb1d34ee7c1229354b8a1758616584f8b96e9aa7c65ea1068ab1",
-      "afterDigest": "a12b3d181b34b6f99e5d93fbe80837a55076c02b5939f47a4ce87202ae409050"
+      "beforeDigest": "a12b3d181b34b6f99e5d93fbe80837a55076c02b5939f47a4ce87202ae409050",
+      "afterDigest": "66c06f6093633902d1af96b8f8d1852690ba4b9c335d8834110dd5de0f824771"
     },
     {
       "path": "SOURCE-ORIGIN.md",
@@ -181,14 +181,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "9868f8210da9e5b34cf0bfee2707211cf750619f",
+      "sourceCommit": "055be1c57cfc412172097f4c1b5f15cbe2c2f23a",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "eb63d6ee31f3afd2c2027f75378be1066d1dd0f92cce43acf3c38495e459a6fd",
-      "afterDigest": "1e38ad9c4392d6e8bba657a494e2043303eba2fff45b116cf74c7f26906acc65"
+      "beforeDigest": "1e38ad9c4392d6e8bba657a494e2043303eba2fff45b116cf74c7f26906acc65",
+      "afterDigest": "201d70a2ee128d4ff860dcea7d7ba11edc556da5c20d24c6e9029666f9981d7f"
     },
     {
       "path": "connector/extension/generated/canvas-api-catalog.json",
