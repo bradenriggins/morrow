@@ -61,7 +61,7 @@ This file records the current implementation against Revision 3 of the Morrow MC
 
 The code cannot create these receipts.
 
-- Authorized Canvas live proof needs a current human-authenticated session. MFA currently blocks it.
+- Authorized Canvas live proof has not completed.
 - Real Codex, Claude Code, and Gemini scenario parity has not completed.
 - The packed Morrow legacy extension needs live pairing and task proof.
 - Public source rights and publication authorization need an owner decision.

@@ -168,6 +168,11 @@ describe("project installation and hermetic parity", () => {
         schema: "morrow.doctor.v1",
         projectScopeDefault: true,
         upstreamConfigExists: true,
+        runtime: {
+          attempted: true,
+          ready: false,
+          reason: "runtime_probe_failed",
+        },
       });
 
       const profile = spawnSync(process.execPath, [
@@ -175,6 +180,13 @@ describe("project installation and hermetic parity", () => {
       ], { encoding: "utf8" });
       expect(profile.status).toBe(0);
       expect(JSON.parse(profile.stdout)).toMatchObject({ schema: "morrow.profile-status.v1" });
+
+      const invalidResume = spawnSync(process.execPath, [
+        cliPath, "batch", "resume", "bat:example", "--json", "--repository", repositoryRoot,
+        "--upstreams", upstreamConfigPath,
+      ], { encoding: "utf8" });
+      expect(invalidResume.status).toBe(1);
+      expect(invalidResume.stderr).toContain("batch resume requires --course-set-digest");
 
       const inspector = spawnSync(process.execPath, [
         cliPath, "mcp", "print-config", "inspector", "--json", "--repository", repositoryRoot,
@@ -190,6 +202,41 @@ describe("project installation and hermetic parity", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("makes doctor report live Morrow runtime readiness", () => {
+    const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
+    const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.sandbox.example.json");
+    const doctor = spawnSync(process.execPath, [
+      cliPath,
+      "doctor",
+      "--json",
+      "--repository",
+      repositoryRoot,
+      "--upstreams",
+      upstreamConfigPath,
+      "--server-entry",
+      serverEntryPath,
+    ], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        MORROW_SANDBOX_ESTATE_PATH: ":memory:",
+        MORROW_SANDBOX_STATE_PATH: ":memory:",
+      },
+    });
+    expect(doctor.status).toBe(0);
+    expect(JSON.parse(doctor.stdout)).toMatchObject({
+      schema: "morrow.doctor.v1",
+      runtime: {
+        attempted: true,
+        ready: true,
+        profile: "sandbox",
+        publicToolCount: 3,
+      },
+    });
+  }, 20_000);
 });
 
 describe("writeClientConfigBundle", () => {

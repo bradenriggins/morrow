@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
+import { sha256Text } from "@morrow/contracts";
 import {
   buildClientConfigBundle,
   buildClientParityReport,
@@ -30,7 +31,8 @@ function usage(): string {
     "  morrow catalog stats [--json] [--repository <path>]",
     "  morrow backend status [--json] --upstreams <absolute-path>",
     "  morrow operation <get|reconcile|cancel> <operation-id> [--json] --upstreams <absolute-path>",
-    "  morrow batch <get|pause|resume|cancel> <batch-id> [--json] --upstreams <absolute-path>",
+    "  morrow batch <get|pause|cancel> <batch-id> [--json] --upstreams <absolute-path>",
+    "  morrow batch resume <batch-id> --course-set-digest <sha256> --profile-digest <sha256> [--max-children <count>] [--json] --upstreams <absolute-path>",
     "  morrow conformance report [--json] [--repository <path>]",
     "  morrow clients render --upstreams <absolute-path> [options]",
     "  morrow mcp print-config inspector --upstreams <absolute-path> [options]",
@@ -62,6 +64,39 @@ function nextValue(args: readonly string[], index: number, flag: string): string
 function positiveInteger(value: string, flag: string): number {
   if (!/^[1-9][0-9]*$/.test(value)) throw new Error(`${flag} requires a positive whole number`);
   return Number(value);
+}
+
+function exactDigest(value: string, flag: string): string {
+  if (!/^[0-9a-f]{64}$/.test(value)) throw new Error(`${flag} requires a lowercase SHA-256 digest`);
+  return value;
+}
+
+function parseBatchResumeOptions(args: readonly string[]): {
+  readonly courseSetDigest: string;
+  readonly profileDigest: string;
+  readonly maxChildren: number;
+  readonly sharedArgs: readonly string[];
+} {
+  let courseSetDigest = "";
+  let profileDigest = "";
+  let maxChildren = 50;
+  const sharedArgs: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const flag = args[index]!;
+    if (!["--course-set-digest", "--profile-digest", "--max-children"].includes(flag)) {
+      sharedArgs.push(flag);
+      continue;
+    }
+    const value = nextValue(args, index, flag);
+    index += 1;
+    if (flag === "--course-set-digest") courseSetDigest = exactDigest(value, flag);
+    if (flag === "--profile-digest") profileDigest = exactDigest(value, flag);
+    if (flag === "--max-children") maxChildren = positiveInteger(value, flag);
+  }
+  if (!courseSetDigest) throw new Error("batch resume requires --course-set-digest");
+  if (!profileDigest) throw new Error("batch resume requires --profile-digest");
+  if (maxChildren > 500) throw new Error("--max-children cannot exceed 500");
+  return { courseSetDigest, profileDigest, maxChildren, sharedArgs };
 }
 
 function parseSharedOptions(args: readonly string[]): { readonly options: SharedOptions; readonly json: boolean } {
@@ -163,22 +198,51 @@ function commandAvailable(command: string): boolean {
   return !result.error;
 }
 
-function doctor(options: SharedOptions): Record<string, unknown> {
+async function doctor(options: SharedOptions): Promise<Record<string, unknown>> {
   const repositoryRoot = resolve(options.repositoryRoot);
   const serverEntryPath = options.serverEntryPath || resolve(repositoryRoot, "packages/mcp-server/dist/index.js");
+  const upstreamConfigPath = options.upstreamConfigPath
+    || (process.env.MORROW_UPSTREAMS_FILE ? resolve(process.env.MORROW_UPSTREAMS_FILE) : "");
+  const upstreamConfigExists = Boolean(upstreamConfigPath) && existsSync(upstreamConfigPath);
+  let runtime: Record<string, unknown> = {
+    attempted: false,
+    ready: false,
+    reason: upstreamConfigPath ? "upstream_config_missing" : "upstream_config_not_selected",
+  };
+  if (existsSync(serverEntryPath) && upstreamConfigExists) {
+    try {
+      const health = await callMorrowTool(
+        { ...options, repositoryRoot, serverEntryPath, upstreamConfigPath },
+        "morrow_health",
+        {},
+      );
+      runtime = health && typeof health === "object" && !Array.isArray(health)
+        ? { attempted: true, ...(health as Record<string, unknown>) }
+        : { attempted: true, ready: false, reason: "invalid_health_result" };
+    } catch (error) {
+      const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+      runtime = {
+        attempted: true,
+        ready: false,
+        reason: "runtime_probe_failed",
+        detailDigest: sha256Text(detail),
+      };
+    }
+  }
   return {
     schema: "morrow.doctor.v1",
     repositoryRoot,
     serverEntryPath,
     serverEntryExists: existsSync(serverEntryPath),
-    upstreamConfigPath: options.upstreamConfigPath || null,
-    upstreamConfigExists: Boolean(options.upstreamConfigPath) && existsSync(options.upstreamConfigPath),
+    upstreamConfigPath: upstreamConfigPath || null,
+    upstreamConfigExists,
     projectScopeDefault: true,
     clients: {
       codex: commandAvailable("codex"),
       claude: commandAvailable("claude"),
       gemini: commandAvailable("gemini"),
     },
+    runtime,
   };
 }
 
@@ -302,7 +366,7 @@ async function run(): Promise<void> {
   if (command === "doctor") {
     const { options, json } = parseSharedOptions(rest);
     if (!json) throw new Error("doctor requires --json");
-    process.stdout.write(`${JSON.stringify(doctor(options))}\n`);
+    process.stdout.write(`${JSON.stringify(await doctor(options))}\n`);
     return;
   }
 
@@ -337,8 +401,16 @@ async function run(): Promise<void> {
     const action = rest[0]!;
     const batchId = rest[1];
     if (!batchId || batchId.startsWith("--")) throw new Error(`batch ${action} requires a batch ID`);
-    const { options, json } = parseSharedOptions(rest.slice(2));
-    emit(await callMorrowTool(options, `morrow_batch_${action}`, { batch_id: batchId }), json);
+    const resume = action === "resume" ? parseBatchResumeOptions(rest.slice(2)) : null;
+    const { options, json } = parseSharedOptions(resume?.sharedArgs || rest.slice(2));
+    emit(await callMorrowTool(options, `morrow_batch_${action}`, {
+      batch_id: batchId,
+      ...(resume ? {
+        course_set_digest: resume.courseSetDigest,
+        profile_digest: resume.profileDigest,
+        max_children: resume.maxChildren,
+      } : {}),
+    }), json);
     return;
   }
 
