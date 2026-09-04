@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+  "candidateCommit": "113d426acd0eaa8fd4b81288f8fc01f73e7ef468",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -1787,14 +1787,14 @@
     },
     {
       "path": "scripts/lib/release-candidate.mjs",
-      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "sourceCommit": "113d426acd0eaa8fd4b81288f8fc01f73e7ef468",
       "originalPath": "scripts/lib/release-candidate.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b4895217c9ed5d3217dabf7b4f22a3b4c03d67826c6aaabcaad25f0881073cea",
-      "afterDigest": "cdb5d7f72580ec3097c514a2d1b827bca6688f90aa6e5147662f04b9481158d7"
+      "beforeDigest": "cdb5d7f72580ec3097c514a2d1b827bca6688f90aa6e5147662f04b9481158d7",
+      "afterDigest": "391842159c94390a9b67dad8b23c45a938dba62f65cb5bd0f0efa9d533fcd2a4"
     },
     {
       "path": "scripts/package-profile.mjs",
