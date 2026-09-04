@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "19479316d456b59f69c0fc5efbd159c5610084a9",
+  "candidateCommit": "94a63d41f7797b1b532432c22b918906146ba559",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -236,14 +236,14 @@
     },
     {
       "path": "docs/implementation/EXAMPLE-WORKTREE.md",
-      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "sourceCommit": "94a63d41f7797b1b532432c22b918906146ba559",
       "originalPath": "docs/implementation/EXAMPLE-WORKTREE.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5e5b7cab493db20850f71a76c7171335e6df3a64dfa0e5fd7811c4b33a04e5a1",
-      "afterDigest": "fde10343ae1cdc6c4046aa4a52010d8225283f54043ee0b24439005d49897ad0"
+      "beforeDigest": "fde10343ae1cdc6c4046aa4a52010d8225283f54043ee0b24439005d49897ad0",
+      "afterDigest": "68e0b8f7a2e5220b2b60821617029fb70f06e86eba803da9274a905e0c3fb7dd"
     },
     {
       "path": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
@@ -390,14 +390,14 @@
     },
     {
       "path": "package.json",
-      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+      "sourceCommit": "94a63d41f7797b1b532432c22b918906146ba559",
       "originalPath": "package.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e75c1e28014aa67b6fd03318b11452b374f018ebe89c12591562f16f489ccf1e",
-      "afterDigest": "f05a10e45f69e2e059618b77fbba09b37a3a62c716797d9dcf175f0ce72498cd"
+      "beforeDigest": "f05a10e45f69e2e059618b77fbba09b37a3a62c716797d9dcf175f0ce72498cd",
+      "afterDigest": "8adff818e77dfce5cb887a13b82390bdbdd4cf57b4478f5f7fcded795c0ba8e8"
     },
     {
       "path": "packages/batch-engine/package.json",
@@ -665,7 +665,7 @@
     },
     {
       "path": "packages/client-config/src/cli.ts",
-      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "sourceCommit": "94a63d41f7797b1b532432c22b918906146ba559",
       "originalPath": "packages/client-config/src/cli.ts",
       "ownership": "new",
       "dependencies": [],
@@ -673,8 +673,8 @@
         "packages/client-config/test/client-config.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2b5ca7010213bd36b340f71c40d79a81e4e5a844fc70252dc617bce36bc42d65",
-      "afterDigest": "f01b7017d23ba121ab72565a81ee1e9f9e12319af372ec14f2e3d02cd9d96285"
+      "beforeDigest": "f01b7017d23ba121ab72565a81ee1e9f9e12319af372ec14f2e3d02cd9d96285",
+      "afterDigest": "1944b0f3a4a8df354b336651c7bcd31fdbbd3746d06d3060834b6c7b77315d31"
     },
     {
       "path": "packages/client-config/src/index.ts",
@@ -691,14 +691,14 @@
     },
     {
       "path": "packages/client-config/test/client-config.test.ts",
-      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "sourceCommit": "94a63d41f7797b1b532432c22b918906146ba559",
       "originalPath": "packages/client-config/test/client-config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9020bfdbedb8854249989b0e046a214c5abbacb650e84eddd70575d0e47fc59b",
-      "afterDigest": "67577f8c8cb8904597186dbe05820c9924410dbed525467a4da5b2b18b1651b4"
+      "beforeDigest": "67577f8c8cb8904597186dbe05820c9924410dbed525467a4da5b2b18b1651b4",
+      "afterDigest": "f6d2bb34a795861309675d25f17faa8dc5c58a8a0b1381e857a9f9399a5d276f"
     },
     {
       "path": "packages/client-config/tsconfig.json",
