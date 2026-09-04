@@ -75,6 +75,16 @@ function selectedPage(courseId: string, pageSlug: string): Page {
   return structuredClone(page);
 }
 
+function rateMeta(requestCost = 0.1, rateLimitRemaining = 700) {
+  return {
+    "io.morrow/canvas-rate": {
+      schema: "morrow.canvas-rate.v1",
+      requestCost,
+      rateLimitRemaining,
+    },
+  };
+}
+
 const CourseId = z.string().regex(/^90[0-9]{3}$/);
 const PageSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/);
 
@@ -98,6 +108,7 @@ function createSandboxServer(): McpServer {
       })).slice(offset, offset + limit);
       return {
         content: [{ type: "text", text: `Returned ${courses.length} synthetic courses.` }],
+        _meta: rateMeta(),
         structuredContent: {
           courses,
           offset,
@@ -121,6 +132,7 @@ function createSandboxServer(): McpServer {
       const page = selectedPage(course_id, page_slug);
       return {
         content: [{ type: "text", text: `Read ${course_id}/${page_slug} from the synthetic estate.` }],
+        _meta: rateMeta(),
         structuredContent: page,
       };
     },
@@ -158,6 +170,7 @@ function createSandboxServer(): McpServer {
       if (fault === "throw_after_apply") throw new Error("sandbox_ambiguous_after_apply");
       return {
         content: [{ type: "text", text: `Updated ${course_id}/${page_slug} in the synthetic estate.` }],
+        _meta: rateMeta(0.2, 699.8),
         structuredContent: updated,
       };
     },

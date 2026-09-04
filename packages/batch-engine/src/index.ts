@@ -213,6 +213,7 @@ export interface BatchDetail {
 export interface BatchExecutionResult {
   readonly state: "succeeded" | "failed" | "unknown";
   readonly resultDigest: string;
+  readonly ratePolicy?: BatchRatePolicyInput;
   readonly gatewayOperationId?: string;
   readonly gatewayOperationState?: string;
   readonly sourceResultState?: string;
@@ -365,6 +366,13 @@ function exactNonNegativeInteger(value: unknown, label: string, maximum: number)
   return Number(value);
 }
 
+function exactNonNegativeNumber(value: unknown, label: string, maximum: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > maximum) {
+    throw new TypeError(`${label} must be a number from 0 through ${maximum}`);
+  }
+  return value;
+}
+
 function exactIsoInstant(value: unknown, label: string): string {
   const text = exactString(value, label, 80);
   if (!Number.isFinite(Date.parse(text))) throw new TypeError(`${label} must be an ISO instant`);
@@ -382,10 +390,10 @@ function exactRatePolicy(value: BatchRatePolicyInput | undefined): BatchRatePoli
     : exactNonNegativeInteger(value.retryAfterMs, "retry after milliseconds", 300_000);
   const requestCost = value.requestCost === undefined
     ? undefined
-    : exactNonNegativeInteger(value.requestCost, "request cost", 1_000_000);
+    : exactNonNegativeNumber(value.requestCost, "request cost", 1_000_000);
   const rateLimitRemaining = value.rateLimitRemaining === undefined
     ? undefined
-    : exactNonNegativeInteger(value.rateLimitRemaining, "rate limit remaining", 1_000_000);
+    : exactNonNegativeNumber(value.rateLimitRemaining, "rate limit remaining", 1_000_000);
   const jitterRatio = value.jitterRatio === undefined
     ? undefined
     : Number(value.jitterRatio);
@@ -1382,98 +1390,6 @@ export class DurableBatchStore {
     this.database.close();
     this.closed = true;
   }
-}
-
-async function mapLimit<T, R>(
-  values: readonly T[],
-  concurrency: number,
-  mapper: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const output = new Array<R>(values.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-    for (;;) {
-      const index = next;
-      next += 1;
-      if (index >= values.length) return;
-      output[index] = await mapper(values[index]!);
-    }
-  });
-  await Promise.all(workers);
-  return output;
-}
-
-function effectiveRatePolicy(
-  batch: BatchRecord,
-  manifest: FrozenBatchManifest,
-  override: BatchRatePolicyInput | undefined,
-  random: () => number,
-): { readonly concurrency: number; readonly backoffMs: number } {
-  const policy = exactRatePolicy({ ...manifest.ratePolicy, ...override });
-  let concurrency = batch.concurrency;
-  if (policy.requestCost && policy.rateLimitRemaining !== undefined) {
-    concurrency = Math.min(concurrency, Math.max(1, Math.floor(policy.rateLimitRemaining / policy.requestCost)));
-  }
-  const retryAfterMs = policy.retryAfterMs || 0;
-  const jitterRatio = policy.jitterRatio ?? 0.1;
-  const boundedRandom = Math.max(0, Math.min(1, random()));
-  return {
-    concurrency,
-    backoffMs: retryAfterMs + Math.floor(retryAfterMs * jitterRatio * boundedRandom),
-  };
-}
-
-export async function runBatchWindow(
-  store: DurableBatchStore,
-  batchId: string,
-  executor: BatchExecutor,
-  options: RunBatchWindowOptions,
-): Promise<BatchWindowResult> {
-  const started = store.beginRun(batchId, options.expectedCatalogDigest, {
-    ...(options.expectedCourseSetDigest ? { courseSetDigest: options.expectedCourseSetDigest } : {}),
-    ...(options.expectedProfileDigest ? { profileDigest: options.expectedProfileDigest } : {}),
-  });
-  const manifest = store.getManifest(batchId);
-  const rate = effectiveRatePolicy(started, manifest, options.ratePolicy, options.random || Math.random);
-  if (TERMINAL_BATCH_STATES.has(started.state)) {
-    return {
-      schema: "morrow.batch-window.v1",
-      batch: started,
-      processed: 0,
-      remaining: 0,
-      children: [],
-      effectiveConcurrency: rate.concurrency,
-      backoffMs: 0,
-    };
-  }
-  if (rate.backoffMs > 0) await (options.sleep || ((milliseconds) => new Promise<void>((resolveValue) => setTimeout(resolveValue, milliseconds))))(rate.backoffMs);
-  const maxChildren = Math.max(1, Math.min(options.maxChildren ?? 50, 500));
-  const claimed = store.claimPending(batchId, maxChildren);
-  const settled = await mapLimit(claimed, rate.concurrency, async (child) => {
-    try {
-      const argumentsValue = store.readArguments(child.batchId, child.childId);
-      const result = await executor({ batch: started, child, arguments: argumentsValue });
-      return store.settleChild(child.batchId, child.childId, result);
-    } catch (error) {
-      const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
-      return store.settleChild(child.batchId, child.childId, {
-        state: "unknown",
-        resultDigest: sha256Text(detail),
-        errorDigest: sha256Text(detail),
-        sourceResultState: "batch_executor_threw",
-      });
-    }
-  });
-  const batch = store.finishWindow(batchId);
-  return {
-    schema: "morrow.batch-window.v1",
-    batch,
-    processed: settled.length,
-    remaining: batch.pendingChildren,
-    children: settled,
-    effectiveConcurrency: rate.concurrency,
-    backoffMs: rate.backoffMs,
-  };
 }
 
 export function batchDetailProjection(detail: BatchDetail): JsonObject {

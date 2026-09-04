@@ -116,6 +116,32 @@ function callMeta(
   };
 }
 
+function boundedRateNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000
+    ? value
+    : undefined;
+}
+
+function canvasRateMeta(value: JsonObject): JsonObject | null {
+  if (!isJsonObject(value._meta)) return null;
+  const raw = value._meta["io.morrow/canvas-rate"];
+  if (!isJsonObject(raw)) return null;
+  const requestCost = boundedRateNumber(raw.requestCost);
+  const rateLimitRemaining = boundedRateNumber(raw.rateLimitRemaining);
+  const retryAfterMs = Number.isSafeInteger(raw.retryAfterMs)
+    && Number(raw.retryAfterMs) >= 0
+    && Number(raw.retryAfterMs) <= 300_000
+    ? Number(raw.retryAfterMs)
+    : undefined;
+  if (requestCost === undefined && rateLimitRemaining === undefined && retryAfterMs === undefined) return null;
+  return {
+    schema: "morrow.canvas-rate.v1",
+    ...(requestCost === undefined ? {} : { requestCost }),
+    ...(rateLimitRemaining === undefined ? {} : { rateLimitRemaining }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+  };
+}
+
 export function normalizeUpstreamResult(value: unknown, context: ResultContext): JsonObject {
   if (!isJsonObject(value)) {
     return textError(
@@ -126,10 +152,12 @@ export function normalizeUpstreamResult(value: unknown, context: ResultContext):
 
   const upstreamDigest = sha256Json(value);
   const projected = projectOutput(value, context.privacy);
+  const rateMeta = canvasRateMeta(value);
   return {
     ...projected,
     _meta: {
       "io.morrow/gateway": callMeta(context, upstreamDigest),
+      ...(rateMeta ? { "io.morrow/canvas-rate": rateMeta } : {}),
     },
   };
 }

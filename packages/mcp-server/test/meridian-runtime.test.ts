@@ -37,7 +37,14 @@ async function sourceTruth(directory: string): Promise<{ path: string; fileSha25
     repository: "fixture/meridian",
     revision,
     capturedAt: "2026-09-04T12:00:00.000Z",
-  }, tools);
+  }, tools.map((tool) => ({
+    ...tool,
+    capability: {
+      family: "canvas-operation",
+      provider: "canvas",
+      route: { backend: "meridian" },
+    },
+  })));
   const bytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`, "utf8");
   const path = join(directory, "meridian.live.json");
   await writeFile(path, bytes);
@@ -206,6 +213,11 @@ describe("ExamplePlatform SSH runtime adapter", () => {
     expect(launch.args.slice(0, 2)).toEqual(["-T", "example-lms-vps"]);
     expect(launch.args[2]).toContain("exec env -i");
     expect(launch.meridianEnvironment.CHCP_READ_ONLY).toBe("1");
+    expect(launch.meridianEnvironment).toMatchObject({
+      CHCP_TEAM_JOB_ID: "catalog-list",
+      CHCP_OPERATOR_JOB_ID: "catalog-list",
+      CHCP_JOB_SCRATCH_DIR: "/remote/state/job-scratch/morrow-catalog/catalog-list",
+    });
   });
 
   it("attests remote Git without returning or echoing the remote root", () => {

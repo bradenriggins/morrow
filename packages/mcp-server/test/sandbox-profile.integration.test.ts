@@ -41,6 +41,9 @@ describe("sandbox runtime profile", () => {
       expect(courses.structuredContent).toMatchObject({
         data: { returned: 100, total: 100, pagination_complete: true },
       });
+      expect(courses._meta).toMatchObject({
+        "io.morrow/canvas-rate": { requestCost: 0.1, rateLimitRemaining: 700 },
+      });
 
       const expected = {
         course_id: "90001",

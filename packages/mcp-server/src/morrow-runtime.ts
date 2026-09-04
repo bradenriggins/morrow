@@ -190,6 +190,23 @@ function gatewayMeta(value: JsonObject): Record<string, unknown> | null {
   return isJsonObject(meta) ? meta : null;
 }
 
+function canvasRatePolicy(value: JsonObject): BatchRatePolicyInput | undefined {
+  if (!isJsonObject(value._meta)) return undefined;
+  const raw = value._meta["io.morrow/canvas-rate"];
+  if (!isJsonObject(raw)) return undefined;
+  const requestCost = typeof raw.requestCost === "number" && Number.isFinite(raw.requestCost)
+    ? raw.requestCost : undefined;
+  const rateLimitRemaining = typeof raw.rateLimitRemaining === "number" && Number.isFinite(raw.rateLimitRemaining)
+    ? raw.rateLimitRemaining : undefined;
+  const retryAfterMs = Number.isSafeInteger(raw.retryAfterMs) ? Number(raw.retryAfterMs) : undefined;
+  if (requestCost === undefined && rateLimitRemaining === undefined && retryAfterMs === undefined) return undefined;
+  return {
+    ...(requestCost === undefined ? {} : { requestCost }),
+    ...(rateLimitRemaining === undefined ? {} : { rateLimitRemaining }),
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+  };
+}
+
 function gatewayOperationId(value: JsonObject): string | undefined {
   if (isJsonObject(value.structuredContent) && typeof value.structuredContent.operationId === "string") {
     const effectOperationId = value.structuredContent.operationId.trim();
@@ -240,6 +257,7 @@ function childResult(
     ? operation.sourceTaskId
     : "";
   const resultDigest = sha256Json(result);
+  const ratePolicy = canvasRatePolicy(result);
 
   if (gatewayOperationState === "source_unknown") {
     return {
@@ -250,6 +268,7 @@ function childResult(
       ...(sourceResultState ? { sourceResultState } : {}),
       ...(sourceTaskId ? { sourceTaskId } : {}),
       errorDigest: sha256Text("gateway_source_unknown"),
+      ...(ratePolicy ? { ratePolicy } : {}),
     };
   }
 
@@ -265,6 +284,7 @@ function childResult(
       ...(sourceResultState ? { sourceResultState } : {}),
       ...(sourceTaskId ? { sourceTaskId } : {}),
       errorDigest: sha256Text(problemCode(result) || "gateway_tool_error"),
+      ...(ratePolicy ? { ratePolicy } : {}),
     };
   }
 
@@ -276,6 +296,7 @@ function childResult(
       ...(gatewayOperationState ? { gatewayOperationState } : {}),
       ...(sourceResultState ? { sourceResultState } : {}),
       errorDigest: sha256Text("staged_write_missing_source_task"),
+      ...(ratePolicy ? { ratePolicy } : {}),
     };
   }
 
@@ -286,6 +307,7 @@ function childResult(
     ...(gatewayOperationState ? { gatewayOperationState } : {}),
     ...(sourceResultState ? { sourceResultState } : {}),
     ...(sourceTaskId ? { sourceTaskId } : {}),
+    ...(ratePolicy ? { ratePolicy } : {}),
   };
 }
 

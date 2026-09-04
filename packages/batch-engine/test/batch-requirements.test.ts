@@ -176,4 +176,42 @@ describe("BAT durable batch requirements", () => {
     expect(slept).toBe(110);
     store.close();
   });
+
+  it("reduces later waves from trusted response telemetry", async () => {
+    const store = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
+    const created = store.create({
+      name: "Adaptive read",
+      mode: "read_only",
+      catalogDigest,
+      concurrency: 2,
+      operationFamily: "course_read",
+      profileDigest,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      courseSet: { source: "explicit", courseIds: ["1", "2", "3", "4"], complete: true },
+      children: [1, 2, 3, 4].map(readChild),
+    });
+    const started: string[] = [];
+    const slept: number[] = [];
+    const result = await runBatchWindow(store, created.batch.batchId, async ({ child }) => {
+      started.push(child.childId);
+      return {
+        state: "succeeded",
+        resultDigest: sha256Json({ childId: child.childId }),
+        ...(child.ordinal < 2 ? {
+          ratePolicy: { requestCost: 1.5, rateLimitRemaining: 1.5, retryAfterMs: 100 },
+        } : {}),
+      };
+    }, {
+      expectedCatalogDigest: catalogDigest,
+      expectedCourseSetDigest: created.manifest.courseSet.digest,
+      expectedProfileDigest: profileDigest,
+      maxChildren: 4,
+      random: () => 0,
+      sleep: async (milliseconds) => { slept.push(milliseconds); },
+    });
+    expect(started).toEqual(["course:1", "course:2", "course:3", "course:4"]);
+    expect(result).toMatchObject({ effectiveConcurrency: 1, backoffMs: 100, processed: 4 });
+    expect(slept).toEqual([100]);
+    store.close();
+  });
 });

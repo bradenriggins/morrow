@@ -176,25 +176,6 @@ export class DurableBatchStore {
   }
 }
 
-async function mapLimit<T, R>(
-  values: readonly T[],
-  concurrency: number,
-  mapper: (value: T) => Promise<R>,
-): Promise<R[]> {
-  const output = new Array<R>(values.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(concurrency, values.length) }, async () => {
-    for (;;) {
-      const index = next;
-      next += 1;
-      if (index >= values.length) return;
-      output[index] = await mapper(values[index]!);
-    }
-  });
-  await Promise.all(workers);
-  return output;
-}
-
 function windowRate(
   batch: BatchRecord,
   manifest: FrozenBatchManifest,
@@ -215,6 +196,31 @@ function windowRate(
   };
 }
 
+type RatePolicy = NonNullable<RunBatchWindowOptions["ratePolicy"]>;
+
+function mergeRateObservations(
+  current: RatePolicy,
+  observations: readonly (BatchExecutionResult["ratePolicy"] | undefined)[],
+): RatePolicy {
+  const valid = observations.filter((value): value is NonNullable<typeof value> => Boolean(value));
+  if (valid.length === 0) return { ...current, retryAfterMs: undefined };
+  const requestCosts = valid.map((value) => value.requestCost).filter((value): value is number => (
+    typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000
+  ));
+  const remainingValues = valid.map((value) => value.rateLimitRemaining).filter((value): value is number => (
+    typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1_000_000
+  ));
+  const retryValues = valid.map((value) => value.retryAfterMs).filter((value): value is number => (
+    typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 300_000
+  ));
+  return {
+    ...current,
+    retryAfterMs: retryValues.length > 0 ? Math.max(...retryValues) : undefined,
+    ...(requestCosts.length > 0 ? { requestCost: Math.max(...requestCosts) } : {}),
+    ...(remainingValues.length > 0 ? { rateLimitRemaining: Math.min(...remainingValues) } : {}),
+  };
+}
+
 export async function runBatchWindow(
   store: DurableBatchStore,
   batchId: string,
@@ -225,7 +231,11 @@ export async function runBatchWindow(
     ...(options.expectedCourseSetDigest ? { courseSetDigest: options.expectedCourseSetDigest } : {}),
     ...(options.expectedProfileDigest ? { profileDigest: options.expectedProfileDigest } : {}),
   });
-  const rate = windowRate(started, store.getManifest(batchId), options.ratePolicy, options.random || Math.random);
+  const manifest = store.getManifest(batchId);
+  const random = options.random || Math.random;
+  const sleep = options.sleep || ((milliseconds: number) => new Promise<void>((resolveValue) => setTimeout(resolveValue, milliseconds)));
+  let policy: RatePolicy = { ...manifest.ratePolicy, ...options.ratePolicy };
+  let rate = windowRate(started, manifest, policy, random);
   if (TERMINAL_BATCH_STATES.has(started.state)) {
     return {
       schema: "morrow.batch-window.v1",
@@ -237,27 +247,46 @@ export async function runBatchWindow(
       backoffMs: 0,
     };
   }
-  if (rate.backoffMs > 0) {
-    await (options.sleep || ((milliseconds) => new Promise<void>((resolveValue) => setTimeout(resolveValue, milliseconds))))(rate.backoffMs);
-  }
   const maxChildren = Math.max(1, Math.min(options.maxChildren ?? 50, 500));
   const claimed = store.claimPending(batchId, maxChildren);
-  const settled = await mapLimit(claimed, rate.concurrency, async (child) => {
-    try {
-      const argumentsValue = store.readArguments(child.batchId, child.childId);
-      const result = await executor({ batch: started, child, arguments: argumentsValue });
-      return store.settleChild(child.batchId, child.childId, result);
-    } catch (error) {
-      const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
-      const digest = sha256Text(detail);
-      return store.settleChild(child.batchId, child.childId, {
-        state: "unknown",
-        resultDigest: digest,
-        errorDigest: digest,
-        sourceResultState: "batch_executor_threw",
-      });
+  const settled: BatchChildRecord[] = [];
+  let next = 0;
+  let minimumConcurrency = rate.concurrency;
+  let totalBackoffMs = 0;
+  while (next < claimed.length) {
+    if (rate.backoffMs > 0) {
+      await sleep(rate.backoffMs);
+      totalBackoffMs += rate.backoffMs;
+      policy = { ...policy, retryAfterMs: undefined };
     }
-  });
+    const wave = claimed.slice(next, next + rate.concurrency);
+    next += wave.length;
+    const executions = await Promise.all(wave.map(async (child) => {
+      try {
+        const argumentsValue = store.readArguments(child.batchId, child.childId);
+        const result = await executor({ batch: started, child, arguments: argumentsValue });
+        return { child, result };
+      } catch (error) {
+        const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+        const digest = sha256Text(detail);
+        return {
+          child,
+          result: {
+            state: "unknown" as const,
+            resultDigest: digest,
+            errorDigest: digest,
+            sourceResultState: "batch_executor_threw",
+          },
+        };
+      }
+    }));
+    for (const execution of executions) {
+      settled.push(store.settleChild(execution.child.batchId, execution.child.childId, execution.result));
+    }
+    policy = mergeRateObservations(policy, executions.map((execution) => execution.result.ratePolicy));
+    rate = windowRate(started, manifest, policy, random);
+    minimumConcurrency = Math.min(minimumConcurrency, rate.concurrency);
+  }
   const batch = store.finishWindow(batchId);
   return {
     schema: "morrow.batch-window.v1",
@@ -265,7 +294,7 @@ export async function runBatchWindow(
     processed: settled.length,
     remaining: batch.pendingChildren,
     children: settled,
-    effectiveConcurrency: rate.concurrency,
-    backoffMs: rate.backoffMs,
+    effectiveConcurrency: minimumConcurrency,
+    backoffMs: totalBackoffMs,
   };
 }

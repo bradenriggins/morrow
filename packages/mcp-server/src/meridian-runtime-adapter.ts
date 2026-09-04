@@ -56,12 +56,11 @@ export function mapExamplePlatformEnvironment(
     profile.stateDirectory,
     `reports/${profile.localOperator}`,
   );
-  const jobScratchRoot = profile.operation
-    ? pathJoin(
-        profile.stateDirectory,
-        `job-scratch/${profile.localOperator}/${profile.operation.id}`,
-      )
-    : pathJoin(profile.stateDirectory, `job-scratch/${profile.localOperator}/catalog`);
+  const jobId = profile.operation?.id ?? profile.sessionId;
+  const jobScratchRoot = pathJoin(
+    profile.stateDirectory,
+    `job-scratch/${profile.localOperator}/${jobId}`,
+  );
 
   const environment: Record<string, string> = {
     HOME: profile.stateDirectory,
@@ -78,6 +77,8 @@ export function mapExamplePlatformEnvironment(
     CHCP_TEAM_SESSION_USER: profile.localOperator,
     CHCP_OPERATOR_JOB_USER: profile.localOperator,
     CHCP_TEAM_CONVERSATION_ID: profile.sessionId,
+    CHCP_TEAM_JOB_ID: jobId,
+    CHCP_OPERATOR_JOB_ID: jobId,
     CHCP_REPORTS_DIR: reportsRoot,
     CHCP_JOB_SCRATCH_DIR: jobScratchRoot,
     CHCP_TEAM_ACCOUNT_PROFILE_DAEMONS: "0",
@@ -87,8 +88,6 @@ export function mapExamplePlatformEnvironment(
   if (profile.mode === "read-only") environment.CHCP_READ_ONLY = "1";
   if (profile.courseScope) environment.CHCP_TEAM_COURSE_ID = profile.courseScope.courseId;
   if (profile.operation) {
-    environment.CHCP_TEAM_JOB_ID = profile.operation.id;
-    environment.CHCP_OPERATOR_JOB_ID = profile.operation.id;
     environment.CHCP_TEAM_TASK_CONTRACT_DIGEST = profile.operation.taskContractDigest;
   }
   if (profile.learnerVault) {

@@ -98,7 +98,7 @@ Morrow legacy bridge tools:
 - `morrow_legacy_bindings`
 - `morrow_legacy_task_get`
 
-Every forwarded result receives bounded `io.morrow/gateway` metadata containing the public tool name, source id, source tool name, catalog digest, and upstream result digest. Raw upstream `_meta` is discarded.
+Every forwarded result receives bounded `io.morrow/gateway` metadata containing the public tool name, source id, source tool name, catalog digest, and upstream result digest. Raw upstream `_meta` is discarded. The only source metadata projection is validated numeric `io.morrow/canvas-rate` telemetry used to slow later batch waves.
 
 ## Donor catalog workflow
 

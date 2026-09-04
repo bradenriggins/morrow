@@ -14,7 +14,14 @@ describe("normalizeUpstreamResult", () => {
     const result = normalizeUpstreamResult({
       content: [{ type: "text", text: "ok" }],
       structuredContent: { value: 1 },
-      _meta: { secret: "must-not-pass" },
+      _meta: {
+        secret: "must-not-pass",
+        "io.morrow/canvas-rate": {
+          requestCost: 0.087,
+          rateLimitRemaining: 699.5,
+          ignored: "must-not-pass",
+        },
+      },
     }, {
       mapping,
       catalogDigest: "a".repeat(64),
@@ -39,6 +46,11 @@ describe("normalizeUpstreamResult", () => {
         upstreamId: "meridian",
         upstreamToolName: "canvas_page_get",
       }),
+      "io.morrow/canvas-rate": {
+        schema: "morrow.canvas-rate.v1",
+        requestCost: 0.087,
+        rateLimitRemaining: 699.5,
+      },
     });
   });
 });

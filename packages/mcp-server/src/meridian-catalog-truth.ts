@@ -13,6 +13,10 @@ export interface ExamplePlatformCatalogTruth {
   readonly tools: readonly UpstreamTool[];
 }
 
+function upstreamContractTools(tools: readonly UpstreamTool[]): readonly UpstreamTool[] {
+  return tools.map(({ capability: _capability, ...tool }) => tool);
+}
+
 export function loadExamplePlatformCatalogTruth(
   config: ExamplePlatformSshUpstreamConfig,
   filters: {
@@ -49,8 +53,14 @@ export function loadExamplePlatformCatalogTruth(
     !excludedNames.has(tool.name)
     && !filters.excludePrefixes.some((prefix) => tool.name.startsWith(prefix))
   ));
-  const upstreamDigest = upstreamCatalogDigest(config.id, catalog.tools);
-  const eligibleCatalogDigest = upstreamCatalogDigest(config.id, eligibleTools);
+  const upstreamDigest = upstreamCatalogDigest(
+    config.id,
+    upstreamContractTools(catalog.tools),
+  );
+  const eligibleCatalogDigest = upstreamCatalogDigest(
+    config.id,
+    upstreamContractTools(eligibleTools),
+  );
   return {
     tools: catalog.tools,
     health: {

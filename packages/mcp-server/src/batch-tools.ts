@@ -61,8 +61,8 @@ const BatchCourseSetSchema = z.object({
 
 const BatchRatePolicySchema = z.object({
   retry_after_ms: z.number().int().min(0).max(300_000).optional(),
-  request_cost: z.number().int().min(0).max(1_000_000).optional(),
-  rate_limit_remaining: z.number().int().min(0).max(1_000_000).optional(),
+  request_cost: z.number().min(0).max(1_000_000).optional(),
+  rate_limit_remaining: z.number().min(0).max(1_000_000).optional(),
   jitter_ratio: z.number().min(0).max(1).optional(),
 });
 
