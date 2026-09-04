@@ -494,6 +494,31 @@ export class MorrowRuntime {
     };
   }
 
+  health(): JsonObject {
+    const gateway = this.gateway.health();
+    const source = (id: string) => gateway.sources.find((entry) => entry.id === id) || null;
+    const meridian = source("meridian");
+    const legacy = source("example-legacy");
+    const batchLedger = this.batchHealth();
+    const effectBroker = this.gateway.effectHealth();
+    return {
+      ...gateway,
+      components: {
+        gateway: { ready: gateway.ready, version: gateway.version },
+        meridian: meridian || { connected: false, reason: "not_configured" },
+        morrowKernel: legacy || { connected: false, reason: "not_configured" },
+        extensionBridge: legacy
+          ? { connected: legacy.connected, catalogAttested: legacy.catalogAttested !== false }
+          : { connected: false, reason: "not_configured" },
+        effectBroker,
+        batchLedger,
+        approvalServer: { ready: this.approval.baseUrl !== null, transport: "loopback" },
+        profile: { name: gateway.profile },
+        catalog: { digest: gateway.catalogDigest, publicToolCount: gateway.publicToolCount },
+      },
+    };
+  }
+
   batchCreate(input: CreateGatewayBatchInput): JsonObject {
     if (!Array.isArray(input.operations) || input.operations.length === 0) {
       throw new Error("A batch requires at least one explicit operation");

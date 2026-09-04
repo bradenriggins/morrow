@@ -131,6 +131,16 @@ describe("Morrow stdio entry", () => {
         "morrow_operation_undo",
       ]) expect(listed.tools.some((tool) => tool.name === name)).toBe(true);
       expect(listed.tools.some((tool) => tool.name === "morrow_operation_approve")).toBe(false);
+      const health = await client.callTool({ name: "morrow_health", arguments: {} });
+      expect(health.structuredContent).toMatchObject({
+        schema: "morrow.health.v1",
+        components: {
+          gateway: { ready: true },
+          effectBroker: { schema: "morrow.effect-broker.health.v1" },
+          batchLedger: { schema: "morrow.batch-store.health.v1" },
+          approvalServer: { ready: true, transport: "loopback" },
+        },
+      });
       const result = await client.callTool({
         name: "canvas_page_get",
         arguments: { course_id: "1" },

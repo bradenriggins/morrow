@@ -607,6 +607,20 @@ export class GatewayRuntime {
     };
   }
 
+  effectHealth(): JsonObject {
+    const recent = this.effects.list(200);
+    const unresolved = recent.filter((operation) => !["verified", "failed", "cancelled"].includes(operation.state));
+    return {
+      schema: "morrow.effect-broker.health.v1",
+      open: true,
+      recentOperationCount: recent.length,
+      recentCoverageComplete: recent.length < 200,
+      unresolvedOperationCount: unresolved.length,
+      appliedOrUnknownCount: recent.filter((operation) => operation.state === "applied_or_unknown").length,
+      dispatchingCount: recent.filter((operation) => operation.state === "dispatching").length,
+    };
+  }
+
   searchCatalog(input: CatalogSearchInput = {}): CatalogSearchResult {
     const query = input.query?.trim().toLowerCase() ?? "";
     const source = input.source?.trim().toLowerCase() ?? "";

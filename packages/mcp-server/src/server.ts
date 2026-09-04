@@ -84,7 +84,10 @@ function safeResultArtifactFailure(error: unknown): CallToolResult {
   };
 }
 
-export function createMorrowServer(runtime: GatewayRuntime): McpServer {
+export function createMorrowServer(
+  runtime: GatewayRuntime,
+  healthProvider: () => JsonObject = () => runtime.health() as unknown as JsonObject,
+): McpServer {
   const server = new McpServer(
     {
       name: "morrow",
@@ -108,7 +111,7 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
       },
     },
     async () => {
-      const health = runtime.health();
+      const health = healthProvider() as unknown as ReturnType<GatewayRuntime["health"]>;
       return textAndStructured(
         health.ready
           ? `Morrow is ready with ${health.publicToolCount} public tools.`
