@@ -433,11 +433,20 @@ function currentEvidenceBinding(root) {
     const receipt = readJson(path);
     return validDigest(receipt.packageDigest) ? receipt.packageDigest : null;
   };
-  const catalogPath = resolve(root, "artifacts/catalogs/merged-capabilities.json");
-  const catalog = existsSync(catalogPath) ? readJson(catalogPath) : {};
+  const canvasCatalogPath = resolve(root, "artifacts/canvas-api/canvas-api-catalog.json");
+  const mergedCatalogPath = resolve(root, "artifacts/catalogs/merged-capabilities.json");
+  const catalog = existsSync(canvasCatalogPath)
+    ? readJson(canvasCatalogPath)
+    : existsSync(mergedCatalogPath)
+      ? readJson(mergedCatalogPath)
+      : {};
   return {
     commit: git(root, ["rev-parse", "HEAD"]).trim(),
-    catalogDigest: validDigest(catalog.digest) ? catalog.digest : null,
+    catalogDigest: validDigest(catalog.catalogDigest)
+      ? catalog.catalogDigest
+      : validDigest(catalog.digest)
+        ? catalog.digest
+        : null,
     candidateDigests: {
       privateFull: receiptDigest("private-full"),
       publicCanvas: receiptDigest("public-canvas"),

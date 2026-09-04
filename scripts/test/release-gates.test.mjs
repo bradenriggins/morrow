@@ -89,6 +89,7 @@ test("candidate set receipts bind the final digest of every profile", () => {
   const root = mkdtempSync(resolve(tmpdir(), "morrow-release-set-"));
   try {
     mkdirSync(resolve(root, "config"), { recursive: true });
+    mkdirSync(resolve(root, "artifacts/canvas-api"), { recursive: true });
     const packageBytes = Buffer.from('{"name":"morrow-test","version":"1.0.0-rc.0"}\n');
     writeFileSync(resolve(root, "package.json"), packageBytes);
     writeFileSync(resolve(root, "config/release-profiles.json"), JSON.stringify({
@@ -98,6 +99,9 @@ test("candidate set receipts bind the final digest of every profile", () => {
         "private-full": { visibility: "private", include: ["package.json"], exclude: [] },
         "public-canvas": { visibility: "private", include: ["package.json"], exclude: [] },
       },
+    }));
+    writeFileSync(resolve(root, "artifacts/canvas-api/canvas-api-catalog.json"), JSON.stringify({
+      catalogDigest: "e".repeat(64),
     }));
     execFileSync("git", ["init", "-q"], { cwd: root });
     execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
@@ -134,6 +138,7 @@ test("candidate set receipts bind the final digest of every profile", () => {
       publicCanvas: receipts[1].packageDigest,
     };
     for (const receipt of receipts) {
+      assert.equal(receipt.externalReceipts.binding.catalogDigest, "e".repeat(64));
       assert.deepEqual(receipt.externalReceipts.binding.candidateDigests, expected);
       assert.deepEqual(receipt.promotionReceipts.binding.candidateDigests, expected);
       assert.deepEqual(receipt.zeroTolerance.binding.candidateDigests, expected);
