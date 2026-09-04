@@ -11,6 +11,7 @@ import {
   installMorrowClient,
   MORROW_CLIENT_SCOPES,
   SUPPORTED_MORROW_CLIENTS,
+  writeLocalCanvasConfig,
   writeClientConfigBundle,
   type ClientConfigBundleOptions,
   type MorrowClientScope,
@@ -25,7 +26,8 @@ interface SharedOptions extends ClientConfigBundleOptions {
 function usage(): string {
   return [
     "Usage:",
-    "  morrow mcp install <codex|claude|gemini> --upstreams <absolute-path> [--scope project] [options]",
+    "  morrow setup [--repository <path>] [--force] [--json]",
+    "  morrow mcp install <codex|claude|claude-desktop|gemini> [--scope project|user] [options]",
     "  morrow doctor --json [--upstreams <absolute-path>] [--repository <path>]",
     "  morrow profile show [--json] [--upstreams <absolute-path>]",
     "  morrow catalog stats [--json] [--repository <path>]",
@@ -161,7 +163,8 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
 
 function requireUpstreams(options: SharedOptions): ClientConfigBundleOptions {
   const upstreamConfigPath = options.upstreamConfigPath
-    || (process.env.MORROW_UPSTREAMS_FILE ? resolve(process.env.MORROW_UPSTREAMS_FILE) : "");
+    || (process.env.MORROW_UPSTREAMS_FILE ? resolve(process.env.MORROW_UPSTREAMS_FILE) : "")
+    || (existsSync(resolve(options.repositoryRoot, "morrow.upstreams.json")) ? resolve(options.repositoryRoot, "morrow.upstreams.json") : "");
   if (!upstreamConfigPath) throw new Error("--upstreams is required when MORROW_UPSTREAMS_FILE is not set");
   const { outputDirectory: _outputDirectory, force: _force, ...bundle } = options;
   return { ...bundle, upstreamConfigPath };
@@ -170,7 +173,7 @@ function requireUpstreams(options: SharedOptions): ClientConfigBundleOptions {
 function exactClient(value: string | undefined): SupportedMorrowClient {
   const normalized = value === "claude" ? "claude-code" : value === "gemini" ? "gemini-cli" : value;
   if (!(SUPPORTED_MORROW_CLIENTS as readonly string[]).includes(String(normalized))) {
-    throw new Error("client must be codex, claude, or gemini");
+    throw new Error("client must be codex, claude, claude-desktop, or gemini");
   }
   return normalized as SupportedMorrowClient;
 }
@@ -202,7 +205,8 @@ async function doctor(options: SharedOptions): Promise<Record<string, unknown>> 
   const repositoryRoot = resolve(options.repositoryRoot);
   const serverEntryPath = options.serverEntryPath || resolve(repositoryRoot, "packages/mcp-server/dist/index.js");
   const upstreamConfigPath = options.upstreamConfigPath
-    || (process.env.MORROW_UPSTREAMS_FILE ? resolve(process.env.MORROW_UPSTREAMS_FILE) : "");
+    || (process.env.MORROW_UPSTREAMS_FILE ? resolve(process.env.MORROW_UPSTREAMS_FILE) : "")
+    || resolve(repositoryRoot, "morrow.upstreams.json");
   const upstreamConfigExists = Boolean(upstreamConfigPath) && existsSync(upstreamConfigPath);
   let runtime: Record<string, unknown> = {
     attempted: false,
@@ -278,22 +282,23 @@ function profileShow(options: SharedOptions): Record<string, unknown> {
 
 function catalogStats(repositoryRoot: string): Record<string, unknown> {
   const root = resolve(repositoryRoot);
-  const mergedPath = resolve(root, "artifacts/catalogs/merged-capabilities.json");
-  const parityPath = resolve(root, "artifacts/catalogs/parity-report.json");
-  const profilesPath = resolve(root, "artifacts/catalogs/profile-report.json");
-  for (const path of [mergedPath, parityPath, profilesPath]) {
-    if (!existsSync(path)) throw new Error(`catalog artifact does not exist: ${path}`);
-  }
-  const merged = readJson(mergedPath);
-  const parity = readJson(parityPath);
-  const profiles = readJson(profilesPath);
+  const catalogPath = resolve(root, "artifacts/canvas-api/canvas-api-catalog.json");
+  if (!existsSync(catalogPath)) throw new Error(`catalog artifact does not exist: ${catalogPath}`);
+  const catalog = readJson(catalogPath);
+  const counts = catalog.counts && typeof catalog.counts === "object" && !Array.isArray(catalog.counts)
+    ? catalog.counts as Record<string, unknown>
+    : {};
   return {
     schema: "morrow.catalog-stats.v1",
-    catalogDigest: merged.digest,
-    capabilityCount: Array.isArray(merged.capabilities) ? merged.capabilities.length : 0,
-    parityCounts: parity.counts,
-    heldProviderCount: parity.heldProviderCount,
-    profiles: profiles.counts,
+    catalogDigest: catalog.catalogDigest,
+    operationCount: counts.totalOperations || 0,
+    officialOperationCount: counts.officialOperations || 0,
+    browserSessionOperationCount: counts.browserSessionOperations || 0,
+    readCount: counts.reads || 0,
+    writeCount: counts.writes || 0,
+    newQuizzesOperationCount: counts.newQuizzesOperations || 0,
+    itemBankOperationCount: counts.itemBankOperations || 0,
+    source: catalog.source,
   };
 }
 
@@ -336,6 +341,23 @@ async function run(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === "--help") {
     process.stdout.write(usage());
+    return;
+  }
+
+  if (command === "setup") {
+    const { options, json } = parseSharedOptions(rest);
+    const configured = writeLocalCanvasConfig({
+      repositoryRoot: options.repositoryRoot,
+      ...(options.nodeCommand ? { nodeCommand: options.nodeCommand } : {}),
+      force: options.force,
+    });
+    emit({
+      schema: "morrow.setup.v1",
+      ...configured,
+      serverEntryPath: resolve(options.repositoryRoot, "packages/mcp-server/dist/index.js"),
+      installs: ["Morrow MCP", "Morrow Canvas Connector extension"],
+      credentialsCopied: false,
+    }, json);
     return;
   }
 

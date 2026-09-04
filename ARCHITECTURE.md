@@ -1,70 +1,152 @@
 # Architecture
 
-This file is an index. The accepted decisions live in the ADRs. Do not flatten ExamplePlatform and Morrow legacy into one implementation.
+Morrow is one local operations layer between an MCP-compatible AI client and a signed-in Canvas session.
 
-Morrow starts as a federation gateway. It wraps existing donor runtimes. It does not rewrite their capability implementations.
+```text
+ChatGPT/Codex, Claude, Gemini, or another MCP client
+                         |
+                         | stdio MCP
+                         v
+                  Morrow MCP server
+       catalog | policy | journal | batches | privacy
+                         |
+                         | authenticated loopback WebSocket
+                         v
+              Morrow Canvas Connector
+                         |
+                         | signed-in Chrome session
+                         v
+      Canvas API and New Quizzes Item Bank services
+```
 
-Browser-dependent Morrow legacy execution enters through one bounded local bridge. That bridge is a transport adapter. It is not a second Canvas client.
+The MCP client is replaceable. The browser session is replaceable. Morrow's operation IDs, approval rules, effect receipts, result envelope, batch records, and verification states stay stable.
 
-## ADR-001: Federated convergence
+## Component boundaries
 
-Record: [`docs/architecture/ADR-001-federated-convergence.md`](docs/architecture/ADR-001-federated-convergence.md)
+### Morrow MCP
 
-Status: accepted for the first implementation branch.
+The root stdio server is the only MCP endpoint a client installs.
 
-The new repository begins as an external MCP gateway over existing donor runtimes.
+It owns:
 
-- The gateway wraps those runtimes with the official TypeScript MCP SDK.
-- ExamplePlatform runs as an internal stdio MCP upstream through `ssh -T example-lms-vps`.
-- The gateway attests the frozen remote Git revision and tracked-clean state before launch.
-- The gateway requires the generated ExamplePlatform catalog count and digest before readiness.
-- Held provider tools are removed at the gateway boundary.
-- A new connection generation is issued after each successful reconnect.
-- Only failed read calls may reconnect and replay. A write with an ambiguous result is never replayed.
-- The existing Morrow capability catalog is exported from `example-legacy` through a deterministic donor-side inventory script.
-- The public-facing catalog is generated from connected sources.
-- A deterministic collision policy retains the higher-priority source name and assigns a stable source-prefixed alias to the other mapping.
-- MindTap and Connect names are removed before publication or registration.
-- The gateway never constructs Canvas routes.
-- The gateway never claims provider success on its own.
-- The upstream that owns a tool remains responsible for its current policy, dispatch, and readback behavior during convergence.
-- Result metadata records the exact upstream and catalog digest without exposing commands, credentials, or private paths.
-- A duplicate tool name is never silently dropped.
+- the generated, typed catalog;
+- profile and source selection;
+- canonical `morrow.result.v1` responses;
+- privacy projection and learner tokenization;
+- frozen write plans;
+- a local approval server;
+- the durable operation and effect journal;
+- encrypted batch manifests and child state;
+- result paging, diagnostics, and evidence.
 
-The first candidate is a federated system. It is not yet a standalone replacement for both donors. Source extraction can occur behind stable gateway contracts after the joined system is running.
+It does not own Canvas credentials. It cannot create its own human approval.
 
-## ADR-002: Authenticated local extension bridge
+### Canvas connector MCP
 
-Record: [`docs/architecture/ADR-002-local-extension-bridge.md`](docs/architecture/ADR-002-local-extension-bridge.md)
+The root server starts the Canvas connector as an internal stdio child. This child owns the authenticated loopback server on `127.0.0.1:32147`.
 
-Status: accepted for the private convergence profile.
+It validates:
 
-Scope: browser-dependent Morrow legacy execution.
+- the extension ID;
+- the catalog digest;
+- the connector revision;
+- the pairing secret;
+- the protocol version;
+- request ID and operation ID;
+- exact operation key;
+- source binding;
+- connection generation;
+- command expiry;
+- single-use outer effect receipt.
 
-- The existing Manifest V3 service worker opens a local WebSocket to a server bound only to `127.0.0.1`.
-- The bridge is a transport adapter over existing donor behavior.
-- The bridge owns no provider success state.
-- Reads go through the current donor execution runtime after the extension resolves one admitted live Canvas binding.
-- Writes do not execute from the bridge command. The extension creates one existing `stageChatTask` under the active persisted conversation.
-- There is no MCP tool that creates approval or invokes `runChatTaskAction`.
-- Each command is sent at most once. A lost response after send is unknown. The caller must inspect the task or provider state before a new request.
+The child is an implementation detail of the Morrow MCP installation. Users do not configure it as a second client server.
 
-A packed-extension and live-Canvas proof is still required before this profile is release-ready.
+### Chrome extension
 
-## Join words used by the ADRs
+The Manifest V3 extension initiates the loopback connection. It has no side panel and no chat interface.
 
-Use these words as the ADRs use them. Do not collapse the two donors.
+The extension owns:
 
-| Word | Meaning in this repository |
-|---|---|
-| wrap | The gateway is an external MCP surface over existing donor runtimes. |
-| import | The gateway imports typed tool lists from connected stdio upstreams. |
-| generate | The public catalog is generated from connected sources. |
-| delegate | The upstream that owns a tool remains responsible for policy, dispatch, and readback. |
-| bridge | Browser-dependent Morrow legacy execution enters through one authenticated loopback adapter. |
-| join | Later extraction occurs after the joined system is running, behind stable gateway contracts. |
+- local pairing;
+- exact-site optional permission;
+- current Canvas principal and course binding;
+- session-generation changes;
+- browser-session request transport;
+- CSRF handling;
+- Item Bank frame execution;
+- provider readback immediately after writes;
+- pairing and permission revocation.
 
-## Related records
+The production manifest has no blanket Canvas host permission. It asks for one HTTPS origin when the user connects a tab. It does not use cookie APIs, remote code, native messaging, or Chrome DevTools Protocol.
 
-- `docs/architecture/ADR-001-federated-convergence.md`
-- `docs/architecture/ADR-002-local-extension-bridge.md`
+## Catalog architecture
+
+`scripts/generate-canvas-api-catalog.mjs` builds one deterministic catalog from the current official Canvas API definitions and Morrow's explicit signed-browser Item Bank contract. The same generated file is embedded in the MCP connector and the extension.
+
+Each row contains:
+
+- one stable tool name and operation key;
+- method and path;
+- exact path, query, and body parameter mapping;
+- JSON Schema input contract;
+- read or write classification;
+- risk class;
+- capability family;
+- profile state;
+- dispatch and readback owner;
+- authority and privacy metadata.
+
+Startup refuses a digest mismatch. The loopback handshake refuses an extension with a different digest. No runtime route is invented from model text.
+
+## Read flow
+
+1. The AI client calls one generated read tool.
+2. Morrow validates the schema and selected profile.
+3. The connector validates the exact current Canvas binding.
+4. The extension executes the generated route in the signed-in session.
+5. The gateway projects and bounds the response.
+6. Morrow returns a canonical read result with source and catalog evidence.
+
+A disconnect during a safe read can fail or reconnect. It never changes write replay rules.
+
+## Write flow
+
+1. The AI client calls one generated write tool with an exact `source_binding_id`.
+2. Morrow freezes the public tool, provider route, arguments, target set, profile, account, principal, connection generation, catalog digest, risk, expiry, and readback comparator.
+3. Morrow records the plan durably and returns an operation ID, plan digest, and local approval URL.
+4. A person opens that URL. The page reads the durable plan directly and can approve once or cancel. MCP exposes no approval tool.
+5. `morrow_operation_dispatch` recomputes current authority and refuses stale approval, binding, profile, catalog, account, principal, or target state.
+6. The effect broker reserves one durable effect receipt before provider dispatch.
+7. The connector consumes that receipt once and sends one browser-session request.
+8. The connector performs the frozen fresh readback.
+9. Morrow records `verified`, `unconfirmed`, `failed`, or `applied_or_unknown` from evidence. It never maps an HTTP success alone to verified success.
+
+An uncertain send is not replayed. Reconciliation runs the readback only. Undo is a new planned and approved corrective operation.
+
+## New Quizzes and Item Banks
+
+Official New Quizzes operations use the documented `/quiz/v1` routes and request formats. New Quiz item create and update operations send complete JSON bodies so nested interaction and scoring structures remain intact.
+
+Item Bank endpoints are available only inside authenticated New Quizzes frames. The extension executes these requests in the page's main world. It validates the Canvas referrer origin and course before use. It strips token-like fields from returned values. The frame token never crosses into extension storage, the loopback protocol, MCP output, logs, or client configuration.
+
+All twelve Item Bank operations share the same schema, authority, approval, one-send, and readback rules as other Canvas operations.
+
+## Batch flow
+
+A batch freezes one exact child operation for each target. Write batches use one complete loopback approval page, but each child receives a separate grant and effect receipt. The scheduler applies bounded concurrency and rate policy. Child results settle independently.
+
+Batch state is durable in SQLite. Arguments and manifests use authenticated encryption. Restart recovery returns interrupted writes to inspection or readback. It does not infer success and does not send them again.
+
+## Trust boundaries
+
+- **AI client:** may choose and call tools; cannot approve.
+- **Morrow MCP:** may plan and reserve effects; has no Canvas secret.
+- **Approval page:** may approve only one exact, unexpired durable plan on loopback.
+- **Extension:** may use only paired commands, admitted operations, current bindings, and unused receipts.
+- **Chrome page:** owns the live Canvas and Item Bank secrets.
+- **Canvas:** is authoritative for final provider state.
+
+## Accepted decisions
+
+- [ADR-001: Standalone Canvas operations layer](docs/architecture/ADR-001-federated-convergence.md)
+- [ADR-002: Authenticated Chrome session connector](docs/architecture/ADR-002-local-extension-bridge.md)

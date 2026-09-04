@@ -11,6 +11,8 @@ artifacts/catalogs/*.json
 artifacts/catalogs/*.md
 !artifacts/catalogs/.gitkeep
 artifacts/candidates/
+artifacts/connector/
 artifacts/release/
+output/
 .DS_Store
 Thumbs.db

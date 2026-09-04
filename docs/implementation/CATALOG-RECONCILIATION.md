@@ -1,68 +1,46 @@
-# Donor catalog capture and reconciliation
+# Canvas catalog generation
 
-Checkpoint B converts both donor tool surfaces into deterministic source catalogs and produces a reviewable mapping report. It does not choose semantic aliases from names alone and it does not make an unexecutable donor catalog publicly callable.
+Morrow uses one deterministic standalone Canvas catalog. It does not merge live donor registries at runtime.
 
-## Artifact contract
-
-Every source catalog uses `morrow.source-catalog.v1` and contains:
-
-- source id, label, kind, repository, revision, and capture timestamp;
-- a duplicate-free sorted tool list;
-- input and optional output schemas;
-- standard MCP annotations;
-- a digest that excludes the capture timestamp so two identical captures compare equal.
-
-Raw upstream `_meta` is not admitted to a source catalog.
-
-## Capture ExamplePlatform
-
-Configure `morrow.upstreams.json`, then run:
+## Generate
 
 ```bash
-pnpm catalog:capture
+pnpm catalog:export
 ```
 
-To capture only ExamplePlatform:
+The generator reads the public Canvas API definition index, retrieves each advertised resource definition, normalizes the operations, adds the explicit Item Bank bridge contract, and writes:
+
+- `artifacts/canvas-api/canvas-api-catalog.json`;
+- `connector/extension/generated/canvas-api-catalog.json`.
+
+Both files must be byte-identical.
+
+## Validate
 
 ```bash
-MORROW_CAPTURE_SOURCE=meridian pnpm catalog:capture
+pnpm catalog:merge
+pnpm catalog:check
+pnpm morrow catalog stats --json
 ```
 
-The default output is `artifacts/catalogs/meridian.live.json`.
+Validation proves:
 
-## Export Morrow legacy
+- stable ordering and byte-identical regeneration;
+- unique operation keys and MCP tool names;
+- exact decimal-string schemas for 64-bit Canvas IDs;
+- an explicit read or write risk class;
+- an explicit profile state;
+- an explicit connector route and readback owner;
+- no enabled MindTap or Connect prefix;
+- matching MCP and extension catalog digests;
+- all twelve Item Bank operations are present.
 
-```bash
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
-```
+## Drift behavior
 
-The exporter requires the pinned donor commit by default and records the live callable Canvas surface before writing `artifacts/catalogs/example-legacy.canvas.json`. It refuses tracked changes in a worktree donor, or verifies each imported source blob against the pinned commit when the donor uses a bare Git metadata directory. The PDF's 270-row estimate is a baseline exception; the pinned live registry currently exposes 284 callable tools.
+The catalog records the provider source digest and last-modified value. A provider definition change changes the Morrow catalog digest. Startup and extension pairing refuse mismatched digests.
 
-## Reconcile
+Generated definitions are reviewed input, not unchecked authority. Any unsupported schema shape or missing request location must block the affected row until the generator has an explicit sanitation rule.
 
-```bash
-pnpm catalog:reconcile -- \
-  --source artifacts/catalogs/meridian.live.json \
-  --source artifacts/catalogs/example-legacy.canvas.json \
-  --aliases config/catalog-aliases.proposed.json \
-  --output artifacts/catalogs/reconciliation.json
-```
+## Discovery
 
-The report separates:
-
-- exact-name compatible contracts;
-- exact-name contract drift;
-- explicit cross-name alias groups;
-- source-only tools;
-- selected mappings that can be automated;
-- unresolved rows that require a human source and behavior decision.
-
-An exact-name or alias row with different input or output contracts receives `contract_drift`, `selected: null`, and `reviewRequired: true`. Source priority cannot override contract drift.
-
-## Proposed aliases
-
-`config/catalog-aliases.proposed.json` contains the first five repository-supported naming hypotheses for pages and modules. They are proposals, not accepted mappings. Reconciliation fails if any referenced tool is absent, and a proposed mapping remains unresolved when the schemas differ.
-
-## Publication rule
-
-Catalog artifacts are ignored build outputs. They prove what a donor exposed at a revision. They do not grant permission to copy source, descriptions, private policy, fixtures, or provider methods into a public release.
+The gateway can register the complete catalog because the default limit is 2,000 tools. Clients should still use `morrow_catalog_search` and bounded catalog pages instead of loading or guessing the full surface in a prompt.

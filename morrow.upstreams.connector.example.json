@@ -1,0 +1,45 @@
+{
+  "schema": "morrow.upstreams.v1",
+  "profile": "private-full",
+  "upstreams": [
+    {
+      "id": "canvas-session",
+      "label": "Morrow Canvas Connector",
+      "kind": "mcp-stdio",
+      "command": "node",
+      "args": ["packages/canvas-connector-mcp/dist/index.js"],
+      "cwd": ".",
+      "env": {
+        "MORROW_CANVAS_CATALOG_PATH": "artifacts/canvas-api/canvas-api-catalog.json"
+      },
+      "sourceDisposition": "direct_owned",
+      "priority": 200,
+      "required": true,
+      "enabled": true,
+      "outputPrivacy": {},
+      "outputPrivacyDefault": {
+        "allowedFields": [],
+        "fieldPolicy": "scrub-sensitive",
+        "dataClass": "learner",
+        "maxRecords": 10000,
+        "maxBytes": 2000000,
+        "freeText": "allow",
+        "learnerTokens": true,
+        "artifactInspection": "deny",
+        "aiClientAdmission": "allow"
+      }
+    }
+  ],
+  "sourcePolicy": { "requireAttestation": false },
+  "publicationPolicy": { "requiredForPublicProfile": true },
+  "filters": { "excludePrefixes": ["mindtap_", "connect_"], "excludeNames": [] },
+  "operationJournal": { "path": ".morrow/morrow.sqlite3" },
+  "batchScheduler": { "maxConcurrentWindows": 1 },
+  "privacy": {
+    "canvasOrigin": "browser-session",
+    "account": "local-browser-account",
+    "principal": "local-browser-principal",
+    "learnerVaultPath": ".morrow/learner-vault.json"
+  },
+  "maxCatalogTools": 2000
+}

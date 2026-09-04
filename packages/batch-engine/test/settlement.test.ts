@@ -90,6 +90,22 @@ describe("BatchSourceSettlementStore", () => {
     })).toBe("inspection_required");
   });
 
+  it("settles a directly verified connector child without a second approval task", () => {
+    const store = new BatchSourceSettlementStore({ path: ":memory:" });
+    store.initialize("bat:connector-1234", [
+      { childId: "course:42", sourceId: "canvas-session", sourceBindingId: "canvas:principal:g1" },
+    ]);
+    store.markDirectVerified("bat:connector-1234", "course:42", "op:verified-12345678");
+    expect(store.summary("bat:connector-1234")).toMatchObject({ outcome: "succeeded", succeeded: 1, terminal: true });
+    expect(store.get("bat:connector-1234", "course:42")).toMatchObject({
+      sourceTaskId: null,
+      stageGatewayOperationId: "op:verified-12345678",
+      verificationStatus: "verified",
+      resultCounts: { done: 1 },
+    });
+    store.close();
+  });
+
   it("refuses task identity substitution", () => {
     const store = new BatchSourceSettlementStore({ path: ":memory:" });
     store.initialize("bat:test-5678", [

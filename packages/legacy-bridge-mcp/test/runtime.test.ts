@@ -64,7 +64,7 @@ async function startRuntime(): Promise<LegacyBridgeRuntime> {
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
     token,
     extensionId,
-    donorRevision: revision,
+    runtimeRevision: revision,
     catalogDigest: catalog.digest,
     bindings: [{ sourceBindingId: "binding-42", provider: "canvas", courseId: "42", runtimeVerified: true }],
     sentAt: Date.now(),

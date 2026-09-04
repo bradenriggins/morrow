@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Morrow Canvas Connector",
+  "description": "Connect signed-in Canvas sessions to the local Morrow MCP. No Canvas credentials leave Chrome.",
+  "version": "1.0.0",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxKPzBjXyxPr9Ldo6wKJCdBhHje1uXWrm+i1YeziYR0bUge+rH27V6+zGDVRyoLWyID2aNOofpCcBjqIVRH9JjhL8s7RxQa7mrIh6eM3aIEJ2xdaJA3HhNQ6/0QPCU22t64s0dvrkm12uqSJtMnYk0TjFbtKi7nLd1/KDMTPnpH3XWXNp8uRomqu+T0SGVugZNsOlFwOUSy2RMWAILdObolRJbncEILELdhxDjnQMEa7cumWbk2jhAA8nRXANNMo6ljZjmTmiDELAghDKX+wvbXmdkGve8Ns/UbLQi7rb9hSX/XrC5ZM0KpWwThukOBn9gcltxe23EFbqWnVHwqM/hwIDAQAB",
+  "minimum_chrome_version": "116",
+  "permissions": ["activeTab", "alarms", "scripting", "storage", "tabs", "webNavigation"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": {
+    "service_worker": "src/service-worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Morrow Canvas Connector",
+    "default_popup": "popup/popup.html"
+  }
+}

@@ -158,9 +158,11 @@ function normalizeBatchArguments(
   sourceBindingId: string,
 ): JsonObject {
   const args = structuredClone(rawArguments);
-  if (mapping.upstreamId !== "example-legacy") {
+  const bridgeControlled = mapping.upstreamId === "example-legacy"
+    || mapping.capability?.route.backend === "canvas-connector";
+  if (!bridgeControlled) {
     if (args._morrow !== undefined || sourceBindingId) {
-      throw new Error("_morrow routing controls apply only to Morrow legacy tools");
+      throw new Error("_morrow routing controls apply only to browser-bridge tools");
     }
     return args;
   }
@@ -174,6 +176,11 @@ function normalizeBatchArguments(
     ...(sourceBindingId ? { source_binding_id: sourceBindingId } : {}),
   };
   return args;
+}
+
+function browserBridgeControlled(mapping: CatalogTool): boolean {
+  return mapping.upstreamId === "example-legacy"
+    || mapping.capability?.route.backend === "canvas-connector";
 }
 
 function sourceBindingIdFromStoredArguments(value: JsonObject): string | undefined {
@@ -288,7 +295,7 @@ function childResult(
     };
   }
 
-  if (batch.mode === "stage_writes" && !sourceTaskId) {
+  if (batch.mode === "stage_writes" && !sourceTaskId && gatewayOperationState !== "verified") {
     return {
       state: "unknown",
       resultDigest,
@@ -528,21 +535,45 @@ export class MorrowRuntime {
     };
   }
 
-  health(): JsonObject {
+  async health(): Promise<JsonObject> {
     const gateway = this.gateway.health();
     const source = (id: string) => gateway.sources.find((entry) => entry.id === id) || null;
-    const meridian = source("meridian");
-    const legacy = source("example-legacy");
+    const connectorSourceId = this.gateway.catalog.tools.find((tool) => tool.capability?.route.backend === "canvas-connector")?.upstreamId;
+    const connector = connectorSourceId ? source(connectorSourceId) : null;
+    let connectorRuntime: JsonObject | null = null;
+    if (connector && this.gateway.catalog.tools.some((tool) => tool.publicName === "morrow_canvas_connector_health")) {
+      try {
+        const inspected = await this.gateway.callSourceOwned("morrow_canvas_connector_health", {});
+        const structured = isJsonObject(inspected.structuredContent) ? inspected.structuredContent : {};
+        connectorRuntime = structured.schema === "morrow.canvas-connector.health.v1"
+          ? structured
+          : isJsonObject(structured.data) ? structured.data : null;
+      } catch {
+        connectorRuntime = null;
+      }
+    }
+    const bridge = connectorRuntime && isJsonObject(connectorRuntime.bridge)
+      ? connectorRuntime.bridge
+      : null;
+    const extensionConnected = bridge?.connected === true;
     const batchLedger = this.batchHealth();
     const effectBroker = this.gateway.effectHealth();
     return {
       ...gateway,
+      ready: gateway.ready && (!connector || extensionConnected),
       components: {
         gateway: { ready: gateway.ready, version: gateway.version },
-        meridian: meridian || { connected: false, reason: "not_configured" },
-        morrowKernel: legacy || { connected: false, reason: "not_configured" },
-        extensionBridge: legacy
-          ? { connected: legacy.connected, catalogAttested: legacy.catalogAttested !== false }
+        morrowKernel: { ready: gateway.ready, effectBroker, batchLedger },
+        canvasConnector: connector
+          ? {
+              processConnected: connector.connected,
+              ready: connectorRuntime?.ready === true,
+              catalogAttested: connector.catalogAttested !== false,
+              ...(connectorRuntime || {}),
+            }
+          : { processConnected: false, ready: false, reason: "not_configured" },
+        extensionBridge: connector
+          ? bridge || { connected: false, reason: "health_unavailable" }
           : { connected: false, reason: "not_configured" },
         effectBroker,
         batchLedger,
@@ -568,9 +599,9 @@ export class MorrowRuntime {
       if (input.mode === "read_only" && !readOnly) {
         throw new Error(`read_only batch cannot include ${mapping.publicName}`);
       }
-      if (input.mode === "stage_writes" && (readOnly || mapping.upstreamId !== "example-legacy")) {
+      if (input.mode === "stage_writes" && (readOnly || !browserBridgeControlled(mapping))) {
         throw new Error(
-          `stage_writes batch currently accepts only Morrow legacy write tools; ${mapping.publicName} is not eligible`,
+          `stage_writes batch accepts browser-bridge write tools; ${mapping.publicName} is not eligible`,
         );
       }
       if (input.mode === "stage_writes" && !sourceBindingId) {
@@ -670,7 +701,7 @@ export class MorrowRuntime {
         ? { approvalUrl: `${this.approval.baseUrl}/batches/${encodeURIComponent(detail.batch.batchId)}` }
         : {}),
       note: input.mode === "stage_writes"
-        ? "A human must approve the exact frozen batch on the loopback page. Running it then reserves each outer effect before staging donor tasks. Provider success remains separate until fresh reconciliation."
+        ? "A human must approve the exact frozen batch on the loopback page. Running it then reserves and dispatches each provider effect once. Success requires connector-owned fresh readback for every child."
         : "Running this batch performs bounded read-only operations.",
     };
   }
@@ -835,6 +866,12 @@ export class MorrowRuntime {
                   ? { taskStatus: outcome.sourceResultState }
                   : {}),
               });
+            } else if (outcome.state === "succeeded" && outcome.gatewayOperationId && outcome.gatewayOperationState === "verified") {
+              this.sourceSettlements.markDirectVerified(
+                batch.batchId,
+                child.childId,
+                outcome.gatewayOperationId,
+              );
             } else {
               this.sourceSettlements.markDispatchResult(
                 batch.batchId,
@@ -874,7 +911,7 @@ export class MorrowRuntime {
       ...(result.batch.mode === "stage_writes"
         ? {
             providerOutcomeFinal: sourceSettlement.terminal,
-            note: "Batch orchestration state reports whether task staging finished. sourceSettlement reports the separately reconciled provider outcome.",
+            note: "Batch state records bounded orchestration. sourceSettlement records each provider effect and its independent verification result.",
           }
         : { providerOutcomeFinal: result.batch.state === "completed" }),
     } as unknown as JsonObject;
@@ -907,11 +944,6 @@ export class MorrowRuntime {
       };
     }
 
-    const inspectionTool = sourceTool(
-      this.gateway,
-      "example-legacy",
-      "morrow_legacy_task_get",
-    );
     const offset = Math.max(0, Math.trunc(input.offset ?? 0));
     const maxChildren = Math.max(1, Math.min(Math.trunc(input.maxChildren ?? 50), 500));
     const page = this.sourceSettlements.list(input.batchId, offset, maxChildren);
@@ -919,6 +951,29 @@ export class MorrowRuntime {
       settlement.sourceTaskId
       && (input.includeTerminal === true || !STABLE_SOURCE_SETTLEMENT_STATES.has(settlement.state))
     ));
+
+    if (candidates.length === 0) {
+      const sourceSettlement = this.sourceSettlements.summary(input.batchId);
+      return {
+        schema: "morrow.batch-reconciliation.v1",
+        batch,
+        sourceSettlementBefore,
+        sourceSettlement,
+        offset,
+        scanned: page.length,
+        processed: 0,
+        nextOffset: offset + page.length < sourceSettlement.total ? offset + page.length : null,
+        settlements: [],
+        problems: [],
+        providerOutcomeFinal: sourceSettlement.terminal,
+      };
+    }
+
+    const inspectionTool = sourceTool(
+      this.gateway,
+      "example-legacy",
+      "morrow_legacy_task_get",
+    );
 
     const reconciled = await mapLimit(candidates, Math.min(batch.concurrency, 4), async (settlement) => {
       const result = await this.gateway.callSourceOwned(inspectionTool.publicName, {

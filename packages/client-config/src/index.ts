@@ -21,6 +21,7 @@ import { sha256Text } from "@morrow/contracts";
 export const SUPPORTED_MORROW_CLIENTS = Object.freeze([
   "codex",
   "claude-code",
+  "claude-desktop",
   "gemini-cli",
 ] as const);
 export type SupportedMorrowClient = typeof SUPPORTED_MORROW_CLIENTS[number];
@@ -69,6 +70,12 @@ export interface InstalledMorrowClient {
   readonly client: SupportedMorrowClient;
   readonly scope: MorrowClientScope;
   readonly path: string;
+  readonly changed: boolean;
+}
+
+export interface LocalCanvasConfiguration {
+  readonly path: string;
+  readonly extensionPath: string;
   readonly changed: boolean;
 }
 
@@ -276,7 +283,7 @@ function readme(input: {
   return [
     `Morrow client bundle for ${input.serverName}`,
     "",
-    "This directory contains local configuration snippets. It does not contain Canvas credentials, donor tokens, bridge tokens, or provider session data.",
+    "This directory contains local configuration snippets. It does not contain Canvas credentials, connector tokens, cookies, or provider session data.",
     "",
     `Repository: ${input.repositoryRoot}`,
     `Upstream configuration: ${input.upstreamConfigPath}`,
@@ -284,6 +291,7 @@ function readme(input: {
     "Files:",
     "- codex.config.toml: merge into user or project Codex configuration.",
     "- claude.mcp.json: merge the mcpServers entry into Claude Code configuration.",
+    "- claude-desktop.config.json: merge the mcpServers entry into the Claude desktop chat configuration.",
     "- gemini.settings.json: merge the mcpServers entry into Gemini CLI settings.",
     "- install.posix.sh and install.powershell.ps1: project-scope registration commands for Claude Code and Gemini CLI. Use morrow mcp install for all supported clients.",
     "- verify.txt: client-neutral verification sequence.",
@@ -298,15 +306,16 @@ function verificationText(serverName: string): string {
     `Verification sequence for ${serverName}`,
     "",
     "1. Build Morrow with pnpm build.",
-    "2. Confirm the configured donor processes and the legacy bridge can start.",
-    "3. Connect the client and call morrow_health.",
-    "4. Confirm ready=true, expected source counts, source attestations, and catalog identity.",
-    "5. Call morrow_catalog with a narrow query before choosing a tool.",
-    "6. Run one read-only operation and inspect morrow_operation_get.",
-    "7. For a write, confirm that the source reports a staged task rather than provider success.",
-    "8. Approve only through the separate Morrow user interface.",
-    "9. Use morrow_batch_reconcile or the source readback tool before stating provider success.",
-    "10. Never repeat a write whose operation state is source_unknown or inspection_required.",
+    "2. Install the Morrow Canvas Connector extension and pair it with the local MCP.",
+    "3. Open one signed-in Canvas course in Chrome and connect that exact account in the extension popup.",
+    "4. Connect the AI client and call morrow_health.",
+    "5. Confirm ready=true, the connector is connected, and the catalog identity matches.",
+    "6. Call morrow_catalog with a narrow query before choosing a tool.",
+    "7. Run one read-only operation.",
+    "8. For a write, inspect the frozen plan and open its local approval URL.",
+    "9. Approve only on the separate loopback approval page.",
+    "10. Dispatch once and require connector-owned fresh readback before stating success.",
+    "11. Never repeat a write whose operation state is source_unknown or inspection_required.",
     "",
   ].join("\n");
 }
@@ -366,6 +375,7 @@ export function buildClientConfigBundle(
       toolTimeoutSeconds,
     })),
     file("claude.mcp.json", claudeConfig(shared)),
+    file("claude-desktop.config.json", claudeConfig(shared)),
     file("gemini.settings.json", geminiConfig({
       ...shared,
       timeoutMilliseconds: geminiTimeoutMilliseconds,
@@ -423,6 +433,81 @@ function writePrivateText(path: string, content: string): void {
   safeChmod(path, 0o600);
 }
 
+export function buildLocalCanvasConfig(
+  repositoryRootValue: string,
+  nodeCommandValue: string = process.execPath,
+): Record<string, unknown> {
+  const repositoryRoot = exactAbsolutePath(repositoryRootValue, "repositoryRoot");
+  const nodeCommand = exactCommand(nodeCommandValue);
+  return {
+    schema: "morrow.upstreams.v1",
+    profile: "private-full",
+    upstreams: [{
+      id: "canvas-session",
+      label: "Morrow Canvas Connector",
+      kind: "mcp-stdio",
+      command: nodeCommand,
+      args: [resolve(repositoryRoot, "packages/canvas-connector-mcp/dist/index.js")],
+      cwd: repositoryRoot,
+      env: {
+        MORROW_CANVAS_CATALOG_PATH: resolve(repositoryRoot, "artifacts/canvas-api/canvas-api-catalog.json"),
+      },
+      sourceDisposition: "direct_owned",
+      priority: 200,
+      required: true,
+      enabled: true,
+      outputPrivacy: {},
+      outputPrivacyDefault: {
+        allowedFields: [],
+        fieldPolicy: "scrub-sensitive",
+        dataClass: "learner",
+        maxRecords: 10_000,
+        maxBytes: 2_000_000,
+        freeText: "allow",
+        learnerTokens: true,
+        artifactInspection: "deny",
+        aiClientAdmission: "allow",
+      },
+    }],
+    sourcePolicy: { requireAttestation: false },
+    publicationPolicy: { requiredForPublicProfile: false },
+    filters: { excludePrefixes: ["mindtap_", "connect_"], excludeNames: [] },
+    operationJournal: { path: resolve(repositoryRoot, ".morrow/morrow.sqlite3") },
+    batchScheduler: { maxConcurrentWindows: 1 },
+    privacy: {
+      canvasOrigin: "browser-session",
+      account: "local-browser-account",
+      principal: "local-browser-principal",
+      learnerVaultPath: resolve(repositoryRoot, ".morrow/learner-vault.json"),
+    },
+    maxCatalogTools: 2_000,
+  };
+}
+
+export function writeLocalCanvasConfig(input: {
+  readonly repositoryRoot: string;
+  readonly path?: string;
+  readonly nodeCommand?: string;
+  readonly force?: boolean;
+}): LocalCanvasConfiguration {
+  const repositoryRoot = exactAbsolutePath(input.repositoryRoot, "repositoryRoot");
+  const path = input.path ? exactAbsolutePath(input.path, "configuration path") : resolve(repositoryRoot, "morrow.upstreams.json");
+  const extensionPath = resolve(repositoryRoot, "connector/extension");
+  for (const [candidate, label] of [
+    [resolve(repositoryRoot, "packages/mcp-server/dist/index.js"), "Morrow MCP server"],
+    [resolve(repositoryRoot, "packages/canvas-connector-mcp/dist/index.js"), "Canvas connector MCP"],
+    [resolve(repositoryRoot, "artifacts/canvas-api/canvas-api-catalog.json"), "Canvas API catalog"],
+    [resolve(extensionPath, "manifest.json"), "Chrome connector extension"],
+  ] as const) assertRegularFile(candidate, label);
+  const content = jsonFile(buildLocalCanvasConfig(repositoryRoot, input.nodeCommand));
+  if (existsSync(path)) {
+    if (readFileSync(path, "utf8") === content) return { path, extensionPath, changed: false };
+    if (input.force !== true) throw new Error(`Refusing to replace existing Morrow configuration at ${path}`);
+  }
+  writePrivateText(path, content);
+  return { path, extensionPath, changed: true };
+}
+
 function exactScope(scope: MorrowClientScope | undefined): MorrowClientScope {
   const value = scope || "project";
   if (!(MORROW_CLIENT_SCOPES as readonly string[]).includes(value)) {
@@ -433,7 +518,7 @@ function exactScope(scope: MorrowClientScope | undefined): MorrowClientScope {
 
 function exactClient(client: SupportedMorrowClient): SupportedMorrowClient {
   if (!(SUPPORTED_MORROW_CLIENTS as readonly string[]).includes(client)) {
-    throw new TypeError("client must be codex, claude-code, or gemini-cli");
+    throw new TypeError("client must be codex, claude-code, claude-desktop, or gemini-cli");
   }
   return client;
 }
@@ -447,6 +532,12 @@ function installPath(
   switch (client) {
     case "codex": return join(root, ".codex", "config.toml");
     case "claude-code": return scope === "project" ? join(root, ".mcp.json") : join(root, ".claude.json");
+    case "claude-desktop": {
+      if (scope !== "user") throw new TypeError("Claude desktop chat supports only --scope user");
+      if (process.platform === "darwin") return join(root, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+      if (process.platform === "win32" && process.env.APPDATA) return join(process.env.APPDATA, "Claude", "claude_desktop_config.json");
+      throw new TypeError("Claude desktop chat installation is supported on macOS and Windows");
+    }
     case "gemini-cli": return join(root, ".gemini", "settings.json");
   }
 }
@@ -458,6 +549,7 @@ function serverEntry(
 ): Record<string, unknown> {
   const name = client === "codex" ? "codex.config.toml"
     : client === "claude-code" ? "claude.mcp.json"
+      : client === "claude-desktop" ? "claude-desktop.config.json"
       : "gemini.settings.json";
   const content = bundle.files.find((entry) => entry.path === name)?.content;
   if (!content) throw new Error(`Morrow did not generate ${name}`);
@@ -543,12 +635,16 @@ export function buildClientParityReport(options: ClientConfigBundleOptions): Cli
     realClientExecution: "not_run",
     scenarios: [
       "health",
-      "catalog",
-      "read_operation",
-      "invalid_input",
-      "cancel_before_dispatch",
-      "large_result_page",
-      "operation_inspection",
+      "catalog_search",
+      "canvas_read",
+      "write_plan",
+      "approval_required_response",
+      "separate_approval",
+      "single_dispatch",
+      "fresh_verification",
+      "batch_start",
+      "batch_status_and_paged_results",
+      "report_export",
     ],
     clients,
   };

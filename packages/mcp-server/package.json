@@ -31,6 +31,10 @@
     "zod": "^4.2.0"
   },
   "devDependencies": {
-    "@modelcontextprotocol/client": "2.0.0"
+    "@modelcontextprotocol/client": "2.0.0",
+    "@morrow/bridge-protocol": "workspace:*",
+    "@morrow/canvas-api-catalog": "workspace:*",
+    "@types/ws": "^8.18.1",
+    "ws": "^8.18.3"
   }
 }

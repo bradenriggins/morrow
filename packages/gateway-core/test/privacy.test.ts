@@ -150,4 +150,25 @@ describe("privacy output boundary", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   });
+
+  it("scrubs learner and credential fields while retaining complete course objects", () => {
+    const vault = new LearnerVault(":memory:");
+    const result = normalize({
+      structuredContent: {
+        course: { id: "42", name: "Biology", workflow_state: "available" },
+        user: { id: "17", name: "Ada Lovelace", email: "ada@example.test", role: "Teacher" },
+        access_token: "never-return-this",
+      },
+    }, {
+      descriptor: { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive", freeText: "allow" },
+      learnerVault: vault,
+      learnerScope: scope,
+    });
+    expect(result.structuredContent).toMatchObject({
+      course: { id: "42", name: "Biology", workflow_state: "available" },
+      user: { learnerToken: expect.stringMatching(/^learner_/), role: "Teacher" },
+    });
+    expect(JSON.stringify(result)).not.toContain("never-return-this");
+    expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
+  });
 });

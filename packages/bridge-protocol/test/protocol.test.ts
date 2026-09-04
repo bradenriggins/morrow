@@ -24,7 +24,7 @@ describe("bridge protocol", () => {
       protocolVersion: BRIDGE_PROTOCOL_VERSION,
       token: "x".repeat(48),
       extensionId: "a".repeat(32),
-      donorRevision: "revision-1",
+      runtimeRevision: "revision-1",
       catalogDigest: digest,
       bindings: [],
       sentAt: 1,

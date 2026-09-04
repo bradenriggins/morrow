@@ -6,7 +6,7 @@ import {
   type Transport,
 } from "@modelcontextprotocol/server";
 
-const MAX_WIRE_MESSAGE_BYTES = 1_000_000;
+const MAX_WIRE_MESSAGE_BYTES = 16 * 1024 * 1024;
 
 export class StrictStdioServerTransport implements Transport {
   onclose?: () => void;

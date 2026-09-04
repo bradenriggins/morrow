@@ -34,7 +34,7 @@ async function connect(server: LoopbackBridgeServer): Promise<WebSocket> {
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
     token,
     extensionId,
-    donorRevision: revision,
+    runtimeRevision: revision,
     catalogDigest: digest,
     bindings: [{
       sourceBindingId: "canvas-course-42",
@@ -71,10 +71,43 @@ function commandHandler(socket: WebSocket, handler: (command: BridgeCommand) => 
 }
 
 describe("LoopbackBridgeServer", () => {
+  it("pairs one exact Chrome extension without copying the local token", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      port: 0,
+      pairingEnabled: true,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const origin = `chrome-extension://${extensionId}`;
+    const created = await fetch(`http://${address.host}:${address.port}${address.path}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ extensionId, catalogDigest: digest, runtimeRevision: revision }),
+    });
+    expect(created.status).toBe(201);
+    const pairing = await created.json() as { approvalUrl: string; statusUrl: string };
+    const decision = await fetch(`${pairing.approvalUrl}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: "decision=approve",
+      redirect: "manual",
+    });
+    expect(decision.status).toBe(303);
+    const status = await fetch(pairing.statusUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ extensionId }),
+    });
+    expect(await status.json()).toMatchObject({ status: "approved", token });
+  });
+
   it("authenticates a Chrome extension and routes one command exactly once", async () => {
     const server = new LoopbackBridgeServer({
       token,
-      expectedDonorRevision: revision,
+      expectedRuntimeRevision: revision,
       expectedCatalogDigest: digest,
       allowedExtensionIds: [extensionId],
       port: 0,
@@ -92,6 +125,7 @@ describe("LoopbackBridgeServer", () => {
     const result = await server.invoke({
       kind: "invoke_read",
       toolName: "list_pages",
+      operationKey: "GET /v1/courses/{course_id}/pages#list_pages",
       arguments: { course_id: "42" },
       sourceBindingId: "canvas-course-42",
     });
@@ -103,7 +137,7 @@ describe("LoopbackBridgeServer", () => {
   it("does not resend a timed-out command", async () => {
     const server = new LoopbackBridgeServer({
       token,
-      expectedDonorRevision: revision,
+      expectedRuntimeRevision: revision,
       expectedCatalogDigest: digest,
       allowedExtensionIds: [extensionId],
       port: 0,
@@ -130,7 +164,7 @@ describe("LoopbackBridgeServer", () => {
   it("accepts a gateway outer effect receipt once", async () => {
     const server = new LoopbackBridgeServer({
       token,
-      expectedDonorRevision: revision,
+      expectedRuntimeRevision: revision,
       expectedCatalogDigest: digest,
       allowedExtensionIds: [extensionId],
       port: 0,
@@ -150,9 +184,26 @@ describe("LoopbackBridgeServer", () => {
       dispatchAttempt: 1 as const,
       gatewayProcessId: "gateway:12345678",
     };
-    await server.invoke({ kind: "stage_write", toolName: "edit_page", outerGrant });
-    await expect(server.invoke({ kind: "stage_write", toolName: "edit_page", outerGrant }))
+    await server.invoke({ kind: "invoke_write", toolName: "edit_page", operationKey: "PUT /v1/pages/{url}#edit_page", outerGrant });
+    await expect(server.invoke({ kind: "invoke_write", toolName: "edit_page", operationKey: "PUT /v1/pages/{url}#edit_page", outerGrant }))
       .rejects.toBeInstanceOf(BridgeOutcomeUnknownError);
     expect(calls).toBe(1);
+  });
+
+  it("refuses a connector write without a gateway outer grant", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    await connect(server);
+    await expect(server.invoke({
+      kind: "invoke_write",
+      toolName: "edit_page",
+      operationKey: "PUT /v1/pages/{url}#edit_page",
+    })).rejects.toThrow("outer grant");
   });
 });

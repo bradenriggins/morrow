@@ -26,6 +26,7 @@ export const BRIDGE_SCHEMAS = Object.freeze({
 
 export type BridgeCommandKind =
   | "invoke_read"
+  | "invoke_write"
   | "stage_write"
   | "task_get"
   | "bindings_get";
@@ -36,6 +37,8 @@ export interface BridgeBinding {
   readonly courseId?: string;
   readonly courseName?: string;
   readonly origin?: string;
+  readonly principalFingerprint?: string;
+  readonly sessionGeneration?: number;
   readonly runtimeVerified: boolean;
   readonly lastSeenAt?: number;
 }
@@ -45,7 +48,7 @@ export interface BridgeHello {
   readonly protocolVersion: typeof BRIDGE_PROTOCOL_VERSION;
   readonly token: string;
   readonly extensionId: string;
-  readonly donorRevision: string;
+  readonly runtimeRevision: string;
   readonly catalogDigest: string;
   readonly bindings: readonly BridgeBinding[];
   readonly sentAt: number;
@@ -67,6 +70,7 @@ export interface BridgeCommand {
   readonly operationId: string;
   readonly kind: BridgeCommandKind;
   readonly toolName?: string;
+  readonly operationKey?: string;
   readonly arguments?: JsonObject;
   readonly sourceBindingId?: string;
   readonly taskId?: string;
@@ -195,6 +199,13 @@ function parseBinding(value: unknown): BridgeBinding {
       throw new TypeError("origin must be one canonical HTTPS origin");
     }
   }
+  const principalFingerprint = optionalString(value.principalFingerprint, "principalFingerprint", 64);
+  if (principalFingerprint && !HEX_SHA256.test(principalFingerprint)) {
+    throw new TypeError("principalFingerprint must be a SHA-256 digest");
+  }
+  const sessionGeneration = value.sessionGeneration === undefined
+    ? undefined
+    : requiredInteger(value.sessionGeneration, "sessionGeneration", 1);
   if (typeof value.runtimeVerified !== "boolean") {
     throw new TypeError("runtimeVerified must be boolean");
   }
@@ -209,6 +220,8 @@ function parseBinding(value: unknown): BridgeBinding {
       ? { courseName: value.courseName.trim().slice(0, 300) }
       : {}),
     ...(origin ? { origin } : {}),
+    ...(principalFingerprint ? { principalFingerprint } : {}),
+    ...(sessionGeneration !== undefined ? { sessionGeneration } : {}),
     runtimeVerified: value.runtimeVerified,
     ...(lastSeenAt !== undefined ? { lastSeenAt } : {}),
   };
@@ -266,7 +279,7 @@ export function parseBridgeHello(value: unknown): BridgeHello {
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
     token,
     extensionId,
-    donorRevision: requiredString(value.donorRevision, "donorRevision", 160),
+    runtimeRevision: requiredString(value.runtimeRevision, "runtimeRevision", 160),
     catalogDigest,
     bindings: normalizeBridgeBindings(value.bindings),
     sentAt: requiredInteger(value.sentAt, "sentAt"),

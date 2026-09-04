@@ -156,7 +156,9 @@ function withSourceOperationId(
   readonly idempotencyKey?: string;
 } {
   const forwarded = structuredClone(args) as Record<string, unknown>;
-  if (mapping.upstreamId !== "example-legacy") {
+  const bridgeControlled = mapping.upstreamId === "example-legacy"
+    || mapping.capability?.route.backend === "canvas-connector";
+  if (!bridgeControlled) {
     delete forwarded._morrow;
     return { forwarded };
   }
@@ -231,6 +233,35 @@ function resultComparable(value: JsonObject): JsonObject {
     content: Array.isArray(value.content) ? structuredClone(value.content) : [],
     isError: value.isError === true,
   };
+}
+
+function isCanvasConnector(mapping: CatalogTool): boolean {
+  return mapping.capability?.route.backend === "canvas-connector";
+}
+
+function connectorReadback(mapping: CatalogTool, request: JsonObject): FrozenReadbackPlan {
+  const policy = {
+    schema: "morrow.connector-readback-policy.v1",
+    source: mapping.upstreamId,
+    tool: mapping.publicName,
+    sourceTool: mapping.upstreamName,
+    requestDigest: sha256Json(request),
+  };
+  return {
+    tool: "morrow_connector_embedded_readback",
+    arguments: policy,
+    expectedDigest: sha256Json(policy),
+  };
+}
+
+function connectorVerification(value: JsonObject): JsonObject | null {
+  const connector = isJsonObject(value.structuredContent) ? value.structuredContent : null;
+  if (!connector || connector.schema !== "morrow.canvas-connector.result.v1" || connector.ok !== true) return null;
+  const browser = isJsonObject(connector.result) ? connector.result : null;
+  const verification = browser && isJsonObject(browser.verification) ? browser.verification : null;
+  if (!verification || verification.schema !== "morrow.browser-verification.v1") return null;
+  if (!new Set(["verified", "mismatch", "unconfirmed"]).has(String(verification.status))) return null;
+  return structuredClone(verification);
 }
 
 function attachOperationMeta(
@@ -872,7 +903,13 @@ export class GatewayRuntime {
       });
     }
     try {
-      const controls = outerOperationControls(args);
+      const supplied = outerOperationControls(args);
+      if (isCanvasConnector(mapping) && !legacyRouting(supplied.request).sourceBindingId) {
+        throw new TypeError("Canvas connector writes require one exact source_binding_id from morrow_canvas_bindings");
+      }
+      const controls: OuterOperationControls = supplied.readback || !isCanvasConnector(mapping)
+        ? supplied
+        : { ...supplied, readback: connectorReadback(mapping, supplied.request) };
       if (!controls.readback) {
         return canonicalMorrowResult({
           tool: publicName,
@@ -937,7 +974,7 @@ export class GatewayRuntime {
       return this.effectResult(settled, "dispatch_failed");
     }
     const forwarded = structuredClone(reserved.forwardedRequest) as Record<string, unknown>;
-    if (mapping.upstreamId === "example-legacy") {
+    if (mapping.upstreamId === "example-legacy" || mapping.capability?.route.backend === "canvas-connector") {
       forwarded._morrow = {
         ...(isJsonObject(forwarded._morrow) ? forwarded._morrow : {}),
         operation_id: reserved.sourceOperationId || reserved.operationId,
@@ -993,6 +1030,24 @@ export class GatewayRuntime {
       innerApprovalRequired,
     });
     if (settled.state === "awaiting_verification") {
+      if (isCanvasConnector(mapping)) {
+        const verification = connectorVerification(result) || {
+          schema: "morrow.browser-verification.v1",
+          status: "unconfirmed",
+          reason: "connector_verification_missing",
+        };
+        const verified = verification.status === "verified";
+        const readbackSettled = this.effects.recordReadback(
+          settled.operationId,
+          sha256Json(verification),
+          verified,
+        );
+        return this.effectResult(
+          readbackSettled,
+          verified ? "verified_readback" : "readback_unconfirmed",
+          result,
+        );
+      }
       return this.verifyOperation(settled.operationId);
     }
     return this.effectResult(settled, "dispatched", result);
@@ -1235,9 +1290,11 @@ export class GatewayRuntime {
       : typeof args.courseId === "string" ? args.courseId : "unbound";
     const descriptor = this.config.upstreams.find((upstreamConfig) => (
       upstreamConfig.id === mapping.upstreamId
-    ))?.outputPrivacy[mapping.upstreamName];
+    ));
+    const outputPrivacy = descriptor?.outputPrivacy[mapping.upstreamName]
+      || descriptor?.outputPrivacyDefault;
     const privacy = {
-      descriptor,
+      descriptor: outputPrivacy,
       learnerVault: this.learnerVault,
       learnerScope: {
         canvasOrigin: this.config.privacy.canvasOrigin,

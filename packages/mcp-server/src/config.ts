@@ -22,6 +22,7 @@ const RemoteRelativePath = z.string().min(1).max(300).refine((value) => (
 
 const OutputPrivacyDescriptorSchema = z.object({
   allowedFields: z.array(z.string().min(1).max(160)).max(100).default([]),
+  fieldPolicy: z.enum(["allow-listed", "scrub-sensitive"]).default("allow-listed"),
   dataClass: z.enum(["public", "course", "learner"]).default("public"),
   maxRecords: z.number().int().min(0).max(10_000).default(0),
   maxBytes: z.number().int().min(0).max(10_000_000).default(0),
@@ -120,6 +121,7 @@ const StdioUpstreamSchema = z.object({
   sourceDisposition: z.enum(SOURCE_DISPOSITIONS).default("private_runtime_dependency"),
   attestation: LocalGitAttestationSchema.optional(),
   outputPrivacy: z.record(z.string().min(1).max(160), OutputPrivacyDescriptorSchema).default({}),
+  outputPrivacyDefault: OutputPrivacyDescriptorSchema.optional(),
   priority: z.number().int().default(0),
   required: z.boolean().default(true),
   enabled: z.boolean().default(true),
@@ -151,6 +153,7 @@ const ExamplePlatformSshUpstreamSchema = z.object({
   required: z.boolean().default(true),
   enabled: z.boolean().default(true),
   outputPrivacy: z.record(z.string().min(1).max(160), OutputPrivacyDescriptorSchema).default({}),
+  outputPrivacyDefault: OutputPrivacyDescriptorSchema.optional(),
 });
 
 const UpstreamSchema = z.discriminatedUnion("kind", [
@@ -193,7 +196,7 @@ const GatewayConfigSchema = z.object({
     principal: "local-principal",
     learnerVaultPath: ".morrow/learner-vault.json",
   }),
-  maxCatalogTools: z.number().int().positive().max(5000).default(1000),
+  maxCatalogTools: z.number().int().positive().max(5000).default(2000),
 });
 
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
@@ -471,8 +474,53 @@ export async function loadGatewayConfig(
     );
   }
 
+  const connectorEntry = resolve(workingDirectory, "packages/canvas-connector-mcp/dist/index.js");
+  const catalogPath = resolve(workingDirectory, "artifacts/canvas-api/canvas-api-catalog.json");
+  if (existsSync(connectorEntry) && existsSync(catalogPath)) {
+    return parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "private-full",
+      upstreams: [{
+        id: "canvas-session",
+        label: "Morrow Canvas Connector",
+        kind: "mcp-stdio",
+        command: process.execPath,
+        args: [connectorEntry],
+        cwd: workingDirectory,
+        env: { MORROW_CANVAS_CATALOG_PATH: catalogPath },
+        sourceDisposition: "direct_owned",
+        priority: 200,
+        required: true,
+        enabled: true,
+        outputPrivacy: {},
+        outputPrivacyDefault: {
+          allowedFields: [],
+          fieldPolicy: "scrub-sensitive",
+          dataClass: "learner",
+          maxRecords: 10_000,
+          maxBytes: 2_000_000,
+          freeText: "allow",
+          learnerTokens: true,
+          artifactInspection: "deny",
+          aiClientAdmission: "allow",
+        },
+      }],
+      sourcePolicy: { requireAttestation: false },
+      publicationPolicy: { requiredForPublicProfile: false },
+      filters: { excludePrefixes: ["mindtap_", "connect_"], excludeNames: [] },
+      operationJournal: { path: resolve(workingDirectory, ".morrow/morrow.sqlite3") },
+      batchScheduler: { maxConcurrentWindows: 1 },
+      privacy: {
+        canvasOrigin: "browser-session",
+        account: "local-browser-account",
+        principal: "local-browser-principal",
+        learnerVaultPath: resolve(workingDirectory, ".morrow/learner-vault.json"),
+      },
+      maxCatalogTools: 2_000,
+    }, environment);
+  }
+
   throw new Error(
-    `No upstream configuration found at ${path}. Copy a meridian SSH upstream example `
-      + "to morrow.upstreams.json.",
+    `No Morrow configuration found at ${path}. Run pnpm build, then run morrow setup.`,
   );
 }

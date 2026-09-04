@@ -341,7 +341,7 @@ export class ProviderEffectBroker {
       preservedFields: ["all_unspecified_fields"],
       targetSet: { count: 1, digest: authority.targetSetDigest },
       risk: { approvalClass: authority.approvalClass },
-      requestCost: { providerRequests: 1 },
+      requestCost: { providerRequests: readback ? 2 : 1 },
       ...(input.sourceBindingId ? { sourceBindingId: identifier(input.sourceBindingId, "source binding id") } : {}),
       ...(readback ? { readback } : {}),
       undo: { supported: false, reason: "no_frozen_pre_state_or_correction_payload" },

@@ -126,7 +126,9 @@ describe("outer provider effects", () => {
       expect(typeof url).toBe("string");
       const view = await fetch(url as string);
       const body = await view.text();
-      expect(body).toContain("Morrow approval");
+      expect(body).toContain("Review this operation");
+      expect(body).toContain("The AI cannot select either action");
+      expect(body).toContain("Show complete frozen plan");
       const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
       const cookie = view.headers.get("set-cookie")?.split(";", 1)[0];
       expect(nonce).toBeTruthy();
@@ -154,6 +156,7 @@ describe("outer provider effects", () => {
         body: new URLSearchParams({ nonce: validNonce! }),
       });
       expect(approval.status).toBe(200);
+      expect(await approval.text()).toContain("Canvas has not changed yet");
       expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "approved" });
     } finally {
       await runtime.close();

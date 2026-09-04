@@ -881,8 +881,8 @@ export class DurableBatchStore {
     if (input.mode === "read_only" && normalized.some((child) => !child.readOnly)) {
       throw new TypeError("read_only batches may contain only read-only children");
     }
-    if (input.mode === "stage_writes" && normalized.some((child) => child.readOnly || child.sourceId !== "example-legacy")) {
-      throw new TypeError("stage_writes batches currently require Morrow legacy write children only");
+    if (input.mode === "stage_writes" && normalized.some((child) => child.readOnly)) {
+      throw new TypeError("stage_writes batches may contain only write children");
     }
     const now = this.instant();
     const courseSet = resolveBatchCourseSet(input.courseSet || {

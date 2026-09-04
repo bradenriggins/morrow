@@ -1,36 +1,46 @@
-# ADR-001: Assemble Morrow as a federation gateway before extraction
+# ADR-001: Standalone Canvas operations layer
 
-- Status: accepted for the first implementation branch
-- Date: 2026-09-03
+- Status: accepted
+- Date: 2026-09-04
 - Owners: Braden Riggins and the Morrow maintainers
 
 ## Decision
 
-The new Morrow repository begins as an external MCP gateway over existing donor runtimes rather than a rewrite of their capability implementations.
+Morrow will ship as one standalone local MCP server with one directly owned Chrome session connector.
 
-The gateway uses the official TypeScript MCP SDK. ExamplePlatform runs as an internal stdio MCP upstream. The existing Morrow capability catalog is exported from `example-legacy` through a deterministic donor-side inventory script. Browser-dependent Morrow execution will enter through one bounded bridge in a later checkpoint.
+The external server uses the official TypeScript MCP SDK. It generates its Canvas catalog from current provider definitions and an explicit Item Bank contract. It owns the operation journal, approval service, effect broker, batch engine, privacy boundary, result envelope, client configuration, and evidence.
 
-The public-facing catalog is generated from connected sources. A deterministic collision policy retains the higher-priority source name and assigns a stable source-prefixed alias to the other mapping. MindTap and Connect names are removed before publication or registration.
+The runtime has no dependency on legacy Morrow, ExamplePlatform, their extensions, their user interfaces, their repositories, or an SSH service.
 
 ## Reasons
 
-1. ExamplePlatform already provides a typed MCP surface with provider authority below the protocol layer.
-2. Morrow already contains broad Canvas definitions, planners, approval data, readback logic, privacy controls, workflow state, and multi-course operations.
-3. Reimplementing these systems before proving the external gateway would discard working behavior and create two new semantic authorities.
-4. The gateway gives Codex, Claude Code, Gemini CLI, and other MCP clients one entry point immediately.
-5. Source extraction can occur behind stable gateway contracts after the joined system is running.
+1. Users need the same operations layer from any MCP-compatible chat interface.
+2. Most Canvas users cannot obtain an institution-wide OAuth developer key.
+3. A signed-in Chrome session is available to the user and can enforce the user's existing Canvas permissions.
+4. Browser-session transport supports regular Canvas APIs and authenticated New Quizzes Item Bank frames without exporting credentials.
+5. One direct execution path removes double approval, donor drift, private deployment requirements, and ambiguous ownership.
+6. Durable plan, approval, effect, verification, batch, privacy, and failure contracts remain useful independent of their earlier implementations.
 
 ## Runtime rules
 
-- The gateway never constructs Canvas routes.
-- The gateway never claims provider success on its own.
-- The upstream that owns a tool remains responsible for its current policy, dispatch, and readback behavior during convergence.
-- Result metadata records the exact upstream and catalog digest without exposing commands, credentials, or private paths.
-- A duplicate tool name is never silently dropped.
-- Held provider prefixes are filtered before tools are registered.
+- One stdio MCP endpoint serves every supported client.
+- The connector is the only Canvas transport in the default profile.
+- The catalog is generated and digest-bound.
+- Each row has an explicit profile, authority, privacy, route, and verification disposition.
+- Reads execute only through a current runtime-verified binding.
+- Writes plan first and require separate local approval.
+- The model cannot approve an operation.
+- Each approved effect can dispatch once.
+- Provider readback, not dispatch response, determines verified success.
+- Ambiguous writes are never replayed automatically.
+- Batches retain child-level truth across pause, failure, uncertainty, and restart.
+- Credentials and browser tokens never cross the connector boundary.
+- MindTap and Connect are not registered or callable.
 
 ## Consequences
 
-The first candidate is a federated system, not yet a standalone replacement for both donors. This is intentional. Each later extraction must preserve the external tool contract and pass parity tests before the gateway mapping changes.
+A user installs Morrow MCP and the Morrow Canvas Connector. The user can then use Morrow from ChatGPT/Codex, Claude, Gemini, or another compatible client without changing Canvas authentication.
 
-A final public release still requires source-rights review, public-safe fixtures, provider authorization, and removal of private donor dependencies from the distributable profile.
+The source tree may retain historical comparison fixtures until removal is safe. They are not part of the default runtime or public Canvas package. No product claim depends on them.
+
+A stable public release still requires source-rights review, provider-policy review, independent reproduction, and explicit publication authorization. These are distribution gates, not runtime dependencies.

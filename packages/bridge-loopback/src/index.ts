@@ -1,4 +1,4 @@
-import { createServer, type Server as HttpServer } from "node:http";
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import {
@@ -23,7 +23,7 @@ import {
   type BridgeReady,
   type BridgeResult,
 } from "@morrow/bridge-protocol";
-import type { JsonObject } from "@morrow/contracts";
+import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 
 const LOOPBACK_HOST = "127.0.0.1";
@@ -34,7 +34,7 @@ const EXTENSION_ORIGIN = /^chrome-extension:\/\/([a-p]{32})$/;
 
 export interface LoopbackBridgeOptions {
   readonly token: string;
-  readonly expectedDonorRevision: string;
+  readonly expectedRuntimeRevision: string;
   readonly expectedCatalogDigest: string;
   readonly allowedExtensionIds?: readonly string[];
   readonly port?: number;
@@ -42,11 +42,14 @@ export interface LoopbackBridgeOptions {
   readonly callTimeoutMs?: number;
   readonly heartbeatMs?: number;
   readonly allowMissingOriginForTests?: boolean;
+  readonly pairingEnabled?: boolean;
+  readonly onPairApproved?: (extensionId: string) => void | Promise<void>;
 }
 
 export interface BridgeInvocation {
   readonly kind: BridgeCommandKind;
   readonly toolName?: string;
+  readonly operationKey?: string;
   readonly arguments?: JsonObject;
   readonly sourceBindingId?: string;
   readonly taskId?: string;
@@ -64,7 +67,7 @@ export interface LoopbackBridgeHealth {
   readonly connected: boolean;
   readonly generation: number;
   readonly extensionId: string | null;
-  readonly donorRevision: string | null;
+  readonly runtimeRevision: string | null;
   readonly catalogDigest: string;
   readonly bindingCount: number;
   readonly pendingCount: number;
@@ -82,7 +85,7 @@ interface PendingRequest {
 interface ActiveClient {
   readonly socket: WebSocket;
   readonly extensionId: string;
-  readonly donorRevision: string;
+  readonly runtimeRevision: string;
   readonly catalogDigest: string;
   readonly generation: number;
   readonly connectedAt: number;
@@ -90,9 +93,17 @@ interface ActiveClient {
   lastSeenAt: number;
 }
 
+interface PairingRequest {
+  readonly pairingId: string;
+  readonly extensionId: string;
+  readonly createdAt: number;
+  readonly expiresAt: number;
+  status: "pending" | "approved" | "denied";
+}
+
 export class BridgeUnavailableError extends Error {
   readonly code = "bridge_unavailable";
-  constructor(message = "The Morrow legacy extension bridge is not connected.") {
+  constructor(message = "The Morrow Canvas connector is not connected.") {
     super(message);
     this.name = "BridgeUnavailableError";
   }
@@ -164,15 +175,18 @@ function send(socket: WebSocket, message: BridgeReady | BridgeCommand | BridgePi
 
 export class LoopbackBridgeServer {
   private readonly expectedToken: Buffer;
-  private readonly expectedDonorRevision: string;
+  private readonly expectedRuntimeRevision: string;
   private readonly expectedCatalogDigest: string;
-  private readonly allowedExtensionIds: ReadonlySet<string>;
+  private readonly allowedExtensionIds: Set<string>;
   private readonly requestedPort: number;
   private readonly authTimeoutMs: number;
   private readonly callTimeoutMs: number;
   private readonly heartbeatMs: number;
   private readonly allowMissingOriginForTests: boolean;
+  private readonly pairingEnabled: boolean;
+  private readonly onPairApproved: ((extensionId: string) => void | Promise<void>) | undefined;
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly pairingRequests = new Map<string, PairingRequest>();
   private readonly usedOuterEffectReceipts = new Set<string>();
   private readonly httpServer: HttpServer;
   private readonly webSocketServer: WebSocketServer;
@@ -184,9 +198,9 @@ export class LoopbackBridgeServer {
 
   constructor(options: LoopbackBridgeOptions) {
     this.expectedToken = tokenBytes(options.token);
-    this.expectedDonorRevision = String(options.expectedDonorRevision || "").trim();
+    this.expectedRuntimeRevision = String(options.expectedRuntimeRevision || "").trim();
     this.expectedCatalogDigest = String(options.expectedCatalogDigest || "").trim();
-    if (!this.expectedDonorRevision) throw new TypeError("expectedDonorRevision is required");
+    if (!this.expectedRuntimeRevision) throw new TypeError("expectedRuntimeRevision is required");
     if (!/^[0-9a-f]{64}$/.test(this.expectedCatalogDigest)) {
       throw new TypeError("expectedCatalogDigest must be a SHA-256 digest");
     }
@@ -200,11 +214,10 @@ export class LoopbackBridgeServer {
     this.callTimeoutMs = exactTimeout(options.callTimeoutMs, DEFAULT_CALL_TIMEOUT_MS, "callTimeoutMs");
     this.heartbeatMs = exactTimeout(options.heartbeatMs, DEFAULT_HEARTBEAT_MS, "heartbeatMs");
     this.allowMissingOriginForTests = options.allowMissingOriginForTests === true;
+    this.pairingEnabled = options.pairingEnabled === true;
+    this.onPairApproved = options.onPairApproved;
 
-    this.httpServer = createServer((request, response) => {
-      response.writeHead(404, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end(JSON.stringify({ error: "not_found" }));
-    });
+    this.httpServer = createServer((request, response) => void this.handleHttp(request, response));
     this.webSocketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_BRIDGE_MESSAGE_BYTES });
     this.httpServer.on("upgrade", (request, socket, head) => {
       const host = request.headers.host || `${LOOPBACK_HOST}:${this.requestedPort}`;
@@ -235,6 +248,152 @@ export class LoopbackBridgeServer {
     this.webSocketServer.on("connection", (socket, request) => {
       this.acceptUnauthenticated(socket, originExtensionId(request.headers.origin));
     });
+  }
+
+  private responseHeaders(contentType: string, origin?: string): Record<string, string> {
+    return {
+      "content-type": contentType,
+      "cache-control": "no-store",
+      "x-content-type-options": "nosniff",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+      ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
+    };
+  }
+
+  private json(response: ServerResponse, status: number, value: unknown, origin?: string): void {
+    response.writeHead(status, this.responseHeaders("application/json; charset=utf-8", origin));
+    response.end(JSON.stringify(value));
+  }
+
+  private prunePairings(now = Date.now()): void {
+    for (const [pairingId, request] of this.pairingRequests) {
+      if (request.expiresAt <= now) this.pairingRequests.delete(pairingId);
+    }
+  }
+
+  private async requestBody(request: IncomingMessage): Promise<unknown> {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for await (const chunk of request) {
+      const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += bytes.length;
+      if (total > 16_384) throw new RangeError("request body is too large");
+      chunks.push(bytes);
+    }
+    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+  }
+
+  private pairingOrigin(request: IncomingMessage): { origin: string; extensionId: string } | null {
+    const origin = String(request.headers.origin || "").trim();
+    const extensionId = originExtensionId(origin);
+    return extensionId ? { origin, extensionId } : null;
+  }
+
+  private pairingUrl(path: string): string {
+    if (this.listeningPort === null) throw new Error("bridge is not listening");
+    return `http://${LOOPBACK_HOST}:${this.listeningPort}${path}`;
+  }
+
+  private pairingPage(request: PairingRequest): string {
+    const extension = request.extensionId.replace(/[<>&"']/g, "");
+    const status = request.status === "pending"
+      ? `<form method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Approve connector</button><button class="secondary" name="decision" value="deny">Deny</button></form>`
+      : `<p class="settled">This pairing request is ${request.status}.</p>`;
+    return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Pair Morrow Canvas Connector</title><style>body{margin:0;background:#0b0d10;color:#f4f6f8;font:16px/1.5 ui-sans-serif,system-ui;display:grid;min-height:100vh;place-items:center}.card{width:min(560px,calc(100vw - 40px));background:#141820;border:1px solid #2b3440;border-radius:20px;padding:32px;box-shadow:0 24px 80px #0008}h1{font-size:25px;margin:0 0 12px}p{color:#b8c2ce}.identity{font:13px ui-monospace,monospace;background:#0b0d10;padding:12px;border-radius:10px;overflow-wrap:anywhere}form{display:flex;gap:12px;margin-top:24px}button{border:0;border-radius:10px;background:#78e08f;color:#07110a;font-weight:750;padding:12px 18px;cursor:pointer}.secondary{background:#2a313d;color:#f4f6f8}.settled{color:#78e08f}</style><body><main class="card"><h1>Connect Morrow to Chrome</h1><p>This allows the local Morrow MCP to use Canvas sessions from this extension. Canvas credentials stay inside Chrome.</p><p class="identity">Extension ${extension}</p>${status}</main></body></html>`;
+  }
+
+  private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const host = String(request.headers.host || "");
+    if (!/^127\.0\.0\.1:\d+$/.test(host) || !this.pairingEnabled) {
+      this.json(response, 404, { error: "not_found" });
+      return;
+    }
+    const url = new URL(request.url || "/", `http://${host}`);
+    this.prunePairings();
+    if (request.method === "OPTIONS" && url.pathname.startsWith(`${BRIDGE_PATH}/pair`)) {
+      const identity = this.pairingOrigin(request);
+      if (!identity) return this.json(response, 403, { error: "extension_origin_required" });
+      response.writeHead(204, {
+        ...this.responseHeaders("application/json", identity.origin),
+        "access-control-allow-methods": "GET, POST, OPTIONS",
+        "access-control-allow-headers": "content-type",
+        "access-control-max-age": "600",
+      });
+      response.end();
+      return;
+    }
+    if (request.method === "POST" && url.pathname === `${BRIDGE_PATH}/pair`) {
+      const identity = this.pairingOrigin(request);
+      if (!identity) return this.json(response, 403, { error: "extension_origin_required" });
+      try {
+        const body = await this.requestBody(request);
+        if (!isJsonObject(body) || body.extensionId !== identity.extensionId
+          || body.catalogDigest !== this.expectedCatalogDigest
+          || body.runtimeRevision !== this.expectedRuntimeRevision) {
+          return this.json(response, 403, { error: "connector_identity_refused" }, identity.origin);
+        }
+        const pairingId = randomUUID();
+        const createdAt = Date.now();
+        const pairing: PairingRequest = { pairingId, extensionId: identity.extensionId, createdAt, expiresAt: createdAt + 10 * 60_000, status: "pending" };
+        this.pairingRequests.set(pairingId, pairing);
+        return this.json(response, 201, {
+          schema: "morrow.bridge.pairing.v1",
+          pairingId,
+          status: pairing.status,
+          approvalUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${pairingId}`),
+          statusUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${pairingId}/status`),
+          expiresAt: pairing.expiresAt,
+        }, identity.origin);
+      } catch {
+        return this.json(response, 400, { error: "invalid_request" }, identity.origin);
+      }
+    }
+    const match = new RegExp(`^${BRIDGE_PATH}/pair/([0-9a-f-]{36})(?:/(status|decision))?$`).exec(url.pathname);
+    if (!match) return this.json(response, 404, { error: "not_found" });
+    const pairing = this.pairingRequests.get(match[1]!);
+    if (!pairing) return this.json(response, 404, { error: "pairing_not_found" });
+    if (match[2] === "status" && (request.method === "GET" || request.method === "POST")) {
+      const identity = this.pairingOrigin(request);
+      if (!identity || identity.extensionId !== pairing.extensionId) return this.json(response, 403, { error: "extension_identity_refused" });
+      if (request.method === "POST") {
+        try {
+          const body = await this.requestBody(request);
+          if (!isJsonObject(body) || body.extensionId !== identity.extensionId) {
+            return this.json(response, 403, { error: "extension_identity_refused" }, identity.origin);
+          }
+        } catch {
+          return this.json(response, 400, { error: "invalid_request" }, identity.origin);
+        }
+      }
+      return this.json(response, 200, {
+        schema: "morrow.bridge.pairing-status.v1",
+        status: pairing.status,
+        expiresAt: pairing.expiresAt,
+        ...(pairing.status === "approved" ? { token: this.expectedToken.toString("utf8") } : {}),
+      }, identity.origin);
+    }
+    if (!match[2] && request.method === "GET") {
+      response.writeHead(200, this.responseHeaders("text/html; charset=utf-8"));
+      response.end(this.pairingPage(pairing));
+      return;
+    }
+    if (match[2] === "decision" && request.method === "POST") {
+      const origin = String(request.headers.origin || "");
+      if (origin && origin !== `http://${host}`) return this.json(response, 403, { error: "local_origin_required" });
+      const bytes: Buffer[] = [];
+      for await (const chunk of request) bytes.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const decision = new URLSearchParams(Buffer.concat(bytes).toString("utf8")).get("decision");
+      if (!['approve', 'deny'].includes(decision || "")) return this.json(response, 400, { error: "invalid_decision" });
+      pairing.status = decision === "approve" ? "approved" : "denied";
+      if (pairing.status === "approved") {
+        this.allowedExtensionIds.add(pairing.extensionId);
+        await this.onPairApproved?.(pairing.extensionId);
+      }
+      response.writeHead(303, { location: `${BRIDGE_PATH}/pair/${pairing.pairingId}`, "cache-control": "no-store" });
+      response.end();
+      return;
+    }
+    this.json(response, 405, { error: "method_not_allowed" });
   }
 
   async start(): Promise<{ host: typeof LOOPBACK_HOST; port: number; path: typeof BRIDGE_PATH }> {
@@ -284,7 +443,7 @@ export class LoopbackBridgeServer {
         }
         if (
           !constantTimeTokenEquals(this.expectedToken, hello.token)
-          || hello.donorRevision !== this.expectedDonorRevision
+          || hello.runtimeRevision !== this.expectedRuntimeRevision
           || hello.catalogDigest !== this.expectedCatalogDigest
           || (originId && hello.extensionId !== originId)
           || (this.allowedExtensionIds.size > 0 && !this.allowedExtensionIds.has(hello.extensionId))
@@ -317,7 +476,7 @@ export class LoopbackBridgeServer {
     this.active = {
       socket,
       extensionId: hello.extensionId,
-      donorRevision: hello.donorRevision,
+      runtimeRevision: hello.runtimeRevision,
       catalogDigest: hello.catalogDigest,
       generation,
       connectedAt,
@@ -405,6 +564,13 @@ export class LoopbackBridgeServer {
   async invoke(invocation: BridgeInvocation): Promise<BridgeResult> {
     const active = this.active;
     if (!active || active.socket.readyState !== WebSocket.OPEN) throw new BridgeUnavailableError();
+    const requiresBinding = ["invoke_read", "invoke_write"].includes(invocation.kind);
+    const selectedBinding = invocation.sourceBindingId
+      ? active.bindings.find((binding) => binding.sourceBindingId === invocation.sourceBindingId)
+      : active.bindings.length === 1 ? active.bindings[0] : undefined;
+    if (requiresBinding && (!selectedBinding || selectedBinding.runtimeVerified !== true)) {
+      throw new BridgeUnavailableError("The exact Canvas binding is unavailable or changed. Create a fresh plan from a current binding.");
+    }
     const now = Date.now();
     const timeoutMs = exactTimeout(invocation.timeoutMs, this.callTimeoutMs, "timeoutMs");
     const requestId = `bridge:${randomUUID()}`;
@@ -412,13 +578,19 @@ export class LoopbackBridgeServer {
     if (!/^[A-Za-z0-9_.:-]{8,160}$/.test(operationId)) {
       throw new TypeError("operationId has an invalid format");
     }
-    if (["invoke_read", "stage_write"].includes(invocation.kind) && !invocation.toolName) {
+    if (["invoke_read", "invoke_write", "stage_write"].includes(invocation.kind) && !invocation.toolName) {
       throw new TypeError(`${invocation.kind} requires toolName`);
+    }
+    if (["invoke_read", "invoke_write"].includes(invocation.kind) && !invocation.operationKey) {
+      throw new TypeError(`${invocation.kind} requires operationKey`);
     }
     if (invocation.kind === "task_get" && !invocation.taskId) {
       throw new TypeError("task_get requires taskId");
     }
-    if (invocation.kind === "stage_write" && invocation.outerGrant) {
+    if (invocation.kind === "invoke_write" && !invocation.outerGrant) {
+      throw new TypeError("invoke_write requires a gateway outer grant");
+    }
+    if (["invoke_write", "stage_write"].includes(invocation.kind) && invocation.outerGrant) {
       if (this.usedOuterEffectReceipts.has(invocation.outerGrant.effectReceiptId)) {
         throw new BridgeOutcomeUnknownError({
           schema: BRIDGE_SCHEMAS.command,
@@ -440,8 +612,9 @@ export class LoopbackBridgeServer {
       operationId,
       kind: invocation.kind,
       ...(invocation.toolName ? { toolName: invocation.toolName } : {}),
+      ...(invocation.operationKey ? { operationKey: invocation.operationKey } : {}),
       ...(invocation.arguments ? { arguments: structuredClone(invocation.arguments) } : {}),
-      ...(invocation.sourceBindingId ? { sourceBindingId: invocation.sourceBindingId } : {}),
+      ...(selectedBinding ? { sourceBindingId: selectedBinding.sourceBindingId } : invocation.sourceBindingId ? { sourceBindingId: invocation.sourceBindingId } : {}),
       ...(invocation.taskId ? { taskId: invocation.taskId } : {}),
       ...(invocation.outerGrant ? { outerGrant: structuredClone(invocation.outerGrant) } : {}),
       generation: active.generation,
@@ -483,7 +656,7 @@ export class LoopbackBridgeServer {
       connected: Boolean(active && active.socket.readyState === WebSocket.OPEN),
       generation: active?.generation || this.generation,
       extensionId: active?.extensionId || null,
-      donorRevision: active?.donorRevision || null,
+      runtimeRevision: active?.runtimeRevision || null,
       catalogDigest: this.expectedCatalogDigest,
       bindingCount: active?.bindings.length || 0,
       pendingCount: this.pending.size,

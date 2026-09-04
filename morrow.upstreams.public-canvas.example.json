@@ -10,26 +10,40 @@
   },
   "upstreams": [
     {
-      "id": "canvas-public-adapter",
-      "label": "Public Canvas adapter",
+      "id": "canvas-session",
+      "label": "Morrow Canvas Connector",
       "kind": "mcp-stdio",
-      "command": "${MORROW_PUBLIC_CANVAS_ADAPTER_COMMAND}",
-      "args": ["${MORROW_PUBLIC_CANVAS_ADAPTER_ENTRY}"],
-      "repository": "${MORROW_PUBLIC_CANVAS_ADAPTER_REPOSITORY}",
-      "revision": "${MORROW_PUBLIC_CANVAS_ADAPTER_REVISION}",
-      "sourceDisposition": "clean_reimplementation",
+      "command": "${MORROW_NODE_COMMAND:-node}",
+      "args": ["${MORROW_REPOSITORY_ROOT}/packages/canvas-connector-mcp/dist/index.js"],
+      "cwd": "${MORROW_REPOSITORY_ROOT}",
+      "env": {
+        "MORROW_CANVAS_CATALOG_PATH": "${MORROW_REPOSITORY_ROOT}/artifacts/canvas-api/canvas-api-catalog.json"
+      },
+      "repository": "example-owner/morrow",
+      "revision": "${MORROW_RELEASE_REVISION}",
+      "sourceDisposition": "direct_owned",
       "attestation": {
         "kind": "local-git",
-        "root": "${MORROW_PUBLIC_CANVAS_ADAPTER_ROOT}",
-        "expectedRevision": "${MORROW_PUBLIC_CANVAS_ADAPTER_REVISION}",
+        "root": "${MORROW_REPOSITORY_ROOT}",
+        "expectedRevision": "${MORROW_RELEASE_REVISION}",
         "requireTrackedClean": true,
-        "expectedToolCount": 1
+        "expectedToolCount": 1132
       },
-      "priority": 100,
+      "priority": 200,
       "required": true,
       "enabled": true,
-      "env": {},
-      "outputPrivacy": {}
+      "outputPrivacy": {},
+      "outputPrivacyDefault": {
+        "allowedFields": [],
+        "fieldPolicy": "scrub-sensitive",
+        "dataClass": "learner",
+        "maxRecords": 10000,
+        "maxBytes": 2000000,
+        "freeText": "allow",
+        "learnerTokens": true,
+        "artifactInspection": "deny",
+        "aiClientAdmission": "allow"
+      }
     }
   ],
   "filters": {
@@ -42,5 +56,11 @@
   "batchScheduler": {
     "maxConcurrentWindows": 1
   },
-  "maxCatalogTools": 1000
+  "privacy": {
+    "canvasOrigin": "browser-session",
+    "account": "local-browser-account",
+    "principal": "local-browser-principal",
+    "learnerVaultPath": ".morrow/learner-vault.json"
+  },
+  "maxCatalogTools": 2000
 }

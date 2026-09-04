@@ -3,9 +3,9 @@
   "release": "1.0.0-rc.0",
   "selections": [
     {
-      "publicName": "canvas_page_get",
-      "sourceId": "meridian",
-      "sourceToolName": "canvas_page_get"
+      "publicName": "canvas_show_page_courses",
+      "sourceId": "canvas-session",
+      "sourceToolName": "canvas_show_page_courses"
     }
   ]
 }

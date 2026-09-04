@@ -66,7 +66,7 @@ export class LegacyBridgeRuntime {
   static async start(config: LegacyBridgeConfig): Promise<LegacyBridgeRuntime> {
     const bridge = new LoopbackBridgeServer({
       token: config.token,
-      expectedDonorRevision: config.expectedRevision,
+      expectedRuntimeRevision: config.expectedRevision,
       expectedCatalogDigest: config.sourceCatalog.digest,
       allowedExtensionIds: config.allowedExtensionIds,
       port: config.port,
@@ -100,6 +100,7 @@ export class LegacyBridgeRuntime {
       const response = await this.bridge.invoke({
         kind,
         toolName: tool.name,
+        ...(kind === "invoke_read" ? { operationKey: `legacy:${tool.name}` } : {}),
         arguments: split.arguments,
         sourceBindingId: split.options.sourceBindingId,
         operationId: operationId(split.options.operationId),

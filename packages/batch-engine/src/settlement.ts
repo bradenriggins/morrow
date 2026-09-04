@@ -447,6 +447,29 @@ export class BatchSourceSettlementStore {
     });
   }
 
+  markDirectVerified(
+    batchIdValue: string,
+    childIdValue: string,
+    gatewayOperationId: string,
+  ): BatchSourceSettlementRecord {
+    const batchId = exactIdentifier(batchIdValue, "batch id");
+    const childId = exactIdentifier(childIdValue, "child id");
+    const gateway = exactIdentifier(gatewayOperationId, "gateway operation id");
+    const now = this.instant();
+    return this.transaction(() => {
+      this.get(batchId, childId);
+      this.database.prepare(`
+        UPDATE gateway_batch_source_settlements
+        SET state='succeeded', task_status='verified', task_outcome='succeeded',
+            verification_status='verified', done_count=1,
+            stage_gateway_operation_id=COALESCE(stage_gateway_operation_id, ?),
+            updated_at=?, checked_at=?, revision=revision+1
+        WHERE batch_id=? AND child_id=?
+      `).run(gateway, now, now, batchId, childId);
+      return this.get(batchId, childId);
+    });
+  }
+
   applyTaskProjection(
     batchIdValue: string,
     childIdValue: string,

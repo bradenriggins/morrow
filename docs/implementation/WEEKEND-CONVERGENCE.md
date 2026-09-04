@@ -1,70 +1,95 @@
 # Weekend convergence implementation
 
-This file records the current implementation against Revision 3 of the Morrow MCP V1.0 Weekend Example Plan.
+This record maps Revision 3 of the weekend plan to the standalone Morrow implementation.
 
-## Catalog and profiles
+The plan used donor wrapping as an allowed weekend method. The completed architecture extracted the required behavior into a directly owned MCP and Chrome connector. This exceeds the two-install product requirement without changing the plan's authority, durability, privacy, or evidence contracts.
 
-- `pnpm catalog:export` captures both pinned donors.
-- Morrow legacy contributes 284 source tools.
-- ExamplePlatform contributes 222 source tools through `ssh -T example-lms-vps`.
-- The 35 MindTap and Connect rows receive `rights_hold` and never enter routing.
-- The merged catalog contains 471 enabled capabilities.
-- Five reviewed alias rules select an explicit schema and route.
-- Every enabled capability has source, behavior, authority, route, profile, schema, and digest evidence.
-- Runtime profiles fail closed when their source or publication evidence is absent.
+## Product target
 
-## Runtime
+| Plan requirement | Current implementation |
+|---|---|
+| One MCP server | `@morrow-lms/gateway` is the only client-facing server. |
+| Generated catalog | 1,118 official Canvas operations plus 12 explicit Item Bank operations. |
+| Explicit row disposition | Every row has route, profile, authority, privacy, risk, and evidence metadata. |
+| Governed reads and writes | All generated calls pass through the Morrow result and authority boundary. |
+| Restart-safe cross-course work | SQLite operation and batch journals retain child truth and uncertain effects. |
+| Four client classes | Codex, Claude Code, Claude desktop chat, and Gemini CLI configs resolve to the same stdio server. |
+| Provider exclusion | MindTap and Connect are denied by catalog generation, gateway filters, and package scans. |
+| Private and public packages | Deterministic private/full and public/Canvas package profiles exist. |
+| Browser-only operations | The directly owned Chrome connector uses the signed-in Canvas session. |
 
-- The public process uses the official MCP TypeScript SDK over strict stdio.
-- Current and legacy protocol initialization use the same server factory.
-- Health includes the gateway, donors, extension bridge, effect broker, batch ledger, approval server, profile, catalog, and source revisions.
-- Read results use `morrow.result.v1` and a durable compact gateway operation.
-- Output projection selects allowed fields before text inspection.
-- Sensitive free text, raw upstream metadata, learner identity, and unreviewed artifacts fail closed.
+## Operation lifecycle
 
-## Writes and approval
+### Read
 
-1. The gateway validates the selected capability and freezes the exact request.
-2. The plan records target, changed and preserved fields, risk, request cost, authority, readback, and correction support.
-3. The operation enters `awaiting_approval` without a provider write.
-4. A loopback page shows the frozen operation and issues a one-use nonce.
-5. The approval grant binds the plan, profile, actor, provider principal, connection generation, catalog, approval class, and expiry.
-6. Dispatch revalidates the current authority and reserves one effect before send.
-7. ExamplePlatform writes start an ephemeral SSH process with the exact operation, course, and task-contract digest.
-8. Morrow legacy writes pass the outer grant to the extension bridge and can then enter donor approval.
-9. A successful send runs the frozen fresh readback immediately when no inner approval remains.
-10. An ambiguous send becomes `applied_or_unknown`. Reconciliation performs only the readback and never replays the write.
+1. Validate the generated tool schema.
+2. Select the exact current browser binding.
+3. Validate origin, principal fingerprint, course, and connection generation.
+4. Execute the generated request in Chrome.
+5. Project and bound the provider response.
+6. Return `morrow.result.v1` with catalog and source evidence.
+
+### Write
+
+1. Validate the schema and exact source binding.
+2. Derive a safe operation-specific readback.
+3. Freeze the request, targets, profile, catalog, account, principal, generation, risk, expiry, and comparator.
+4. Write the plan to the durable effect journal.
+5. Return the operation ID, plan digest, and local approval URL.
+6. Accept human approval only through the nonce-bound loopback page.
+7. Recompute authority at dispatch.
+8. Reserve and consume one effect receipt.
+9. Send one provider request through the connector.
+10. Perform fresh provider readback in the connector.
+11. Record verified, unconfirmed, failed, or applied-or-unknown state.
+
+Morrow never creates approval through MCP. It never treats dispatch or HTTP success as proof of final state. It never automatically replays an ambiguous write.
+
+## Connector protocol
+
+The extension initiates the WebSocket because Chrome service workers cannot accept local inbound connections. The loopback server binds only to `127.0.0.1`. Pairing uses a local approval page and a high-entropy secret sent in the first WebSocket message, not in a URL.
+
+Commands carry protocol version, request ID, operation ID, generation, exact operation key, exact source binding, expiry, arguments, and outer grant. Results carry matching identity and bounded result or problem data.
+
+The connector owns provider readback. This closes the false-verification gap that exists when a gateway trusts a write response without observing Canvas state.
+
+## New Quizzes and Item Banks
+
+Official New Quizzes routes are generated from Canvas definitions. New Quiz item create and update use JSON request bodies. This preserves nested `interaction_data`, answer structures, and `scoring_data`.
+
+The Item Bank contract defines twelve signed-browser operations. The in-page executor covers all methods, paths, queries, and bodies. It rejects a wrong origin, referrer, course, principal, token, path, or catalog key before network dispatch. It strips secret-shaped keys from returned objects. The New Quizzes token stays in the frame's main world.
+
+Every Item Bank write enters the same plan, approval, receipt, dispatch, and verification lifecycle as an official Canvas write.
 
 ## Batches
 
-- Batch manifests contain an exact explicit course set, child order, target digests, dependencies, profile and catalog digests, approval coverage, request estimates, readback digests, correction facts, and expiry.
-- Arguments and the full manifest use AES-256-GCM at rest.
-- Every write child freezes its own outer effect operation at batch creation.
-- One loopback batch page renders the full child target set and approves all exact child plans.
-- A batch cannot dispatch until every pending child has a current outer grant.
-- Each child reserves and consumes one effect before source dispatch.
-- Provider approval and provider readback stay separate from orchestration progress.
-- A write batch stays nonterminal while any source result is awaiting approval or verification.
-- Restart recovery marks interrupted children for inspection and performs no automatic write replay.
-- Result pages read only bounded child rows and return an encrypted manifest reference.
-- Only explicit course sets are accepted in this release. Other source types require a future gateway-owned resolver receipt.
+Batch creation accepts only an explicit complete course set for writes. It freezes child order, course IDs, tool names, source bindings, argument digests, dependencies, catalog digest, profile digest, approval coverage, request estimate, rate policy, expiry, readback digests, and correction facts.
 
-## Clients and packages
+One approval page shows every child. Each child still receives a separate effect record and receipt. The scheduler limits active windows and per-batch concurrency. It records every child independently and exposes bounded result pages.
 
-- `morrow mcp install` renders project-scoped Codex, Claude Code, and Gemini configuration.
-- Client files contain only the Morrow stdio command, repository working directory, and upstream-config path.
-- The CLI exposes doctor, profile, catalog, backend, operation, batch, conformance, install, config inspection, and render commands.
-- Private and public package profiles produce deterministic ZIP files, SHA-256 manifests, CycloneDX SBOMs, marker scans, and receipts.
-- The public package omits the private ExamplePlatform runtime adapter and requires explicit source-rights records.
+Recovery distinguishes safe queued work from an interrupted or uncertain provider effect. The latter moves to inspection or readback. It is never sent again automatically.
 
-## Remaining external gates
+## Privacy
 
-The code cannot create these receipts.
+The gateway projects data before redaction. Policy controls fields, record count, byte count, free text, artifacts, and AI-client admission. Learner identifiers map to stable local opaque tokens. The vault is separate from output. Nested provider errors and logs are scrubbed.
 
-- Authorized Canvas live proof has not completed.
-- Real Codex, Claude Code, and Gemini scenario parity has not completed.
-- The packed Morrow legacy extension needs live pairing and task proof.
-- Public source rights and publication authorization need an owner decision.
-- Independent clean-machine reproduction needs a separate machine or environment.
+The connector never returns Canvas passwords, cookies, CSRF values, session tokens, Item Bank tokens, raw pairing secrets, or Chrome tab IDs to the AI client.
 
-Morrow remains `1.0.0-rc.0` while any gate is missing.
+## Packaging and client integration
+
+The setup command writes an absolute local connector configuration. Client installation merges one Morrow stdio entry without replacing unrelated client settings. Configuration contains no provider credential.
+
+The extension packager creates stable bytes from the exact manifest, popup, runtime modules, and generated catalog. Release profiles create deterministic source candidates, checksums, manifests, and CycloneDX SBOMs.
+
+## Verification map
+
+- CAT: deterministic generation, unique names and keys, exact integer IDs, profile disposition, held-provider scan.
+- MCP: protocol eras, malformed input, bounded result handles, strict stdio, disconnect behavior.
+- AUTH and APR: wrong origin, changed principal, stale generation, wrong nonce, expiry, replay, incomplete coverage.
+- EFF and VER: pre-send failure, post-send uncertainty, idempotency conflict, no duplicate, mismatch, incomplete readback, correction conflict.
+- BAT: 25 and 100 course execution, 10,000 child stress, failure, uncertainty, pause, cancel, altered target, restart, paging.
+- PRIV: nested secrets, learner identity, hidden HTML, artifacts, logs, public package markers, private source refusal.
+- CLIENT: equivalent server command, args, working directory, environment, and eleven-step scenario definition.
+- CONNECTOR: pairing, binding, permissions, Canvas read/write, New Quiz JSON write, all Item Bank transports, readback, replay refusal, restart, disconnect, and packaging.
+
+Live Canvas, real-client, independent-reproduction, source-rights, provider-policy, and publication receipts stay external and must remain explicit until completed.

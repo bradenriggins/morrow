@@ -6,7 +6,7 @@
       "visibility": "private",
       "include": ["*"],
       "exclude": ["packages/*/test/", "scripts/test/", "config/source-origin-ledger.json"],
-      "description": "Complete tracked convergence source for local evidence only. It is not a publication payload."
+      "description": "Complete tracked Morrow source for local evidence and private candidate use. It is not a publication payload."
     },
     "public-canvas": {
       "visibility": "public",
@@ -15,21 +15,39 @@
         "pnpm-lock.yaml",
         "pnpm-workspace.yaml",
         "tsconfig.base.json",
+        ".gitignore",
+        "README.md",
+        "ARCHITECTURE.md",
+        "LIMITATIONS.md",
+        "SOURCE-ORIGIN.md",
+        "LICENSE",
         "packages/contracts/",
         "packages/gateway-core/",
         "packages/mcp-server/",
         "packages/operation-journal/",
         "packages/upstream-mcp/",
         "packages/batch-engine/",
+        "packages/bridge-protocol/",
+        "packages/bridge-loopback/",
+        "packages/canvas-api-catalog/",
+        "packages/canvas-connector-mcp/",
+        "packages/client-config/",
+        "connector/extension/",
+        "artifacts/canvas-api/",
+        "docs/architecture/",
         "docs/release/",
+        "docs/implementation/EXAMPLE-WORKTREE.md",
         "config/publication-selections.example.json",
-        "morrow.upstreams.public-canvas.example.json"
+        "morrow.upstreams.connector.example.json",
+        "morrow.upstreams.public-canvas.example.json",
+        "scripts/generate-canvas-api-catalog.mjs",
+        "scripts/package-canvas-connector.mjs"
       ],
       "exclude": [
         "packages/*/test/",
         "packages/mcp-server/src/meridian-runtime-adapter.ts"
       ],
-      "description": "Reviewed Canvas-oriented source projection. External source rights, policy authorization, live proof, and independent reproduction remain required."
+      "description": "Standalone Canvas MCP and Chrome connector source projection. Publication still requires current source-rights, provider-policy, live-proof, and independent-reproduction receipts."
     }
   }
 }

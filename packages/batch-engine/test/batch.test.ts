@@ -58,7 +58,7 @@ describe("DurableBatchStore", () => {
     expect(bytes.includes(Buffer.from("private-1"))).toBe(false);
   });
 
-  it("allows staged-write batches only for Morrow legacy write children", () => {
+  it("allows staged-write batches only for write children", () => {
     const store = new DurableBatchStore({ path: ":memory:", encryptionKey: new Uint8Array(32).fill(7) });
     expect(() => store.create({
       name: "Invalid",
@@ -66,7 +66,7 @@ describe("DurableBatchStore", () => {
       catalogDigest: "a".repeat(64),
       concurrency: 1,
       children: [child(1, true)],
-    })).toThrow(/Morrow legacy write children/);
+    })).toThrow(/only write children/);
     const created = store.create({
       name: "Stage one write",
       mode: "stage_writes",

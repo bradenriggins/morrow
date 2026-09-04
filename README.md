@@ -1,173 +1,172 @@
 # Morrow
 
-Models reason. Morrow safely operates learning systems.
+Models reason. Morrow safely operates Canvas.
 
-Morrow is a local, model-neutral LMS operations layer for MCP-compatible AI clients. It provides typed Canvas operations, bounded authority, reviewed plans, separate approval, durable effect records, fresh provider readback, multi-course execution, privacy controls, and evidence.
+Morrow is a local, chat-interface-agnostic Canvas operations layer. It gives MCP-compatible AI clients one governed tool surface for Canvas. The AI client supplies intent and calls tools. Morrow owns connection, authority, approval, dispatch, verification, durable state, privacy, and evidence.
 
-Start with [WEEKEND-HANDOFF.md](WEEKEND-HANDOFF.md). Also see [ARCHITECTURE.md](ARCHITECTURE.md), [SOURCE-ORIGIN.md](SOURCE-ORIGIN.md), and [LIMITATIONS.md](LIMITATIONS.md).
+Morrow has no chat interface. Use it from ChatGPT/Codex, Claude Code, the Claude desktop app, Gemini CLI, or another stdio MCP client.
 
-## Current implementation
+## What a user installs
 
-The repository begins with a federation gateway because the capabilities already exist in two private donor systems:
+A user installs only two Morrow components:
 
-- `example-legacy` contains the existing Morrow Canvas catalog, planners, approval projections, privacy controls, workflows, reports, and browser-backed operations.
-- `example-attestation-repo` contains ExamplePlatform's typed MCP surface, provider binding, durable effect broker, batch recovery, workspace state, and failure history.
+1. **Morrow MCP** runs as one local stdio server. The selected chat application starts it when needed.
+2. **Morrow Canvas Connector** is one Manifest V3 Chrome extension. It uses the Canvas session that is already signed in within Chrome.
 
-The gateway connects ExamplePlatform and other configured MCP processes as internal stdio upstreams and exposes their permitted tools through one official-SDK Morrow server. Deterministic commands export both donor catalogs and generate the compatibility, alias, profile, and source-selection records.
+No Canvas access token, developer key, OAuth app, ExamplePlatform service, legacy Morrow extension, hosted Morrow account, or separate approval application is required.
 
-The bounded Morrow legacy extension bridge presents the donor's exported Canvas catalog as an internal MCP server. It connects to the existing browser service worker over an authenticated loopback WebSocket. Reads use the donor runtime. Writes require the outer gateway plan and approval before they can create a donor task for the donor's separate approval.
+Node.js is the runtime for the current source release. It is part of the MCP installation path, not a third Morrow service.
 
-The sandbox profile starts a network-disabled synthetic Canvas process from `morrow.upstreams.sandbox.example.json`. It provides 100 deterministic courses, bounded pagination, page reads, approved page writes, fresh readback, and injected pre-send or ambiguous-delivery faults. It requires no provider credentials.
+## How a user works with Morrow
 
-Every ExamplePlatform write uses a new SSH process bound to the exact outer operation, course, plan, grant, and effect receipt. Batch writes freeze one outer operation per child and use one complete loopback batch approval before bounded dispatch.
+1. Start or install the Morrow MCP in the chosen AI client.
+2. Open the Morrow Canvas Connector popup.
+3. Select **Connect to Morrow MCP**.
+4. Review the local pairing page that opens at `127.0.0.1`. Approve that one extension pairing.
+5. Open the exact signed-in Canvas course in Chrome.
+6. Select **Connect this Canvas tab** in the extension.
+7. Ask the AI client to inspect or change Canvas.
 
-## Provider boundary
+Read operations run against the selected Chrome session. Write operations do not run immediately. Morrow first returns a frozen plan and a local approval URL. The user opens that URL, reviews the exact tool, account, course, fields, target digest, risk, expiry, and verification method, and selects **Approve once** or **Cancel**. There is no model-callable approval tool.
 
-Canvas is the initial provider. MindTap and Connect are removed from the merged catalog and remain outside supported claims pending written permission or formal developer terms.
+After approval, the AI client calls `morrow_operation_dispatch` with the operation ID. Morrow checks the account, course, catalog, connection generation, target set, profile, approval, and effect receipt again. The connector sends the Canvas request once. It then performs a fresh provider readback. Morrow reports `verified` only when that readback satisfies the frozen postcondition.
 
-## Local RC evidence only
+If delivery becomes ambiguous, Morrow records `applied_or_unknown` and refuses automatic replay. A later reconciliation performs only the frozen readback.
 
-The workspace uses version `1.0.0-rc.0` for local candidate semantics. It does
-not publish or tag software. `pnpm package:rc` creates deterministic local
-candidate bytes, scans included source, docs, examples, JSON, and source maps,
-and writes a commit-bound receipt. `pnpm weekend:check` remains blocked until
-the source-origin ledger, all zero-tolerance evidence, authorized live Canvas
-proof, client parity, independent reproduction, and publication authorization
-are present. See [LIMITATIONS.md](LIMITATIONS.md).
+## Canvas authentication
 
-## Quick start with ExamplePlatform
+Canvas authentication stays inside Chrome.
+
+- The extension requests access to the exact Canvas site only after the user selects a signed-in tab.
+- Normal Canvas API requests use the page's signed-in session and Canvas CSRF protection.
+- New Quizzes Item Bank requests run inside the authenticated New Quizzes frame. Frame tokens remain in the page execution world. The extension never returns them to the MCP or AI client.
+- The MCP receives a bounded account fingerprint and connection generation. It does not receive cookies, passwords, OAuth tokens, CSRF tokens, or Item Bank bearer tokens.
+- **Disconnect and revoke access** clears the local pairing secret, Canvas bindings, used effect receipts, and optional Canvas site permissions.
+
+Morrow does not reuse a ChatGPT or Claude in-app browser session. The Chrome connector is the stable provider boundary for every supported chat client.
+
+## Capability surface
+
+The generated catalog currently contains 1,130 governed Canvas operations:
+
+- 1,118 operations generated from the current official Canvas API definitions;
+- 568 reads and 562 writes;
+- 26 New Quizzes operations;
+- 12 signed-browser New Quizzes Item Bank operations.
+
+The surface includes course and account discovery, pages, modules, assignments, groups, discussions, announcements, files, folders, Classic Quizzes, New Quizzes, Item Banks, rubrics, outcomes, enrollments, submissions, gradebook operations, migrations, Blueprints, reports, webhooks, and other official Canvas families.
+
+The Item Bank bridge supports:
+
+- list, get, create, share, and archive banks;
+- list and get entries;
+- create and update items;
+- attach an item to a bank;
+- delete an entry;
+- list bank shares.
+
+Morrow keeps 64-bit Canvas identifiers as exact decimal strings. It generates tool schemas and routes from provider definitions. It rejects unknown fields, missing required values, cross-origin bindings, stale tabs, stale connection generations, mismatched operation keys, and expired commands before provider dispatch.
+
+MindTap and Connect are absent from the enabled catalog and runtime.
+
+## Batches and long-running work
+
+Morrow supports durable read and write batches across explicit course sets.
+
+- Every child has an exact course, tool, arguments digest, source binding, dependency set, and operation ID.
+- One local page shows the complete frozen target set before approval.
+- Each write child receives its own single-use effect receipt.
+- Approved concurrency and rate controls cannot change during execution.
+- Child results remain independently true when another child fails or becomes uncertain.
+- Pause and cancel stop new child dispatch.
+- Restart recovery resumes from durable checkpoints and never replays an uncertain write.
+- Large batches use bounded database pages instead of one unbounded MCP response.
+
+## Privacy and local state
+
+Morrow projects results before it returns them to the AI client. It applies field policy, record limits, byte limits, free-text policy, and learner tokenization at the gateway boundary. Sensitive nested errors are scrubbed. The learner vault, operation journal, encrypted batch manifests, pairing state, and verification receipts stay on the user's computer.
+
+Client configuration contains only the local Node command, server entry path, working directory, and `MORROW_UPSTREAMS_FILE`. It contains no Canvas credential or browser secret.
+
+## Install from this repository
 
 Requirements:
 
-- Node.js 22.13 or newer
-- pnpm 10.6.1 through Corepack
-- SSH access through the `example-lms-vps` host alias
-- The generated ExamplePlatform source catalog at the pinned donor revision
+- Node.js 22.13 or newer;
+- pnpm 10.6.1 through Corepack;
+- Chrome 116 or newer;
+- one MCP-compatible client.
 
 ```bash
 corepack enable
-pnpm install
-pnpm build
-cp morrow.upstreams.example.json morrow.upstreams.json
-export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
-pnpm start
+pnpm install --frozen-lockfile
+pnpm setup
 ```
 
-The default example is a hermetic, read-only catalog profile. It runs the frozen server only through `ssh -T example-lms-vps`. It checks the remote Git revision and tracked-clean state before launch. It then requires the generated 222-tool catalog truth. The gateway removes the 35 held MindTap and Connect tools and exposes 187 eligible tools.
+`pnpm setup` builds the workspace and writes a private local `morrow.upstreams.json` with absolute paths. It prints the unpacked extension directory.
 
-`morrow.upstreams.meridian-private.example.json` shows the private edit profile and the generic-to-ExamplePlatform environment mapping. Replace its example identifiers and remote state paths with one exact private profile. Do not place raw tokens in the file. Use a ExamplePlatform-owned session, credential, or socket path. Morrow replaces static operation fields with a fresh per-operation binding for each write.
-
-## Add the Morrow legacy browser runtime
-
-First export the donor catalog while the legacy checkout is clean:
+Load `connector/extension` from `chrome://extensions` with **Developer mode** and **Load unpacked**. A deterministic distributable archive is also available after:
 
 ```bash
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
+pnpm package:connector
 ```
 
-Then create a pairing token, install the reversible extension overlay, and use the two-upstream example:
+Install Morrow into one or more clients:
 
 ```bash
-export MORROW_NEW_REPO_ROOT=$PWD
-export MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy
-export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
-export MORROW_LEGACY_BRIDGE_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
-pnpm bridge:legacy:install
-cp morrow.upstreams.with-legacy-bridge.example.json morrow.upstreams.json
-export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
-pnpm start
+pnpm morrow mcp install codex --scope project --upstreams "$PWD/morrow.upstreams.json"
+pnpm morrow mcp install claude --scope project --upstreams "$PWD/morrow.upstreams.json"
+pnpm morrow mcp install claude-desktop --scope user --upstreams "$PWD/morrow.upstreams.json"
+pnpm morrow mcp install gemini --scope project --upstreams "$PWD/morrow.upstreams.json"
 ```
 
-Reload the unpacked Morrow legacy extension after installing the overlay. The gateway starts the internal bridge MCP, which listens only on `127.0.0.1` and authenticates the extension before accepting binding or tool messages.
+The aliases `claude` and `gemini` select Claude Code and Gemini CLI. Claude desktop chat supports user scope on macOS and Windows.
 
-A bridge write first returns a frozen outer plan. Approve that plan through its loopback URL. Dispatch can then create an approval-required donor task. Approve or deny that task through the existing Morrow user surface. There is no model-callable approval tool.
+The generated client files are:
 
-## Built-in inspection tools
+- Codex or ChatGPT/Codex desktop: `.codex/config.toml`;
+- Claude Code: `.mcp.json` or `~/.claude.json`;
+- Claude desktop chat: `claude_desktop_config.json`;
+- Gemini CLI: `.gemini/settings.json`.
 
-Gateway tools:
+Restart the selected client after configuration. The client then starts Morrow over stdio. The Morrow MCP starts its internal Canvas connector runtime. The Chrome extension connects to that runtime at `127.0.0.1:32147`.
 
-- `morrow_health` reports the complete runtime component state.
-- `morrow_catalog` returns a bounded catalog page.
-- `morrow_catalog_search`, `morrow_capability_get`, and `morrow_profile_status` inspect the generated capability and profile records.
-- `morrow_operation_*` tools inspect, dispatch, cancel, reconcile, verify, or request a supported correction. They cannot approve an operation.
-- `morrow_batch_*` tools create, inspect, run, pause, recover, reconcile, cancel, and page durable batches. Batch approval remains on the loopback page.
+## Native Morrow tools
 
-Morrow legacy bridge tools:
+Use these tools to inspect and control the layer:
 
-- `morrow_legacy_bridge_health`
-- `morrow_legacy_bindings`
-- `morrow_legacy_task_get`
+- `morrow_health` reports the profile, catalog, local operation journal, batch ledger, connector process, and current browser connection.
+- `morrow_catalog`, `morrow_catalog_search`, and `morrow_capability_get` provide bounded discovery across the full surface.
+- `morrow_canvas_connector_health` reports the local connector transport.
+- `morrow_canvas_bindings` lists bounded, non-secret Canvas session bindings.
+- `morrow_operation_*` tools inspect, dispatch, cancel, reconcile, verify, and create separate corrective operations.
+- `morrow_batch_*` tools create, inspect, run, pause, recover, reconcile, cancel, and page durable batches.
+- `morrow_result_page` retrieves bounded pages for large local results.
 
-Every forwarded result receives bounded `io.morrow/gateway` metadata containing the public tool name, source id, source tool name, catalog digest, and upstream result digest. Raw upstream `_meta` is discarded. The only source metadata projection is validated numeric `io.morrow/canvas-rate` telemetry used to slow later batch waves.
+Provider operations use generated `canvas_*` names. A call to a read tool executes. A call to a write tool creates a plan.
 
-## Donor catalog workflow
+## Verification
+
+Run the complete local campaign:
 
 ```bash
 pnpm catalog:export
 pnpm catalog:merge
 pnpm catalog:check
+pnpm build
+pnpm test
+pnpm test:connector
+pnpm test:package
+pnpm package:connector
+pnpm package:connector:check
+pnpm morrow doctor --json
 pnpm morrow catalog stats --json
 ```
 
-Generated donor catalogs and reconciliation output live under `artifacts/catalogs/` and are ignored by default. Donor export refuses the wrong commit or tracked changes. Contract drift cannot be selected by source priority. Each accepted drift requires an explicit reviewed alias rule.
+The browser campaign uses Chrome for Testing with a temporary profile and a synthetic Canvas estate. It validates extension pairing, site-scoped permission, account binding, regular Canvas reads and writes, a complete nested New Quiz item request, cookies and CSRF handling, fresh readback, replay refusal, restart, and disconnect revocation.
 
-## MCP client install
+See [ARCHITECTURE.md](ARCHITECTURE.md), [WEEKEND-HANDOFF.md](WEEKEND-HANDOFF.md), [LIMITATIONS.md](LIMITATIONS.md), and [SOURCE-ORIGIN.md](SOURCE-ORIGIN.md).
 
-The public Morrow endpoint is a local stdio server. After `pnpm install` and `pnpm build`, the root script `pnpm start` runs `@morrow-lms/gateway` (`node dist/index.js`). The `@morrow-lms/cli` package declares the unified `morrow` command. The public endpoint serves both MCP SDK protocol eras through one stdio factory.
+## Release status
 
-Start the process from the repository root. The gateway loads `morrow.upstreams.json` from the process working directory, or from `MORROW_UPSTREAMS_FILE` when that variable is set. A ExamplePlatform source cannot use `MORROW_MERIDIAN_SERVER_PATH` for local startup. Use the first-class `meridian-ssh` configuration.
-
-Example upstream files that exist in this repository:
-
-- `morrow.upstreams.example.json`
-- `morrow.upstreams.meridian-private.example.json`
-- `morrow.upstreams.with-legacy-bridge.example.json`
-
-Named tools registered in this repository:
-
-- Gateway: catalog, profile, operation, batch, health, and bounded result-page tools under the `morrow_*` namespace.
-- Legacy bridge, when that upstream is enabled: `morrow_legacy_bridge_health`, `morrow_legacy_bindings`, `morrow_legacy_task_get`
-
-The gateway also forwards tools imported from connected upstreams. A request cancelled before dispatch does not call the source. A request cancelled after dispatch is recorded as source-unknown and must not be replayed. Large results return a process-local result handle. Read it with `morrow_result_page` in bounded pages.
-
-Generate each project configuration after the build. Project scope is the default. The configuration's only environment setting is the absolute `MORROW_UPSTREAMS_FILE` path. It does not copy Canvas credentials, donor tokens, bridge tokens, or session data.
-
-```bash
-pnpm morrow mcp install codex --scope project --upstreams "$PWD/morrow.upstreams.json"
-pnpm morrow mcp install claude --scope project --upstreams "$PWD/morrow.upstreams.json"
-pnpm morrow mcp install gemini --scope project --upstreams "$PWD/morrow.upstreams.json"
-pnpm morrow doctor --json --upstreams "$PWD/morrow.upstreams.json"
-pnpm morrow conformance --json --upstreams "$PWD/morrow.upstreams.json"
-```
-
-The commands install these project-scoped files:
-
-- Codex: `.codex/config.toml`
-- Claude Code: `.mcp.json`
-- Gemini CLI: `.gemini/settings.json`
-
-`morrow conformance --json` is a deterministic configuration harness. It proves matching command, arguments, working directory, and allowed environment names. It does not prove that the installed Codex, Claude Code, or Gemini CLI binary can connect. Run each real client separately before making that claim.
-
-Set `MORROW_MERIDIAN_CATALOG_PATH` when the selected upstream file uses the ExamplePlatform SSH adapter. For the two-upstream example, also set the legacy bridge variables documented above.
-
-## Documentation
-
-Named root files:
-
-- [Limitations](LIMITATIONS.md)
-- [Source origin](SOURCE-ORIGIN.md)
-- [Architecture](ARCHITECTURE.md)
-- [Weekend handoff](WEEKEND-HANDOFF.md)
-
-Implementation notes and ADRs:
-
-- [Weekend convergence implementation](docs/implementation/EXAMPLE-WORKTREE.md)
-- [Catalog capture and reconciliation](docs/implementation/CATALOG-RECONCILIATION.md)
-- [Morrow legacy extension bridge](docs/implementation/MORROW-LEGACY-BRIDGE.md)
-- [ADR-001: Federated convergence](docs/architecture/ADR-001-federated-convergence.md)
-- [ADR-002: Authenticated legacy extension bridge](docs/architecture/ADR-002-local-extension-bridge.md)
-- [Donor manifest](docs/sources/donor-manifest.json)
-
-## Source rule
-
-The donor repositories remain private reference systems. This repository accepts only new source, publication-cleared source, synthetic fixtures, and reviewed origin records. It does not accept private CHCP material, real course content, credentials, harvested publisher methods, or copied private deployment configuration.
+The repository uses `1.0.0-rc.0`. Local private and public-candidate archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. A public stable tag still requires the documented source-rights, provider-policy, independent reproduction, and publication approvals. These distribution gates do not change the local runtime architecture.

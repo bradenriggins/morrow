@@ -37,6 +37,7 @@ export type SourceDisposition = (typeof SOURCE_DISPOSITIONS)[number];
 
 export interface OutputPrivacyDescriptor {
   readonly allowedFields: readonly string[];
+  readonly fieldPolicy?: "allow-listed" | "scrub-sensitive";
   readonly dataClass: "public" | "course" | "learner";
   readonly maxRecords: number;
   readonly maxBytes: number;
@@ -48,6 +49,7 @@ export interface OutputPrivacyDescriptor {
 
 export const DENY_ALL_OUTPUT: OutputPrivacyDescriptor = Object.freeze({
   allowedFields: [],
+  fieldPolicy: "allow-listed",
   dataClass: "public",
   maxRecords: 0,
   maxBytes: 0,
@@ -261,11 +263,12 @@ export interface ProjectedOutput {
   readonly structuredContent?: JsonObject;
 }
 
-const SENSITIVE_FIELDS = new Set([
+const LEARNER_FIELDS = new Set([
   "id", "user_id", "userId", "student_id", "studentId", "sis_user_id", "sisUserId",
-  "name", "email", "login_id", "loginId", "sortable_name", "short_name",
+  "name", "display_name", "email", "login_id", "loginId", "sortable_name", "short_name",
   "accommodations", "submission", "submissions",
 ]);
+const SECRET_FIELD = /(?:^|_)(?:authorization|bearer|access_token|refresh_token|csrf|cookie|secret|credential|jwt)(?:$|_)/i;
 
 function privacyError(code: string): JsonObject {
   return {
@@ -278,8 +281,10 @@ function privacyError(code: string): JsonObject {
 function exactDescriptor(value: OutputPrivacyDescriptor | undefined): OutputPrivacyDescriptor {
   const descriptor = value || DENY_ALL_OUTPUT;
   const aiClientAdmission = descriptor.aiClientAdmission ?? "allow";
+  const fieldPolicy = descriptor.fieldPolicy ?? "allow-listed";
   if (
     !Array.isArray(descriptor.allowedFields)
+    || !["allow-listed", "scrub-sensitive"].includes(fieldPolicy)
     || !["public", "course", "learner"].includes(descriptor.dataClass)
     || !Number.isInteger(descriptor.maxRecords) || descriptor.maxRecords < 0 || descriptor.maxRecords > 10_000
     || !Number.isInteger(descriptor.maxBytes) || descriptor.maxBytes < 0 || descriptor.maxBytes > 10_000_000
@@ -287,10 +292,17 @@ function exactDescriptor(value: OutputPrivacyDescriptor | undefined): OutputPriv
     || !["deny", "text", "trusted-generated"].includes(descriptor.artifactInspection)
     || !["allow", "deny"].includes(aiClientAdmission)
   ) throw new TypeError("output privacy descriptor is invalid");
-  return { ...descriptor, aiClientAdmission };
+  return { ...descriptor, aiClientAdmission, fieldPolicy };
 }
 
 function learnerIdentity(value: JsonObject): LearnerIdentity | null {
+  const keys = new Set(Object.keys(value));
+  const hasLearnerSignal = [
+    "user_id", "userId", "student_id", "studentId", "sis_user_id", "sisUserId",
+    "email", "login_id", "loginId", "sortable_name",
+  ].some((key) => keys.has(key))
+    || ((keys.has("avatar_image_url") || keys.has("pronouns")) && (keys.has("name") || keys.has("display_name")));
+  if (!hasLearnerSignal) return null;
   const id = value.id ?? value.user_id ?? value.userId ?? value.student_id ?? value.studentId;
   if (typeof id !== "string" && typeof id !== "number") return null;
   return {
@@ -314,7 +326,8 @@ function projectValue(value: unknown, descriptor: OutputPrivacyDescriptor, conte
     output.learnerToken = context.learnerVault.tokenize(context.learnerScope, learner);
   }
   for (const [key, child] of Object.entries(value)) {
-    if (!descriptor.allowedFields.includes(key) || SENSITIVE_FIELDS.has(key)) continue;
+    const allowField = descriptor.fieldPolicy === "scrub-sensitive" || descriptor.allowedFields.includes(key);
+    if (!allowField || SECRET_FIELD.test(key) || (learner && LEARNER_FIELDS.has(key))) continue;
     if (typeof child === "string") {
       if (descriptor.freeText === "deny" && (key === "html" || key === "body" || key === "content")) continue;
       if (containsSensitiveText(child)) throw new Error("privacy_sensitive_text_refused");

@@ -465,8 +465,8 @@ export function validateAppendixCPathMap(root = DEFAULT_ROOT) {
   return {
     schema: "morrow.appendix-c-path-map-validation.v1",
     passed: value.schema === "morrow.appendix-c-path-map.v1"
-      && value.status === "ratified-for-current-gateway-architecture"
-      && mappings.length === 33
+      && value.status === "ratified-for-standalone-connector-architecture"
+      && mappings.length === 32
       && mappings.every((mapping) => !["not-implemented", "owned-by-donor"].includes(mapping.status))
       && invalid.length === 0,
     mappingCount: mappings.length,

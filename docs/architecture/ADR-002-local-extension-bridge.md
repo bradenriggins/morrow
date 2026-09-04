@@ -1,53 +1,67 @@
-# ADR-002: Authenticated loopback bridge for Morrow legacy
+# ADR-002: Authenticated Chrome session connector
 
-- Status: accepted for the private convergence profile
-- Date: 2026-09-03
-- Scope: browser-dependent Morrow legacy execution
+- Status: accepted
+- Date: 2026-09-04
+- Scope: Canvas authentication and provider transport
 
 ## Decision
 
-Use a local WebSocket connection initiated by the existing Manifest V3 service worker to a server bound only to `127.0.0.1`.
+Use one directly owned Manifest V3 Chrome extension. It connects to the local Morrow connector over an authenticated WebSocket bound to `127.0.0.1`.
 
-The bridge is a transport adapter over existing donor behavior. It is not a second Canvas client and it owns no provider success state.
+The extension uses the Canvas session that the user already opened in Chrome. It sends regular Canvas requests through the signed-in top-level page. It sends New Quizzes Item Bank requests inside the authenticated New Quizzes frame.
 
-## Why WebSocket
+## User interaction
 
-The donor runtime lives in a Manifest V3 service worker and already requires Chrome 127 or newer. A WebSocket connection can receive local commands without polling and can exchange an application heartbeat inside the service-worker idle window.
+1. The user starts Morrow through an MCP client.
+2. The user selects **Connect to Morrow MCP** in the extension.
+3. Morrow opens a local, nonce-bound pairing page.
+4. The user approves the pairing.
+5. The user opens an exact signed-in Canvas course.
+6. The user selects **Connect this Canvas tab**.
+7. Chrome asks for permission to that exact Canvas site.
 
-Native messaging was not selected because the donor extension does not currently request the permission or ship a native-host installation path. Chrome DevTools Protocol was not selected because the donor uses it for isolated test harnesses rather than production authority.
+The extension popup then shows local MCP status and the bounded Canvas origin and course binding. **Disconnect and revoke access** removes pairing state, bindings, receipt replay state, and optional HTTPS permissions.
 
 ## Authentication and binding
 
-The server:
+The loopback server:
 
-- binds only `127.0.0.1`;
+- listens only on `127.0.0.1:32147`;
 - accepts only `/morrow-bridge/v1`;
-- requires a high-entropy token in the first message, never in the URL;
-- validates the Chrome extension origin when present;
-- optionally restricts one or more exact extension ids;
-- requires the pinned donor revision and source-catalog digest;
-- assigns a new connection generation after every authenticated reconnect;
-- rejects results from an older generation or a different operation id.
+- never places its high-entropy pairing secret in a URL;
+- requires explicit pairing through the local page;
+- validates the extension ID, protocol version, runtime revision, and catalog digest;
+- assigns a new generation after each authenticated connection;
+- rejects stale, expired, mismatched, or cross-generation commands;
+- binds every request to one runtime-verified Canvas account and origin.
 
-The extension sends only a bounded projection of runtime-verified Canvas source bindings.
+The public binding contains a one-way principal fingerprint, Canvas origin, optional course ID, connection generation, and freshness time. It does not contain a cookie, token, password, email address, or Canvas user ID.
 
-## Read behavior
+## Permissions
 
-A read request must name an admitted, model-visible donor capability whose current capability row classifies it as non-writing. The extension resolves an exact live source and calls the current donor execution runtime.
+The extension has permanent access only to its loopback host. HTTPS access is optional. Chrome grants it only after the user connects the current Canvas tab.
 
-## Write behavior
+The extension does not use:
 
-A write request must name an admitted capability whose current capability row classifies it as writing. The extension does not execute it. It creates one existing `stageChatTask` operation under the active persisted conversation and returns the task id and approval-required state.
+- the Chrome cookies API;
+- `<all_urls>` host permission;
+- native messaging;
+- Chrome DevTools Protocol;
+- remote executable code;
+- a content-side chat or approval interface.
 
-There is no MCP tool that creates approval or invokes `runChatTaskAction`.
+## Request behavior
 
-## Failure rule
+A read command names one exact catalog operation and binding. The extension validates both before it executes the generated request.
 
-The local server sends each command at most once. If the deadline expires or the connection closes after send, the result is unknown. The caller must inspect the task or provider state before making a new request.
+A write command must also carry a current outer approval grant and a unique effect receipt. The extension reserves the receipt before send. It then sends once and performs a connector-owned readback. A reused receipt is refused.
+
+If the response is lost after send, the outcome is unknown. Morrow must inspect provider state. It cannot resend the request automatically.
+
+## Item Bank boundary
+
+The Item Bank bearer token exists only in the authenticated New Quizzes frame. The executor runs in the frame's main world so the extension does not copy the token into service-worker state. It validates the parent Canvas referrer and exact course. Returned objects are recursively stripped of token-like keys before they cross the extension boundary.
 
 ## Consequences
 
-- Browser-only capabilities can be used by external MCP clients without recreating their handlers.
-- The legacy task executor remains the mutation authority.
-- The donor checkout receives a reversible local overlay during convergence.
-- A packed-extension and live-Canvas proof is still required before this profile is release-ready.
+Every supported MCP client uses one Canvas authentication path. Canvas keeps its own access controls. Morrow does not require a Canvas OAuth developer key and does not ask the user to paste a long-lived access token.

@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildClientConfigBundle,
   buildClientParityReport,
+  buildLocalCanvasConfig,
   installMorrowClient,
   writeClientConfigBundle,
 } from "../src/index.js";
@@ -18,7 +19,19 @@ function fileContent(bundle: ReturnType<typeof buildClientConfigBundle>, path: s
 }
 
 describe("buildClientConfigBundle", () => {
-  it("generates deterministic Codex, Claude Code, and Gemini CLI configurations", () => {
+  it("builds a two-install local Canvas configuration without credentials", () => {
+    const root = resolve("/tmp/morrow-local");
+    const config = buildLocalCanvasConfig(root, "/usr/local/bin/node") as { upstreams: Record<string, unknown>[] };
+    expect(config.upstreams).toMatchObject([{
+      id: "canvas-session",
+      command: "/usr/local/bin/node",
+      cwd: root,
+      sourceDisposition: "direct_owned",
+    }]);
+    expect(JSON.stringify(config)).not.toMatch(/(?:canvas_token|cookie|credential)/i);
+  });
+
+  it("generates deterministic ChatGPT/Codex, Claude, and Gemini configurations", () => {
     const repositoryRoot = resolve("/tmp/Morrow local repo");
     const upstreamConfigPath = resolve("/tmp/Morrow local repo/.morrow/upstreams.json");
     const serverEntryPath = resolve(repositoryRoot, "packages/mcp-server/dist/index.js");
@@ -66,6 +79,7 @@ describe("buildClientConfigBundle", () => {
         },
       },
     });
+    expect(JSON.parse(fileContent(first, "claude-desktop.config.json"))).toEqual(claude);
 
     const gemini = JSON.parse(fileContent(first, "gemini.settings.json")) as Record<string, unknown>;
     expect(gemini).toEqual({
@@ -84,7 +98,7 @@ describe("buildClientConfigBundle", () => {
     const manifest = JSON.parse(fileContent(first, "manifest.json")) as {
       files: { path: string; sha256: string }[];
     };
-    expect(manifest.files).toHaveLength(7);
+    expect(manifest.files).toHaveLength(8);
     expect(manifest.files.every((entry) => /^[0-9a-f]{64}$/.test(entry.sha256))).toBe(true);
     expect(manifest.files.some((entry) => entry.path === "manifest.json")).toBe(false);
     expect(JSON.stringify(first)).not.toContain("CANVAS_TOKEN");
@@ -136,8 +150,10 @@ describe("project installation and hermetic parity", () => {
         proofLevel: "hermetic_config_only",
         realClientExecution: "not_run",
       });
-      expect(report.clients).toHaveLength(3);
+      expect(report.clients).toHaveLength(4);
       expect(report.clients.every((client) => client.equivalent)).toBe(true);
+      expect(() => installMorrowClient({ ...options, client: "claude-desktop" }))
+        .toThrow(/only --scope user/);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -151,11 +167,24 @@ describe("project installation and hermetic parity", () => {
     const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
     try {
       await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await mkdir(join(repositoryRoot, "packages", "canvas-connector-mcp", "dist"), { recursive: true });
+      await mkdir(join(repositoryRoot, "artifacts", "canvas-api"), { recursive: true });
+      await mkdir(join(repositoryRoot, "connector", "extension"), { recursive: true });
       await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
-      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      await writeFile(join(repositoryRoot, "packages", "canvas-connector-mcp", "dist", "index.js"), "console.error('fixture');\n", "utf8");
+      await writeFile(join(repositoryRoot, "artifacts", "canvas-api", "canvas-api-catalog.json"), "{}\n", "utf8");
+      await writeFile(join(repositoryRoot, "connector", "extension", "manifest.json"), "{}\n", "utf8");
+      const setup = spawnSync(process.execPath, [
+        cliPath, "setup", "--json", "--repository", repositoryRoot,
+      ], { encoding: "utf8" });
+      expect(setup.status).toBe(0);
+      expect(JSON.parse(setup.stdout)).toMatchObject({
+        schema: "morrow.setup.v1",
+        path: upstreamConfigPath,
+        credentialsCopied: false,
+      });
       const install = spawnSync(process.execPath, [
-        cliPath, "mcp", "install", "gemini", "--upstreams", upstreamConfigPath,
-        "--repository", repositoryRoot,
+        cliPath, "mcp", "install", "gemini", "--repository", repositoryRoot,
       ], { encoding: "utf8" });
       expect(install.status).toBe(0);
       expect(install.stdout).toContain("scope=project");
@@ -258,7 +287,7 @@ describe("writeClientConfigBundle", () => {
         serverEntryPath,
         nodeCommand: process.execPath,
       });
-      expect(bundle.files).toHaveLength(8);
+      expect(bundle.files).toHaveLength(9);
       const manifest = await readFile(join(outputDirectory, "manifest.json"), "utf8");
       expect(JSON.parse(manifest)).toMatchObject({
         schema: "morrow.client-config-manifest.v1",

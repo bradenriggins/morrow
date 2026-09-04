@@ -273,7 +273,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_run",
     {
-      description: "Run or resume a bounded window of one frozen batch. The approved manifest fixes concurrency and rate controls. read_only children perform reads. stage_writes children only stage existing Morrow tasks for separate human approval. Batch completion means orchestration finished, not that Canvas changes were approved or verified. Morrow serializes control for one batch and caps active windows across batches.",
+      description: "Run or resume a bounded window of one frozen batch. The approved manifest fixes concurrency and rate controls. read_only children perform reads. stage_writes children consume their approved provider-effect grants and dispatch once. A write batch succeeds only after every child has verified fresh readback. Morrow serializes control for one batch and caps active windows across batches.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         max_children: z.number().int().min(1).max(500).default(50),
@@ -350,7 +350,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_reconcile",
     {
-      description: "Read the current state of staged Morrow legacy tasks and update the batch source-settlement ledger. This never approves, denies, resumes, undoes, or dispatches a task. Use include_terminal to recheck tasks that were previously recorded as final, such as after a later user-initiated undo.",
+      description: "Update source-settlement evidence for staged writes that use a source-owned task. Direct Canvas connector writes settle from their verified readback and need no source-task poll. This tool never approves, denies, resumes, undoes, or dispatches a task.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         offset: z.number().int().min(0).default(0),

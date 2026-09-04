@@ -8,6 +8,7 @@ import {
   normalizeInputSchema,
   normalizeSourceId,
   normalizeToolName,
+  parseSourceCapabilityMetadata,
   sha256Text,
   upstreamCatalogDigest,
   type CatalogTruthHealth,
@@ -53,7 +54,7 @@ export interface UpstreamCallOptions {
 export type StdioUpstreamHealth = GatewaySourceHealth;
 
 const UPSTREAM_STDERR_LIMIT = 8_000;
-const UPSTREAM_MAX_BUFFER_SIZE = 1_000_000;
+const UPSTREAM_MAX_BUFFER_SIZE = 16 * 1024 * 1024;
 interface ExactSupervision {
   readonly startupAttempts: number;
   readonly reconnectAttempts: number;
@@ -170,6 +171,9 @@ export class StdioMcpUpstream {
     const normalized = listed.tools.map((tool): UpstreamTool => {
       const raw = tool as unknown as JsonObject;
       const annotations = normalizeAnnotations(raw.annotations);
+      const metadata = isJsonObject(raw._meta)
+        ? parseSourceCapabilityMetadata(raw._meta["io.morrow/capability"])
+        : undefined;
       return {
         name: normalizeToolName(raw.name),
         ...(typeof raw.title === "string" && raw.title.trim() ? { title: raw.title.trim() } : {}),
@@ -181,6 +185,7 @@ export class StdioMcpUpstream {
           ? { outputSchema: normalizeInputSchema(raw.outputSchema) }
           : {}),
         ...(annotations ? { annotations } : {}),
+        ...(metadata ? { capability: metadata } : {}),
       };
     }).sort((left, right) => compareAscii(left.name, right.name));
 

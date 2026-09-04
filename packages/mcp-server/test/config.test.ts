@@ -1,6 +1,7 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   expandEnvironmentTemplate,
@@ -84,5 +85,18 @@ describe("gateway configuration", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("starts the local Canvas connector without a separate upstream file", async () => {
+    const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
+    const config = await loadGatewayConfig({}, repositoryRoot);
+    expect(config.profile).toBe("private-full");
+    expect(config.upstreams).toMatchObject([{
+      id: "canvas-session",
+      kind: "mcp-stdio",
+      sourceDisposition: "direct_owned",
+      required: true,
+    }]);
+    expect(config.maxCatalogTools).toBe(2000);
   });
 });

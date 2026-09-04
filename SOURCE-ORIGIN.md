@@ -1,47 +1,43 @@
 # Source origin
 
-Donors are read-only. This repository does not merge their Git history.
+Morrow's default runtime is directly owned source in this repository. It does not import or execute source from another private repository.
 
-The pinned commits below are the values recorded in `docs/sources/donor-manifest.json`. Do not invent other SHAs.
+## Source classes
 
-## Source rule
+### Direct Morrow source
 
-The donor repositories remain private reference systems. This repository accepts only new source, publication-cleared source, synthetic fixtures, and reviewed origin records. It does not accept private CHCP material, real course content, credentials, harvested publisher methods, or copied private deployment configuration.
+The MCP server, operation journal, effect broker, batch engine, privacy layer, client installer, loopback protocol, Canvas connector MCP, Chrome extension, verification logic, package tooling, and documentation are maintained in `example-owner/morrow`.
 
-That paragraph is the `README.md` source rule.
+Each public-candidate file needs one exact digest record before publication. A repository location or authorship claim does not replace that review.
 
-## Recorded donors
+### Generated Canvas catalog
 
-Schema: `morrow.donor-manifest.v1`. Created at `2026-09-03T00:00:00.000Z`.
+`scripts/generate-canvas-api-catalog.mjs` retrieves the current public Canvas API definition index and its resource definitions. It converts them into normalized Morrow operation rows. The generated artifact records the upstream URLs, source digest, last-modified value, operation counts, and final catalog digest.
 
-### example-legacy
+The generator adds twelve explicit New Quizzes Item Bank contracts for the signed-browser connector. These rows are maintained as Morrow source and tested against exact request behavior.
 
-- Repository: `example-org/example-legacy-source`
-- Pinned commit: `7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4`
-- Role: Private donor for Canvas tools, planning, approval projections, verification, privacy, workflows, reports, and browser-backed execution.
-- Default disposition: `behavior-reference-and-reviewed-export`
+Generated metadata does not by itself grant publication rights. The public package gate must record the intended use and reviewed rights basis.
 
-### example-attestation-repo (ExamplePlatform)
+### Historical behavior references
 
-- Manifest id: `meridian`
-- Repository: `example-owner/example-attestation-repo`
-- Pinned commit: `7cc052cf2063e1f2492c0ac20aee41ee3a22a10f`
-- Role: Private donor and initial internal MCP upstream for typed Canvas operations, scope binding, durable effects, batch recovery, and workspace state.
-- Default disposition: `private-upstream-and-behavior-reference`
+Earlier Morrow and ExamplePlatform systems informed the required safety properties: typed operations, separate approval, effect receipts, readback, privacy projection, durable batches, restart recovery, and honest uncertain outcomes.
 
-## Held providers
+The standalone runtime does not need either system. Historical comparison files and fixtures are not included in the public Canvas profile. No private repository history, credentials, institutional data, learner records, private deployment configuration, or covered course content may enter a public candidate.
 
-The manifest records `heldProviders` as `mindtap` and `connect`.
+## Prohibited material
 
-## Manifest rules
+- Canvas credentials, cookies, CSRF values, or session tokens;
+- New Quizzes or Item Bank bearer tokens;
+- real learner identity or covered course content;
+- private institutional paths, doctrine, responses, or deployment configuration;
+- harvested MindTap or Connect methods;
+- copied private source without an exact reviewed origin record.
 
-- No private repository history is merged into this repository.
-- Every copied or adapted source file requires an origin record and rights review.
-- Generated donor catalogs are build artifacts, not publication permission.
-- Private institution data, paths, identities, credentials, and provider responses are prohibited.
+## Release records
 
-## Related records
+- `config/source-rights.manifest.json` contains per-file publication review.
+- `config/source-origin-ledger.json` binds tracked files to a Git revision and digest.
+- `config/release-profiles.json` defines private and public candidate boundaries.
+- `docs/release/PUBLIC-CANVAS-LIMITATIONS.md` states current external gates.
 
-- `docs/sources/donor-manifest.json`
-- `config/source-rights.manifest.json` starts empty on purpose. Public assembly stays blocked until an owner adds one reviewed, exact-digest record for every included file.
-- `README.md`
+Source review, provider-policy review, and publication authorization remain separate decisions. A successful build or package scan cannot create those approvals.

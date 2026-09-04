@@ -36,6 +36,48 @@ export interface SourceCapabilityMetadata {
   readonly evidence?: Readonly<Record<string, CapabilityFieldEvidence>>;
 }
 
+export function parseSourceCapabilityMetadata(value: unknown): SourceCapabilityMetadata | undefined {
+  if (value === undefined) return undefined;
+  if (!isJsonObject(value)) throw new TypeError("source capability metadata must be an object");
+  const output = structuredClone(value) as JsonObject;
+  if (output.provider !== undefined && !["canvas", "local", "mindtap", "connect"].includes(String(output.provider))) {
+    throw new TypeError("source capability provider is invalid");
+  }
+  for (const field of ["family", "sourcePath", "sourceExport"] as const) {
+    if (output[field] !== undefined && (typeof output[field] !== "string" || !output[field].trim())) {
+      throw new TypeError(`source capability ${field} is invalid`);
+    }
+  }
+  if (output.sourceDigest !== undefined && !/^[0-9a-f]{64}$/.test(String(output.sourceDigest))) {
+    throw new TypeError("source capability sourceDigest is invalid");
+  }
+  if (output.behavior !== undefined) {
+    if (!isJsonObject(output.behavior)) throw new TypeError("source capability behavior is invalid");
+    for (const entry of Object.values(output.behavior)) {
+      if (typeof entry !== "boolean") throw new TypeError("source capability behavior values must be boolean");
+    }
+  }
+  if (output.authority !== undefined && !isJsonObject(output.authority)) {
+    throw new TypeError("source capability authority is invalid");
+  }
+  if (output.route !== undefined) {
+    if (!isJsonObject(output.route)) throw new TypeError("source capability route is invalid");
+    if (output.route.backend !== undefined && ![
+      "meridian", "morrow-node", "morrow-extension", "canvas-connector", "composite",
+    ].includes(String(output.route.backend))) throw new TypeError("source capability route backend is invalid");
+  }
+  if (output.profiles !== undefined) {
+    if (!isJsonObject(output.profiles)) throw new TypeError("source capability profiles are invalid");
+    for (const [profileName, profileValue] of Object.entries(output.profiles)) {
+      if (!RUNTIME_PROFILES.includes(profileName as RuntimeProfile) || !isJsonObject(profileValue)
+        || !["supported", "profile_limited", "rights_hold", "private_only", "broken_at_baseline"].includes(String(profileValue.state))) {
+        throw new TypeError("source capability profile is invalid");
+      }
+    }
+  }
+  return output as unknown as SourceCapabilityMetadata;
+}
+
 export interface CapabilityProfileAvailability {
   readonly state: CapabilityProfileState;
   readonly reason?: string;
@@ -76,7 +118,7 @@ export interface MorrowCapabilityDescriptorV1 {
     readonly dataClass: string;
   };
   readonly route: {
-    readonly backend: "meridian" | "morrow-node" | "morrow-extension" | "composite";
+    readonly backend: "meridian" | "morrow-node" | "morrow-extension" | "canvas-connector" | "composite";
     readonly planBackend?: string;
     readonly dispatchBackend?: string;
     readonly readbackBackend?: string;
@@ -314,7 +356,7 @@ export function parseMorrowCapabilityDescriptorV1(value: unknown): MorrowCapabil
   if (!["none", "standard", "destructive", "learner", "grade", "blueprint"].includes(String(value.authority.approvalClass))) {
     throw new TypeError("authority.approvalClass is invalid");
   }
-  if (!["meridian", "morrow-node", "morrow-extension", "composite"].includes(String(value.route.backend))) {
+  if (!["meridian", "morrow-node", "morrow-extension", "canvas-connector", "composite"].includes(String(value.route.backend))) {
     throw new TypeError("route.backend is invalid");
   }
   if (!isJsonObject(value.profiles)) throw new TypeError("profiles are required");
