@@ -60,6 +60,7 @@ async function fakeSsh(
     `  printf '%s\\nclean\\n' ${shellQuote(revision)}`,
     "  exit 0",
     "fi",
+    `printf '%s\\n' "$3" >> ${shellQuote(`${statePrefix}.commands`)}`,
     ...(failStartupOnce
       ? [
           `if test ! -f ${shellQuote(startupMarker)}; then`,
@@ -79,6 +80,7 @@ async function fakeSsh(
 function config(
   truth: { path: string; fileSha256: string },
   stateDirectory: string,
+  edit = false,
 ) {
   return parseGatewayConfig({
     schema: "morrow.upstreams.v1",
@@ -101,15 +103,25 @@ function config(
         requireTrackedClean: true,
       },
       catalogTruth: truth,
-      runtimeProfile: {
-        kind: "catalog-hermetic",
-        profileId: "morrow-catalog",
-        environment: "test",
-        localOperator: "morrow-catalog",
-        sessionId: "catalog-list",
-        stateDirectory: "/tmp/morrow-catalog",
-        mode: "read-only",
-      },
+      runtimeProfile: edit
+        ? {
+            kind: "private-runtime",
+            profileId: "morrow-private",
+            environment: "test",
+            localOperator: "morrow-operator",
+            sessionId: "runtime",
+            stateDirectory: "/tmp/morrow-private",
+            mode: "edit",
+          }
+        : {
+            kind: "catalog-hermetic",
+            profileId: "morrow-catalog",
+            environment: "test",
+            localOperator: "morrow-catalog",
+            sessionId: "catalog-list",
+            stateDirectory: "/tmp/morrow-catalog",
+            mode: "read-only",
+          },
       supervision: {
         startupAttempts: 2,
         reconnectAttempts: 2,
@@ -285,7 +297,7 @@ describe("ExamplePlatform SSH runtime adapter", () => {
       const statePrefix = join(directory, "write");
       await fakeSsh(directory, statePrefix, "canvas_page_update");
       process.env.PATH = `${directory}:${previousPath || ""}`;
-      const runtime = await GatewayRuntime.connect(config(truth, ":memory:"), { journalPath: ":memory:" });
+      const runtime = await GatewayRuntime.connect(config(truth, ":memory:", true), { journalPath: ":memory:" });
       try {
         const planned = await runtime.call("canvas_page_update", {
           course_id: "101",
@@ -312,6 +324,10 @@ describe("ExamplePlatform SSH runtime adapter", () => {
         await new Promise((resolve) => setTimeout(resolve, 30));
         expect((await readFile(`${statePrefix}.calls`, "utf8")).trim().split("\n"))
           .toEqual(["canvas_page_update"]);
+        const commands = await readFile(`${statePrefix}.commands`, "utf8");
+        expect(commands).toContain(`CHCP_TEAM_JOB_ID='${operationId}'`);
+        expect(commands).toMatch(/CHCP_TEAM_TASK_CONTRACT_DIGEST='[0-9a-f]{64}'/);
+        expect(commands).toContain("CHCP_TEAM_COURSE_ID='101'");
       } finally {
         await runtime.close();
       }

@@ -78,7 +78,9 @@ function trackedFiles(root) {
 }
 
 function trackedBuffer(root, path) {
-  return execFileSync("git", ["-C", root, "show", `HEAD:${path}`]);
+  return execFileSync("git", ["-C", root, "show", `HEAD:${path}`], {
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 function profileRuleMatches(path, rule) {

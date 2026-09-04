@@ -28,24 +28,14 @@
       "runtimeProfile": {
         "kind": "private-runtime",
         "profileId": "morrow-private",
-        "environment": "test",
+        "environment": "production",
         "localOperator": "morrow-operator",
         "sessionId": "morrow-session",
         "stateDirectory": "/tmp/morrow-meridian-private-profile",
-        "mode": "read-only",
+        "mode": "edit",
         "canvasConnection": {
           "kind": "session-path",
           "path": "/tmp/morrow-meridian-private-profile/canvas-session.json"
-        },
-        "courseScope": {
-          "courseId": "101"
-        },
-        "operation": {
-          "id": "morrow-operation",
-          "taskContractDigest": "0000000000000000000000000000000000000000000000000000000000000000"
-        },
-        "learnerVault": {
-          "vaultId": "c_0000000000000000"
         }
       },
       "supervision": {

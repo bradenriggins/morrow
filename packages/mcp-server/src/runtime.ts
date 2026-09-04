@@ -950,7 +950,24 @@ export class GatewayRuntime {
         },
       };
     }
-    const result = await this.callSourceOwned(mapping.publicName, forwarded);
+    let operationUpstream: StdioMcpUpstream | undefined;
+    try {
+      if (mapping.upstreamId === "meridian") {
+        operationUpstream = await this.meridianOperationUpstream(reserved);
+      }
+    } catch (error) {
+      const settled = this.effects.settleFailure(reserved.operationId, error, false);
+      return this.effectResult(settled, "dispatch_failed");
+    }
+    let result: JsonObject;
+    try {
+      result = await this.callSourceOwned(mapping.publicName, forwarded, {
+        authorizedEffectOperationId: reserved.operationId,
+        ...(operationUpstream ? { sourceOverride: operationUpstream } : {}),
+      });
+    } finally {
+      await operationUpstream?.close();
+    }
     const source = classifySourceResult(result);
     if (result.isError === true) {
       const meta = isJsonObject(result._meta) && isJsonObject(result._meta["io.morrow/gateway"])
@@ -971,6 +988,67 @@ export class GatewayRuntime {
       return this.verifyOperation(settled.operationId);
     }
     return this.effectResult(settled, "dispatched", result);
+  }
+
+  private async meridianOperationUpstream(
+    operation: EffectOperationRecord,
+  ): Promise<StdioMcpUpstream> {
+    const sourceConfig = this.config.upstreams.find((source) => source.id === operation.sourceId);
+    if (!sourceConfig || sourceConfig.kind !== "meridian-ssh") {
+      throw new Error("ExamplePlatform operation source configuration is unavailable");
+    }
+    if (sourceConfig.runtimeProfile.kind !== "private-runtime" || sourceConfig.runtimeProfile.mode !== "edit") {
+      throw new Error("ExamplePlatform writes require an explicit private edit runtime profile");
+    }
+    const argumentsValue = isJsonObject(operation.plan.arguments) ? operation.plan.arguments : {};
+    const courseId = typeof argumentsValue.course_id === "string"
+      ? argumentsValue.course_id
+      : typeof argumentsValue.courseId === "string"
+        ? argumentsValue.courseId
+        : sourceConfig.runtimeProfile.courseScope?.courseId;
+    const privateAdapterModule = "./meridian-runtime-adapter.js";
+    const launch = (await import(privateAdapterModule)).buildExamplePlatformSshLaunch({
+      host: sourceConfig.host,
+      remoteRoot: sourceConfig.remoteRoot,
+      serverPath: sourceConfig.serverPath,
+      runtimeProfile: {
+        ...sourceConfig.runtimeProfile,
+        mode: "edit",
+        ...(courseId ? { courseScope: { courseId } } : {}),
+        operation: {
+          id: operation.operationId,
+          taskContractDigest: sha256Json({
+            operationId: operation.operationId,
+            planDigest: operation.planDigest,
+            approvalGrantDigest: operation.approvalGrantDigest,
+            effectReceiptId: operation.effectReceiptId,
+          }),
+        },
+      },
+    });
+    const referenceHealth = this.upstreams.get(operation.sourceId)?.health();
+    const upstream = new StdioMcpUpstream({
+      id: sourceConfig.id,
+      label: `${sourceConfig.label} operation`,
+      command: launch.command,
+      args: launch.args,
+      stderr: "ignore",
+      priority: sourceConfig.priority,
+      required: true,
+      ...(referenceHealth?.expectedToolCount ? { expectedToolCount: referenceHealth.expectedToolCount } : {}),
+      ...(referenceHealth?.expectedCatalogDigest ? { expectedCatalogDigest: referenceHealth.expectedCatalogDigest } : {}),
+      ...(referenceHealth?.sourceAttestation ? { sourceAttestation: referenceHealth.sourceAttestation } : {}),
+      ...(referenceHealth?.catalogTruth ? { catalogTruth: referenceHealth.catalogTruth } : {}),
+      beforeConnect: () => {
+        verifyRemoteGitSshSourceAttestation(
+          sourceConfig.id,
+          sourceConfig.repository,
+          sourceConfig.attestation,
+        );
+      },
+    });
+    await upstream.connect();
+    return upstream;
   }
 
   async verifyOperation(operationId: string): Promise<JsonObject> {
@@ -1037,7 +1115,11 @@ export class GatewayRuntime {
   async callSourceOwned(
     publicName: string,
     args: Readonly<Record<string, unknown>>,
-    options: { readonly signal?: AbortSignal } = {},
+    options: {
+      readonly signal?: AbortSignal;
+      readonly authorizedEffectOperationId?: string;
+      readonly sourceOverride?: StdioMcpUpstream;
+    } = {},
   ): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
     if (!mapping) {
@@ -1045,6 +1127,17 @@ export class GatewayRuntime {
         content: [{ type: "text", text: `Unknown Morrow tool ${publicName}.` }],
         isError: true,
         structuredContent: { schema: "morrow.problem.v1", code: "tool_not_found" },
+      };
+    }
+    if (mapping.annotations?.readOnlyHint !== true && !options.authorizedEffectOperationId?.startsWith("op:")) {
+      return {
+        content: [{ type: "text", text: "Morrow refused a provider write without an outer effect reservation." }],
+        isError: true,
+        structuredContent: {
+          schema: "morrow.problem.v1",
+          code: "provider_effect_reservation_required",
+          recoverable: false,
+        },
       };
     }
 
@@ -1112,7 +1205,7 @@ export class GatewayRuntime {
       }, mapping, this.catalog.digest, cancelled, this.config.profile);
     }
 
-    const upstream = this.upstreams.get(mapping.upstreamId);
+    const upstream = options.sourceOverride || this.upstreams.get(mapping.upstreamId);
     if (!upstream) {
       const failed = this.journal.recordFailedBeforeSend(
         prepared.record.operationId,
