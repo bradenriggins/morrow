@@ -254,14 +254,15 @@ describe("MorrowRuntime durable batches", () => {
     try {
       const detail = second.batchGet({ batchId, limit: 10 });
       expect(detail.sourceSettlement).toMatchObject({
-        outcome: "awaiting_approval",
-        awaitingApproval: 1,
+        outcome: "inspection_required",
+        inspectionRequired: 1,
+        requiresAttention: true,
       });
       expect(detail.sourceSettlements).toMatchObject([{
         childId: "course:700",
         sourceBindingId: "canvas:700",
         sourceTaskId: "task-700",
-        state: "awaiting_approval",
+        state: "inspection_required",
       }]);
       expect(JSON.stringify(detail)).not.toContain("Never returned");
     } finally {

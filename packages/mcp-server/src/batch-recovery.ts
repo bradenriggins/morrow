@@ -25,50 +25,55 @@ function synchronizeSourceSettlement(
   runtime: MorrowRuntime,
   batchId: string,
 ): BatchSourceSettlementSummary {
-  const detail = runtime.batches.get(batchId);
-  if (detail.batch.mode !== "stage_writes") {
+  const batch = runtime.batches.getBatch(batchId);
+  if (batch.mode !== "stage_writes") {
     return runtime.sourceSettlements.summary(batchId);
   }
+  let offset = 0;
+  for (;;) {
+    const page = runtime.batches.listChildren(batchId, offset, 500);
+    runtime.sourceSettlements.initialize(
+      batchId,
+      page.children.map((child) => {
+        const args = runtime.batches.readArguments(batchId, child.childId);
+        const binding = sourceBindingId(args);
+        return {
+          childId: child.childId,
+          sourceId: child.sourceId,
+          ...(binding ? { sourceBindingId: binding } : {}),
+        };
+      }),
+    );
 
-  runtime.sourceSettlements.initialize(
-    batchId,
-    detail.children.map((child) => {
-      const args = runtime.batches.readArguments(batchId, child.childId);
-      const binding = sourceBindingId(args);
-      return {
-        childId: child.childId,
-        sourceId: child.sourceId,
-        ...(binding ? { sourceBindingId: binding } : {}),
-      };
-    }),
-  );
-
-  for (const child of detail.children) {
-    const settlement = runtime.sourceSettlements.get(batchId, child.childId);
-    if (child.sourceTaskId && !settlement.sourceTaskId) {
-      runtime.sourceSettlements.markStaged(batchId, child.childId, {
-        sourceTaskId: child.sourceTaskId,
-        ...(child.gatewayOperationId ? { gatewayOperationId: child.gatewayOperationId } : {}),
-        ...(child.sourceResultState ? { taskStatus: child.sourceResultState } : {}),
-      });
-      continue;
+    for (const child of page.children) {
+      const settlement = runtime.sourceSettlements.get(batchId, child.childId);
+      if (child.sourceTaskId && !settlement.sourceTaskId) {
+        runtime.sourceSettlements.markStaged(batchId, child.childId, {
+          sourceTaskId: child.sourceTaskId,
+          ...(child.gatewayOperationId ? { gatewayOperationId: child.gatewayOperationId } : {}),
+          ...(child.sourceResultState ? { taskStatus: child.sourceResultState } : {}),
+        });
+        continue;
+      }
+      if (settlement.sourceTaskId || settlement.state !== "not_started") continue;
+      if (child.state === "unknown") {
+        runtime.sourceSettlements.markDispatchResult(
+          batchId,
+          child.childId,
+          "unknown",
+          child.gatewayOperationId || undefined,
+        );
+      } else if (child.state === "failed") {
+        runtime.sourceSettlements.markDispatchResult(
+          batchId,
+          child.childId,
+          "failed",
+          child.gatewayOperationId || undefined,
+        );
+      }
     }
-    if (settlement.sourceTaskId || settlement.state !== "not_started") continue;
-    if (child.state === "unknown") {
-      runtime.sourceSettlements.markDispatchResult(
-        batchId,
-        child.childId,
-        "unknown",
-        child.gatewayOperationId || undefined,
-      );
-    } else if (child.state === "failed") {
-      runtime.sourceSettlements.markDispatchResult(
-        batchId,
-        child.childId,
-        "failed",
-        child.gatewayOperationId || undefined,
-      );
-    }
+    if (page.nextOffset === null) break;
+    offset = page.nextOffset;
   }
 
   return runtime.sourceSettlements.summary(batchId);

@@ -51,9 +51,78 @@ export type BatchChildState = typeof BATCH_CHILD_STATES[number];
 export const MAX_BATCH_CHILDREN = 10_000;
 export const MAX_BATCH_ARGUMENT_BYTES = 64 * 1024;
 export const MAX_BATCH_MANIFEST_BYTES = 8 * 1024 * 1024;
+export const MAX_READ_BATCH_CONCURRENCY = 8;
+export const MAX_WRITE_BATCH_CONCURRENCY = 4;
+
+export const COURSE_SET_SOURCES = Object.freeze([
+  "explicit",
+  "saved_project",
+  "account_search",
+  "term_state_filter",
+  "blueprint_associations",
+  "prior_cross_course_search",
+] as const);
+export type CourseSetSource = typeof COURSE_SET_SOURCES[number];
+
+export interface BatchCourseSetInput {
+  readonly source: CourseSetSource;
+  readonly courseIds: readonly string[];
+  readonly complete: boolean;
+  readonly allCoursesRequested?: boolean;
+  readonly paginationComplete?: boolean;
+  readonly snapshotDigest?: string;
+}
+
+export interface ResolvedBatchCourseSet {
+  readonly schema: "morrow.batch-course-set.v1";
+  readonly source: CourseSetSource;
+  readonly courseIds: readonly string[];
+  readonly complete: true;
+  readonly allCoursesRequested: boolean;
+  readonly paginationComplete: boolean;
+  readonly snapshotDigest: string;
+  readonly digest: string;
+}
+
+export interface BatchRatePolicyInput {
+  readonly retryAfterMs?: number;
+  readonly requestCost?: number;
+  readonly rateLimitRemaining?: number;
+  readonly jitterRatio?: number;
+}
+
+export interface FrozenBatchManifest {
+  readonly schema: "morrow.batch-manifest.v2";
+  readonly batchId: string;
+  readonly operationFamily: string;
+  readonly catalogDigest: string;
+  readonly profileDigest: string;
+  readonly planDigest: string;
+  readonly courseSet: ResolvedBatchCourseSet;
+  readonly approvalPreviewDigest: string;
+  readonly approvalCoverageChildCount: number;
+  readonly requestEstimate: number;
+  readonly byteEstimate: number;
+  readonly readbackSpecDigest: string;
+  readonly correctionFactsDigest: string;
+  readonly expiresAt: string;
+  readonly ratePolicy: BatchRatePolicyInput;
+  readonly children: readonly {
+    readonly childId: string;
+    readonly ordinal: number;
+    readonly courseId: string;
+    readonly targetDigest: string;
+    readonly planFragmentDigest: string;
+    readonly sourceObservationDigest: string;
+    readonly readbackSpecDigest: string;
+    readonly correctionFactsDigest: string;
+    readonly dependencyChildIds: readonly string[];
+  }[];
+}
 
 export interface CreateBatchChildInput {
   readonly childId?: string;
+  readonly courseId?: string;
   readonly publicToolName: string;
   readonly sourceId: string;
   readonly sourceToolName: string;
@@ -61,6 +130,10 @@ export interface CreateBatchChildInput {
   readonly arguments: JsonObject;
   readonly idempotencyKey?: string;
   readonly sourceOperationId?: string;
+  readonly dependencyChildIds?: readonly string[];
+  readonly sourceObservationDigest?: string;
+  readonly readbackSpecDigest?: string;
+  readonly correctionFactsDigest?: string;
 }
 
 export interface CreateBatchInput {
@@ -69,6 +142,16 @@ export interface CreateBatchInput {
   readonly catalogDigest: string;
   readonly concurrency: number;
   readonly children: readonly CreateBatchChildInput[];
+  readonly operationFamily?: string;
+  readonly courseSet?: BatchCourseSetInput;
+  readonly profileDigest?: string;
+  readonly planDigest?: string;
+  readonly approvalPreviewDigest?: string;
+  readonly requestEstimate?: number;
+  readonly readbackSpecDigest?: string;
+  readonly correctionFactsDigest?: string;
+  readonly expiresAt?: string;
+  readonly ratePolicy?: BatchRatePolicyInput;
 }
 
 export interface BatchRecord {
@@ -123,6 +206,7 @@ export interface BatchChildRecord {
 
 export interface BatchDetail {
   readonly batch: BatchRecord;
+  readonly manifest: FrozenBatchManifest;
   readonly children: readonly BatchChildRecord[];
 }
 
@@ -147,6 +231,11 @@ export type BatchExecutor = (input: BatchExecutorInput) => Promise<BatchExecutio
 export interface RunBatchWindowOptions {
   readonly maxChildren?: number;
   readonly expectedCatalogDigest: string;
+  readonly expectedCourseSetDigest?: string;
+  readonly expectedProfileDigest?: string;
+  readonly ratePolicy?: BatchRatePolicyInput;
+  readonly sleep?: (milliseconds: number) => Promise<void>;
+  readonly random?: () => number;
 }
 
 export interface BatchWindowResult {
@@ -155,6 +244,8 @@ export interface BatchWindowResult {
   readonly processed: number;
   readonly remaining: number;
   readonly children: readonly BatchChildRecord[];
+  readonly effectiveConcurrency: number;
+  readonly backoffMs: number;
 }
 
 export interface DurableBatchStoreOptions {
@@ -214,6 +305,14 @@ interface ChildRow {
   revision: number;
 }
 
+interface ManifestRow {
+  batch_id: string;
+  manifest_digest: string;
+  manifest_ciphertext: string;
+  manifest_iv: string;
+  manifest_tag: string;
+}
+
 const SHA256 = /^[0-9a-f]{64}$/;
 const NAME = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const TERMINAL_CHILD_STATES = new Set<BatchChildState>([
@@ -251,11 +350,82 @@ function exactDigest(value: unknown, label: string): string {
   return normalized;
 }
 
-function exactConcurrency(value: unknown): number {
-  if (!Number.isInteger(value) || Number(value) < 1 || Number(value) > 16) {
-    throw new TypeError("batch concurrency must be a whole number from 1 through 16");
+function exactConcurrency(value: unknown, mode: BatchMode): number {
+  const maximum = mode === "stage_writes" ? MAX_WRITE_BATCH_CONCURRENCY : MAX_READ_BATCH_CONCURRENCY;
+  if (!Number.isInteger(value) || Number(value) < 1 || Number(value) > maximum) {
+    throw new TypeError(`batch concurrency must be a whole number from 1 through ${maximum}`);
   }
   return Number(value);
+}
+
+function exactNonNegativeInteger(value: unknown, label: string, maximum: number): number {
+  if (!Number.isSafeInteger(value) || Number(value) < 0 || Number(value) > maximum) {
+    throw new TypeError(`${label} must be a whole number from 0 through ${maximum}`);
+  }
+  return Number(value);
+}
+
+function exactIsoInstant(value: unknown, label: string): string {
+  const text = exactString(value, label, 80);
+  if (!Number.isFinite(Date.parse(text))) throw new TypeError(`${label} must be an ISO instant`);
+  return new Date(text).toISOString();
+}
+
+function resolvedCourseId(value: unknown, label: string): string {
+  return exactName(value, label);
+}
+
+function exactRatePolicy(value: BatchRatePolicyInput | undefined): BatchRatePolicyInput {
+  if (!value) return {};
+  const retryAfterMs = value.retryAfterMs === undefined
+    ? undefined
+    : exactNonNegativeInteger(value.retryAfterMs, "retry after milliseconds", 300_000);
+  const requestCost = value.requestCost === undefined
+    ? undefined
+    : exactNonNegativeInteger(value.requestCost, "request cost", 1_000_000);
+  const rateLimitRemaining = value.rateLimitRemaining === undefined
+    ? undefined
+    : exactNonNegativeInteger(value.rateLimitRemaining, "rate limit remaining", 1_000_000);
+  const jitterRatio = value.jitterRatio === undefined
+    ? undefined
+    : Number(value.jitterRatio);
+  if (jitterRatio !== undefined && (!Number.isFinite(jitterRatio) || jitterRatio < 0 || jitterRatio > 1)) {
+    throw new TypeError("jitter ratio must be a number from 0 through 1");
+  }
+  return {
+    ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+    ...(requestCost === undefined ? {} : { requestCost }),
+    ...(rateLimitRemaining === undefined ? {} : { rateLimitRemaining }),
+    ...(jitterRatio === undefined ? {} : { jitterRatio }),
+  };
+}
+
+export function resolveBatchCourseSet(input: BatchCourseSetInput): ResolvedBatchCourseSet {
+  if (!COURSE_SET_SOURCES.includes(input.source)) throw new TypeError("course set source is invalid");
+  if (!Array.isArray(input.courseIds) || input.courseIds.length < 1 || input.courseIds.length > MAX_BATCH_CHILDREN) {
+    throw new TypeError(`course set must contain 1 through ${MAX_BATCH_CHILDREN} course ids`);
+  }
+  const courseIds = input.courseIds.map((courseId) => resolvedCourseId(courseId, "course id"));
+  if (new Set(courseIds).size !== courseIds.length) throw new TypeError("course set ids must be unique");
+  const allCoursesRequested = input.allCoursesRequested === true;
+  const paginationComplete = input.paginationComplete === true || input.source === "explicit";
+  if (!input.complete || (allCoursesRequested && !paginationComplete)) {
+    throw new Error("incomplete course discovery cannot become an all-courses batch");
+  }
+  const snapshotDigest = input.snapshotDigest
+    ? exactDigest(input.snapshotDigest, "course set snapshot digest")
+    : sha256Json({ source: input.source, courseIds });
+  const digest = sha256Json({ source: input.source, courseIds, snapshotDigest, allCoursesRequested, paginationComplete });
+  return {
+    schema: "morrow.batch-course-set.v1",
+    source: input.source,
+    courseIds,
+    complete: true,
+    allCoursesRequested,
+    paginationComplete,
+    snapshotDigest,
+    digest,
+  };
 }
 
 function exactKey(value: Uint8Array): Buffer {
@@ -361,6 +531,39 @@ function decryptedRequest(key: Buffer, row: ChildRow): JsonObject {
   return parsed;
 }
 
+function encryptedManifest(
+  key: Buffer,
+  batchId: string,
+  manifestDigest: string,
+  manifest: FrozenBatchManifest,
+): { ciphertext: string; iv: string; tag: string } {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`${batchId}\0manifest\0${manifestDigest}`, "utf8"));
+  const plaintext = Buffer.from(canonicalJson(manifest), "utf8");
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return {
+    ciphertext: ciphertext.toString("base64url"),
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+  };
+}
+
+function decryptedManifest(key: Buffer, row: ManifestRow): FrozenBatchManifest {
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(row.manifest_iv, "base64url"));
+  decipher.setAAD(Buffer.from(`${row.batch_id}\0manifest\0${row.manifest_digest}`, "utf8"));
+  decipher.setAuthTag(Buffer.from(row.manifest_tag, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(row.manifest_ciphertext, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+  const parsed = JSON.parse(plaintext) as unknown;
+  if (!isJsonObject(parsed) || sha256Json(parsed) !== row.manifest_digest) {
+    throw new Error("batch manifest failed authenticated readback");
+  }
+  return parsed as unknown as FrozenBatchManifest;
+}
+
 export function loadOrCreateBatchEncryptionKey(pathValue: string): Uint8Array {
   const path = resolve(pathValue);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -398,6 +601,7 @@ export class DurableBatchStore {
   private closed = false;
   private readonly selectBatch: StatementSync;
   private readonly selectChild: StatementSync;
+  private readonly selectManifest: StatementSync;
 
   constructor(options: DurableBatchStoreOptions) {
     this.path = options.path === ":memory:" ? ":memory:" : resolve(options.path);
@@ -467,10 +671,20 @@ export class DurableBatchStore {
       ) STRICT;
       CREATE INDEX IF NOT EXISTS gateway_batch_children_state
         ON gateway_batch_children(batch_id, state, ordinal);
+      CREATE TABLE IF NOT EXISTS gateway_batch_manifests (
+        batch_id TEXT PRIMARY KEY REFERENCES gateway_batches(batch_id) ON DELETE CASCADE,
+        manifest_digest TEXT NOT NULL,
+        manifest_ciphertext TEXT NOT NULL,
+        manifest_iv TEXT NOT NULL,
+        manifest_tag TEXT NOT NULL
+      ) STRICT;
     `);
     this.selectBatch = this.database.prepare("SELECT * FROM gateway_batches WHERE batch_id=?");
     this.selectChild = this.database.prepare(
       "SELECT * FROM gateway_batch_children WHERE batch_id=? AND child_id=?",
+    );
+    this.selectManifest = this.database.prepare(
+      "SELECT * FROM gateway_batch_manifests WHERE batch_id=?",
     );
     this.recoverRunningChildren();
   }
@@ -566,7 +780,7 @@ export class DurableBatchStore {
     const name = exactString(input.name, "batch name", 200);
     if (!BATCH_MODES.includes(input.mode)) throw new TypeError("batch mode is invalid");
     const catalogDigest = exactDigest(input.catalogDigest, "catalog digest");
-    const concurrency = exactConcurrency(input.concurrency);
+    const concurrency = exactConcurrency(input.concurrency, input.mode);
     if (!Array.isArray(input.children) || input.children.length < 1 || input.children.length > MAX_BATCH_CHILDREN) {
       throw new TypeError(`batch must contain 1 through ${MAX_BATCH_CHILDREN} children`);
     }
@@ -580,15 +794,27 @@ export class DurableBatchStore {
         throw new RangeError(`child ${index + 1} arguments exceed ${MAX_BATCH_ARGUMENT_BYTES} bytes`);
       }
       const id = childId(child.childId, index + 1);
+      const argumentCourseId = typeof argumentsClone.course_id === "string"
+        ? argumentsClone.course_id
+        : undefined;
+      const courseId = resolvedCourseId(child.courseId || argumentCourseId, `child ${index + 1} course id`);
+      const dependencyChildIds = (child.dependencyChildIds || []).map((dependency: string) => (
+        exactName(dependency, `child ${index + 1} dependency id`)
+      ));
+      if (new Set(dependencyChildIds).size !== dependencyChildIds.length) {
+        throw new TypeError(`child ${index + 1} dependency ids must be unique`);
+      }
+      const requestDigest = sha256Json(argumentsClone);
       return {
         childId: id,
         ordinal: index + 1,
+        courseId,
         publicToolName: exactName(child.publicToolName, "public tool name"),
         sourceId: exactName(child.sourceId, "source id"),
         sourceToolName: exactName(child.sourceToolName, "source tool name"),
         readOnly: child.readOnly === true,
         arguments: argumentsClone,
-        requestDigest: sha256Json(argumentsClone),
+        requestDigest,
         idempotencyKey: child.idempotencyKey
           ? exactName(child.idempotencyKey, "idempotency key")
           : `batch:${sha256Text(`${batchId}\0${id}`).slice(0, 48)}`,
@@ -597,6 +823,23 @@ export class DurableBatchStore {
           : (input.mode === "stage_writes"
             ? `operation:${sha256Text(`${batchId}\0${id}\0source`).slice(0, 48)}`
             : null),
+        dependencyChildIds,
+        targetDigest: sha256Json({
+          courseId,
+          publicToolName: child.publicToolName,
+          sourceId: child.sourceId,
+          sourceToolName: child.sourceToolName,
+          requestDigest,
+        }),
+        sourceObservationDigest: child.sourceObservationDigest
+          ? exactDigest(child.sourceObservationDigest, "source observation digest")
+          : sha256Text("source_observation_not_supplied"),
+        readbackSpecDigest: child.readbackSpecDigest
+          ? exactDigest(child.readbackSpecDigest, "child readback spec digest")
+          : sha256Json({ sourceId: child.sourceId, sourceToolName: child.sourceToolName, courseId }),
+        correctionFactsDigest: child.correctionFactsDigest
+          ? exactDigest(child.correctionFactsDigest, "child correction facts digest")
+          : sha256Text("no_correction_facts"),
         bytes,
       };
     });
@@ -606,6 +849,23 @@ export class DurableBatchStore {
     if (new Set(normalized.map((child) => child.idempotencyKey)).size !== normalized.length) {
       throw new TypeError("batch child idempotency keys must be unique");
     }
+    const knownChildIds = new Set(normalized.map((child) => child.childId));
+    for (const child of normalized) {
+      if (child.dependencyChildIds.includes(child.childId) || child.dependencyChildIds.some((id: string) => !knownChildIds.has(id))) {
+        throw new TypeError(`child ${child.childId} has an invalid dependency`);
+      }
+    }
+    const dependencyState = new Map<string, "visiting" | "visited">();
+    const visit = (childIdValue: string): void => {
+      const state = dependencyState.get(childIdValue);
+      if (state === "visiting") throw new TypeError("batch child dependencies must not contain a cycle");
+      if (state === "visited") return;
+      dependencyState.set(childIdValue, "visiting");
+      const child = normalized.find((candidate) => candidate.childId === childIdValue)!;
+      for (const dependency of child.dependencyChildIds) visit(dependency);
+      dependencyState.set(childIdValue, "visited");
+    };
+    for (const child of normalized) visit(child.childId);
     const totalBytes = normalized.reduce((sum, child) => sum + child.bytes, 0);
     if (totalBytes > MAX_BATCH_MANIFEST_BYTES) {
       throw new RangeError(`batch arguments exceed ${MAX_BATCH_MANIFEST_BYTES} bytes`);
@@ -616,24 +876,79 @@ export class DurableBatchStore {
     if (input.mode === "stage_writes" && normalized.some((child) => child.readOnly || child.sourceId !== "example-legacy")) {
       throw new TypeError("stage_writes batches currently require Morrow legacy write children only");
     }
-    const manifestDigest = sha256Json({
-      name,
-      mode: input.mode,
+    const now = this.instant();
+    const courseSet = resolveBatchCourseSet(input.courseSet || {
+      source: "explicit",
+      courseIds: [...new Set(normalized.map((child) => child.courseId))],
+      complete: true,
+      paginationComplete: true,
+    });
+    const courseIdsWithChildren = new Set(normalized.map((child) => child.courseId));
+    if (
+      courseSet.courseIds.some((courseId) => !courseIdsWithChildren.has(courseId))
+      || normalized.some((child) => !courseSet.courseIds.includes(child.courseId))
+    ) {
+      throw new Error("frozen course set and child targets must match exactly");
+    }
+    const profileDigest = input.profileDigest
+      ? exactDigest(input.profileDigest, "profile digest")
+      : sha256Text("profile_unbound");
+    const planDigest = input.planDigest
+      ? exactDigest(input.planDigest, "plan digest")
+      : sha256Json(normalized.map((child) => ({
+        childId: child.childId,
+        targetDigest: child.targetDigest,
+        dependencyChildIds: child.dependencyChildIds,
+      })));
+    const approvalPreviewDigest = input.approvalPreviewDigest
+      ? exactDigest(input.approvalPreviewDigest, "approval preview digest")
+      : sha256Json(normalized.map((child) => ({ childId: child.childId, targetDigest: child.targetDigest })));
+    const requestEstimate = input.requestEstimate === undefined
+      ? normalized.length
+      : exactNonNegativeInteger(input.requestEstimate, "request estimate", 1_000_000);
+    const readbackSpecDigest = input.readbackSpecDigest
+      ? exactDigest(input.readbackSpecDigest, "readback spec digest")
+      : sha256Json(normalized.map((child) => child.readbackSpecDigest));
+    const correctionFactsDigest = input.correctionFactsDigest
+      ? exactDigest(input.correctionFactsDigest, "correction facts digest")
+      : sha256Json(normalized.map((child) => child.correctionFactsDigest));
+    const expiresAt = input.expiresAt
+      ? exactIsoInstant(input.expiresAt, "batch expiry")
+      : new Date(this.now().getTime() + 60 * 60 * 1000).toISOString();
+    if (Date.parse(expiresAt) <= Date.parse(now)) throw new Error("batch expiry must be in the future");
+    const ratePolicy = exactRatePolicy(input.ratePolicy);
+    const manifest: FrozenBatchManifest = {
+      schema: "morrow.batch-manifest.v2",
+      batchId,
+      operationFamily: exactName(input.operationFamily || "batch", "operation family"),
       catalogDigest,
-      concurrency,
+      profileDigest,
+      planDigest,
+      courseSet,
+      approvalPreviewDigest,
+      approvalCoverageChildCount: normalized.length,
+      requestEstimate,
+      byteEstimate: totalBytes,
+      readbackSpecDigest,
+      correctionFactsDigest,
+      expiresAt,
+      ratePolicy,
       children: normalized.map((child) => ({
         childId: child.childId,
         ordinal: child.ordinal,
-        publicToolName: child.publicToolName,
-        sourceId: child.sourceId,
-        sourceToolName: child.sourceToolName,
-        readOnly: child.readOnly,
-        requestDigest: child.requestDigest,
-        idempotencyKey: child.idempotencyKey,
-        sourceOperationId: child.sourceOperationId,
+        courseId: child.courseId,
+        targetDigest: child.targetDigest,
+        planFragmentDigest: sha256Json({ planDigest, childId: child.childId, targetDigest: child.targetDigest }),
+        sourceObservationDigest: child.sourceObservationDigest,
+        readbackSpecDigest: child.readbackSpecDigest,
+        correctionFactsDigest: child.correctionFactsDigest,
+        dependencyChildIds: child.dependencyChildIds,
       })),
-    });
-    const now = this.instant();
+    };
+    const manifestDigest = sha256Json(manifest);
+    if (Buffer.byteLength(canonicalJson(manifest), "utf8") > MAX_BATCH_MANIFEST_BYTES) {
+      throw new RangeError(`batch manifest exceeds ${MAX_BATCH_MANIFEST_BYTES} bytes`);
+    }
     this.transaction(() => {
       this.database.prepare(`
         INSERT INTO gateway_batches(
@@ -652,6 +967,18 @@ export class DurableBatchStore {
         normalized.length,
         now,
         now,
+      );
+      const encryptedManifestValue = encryptedManifest(this.key, batchId, manifestDigest, manifest);
+      this.database.prepare(`
+        INSERT INTO gateway_batch_manifests(
+          batch_id, manifest_digest, manifest_ciphertext, manifest_iv, manifest_tag
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(
+        batchId,
+        manifestDigest,
+        encryptedManifestValue.ciphertext,
+        encryptedManifestValue.iv,
+        encryptedManifestValue.tag,
       );
       const insert = this.database.prepare(`
         INSERT INTO gateway_batch_children(
@@ -698,12 +1025,44 @@ export class DurableBatchStore {
     return batchRecord(row);
   }
 
+  getManifest(batchIdValue: string): FrozenBatchManifest {
+    this.assertOpen();
+    const batchId = exactName(batchIdValue, "batch id");
+    const row = this.selectManifest.get(batchId) as ManifestRow | undefined;
+    if (!row) throw new Error("batch manifest does not exist");
+    return decryptedManifest(this.key, row);
+  }
+
   get(batchIdValue: string): BatchDetail {
     const batch = this.getBatch(batchIdValue);
+    const manifest = this.getManifest(batch.batchId);
     const rows = this.database.prepare(`
       SELECT * FROM gateway_batch_children WHERE batch_id=? ORDER BY ordinal ASC
     `).all(batch.batchId) as unknown as ChildRow[];
-    return { batch, children: rows.map(childRecord) };
+    return { batch, manifest, children: rows.map(childRecord) };
+  }
+
+  listChildren(batchIdValue: string, offsetValue = 0, limitValue = 100): {
+    readonly batch: BatchRecord;
+    readonly offset: number;
+    readonly returned: number;
+    readonly nextOffset: number | null;
+    readonly children: readonly BatchChildRecord[];
+  } {
+    const batch = this.getBatch(batchIdValue);
+    const offset = Math.max(0, Math.trunc(offsetValue));
+    const limit = Math.max(1, Math.min(Math.trunc(limitValue), 500));
+    const rows = this.database.prepare(`
+      SELECT * FROM gateway_batch_children
+      WHERE batch_id=? ORDER BY ordinal ASC LIMIT ? OFFSET ?
+    `).all(batch.batchId, limit, offset) as unknown as ChildRow[];
+    return {
+      batch,
+      offset,
+      returned: rows.length,
+      nextOffset: offset + rows.length < batch.totalChildren ? offset + rows.length : null,
+      children: rows.map(childRecord),
+    };
   }
 
   list(limitValue = 50): readonly BatchRecord[] {
@@ -712,6 +1071,45 @@ export class DurableBatchStore {
     return (this.database.prepare(`
       SELECT * FROM gateway_batches ORDER BY created_at DESC, batch_id DESC LIMIT ?
     `).all(limit) as unknown as BatchRow[]).map(batchRecord);
+  }
+
+  listPage(offsetValue = 0, limitValue = 100): {
+    readonly batches: readonly BatchRecord[];
+    readonly nextOffset: number | null;
+  } {
+    this.assertOpen();
+    const offset = Math.max(0, Math.trunc(offsetValue));
+    const limit = Math.max(1, Math.min(Math.trunc(limitValue), 500));
+    const rows = this.database.prepare(`
+      SELECT * FROM gateway_batches ORDER BY created_at ASC, batch_id ASC LIMIT ? OFFSET ?
+    `).all(limit, offset) as unknown as BatchRow[];
+    const total = this.database.prepare("SELECT COUNT(*) AS count FROM gateway_batches").get() as { count: number };
+    return {
+      batches: rows.map(batchRecord),
+      nextOffset: offset + rows.length < Number(total.count || 0) ? offset + rows.length : null,
+    };
+  }
+
+  listNonterminal(offsetValue = 0, limitValue = 100): {
+    readonly batches: readonly BatchRecord[];
+    readonly nextOffset: number | null;
+  } {
+    this.assertOpen();
+    const offset = Math.max(0, Math.trunc(offsetValue));
+    const limit = Math.max(1, Math.min(Math.trunc(limitValue), 500));
+    const rows = this.database.prepare(`
+      SELECT * FROM gateway_batches
+      WHERE state IN ('planned','running','paused','inspection_required')
+      ORDER BY created_at ASC, batch_id ASC LIMIT ? OFFSET ?
+    `).all(limit, offset) as unknown as BatchRow[];
+    const total = this.database.prepare(`
+      SELECT COUNT(*) AS count FROM gateway_batches
+      WHERE state IN ('planned','running','paused','inspection_required')
+    `).get() as { count: number };
+    return {
+      batches: rows.map(batchRecord),
+      nextOffset: offset + rows.length < Number(total.count || 0) ? offset + rows.length : null,
+    };
   }
 
   pause(batchIdValue: string): BatchRecord {
@@ -754,12 +1152,28 @@ export class DurableBatchStore {
     });
   }
 
-  beginRun(batchIdValue: string, expectedCatalogDigestValue: string): BatchRecord {
+  quarantine(batchIdValue: string): BatchRecord {
+    const batchId = exactName(batchIdValue, "batch id");
+    return this.transaction(() => {
+      this.getBatch(batchId);
+      this.database.prepare(`
+        UPDATE gateway_batches SET state='inspection_required', updated_at=?, revision=revision+1 WHERE batch_id=?
+      `).run(this.instant(), batchId);
+      return this.getBatch(batchId);
+    });
+  }
+
+  beginRun(
+    batchIdValue: string,
+    expectedCatalogDigestValue: string,
+    expected: { readonly courseSetDigest?: string; readonly profileDigest?: string } = {},
+  ): BatchRecord {
     const batchId = exactName(batchIdValue, "batch id");
     const expectedCatalogDigest = exactDigest(expectedCatalogDigestValue, "expected catalog digest");
     return this.transaction(() => {
       const current = this.getBatch(batchId);
       if (TERMINAL_BATCH_STATES.has(current.state)) return current;
+      const manifest = this.getManifest(batchId);
       if (current.catalogDigest !== expectedCatalogDigest) {
         this.database.prepare(`
           UPDATE gateway_batches
@@ -767,7 +1181,22 @@ export class DurableBatchStore {
         `).run(this.instant(), batchId);
         throw new Error("batch catalog digest is stale; create a new frozen batch");
       }
+      if (
+        (expected.courseSetDigest && manifest.courseSet.digest !== exactDigest(expected.courseSetDigest, "expected course set digest"))
+        || (expected.profileDigest && manifest.profileDigest !== exactDigest(expected.profileDigest, "expected profile digest"))
+      ) {
+        this.database.prepare(`
+          UPDATE gateway_batches SET state='paused', updated_at=?, revision=revision+1 WHERE batch_id=?
+        `).run(this.instant(), batchId);
+        throw new Error("batch target or profile facts are stale; create a new frozen batch");
+      }
       const now = this.instant();
+      if (Date.parse(manifest.expiresAt) <= Date.parse(now)) {
+        this.database.prepare(`
+          UPDATE gateway_batches SET state='paused', updated_at=?, revision=revision+1 WHERE batch_id=?
+        `).run(now, batchId);
+        throw new Error("batch approval preview has expired; create a new frozen batch");
+      }
       this.database.prepare(`
         UPDATE gateway_batches
         SET state='running', started_at=COALESCE(started_at, ?), updated_at=?, revision=revision+1
@@ -777,17 +1206,32 @@ export class DurableBatchStore {
     });
   }
 
+  resume(batchIdValue: string, expectedCatalogDigestValue: string, expected: {
+    readonly courseSetDigest?: string;
+    readonly profileDigest?: string;
+  } = {}): BatchRecord {
+    return this.beginRun(batchIdValue, expectedCatalogDigestValue, expected);
+  }
+
   claimPending(batchIdValue: string, limitValue: number): readonly BatchChildRecord[] {
     const batchId = exactName(batchIdValue, "batch id");
     const limit = Math.max(1, Math.min(Math.trunc(limitValue), 500));
     return this.transaction(() => {
       const batch = this.getBatch(batchId);
       if (batch.state !== "running") return [];
+      const manifest = this.getManifest(batchId);
+      const dependencyStateRows = this.database.prepare(`
+        SELECT child_id, state FROM gateway_batch_children WHERE batch_id=?
+      `).all(batchId) as { child_id: string; state: BatchChildState }[];
+      const dependencyStates = new Map(dependencyStateRows.map((row) => [row.child_id, row.state]));
+      const dependenciesByChild = new Map(
+        manifest.children.map((child) => [child.childId, child.dependencyChildIds]),
+      );
       const rows = this.database.prepare(`
         SELECT * FROM gateway_batch_children
         WHERE batch_id=? AND state='pending'
         ORDER BY ordinal ASC LIMIT ?
-      `).all(batchId, limit) as unknown as ChildRow[];
+      `).all(batchId, Math.min(limit * 4, 500)) as unknown as ChildRow[];
       const now = this.instant();
       const update = this.database.prepare(`
         UPDATE gateway_batch_children
@@ -797,6 +1241,9 @@ export class DurableBatchStore {
       `);
       const claimed: BatchChildRecord[] = [];
       for (const row of rows) {
+        if (claimed.length >= limit) break;
+        const dependencies = dependenciesByChild.get(row.child_id) || [];
+        if (dependencies.some((dependency) => dependencyStates.get(dependency) !== "succeeded")) continue;
         const result = update.run(now, now, batchId, row.child_id);
         if (Number(result.changes) === 1) {
           claimed.push(childRecord(this.selectChild.get(batchId, row.child_id) as ChildRow));
@@ -900,19 +1347,53 @@ async function mapLimit<T, R>(
   return output;
 }
 
+function effectiveRatePolicy(
+  batch: BatchRecord,
+  manifest: FrozenBatchManifest,
+  override: BatchRatePolicyInput | undefined,
+  random: () => number,
+): { readonly concurrency: number; readonly backoffMs: number } {
+  const policy = exactRatePolicy({ ...manifest.ratePolicy, ...override });
+  let concurrency = batch.concurrency;
+  if (policy.requestCost && policy.rateLimitRemaining !== undefined) {
+    concurrency = Math.min(concurrency, Math.max(1, Math.floor(policy.rateLimitRemaining / policy.requestCost)));
+  }
+  const retryAfterMs = policy.retryAfterMs || 0;
+  const jitterRatio = policy.jitterRatio ?? 0.1;
+  const boundedRandom = Math.max(0, Math.min(1, random()));
+  return {
+    concurrency,
+    backoffMs: retryAfterMs + Math.floor(retryAfterMs * jitterRatio * boundedRandom),
+  };
+}
+
 export async function runBatchWindow(
   store: DurableBatchStore,
   batchId: string,
   executor: BatchExecutor,
   options: RunBatchWindowOptions,
 ): Promise<BatchWindowResult> {
-  const started = store.beginRun(batchId, options.expectedCatalogDigest);
+  const started = store.beginRun(batchId, options.expectedCatalogDigest, {
+    ...(options.expectedCourseSetDigest ? { courseSetDigest: options.expectedCourseSetDigest } : {}),
+    ...(options.expectedProfileDigest ? { profileDigest: options.expectedProfileDigest } : {}),
+  });
+  const manifest = store.getManifest(batchId);
+  const rate = effectiveRatePolicy(started, manifest, options.ratePolicy, options.random || Math.random);
   if (TERMINAL_BATCH_STATES.has(started.state)) {
-    return { schema: "morrow.batch-window.v1", batch: started, processed: 0, remaining: 0, children: [] };
+    return {
+      schema: "morrow.batch-window.v1",
+      batch: started,
+      processed: 0,
+      remaining: 0,
+      children: [],
+      effectiveConcurrency: rate.concurrency,
+      backoffMs: 0,
+    };
   }
+  if (rate.backoffMs > 0) await (options.sleep || ((milliseconds) => new Promise<void>((resolveValue) => setTimeout(resolveValue, milliseconds))))(rate.backoffMs);
   const maxChildren = Math.max(1, Math.min(options.maxChildren ?? 50, 500));
   const claimed = store.claimPending(batchId, maxChildren);
-  const settled = await mapLimit(claimed, started.concurrency, async (child) => {
+  const settled = await mapLimit(claimed, rate.concurrency, async (child) => {
     try {
       const argumentsValue = store.readArguments(child.batchId, child.childId);
       const result = await executor({ batch: started, child, arguments: argumentsValue });
@@ -934,12 +1415,15 @@ export async function runBatchWindow(
     processed: settled.length,
     remaining: batch.pendingChildren,
     children: settled,
+    effectiveConcurrency: rate.concurrency,
+    backoffMs: rate.backoffMs,
   };
 }
 
 export function batchDetailProjection(detail: BatchDetail): JsonObject {
   return {
     batch: detail.batch,
+    manifest: detail.manifest,
     children: detail.children,
   };
 }

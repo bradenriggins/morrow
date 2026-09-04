@@ -9,6 +9,7 @@ import {
   type BatchWindowResult,
   type CreateBatchInput,
   type DurableBatchStoreOptions,
+  type FrozenBatchManifest,
   type RunBatchWindowOptions,
 } from "./index.js";
 import { sha256Text, type JsonObject } from "@morrow/contracts";
@@ -60,24 +61,24 @@ export class DurableBatchStore {
     return this.inner.get(batchId);
   }
 
+  getManifest(batchId: string): FrozenBatchManifest {
+    return this.inner.getManifest(batchId);
+  }
+
   list(limit = 50): readonly BatchRecord[] {
     return this.inner.list(limit);
   }
 
+  listPage(offset = 0, limit = 100) {
+    return this.inner.listPage(offset, limit);
+  }
+
   listChildren(batchId: string, offsetValue = 0, limitValue = 100): BatchChildrenPage {
-    const detail = this.inner.get(batchId);
-    const offset = Math.max(0, Math.trunc(offsetValue));
-    const limit = Math.max(1, Math.min(Math.trunc(limitValue), 500));
-    const children = detail.children.slice(offset, offset + limit);
-    return {
-      batch: detail.batch,
-      offset,
-      returned: children.length,
-      nextOffset: offset + children.length < detail.children.length
-        ? offset + children.length
-        : null,
-      children,
-    };
+    return this.inner.listChildren(batchId, offsetValue, limitValue);
+  }
+
+  listNonterminal(offset = 0, limit = 100) {
+    return this.inner.listNonterminal(offset, limit);
   }
 
   pause(batchId: string): BatchRecord {
@@ -88,16 +89,32 @@ export class DurableBatchStore {
     return this.inner.cancel(batchId);
   }
 
-  beginRun(batchId: string, expectedCatalogDigest: string): BatchRecord {
+  quarantine(batchId: string): BatchRecord {
+    return this.inner.quarantine(batchId);
+  }
+
+  beginRun(
+    batchId: string,
+    expectedCatalogDigest: string,
+    expected: { readonly courseSetDigest?: string; readonly profileDigest?: string } = {},
+  ): BatchRecord {
     try {
-      return this.inner.beginRun(batchId, expectedCatalogDigest);
+      return this.inner.beginRun(batchId, expectedCatalogDigest, expected);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (message.includes("catalog digest is stale")) {
+      if (message.includes("stale") || message.includes("expired")) {
         this.inner.pause(batchId);
       }
       throw error;
     }
+  }
+
+  resume(
+    batchId: string,
+    expectedCatalogDigest: string,
+    expected: { readonly courseSetDigest?: string; readonly profileDigest?: string } = {},
+  ): BatchRecord {
+    return this.beginRun(batchId, expectedCatalogDigest, expected);
   }
 
   claimPending(batchId: string, limit: number): readonly BatchChildRecord[] {
@@ -158,13 +175,37 @@ async function mapLimit<T, R>(
   return output;
 }
 
+function windowRate(
+  batch: BatchRecord,
+  manifest: FrozenBatchManifest,
+  override: RunBatchWindowOptions["ratePolicy"],
+  random: () => number,
+): { concurrency: number; backoffMs: number } {
+  const policy = { ...manifest.ratePolicy, ...override };
+  let concurrency = batch.concurrency;
+  if (policy.requestCost && policy.rateLimitRemaining !== undefined) {
+    concurrency = Math.min(concurrency, Math.max(1, Math.floor(policy.rateLimitRemaining / policy.requestCost)));
+  }
+  const retryAfterMs = policy.retryAfterMs || 0;
+  const jitterRatio = policy.jitterRatio ?? 0.1;
+  const boundedRandom = Math.max(0, Math.min(1, random()));
+  return {
+    concurrency,
+    backoffMs: retryAfterMs + Math.floor(retryAfterMs * jitterRatio * boundedRandom),
+  };
+}
+
 export async function runBatchWindow(
   store: DurableBatchStore,
   batchId: string,
   executor: BatchExecutor,
   options: RunBatchWindowOptions,
 ): Promise<BatchWindowResult> {
-  const started = store.beginRun(batchId, options.expectedCatalogDigest);
+  const started = store.beginRun(batchId, options.expectedCatalogDigest, {
+    ...(options.expectedCourseSetDigest ? { courseSetDigest: options.expectedCourseSetDigest } : {}),
+    ...(options.expectedProfileDigest ? { profileDigest: options.expectedProfileDigest } : {}),
+  });
+  const rate = windowRate(started, store.getManifest(batchId), options.ratePolicy, options.random || Math.random);
   if (TERMINAL_BATCH_STATES.has(started.state)) {
     return {
       schema: "morrow.batch-window.v1",
@@ -172,11 +213,16 @@ export async function runBatchWindow(
       processed: 0,
       remaining: 0,
       children: [],
+      effectiveConcurrency: rate.concurrency,
+      backoffMs: 0,
     };
+  }
+  if (rate.backoffMs > 0) {
+    await (options.sleep || ((milliseconds) => new Promise<void>((resolveValue) => setTimeout(resolveValue, milliseconds))))(rate.backoffMs);
   }
   const maxChildren = Math.max(1, Math.min(options.maxChildren ?? 50, 500));
   const claimed = store.claimPending(batchId, maxChildren);
-  const settled = await mapLimit(claimed, started.concurrency, async (child) => {
+  const settled = await mapLimit(claimed, rate.concurrency, async (child) => {
     try {
       const argumentsValue = store.readArguments(child.batchId, child.childId);
       const result = await executor({ batch: started, child, arguments: argumentsValue });
@@ -199,5 +245,7 @@ export async function runBatchWindow(
     processed: settled.length,
     remaining: batch.pendingChildren,
     children: settled,
+    effectiveConcurrency: rate.concurrency,
+    backoffMs: rate.backoffMs,
   };
 }

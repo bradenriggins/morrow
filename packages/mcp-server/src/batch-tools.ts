@@ -33,10 +33,48 @@ function safeFailure(error: unknown): CallToolResult {
 
 const BatchOperationSchema = z.object({
   child_id: z.string().min(1).max(160).optional(),
+  course_id: z.string().min(1).max(160).optional(),
   tool: z.string().min(1).max(128),
   arguments: z.record(z.string(), z.unknown()).default({}),
   source_binding_id: z.string().min(1).max(160).optional(),
+  depends_on: z.array(z.string().min(1).max(160)).max(10_000).default([]),
+  source_observation_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  readback_spec_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+  correction_facts_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 });
+
+const BatchCourseSetSchema = z.object({
+  source: z.enum([
+    "explicit",
+    "saved_project",
+    "account_search",
+    "term_state_filter",
+    "blueprint_associations",
+    "prior_cross_course_search",
+  ]),
+  course_ids: z.array(z.string().min(1).max(160)).min(1).max(10_000),
+  complete: z.boolean(),
+  all_courses_requested: z.boolean().default(false),
+  pagination_complete: z.boolean().default(false),
+  snapshot_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+});
+
+const BatchRatePolicySchema = z.object({
+  retry_after_ms: z.number().int().min(0).max(300_000).optional(),
+  request_cost: z.number().int().min(0).max(1_000_000).optional(),
+  rate_limit_remaining: z.number().int().min(0).max(1_000_000).optional(),
+  jitter_ratio: z.number().min(0).max(1).optional(),
+});
+
+function ratePolicy(value: z.infer<typeof BatchRatePolicySchema> | undefined) {
+  if (!value) return undefined;
+  return {
+    ...(value.retry_after_ms === undefined ? {} : { retryAfterMs: value.retry_after_ms }),
+    ...(value.request_cost === undefined ? {} : { requestCost: value.request_cost }),
+    ...(value.rate_limit_remaining === undefined ? {} : { rateLimitRemaining: value.rate_limit_remaining }),
+    ...(value.jitter_ratio === undefined ? {} : { jitterRatio: value.jitter_ratio }),
+  };
+}
 
 export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): void {
   const scheduler = new BatchWindowScheduler({
@@ -68,8 +106,18 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
       inputSchema: z.object({
         name: z.string().min(1).max(200),
         mode: z.enum(BATCH_MODES),
-        concurrency: z.number().int().min(1).max(16).default(2),
+        concurrency: z.number().int().min(1).max(8).default(2),
         operations: z.array(BatchOperationSchema).min(1).max(10_000),
+        operation_family: z.string().min(1).max(160),
+        course_set: BatchCourseSetSchema.optional(),
+        profile_digest: z.string().regex(/^[0-9a-f]{64}$/),
+        plan_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+        approval_preview_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+        request_estimate: z.number().int().min(0).max(1_000_000).optional(),
+        readback_spec_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+        correction_facts_digest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+        expires_at: z.string().datetime(),
+        rate_policy: BatchRatePolicySchema.optional(),
       }),
       annotations: {
         readOnlyHint: false,
@@ -78,7 +126,22 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         openWorldHint: false,
       },
     },
-    async ({ name, mode, concurrency, operations }) => {
+    async ({
+      name,
+      mode,
+      concurrency,
+      operations,
+      operation_family,
+      course_set,
+      profile_digest,
+      plan_digest,
+      approval_preview_digest,
+      request_estimate,
+      readback_spec_digest,
+      correction_facts_digest,
+      expires_at,
+      rate_policy,
+    }) => {
       try {
         const result = runtime.batchCreate({
           name,
@@ -86,12 +149,36 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
           concurrency,
           operations: operations.map((operation) => ({
             ...(operation.child_id ? { childId: operation.child_id } : {}),
+            ...(operation.course_id ? { courseId: operation.course_id } : {}),
             tool: operation.tool,
             arguments: operation.arguments,
             ...(operation.source_binding_id
               ? { sourceBindingId: operation.source_binding_id }
               : {}),
+            ...(operation.depends_on.length > 0 ? { dependencyChildIds: operation.depends_on } : {}),
+            ...(operation.source_observation_digest ? { sourceObservationDigest: operation.source_observation_digest } : {}),
+            ...(operation.readback_spec_digest ? { readbackSpecDigest: operation.readback_spec_digest } : {}),
+            ...(operation.correction_facts_digest ? { correctionFactsDigest: operation.correction_facts_digest } : {}),
           })),
+          operationFamily: operation_family,
+          ...(course_set ? {
+            courseSet: {
+              source: course_set.source,
+              courseIds: course_set.course_ids,
+              complete: course_set.complete,
+              allCoursesRequested: course_set.all_courses_requested,
+              paginationComplete: course_set.pagination_complete,
+              ...(course_set.snapshot_digest ? { snapshotDigest: course_set.snapshot_digest } : {}),
+            },
+          } : {}),
+          profileDigest: profile_digest,
+          ...(plan_digest ? { planDigest: plan_digest } : {}),
+          ...(approval_preview_digest ? { approvalPreviewDigest: approval_preview_digest } : {}),
+          ...(request_estimate === undefined ? {} : { requestEstimate: request_estimate }),
+          ...(readback_spec_digest ? { readbackSpecDigest: readback_spec_digest } : {}),
+          ...(correction_facts_digest ? { correctionFactsDigest: correction_facts_digest } : {}),
+          expiresAt: expires_at,
+          ...(ratePolicy(rate_policy) ? { ratePolicy: ratePolicy(rate_policy)! } : {}),
         });
         return textAndStructured("Created a frozen Morrow batch manifest.", result);
       } catch (error) {
@@ -158,12 +245,41 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   );
 
   server.registerTool(
+    "morrow_batch_results_page",
+    {
+      description: "Return one bounded page of durable child results and source-settlement facts for a frozen batch.",
+      inputSchema: z.object({
+        batch_id: z.string().min(8).max(160),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(500).default(100),
+      }),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ batch_id, offset, limit }) => {
+      try {
+        const result = runtime.batchResultsPage({ batchId: batch_id, offset, limit });
+        return textAndStructured(`Loaded one bounded result page for batch ${batch_id}.`, result);
+      } catch (error) {
+        return safeFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
     "morrow_batch_run",
     {
       description: "Run or resume a bounded window of one frozen batch. read_only children perform reads. stage_writes children only stage existing Morrow tasks for separate human approval. Batch completion means orchestration finished, not that Canvas changes were approved or verified. Morrow serializes control for one batch and caps active windows across batches.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         max_children: z.number().int().min(1).max(500).default(50),
+        course_set_digest: z.string().regex(/^[0-9a-f]{64}$/),
+        profile_digest: z.string().regex(/^[0-9a-f]{64}$/),
+        rate_policy: BatchRatePolicySchema.optional(),
       }),
       annotations: {
         readOnlyHint: false,
@@ -172,11 +288,14 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         openWorldHint: true,
       },
     },
-    async ({ batch_id, max_children }) => {
+    async ({ batch_id, max_children, course_set_digest, profile_digest, rate_policy }) => {
       try {
         const result = await scheduler.run(batch_id, () => runtime.batchRun({
           batchId: batch_id,
           maxChildren: max_children,
+          courseSetDigest: course_set_digest,
+          profileDigest: profile_digest,
+          ...(ratePolicy(rate_policy) ? { ratePolicy: ratePolicy(rate_policy)! } : {}),
         }));
         const batch = result.batch;
         const state = batch && typeof batch === "object" && !Array.isArray(batch)
@@ -192,6 +311,40 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
           `Processed a bounded batch window. Orchestration is ${state}; source outcome is ${sourceOutcome}.`,
           result,
         );
+      } catch (error) {
+        return safeFailure(error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "morrow_batch_resume",
+    {
+      description: "Resume a paused frozen batch only after its supplied course-set and profile facts still match the encrypted manifest.",
+      inputSchema: z.object({
+        batch_id: z.string().min(8).max(160),
+        max_children: z.number().int().min(1).max(500).default(50),
+        course_set_digest: z.string().regex(/^[0-9a-f]{64}$/),
+        profile_digest: z.string().regex(/^[0-9a-f]{64}$/),
+        rate_policy: BatchRatePolicySchema.optional(),
+      }),
+      annotations: {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: true,
+      },
+    },
+    async ({ batch_id, max_children, course_set_digest, profile_digest, rate_policy }) => {
+      try {
+        const result = await scheduler.run(batch_id, () => runtime.batchResume({
+          batchId: batch_id,
+          maxChildren: max_children,
+          courseSetDigest: course_set_digest,
+          profileDigest: profile_digest,
+          ...(ratePolicy(rate_policy) ? { ratePolicy: ratePolicy(rate_policy)! } : {}),
+        }));
+        return textAndStructured(`Resumed a bounded batch window for ${batch_id}.`, result);
       } catch (error) {
         return safeFailure(error);
       }

@@ -79,6 +79,48 @@ describe("Morrow stdio entry", () => {
         schema: "morrow.capability-get.v1",
         descriptor: { canonicalName: "canvas_page_get" },
       });
+      expect(listed.tools.some((tool) => tool.name === "morrow_batch_resume")).toBe(true);
+      expect(listed.tools.some((tool) => tool.name === "morrow_batch_results_page")).toBe(true);
+      const profileDigest = "a".repeat(64);
+      const created = await client.callTool({
+        name: "morrow_batch_create",
+        arguments: {
+          name: "One exact course read",
+          mode: "read_only",
+          concurrency: 2,
+          operation_family: "course_read",
+          profile_digest: profileDigest,
+          expires_at: "2030-01-01T00:00:00.000Z",
+          course_set: {
+            source: "explicit",
+            course_ids: ["1"],
+            complete: true,
+            pagination_complete: true,
+          },
+          operations: [{ child_id: "course:1", course_id: "1", tool: "canvas_page_get", arguments: { course_id: "1" } }],
+        },
+      });
+      expect(created.isError).not.toBe(true);
+      const createdContent = created.structuredContent as {
+        batch: { batchId: string };
+        manifest: { courseSet: { digest: string } };
+      };
+      const page = await client.callTool({
+        name: "morrow_batch_results_page",
+        arguments: { batch_id: createdContent.batch.batchId, offset: 0, limit: 1 },
+      });
+      expect(page.isError).not.toBe(true);
+      await client.callTool({ name: "morrow_batch_pause", arguments: { batch_id: createdContent.batch.batchId } });
+      const resumed = await client.callTool({
+        name: "morrow_batch_resume",
+        arguments: {
+          batch_id: createdContent.batch.batchId,
+          max_children: 1,
+          course_set_digest: createdContent.manifest.courseSet.digest,
+          profile_digest: profileDigest,
+        },
+      });
+      expect(resumed.isError).not.toBe(true);
       const result = await client.callTool({
         name: "canvas_page_get",
         arguments: { course_id: "1" },

@@ -4,11 +4,14 @@ import {
   BatchSourceSettlementStore,
   DurableBatchStore,
   loadOrCreateBatchEncryptionKey,
+  recoverBatchState,
   runBatchWindow,
   taskProjectionFromGatewayResult,
   type BatchChildRecord,
+  type BatchCourseSetInput,
   type BatchExecutionResult,
   type BatchMode,
+  type BatchRatePolicyInput,
   type BatchRecord,
   type BatchSourceSettlementRecord,
   type BatchSourceSettlementSummary,
@@ -29,8 +32,10 @@ export const MORROW_BATCH_TOOL_NAMES = Object.freeze([
   "morrow_batch_health",
   "morrow_batch_create",
   "morrow_batch_get",
+  "morrow_batch_results_page",
   "morrow_batches_recent",
   "morrow_batch_run",
+  "morrow_batch_resume",
   "morrow_batch_reconcile",
   "morrow_batch_pause",
   "morrow_batch_cancel",
@@ -38,9 +43,14 @@ export const MORROW_BATCH_TOOL_NAMES = Object.freeze([
 
 export interface CreateGatewayBatchOperationInput {
   readonly childId?: string;
+  readonly courseId?: string;
   readonly tool: string;
   readonly arguments: JsonObject;
   readonly sourceBindingId?: string;
+  readonly dependencyChildIds?: readonly string[];
+  readonly sourceObservationDigest?: string;
+  readonly readbackSpecDigest?: string;
+  readonly correctionFactsDigest?: string;
 }
 
 export interface CreateGatewayBatchInput {
@@ -48,6 +58,16 @@ export interface CreateGatewayBatchInput {
   readonly mode: BatchMode;
   readonly concurrency: number;
   readonly operations: readonly CreateGatewayBatchOperationInput[];
+  readonly operationFamily?: string;
+  readonly courseSet?: BatchCourseSetInput;
+  readonly profileDigest?: string;
+  readonly planDigest?: string;
+  readonly approvalPreviewDigest?: string;
+  readonly requestEstimate?: number;
+  readonly readbackSpecDigest?: string;
+  readonly correctionFactsDigest?: string;
+  readonly expiresAt?: string;
+  readonly ratePolicy?: BatchRatePolicyInput;
 }
 
 export interface GatewayBatchPageInput {
@@ -64,6 +84,9 @@ export interface RecentBatchesInput {
 export interface RunGatewayBatchInput {
   readonly batchId: string;
   readonly maxChildren?: number;
+  readonly courseSetDigest?: string;
+  readonly profileDigest?: string;
+  readonly ratePolicy?: BatchRatePolicyInput;
 }
 
 export interface ReconcileGatewayBatchInput {
@@ -330,7 +353,7 @@ export class MorrowRuntime {
       const batches = new DurableBatchStore({ path, encryptionKey: key });
       const sourceSettlements = new BatchSourceSettlementStore({ path });
       const runtime = new MorrowRuntime(gateway, batches, sourceSettlements);
-      runtime.recoverRecentSourceSettlementIndex();
+      await runtime.recoverStartupBatches();
       return runtime;
     } catch (error) {
       await gateway.close();
@@ -338,56 +361,91 @@ export class MorrowRuntime {
     }
   }
 
-  private recoverRecentSourceSettlementIndex(): void {
-    for (const batch of this.batches.list(200)) {
-      if (batch.mode !== "stage_writes") continue;
-      this.ensureSourceSettlementRows(batch.batchId);
+  private async recoverStartupBatches(): Promise<void> {
+    const batches: BatchRecord[] = [];
+    let offset = 0;
+    for (;;) {
+      const page = this.batches.listPage(offset, 500);
+      batches.push(...page.batches);
+      if (page.nextOffset === null) break;
+      offset = page.nextOffset;
+    }
+    for (const batch of batches) {
+      try {
+        if (["paused", "inspection_required"].includes(batch.state)) {
+          recoverBatchState({
+            path: this.batches.path,
+            batchId: batch.batchId,
+            mode: "apply_safe",
+          });
+        }
+        if (batch.mode !== "stage_writes") continue;
+        this.ensureSourceSettlementRows(batch.batchId);
+        let reconciliationOffset = 0;
+        for (;;) {
+          const result = await this.batchReconcile({
+            batchId: batch.batchId,
+            offset: reconciliationOffset,
+            maxChildren: 500,
+          });
+          const nextOffset = typeof result.nextOffset === "number" ? result.nextOffset : null;
+          if (nextOffset === null) break;
+          reconciliationOffset = nextOffset;
+        }
+      } catch {
+        this.batches.quarantine(batch.batchId);
+      }
     }
   }
 
   private ensureSourceSettlementRows(batchId: string): BatchSourceSettlementSummary {
-    const detail = this.batches.get(batchId);
-    if (detail.batch.mode !== "stage_writes") {
+    const batch = this.batches.getBatch(batchId);
+    if (batch.mode !== "stage_writes") {
       return this.sourceSettlements.summary(batchId);
     }
+    let offset = 0;
+    for (;;) {
+      const page = this.batches.listChildren(batchId, offset, 500);
+      const identities = page.children.map((child) => {
+        const argumentsValue = this.batches.readArguments(batchId, child.childId);
+        return {
+          childId: child.childId,
+          sourceId: child.sourceId,
+          ...(sourceBindingIdFromStoredArguments(argumentsValue)
+            ? { sourceBindingId: sourceBindingIdFromStoredArguments(argumentsValue) }
+            : {}),
+        };
+      });
+      this.sourceSettlements.initialize(batchId, identities);
 
-    const identities = detail.children.map((child) => {
-      const argumentsValue = this.batches.readArguments(batchId, child.childId);
-      return {
-        childId: child.childId,
-        sourceId: child.sourceId,
-        ...(sourceBindingIdFromStoredArguments(argumentsValue)
-          ? { sourceBindingId: sourceBindingIdFromStoredArguments(argumentsValue) }
-          : {}),
-      };
-    });
-    this.sourceSettlements.initialize(batchId, identities);
-
-    for (const child of detail.children) {
-      const current = this.sourceSettlements.get(batchId, child.childId);
-      if (child.sourceTaskId && !current.sourceTaskId) {
-        this.sourceSettlements.markStaged(batchId, child.childId, {
-          sourceTaskId: child.sourceTaskId,
-          ...(child.gatewayOperationId ? { gatewayOperationId: child.gatewayOperationId } : {}),
-          ...(child.sourceResultState ? { taskStatus: child.sourceResultState } : {}),
-        });
-      } else if (!child.sourceTaskId && current.state === "not_started") {
-        if (child.state === "unknown") {
-          this.sourceSettlements.markDispatchResult(
-            batchId,
-            child.childId,
-            "unknown",
-            child.gatewayOperationId || undefined,
-          );
-        } else if (child.state === "failed") {
-          this.sourceSettlements.markDispatchResult(
-            batchId,
-            child.childId,
-            "failed",
-            child.gatewayOperationId || undefined,
-          );
+      for (const child of page.children) {
+        const current = this.sourceSettlements.get(batchId, child.childId);
+        if (child.sourceTaskId && !current.sourceTaskId) {
+          this.sourceSettlements.markStaged(batchId, child.childId, {
+            sourceTaskId: child.sourceTaskId,
+            ...(child.gatewayOperationId ? { gatewayOperationId: child.gatewayOperationId } : {}),
+            ...(child.sourceResultState ? { taskStatus: child.sourceResultState } : {}),
+          });
+        } else if (!child.sourceTaskId && current.state === "not_started") {
+          if (child.state === "unknown") {
+            this.sourceSettlements.markDispatchResult(
+              batchId,
+              child.childId,
+              "unknown",
+              child.gatewayOperationId || undefined,
+            );
+          } else if (child.state === "failed") {
+            this.sourceSettlements.markDispatchResult(
+              batchId,
+              child.childId,
+              "failed",
+              child.gatewayOperationId || undefined,
+            );
+          }
         }
       }
+      if (page.nextOffset === null) break;
+      offset = page.nextOffset;
     }
     return this.sourceSettlements.summary(batchId);
   }
@@ -450,11 +508,16 @@ export class MorrowRuntime {
         ...(sourceBindingId ? { sourceBindingId } : {}),
         child: {
           ...(operation.childId ? { childId: operation.childId } : {}),
+          ...(operation.courseId ? { courseId: operation.courseId } : {}),
           publicToolName: mapping.publicName,
           sourceId: mapping.upstreamId,
           sourceToolName: mapping.upstreamName,
           readOnly,
           arguments: normalizeBatchArguments(mapping, operation.arguments, sourceBindingId),
+          ...(operation.dependencyChildIds ? { dependencyChildIds: operation.dependencyChildIds } : {}),
+          ...(operation.sourceObservationDigest ? { sourceObservationDigest: operation.sourceObservationDigest } : {}),
+          ...(operation.readbackSpecDigest ? { readbackSpecDigest: operation.readbackSpecDigest } : {}),
+          ...(operation.correctionFactsDigest ? { correctionFactsDigest: operation.correctionFactsDigest } : {}),
         },
       };
     });
@@ -468,6 +531,16 @@ export class MorrowRuntime {
       catalogDigest: this.gateway.catalog.digest,
       concurrency,
       children: prepared.map((entry) => entry.child),
+      ...(input.operationFamily ? { operationFamily: input.operationFamily } : {}),
+      ...(input.courseSet ? { courseSet: input.courseSet } : {}),
+      ...(input.profileDigest ? { profileDigest: input.profileDigest } : {}),
+      ...(input.planDigest ? { planDigest: input.planDigest } : {}),
+      ...(input.approvalPreviewDigest ? { approvalPreviewDigest: input.approvalPreviewDigest } : {}),
+      ...(input.requestEstimate === undefined ? {} : { requestEstimate: input.requestEstimate }),
+      ...(input.readbackSpecDigest ? { readbackSpecDigest: input.readbackSpecDigest } : {}),
+      ...(input.correctionFactsDigest ? { correctionFactsDigest: input.correctionFactsDigest } : {}),
+      ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+      ...(input.ratePolicy ? { ratePolicy: input.ratePolicy } : {}),
     });
 
     if (input.mode === "stage_writes") {
@@ -486,6 +559,7 @@ export class MorrowRuntime {
     return {
       schema: "morrow.batch-created.v1",
       batch: detail.batch,
+      manifest: detail.manifest,
       sourceSettlement: this.sourceSettlements.summary(detail.batch.batchId),
       returnedChildren: Math.min(detail.children.length, 25),
       children: detail.children.slice(0, 25),
@@ -504,6 +578,7 @@ export class MorrowRuntime {
     return {
       schema: "morrow.batch-detail.v1",
       batch: page.batch,
+      manifest: this.batches.getManifest(input.batchId),
       sourceSettlement: this.sourceSettlements.summary(input.batchId),
       offset: page.offset,
       returned: page.returned,
@@ -511,6 +586,14 @@ export class MorrowRuntime {
       children: page.children,
       sourceSettlements: this.settlementPage(input.batchId, page.children),
     };
+  }
+
+  batchResultsPage(input: GatewayBatchPageInput): JsonObject {
+    const detail = this.batchGet(input);
+    return {
+      ...detail,
+      schema: "morrow.batch-results-page.v1",
+    } as JsonObject;
   }
 
   batchesRecent(input: RecentBatchesInput = {}): JsonObject {
@@ -579,6 +662,9 @@ export class MorrowRuntime {
       {
         expectedCatalogDigest: this.gateway.catalog.digest,
         maxChildren: input.maxChildren,
+        ...(input.courseSetDigest ? { expectedCourseSetDigest: input.courseSetDigest } : {}),
+        ...(input.profileDigest ? { expectedProfileDigest: input.profileDigest } : {}),
+        ...(input.ratePolicy ? { ratePolicy: input.ratePolicy } : {}),
       },
     );
     const sourceSettlement = this.sourceSettlements.summary(input.batchId);
@@ -594,6 +680,14 @@ export class MorrowRuntime {
           }
         : { providerOutcomeFinal: result.batch.state === "completed" }),
     } as unknown as JsonObject;
+  }
+
+  async batchResume(input: RunGatewayBatchInput): Promise<JsonObject> {
+    const result = await this.batchRun(input);
+    return {
+      ...result,
+      schema: "morrow.batch-resumed.v1",
+    } as JsonObject;
   }
 
   async batchReconcile(input: ReconcileGatewayBatchInput): Promise<JsonObject> {

@@ -26,7 +26,7 @@ describe("DurableBatchStore scale campaign", () => {
         name: "Ten thousand course reads",
         mode: "read_only",
         catalogDigest,
-        concurrency: 16,
+        concurrency: 8,
         children: Array.from({ length: MAX_BATCH_CHILDREN }, (_, index) => {
           const number = index + 1;
           return {
@@ -46,7 +46,7 @@ describe("DurableBatchStore scale campaign", () => {
       expect(created.batch).toMatchObject({
         totalChildren: 10_000,
         pendingChildren: 10_000,
-        concurrency: 16,
+        concurrency: 8,
         state: "planned",
       });
       expect(created.batch.manifestDigest).toMatch(/^[0-9a-f]{64}$/);
