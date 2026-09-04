@@ -273,13 +273,12 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_run",
     {
-      description: "Run or resume a bounded window of one frozen batch. read_only children perform reads. stage_writes children only stage existing Morrow tasks for separate human approval. Batch completion means orchestration finished, not that Canvas changes were approved or verified. Morrow serializes control for one batch and caps active windows across batches.",
+      description: "Run or resume a bounded window of one frozen batch. The approved manifest fixes concurrency and rate controls. read_only children perform reads. stage_writes children only stage existing Morrow tasks for separate human approval. Batch completion means orchestration finished, not that Canvas changes were approved or verified. Morrow serializes control for one batch and caps active windows across batches.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         max_children: z.number().int().min(1).max(500).default(50),
         course_set_digest: z.string().regex(/^[0-9a-f]{64}$/),
         profile_digest: z.string().regex(/^[0-9a-f]{64}$/),
-        rate_policy: BatchRatePolicySchema.optional(),
       }),
       annotations: {
         readOnlyHint: false,
@@ -288,14 +287,13 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         openWorldHint: true,
       },
     },
-    async ({ batch_id, max_children, course_set_digest, profile_digest, rate_policy }) => {
+    async ({ batch_id, max_children, course_set_digest, profile_digest }) => {
       try {
         const result = await scheduler.run(batch_id, () => runtime.batchRun({
           batchId: batch_id,
           maxChildren: max_children,
           courseSetDigest: course_set_digest,
           profileDigest: profile_digest,
-          ...(ratePolicy(rate_policy) ? { ratePolicy: ratePolicy(rate_policy)! } : {}),
         }));
         const batch = result.batch;
         const state = batch && typeof batch === "object" && !Array.isArray(batch)
@@ -320,13 +318,12 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_resume",
     {
-      description: "Resume a paused frozen batch only after its supplied course-set and profile facts still match the encrypted manifest.",
+      description: "Resume a paused frozen batch only after its supplied course-set and profile facts still match the encrypted manifest. The caller cannot replace its approved concurrency or rate controls.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         max_children: z.number().int().min(1).max(500).default(50),
         course_set_digest: z.string().regex(/^[0-9a-f]{64}$/),
         profile_digest: z.string().regex(/^[0-9a-f]{64}$/),
-        rate_policy: BatchRatePolicySchema.optional(),
       }),
       annotations: {
         readOnlyHint: false,
@@ -335,14 +332,13 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
         openWorldHint: true,
       },
     },
-    async ({ batch_id, max_children, course_set_digest, profile_digest, rate_policy }) => {
+    async ({ batch_id, max_children, course_set_digest, profile_digest }) => {
       try {
         const result = await scheduler.run(batch_id, () => runtime.batchResume({
           batchId: batch_id,
           maxChildren: max_children,
           courseSetDigest: course_set_digest,
           profileDigest: profile_digest,
-          ...(ratePolicy(rate_policy) ? { ratePolicy: ratePolicy(rate_policy)! } : {}),
         }));
         return textAndStructured(`Resumed a bounded batch window for ${batch_id}.`, result);
       } catch (error) {

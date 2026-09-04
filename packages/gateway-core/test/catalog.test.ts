@@ -95,6 +95,29 @@ describe("mergeCatalog", () => {
     });
   });
 
+  it("admits only synthetic source capabilities to the sandbox profile", () => {
+    const snapshot = mergeCatalog([
+      {
+        id: "sandbox",
+        label: "Sandbox",
+        priority: 100,
+        tools: [{ name: "canvas_page_get", inputSchema: emptySchema, annotations: { readOnlyHint: true } }],
+      },
+      {
+        id: "meridian",
+        label: "ExamplePlatform",
+        priority: 50,
+        tools: [{ name: "canvas_course_get", inputSchema: emptySchema, annotations: { readOnlyHint: true } }],
+      },
+    ]);
+
+    expect(snapshot.tools.find((tool) => tool.upstreamId === "sandbox")?.capability?.profiles.sandbox).toEqual({ state: "supported" });
+    expect(snapshot.tools.find((tool) => tool.upstreamId === "meridian")?.capability?.profiles.sandbox).toEqual({
+      state: "profile_limited",
+      reason: "This live capability is not available in the synthetic estate.",
+    });
+  });
+
   it("rejects an incomplete capability descriptor", () => {
     expect(() => parseMorrowCapabilityDescriptorV1({
       schema: "morrow.capability.v1",

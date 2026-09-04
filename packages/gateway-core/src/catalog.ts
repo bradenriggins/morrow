@@ -61,13 +61,16 @@ function profile(state: CapabilityProfileAvailability["state"], reason?: string)
 
 function defaultProfiles(sourceId: string): Readonly<Record<RuntimeProfile, CapabilityProfileAvailability>> {
   const isMorrow = sourceId === "example-legacy";
+  const isSandbox = sourceId === "sandbox";
   return {
     "private-full": profile("supported"),
     "public-canvas": profile(
       isMorrow ? "rights_hold" : "supported",
       isMorrow ? "Morrow legacy source requires an explicit publication selection." : undefined,
     ),
-    sandbox: profile("profile_limited", "No synthetic donor fixture has admitted this capability."),
+    sandbox: isSandbox
+      ? profile("supported")
+      : profile("profile_limited", "This live capability is not available in the synthetic estate."),
     "read-only": profile("profile_limited", "The read-only profile does not admit provider writes."),
   };
 }

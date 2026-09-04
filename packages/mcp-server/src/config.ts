@@ -402,6 +402,14 @@ export function parseGatewayConfig(
     ) {
       throw new Error(`public-canvas profile refuses ${upstream.sourceDisposition} upstream ${upstream.id}.`);
     }
+    if (parsed.profile === "sandbox") {
+      if (upstream.id !== "sandbox" || upstream.kind !== "mcp-stdio") {
+        throw new Error("sandbox profile accepts only the local synthetic sandbox upstream");
+      }
+      if (upstream.env.MORROW_SANDBOX !== "1" || upstream.env.MORROW_ALLOW_EXTERNAL_NETWORK !== "0") {
+        throw new Error("sandbox profile requires synthetic mode and disabled external network access");
+      }
+    }
   }
   const publicationPath = parsed.publicationPolicy.path
     ? resolveLocalPath(parsed.publicationPolicy.path, environment)

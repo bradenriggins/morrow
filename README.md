@@ -17,6 +17,8 @@ The gateway connects ExamplePlatform and other configured MCP processes as inter
 
 The bounded Morrow legacy extension bridge presents the donor's exported Canvas catalog as an internal MCP server. It connects to the existing browser service worker over an authenticated loopback WebSocket. Reads use the donor runtime. Writes require the outer gateway plan and approval before they can create a donor task for the donor's separate approval.
 
+The sandbox profile starts a network-disabled synthetic Canvas process from `morrow.upstreams.sandbox.example.json`. It provides 100 deterministic courses, bounded pagination, page reads, approved page writes, fresh readback, and injected pre-send or ambiguous-delivery faults. It requires no provider credentials.
+
 Every ExamplePlatform write uses a new SSH process bound to the exact outer operation, course, plan, grant, and effect receipt. Batch writes freeze one outer operation per child and use one complete loopback batch approval before bounded dispatch.
 
 ## Provider boundary

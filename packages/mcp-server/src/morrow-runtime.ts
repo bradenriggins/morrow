@@ -87,7 +87,6 @@ export interface RunGatewayBatchInput {
   readonly maxChildren?: number;
   readonly courseSetDigest?: string;
   readonly profileDigest?: string;
-  readonly ratePolicy?: BatchRatePolicyInput;
 }
 
 export interface ReconcileGatewayBatchInput {
@@ -838,7 +837,6 @@ export class MorrowRuntime {
         maxChildren: input.maxChildren,
         ...(input.courseSetDigest ? { expectedCourseSetDigest: input.courseSetDigest } : {}),
         ...(input.profileDigest ? { expectedProfileDigest: input.profileDigest } : {}),
-        ...(input.ratePolicy ? { ratePolicy: input.ratePolicy } : {}),
       },
     );
     const sourceSettlement = this.sourceSettlements.summary(input.batchId);

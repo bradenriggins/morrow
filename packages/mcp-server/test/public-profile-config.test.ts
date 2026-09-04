@@ -94,3 +94,33 @@ describe("public-canvas configuration", () => {
     }
   });
 });
+
+describe("sandbox configuration", () => {
+  it("accepts only the network-disabled synthetic upstream", () => {
+    expect(() => parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "sandbox",
+      upstreams: [{
+        id: "sandbox",
+        label: "Sandbox",
+        kind: "mcp-stdio",
+        command: "node",
+        args: ["sandbox.js"],
+        env: { MORROW_SANDBOX: "1", MORROW_ALLOW_EXTERNAL_NETWORK: "0" },
+      }],
+    })).not.toThrow();
+
+    expect(() => parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "sandbox",
+      upstreams: [{
+        id: "sandbox",
+        label: "Sandbox",
+        kind: "mcp-stdio",
+        command: "node",
+        args: ["sandbox.js"],
+        env: { MORROW_SANDBOX: "1", MORROW_ALLOW_EXTERNAL_NETWORK: "1" },
+      }],
+    })).toThrow(/disabled external network/);
+  });
+});

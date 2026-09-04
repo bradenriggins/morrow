@@ -45,13 +45,23 @@ describe("gateway configuration", () => {
   });
 
   it("accepts the sandbox and read-only runtime profiles", () => {
-    for (const profile of ["sandbox", "read-only"]) {
-      expect(parseGatewayConfig({
-        schema: "morrow.upstreams.v1",
-        profile,
-        upstreams: [{ id: "fixture", label: "Fixture", kind: "mcp-stdio", command: "node" }],
-        operationJournal: { path: ":memory:" },
-      }).profile).toBe(profile);
-    }
+    expect(parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "sandbox",
+      upstreams: [{
+        id: "sandbox",
+        label: "Sandbox",
+        kind: "mcp-stdio",
+        command: "node",
+        env: { MORROW_SANDBOX: "1", MORROW_ALLOW_EXTERNAL_NETWORK: "0" },
+      }],
+      operationJournal: { path: ":memory:" },
+    }).profile).toBe("sandbox");
+    expect(parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "read-only",
+      upstreams: [{ id: "fixture", label: "Fixture", kind: "mcp-stdio", command: "node" }],
+      operationJournal: { path: ":memory:" },
+    }).profile).toBe("read-only");
   });
 });

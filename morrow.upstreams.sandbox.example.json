@@ -5,18 +5,49 @@
     "id": "sandbox",
     "label": "Synthetic Canvas fixture",
     "kind": "mcp-stdio",
-    "command": "${MORROW_SANDBOX_MCP_COMMAND}",
-    "args": [],
+    "command": "${MORROW_SANDBOX_MCP_COMMAND:-node}",
+    "args": ["${MORROW_SANDBOX_MCP_PATH:-packages/mcp-server/dist/sandbox-upstream.js}"],
     "priority": 100,
     "required": true,
     "enabled": true,
+    "sourceDisposition": "direct_owned",
     "env": {
       "MORROW_SANDBOX": "1",
-      "MORROW_ALLOW_EXTERNAL_NETWORK": "0"
+      "MORROW_ALLOW_EXTERNAL_NETWORK": "0",
+      "MORROW_SANDBOX_ESTATE_PATH": "${MORROW_SANDBOX_ESTATE_PATH:-:memory:}"
+    },
+    "outputPrivacy": {
+      "canvas_courses_list": {
+        "allowedFields": ["courses", "course_id", "title", "offset", "returned", "total", "next_offset", "pagination_complete"],
+        "dataClass": "course",
+        "maxRecords": 100,
+        "maxBytes": 100000,
+        "freeText": "allow",
+        "learnerTokens": false,
+        "artifactInspection": "deny"
+      },
+      "canvas_page_get": {
+        "allowedFields": ["course_id", "page_slug", "title", "body", "revision"],
+        "dataClass": "course",
+        "maxRecords": 10,
+        "maxBytes": 100000,
+        "freeText": "allow",
+        "learnerTokens": false,
+        "artifactInspection": "deny"
+      },
+      "canvas_page_update": {
+        "allowedFields": ["course_id", "page_slug", "title", "body", "revision"],
+        "dataClass": "course",
+        "maxRecords": 10,
+        "maxBytes": 100000,
+        "freeText": "allow",
+        "learnerTokens": false,
+        "artifactInspection": "deny"
+      }
     }
   }],
   "filters": { "excludePrefixes": ["mindtap_", "connect_"], "excludeNames": [] },
-  "operationJournal": { "path": "${MORROW_SANDBOX_STATE_PATH:-:memory:}" },
+  "operationJournal": { "path": "${MORROW_SANDBOX_STATE_PATH:-.morrow/sandbox.sqlite3}" },
   "batchScheduler": { "maxConcurrentWindows": 1 },
   "maxCatalogTools": 1000
 }

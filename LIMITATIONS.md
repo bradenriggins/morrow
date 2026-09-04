@@ -15,12 +15,14 @@ Morrow `1.0.0-rc.0` is a local release candidate. It is not a public release or 
 - Canvas is the only enabled LMS provider family.
 - MindTap and Connect remain excluded from every runtime catalog and package claim.
 - Only explicit course sets can create a batch. Saved-project and discovered course sets stay unavailable until Morrow can bind a gateway-owned complete-coverage receipt.
+- Batch concurrency and initial rate controls are frozen in the approved manifest. A run or resume call cannot replace them. Response-header adaptation still depends on a donor adapter publishing trusted Canvas rate telemetry.
 - A write without an exact frozen readback comparator is refused.
 - Undo is refused unless the frozen plan contains exact pre-state or correction facts. The current generated catalog does not advertise such facts.
 - A Morrow legacy write can require two human gates. The first gate approves the outer Morrow effect. The second gate belongs to the donor task UI.
 - A ExamplePlatform write requires the private edit profile. It starts a new SSH runtime with an exact operation binding. The hermetic catalog profile cannot write.
 - A provider timeout, broken pipe, malformed response, or process exit after send becomes `applied_or_unknown`. Morrow does not replay it.
 - Large in-process read results use bounded temporary handles. These handles do not survive a gateway restart.
+- The sandbox profile is a network-disabled 100-course synthetic estate. It proves deterministic read, write, failure, approval, effect, and readback behavior. It does not prove live Canvas behavior.
 
 ## Release behavior
 

@@ -972,7 +972,15 @@ export class GatewayRuntime {
     if (result.isError === true) {
       const meta = isJsonObject(result._meta) && isJsonObject(result._meta["io.morrow/gateway"])
         ? result._meta["io.morrow/gateway"] : {};
-      const definitelyNotSent = meta.gatewayOperationState === "failed_before_send" || source.state === "not_sent";
+      const innerOperationId = typeof meta.gatewayOperationId === "string"
+        ? meta.gatewayOperationId
+        : "";
+      const innerOperation = innerOperationId
+        ? this.journal.get(innerOperationId)
+        : undefined;
+      const definitelyNotSent = meta.gatewayOperationState === "failed_before_send"
+        || source.state === "not_sent"
+        || innerOperation?.sourceResultState === "not_sent";
       const settled = this.effects.settleFailure(reserved.operationId, result, !definitelyNotSent);
       return this.effectResult(settled, "dispatch_failed", result);
     }

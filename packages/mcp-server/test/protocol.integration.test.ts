@@ -127,11 +127,15 @@ describe("Morrow public stdio protocol", () => {
     const legacy = await connectPublic(path);
     try {
       expect(legacy.getProtocolEra()).toBe("legacy");
-      expect((await legacy.listTools()).tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+      const legacyTools = (await legacy.listTools()).tools;
+      expect(legacyTools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
         "morrow_health",
         "morrow_result_page",
         "canvas_page_get",
       ]));
+      const batchRun = legacyTools.find((tool) => tool.name === "morrow_batch_run");
+      expect(batchRun).toBeDefined();
+      expect((batchRun?.inputSchema.properties as Record<string, unknown>)).not.toHaveProperty("rate_policy");
     } finally {
       await legacy.close();
     }
