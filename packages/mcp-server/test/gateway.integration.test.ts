@@ -94,7 +94,14 @@ describe("GatewayRuntime stdio federation", () => {
 
       const firstDedupe = await runtime.call("morrow_legacy_only", {
         value: "write-once",
-        _morrow: { operation_id: "operation:dedupe-1234" },
+        _morrow: {
+          operation_id: "operation:dedupe-1234",
+          readback: {
+            tool: "canvas_page_get",
+            arguments: { course_id: "101" },
+            expected_digest: "a".repeat(64),
+          },
+        },
       });
       expect(firstDedupe.isError).not.toBe(true);
       expect(firstDedupe.structuredContent).toMatchObject({
@@ -104,7 +111,14 @@ describe("GatewayRuntime stdio federation", () => {
       });
       const replay = await runtime.call("morrow_legacy_only", {
         value: "write-once",
-        _morrow: { operation_id: "operation:dedupe-1234" },
+        _morrow: {
+          operation_id: "operation:dedupe-1234",
+          readback: {
+            tool: "canvas_page_get",
+            arguments: { course_id: "101" },
+            expected_digest: "a".repeat(64),
+          },
+        },
       });
       expect(replay.isError).not.toBe(true);
       expect(replay.structuredContent).toMatchObject({

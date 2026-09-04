@@ -24,6 +24,16 @@ export interface FrozenReadbackPlan {
   readonly expectedDigest: string;
 }
 
+export interface EffectAuthoritySnapshot {
+  readonly profileDigest: string;
+  readonly actorDigest: string;
+  readonly providerPrincipalDigest: string;
+  readonly connectionGeneration: number;
+  readonly catalogDigest: string;
+  readonly approvalClass: string;
+  readonly targetSetDigest: string;
+}
+
 export interface CreateEffectOperationInput {
   readonly publicToolName: string;
   readonly sourceId: string;
@@ -36,6 +46,7 @@ export interface CreateEffectOperationInput {
   readonly readback?: FrozenReadbackPlan;
   readonly correctionOf?: string;
   readonly approvalTtlMs?: number;
+  readonly authority: EffectAuthoritySnapshot;
 }
 
 export interface EffectOperationRecord {
@@ -142,6 +153,27 @@ function parseReadback(value: string | null): FrozenReadbackPlan | null {
     tool: identifier(parsed.tool, "readback tool"),
     arguments: jsonObject(parsed.arguments, "readback arguments"),
     expectedDigest: digest(parsed.expectedDigest, "readback expected digest"),
+  };
+}
+
+function authoritySnapshot(value: unknown): EffectAuthoritySnapshot {
+  const object = jsonObject(value, "authority");
+  for (const field of ["profileDigest", "actorDigest", "providerPrincipalDigest", "catalogDigest", "targetSetDigest"] as const) {
+    digest(object[field], `authority ${field}`);
+  }
+  const connectionGeneration = object.connectionGeneration;
+  if (!Number.isSafeInteger(connectionGeneration) || Number(connectionGeneration) < 0) {
+    throw new TypeError("authority connectionGeneration must be a non-negative integer");
+  }
+  const approvalClass = identifier(object.approvalClass, "authority approval class");
+  return {
+    profileDigest: String(object.profileDigest),
+    actorDigest: String(object.actorDigest),
+    providerPrincipalDigest: String(object.providerPrincipalDigest),
+    connectionGeneration: Number(connectionGeneration),
+    catalogDigest: String(object.catalogDigest),
+    approvalClass,
+    targetSetDigest: String(object.targetSetDigest),
   };
 }
 
@@ -291,6 +323,8 @@ export class ProviderEffectBroker {
     const sourceId = identifier(input.sourceId, "source id");
     const sourceToolName = identifier(input.sourceToolName, "source tool name");
     const catalogDigest = digest(input.catalogDigest, "catalog digest");
+    const authority = authoritySnapshot(input.authority);
+    if (authority.catalogDigest !== catalogDigest) throw new Error("authority catalog digest does not match the operation catalog");
     const sourceOperationId = input.sourceOperationId
       ? identifier(input.sourceOperationId, "source operation id")
       : null;
@@ -300,9 +334,17 @@ export class ProviderEffectBroker {
       source: sourceId,
       sourceTool: sourceToolName,
       catalogDigest,
+      authority,
       arguments: request,
+      orderedChildren: [{ sequence: 1, tool: sourceToolName, targetDigest: authority.targetSetDigest }],
+      changedFields: Object.keys(request).filter((field) => field !== "_morrow").sort(),
+      preservedFields: ["all_unspecified_fields"],
+      targetSet: { count: 1, digest: authority.targetSetDigest },
+      risk: { approvalClass: authority.approvalClass },
+      requestCost: { providerRequests: 1 },
       ...(input.sourceBindingId ? { sourceBindingId: identifier(input.sourceBindingId, "source binding id") } : {}),
       ...(readback ? { readback } : {}),
+      undo: { supported: false, reason: "no_frozen_pre_state_or_correction_payload" },
       ...(input.correctionOf ? { correctionOf: identifier(input.correctionOf, "correction operation id") } : {}),
     };
     const operationId = `op:${randomUUID()}`;
@@ -355,6 +397,9 @@ export class ProviderEffectBroker {
         now,
         now,
       );
+      this.database.prepare(`
+        UPDATE provider_effect_operations SET verification_status=? WHERE operation_id=?
+      `).run(readback ? "unconfirmed" : "not_requested", operationId);
       return this.get(operationId);
     });
   }
@@ -391,7 +436,13 @@ export class ProviderEffectBroker {
         `).run(JSON.stringify(["approval_expired"]), now, now, operationId);
         return this.get(operationId);
       }
-      const grantDigest = sha256Json({ operationId, planDigest: current.planDigest, nonce: randomBytes(32).toString("base64url") });
+      const grantDigest = sha256Json({
+        operationId,
+        planDigest: current.planDigest,
+        authority: current.plan.authority,
+        approvalExpiresAt: current.approvalExpiresAt,
+        nonce: randomBytes(32).toString("base64url"),
+      });
       this.database.prepare(`
         UPDATE provider_effect_operations
         SET state='approved', approval_grant_digest=?, updated_at=? WHERE operation_id=?
@@ -416,13 +467,18 @@ export class ProviderEffectBroker {
     });
   }
 
-  reserveDispatch(operationIdValue: string): EffectOperationRecord {
+  reserveDispatch(operationIdValue: string, currentAuthorityValue?: EffectAuthoritySnapshot): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
     const now = this.instant();
     return this.transaction(() => {
       const current = this.get(operationId);
       if (current.state !== "approved" || !current.approvalGrantDigest) {
         throw new Error(`operation cannot dispatch from ${current.state}`);
+      }
+      const frozenAuthority = authoritySnapshot(current.plan.authority);
+      const currentAuthority = authoritySnapshot(currentAuthorityValue || frozenAuthority);
+      if (sha256Json(currentAuthority) !== sha256Json(frozenAuthority)) {
+        throw new Error("operation authority changed after approval");
       }
       if (!current.approvalExpiresAt || current.approvalExpiresAt <= now) {
         this.database.prepare(`
@@ -492,10 +548,10 @@ export class ProviderEffectBroker {
     const now = this.instant();
     return this.transaction(() => {
       const current = this.get(operationId);
-      if (current.state !== "awaiting_verification") {
+      if (!["awaiting_verification", "applied_or_unknown"].includes(current.state)) {
         throw new Error(`operation cannot verify from ${current.state}`);
       }
-      const state: EffectOperationState = verified ? "verified" : "awaiting_verification";
+      const state: EffectOperationState = verified ? "verified" : current.state;
       this.database.prepare(`
         UPDATE provider_effect_operations
         SET state=?, readback_digest=?, verification_status=?, attention_json=?,

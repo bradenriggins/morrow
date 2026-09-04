@@ -290,6 +290,13 @@ describe("ExamplePlatform SSH runtime adapter", () => {
         const planned = await runtime.call("canvas_page_update", {
           course_id: "101",
           body: "one dispatch",
+          _morrow: {
+            readback: {
+              tool: "canvas_page_get",
+              arguments: { course_id: "101" },
+              expected_digest: "a".repeat(64),
+            },
+          },
         });
         const operationId = (planned.structuredContent as { operationId: string }).operationId;
         runtime.approveOperation(operationId);

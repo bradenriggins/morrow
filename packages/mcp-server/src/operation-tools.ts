@@ -75,13 +75,13 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
   server.registerTool(
     "morrow_operation_reconcile",
     {
-      description: "Return the current outer operation state and state that source-provider evidence is still required. It does not replay a provider request.",
+      description: "Run the frozen readback for an unsettled operation when available. It never replays a provider request.",
       inputSchema: z.object({ operation_id: z.string().min(8).max(160) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
     async ({ operation_id }) => {
       try {
-        return runtime.reconcileOperation(operation_id) as unknown as CallToolResult;
+        return await runtime.reconcileOperation(operation_id) as unknown as CallToolResult;
       } catch (error) {
         return failure(operation_id, "reconcile", error);
       }

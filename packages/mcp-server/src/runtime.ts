@@ -34,6 +34,7 @@ import {
   effectOperationProjection,
   operationRecordProjection,
   type EffectOperationRecord,
+  type EffectAuthoritySnapshot,
   type FrozenReadbackPlan,
   type GatewayOperationRecord,
   type GatewayOperationState,
@@ -780,6 +781,7 @@ export class GatewayRuntime {
       sourceId: mapping.upstreamId,
       sourceToolName: mapping.upstreamName,
       catalogDigest: this.catalog.digest,
+      authority: this.effectAuthority(mapping, controls.request),
       request: controls.request,
       forwardedRequest: routed.forwarded as JsonObject,
       ...(routed.sourceOperationId ? { sourceOperationId: routed.sourceOperationId } : {}),
@@ -788,6 +790,29 @@ export class GatewayRuntime {
       ...(controls.approvalTtlMs ? { approvalTtlMs: controls.approvalTtlMs } : {}),
       ...(correctionOf ? { correctionOf } : {}),
     });
+  }
+
+  private effectAuthority(mapping: CatalogTool, request: JsonObject): EffectAuthoritySnapshot {
+    const source = this.upstreams.get(mapping.upstreamId)?.health();
+    const approvalClass = mapping.capability?.authority.approvalClass
+      || (mapping.annotations?.destructiveHint ? "destructive" : "standard");
+    return {
+      profileDigest: sha256Json({
+        profile: this.config.profile,
+        filters: this.config.filters,
+        sources: this.config.upstreams.map((entry) => ({ id: entry.id, revision: entry.revision || null })),
+      }),
+      actorDigest: sha256Json({ account: this.config.privacy.account, principal: this.config.privacy.principal }),
+      providerPrincipalDigest: sha256Json({
+        origin: this.config.privacy.canvasOrigin,
+        account: this.config.privacy.account,
+        principal: this.config.privacy.principal,
+      }),
+      connectionGeneration: source?.connectionGeneration || 0,
+      catalogDigest: this.catalog.digest,
+      approvalClass,
+      targetSetDigest: sha256Json(request),
+    };
   }
 
   resultPage(handle: string, offset?: number, limit?: number): JsonObject {
@@ -825,7 +850,20 @@ export class GatewayRuntime {
       });
     }
     try {
-      const operation = this.planEffect(mapping, outerOperationControls(args));
+      const controls = outerOperationControls(args);
+      if (!controls.readback) {
+        return canonicalMorrowResult({
+          tool: publicName,
+          phase: "rejected",
+          verificationStatus: "not_requested",
+          result: {
+            content: [{ type: "text", text: "Morrow refused a write without a frozen fresh-readback comparator." }],
+            isError: true,
+            structuredContent: { schema: "morrow.problem.v1", code: "write_readback_required" },
+          },
+        });
+      }
+      const operation = this.planEffect(mapping, controls);
       return this.effectResult(operation, "planned");
     } catch (error) {
       const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
@@ -849,7 +887,13 @@ export class GatewayRuntime {
   async dispatchOperation(operationId: string): Promise<JsonObject> {
     let reserved: EffectOperationRecord;
     try {
-      reserved = this.effects.reserveDispatch(operationId);
+      const pending = this.effects.get(operationId);
+      const pendingMapping = this.toolByPublicName.get(pending.publicToolName);
+      if (!pendingMapping) throw new Error("frozen tool mapping is unavailable");
+      reserved = this.effects.reserveDispatch(
+        operationId,
+        this.effectAuthority(pendingMapping, pending.plan.arguments as JsonObject),
+      );
     } catch (error) {
       const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
       return canonicalMorrowResult({
@@ -901,6 +945,9 @@ export class GatewayRuntime {
       ...(source.taskId ? { sourceTaskId: source.taskId } : {}),
       innerApprovalRequired,
     });
+    if (settled.state === "awaiting_verification") {
+      return this.verifyOperation(settled.operationId);
+    }
     return this.effectResult(settled, "dispatched", result);
   }
 
@@ -927,8 +974,11 @@ export class GatewayRuntime {
     return this.effectResult(settled, "verified_readback", fresh);
   }
 
-  reconcileOperation(operationId: string): JsonObject {
+  async reconcileOperation(operationId: string): Promise<JsonObject> {
     const operation = this.effects.get(operationId);
+    if (["awaiting_verification", "applied_or_unknown"].includes(operation.state) && operation.readback) {
+      return this.verifyOperation(operationId);
+    }
     return this.effectResult(operation, "reconciliation_requires_provider_evidence");
   }
 
@@ -938,11 +988,17 @@ export class GatewayRuntime {
     correctionArguments: Readonly<Record<string, unknown>>,
   ): JsonObject {
     const original = this.effects.get(operationId);
+    const undo = isJsonObject(original.plan.undo) ? original.plan.undo : {};
+    if (undo.supported !== true) {
+      throw new Error("The frozen operation plan has no exact undo facts");
+    }
     const mapping = this.toolByPublicName.get(correctionTool);
     if (!mapping || mapping.annotations?.readOnlyHint === true) {
       throw new Error("A correction must use one current mutating Morrow tool");
     }
-    const correction = this.planEffect(mapping, outerOperationControls(correctionArguments), original.operationId);
+    const controls = outerOperationControls(correctionArguments);
+    if (!controls.readback) throw new Error("A correction requires its own frozen readback comparator");
+    const correction = this.planEffect(mapping, controls, original.operationId);
     return this.effectResult(correction, "correction_planned");
   }
 

@@ -20,6 +20,15 @@ function create(broker: ProviderEffectBroker, input: Partial<Parameters<Provider
     request: { page_id: "42", title: "Original" },
     forwardedRequest: { page_id: "42", title: "Original", _morrow: { operation_id: sourceOperationId } },
     sourceOperationId,
+    authority: {
+      profileDigest: "1".repeat(64),
+      actorDigest: "2".repeat(64),
+      providerPrincipalDigest: "3".repeat(64),
+      connectionGeneration: 1,
+      catalogDigest: "a".repeat(64),
+      approvalClass: "standard",
+      targetSetDigest: "4".repeat(64),
+    },
     ...input,
   });
 }
@@ -39,6 +48,13 @@ describe("ProviderEffectBroker", () => {
     expect(dispatched.state).toBe("dispatching");
     expect(dispatched.dispatchAttempt).toBe(1);
     expect(() => broker.reserveDispatch(operation.operationId)).toThrow("cannot dispatch");
+
+    const stale = create(broker);
+    broker.approve(stale.operationId);
+    expect(() => broker.reserveDispatch(stale.operationId, {
+      ...(stale.plan.authority as Parameters<ProviderEffectBroker["reserveDispatch"]>[1]),
+      connectionGeneration: 2,
+    })).toThrow(/authority changed/);
 
     const expiring = create(broker, { approvalTtlMs: 60_000 });
     clock = new Date("2026-09-04T00:01:01.000Z");

@@ -88,24 +88,15 @@ describe("outer provider effects", () => {
       const dispatched = await runtime.dispatchOperation(id);
       expect(dispatched.structuredContent).toMatchObject({
         schema: "morrow.result.v1",
-        effectState: "awaiting_verification",
-        verification: { status: "unconfirmed" },
+        effectState: "verified",
+        verification: { status: "verified" },
         receipts: { dispatchAttempt: 1 },
       });
       const replay = await runtime.dispatchOperation(id);
       expect(replay.isError).toBe(true);
 
-      const verified = await runtime.verifyOperation(id);
-      expect(verified.structuredContent).toMatchObject({
-        schema: "morrow.result.v1",
-        effectState: "verified",
-        verification: { status: "verified" },
-      });
-
-      const correction = runtime.undoOperation(id, "morrow_legacy_only", { value: "corrected" });
-      const correctionId = operationId(correction);
-      expect(correctionId).not.toBe(id);
-      expect(runtime.operationGet(correctionId)).toMatchObject({ correctionOf: id, state: "awaiting_approval" });
+      expect(() => runtime.undoOperation(id, "morrow_legacy_only", { value: "corrected" }))
+        .toThrow("no exact undo facts");
     } finally {
       await runtime.close();
     }
@@ -114,7 +105,16 @@ describe("outer provider effects", () => {
   it("uses an isolated loopback approval service that is outside the MCP tool surface", async () => {
     const runtime = await MorrowRuntime.connect(config(), { statePath: ":memory:" });
     try {
-      const planned = await runtime.gateway.call("morrow_legacy_only", { value: "approve-through-loopback" });
+      const planned = await runtime.gateway.call("morrow_legacy_only", {
+        value: "approve-through-loopback",
+        _morrow: {
+          readback: {
+            tool: "canvas_page_get",
+            arguments: { course_id: "101" },
+            expected_digest: "a".repeat(64),
+          },
+        },
+      });
       const id = operationId(planned);
       const structured = planned.structuredContent as { receipts?: { approvalUrl?: unknown } };
       const url = structured.receipts?.approvalUrl;
