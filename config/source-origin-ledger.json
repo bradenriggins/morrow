@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "622e1be362f2bae393e21da4be235fca53512124",
+  "candidateCommit": "fb756df16aa27f346e581cdd27f3d970cef4f6e8",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -1048,14 +1048,14 @@
     },
     {
       "path": "packages/client-config/test/client-config.test.ts",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "fb756df16aa27f346e581cdd27f3d970cef4f6e8",
       "originalPath": "packages/client-config/test/client-config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b5e149e6ae519ec8b8f7ded0dc189444021d87041278cb8afebdaca025b8db17",
-      "afterDigest": "9114391621683ef266e9ab3dc8c288c7de9f442905c6a7a9170d6a0b9b77c82b"
+      "beforeDigest": "9114391621683ef266e9ab3dc8c288c7de9f442905c6a7a9170d6a0b9b77c82b",
+      "afterDigest": "988a1fc86d3e685c56c401198aaa13afb284f120ab547cecf2ec5ce3c8eb9cad"
     },
     {
       "path": "packages/client-config/tsconfig.json",
