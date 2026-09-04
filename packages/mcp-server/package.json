@@ -1,5 +1,5 @@
 {
-  "name": "@morrow/mcp-server",
+  "name": "@morrow-lms/gateway",
   "version": "1.0.0-rc.0",
   "private": true,
   "type": "module",

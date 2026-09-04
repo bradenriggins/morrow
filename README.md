@@ -108,7 +108,7 @@ Generated donor catalogs and reconciliation output live under `artifacts/catalog
 
 ## MCP client install
 
-The public Morrow endpoint is a local stdio server. After `pnpm install` and `pnpm build`, the root script `pnpm start` runs `@morrow/mcp-server` (`node dist/index.js`). The client-config package declares the unified `morrow` command. The public endpoint serves both MCP SDK protocol eras through one stdio factory.
+The public Morrow endpoint is a local stdio server. After `pnpm install` and `pnpm build`, the root script `pnpm start` runs `@morrow-lms/gateway` (`node dist/index.js`). The `@morrow-lms/cli` package declares the unified `morrow` command. The public endpoint serves both MCP SDK protocol eras through one stdio factory.
 
 Start the process from the repository root. The gateway loads `morrow.upstreams.json` from the process working directory, or from `MORROW_UPSTREAMS_FILE` when that variable is set. A ExamplePlatform source cannot use `MORROW_MERIDIAN_SERVER_PATH` for local startup. Use the first-class `meridian-ssh` configuration.
 

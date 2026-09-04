@@ -1,5 +1,5 @@
 {
-  "name": "@morrow/client-config",
+  "name": "@morrow-lms/cli",
   "version": "1.0.0-rc.0",
   "private": true,
   "type": "module",
@@ -23,6 +23,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
     "@morrow/contracts": "workspace:*"
   }
 }

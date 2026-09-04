@@ -1,8 +1,11 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
+import { Client } from "@modelcontextprotocol/client";
+import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import {
+  buildClientConfigBundle,
   buildClientParityReport,
   installMorrowClient,
   MORROW_CLIENT_SCOPES,
@@ -23,8 +26,14 @@ function usage(): string {
     "Usage:",
     "  morrow mcp install <codex|claude|gemini> --upstreams <absolute-path> [--scope project] [options]",
     "  morrow doctor --json [--upstreams <absolute-path>] [--repository <path>]",
-    "  morrow conformance --upstreams <absolute-path> --json [options]",
+    "  morrow profile show [--json] [--upstreams <absolute-path>]",
+    "  morrow catalog stats [--json] [--repository <path>]",
+    "  morrow backend status [--json] --upstreams <absolute-path>",
+    "  morrow operation <get|reconcile|cancel> <operation-id> [--json] --upstreams <absolute-path>",
+    "  morrow batch <get|pause|resume|cancel> <batch-id> [--json] --upstreams <absolute-path>",
+    "  morrow conformance report [--json] [--repository <path>]",
     "  morrow clients render --upstreams <absolute-path> [options]",
+    "  morrow mcp print-config inspector --upstreams <absolute-path> [options]",
     "",
     "Options:",
     "  --repository <path>       Morrow repository root. Defaults to the current directory.",
@@ -116,9 +125,11 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
 }
 
 function requireUpstreams(options: SharedOptions): ClientConfigBundleOptions {
-  if (!options.upstreamConfigPath) throw new Error("--upstreams is required");
+  const upstreamConfigPath = options.upstreamConfigPath
+    || (process.env.MORROW_UPSTREAMS_FILE ? resolve(process.env.MORROW_UPSTREAMS_FILE) : "");
+  if (!upstreamConfigPath) throw new Error("--upstreams is required when MORROW_UPSTREAMS_FILE is not set");
   const { outputDirectory: _outputDirectory, force: _force, ...bundle } = options;
-  return bundle;
+  return { ...bundle, upstreamConfigPath };
 }
 
 function exactClient(value: string | undefined): SupportedMorrowClient {
@@ -171,7 +182,93 @@ function doctor(options: SharedOptions): Record<string, unknown> {
   };
 }
 
-function run(): void {
+function emit(value: unknown, json: boolean): void {
+  if (json || typeof value !== "object" || value === null) {
+    process.stdout.write(`${typeof value === "string" ? value : JSON.stringify(value, null, 2)}\n`);
+    return;
+  }
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+function readJson(path: string): Record<string, unknown> {
+  const value = JSON.parse(readFileSync(path, "utf8")) as unknown;
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${path} must contain a JSON object`);
+  return value as Record<string, unknown>;
+}
+
+function profileShow(options: SharedOptions): Record<string, unknown> {
+  const configPath = requireUpstreams(options).upstreamConfigPath;
+  if (!existsSync(configPath)) throw new Error(`upstream configuration does not exist: ${configPath}`);
+  const config = readJson(configPath);
+  const upstreams = Array.isArray(config.upstreams) ? config.upstreams : [];
+  return {
+    schema: "morrow.profile-status.v1",
+    profile: config.profile || "private-full",
+    upstreamConfigPath: configPath,
+    upstreams: upstreams.map((value) => {
+      const source = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      return { id: source.id, kind: source.kind, enabled: source.enabled !== false, required: source.required !== false };
+    }),
+  };
+}
+
+function catalogStats(repositoryRoot: string): Record<string, unknown> {
+  const root = resolve(repositoryRoot);
+  const mergedPath = resolve(root, "artifacts/catalogs/merged-capabilities.json");
+  const parityPath = resolve(root, "artifacts/catalogs/parity-report.json");
+  const profilesPath = resolve(root, "artifacts/catalogs/profile-report.json");
+  for (const path of [mergedPath, parityPath, profilesPath]) {
+    if (!existsSync(path)) throw new Error(`catalog artifact does not exist: ${path}`);
+  }
+  const merged = readJson(mergedPath);
+  const parity = readJson(parityPath);
+  const profiles = readJson(profilesPath);
+  return {
+    schema: "morrow.catalog-stats.v1",
+    catalogDigest: merged.digest,
+    capabilityCount: Array.isArray(merged.capabilities) ? merged.capabilities.length : 0,
+    parityCounts: parity.counts,
+    heldProviderCount: parity.heldProviderCount,
+    profiles: profiles.counts,
+  };
+}
+
+async function callMorrowTool(
+  options: SharedOptions,
+  name: string,
+  args: Record<string, unknown>,
+): Promise<unknown> {
+  const bundle = requireUpstreams(options);
+  const serverEntryPath = bundle.serverEntryPath || resolve(bundle.repositoryRoot, "packages/mcp-server/dist/index.js");
+  const client = new Client({ name: "morrow-cli", version: "1.0.0-rc.0" });
+  const transport = new StdioClientTransport({
+    command: bundle.nodeCommand || process.execPath,
+    args: [serverEntryPath],
+    cwd: bundle.repositoryRoot,
+    env: { ...process.env, MORROW_UPSTREAMS_FILE: bundle.upstreamConfigPath } as Record<string, string>,
+    stderr: "inherit",
+  });
+  try {
+    await client.connect(transport);
+    const result = await client.callTool({ name, arguments: args });
+    return result.structuredContent || result;
+  } finally {
+    await client.close();
+  }
+}
+
+function runConformance(repositoryRoot: string): never | void {
+  const result = spawnSync(process.execPath, [resolve(repositoryRoot, "scripts/conformance-report.mjs")], {
+    cwd: repositoryRoot,
+    encoding: "utf8",
+    env: process.env,
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.status !== 0) process.exitCode = result.status ?? 1;
+}
+
+async function run(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
   if (!command || command === "--help") {
     process.stdout.write(usage());
@@ -188,6 +285,20 @@ function run(): void {
     return;
   }
 
+  if (command === "mcp" && rest[0] === "print-config" && rest[1] === "inspector") {
+    const { options, json } = parseSharedOptions(rest.slice(2));
+    const bundle = buildClientConfigBundle(requireUpstreams(options));
+    emit({
+      schema: "morrow.inspector-config.v1",
+      transport: bundle.transport,
+      command: bundle.command,
+      args: bundle.args,
+      cwd: bundle.cwd,
+      env: { MORROW_UPSTREAMS_FILE: requireUpstreams(options).upstreamConfigPath },
+    }, json);
+    return;
+  }
+
   if (command === "doctor") {
     const { options, json } = parseSharedOptions(rest);
     if (!json) throw new Error("doctor requires --json");
@@ -195,10 +306,52 @@ function run(): void {
     return;
   }
 
+  if (command === "profile" && rest[0] === "show") {
+    const { options, json } = parseSharedOptions(rest.slice(1));
+    emit(profileShow(options), json);
+    return;
+  }
+
+  if (command === "catalog" && rest[0] === "stats") {
+    const { options, json } = parseSharedOptions(rest.slice(1));
+    emit(catalogStats(options.repositoryRoot), json);
+    return;
+  }
+
+  if (command === "backend" && rest[0] === "status") {
+    const { options, json } = parseSharedOptions(rest.slice(1));
+    emit(await callMorrowTool(options, "morrow_health", {}), json);
+    return;
+  }
+
+  if (command === "operation" && ["get", "reconcile", "cancel"].includes(rest[0] || "")) {
+    const action = rest[0]!;
+    const operationId = rest[1];
+    if (!operationId || operationId.startsWith("--")) throw new Error(`operation ${action} requires an operation ID`);
+    const { options, json } = parseSharedOptions(rest.slice(2));
+    emit(await callMorrowTool(options, `morrow_operation_${action}`, { operation_id: operationId }), json);
+    return;
+  }
+
+  if (command === "batch" && ["get", "pause", "resume", "cancel"].includes(rest[0] || "")) {
+    const action = rest[0]!;
+    const batchId = rest[1];
+    if (!batchId || batchId.startsWith("--")) throw new Error(`batch ${action} requires a batch ID`);
+    const { options, json } = parseSharedOptions(rest.slice(2));
+    emit(await callMorrowTool(options, `morrow_batch_${action}`, { batch_id: batchId }), json);
+    return;
+  }
+
+  if (command === "conformance" && rest[0] === "report") {
+    const { options } = parseSharedOptions(rest.slice(1));
+    runConformance(options.repositoryRoot);
+    return;
+  }
+
   if (command === "conformance") {
     const { options, json } = parseSharedOptions(rest);
-    if (!json) throw new Error("conformance requires --json");
-    process.stdout.write(`${JSON.stringify(buildClientParityReport(requireUpstreams(options)))}\n`);
+    if (!json) throw new Error("client parity conformance requires --json");
+    emit(buildClientParityReport(requireUpstreams(options)), true);
     return;
   }
 
@@ -215,7 +368,7 @@ function run(): void {
 }
 
 try {
-  run();
+  await run();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(`[morrow] ${message}\n\n${usage()}`);

@@ -169,6 +169,23 @@ describe("project installation and hermetic parity", () => {
         projectScopeDefault: true,
         upstreamConfigExists: true,
       });
+
+      const profile = spawnSync(process.execPath, [
+        cliPath, "profile", "show", "--json", "--repository", repositoryRoot, "--upstreams", upstreamConfigPath,
+      ], { encoding: "utf8" });
+      expect(profile.status).toBe(0);
+      expect(JSON.parse(profile.stdout)).toMatchObject({ schema: "morrow.profile-status.v1" });
+
+      const inspector = spawnSync(process.execPath, [
+        cliPath, "mcp", "print-config", "inspector", "--json", "--repository", repositoryRoot,
+        "--upstreams", upstreamConfigPath, "--server-entry", serverEntryPath,
+      ], { encoding: "utf8" });
+      expect(inspector.status).toBe(0);
+      expect(JSON.parse(inspector.stdout)).toMatchObject({
+        schema: "morrow.inspector-config.v1",
+        transport: "stdio",
+        env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+      });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
