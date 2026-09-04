@@ -1,6 +1,10 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   expandEnvironmentTemplate,
+  loadGatewayConfig,
   parseGatewayConfig,
 } from "../src/config.js";
 
@@ -63,5 +67,22 @@ describe("gateway configuration", () => {
       upstreams: [{ id: "fixture", label: "Fixture", kind: "mcp-stdio", command: "node" }],
       operationJournal: { path: ":memory:" },
     }).profile).toBe("read-only");
+  });
+
+  it("starts relative stdio paths from the selected configuration directory", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-config-root-"));
+    const path = join(directory, "morrow.upstreams.json");
+    try {
+      await writeFile(path, JSON.stringify({
+        schema: "morrow.upstreams.v1",
+        profile: "private-full",
+        upstreams: [{ id: "fixture", label: "Fixture", kind: "mcp-stdio", command: "node", args: ["server.js"] }],
+        operationJournal: { path: ":memory:" },
+      }), "utf8");
+      const config = await loadGatewayConfig({ MORROW_UPSTREAMS_FILE: path }, "/tmp/other-project");
+      expect(config.upstreams[0]).toMatchObject({ cwd: directory, args: ["server.js"] });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

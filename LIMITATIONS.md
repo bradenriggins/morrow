@@ -5,7 +5,7 @@ Morrow `1.0.0-rc.0` is a local release candidate. It is not a public release or 
 ## External evidence not yet available
 
 - Canvas authentication currently stops at MFA. The authorized live Canvas scenario has not completed.
-- Codex, Claude Code, and Gemini configuration parity is covered by hermetic tests. Real-client execution parity has not completed.
+- Codex, Claude Code, and Gemini configuration parity is covered by hermetic tests. Codex `0.153.0` and Claude Code `2.1.258` each completed a real sandbox health call against catalog `7d7562326d723b6264abe933add00e166e581aa68c427f8113f197dcc8338f92`. The full client scenario and Gemini execution have not completed. Gemini currently has no configured authentication method.
 - The legacy bridge has protocol, authentication, collision, disconnect, and synthetic-extension proof. The live packed extension proof has not completed.
 - The public Canvas source-rights manifest is empty. The public package is not cleared for publication.
 - Independent clean-machine reproduction has not completed.

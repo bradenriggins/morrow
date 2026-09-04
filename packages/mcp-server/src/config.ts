@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import * as z from "zod/v4";
 import { SOURCE_DISPOSITIONS } from "@morrow/gateway-core";
 
@@ -450,7 +450,15 @@ export async function loadGatewayConfig(
 
   if (existsSync(path)) {
     const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
-    const config = parseGatewayConfig(raw, environment);
+    const parsed = parseGatewayConfig(raw, environment);
+    const config: GatewayConfig = {
+      ...parsed,
+      upstreams: parsed.upstreams.map((upstream) => (
+        upstream.kind === "mcp-stdio" && !upstream.cwd
+          ? { ...upstream, cwd: dirname(path) }
+          : upstream
+      )),
+    };
     if (config.upstreams.some((upstream) => upstream.id.toLowerCase() === "meridian" && upstream.kind !== "meridian-ssh")) {
       throw new Error("ExamplePlatform must run through a meridian-ssh upstream.");
     }
