@@ -61,6 +61,7 @@ const RELEASE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,79}$/;
 const DEFAULT_DENIED_PREFIXES = Object.freeze(["mindtap_", "connect_"]);
 const DEFAULT_RESERVED_NAMES = Object.freeze([
   "morrow_health",
+  "morrow_check_new_quiz",
   "morrow_catalog",
   "morrow_operation_get",
   "morrow_operations_recent",

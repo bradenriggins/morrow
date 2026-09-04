@@ -11,6 +11,7 @@ import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { GatewayRuntime } from "../src/runtime.js";
+import { checkNewQuiz } from "../src/quiz-check.js";
 
 async function availablePort(): Promise<number> {
   const server = createServer();
@@ -90,7 +91,7 @@ async function approveBatch(url: string): Promise<void> {
 }
 
 describe("Canvas connector gateway path", () => {
-  it("plans, approves, grants, dispatches, and verifies one browser-session write", async () => {
+  it("checks quiz structure without writes, then governs one browser-session write", async () => {
     const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-connector-gateway-"));
     const port = await availablePort();
     const root = resolve("../..");
@@ -116,6 +117,27 @@ describe("Canvas connector gateway path", () => {
       const [readyRaw] = await once(socket, "message");
       const ready = parseBridgeJson(readyRaw.toString()) as { generation: number };
       let writeCommands = 0;
+      let partialQuiz = false;
+      const repeatedBody = `<p>${"Explain the process. ".repeat(4_000)}</p>`;
+      const quizItems = [
+        { id: "1", position: 1, points_possible: 5, entry_type: "Item", entry: {
+          title: "Cell structure", item_body: "Which structure contains DNA?", interaction_type_slug: "choice",
+          interaction_data: { choices: [{ id: "a", item_body: "Nucleus" }, { id: "b", itemBody: "Membrane" }] },
+          scoring_data: { value: "missing-choice" },
+        } },
+        { id: "2", position: 2, points_possible: 5, entry_type: "Item", entry: {
+          title: "Cell statement", item_body: "Cells have membranes.", interaction_type_slug: "true-false",
+          interaction_data: { true_choice: "True", false_choice: "False" }, scoring_data: { value: false },
+        } },
+        { id: "3", position: 3, points_possible: 5, entry_type: "Item", entry: {
+          title: "Cell parts", item_body: "Choose two cell parts.", interaction_type_slug: "multi-answer",
+          interaction_data: { choices: [{ id: "a", item_body: "Nucleus" }, { id: "b", item_body: "Membrane" }] },
+          scoring_data: { value: ["a", "b"] },
+        } },
+        { id: "4", position: 4, points_possible: 5, entry_type: "Item", entry: {
+          title: "Written explanation", item_body: repeatedBody, interaction_type_slug: "essay",
+        } },
+      ];
       socket.on("message", (raw) => {
         const value = parseBridgeJson(raw.toString()) as { schema?: string };
         if (value.schema !== BRIDGE_SCHEMAS.command) return;
@@ -136,8 +158,11 @@ describe("Canvas connector gateway path", () => {
             ok: true,
             sent: true,
             status: 200,
+            truncated: partialQuiz && command.toolName === "canvas_list_quiz_items",
             data: command.toolName === "canvas_get_new_quiz"
-              ? { id: "77", course_id: "42", title: "Cell Structure Check" }
+              ? { id: command.arguments.assignment_id, course_id: "42", title: command.arguments.assignment_id === "77" ? "Cell Structure Check" : "Practice quiz" }
+              : command.toolName === "canvas_list_quiz_items"
+                ? command.arguments.assignment_id === "77" ? quizItems : [{ ...quizItems[3], id: "8" }]
               : { id: "42", name: "Biology" },
             ...(command.kind === "invoke_write" ? {
               verification: {
@@ -152,6 +177,24 @@ describe("Canvas connector gateway path", () => {
           completedAt: Date.now(),
         }));
       });
+
+      const checkInput = { source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", compare_quiz_ids: ["78"], expected_question_count: 5, expected_question_points: 25 };
+      const checked = await checkNewQuiz(runtime, checkInput);
+      expect(checked.structuredContent).toMatchObject({
+        status: "needs_attention", course: { name: "Biology" }, findingCount: 3, repeatedGroupCount: 1,
+        quizzes: [{ name: "Cell Structure Check", directQuestionCount: 4, directQuestionPoints: 20, totalsComplete: true, answerSettingsChecked: 3 }, { name: "Practice quiz", directQuestionCount: 1 }],
+        findings: [{ question: "Cell structure", message: "The saved correct answer does not match the answer choices." }, { message: "Expected 5 questions; found 4." }, { message: "Expected 25 question points; found 20." }],
+        repeatedContent: [[{ quiz: "Cell Structure Check", question: "Written explanation" }, { quiz: "Practice quiz", question: "Written explanation" }]],
+        incomplete: [],
+      });
+      expect(JSON.stringify(checked)).not.toContain(repeatedBody);
+      expect(writeCommands).toBe(0);
+      partialQuiz = true;
+      const partial = await checkNewQuiz(runtime, { ...checkInput, compare_quiz_ids: [] });
+      expect(partial.structuredContent).toMatchObject({ status: "incomplete", quizzes: [], findingCount: 0 });
+      expect(JSON.stringify(partial)).toContain("Do not treat this as a complete check");
+      expect(writeCommands).toBe(0);
+      partialQuiz = false;
 
       const reviewPlan = await runtime.call("canvas_create_quiz_item", {
         course_id: "42", assignment_id: "77", item_entry_title: "Cell structure",

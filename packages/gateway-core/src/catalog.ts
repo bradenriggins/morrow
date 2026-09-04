@@ -27,10 +27,12 @@ export interface CatalogMergeOptions {
 
 const DEFAULT_EXCLUDED_NAMES = Object.freeze([
   "morrow_batch_recover",
+  "morrow_check_new_quiz",
 ]);
 
 const DEFAULT_RESERVED_NAMES = Object.freeze([
   "morrow_health",
+  "morrow_check_new_quiz",
   "morrow_catalog",
   "morrow_catalog_search",
   "morrow_capability_get",

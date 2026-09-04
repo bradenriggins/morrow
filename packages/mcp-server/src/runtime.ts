@@ -55,6 +55,7 @@ import {
 
 export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_health",
+  "morrow_check_new_quiz",
   "morrow_catalog",
   "morrow_catalog_search",
   "morrow_capability_get",

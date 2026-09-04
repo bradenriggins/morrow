@@ -60,6 +60,27 @@ After approval, the AI client calls `morrow_operation_dispatch` with the operati
 
 If delivery becomes ambiguous, Morrow records `applied_or_unknown` and refuses automatic replay. A later reconciliation performs only the frozen readback.
 
+## Check a New Quiz
+
+Ask your AI app: “Use Morrow to check the Week 3 quiz. It should have 20
+questions worth 20 question points. Check for repeated question content in the
+Week 2 quiz too.” Your AI app resolves the named course and quizzes, then calls
+`morrow_check_new_quiz` with those exact targets.
+
+The report names the course and quizzes. It checks the number of directly listed
+questions, their total points, saved choice-based answer settings, and repeated
+question content. It can compare up to three other New Quizzes in the same
+course. Reads use the existing Chrome connection. No change approval is needed.
+
+This is a structural check, not a complete assessment review. Repeated content
+means identical question content apart from extra whitespace, not similar ideas.
+The check does not judge answer correctness, learning objectives, accessibility,
+bank contents, or student access. Partial reads and bank draws are marked
+incomplete. Question points are not the same as Canvas assignment gradebook points.
+
+This workflow has automated connector tests. Live Canvas verification is still
+required before treating it as a production-ready feature.
+
 ## Canvas authentication
 
 Canvas authentication stays inside Chrome.
