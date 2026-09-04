@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "5d8de6d4a2e288883d09d1edaffcb2fbefbef237",
+  "candidateCommit": "622e1be362f2bae393e21da4be235fca53512124",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -192,14 +192,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "5d8de6d4a2e288883d09d1edaffcb2fbefbef237",
+      "sourceCommit": "622e1be362f2bae393e21da4be235fca53512124",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "a6899583ee7cd0d112b316591ee7a5dfd166f6cf7baa98cfed4db45b68b5eb5c",
-      "afterDigest": "b9896723bcb61691b410b3ee8584cf09b9c00e5ae2793a12627c24bd0cc55848"
+      "beforeDigest": "b9896723bcb61691b410b3ee8584cf09b9c00e5ae2793a12627c24bd0cc55848",
+      "afterDigest": "51c42d237ebe12a774a62052498d1509bc1f76d66bd724fde365c7093a6446cd"
     },
     {
       "path": "connector/extension/brand/FONT-LICENSE.txt",
@@ -302,25 +302,25 @@
     },
     {
       "path": "connector/extension/popup/popup.js",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "622e1be362f2bae393e21da4be235fca53512124",
       "originalPath": "connector/extension/popup/popup.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5d067a821967e1e4dba9f454569612bfa4850bd1c5d6c8b068629125de01dd52",
-      "afterDigest": "f124b8bf08af6d65800e103c694a4f49f0d3c8dc559c57ff0d1507b1a15774cc"
+      "beforeDigest": "f124b8bf08af6d65800e103c694a4f49f0d3c8dc559c57ff0d1507b1a15774cc",
+      "afterDigest": "79ac97c9b5bae9eb560d6c4159427bb26a2b2ac4721256f0fb5bf84172775f8a"
     },
     {
       "path": "connector/extension/src/canvas-content.js",
-      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "sourceCommit": "622e1be362f2bae393e21da4be235fca53512124",
       "originalPath": "connector/extension/src/canvas-content.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "6e458da4954258a82f52da23383b8f2ba7d0ac86e8c4c2c633fd11341dde7e9f"
+      "beforeDigest": "6e458da4954258a82f52da23383b8f2ba7d0ac86e8c4c2c633fd11341dde7e9f",
+      "afterDigest": "e3711b3d599b08e7856a3e067d20d5c0aa9eb63281706053db41f522e93b2292"
     },
     {
       "path": "connector/extension/src/item-bank-executor.js",
@@ -335,14 +335,14 @@
     },
     {
       "path": "connector/extension/src/service-worker.js",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "622e1be362f2bae393e21da4be235fca53512124",
       "originalPath": "connector/extension/src/service-worker.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "6eecf1d222b592501bc20fafd42ff1d573446e43d1cc394983e609207a2db079",
-      "afterDigest": "cc56b6f0d0056b942c6a87d5bf58e0a6f993c861601a14c0546bb1f3cf97e960"
+      "beforeDigest": "cc56b6f0d0056b942c6a87d5bf58e0a6f993c861601a14c0546bb1f3cf97e960",
+      "afterDigest": "c3c7002d08ed36cc935d6f5b35c894fe29d3460600d6a031923782ccfc4d8f06"
     },
     {
       "path": "connector/extension/src/verification.js",
@@ -423,14 +423,14 @@
     },
     {
       "path": "docs/implementation/EXAMPLE-WORKTREE.md",
-      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "sourceCommit": "622e1be362f2bae393e21da4be235fca53512124",
       "originalPath": "docs/implementation/EXAMPLE-WORKTREE.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "68e0b8f7a2e5220b2b60821617029fb70f06e86eba803da9274a905e0c3fb7dd",
-      "afterDigest": "af97a8838232f1718e0cb22c5bad27050843948f2c8a2722b584aaf5b69977be"
+      "beforeDigest": "af97a8838232f1718e0cb22c5bad27050843948f2c8a2722b584aaf5b69977be",
+      "afterDigest": "c0b6ac6835ac2a30e262d12c2b1e3c6c9ee303cddb897f00f7f89d00674a783c"
     },
     {
       "path": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
@@ -2329,14 +2329,14 @@
     },
     {
       "path": "scripts/test/canvas-connector-browser.mjs",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "622e1be362f2bae393e21da4be235fca53512124",
       "originalPath": "scripts/test/canvas-connector-browser.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c8c76a447c39de1d974e8367c720ae33ea07f6282de0ad39a7ff54fe74e08c5d",
-      "afterDigest": "20fcbad2d44bef859f7924f05090b60e1c87e537bd078caf77c12ec2e0de8986"
+      "beforeDigest": "20fcbad2d44bef859f7924f05090b60e1c87e537bd078caf77c12ec2e0de8986",
+      "afterDigest": "77db62cd468cf107e312974fa5b0d3a3d0b49f60eae92a7ce794c927550c72dd"
     },
     {
       "path": "scripts/test/canvas-connector-package.test.mjs",
