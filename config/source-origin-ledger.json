@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "113d426acd0eaa8fd4b81288f8fc01f73e7ef468",
+  "candidateCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -60,25 +60,25 @@
     },
     {
       "path": "LIMITATIONS.md",
-      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "LIMITATIONS.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f5950e41786d9b510d267c53fccccb1a565386f0ded56a3d483c0742f9e91287",
-      "afterDigest": "9da0229bc77a98998b25f59d05f90080e50f9d86c91cf3494014498d6437d53a"
+      "beforeDigest": "9da0229bc77a98998b25f59d05f90080e50f9d86c91cf3494014498d6437d53a",
+      "afterDigest": "5d15ba1dd1771e412331a1cd5964a9876e53a8b78c4be33cafbf92640bd1f362"
     },
     {
       "path": "README.md",
-      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "fb7a6564bdcacf4828498be6e5eff41cb603206cf9679b8ba4ac88876fe1102d",
-      "afterDigest": "05acff3916acdb494aba0318e2be11a56367f4b856b8d7f398061027d82a82fb"
+      "beforeDigest": "05acff3916acdb494aba0318e2be11a56367f4b856b8d7f398061027d82a82fb",
+      "afterDigest": "344b5fe225b7a77ffd2b3ac16d0d78c86fa1f8f860ad64f66abd245350aada6e"
     },
     {
       "path": "SOURCE-ORIGIN.md",
@@ -93,14 +93,14 @@
     },
     {
       "path": "WEEKEND-HANDOFF.md",
-      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "WEEKEND-HANDOFF.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cf0f4e53b5a3b8828be61668b966fa164ad9edd16d2d2b1accd2f5f895bf51f7",
-      "afterDigest": "5cb1937abfa78934015f83b6afa3081d0ba8804e287e614998c3d92f6858c425"
+      "beforeDigest": "5cb1937abfa78934015f83b6afa3081d0ba8804e287e614998c3d92f6858c425",
+      "afterDigest": "d8ea05779c332bb248eff201cc6be9dfb3d0e5fecd0d6cdb52b27f0fc48984e6"
     },
     {
       "path": "artifacts/catalogs/.gitkeep",
@@ -368,14 +368,14 @@
     },
     {
       "path": "morrow.upstreams.sandbox.example.json",
-      "sourceCommit": "26eb6cda20f0384291718ae741398d7f094c4105",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "morrow.upstreams.sandbox.example.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "867f1b146d9b45f80049b1b2789807e35d4a6b5d8a0c143a0754fe544cd5fca9"
+      "beforeDigest": "867f1b146d9b45f80049b1b2789807e35d4a6b5d8a0c143a0754fe544cd5fca9",
+      "afterDigest": "2346c18e0196784606adb15a0a0247bac5a6d5e86424079493b966735dcf329d"
     },
     {
       "path": "morrow.upstreams.with-legacy-bridge.example.json",
@@ -390,14 +390,14 @@
     },
     {
       "path": "package.json",
-      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "package.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9b195fa51e912f2bb513145e1196e1a4eef93944a52fc2dd4bbc41ea5aa709fd",
-      "afterDigest": "e75c1e28014aa67b6fd03318b11452b374f018ebe89c12591562f16f489ccf1e"
+      "beforeDigest": "e75c1e28014aa67b6fd03318b11452b374f018ebe89c12591562f16f489ccf1e",
+      "afterDigest": "f05a10e45f69e2e059618b77fbba09b37a3a62c716797d9dcf175f0ce72498cd"
     },
     {
       "path": "packages/batch-engine/package.json",
@@ -757,7 +757,7 @@
     },
     {
       "path": "packages/gateway-core/src/catalog.ts",
-      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/gateway-core/src/catalog.ts",
       "ownership": "new",
       "dependencies": [],
@@ -766,8 +766,8 @@
         "packages/gateway-core/test/native-controls.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ddb314d37230d0e82a1937e1867c48dbcca23f16b37204738605b10f431ce18a",
-      "afterDigest": "7e783b263da9be57d4111914940284f5663657e53f10e59239b64f0113a61485"
+      "beforeDigest": "7e783b263da9be57d4111914940284f5663657e53f10e59239b64f0113a61485",
+      "afterDigest": "d54de17f0d611b3c74635d04a79f8f03b14c51c0ff6ed77598a404c80f4c7d31"
     },
     {
       "path": "packages/gateway-core/src/index.ts",
@@ -869,14 +869,14 @@
     },
     {
       "path": "packages/gateway-core/test/catalog.test.ts",
-      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/gateway-core/test/catalog.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b0052c78e64172901b755c79ef80d00e24f3e5c95e51e0ad124b2361973ff1d1",
-      "afterDigest": "4b1b98fd55aaab8cdc27db36a24921f0e1d17ad8a4c03be9608af75756d4be75"
+      "beforeDigest": "4b1b98fd55aaab8cdc27db36a24921f0e1d17ad8a4c03be9608af75756d4be75",
+      "afterDigest": "b17f44fa8842a65835bd8d3d3e8a0da11bfc7c3dc8f939fb3bef834530737612"
     },
     {
       "path": "packages/gateway-core/test/native-controls.test.ts",
@@ -1106,7 +1106,7 @@
     },
     {
       "path": "packages/mcp-server/src/batch-tools.ts",
-      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/mcp-server/src/batch-tools.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1115,8 +1115,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "0182cf9ebcc5ded1258947ee5dcbcee73ec50a5b355313daebc6409b0fbad51b",
-      "afterDigest": "db30c01b2557fd7f65bb0a55431038c2addbce3b291337b24894af1fc69b3f40"
+      "beforeDigest": "db30c01b2557fd7f65bb0a55431038c2addbce3b291337b24894af1fc69b3f40",
+      "afterDigest": "737def9d961475e8c998890f07dd2b00da7d69a5dc5df7e18bbded5f0b683878"
     },
     {
       "path": "packages/mcp-server/src/batch-window-scheduler.ts",
@@ -1134,7 +1134,7 @@
     },
     {
       "path": "packages/mcp-server/src/config.ts",
-      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/mcp-server/src/config.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1143,8 +1143,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "3c27a3eb89f0f05f0af365d24e62399cee1626c5456d5697f0bef544b8bbc05a",
-      "afterDigest": "ad06d5d7a57949695310ab0ebb40399f0805aee81a590ba66b6d67fffe9ad529"
+      "beforeDigest": "ad06d5d7a57949695310ab0ebb40399f0805aee81a590ba66b6d67fffe9ad529",
+      "afterDigest": "415a8d308065af2458f0dc6fed87b7d31922621fc6537b6e524cda40c2e808fc"
     },
     {
       "path": "packages/mcp-server/src/full-server.ts",
@@ -1204,7 +1204,7 @@
     },
     {
       "path": "packages/mcp-server/src/morrow-runtime.ts",
-      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/mcp-server/src/morrow-runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1213,8 +1213,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9a9bb42b9eaf8253b9e576d54fad57e4e0c523d5cd5d43fbfa2714bb816faf98",
-      "afterDigest": "67aedc0e7a6fb96f32d70353fcde111c1343a4f0a6ec86e120838fb6a5140773"
+      "beforeDigest": "67aedc0e7a6fb96f32d70353fcde111c1343a4f0a6ec86e120838fb6a5140773",
+      "afterDigest": "cd9079348e009a934ee95fb08c64ff423ab62b56cf2278db1ac3c661335170ab"
     },
     {
       "path": "packages/mcp-server/src/operation-tools.ts",
@@ -1246,7 +1246,7 @@
     },
     {
       "path": "packages/mcp-server/src/runtime.ts",
-      "sourceCommit": "08f77683d1d8152182b6d035fcdcca497c377f14",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/mcp-server/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1255,8 +1255,22 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "0c38729af28c586fff8917d2cbe8d3278f44099fc39c2aaccc2d4013c5a1e7ef",
-      "afterDigest": "941ce16a29a2fa56a8891bb6042edfad743624426e976a0249782fdfa09f1f7e"
+      "beforeDigest": "941ce16a29a2fa56a8891bb6042edfad743624426e976a0249782fdfa09f1f7e",
+      "afterDigest": "c5359cd7841316b7e6fc6c11cf8db091fa27b13e8c005b2b2413cfdbba9267ef"
+    },
+    {
+      "path": "packages/mcp-server/src/sandbox-upstream.ts",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+      "originalPath": "packages/mcp-server/src/sandbox-upstream.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "4750003bc84719b96b8a13e121b5ea523767d12a5d95e22b6a5fc783c7ad7579"
     },
     {
       "path": "packages/mcp-server/src/server-instructions.ts",
@@ -1374,14 +1388,14 @@
     },
     {
       "path": "packages/mcp-server/test/config.test.ts",
-      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/mcp-server/test/config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "7340d2b4414a95fd1a08634ca82ae9c23313e3545c26d3e5416a51bc89338793",
-      "afterDigest": "1188a6db18a5dbd3ba432ee9535ac5fcc025cbd87fc857c34d3d077c620ad77e"
+      "beforeDigest": "1188a6db18a5dbd3ba432ee9535ac5fcc025cbd87fc857c34d3d077c620ad77e",
+      "afterDigest": "6b56dd85ea01385aafc900f7ada54efd2c77af66fee02e90dc75f1e876b7d868"
     },
     {
       "path": "packages/mcp-server/test/fixtures/fake-batch-upstream.mjs",
@@ -1462,25 +1476,25 @@
     },
     {
       "path": "packages/mcp-server/test/protocol.integration.test.ts",
-      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/mcp-server/test/protocol.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "3f679a1eb59a0c4f50d0ec89f0cec288df709bafeaf467ae945ba01486fcc493"
+      "beforeDigest": "3f679a1eb59a0c4f50d0ec89f0cec288df709bafeaf467ae945ba01486fcc493",
+      "afterDigest": "b58aa0e87e55b18215bc71a527460ee7286fe8f9664a4d3012bf54c23881fe2d"
     },
     {
       "path": "packages/mcp-server/test/public-profile-config.test.ts",
-      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
       "originalPath": "packages/mcp-server/test/public-profile-config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c3568b2b855edcb873f0b8feb17fee65efee44fb6c7c5cb9107a674cad9fb9e7",
-      "afterDigest": "d82a8ce55e644d0435b26cd02486b3da74624459d8bd34af9a7c0f176746e13e"
+      "beforeDigest": "d82a8ce55e644d0435b26cd02486b3da74624459d8bd34af9a7c0f176746e13e",
+      "afterDigest": "52c0562099d60eed423a91fbe1d3b95dbc04c0d5702e0593278664e720827109"
     },
     {
       "path": "packages/mcp-server/test/public-profile.integration.test.ts",
@@ -1492,6 +1506,17 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "38be9e3bc55983d6c0e0665fcd48094396b67fbde80175fd271184cef391fe1a",
       "afterDigest": "845fc08e1910f7b79d85b94f44779432294750ce2521c10cd2a33e6ba0985a3f"
+    },
+    {
+      "path": "packages/mcp-server/test/sandbox-profile.integration.test.ts",
+      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+      "originalPath": "packages/mcp-server/test/sandbox-profile.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "425adce2e80e9a487cb6c4edd8bf3e78db3d8fa12221ab2af1e9ed73faeae72e"
     },
     {
       "path": "packages/mcp-server/test/server-instructions.test.ts",
