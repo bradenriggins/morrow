@@ -43,4 +43,5 @@ The manifest records `heldProviders` as `mindtap` and `connect`.
 ## Related records
 
 - `docs/sources/donor-manifest.json`
+- `config/source-rights.manifest.json` starts empty on purpose. Public assembly stays blocked until an owner adds one reviewed, exact-digest record for every included file.
 - `README.md`

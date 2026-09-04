@@ -17,8 +17,11 @@ import {
 } from "@morrow/contracts";
 import {
   applyPublicationPolicy,
+  ArtifactGenerationRegistry,
+  LearnerVault,
   mergeCatalog,
   normalizeUpstreamResult,
+  resolveLearnerTokens,
   safeUpstreamFailure,
 } from "@morrow/gateway-core";
 import {
@@ -295,6 +298,8 @@ export class GatewayRuntime {
   private readonly toolByPublicName: ReadonlyMap<string, CatalogTool>;
   private readonly journal: GatewayOperationJournal;
   private readonly publicationPolicy: PublicationPolicyHealth | undefined;
+  private readonly learnerVault: LearnerVault;
+  private readonly artifacts: ArtifactGenerationRegistry;
 
   private constructor(
     config: GatewayConfig,
@@ -302,12 +307,16 @@ export class GatewayRuntime {
     catalog: CatalogSnapshot,
     journal: GatewayOperationJournal,
     publicationPolicy?: PublicationPolicyHealth,
+    learnerVault = new LearnerVault(":memory:"),
+    artifacts = new ArtifactGenerationRegistry(),
   ) {
     this.config = config;
     this.upstreams = upstreams;
     this.catalog = catalog;
     this.journal = journal;
     this.publicationPolicy = publicationPolicy;
+    this.learnerVault = learnerVault;
+    this.artifacts = artifacts;
     this.toolByPublicName = new Map(catalog.tools.map((tool) => [tool.publicName, tool]));
   }
 
@@ -319,6 +328,11 @@ export class GatewayRuntime {
     const journal = new GatewayOperationJournal({
       path: options.journalPath || config.operationJournal.path,
     });
+    const learnerVault = new LearnerVault(
+      (options.journalPath || config.operationJournal.path) === ":memory:"
+        ? ":memory:"
+        : config.privacy.learnerVaultPath,
+    );
     const upstreams = new Map<string, StdioMcpUpstream>();
     const sources: CatalogSource[] = [];
 
@@ -414,6 +428,7 @@ export class GatewayRuntime {
         catalog,
         journal,
         publicationPolicy,
+        learnerVault,
       );
     } catch (error) {
       await closeStartupResources(upstreams, journal);
@@ -587,10 +602,43 @@ export class GatewayRuntime {
       }, mapping, this.catalog.digest, failed, this.config.profile);
     }
 
-    const dispatched = this.journal.markDispatched(prepared.record.operationId);
-    const baseContext = { mapping, catalogDigest: this.catalog.digest };
+    const course = typeof args.course_id === "string"
+      ? args.course_id
+      : typeof args.courseId === "string" ? args.courseId : "unbound";
+    const descriptor = this.config.upstreams.find((upstreamConfig) => (
+      upstreamConfig.id === mapping.upstreamId
+    ))?.outputPrivacy[mapping.upstreamName];
+    const privacy = {
+      descriptor,
+      learnerVault: this.learnerVault,
+      learnerScope: {
+        canvasOrigin: this.config.privacy.canvasOrigin,
+        account: this.config.privacy.account,
+        course,
+        principal: this.config.privacy.principal,
+        profile: this.config.profile,
+      },
+      artifacts: this.artifacts,
+    };
+    const baseContext = { mapping, catalogDigest: this.catalog.digest, privacy };
+    let dispatchedArguments: Record<string, unknown>;
     try {
-      const result = await upstream.callTool(mapping.upstreamName, routed.forwarded);
+      dispatchedArguments = resolveLearnerTokens(routed.forwarded, this.learnerVault, privacy.learnerScope);
+    } catch (error) {
+      const failed = this.journal.recordFailedBeforeSend(prepared.record.operationId, error);
+      return attachOperationMeta({
+        content: [{ type: "text", text: "Morrow could not resolve the supplied learner token." }],
+        isError: true,
+        structuredContent: {
+          schema: "morrow.problem.v1",
+          code: "learner_token_unavailable",
+          recoverable: false,
+        },
+      }, mapping, this.catalog.digest, failed, this.config.profile);
+    }
+    const dispatched = this.journal.markDispatched(prepared.record.operationId);
+    try {
+      const result = await upstream.callTool(mapping.upstreamName, dispatchedArguments);
       const normalized = normalizeUpstreamResult(result, baseContext);
       const source = classifySourceResult(result);
       const complete = this.journal.recordResponse(dispatched.operationId, {
@@ -615,5 +663,9 @@ export class GatewayRuntime {
   async close(): Promise<void> {
     await Promise.allSettled([...this.upstreams.values()].map((upstream) => upstream.close()));
     this.journal.close();
+  }
+
+  recordGeneratedArtifact(bytes: Uint8Array): string {
+    return this.artifacts.record(bytes);
   }
 }

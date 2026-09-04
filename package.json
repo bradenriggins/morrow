@@ -25,6 +25,9 @@
     "catalog:report": "pnpm catalog:merge",
     "catalog:scan": "node scripts/scan-held-provider-inputs.mjs",
     "publication:build": "pnpm build && node scripts/create-publication-policy.mjs",
+    "source-rights:check": "pnpm build && node scripts/validate-source-rights.mjs",
+    "test:privacy": "pnpm --filter @morrow/gateway-core exec vitest run test/privacy.test.ts && pnpm --filter @morrow/operation-journal exec vitest run test/journal.test.ts",
+    "test:package": "pnpm --filter @morrow/gateway-core exec vitest run test/source-rights.test.ts && pnpm --filter @morrow/mcp-server exec vitest run test/public-profile-config.test.ts",
     "bridge:legacy:start": "pnpm build && pnpm --filter @morrow/legacy-bridge-mcp start",
     "bridge:legacy:install": "node scripts/install-example-legacy-bridge.mjs",
     "bridge:legacy:remove": "node scripts/remove-example-legacy-bridge.mjs"

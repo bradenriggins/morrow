@@ -11,6 +11,7 @@ function source(overrides: Record<string, unknown> = {}) {
     command: "python3",
     args: ["server.py"],
     enabled: true,
+    sourceDisposition: "clean_reimplementation",
     ...overrides,
   };
 }
@@ -71,5 +72,25 @@ describe("public-canvas configuration", () => {
     expect(parsed.publicationPolicy.path).toBe("/tmp/morrow/public-canvas.json");
     expect(parsed.upstreams[0]?.attestation?.root).toBe("/tmp/meridian");
     expect(parsed.operationJournal.path).toBe(":memory:");
+  });
+
+  it("PRIV-08 refuses private and rights-held sources before startup", () => {
+    for (const sourceDisposition of ["private_runtime_dependency", "rights_hold", "retired"]) {
+      expect(() => parseGatewayConfig({
+        schema: "morrow.upstreams.v1",
+        profile: "public-canvas",
+        publicationPolicy: { path: "/tmp/public-canvas.json" },
+        upstreams: [source({
+          sourceDisposition,
+          revision,
+          attestation: {
+            kind: "local-git",
+            root: "/tmp/adapter",
+            expectedRevision: revision,
+            requireTrackedClean: true,
+          },
+        })],
+      })).toThrow(/public-canvas profile refuses/);
+    }
   });
 });

@@ -21,6 +21,9 @@ describe("Morrow legacy read routing", () => {
           priority: 100,
           required: true,
           enabled: true,
+          outputPrivacy: {
+            canvas_page_get: { allowedFields: ["source", "course_id"], dataClass: "course", maxRecords: 10, maxBytes: 2_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+          },
         },
         {
           id: "example-legacy",
@@ -32,6 +35,9 @@ describe("Morrow legacy read routing", () => {
           priority: 50,
           required: true,
           enabled: true,
+          outputPrivacy: {
+            canvas_page_get: { allowedFields: ["source", "course_id"], dataClass: "course", maxRecords: 10, maxBytes: 2_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+          },
         },
       ],
       operationJournal: { path: ":memory:" },

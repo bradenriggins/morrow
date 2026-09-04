@@ -18,6 +18,17 @@ describe("normalizeUpstreamResult", () => {
     }, {
       mapping,
       catalogDigest: "a".repeat(64),
+      privacy: {
+        descriptor: {
+          allowedFields: ["value"],
+          dataClass: "public",
+          maxRecords: 1,
+          maxBytes: 1_000,
+          freeText: "allow",
+          learnerTokens: false,
+          artifactInspection: "deny",
+        },
+      },
     });
 
     expect(result.content).toEqual([{ type: "text", text: "ok" }]);

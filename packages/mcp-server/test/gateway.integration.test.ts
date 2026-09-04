@@ -21,6 +21,10 @@ describe("GatewayRuntime stdio federation", () => {
           priority: 100,
           required: true,
           enabled: true,
+          outputPrivacy: {
+            canvas_page_get: { allowedFields: ["source", "course_id"], dataClass: "course", maxRecords: 10, maxBytes: 2_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+            meridian_only: { allowedFields: ["source", "tool", "value", "operation_id"], dataClass: "course", maxRecords: 10, maxBytes: 2_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+          },
         },
         {
           id: "example-legacy",
@@ -32,6 +36,10 @@ describe("GatewayRuntime stdio federation", () => {
           priority: 50,
           required: true,
           enabled: true,
+          outputPrivacy: {
+            canvas_page_get: { allowedFields: ["source", "course_id"], dataClass: "course", maxRecords: 10, maxBytes: 2_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+            morrow_legacy_only: { allowedFields: ["source", "tool", "value", "operation_id"], dataClass: "course", maxRecords: 10, maxBytes: 2_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+          },
         },
       ],
       filters: {

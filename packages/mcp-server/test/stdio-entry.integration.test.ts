@@ -25,6 +25,17 @@ describe("Morrow stdio entry", () => {
         required: true,
         enabled: true,
         env: {},
+        outputPrivacy: {
+          canvas_page_get: {
+            allowedFields: ["source", "course_id"],
+            dataClass: "course",
+            maxRecords: 10,
+            maxBytes: 2_000,
+            freeText: "deny",
+            learnerTokens: false,
+            artifactInspection: "deny"
+          }
+        },
       }],
       filters: { excludePrefixes: ["mindtap_", "connect_"], excludeNames: [] },
       operationJournal: { path: ":memory:" },

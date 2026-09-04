@@ -73,7 +73,8 @@ function publicConfig(input: {
       command: process.execPath,
       args: [fixturePath],
       env: { FAKE_SOURCE: "meridian" },
-      repository: "example-owner/example-attestation-repo",
+      repository: "example/public-canvas-adapter",
+      sourceDisposition: "clean_reimplementation",
       revision: input.revision,
       attestation: {
         kind: "local-git",
@@ -85,6 +86,17 @@ function publicConfig(input: {
       priority: 100,
       required: true,
       enabled: true,
+      outputPrivacy: {
+        canvas_page_get: {
+          allowedFields: ["source", "course_id"],
+          dataClass: "course",
+          maxRecords: 10,
+          maxBytes: 1_000,
+          freeText: "allow",
+          learnerTokens: false,
+          artifactInspection: "deny",
+        },
+      },
     }],
     operationJournal: { path: ":memory:" },
     maxCatalogTools: 20,

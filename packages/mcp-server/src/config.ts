@@ -2,11 +2,22 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import * as z from "zod/v4";
+import { SOURCE_DISPOSITIONS } from "@morrow/gateway-core";
 
 const EnvironmentName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 const FullGitRevision = z.string().regex(/^[0-9a-fA-F]{40,64}$/);
 const Sha256Digest = z.string().regex(/^[0-9a-fA-F]{64}$/);
 const RepositoryRelativePath = z.string().min(1).max(500);
+
+const OutputPrivacyDescriptorSchema = z.object({
+  allowedFields: z.array(z.string().min(1).max(160)).max(100).default([]),
+  dataClass: z.enum(["public", "course", "learner"]).default("public"),
+  maxRecords: z.number().int().min(0).max(10_000).default(0),
+  maxBytes: z.number().int().min(0).max(10_000_000).default(0),
+  freeText: z.enum(["allow", "deny"]).default("deny"),
+  learnerTokens: z.boolean().default(false),
+  artifactInspection: z.enum(["deny", "text", "trusted-generated"]).default("deny"),
+});
 
 const LocalGitAttestationSchema = z.object({
   kind: z.literal("local-git"),
@@ -29,7 +40,9 @@ const StdioUpstreamSchema = z.object({
   env: z.record(EnvironmentName, z.string()).default({}),
   repository: z.string().min(1).max(300).optional(),
   revision: z.string().min(1).max(300).optional(),
+  sourceDisposition: z.enum(SOURCE_DISPOSITIONS).default("private_runtime_dependency"),
   attestation: LocalGitAttestationSchema.optional(),
+  outputPrivacy: z.record(z.string().min(1).max(160), OutputPrivacyDescriptorSchema).default({}),
   priority: z.number().int().default(0),
   required: z.boolean().default(true),
   enabled: z.boolean().default(true),
@@ -59,6 +72,17 @@ const GatewayConfigSchema = z.object({
   batchScheduler: z.object({
     maxConcurrentWindows: z.number().int().min(1).max(16).default(1),
   }).default({ maxConcurrentWindows: 1 }),
+  privacy: z.object({
+    canvasOrigin: z.string().min(1).max(500).default("local"),
+    account: z.string().min(1).max(500).default("local-account"),
+    principal: z.string().min(1).max(500).default("local-principal"),
+    learnerVaultPath: z.string().min(1).default(".morrow/learner-vault.json"),
+  }).default({
+    canvasOrigin: "local",
+    account: "local-account",
+    principal: "local-principal",
+    learnerVaultPath: ".morrow/learner-vault.json",
+  }),
   maxCatalogTools: z.number().int().positive().max(5000).default(1000),
 });
 
@@ -175,6 +199,12 @@ export function parseGatewayConfig(
     if (requireSourceAttestation && !upstream.attestation) {
       throw new Error(`Upstream ${upstream.id} requires a configured source attestation.`);
     }
+    if (
+      parsed.profile === "public-canvas"
+      && !["direct_owned", "adapted_owned", "clean_reimplementation"].includes(upstream.sourceDisposition)
+    ) {
+      throw new Error(`public-canvas profile refuses ${upstream.sourceDisposition} upstream ${upstream.id}.`);
+    }
   }
   const publicationPath = parsed.publicationPolicy.path
     ? resolveLocalPath(parsed.publicationPolicy.path, environment)
@@ -198,6 +228,10 @@ export function parseGatewayConfig(
     },
     operationJournal: {
       path: resolveLocalPath(parsed.operationJournal.path, environment),
+    },
+    privacy: {
+      ...parsed.privacy,
+      learnerVaultPath: resolveLocalPath(parsed.privacy.learnerVaultPath, environment),
     },
   };
 }

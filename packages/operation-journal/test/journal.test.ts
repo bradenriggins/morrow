@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -81,5 +81,18 @@ describe("GatewayOperationJournal", () => {
         result: { resultState: "bridge_outcome_unknown", taskId: "task-7" },
       },
     })).toEqual({ state: "bridge_outcome_unknown", taskId: "task-7" });
+  });
+
+  it("PRIV-07 stores error digests without raw private markers", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-journal-private-log-"));
+    roots.push(root);
+    const path = join(root, "operations.sqlite3");
+    const journal = new GatewayOperationJournal({ path });
+    const prepared = journal.prepare(input());
+    journal.markDispatched(prepared.record.operationId);
+    journal.recordSourceUnknown(prepared.record.operationId, new Error("raw-page-body CHCP_PRIVATE_MARKER"));
+    journal.close();
+    expect(readFileSync(path).includes("raw-page-body")).toBe(false);
+    expect(readFileSync(path).includes("CHCP_PRIVATE_MARKER")).toBe(false);
   });
 });

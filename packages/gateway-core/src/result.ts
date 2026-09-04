@@ -6,6 +6,7 @@ import {
   type GatewayCallMeta,
   type JsonObject,
 } from "@morrow/contracts";
+import { projectOutput, type OutputPrivacyContext } from "./privacy.js";
 
 export interface ResultContext {
   readonly mapping: CatalogTool;
@@ -15,6 +16,7 @@ export interface ResultContext {
     readonly state: string;
     readonly sourceOperationId?: string;
   };
+  readonly privacy?: OutputPrivacyContext;
 }
 
 function textError(text: string, detailDigest: string): JsonObject {
@@ -59,14 +61,9 @@ export function normalizeUpstreamResult(value: unknown, context: ResultContext):
   }
 
   const upstreamDigest = sha256Json(value);
+  const projected = projectOutput(value, context.privacy);
   return {
-    content: Array.isArray(value.content)
-      ? structuredClone(value.content)
-      : [{ type: "text", text: "The upstream returned no MCP content blocks." }],
-    ...(typeof value.isError === "boolean" ? { isError: value.isError } : {}),
-    ...(isJsonObject(value.structuredContent)
-      ? { structuredContent: structuredClone(value.structuredContent) }
-      : {}),
+    ...projected,
     _meta: {
       "io.morrow/gateway": callMeta(context, upstreamDigest),
     },
