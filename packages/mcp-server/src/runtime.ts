@@ -42,7 +42,6 @@ import { StdioMcpUpstream } from "@morrow/upstream-mcp";
 import type { GatewayConfig } from "./config.js";
 import { ResultArtifactStore } from "./result-artifacts.js";
 import { loadExamplePlatformCatalogTruth } from "./meridian-catalog-truth.js";
-import { buildExamplePlatformSshLaunch } from "./meridian-runtime-adapter.js";
 import {
   verifyLocalGitSourceAttestation,
   verifyRemoteGitSshSourceAttestation,
@@ -434,8 +433,9 @@ export class GatewayRuntime {
     ))) {
       const attestation = sourceAttestations.get(upstreamConfig.id);
       const truth = catalogTruth.get(upstreamConfig.id);
+      const privateAdapterModule = "./meridian-runtime-adapter.js";
       const launch = upstreamConfig.kind === "meridian-ssh"
-        ? buildExamplePlatformSshLaunch({
+        ? (await import(privateAdapterModule)).buildExamplePlatformSshLaunch({
             host: upstreamConfig.host,
             remoteRoot: upstreamConfig.remoteRoot,
             serverPath: upstreamConfig.serverPath,

@@ -15,6 +15,8 @@ export const RELEASE_VERSION = "1.0.0-rc.0";
 export const REQUIRED_EXTERNAL_RECEIPTS = Object.freeze([
   "authorized_live_canvas",
   "client_parity",
+]);
+export const REQUIRED_PROMOTION_RECEIPTS = Object.freeze([
   "independent_clean_machine",
   "publication_authorization",
 ]);
@@ -182,18 +184,39 @@ export function deterministicZip(entries) {
 }
 
 export function buildCycloneDxSbom({ candidateName, sourceFiles, version = RELEASE_VERSION }) {
-  const components = sourceFiles
+  const manifests = sourceFiles
     .filter((file) => file.path === "package.json" || /^packages\/[^/]+\/package\.json$/.test(file.path))
-    .map((file) => {
-      const packageJson = JSON.parse(Buffer.from(file.data).toString("utf8"));
-      return {
-        type: "library",
-        name: packageJson.name,
-        version: packageJson.version,
-        properties: [{ name: "morrow:source-path", value: file.path }],
-      };
-    })
+    .map((file) => ({ path: file.path, packageJson: JSON.parse(Buffer.from(file.data).toString("utf8")) }));
+  const workspaceNames = new Set(manifests.map(({ packageJson }) => packageJson.name));
+  const externalVersions = new Map();
+  for (const { packageJson } of manifests) {
+    for (const [name, range] of Object.entries({ ...packageJson.dependencies, ...packageJson.devDependencies })) {
+      if (!workspaceNames.has(name)) externalVersions.set(name, String(range));
+    }
+  }
+  const components = [
+    ...manifests.map(({ path, packageJson }) => ({
+      type: "library",
+      name: packageJson.name,
+      version: packageJson.version,
+      "bom-ref": `pkg:npm/${encodeURIComponent(packageJson.name)}@${packageJson.version}`,
+      properties: [{ name: "morrow:source-path", value: path }],
+    })),
+    ...[...externalVersions].map(([name, versionRange]) => ({
+      type: "library",
+      name,
+      version: versionRange,
+      "bom-ref": `pkg:npm/${encodeURIComponent(name)}@${encodeURIComponent(versionRange)}`,
+      properties: [{ name: "morrow:version-source", value: "manifest range; pnpm lockfile included" }],
+    })),
+  ]
     .sort((left, right) => left.name.localeCompare(right.name));
+  const dependencies = manifests.map(({ packageJson }) => ({
+    ref: `pkg:npm/${encodeURIComponent(packageJson.name)}@${packageJson.version}`,
+    dependsOn: Object.entries(packageJson.dependencies || {}).map(([name, range]) => workspaceNames.has(name)
+      ? `pkg:npm/${encodeURIComponent(name)}@${manifests.find((entry) => entry.packageJson.name === name)?.packageJson.version}`
+      : `pkg:npm/${encodeURIComponent(name)}@${encodeURIComponent(String(range))}`).sort(),
+  })).sort((left, right) => left.ref.localeCompare(right.ref));
   return {
     bomFormat: "CycloneDX",
     specVersion: "1.5",
@@ -206,6 +229,7 @@ export function buildCycloneDxSbom({ candidateName, sourceFiles, version = RELEA
       },
     },
     components,
+    dependencies,
   };
 }
 
@@ -225,7 +249,12 @@ export function validateSourceOriginLedger({ root = DEFAULT_ROOT, files, commit 
   if (!existsSync(ledgerPath)) {
     return { schema: "morrow.source-origin-validation.v1", passed: false, reason: "ledger_missing", missing: files };
   }
-  const ledger = readJson(ledgerPath);
+  let ledger;
+  try {
+    ledger = JSON.parse(Buffer.from(trackedBuffer(root, "config/source-origin-ledger.json")).toString("utf8"));
+  } catch {
+    ledger = readJson(ledgerPath);
+  }
   const entries = Array.isArray(ledger.entries) ? ledger.entries : [];
   const byPath = new Map(entries.map((entry) => [entry.path, entry]));
   const missing = [];
@@ -250,11 +279,24 @@ export function validateSourceOriginLedger({ root = DEFAULT_ROOT, files, commit 
     .map((entry) => entry.path)
     .filter((path) => !files.some((file) => file.path === path))
     .sort();
-  const reviewed = ledger.status === "reviewed";
+  let candidateCommitMatches = ledger.candidateCommit === commit;
+  if (!candidateCommitMatches && existsSync(resolve(root, ".git")) && typeof ledger.candidateCommit === "string" && /^[0-9a-f]{40,64}$/i.test(ledger.candidateCommit)) {
+    try {
+      git(root, ["merge-base", "--is-ancestor", ledger.candidateCommit, commit]);
+      const changed = git(root, ["diff", "--name-only", `${ledger.candidateCommit}..${commit}`, "--", ...files.map((file) => file.path)])
+        .trim();
+      candidateCommitMatches = changed === "";
+    } catch {
+      candidateCommitMatches = false;
+    }
+  }
+  const reviewed = ledger.status === "reviewed" && candidateCommitMatches;
   return {
     schema: "morrow.source-origin-validation.v1",
     ledgerPath: relative(root, ledgerPath),
     ledgerStatus: ledger.status || "unknown",
+    candidateCommit: ledger.candidateCommit || null,
+    candidateCommitMatches,
     passed: reviewed && missing.length === 0 && invalid.length === 0 && unexpected.length === 0,
     missing,
     invalid,
@@ -262,8 +304,38 @@ export function validateSourceOriginLedger({ root = DEFAULT_ROOT, files, commit 
   };
 }
 
+function sourceRightsState(root, files, visibility) {
+  if (visibility !== "public") {
+    return { schema: "morrow.source-rights-validation.v1", required: false, passed: true, missing: [], invalid: [] };
+  }
+  const path = resolve(root, "config/source-rights.manifest.json");
+  const manifest = existsSync(path) ? readJson(path) : { files: [] };
+  const records = new Map((Array.isArray(manifest.files) ? manifest.files : []).map((entry) => [entry.path, entry]));
+  const allowed = new Set(["direct_owned", "adapted_owned", "clean_reimplementation"]);
+  const missing = [];
+  const invalid = [];
+  for (const file of files) {
+    const entry = records.get(file.path);
+    if (!entry) {
+      missing.push(file.path);
+      continue;
+    }
+    if (!allowed.has(entry.disposition) || entry.sha256 !== file.sha256 || typeof entry.review !== "string" || !entry.review.trim()) {
+      invalid.push(file.path);
+    }
+  }
+  return {
+    schema: "morrow.source-rights-validation.v1",
+    required: true,
+    manifestPath: relative(root, path),
+    passed: manifest.schema === "morrow.source-rights.v1" && missing.length === 0 && invalid.length === 0,
+    missing,
+    invalid,
+  };
+}
+
 const PUBLIC_MARKERS = Object.freeze([
-  { id: "private_example-kit_marker", expression: /\bexample-kit\b|example-attestation-repo|example-lms-vps/i },
+  { id: "private_example-kit_marker", expression: /(?:\bexample-kit\b|example-kit[_-]|example-attestation-repo|example-lms-vps)/i },
   { id: "absolute_user_path", expression: /\/(?:Users|home)\/[^/\s]+/ },
   { id: "private_key", expression: /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----/ },
   { id: "secret_literal", expression: /\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9_-]{12,}/ },
@@ -292,13 +364,13 @@ export function scanCandidateEntries(entries, visibility) {
   };
 }
 
-function externalReceiptState(root) {
+function externalReceiptSet(root, ids) {
   const path = process.env.MORROW_EXTERNAL_RECEIPTS_PATH
     ? resolve(process.env.MORROW_EXTERNAL_RECEIPTS_PATH)
     : resolve(root, "artifacts/release/external-receipts.json");
   const supplied = existsSync(path) ? readJson(path) : { receipts: [] };
   const byId = new Map((Array.isArray(supplied.receipts) ? supplied.receipts : []).map((entry) => [entry.id, entry]));
-  const receipts = REQUIRED_EXTERNAL_RECEIPTS.map((id) => {
+  const receipts = ids.map((id) => {
     const entry = byId.get(id);
     const verified = entry?.status === "verified"
       && validDigest(entry.receiptDigest)
@@ -312,6 +384,14 @@ function externalReceiptState(root) {
     };
   });
   return { path: existsSync(path) ? path : null, receipts, passed: receipts.every((entry) => !entry.blocking) };
+}
+
+function externalReceiptState(root) {
+  return externalReceiptSet(root, REQUIRED_EXTERNAL_RECEIPTS);
+}
+
+function promotionReceiptState(root) {
+  return externalReceiptSet(root, REQUIRED_PROMOTION_RECEIPTS);
 }
 
 function zeroToleranceState(root) {
@@ -351,6 +431,7 @@ export function validateAppendixCPathMap(root = DEFAULT_ROOT) {
     passed: value.schema === "morrow.appendix-c-path-map.v1"
       && value.status === "ratified-for-current-gateway-architecture"
       && mappings.length === 33
+      && mappings.every((mapping) => !["not-implemented", "owned-by-donor"].includes(mapping.status))
       && invalid.length === 0,
     mappingCount: mappings.length,
     invalid,
@@ -375,8 +456,10 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
     .map((path) => ({ path, data: trackedBuffer(root, path) }));
   const files = sourceFiles.map((file) => ({ path: file.path, bytes: file.data.length, sha256: sha256(file.data) }));
   const sourceOrigin = validateSourceOriginLedger({ root, files, commit });
+  const sourceRights = sourceRightsState(root, files, profile.visibility);
   const markerScan = scanCandidateEntries(sourceFiles, profile.visibility);
   const externalReceipts = externalReceiptState(root);
+  const promotionReceipts = promotionReceiptState(root);
   const zeroTolerance = zeroToleranceState(root);
   const stageManifest = {
     schema: "morrow.candidate-stage.v1",
@@ -389,6 +472,7 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
     sourceFiles: files,
     sourceFilesDigest: sha256(stableJson(files)),
     sourceOrigin,
+    sourceRights,
     markerScan,
     localEvidenceOnly: true,
   };
@@ -436,6 +520,7 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
   const blockers = [
     ...(markerScan.passed ? [] : ["candidate_marker_scan_failed"]),
     ...(sourceOrigin.passed ? [] : ["source_origin_ledger_incomplete"]),
+    ...(sourceRights.passed ? [] : ["source_rights_manifest_incomplete"]),
     ...externalReceipts.receipts.filter((entry) => entry.blocking).map((entry) => `external_receipt_missing:${entry.id}`),
     ...zeroTolerance.checks.filter((entry) => entry.blocking).map((entry) => `zero_tolerance_evidence_missing:${entry.id}`),
   ].sort();
@@ -454,11 +539,14 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
     checksumsDigest: sha256(checksumData),
     deterministicRebuild: verifyRebuild ? { verified: true, digest: sha256(rebuilt) } : { verified: false },
     sourceOrigin,
+    sourceRights,
     markerScan,
     externalReceipts,
+    promotionReceipts,
     zeroTolerance,
     localEvidenceOnly: true,
-    promotable: false,
+    promotable: blockers.length === 0,
+    stablePromotionReady: blockers.length === 0 && promotionReceipts.passed,
     blockingReasons: blockers,
   };
   writeJson(resolve(output, "receipt.json"), receipt);
@@ -488,14 +576,25 @@ export function scanStagedCandidate({ root = DEFAULT_ROOT, profileName = "privat
   const scan = scanCandidateEntries(entries, manifest.visibility);
   const archivePath = resolve(root, receipt.packagePath);
   const archiveMatches = existsSync(archivePath) && sha256(readFileSync(archivePath)) === receipt.packageDigest;
+  const sourceFilesMatch = manifest.sourceFiles.every((file) => {
+    const path = resolve(stageRoot, file.path);
+    return existsSync(path) && statSync(path).isFile() && sha256(readFileSync(path)) === file.sha256;
+  });
+  const stageManifestMatches = sha256(readFileSync(stageManifestPath)) === receipt.stageManifestDigest;
+  const sbomMatches = sha256(readFileSync(resolve(stageRoot, "release/sbom.cdx.json"))) === receipt.sbomDigest;
+  const checksumsMatch = sha256(readFileSync(resolve(stageRoot, "release/checksums.sha256"))) === receipt.checksumsDigest;
   const report = {
     schema: "morrow.package-scan-report.v1",
     profile: profileName,
     candidateName: receipt.candidateName,
     packageDigest: receipt.packageDigest,
     archiveMatches,
+    sourceFilesMatch,
+    stageManifestMatches,
+    sbomMatches,
+    checksumsMatch,
     scan,
-    passed: archiveMatches && scan.passed,
+    passed: archiveMatches && sourceFilesMatch && stageManifestMatches && sbomMatches && checksumsMatch && scan.passed,
   };
   writeJson(resolve(root, "artifacts/release", `package-scan-${profileName}.json`), report);
   return report;
@@ -513,13 +612,35 @@ export function conformanceReport({ root = DEFAULT_ROOT, profileName = "private-
   })();
   const appendix = validateAppendixCPathMap(root);
   const receipt = readCandidateReceipt(root, profileName);
+  const currentCommit = git(root, ["rev-parse", "HEAD"]).trim();
+  const currentTree = git(root, ["rev-parse", "HEAD^{tree}"]).trim();
+  let packageScan = null;
+  try {
+    if (receipt) packageScan = scanStagedCandidate({ root, profileName });
+  } catch {
+    packageScan = null;
+  }
+  const otherProfileName = profileName === "private-full" ? "public-canvas" : "private-full";
+  const otherReceipt = readCandidateReceipt(root, otherProfileName);
+  let otherPackageScan = null;
+  try {
+    if (otherReceipt) otherPackageScan = scanStagedCandidate({ root, profileName: otherProfileName });
+  } catch {
+    otherPackageScan = null;
+  }
   const checks = [
     { id: "candidate_version", passed: packageJson.version === RELEASE_VERSION },
     { id: "frozen_lockfile_tracked", passed: lockTracked },
     { id: "appendix_c_path_map", passed: appendix.passed },
     { id: "candidate_receipt", passed: receipt !== null },
+    { id: "candidate_bound_to_head", passed: receipt?.commit === currentCommit && receipt?.tree === currentTree },
+    { id: "candidate_package_integrity", passed: packageScan?.passed === true },
+    { id: "other_profile_candidate_receipt", passed: otherReceipt !== null },
+    { id: "other_profile_bound_to_head", passed: otherReceipt?.commit === currentCommit && otherReceipt?.tree === currentTree },
+    { id: "other_profile_package_integrity", passed: otherPackageScan?.passed === true },
     { id: "candidate_marker_scan", passed: receipt?.markerScan?.passed === true },
     { id: "source_origin_ledger", passed: receipt?.sourceOrigin?.passed === true },
+    { id: "source_rights", passed: receipt?.sourceRights?.passed === true },
     { id: "external_live_receipts", passed: receipt?.externalReceipts?.passed === true },
     { id: "zero_tolerance_receipt", passed: receipt?.zeroTolerance?.passed === true },
     { id: "candidate_promotable", passed: receipt?.promotable === true },

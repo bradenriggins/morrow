@@ -9,11 +9,14 @@ const profileName = profileIndex === -1
 if (!profileName || profileName.startsWith("--")) throw new Error("--profile requires a profile name");
 
 try {
-  const result = args.includes("--scan")
-    ? scanStagedCandidate({ profileName })
-    : stageCandidate({ profileName, verifyRebuild: args.includes("--verify-rebuild") });
+  const profileNames = args.includes("--all") ? ["private-full", "public-canvas"] : [profileName];
+  const results = profileNames.map((name) => args.includes("--scan")
+    ? scanStagedCandidate({ profileName: name })
+    : stageCandidate({ profileName: name, verifyRebuild: args.includes("--verify-rebuild") }));
+  const result = results.length === 1 ? results[0] : { schema: "morrow.release-candidates.v1", candidates: results };
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  if ((args.includes("--scan") && !result.passed) || (!args.includes("--scan") && !result.markerScan.passed)) {
+  const failed = results.some((entry) => args.includes("--scan") ? !entry.passed : entry.promotable !== true);
+  if (failed) {
     process.exitCode = 1;
   }
 } catch (error) {

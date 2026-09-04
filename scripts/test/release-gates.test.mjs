@@ -64,6 +64,7 @@ test("source-origin validation fails closed until every staged file is reviewed"
     writeFileSync(resolve(root, "config/source-origin-ledger.json"), JSON.stringify({
       schema: "morrow.source-origin-ledger.v1",
       status: "reviewed",
+      candidateCommit: "b".repeat(40),
       entries: [{
         path: "packages/example.js",
         sourceCommit: "d".repeat(40),

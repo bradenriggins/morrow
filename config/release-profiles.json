@@ -5,7 +5,7 @@
     "private-full": {
       "visibility": "private",
       "include": ["*"],
-      "exclude": ["packages/*/test/", "scripts/test/"],
+      "exclude": ["packages/*/test/", "scripts/test/", "config/source-origin-ledger.json"],
       "description": "Complete tracked convergence source for local evidence only. It is not a publication payload."
     },
     "public-canvas": {
@@ -22,9 +22,13 @@
         "packages/upstream-mcp/",
         "packages/batch-engine/",
         "docs/release/",
-        "config/publication-selections.example.json"
+        "config/publication-selections.example.json",
+        "morrow.upstreams.public-canvas.example.json"
       ],
-      "exclude": ["packages/*/test/"],
+      "exclude": [
+        "packages/*/test/",
+        "packages/mcp-server/src/meridian-runtime-adapter.ts"
+      ],
       "description": "Reviewed Canvas-oriented source projection. External source rights, policy authorization, live proof, and independent reproduction remain required."
     }
   }
