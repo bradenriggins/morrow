@@ -1,4 +1,593 @@
 {
   "schema": "morrow.source-rights.v1",
-  "files": []
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "1549baf9994504fd53be53338021568b949ed4dcd5e9f94c1bad26db6e8b2180",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "ARCHITECTURE.md",
+      "sha256": "3ae7de98485a69ffeb6580ef7986a8e2afa8140d50cae95458a1f4fc4db02f3c",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "LICENSE",
+      "sha256": "f37f80963047fbbf92f6da766ca977de53d8ee56f60d1d26cf17b22cda65cace",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "LIMITATIONS.md",
+      "sha256": "9635245750c8ee7f4659453686f3709f4b933a576d7929ebaaeb77fd428db71f",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "README.md",
+      "sha256": "a12b3d181b34b6f99e5d93fbe80837a55076c02b5939f47a4ce87202ae409050",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "SOURCE-ORIGIN.md",
+      "sha256": "1a203b4888a539af396a5c78a683047bf5b9daad29d5cc7f5c5f553400656b67",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "artifacts/canvas-api/canvas-api-catalog.json",
+      "sha256": "3840ba0f81318d5d727fd862986b00d52821214d7227154caa036d190d0a2868",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "config/publication-selections.example.json",
+      "sha256": "a8cc524b430eca079718453c6c08b32f34072e33aafb2a141e49b10fb911c788",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/generated/canvas-api-catalog.json",
+      "sha256": "3840ba0f81318d5d727fd862986b00d52821214d7227154caa036d190d0a2868",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/manifest.json",
+      "sha256": "7320785a46a11b574fc1bf300a00c8b1fec31c1bc20e2cc5f76182314a0b9fe5",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/popup/popup.css",
+      "sha256": "14162c826e76dff1e725d0bc7b164feff15b44ede488ef44c4fbb4e5b0f0abeb",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/popup/popup.html",
+      "sha256": "bdf0c0fa53f48a19ce895b1f1afcb6f85919239f533b163f7c9aee1b601248f1",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/popup/popup.js",
+      "sha256": "017fecdcada8850ca57e51aa2fc369738ede8c3e2ebf19a3dee60df4499ad939",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/src/canvas-content.js",
+      "sha256": "6e458da4954258a82f52da23383b8f2ba7d0ac86e8c4c2c633fd11341dde7e9f",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/src/item-bank-executor.js",
+      "sha256": "fd717b38eaf4ee056acd7abc01c589fda65df396a8f6a531c0e3cfad20c7e7cc",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/src/service-worker.js",
+      "sha256": "ff435177fe8ff48918f2a143d564ab4bc7ef9f8c5e4a6c529930bd8a5983a430",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/src/verification.js",
+      "sha256": "be571441e2217b0a42b77f5836b34ebc69f41a52e50a75fd5f82b51d569cd00e",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "docs/architecture/ADR-001-federated-convergence.md",
+      "sha256": "8f9999757b038c3dfc31686a1f54f34c74dee451bfd2f87a1449dc1155bdc1a1",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "docs/architecture/ADR-002-local-extension-bridge.md",
+      "sha256": "ca364a63655eec0858e0ca7b409e19553609cf0da87b16925e6407c8ea603ec3",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "docs/implementation/EXAMPLE-WORKTREE.md",
+      "sha256": "af97a8838232f1718e0cb22c5bad27050843948f2c8a2722b584aaf5b69977be",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
+      "sha256": "fa9e7ece11729efed2943a08e2ce5ee1011db6405a57d7a1b19337bdcb3a8ab6",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "morrow.upstreams.connector.example.json",
+      "sha256": "2cd2036bd8047e11d8dec16eb148f8916548d5355cec9c6a7cb1d98b22e85315",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "morrow.upstreams.public-canvas.example.json",
+      "sha256": "2e562082d2ff9a9697e70581d724d691df6368077a5e2afa56762d4e6f2cd1d4",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "package.json",
+      "sha256": "3fb66969d950ea0367b418d901879e66934ab80d0382ccbfb4ae4d8486b39096",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/batch-engine/package.json",
+      "sha256": "2c5ad591460319750b1932ff8109fc83a75d3958757ffd0cd1c8eaa175b42f14",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/batch-engine/src/facade.ts",
+      "sha256": "36f9a8edb02eb8b97d1aa9578bee50e2011cf8b4d8a25d03b70b4d6105587da5",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/batch-engine/src/index.ts",
+      "sha256": "21a3c6e160b00cb842fad5eb4251454ee23443aa9b0b98c1f8cbd34bba13311b",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/batch-engine/src/node-sqlite-compat.d.ts",
+      "sha256": "8e1e61028b7e401b02c0edd747960d74b3511b0754c83afd8e85ba68265a798a",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/batch-engine/src/public.ts",
+      "sha256": "e03729178de1b1f10729b6c8bf0da46a8ea5650d069682e3bf6ed0b286a123b3",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/batch-engine/src/recovery.ts",
+      "sha256": "d9ee9daa794e880875bc08212a6bd9a6dd1ee50e179c427bbacf8bbbe48ffd40",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/batch-engine/src/settlement.ts",
+      "sha256": "bf6b10e5fabb8871f9e6ffd36b2e7e2ca9eb9b2e611cea3143c79ff4504bd0ba",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/batch-engine/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/bridge-loopback/package.json",
+      "sha256": "26a1219eac42861ac761456f4854b8d790288f8f84172d6a7a665960b852ee65",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/bridge-loopback/src/index.ts",
+      "sha256": "f0aa15dd7b1e18a2d494d905766c0988f18537161742c510f83a88591cb6dc25",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/bridge-loopback/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/bridge-protocol/package.json",
+      "sha256": "dce9603c1566ff818147146d1d7a4d7a983159b474cbe07e4f752015faa2a43f",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/bridge-protocol/src/index.ts",
+      "sha256": "ed52df44733d40af1eb73b37921eb562346b56ddad1dc43e758f8e8d6a9352f3",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/bridge-protocol/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-api-catalog/package.json",
+      "sha256": "28ad6dadd1d14809dd074a804b965c50a3325d4ee23349670c1e2641d3fc89a9",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-api-catalog/src/index.ts",
+      "sha256": "e96ac29466c86aad58c6a27f1cb42b2e52a10d021fa0fac12882f797ed52a1c6",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-api-catalog/tsconfig.json",
+      "sha256": "2d7b3bb8c244034a0c123fad7913ee4d68501f6b4019400e51e1e047265f8ba3",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/package.json",
+      "sha256": "06348e7f4f95d091285b46004a8291dd7489c4f740fef3a4d44155843f6321fa",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/src/config.ts",
+      "sha256": "7b9a0dfdafe7c1f88e6b785d958f93474e597cbf52a74337192c0e47e0b8c684",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/src/index.ts",
+      "sha256": "15c591eba52cbe03ab7a35658b6a5ac98df851ddd10f452a8fbb84059422ee56",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/src/runtime.ts",
+      "sha256": "408a5225d1946f7841b014202499643ffec913d85b4044600c53c217bf54cb6d",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/src/server.ts",
+      "sha256": "19faa4f6b26b60b5f25e317d6bfc28a70cf36f321f7f6bf7f8c785c21c27d93c",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/tsconfig.json",
+      "sha256": "4352824d5e9d013b01733b175da2ce508be5174aff309214dae3a5673ee04160",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/client-config/package.json",
+      "sha256": "c04488a174a5085a28845bc6d4b8186ae3a31cc12be5d82f0eda3738a0e6307e",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/client-config/src/cli.ts",
+      "sha256": "d078b5b3a5a3f41fe6848f9ed1bb41b7be6544ff25b6deaada3a99fcae16f387",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/client-config/src/index.ts",
+      "sha256": "5878a0411491588ff9a920ae190d9f1c96562e84299c03ccca65a90e3ec6dadf",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/client-config/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/contracts/package.json",
+      "sha256": "9d6c6dc71568dc0edaadbde61ab6e2a6b37bb15345dee31676664de0e40d0f91",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/contracts/src/index.ts",
+      "sha256": "b684d01a8a63745ebb271a0c0d4fa5d9c385a3bfe43a770523275d77a0a79246",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/contracts/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/package.json",
+      "sha256": "d61020f04bc515344a4b8620f89152d9381ab70b1cde380aaefc2fc55b3803ba",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/src/catalog.ts",
+      "sha256": "d54de17f0d611b3c74635d04a79f8f03b14c51c0ff6ed77598a404c80f4c7d31",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/src/index.ts",
+      "sha256": "3dc2d55ed5d3ecb816cdfbca322d8ceb611f968910638d3a21b55e23183685a0",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/src/privacy.ts",
+      "sha256": "4e119a282f24da917312cfa298cfb544a1eaca3f93fe431982303b4b4bf946de",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/src/publication-candidate.ts",
+      "sha256": "47b1e77b8c4d6536194f35f43dfb942d9ebb1e97ab28aa796b39eebe2937379b",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/src/publication.ts",
+      "sha256": "17fe7d673792b1bb1730833b5c2af8c6e1ec738b084793f6fb33539f3e47b178",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/src/reconcile.ts",
+      "sha256": "278b77596e39c7c906b73f97a12365d4ce3d72d8980fc2991c856fd283480832",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/src/result.ts",
+      "sha256": "76fe3caad112d154b54a66782ca87a8c76d7a5919c14b40e34aef2219a12f7a4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/src/source-rights.ts",
+      "sha256": "d6d9732514de6094d41ce55ce12aae7583a2b31ade5e61606e2cd7fec6a86689",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/gateway-core/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/package.json",
+      "sha256": "1ef8185c6ceba19843c9ab705f5deef6587ddc9b25772b3b4e2e34e037da2bac",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/approval-entry.ts",
+      "sha256": "1f04f84f95ae689407114bcf3b25500f76d1adfcc8c3effeedb4a20af92b4aab",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/approval-server.ts",
+      "sha256": "985d9690e238a92c39b806df2da45df4ee7020f8e19f94c326b8c6da5cd8a385",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/batch-recovery.ts",
+      "sha256": "af21afa79f22c09bd576619a9de3818c3308ffe9702ddbe1eb8645cb8af98135",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/batch-tools.ts",
+      "sha256": "7c4544964afd5d193eaabccbef26a09a1dfa53c18eda5454a57d632cba391d29",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/batch-window-scheduler.ts",
+      "sha256": "828bee4c84f9377da64e86d3bdafff484a27713f73cc6f15bf18c099bfd0710b",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/config.ts",
+      "sha256": "ccdf75bb38530e302c20250075d26b1566900a882617bee25d57e130c1d093e9",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/full-server.ts",
+      "sha256": "afcae9e11086855d012afa0cddaac0484e09a6e6f716c5e23965c15dd7fa865b",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/index.ts",
+      "sha256": "a234d78b9a742ea20026071c0e0f0680e7931e52f9a8062ed4ff8c2e81746989",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/meridian-catalog-truth.ts",
+      "sha256": "e1a8989e6766857ba1db564554fab657289a24a73a85aae97d4d4af99059cfcb",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/morrow-runtime.ts",
+      "sha256": "08da69477e3c8dc08cd8f1b08a5ee977622f659b897ca63a293c7f0d026fe858",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/operation-tools.ts",
+      "sha256": "bb0795a6072bd868e3f14173413fe05444f1798171301867369370b51cf8aafc",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/result-artifacts.ts",
+      "sha256": "2c5c23c70c6938c916f3989586e15dcb7ba5c6f6f54e47304c765ce750978a2a",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/runtime.ts",
+      "sha256": "819f7484d9dde1d17ff6eaac8b9d58f510c444c8ba7f46571971ae6557484cdf",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/sandbox-upstream.ts",
+      "sha256": "1228a3e4aa32ca4c5e04d23f387efeec2c77baa676140840a0d015173448583f",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/server-instructions.ts",
+      "sha256": "d7475f2d9344b9227ea95d2c5f1b0afd96aa9fe28bb1a8b6ea5175dcc69c1062",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/server.ts",
+      "sha256": "7dde570cd0d8440e15c72fc72f37cf6ecbd88f1e32de33d49a8b1546438ac116",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/source-attestation.ts",
+      "sha256": "a50af315ec1b556d5d01c1296827b5e6030cd5bd64bd92efc73cf55602f79c18",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/state-lease.ts",
+      "sha256": "a11a5ca18997e4404ae87d8b0fa9bfe6d03f44d598e5e4783511e4487a20e63f",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/src/strict-stdio.ts",
+      "sha256": "c3da5a7cf26795d40c34fb5a864794cd3135387a06c5502b82e20ce68e91d0fe",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/mcp-server/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/operation-journal/package.json",
+      "sha256": "e2e8fba13b7c75f14ebfefa3adecaf23e5f6e51799df4d6be244854b704ade25",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/operation-journal/src/effect-broker.ts",
+      "sha256": "ffd8ea911e0b60744fe655fcb14c340133b887a3f7f8996763d0c6cac4788cff",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/operation-journal/src/index.ts",
+      "sha256": "efb467b7089063de3e8d0e9708d6d1e955fff9f22e7b1aaa2a59443ccccebae3",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/operation-journal/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/upstream-mcp/package.json",
+      "sha256": "9dc5b0af7987486f67ecfbb7c535177dda8d4663b1d0639302c33573750d8275",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/upstream-mcp/src/index.ts",
+      "sha256": "51d56f4005c95166d982b5e0cd866ba6e512bb56c4d7afad9f5357fa21a4f000",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/upstream-mcp/src/strict-stdio.ts",
+      "sha256": "9b7ceef3241ed09b785251b7c3c90b5855427b65178a80a30132a9849bc6b671",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "packages/upstream-mcp/tsconfig.json",
+      "sha256": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4",
+      "disposition": "adapted_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "c95367dca3b17b22e537542d9f1a06bce3a32f9da3f9335dbec1a59ffcd892d3",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "sha256": "d115dc6c83ba283a7d17146ad456056f3f70b003edb8c312a52880b48b034001",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "scripts/generate-canvas-api-catalog.mjs",
+      "sha256": "51b739cc2b844ee939d5162763a9785351be8984f9c08241bf1ca80cd3db27ff",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "scripts/package-canvas-connector.mjs",
+      "sha256": "9ab1efbd9599ad182652eec1cfacbf88aeeaa1634ed9d928a2313067badd7c2f",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    },
+    {
+      "path": "tsconfig.base.json",
+      "sha256": "87fe4790e8f588c357efa665a1215777a8b284df559dc7c21591674f988a0e68",
+      "disposition": "direct_owned",
+      "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
+    }
+  ]
 }
