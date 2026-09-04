@@ -4,6 +4,7 @@ import {
   isJsonObject,
   sha256Json,
   sha256Text,
+  upstreamCatalogDigest,
   type CatalogSnapshot,
   type CatalogSource,
   type CatalogTool,
@@ -40,7 +41,12 @@ import {
 import { StdioMcpUpstream } from "@morrow/upstream-mcp";
 import type { GatewayConfig } from "./config.js";
 import { ResultArtifactStore } from "./result-artifacts.js";
-import { verifyLocalGitSourceAttestation } from "./source-attestation.js";
+import { loadExamplePlatformCatalogTruth } from "./meridian-catalog-truth.js";
+import { buildExamplePlatformSshLaunch } from "./meridian-runtime-adapter.js";
+import {
+  verifyLocalGitSourceAttestation,
+  verifyRemoteGitSshSourceAttestation,
+} from "./source-attestation.js";
 
 export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_health",
@@ -298,11 +304,17 @@ function verifyConfiguredSources(
   const evidence = new Map<string, SourceAttestationHealth>();
   for (const source of config.upstreams) {
     if (!source.attestation) continue;
-    const verified = verifyLocalGitSourceAttestation(
-      source.id,
-      source.repository,
-      source.attestation,
-    );
+    const verified = source.attestation.kind === "remote-git-ssh"
+      ? verifyRemoteGitSshSourceAttestation(
+          source.id,
+          source.repository,
+          source.attestation,
+        )
+      : verifyLocalGitSourceAttestation(
+          source.id,
+          source.repository,
+          source.attestation,
+        );
     evidence.set(source.id, verified);
   }
   return evidence;
@@ -397,6 +409,12 @@ export class GatewayRuntime {
     options: { readonly journalPath?: string } = {},
   ): Promise<GatewayRuntime> {
     const sourceAttestations = verifyConfiguredSources(config);
+    const catalogTruth = new Map<string, ReturnType<typeof loadExamplePlatformCatalogTruth>>(config.upstreams
+      .filter((source) => source.kind === "meridian-ssh")
+      .map((source) => [
+        source.id,
+        loadExamplePlatformCatalogTruth(source, config.filters),
+      ]));
     const journal = new GatewayOperationJournal({
       path: options.journalPath || config.operationJournal.path,
     });
@@ -415,27 +433,67 @@ export class GatewayRuntime {
       right.priority - left.priority || compareAscii(left.id, right.id)
     ))) {
       const attestation = sourceAttestations.get(upstreamConfig.id);
+      const truth = catalogTruth.get(upstreamConfig.id);
+      const launch = upstreamConfig.kind === "meridian-ssh"
+        ? buildExamplePlatformSshLaunch({
+            host: upstreamConfig.host,
+            remoteRoot: upstreamConfig.remoteRoot,
+            serverPath: upstreamConfig.serverPath,
+            runtimeProfile: upstreamConfig.runtimeProfile,
+          })
+        : {
+            command: upstreamConfig.command,
+            args: upstreamConfig.args,
+            ...(upstreamConfig.cwd ? { cwd: upstreamConfig.cwd } : {}),
+            env: upstreamConfig.env,
+          };
       const upstream = new StdioMcpUpstream({
         id: upstreamConfig.id,
         label: upstreamConfig.label,
-        command: upstreamConfig.command,
-        args: upstreamConfig.args,
-        ...(upstreamConfig.cwd ? { cwd: upstreamConfig.cwd } : {}),
-        env: upstreamConfig.env,
+        command: launch.command,
+        args: launch.args,
+        ...(upstreamConfig.kind === "mcp-stdio" && upstreamConfig.cwd
+          ? { cwd: upstreamConfig.cwd }
+          : {}),
+        ...(upstreamConfig.kind === "mcp-stdio" ? { env: upstreamConfig.env } : {}),
+        ...(upstreamConfig.kind === "meridian-ssh" ? { stderr: "ignore" as const } : {}),
         priority: upstreamConfig.priority,
         required: upstreamConfig.required,
-        ...(upstreamConfig.attestation?.expectedToolCount !== undefined
+        ...(truth
+          ? { expectedToolCount: truth.health.totalToolCount }
+          : upstreamConfig.attestation?.kind === "local-git"
+            && upstreamConfig.attestation.expectedToolCount !== undefined
           ? { expectedToolCount: upstreamConfig.attestation.expectedToolCount }
           : {}),
-        ...(upstreamConfig.attestation?.expectedCatalogDigest
+        ...(truth
+          ? { expectedCatalogDigest: truth.health.upstreamCatalogDigest }
+          : upstreamConfig.attestation?.kind === "local-git"
+            && upstreamConfig.attestation.expectedCatalogDigest
           ? { expectedCatalogDigest: upstreamConfig.attestation.expectedCatalogDigest }
           : {}),
         ...(attestation ? { sourceAttestation: attestation } : {}),
+        ...(truth ? { catalogTruth: truth.health } : {}),
+        ...(upstreamConfig.kind === "meridian-ssh"
+          ? { supervision: upstreamConfig.supervision }
+          : {}),
       });
       upstreams.set(upstream.id, upstream);
 
       try {
         const tools = await upstream.connect();
+        if (truth) {
+          const excludedNames = new Set(config.filters.excludeNames);
+          const eligibleTools = tools.filter((tool) => (
+            !excludedNames.has(tool.name)
+            && !config.filters.excludePrefixes.some((prefix) => tool.name.startsWith(prefix))
+          ));
+          if (
+            eligibleTools.length !== truth.health.eligibleToolCount
+            || upstreamCatalogDigest(upstream.id, eligibleTools) !== truth.health.eligibleCatalogDigest
+          ) {
+            throw new Error(`Source ${upstream.id} eligible catalog does not match generated truth.`);
+          }
+        }
         sources.push({
           id: upstream.id,
           label: upstream.label,
@@ -460,6 +518,11 @@ export class GatewayRuntime {
         excludeNames: config.filters.excludeNames,
         reservedNames: MORROW_NATIVE_TOOL_NAMES,
       });
+      for (const [sourceId, truth] of catalogTruth) {
+        if ((mergedCatalog.countsBySource[sourceId] ?? 0) !== truth.health.eligibleToolCount) {
+          throw new Error(`Source ${sourceId} eligible catalog does not match generated truth.`);
+        }
+      }
       let catalog = mergedCatalog;
       let publicationPolicy: PublicationPolicyHealth | undefined;
 
@@ -517,7 +580,13 @@ export class GatewayRuntime {
     return {
       schema: "morrow.health.v1",
       version: "1.0.0-alpha.1",
-      ready: sources.every((source) => !source.required || source.connected),
+      ready: sources.every((source) => (
+        !source.required
+        || (
+          source.connected
+          && source.catalogAttested !== false
+        )
+      )),
       profile: this.config.profile,
       catalogDigest: this.catalog.digest,
       publicToolCount: this.catalog.tools.length,
@@ -985,7 +1054,11 @@ export class GatewayRuntime {
     }
     const dispatched = this.journal.markDispatched(prepared.record.operationId);
     try {
-      const result = await upstream.callTool(mapping.upstreamName, dispatchedArguments, options);
+      const result = await upstream.callTool(mapping.upstreamName, dispatchedArguments, {
+        signal: options.signal,
+        safeToRetry: mapping.upstreamId === "meridian"
+          && mapping.annotations?.readOnlyHint === true,
+      });
       const normalized = normalizeUpstreamResult(result, baseContext);
       const source = classifySourceResult(result);
       const complete = this.journal.recordResponse(dispatched.operationId, {

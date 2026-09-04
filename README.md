@@ -27,18 +27,21 @@ Requirements:
 
 - Node.js 22.12 or newer
 - pnpm 10.6.1 through Corepack
-- A local checkout of `example-attestation-repo` at the pinned donor revision
+- SSH access through the `example-lms-vps` host alias
+- The generated ExamplePlatform source catalog at the pinned donor revision
 
 ```bash
 corepack enable
 pnpm install
 pnpm build
 cp morrow.upstreams.example.json morrow.upstreams.json
-export MORROW_MERIDIAN_SERVER_PATH=/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py
+export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
 pnpm start
 ```
 
-The local configuration file is ignored by Git. It may contain paths, but it must not contain provider credentials. ExamplePlatform continues to own its existing credential and provider authority during this convergence checkpoint.
+The default example is a hermetic, read-only catalog profile. It runs the frozen server only through `ssh -T example-lms-vps`. It checks the remote Git revision and tracked-clean state before launch. It then requires the generated 222-tool catalog truth. The gateway removes the 35 held MindTap and Connect tools and exposes 187 eligible tools.
+
+`morrow.upstreams.meridian-private.example.json` shows the private runtime profile and the generic-to-ExamplePlatform environment mapping. Replace its generic example identifiers and remote state paths with one exact private profile. Do not place raw tokens in the file. Use a ExamplePlatform-owned session, credential, or socket path.
 
 ## Add the Morrow legacy browser runtime
 
@@ -57,7 +60,7 @@ export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.
 export MORROW_LEGACY_BRIDGE_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
 pnpm bridge:legacy:install
 cp morrow.upstreams.with-legacy-bridge.example.json morrow.upstreams.json
-export MORROW_MERIDIAN_SERVER_PATH=/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py
+export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
 pnpm start
 ```
 
@@ -69,7 +72,7 @@ A bridge write returns an approval-required task. Approve or deny it through the
 
 Gateway tools:
 
-- `morrow_health` reports gateway readiness, source connection state, catalog counts, and the catalog digest.
+- `morrow_health` reports gateway readiness, source revision, generated catalog truth, tool counts and digests, connection generation, and bounded reconnect state.
 - `morrow_catalog` searches a paginated projection of the merged catalog. It returns source mappings and schema digests rather than full schemas or raw upstream metadata.
 
 Morrow legacy bridge tools:
@@ -97,17 +100,17 @@ Generated donor catalogs and reconciliation output live under `artifacts/catalog
 
 The public Morrow endpoint is a local stdio server. After `pnpm install` and `pnpm build`, the root script `pnpm start` runs `@morrow/mcp-server` (`node dist/index.js`). The client-config package declares the unified `morrow` command. The public endpoint serves both MCP SDK protocol eras through one stdio factory.
 
-Start the process from the repository root. The gateway loads `morrow.upstreams.json` from the process working directory, or from `MORROW_UPSTREAMS_FILE` when that variable is set. If that file is absent, set `MORROW_MERIDIAN_SERVER_PATH`. Optional `MORROW_PYTHON_COMMAND` defaults to `python3`.
+Start the process from the repository root. The gateway loads `morrow.upstreams.json` from the process working directory, or from `MORROW_UPSTREAMS_FILE` when that variable is set. A ExamplePlatform source cannot use `MORROW_MERIDIAN_SERVER_PATH` for local startup. Use the first-class `meridian-ssh` configuration.
 
 Example upstream files that exist in this repository:
 
 - `morrow.upstreams.example.json`
+- `morrow.upstreams.meridian-private.example.json`
 - `morrow.upstreams.with-legacy-bridge.example.json`
 
 Named tools registered in this repository:
 
-- Gateway: `morrow_health`, `morrow_catalog`, `morrow_operation_get`, `morrow_operations_recent`, and `morrow_result_page`
-- Reserved interface: `morrow_operation_cancel` returns `operation_cancel_not_available` until source-task cancellation is implemented.
+- Gateway: catalog, profile, operation, batch, health, and bounded result-page tools under the `morrow_*` namespace.
 - Legacy bridge, when that upstream is enabled: `morrow_legacy_bridge_health`, `morrow_legacy_bindings`, `morrow_legacy_task_get`
 
 The gateway also forwards tools imported from connected upstreams. A request cancelled before dispatch does not call the source. A request cancelled after dispatch is recorded as source-unknown and must not be replayed. Large results return a process-local result handle. Read it with `morrow_result_page` in bounded pages.
@@ -129,6 +132,8 @@ The commands install these project-scoped files:
 - Gemini CLI: `.gemini/settings.json`
 
 `morrow conformance --json` is a deterministic configuration harness. It proves matching command, arguments, working directory, and allowed environment names. It does not prove that the installed Codex, Claude Code, or Gemini CLI binary can connect. Run each real client separately before making that claim.
+
+Set `MORROW_MERIDIAN_CATALOG_PATH` when the selected upstream file uses the ExamplePlatform SSH adapter. For the two-upstream example, also set the legacy bridge variables documented above.
 
 ## Documentation
 

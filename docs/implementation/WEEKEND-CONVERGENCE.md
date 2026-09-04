@@ -17,6 +17,11 @@ Checkpoint C adds an authenticated loopback WebSocket server and a reversible ex
 - Deterministic catalog merge with stable aliases and a catalog digest.
 - MindTap and Connect prefix holds at catalog construction time.
 - Official MCP stdio clients for internal upstreams.
+- First-class ExamplePlatform SSH stdio launch through `ssh -T example-lms-vps`.
+- Remote exact-revision and tracked-clean Git attestation without remote paths in health output.
+- Hermetic catalog and private runtime profile adapters for ExamplePlatform environment bindings.
+- Generated ExamplePlatform catalog truth enforcement before backend readiness.
+- Bounded startup and runtime reconnect with safe-read replay only.
 - Official MCP stdio server for the public Morrow endpoint.
 - `morrow_health` and a paginated, schema-digest-only `morrow_catalog` inspection tool.
 - Upstream call forwarding with bounded source metadata.
@@ -43,7 +48,7 @@ corepack enable
 pnpm install
 pnpm build
 cp morrow.upstreams.example.json morrow.upstreams.json
-export MORROW_MERIDIAN_SERVER_PATH=/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py
+export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
 pnpm start
 ```
 
@@ -57,7 +62,7 @@ export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.
 export MORROW_LEGACY_BRIDGE_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
 pnpm bridge:legacy:install
 cp morrow.upstreams.with-legacy-bridge.example.json morrow.upstreams.json
-export MORROW_MERIDIAN_SERVER_PATH=/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py
+export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
 pnpm start
 ```
 
@@ -80,7 +85,7 @@ See `CATALOG-RECONCILIATION.md` for the artifact and decision rules.
 
 ### Checkpoint B: donor receipts
 
-Implemented in code, awaiting execution against Braden's pinned local donor checkouts.
+Implemented in code. The ExamplePlatform donor is inspected and started only over SSH.
 
 - Run the capture and export commands.
 - Review every initial alias and contract-drift row.
@@ -107,6 +112,7 @@ Next engineering checkpoint.
 - Add durable batch manifests that reference source-owned child operations.
 - Recover gateway calls after process restart without replaying an ambiguous source command.
 - Add fault tests for process loss, ambiguous bridge delivery, partial batch completion, and source reconnect.
+- ExamplePlatform process-loss and source-reconnect fault tests are complete. Bridge delivery and partial-batch fault coverage remain separate lanes.
 
 ### Checkpoint E: candidate assembly
 

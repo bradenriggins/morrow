@@ -18,6 +18,20 @@ export interface LocalGitSourceAttestationConfig {
   readonly expectedCatalogDigest?: string;
 }
 
+export interface RemoteGitSshSourceAttestationConfig {
+  readonly kind: "remote-git-ssh";
+  readonly host: string;
+  readonly root: string;
+  readonly expectedRevision: string;
+  readonly requireTrackedClean: true;
+}
+
+export type SshAttestationRunner = (
+  command: "ssh",
+  args: readonly string[],
+  options: { readonly input: string; readonly timeout: number },
+) => string;
+
 export class SourceAttestationError extends Error {
   readonly code: string;
   readonly detailDigest: string;
@@ -75,6 +89,32 @@ function exactRevision(value: string, label: string): string {
     );
   }
   return normalized;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
+}
+
+function defaultSshAttestationRunner(
+  command: "ssh",
+  args: readonly string[],
+  options: { readonly input: string; readonly timeout: number },
+): string {
+  try {
+    return execFileSync(command, [...args], {
+      encoding: "utf8",
+      stdio: ["pipe", "pipe", "pipe"],
+      input: options.input,
+      timeout: options.timeout,
+      windowsHide: true,
+      maxBuffer: 1024 * 1024,
+    });
+  } catch {
+    throw new SourceAttestationError(
+      "source_git_ssh_command_failed",
+      "The remote donor could not be inspected over SSH.",
+    );
+  }
 }
 
 function exactToolCount(value: number | undefined): number | undefined {
@@ -278,5 +318,62 @@ export function verifyLocalGitSourceAttestation(
     ...(expectedTrackedPatchDigest ? { expectedTrackedPatchDigest } : {}),
     ...(expectedToolCount !== undefined ? { expectedToolCount } : {}),
     ...(expectedCatalogDigest ? { expectedCatalogDigest } : {}),
+  };
+}
+
+export function verifyRemoteGitSshSourceAttestation(
+  sourceId: string,
+  repository: string | undefined,
+  config: RemoteGitSshSourceAttestationConfig,
+  now: () => Date = () => new Date(),
+  runner: SshAttestationRunner = defaultSshAttestationRunner,
+): SourceAttestationHealth {
+  const expectedRevision = exactRevision(config.expectedRevision, "expectedRevision");
+  const script = [
+    "set -eu",
+    "root=$1",
+    "revision=$(git -C \"$root\" rev-parse HEAD)",
+    "if git -C \"$root\" diff --quiet --no-ext-diff HEAD --; then tracked=clean; else tracked=dirty; fi",
+    "printf '%s\\n%s\\n' \"$revision\" \"$tracked\"",
+  ].join("\n");
+  const remoteCommand = `sh -s -- ${shellQuote(config.root)}`;
+  const raw = runner("ssh", ["-T", config.host, remoteCommand], {
+    input: script,
+    timeout: 15_000,
+  });
+  const lines = raw.trim().split(/\r?\n/);
+  if (lines.length !== 2 || !["clean", "dirty"].includes(lines[1]!)) {
+    throw new SourceAttestationError(
+      "source_git_ssh_response_invalid",
+      "The remote Git attestation returned an invalid response.",
+    );
+  }
+  const actualRevision = exactRevision(lines[0]!, "remote Git HEAD");
+  if (actualRevision !== expectedRevision) {
+    throw new SourceAttestationError(
+      "source_revision_mismatch",
+      `Source ${sourceId} is at ${actualRevision}, not the configured revision ${expectedRevision}.`,
+    );
+  }
+  const trackedClean = lines[1] === "clean";
+  if (!trackedClean) {
+    throw new SourceAttestationError(
+      "source_tracked_changes_present",
+      `Source ${sourceId} has tracked worktree changes. Refusing a non-reproducible donor process.`,
+    );
+  }
+  return {
+    schema: "morrow.source-attestation.v1",
+    kind: "remote-git-ssh",
+    verified: true,
+    sourceId,
+    ...(repository ? { repository } : {}),
+    expectedRevision,
+    actualRevision,
+    trackedClean: true,
+    trackedChangeCount: 0,
+    requireTrackedClean: true,
+    rootDigest: sha256Text(config.root),
+    verifiedAt: now().toISOString(),
   };
 }

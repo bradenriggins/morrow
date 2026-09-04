@@ -152,7 +152,7 @@ export interface CatalogSnapshot {
 
 export interface SourceAttestationHealth {
   readonly schema: "morrow.source-attestation.v1";
-  readonly kind: "local-git";
+  readonly kind: "local-git" | "remote-git-ssh";
   readonly verified: true;
   readonly sourceId: string;
   readonly repository?: string;
@@ -170,6 +170,29 @@ export interface SourceAttestationHealth {
   readonly expectedCatalogDigest?: string;
 }
 
+export interface UpstreamReconnectHealth {
+  readonly schema: "morrow.upstream-reconnect.health.v1";
+  readonly state: "idle" | "waiting" | "connecting" | "exhausted" | "closed";
+  readonly attempt: number;
+  readonly maxAttempts: number;
+  readonly startupAttempts: number;
+  readonly nextRetryAt?: string;
+  readonly lastConnectedAt?: string;
+  readonly lastDisconnectedAt?: string;
+}
+
+export interface CatalogTruthHealth {
+  readonly schema: "morrow.catalog-truth.health.v1";
+  readonly verified: true;
+  readonly fileSha256: string;
+  readonly sourceCatalogDigest: string;
+  readonly totalToolCount: number;
+  readonly upstreamCatalogDigest: string;
+  readonly eligibleToolCount: number;
+  readonly eligibleCatalogDigest: string;
+  readonly heldToolCount: number;
+}
+
 export interface GatewaySourceHealth {
   readonly id: string;
   readonly label: string;
@@ -181,6 +204,9 @@ export interface GatewaySourceHealth {
   readonly expectedCatalogDigest?: string;
   readonly catalogAttested?: boolean;
   readonly sourceAttestation?: SourceAttestationHealth;
+  readonly catalogTruth?: CatalogTruthHealth;
+  readonly connectionGeneration?: number;
+  readonly reconnect?: UpstreamReconnectHealth;
   readonly errorDigest?: string;
 }
 

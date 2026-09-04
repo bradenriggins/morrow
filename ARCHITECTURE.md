@@ -15,7 +15,12 @@ Status: accepted for the first implementation branch.
 The new repository begins as an external MCP gateway over existing donor runtimes.
 
 - The gateway wraps those runtimes with the official TypeScript MCP SDK.
-- ExamplePlatform runs as an internal stdio MCP upstream.
+- ExamplePlatform runs as an internal stdio MCP upstream through `ssh -T example-lms-vps`.
+- The gateway attests the frozen remote Git revision and tracked-clean state before launch.
+- The gateway requires the generated ExamplePlatform catalog count and digest before readiness.
+- Held provider tools are removed at the gateway boundary.
+- A new connection generation is issued after each successful reconnect.
+- Only failed read calls may reconnect and replay. A write with an ambiguous result is never replayed.
 - The existing Morrow capability catalog is exported from `example-legacy` through a deterministic donor-side inventory script.
 - The public-facing catalog is generated from connected sources.
 - A deterministic collision policy retains the higher-priority source name and assigns a stable source-prefixed alias to the other mapping.

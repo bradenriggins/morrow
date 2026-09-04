@@ -105,7 +105,7 @@ When the allowlist is present, the WebSocket `Origin`, the hello envelope, and t
 Copy `morrow.upstreams.with-legacy-bridge.example.json` to `morrow.upstreams.json` and provide these environment variables:
 
 ```bash
-export MORROW_MERIDIAN_SERVER_PATH=/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py
+export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
 export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
 export MORROW_LEGACY_BRIDGE_TOKEN
 pnpm start

@@ -8,6 +8,17 @@ const EnvironmentName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 const FullGitRevision = z.string().regex(/^[0-9a-fA-F]{40,64}$/);
 const Sha256Digest = z.string().regex(/^[0-9a-fA-F]{64}$/);
 const RepositoryRelativePath = z.string().min(1).max(500);
+const RuntimeIdentifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
+const CanvasId = z.string().regex(/^[1-9][0-9]{0,18}$/);
+const SshHost = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.-]{0,127}$/);
+const RemoteAbsolutePath = z.string().min(1).max(500).refine((value) => (
+  value.startsWith("/") && !/[\0\r\n]/.test(value) && !value.split("/").includes("..")
+), "expected a safe absolute remote path");
+const RemoteRelativePath = z.string().min(1).max(300).refine((value) => (
+  !value.startsWith("/")
+  && !/[\0\r\n]/.test(value)
+  && !value.split("/").some((segment) => segment === "" || segment === "." || segment === "..")
+), "expected a safe repository-relative remote path");
 
 const OutputPrivacyDescriptorSchema = z.object({
   allowedFields: z.array(z.string().min(1).max(160)).max(100).default([]),
@@ -30,6 +41,71 @@ const LocalGitAttestationSchema = z.object({
   expectedCatalogDigest: Sha256Digest.optional(),
 });
 
+const RemoteGitSshAttestationSchema = z.object({
+  kind: z.literal("remote-git-ssh"),
+  host: SshHost,
+  root: RemoteAbsolutePath,
+  expectedRevision: FullGitRevision,
+  requireTrackedClean: z.literal(true).default(true),
+});
+
+const SupervisionSchema = z.object({
+  startupAttempts: z.number().int().min(1).max(8).default(3),
+  reconnectAttempts: z.number().int().min(1).max(8).default(3),
+  initialBackoffMs: z.number().int().min(1).max(30_000).default(100),
+  maxBackoffMs: z.number().int().min(1).max(60_000).default(2_000),
+}).refine(
+  (value) => value.maxBackoffMs >= value.initialBackoffMs,
+  "maxBackoffMs must be greater than or equal to initialBackoffMs",
+);
+
+const CatalogTruthSchema = z.object({
+  path: z.string().min(1),
+  fileSha256: Sha256Digest,
+});
+
+const CanvasConnectionSchema = z.object({
+  kind: z.enum(["session-path", "credential-path", "socket"]),
+  path: RemoteAbsolutePath,
+});
+
+const CatalogRuntimeProfileSchema = z.object({
+  kind: z.literal("catalog-hermetic"),
+  profileId: RuntimeIdentifier.default("morrow-catalog"),
+  environment: z.literal("test").default("test"),
+  localOperator: RuntimeIdentifier.default("morrow-catalog"),
+  sessionId: RuntimeIdentifier.default("catalog-list"),
+  stateDirectory: RemoteAbsolutePath,
+  mode: z.literal("read-only").default("read-only"),
+});
+
+const PrivateRuntimeProfileSchema = z.object({
+  kind: z.literal("private-runtime"),
+  profileId: RuntimeIdentifier,
+  environment: z.enum(["test", "staging", "production"]),
+  localOperator: RuntimeIdentifier,
+  sessionId: RuntimeIdentifier,
+  stateDirectory: RemoteAbsolutePath,
+  mode: z.enum(["read-only", "plan", "edit"]).default("read-only"),
+  canvasConnection: CanvasConnectionSchema.optional(),
+  courseScope: z.object({ courseId: CanvasId }).optional(),
+  operation: z.object({
+    id: RuntimeIdentifier,
+    taskContractDigest: Sha256Digest,
+  }).optional(),
+  learnerVault: z.object({
+    vaultId: z.string().regex(/^c_[0-9a-f]{16}$/),
+  }).optional(),
+}).superRefine((value, context) => {
+  if (value.learnerVault && !value.operation) {
+    context.addIssue({
+      code: "custom",
+      message: "learnerVault requires an exact operation binding",
+      path: ["learnerVault"],
+    });
+  }
+});
+
 const StdioUpstreamSchema = z.object({
   id: z.string().min(1),
   label: z.string().min(1),
@@ -48,10 +124,43 @@ const StdioUpstreamSchema = z.object({
   enabled: z.boolean().default(true),
 });
 
+const ExamplePlatformSshUpstreamSchema = z.object({
+  id: z.literal("meridian"),
+  label: z.string().min(1),
+  kind: z.literal("meridian-ssh"),
+  host: SshHost,
+  remoteRoot: RemoteAbsolutePath,
+  serverPath: RemoteRelativePath.default("scripts/team/mcp/meridian_server.py"),
+  repository: z.string().min(1).max(300).optional(),
+  revision: FullGitRevision,
+  sourceDisposition: z.enum(SOURCE_DISPOSITIONS).default("private_runtime_dependency"),
+  attestation: RemoteGitSshAttestationSchema,
+  catalogTruth: CatalogTruthSchema,
+  runtimeProfile: z.discriminatedUnion("kind", [
+    CatalogRuntimeProfileSchema,
+    PrivateRuntimeProfileSchema,
+  ]),
+  supervision: SupervisionSchema.default({
+    startupAttempts: 3,
+    reconnectAttempts: 3,
+    initialBackoffMs: 100,
+    maxBackoffMs: 2_000,
+  }),
+  priority: z.number().int().default(100),
+  required: z.boolean().default(true),
+  enabled: z.boolean().default(true),
+  outputPrivacy: z.record(z.string().min(1).max(160), OutputPrivacyDescriptorSchema).default({}),
+});
+
+const UpstreamSchema = z.discriminatedUnion("kind", [
+  StdioUpstreamSchema,
+  ExamplePlatformSshUpstreamSchema,
+]);
+
 const GatewayConfigSchema = z.object({
   schema: z.literal("morrow.upstreams.v1"),
   profile: z.enum(["private-full", "public-canvas", "sandbox", "read-only"]).default("private-full"),
-  upstreams: z.array(StdioUpstreamSchema).min(1),
+  upstreams: z.array(UpstreamSchema).min(1),
   sourcePolicy: z.object({
     requireAttestation: z.boolean().default(false),
   }).default({ requireAttestation: false }),
@@ -87,8 +196,11 @@ const GatewayConfigSchema = z.object({
 });
 
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
-export type StdioUpstreamConfig = z.infer<typeof StdioUpstreamSchema>;
+export type UpstreamConfig = z.infer<typeof UpstreamSchema>;
+export type StdioUpstreamConfig = Extract<UpstreamConfig, { kind: "mcp-stdio" }>;
+export type ExamplePlatformSshUpstreamConfig = Extract<UpstreamConfig, { kind: "meridian-ssh" }>;
 export type LocalGitAttestationConfig = z.infer<typeof LocalGitAttestationSchema>;
+export type RemoteGitSshAttestationConfig = z.infer<typeof RemoteGitSshAttestationSchema>;
 
 const TEMPLATE = /\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 
@@ -113,9 +225,82 @@ function resolveLocalPath(
 }
 
 function expandUpstream(
-  upstream: StdioUpstreamConfig,
+  upstream: UpstreamConfig,
   environment: Readonly<Record<string, string | undefined>>,
-): StdioUpstreamConfig {
+): UpstreamConfig {
+  if (upstream.kind === "meridian-ssh") {
+    const remoteRoot = expandEnvironmentTemplate(upstream.remoteRoot, environment);
+    const host = expandEnvironmentTemplate(upstream.host, environment);
+    const stateDirectory = expandEnvironmentTemplate(
+      upstream.runtimeProfile.stateDirectory,
+      environment,
+    );
+    const runtimeProfile = upstream.runtimeProfile.kind === "catalog-hermetic"
+      ? {
+          ...upstream.runtimeProfile,
+          profileId: expandEnvironmentTemplate(upstream.runtimeProfile.profileId, environment),
+          localOperator: expandEnvironmentTemplate(upstream.runtimeProfile.localOperator, environment),
+          sessionId: expandEnvironmentTemplate(upstream.runtimeProfile.sessionId, environment),
+          stateDirectory,
+        }
+      : {
+          ...upstream.runtimeProfile,
+          profileId: expandEnvironmentTemplate(upstream.runtimeProfile.profileId, environment),
+          localOperator: expandEnvironmentTemplate(upstream.runtimeProfile.localOperator, environment),
+          sessionId: expandEnvironmentTemplate(upstream.runtimeProfile.sessionId, environment),
+          stateDirectory,
+          ...(upstream.runtimeProfile.canvasConnection
+            ? {
+                canvasConnection: {
+                  ...upstream.runtimeProfile.canvasConnection,
+                  path: expandEnvironmentTemplate(
+                    upstream.runtimeProfile.canvasConnection.path,
+                    environment,
+                  ),
+                },
+              }
+            : {}),
+          ...(upstream.runtimeProfile.operation
+            ? {
+                operation: {
+                  id: expandEnvironmentTemplate(upstream.runtimeProfile.operation.id, environment),
+                  taskContractDigest: expandEnvironmentTemplate(
+                    upstream.runtimeProfile.operation.taskContractDigest,
+                    environment,
+                  ).toLowerCase(),
+                },
+              }
+            : {}),
+          ...(upstream.runtimeProfile.learnerVault
+            ? {
+                learnerVault: {
+                  vaultId: expandEnvironmentTemplate(
+                    upstream.runtimeProfile.learnerVault.vaultId,
+                    environment,
+                  ),
+                },
+              }
+            : {}),
+        };
+    return {
+      ...upstream,
+      host,
+      remoteRoot,
+      serverPath: expandEnvironmentTemplate(upstream.serverPath, environment),
+      revision: upstream.revision.toLowerCase(),
+      attestation: {
+        ...upstream.attestation,
+        host: expandEnvironmentTemplate(upstream.attestation.host, environment),
+        root: expandEnvironmentTemplate(upstream.attestation.root, environment),
+        expectedRevision: upstream.attestation.expectedRevision.toLowerCase(),
+      },
+      catalogTruth: {
+        path: resolveLocalPath(upstream.catalogTruth.path, environment),
+        fileSha256: upstream.catalogTruth.fileSha256.toLowerCase(),
+      },
+      runtimeProfile,
+    };
+  }
   return {
     ...upstream,
     command: expandEnvironmentTemplate(upstream.command, environment),
@@ -152,7 +337,7 @@ function expandUpstream(
   };
 }
 
-function validateSourceProvenance(upstream: StdioUpstreamConfig): void {
+function validateSourceProvenance(upstream: UpstreamConfig): void {
   if (!upstream.attestation) return;
   const declaredRevision = String(upstream.revision || "").trim().toLowerCase();
   if (
@@ -162,6 +347,17 @@ function validateSourceProvenance(upstream: StdioUpstreamConfig): void {
     throw new Error(
       `Upstream ${upstream.id} declares revision ${declaredRevision} but attests ${upstream.attestation.expectedRevision}.`,
     );
+  }
+  if (upstream.attestation.kind === "remote-git-ssh") {
+    if (upstream.kind !== "meridian-ssh") {
+      throw new Error(`Upstream ${upstream.id} cannot use remote ExamplePlatform attestation.`);
+    }
+    if (upstream.host !== upstream.attestation.host || upstream.remoteRoot !== upstream.attestation.root) {
+      throw new Error(
+        `Upstream ${upstream.id} launch and attestation must use the same SSH host and remote root.`,
+      );
+    }
+    return;
   }
   if (
     upstream.attestation.requireTrackedClean
@@ -248,58 +444,14 @@ export async function loadGatewayConfig(
     return parseGatewayConfig(raw, environment);
   }
 
-  const meridianServerPath = environment.MORROW_MERIDIAN_SERVER_PATH?.trim();
-  if (meridianServerPath) {
-    const meridianRoot = environment.MORROW_MERIDIAN_ROOT?.trim();
-    return parseGatewayConfig({
-      schema: "morrow.upstreams.v1",
-      profile: "private-full",
-      sourcePolicy: {
-        requireAttestation: Boolean(meridianRoot),
-      },
-      upstreams: [{
-        id: "meridian",
-        label: "ExamplePlatform",
-        kind: "mcp-stdio",
-        command: environment.MORROW_PYTHON_COMMAND?.trim() || "python3",
-        args: [meridianServerPath],
-        repository: "example-owner/example-attestation-repo",
-        revision: "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
-        ...(meridianRoot
-          ? {
-              attestation: {
-                kind: "local-git",
-                root: meridianRoot,
-                expectedRevision: "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
-                requireTrackedClean: true,
-                allowedTrackedPaths: [],
-                expectedToolCount: 222,
-              },
-            }
-          : {}),
-        priority: 100,
-        required: true,
-        enabled: true,
-      }],
-      publicationPolicy: {
-        requiredForPublicProfile: true,
-      },
-      filters: {
-        excludePrefixes: ["mindtap_", "connect_"],
-        excludeNames: [],
-      },
-      operationJournal: {
-        path: "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}",
-      },
-      batchScheduler: {
-        maxConcurrentWindows: 1,
-      },
-      maxCatalogTools: 1000,
-    }, environment);
+  if (environment.MORROW_MERIDIAN_SERVER_PATH?.trim()) {
+    throw new Error(
+      "MORROW_MERIDIAN_SERVER_PATH cannot start ExamplePlatform locally. Use a meridian-ssh upstream configuration.",
+    );
   }
 
   throw new Error(
-    `No upstream configuration found at ${path}. Copy morrow.upstreams.example.json `
-      + "to morrow.upstreams.json or set MORROW_MERIDIAN_SERVER_PATH.",
+    `No upstream configuration found at ${path}. Copy a meridian SSH upstream example `
+      + "to morrow.upstreams.json.",
   );
 }

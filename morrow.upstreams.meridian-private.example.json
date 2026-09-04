@@ -7,7 +7,7 @@
   "upstreams": [
     {
       "id": "meridian",
-      "label": "ExamplePlatform hermetic catalog",
+      "label": "ExamplePlatform private runtime",
       "kind": "meridian-ssh",
       "host": "example-lms-vps",
       "remoteRoot": "/tmp/morrow-meridian-donor-7cc052cf",
@@ -26,13 +26,27 @@
         "fileSha256": "5234b664a8a4ae83c9459745c08a2b1943b3132152118b79b7771e1eeb7be9c5"
       },
       "runtimeProfile": {
-        "kind": "catalog-hermetic",
-        "profileId": "morrow-catalog",
+        "kind": "private-runtime",
+        "profileId": "morrow-private",
         "environment": "test",
-        "localOperator": "morrow-catalog",
-        "sessionId": "catalog-list",
-        "stateDirectory": "/tmp/morrow-meridian-catalog-profile",
-        "mode": "read-only"
+        "localOperator": "morrow-operator",
+        "sessionId": "morrow-session",
+        "stateDirectory": "/tmp/morrow-meridian-private-profile",
+        "mode": "read-only",
+        "canvasConnection": {
+          "kind": "session-path",
+          "path": "/tmp/morrow-meridian-private-profile/canvas-session.json"
+        },
+        "courseScope": {
+          "courseId": "101"
+        },
+        "operation": {
+          "id": "morrow-operation",
+          "taskContractDigest": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "learnerVault": {
+          "vaultId": "c_0000000000000000"
+        }
       },
       "supervision": {
         "startupAttempts": 3,

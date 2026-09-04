@@ -7,23 +7,36 @@
   "upstreams": [
     {
       "id": "meridian",
-      "label": "ExamplePlatform",
-      "kind": "mcp-stdio",
-      "command": "${MORROW_PYTHON_COMMAND:-python3}",
-      "args": ["${MORROW_MERIDIAN_SERVER_PATH}"],
+      "label": "ExamplePlatform hermetic catalog",
+      "kind": "meridian-ssh",
+      "host": "example-lms-vps",
+      "remoteRoot": "/tmp/morrow-meridian-donor-7cc052cf",
+      "serverPath": "scripts/team/mcp/meridian_server.py",
       "repository": "example-owner/example-attestation-repo",
       "revision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
       "attestation": {
-        "kind": "local-git",
-        "root": "${MORROW_MERIDIAN_ROOT}",
+        "kind": "remote-git-ssh",
+        "host": "example-lms-vps",
+        "root": "/tmp/morrow-meridian-donor-7cc052cf",
         "expectedRevision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
-        "requireTrackedClean": true,
-        "expectedToolCount": 222
+        "requireTrackedClean": true
+      },
+      "catalogTruth": {
+        "path": "${MORROW_MERIDIAN_CATALOG_PATH}",
+        "fileSha256": "5234b664a8a4ae83c9459745c08a2b1943b3132152118b79b7771e1eeb7be9c5"
+      },
+      "runtimeProfile": {
+        "kind": "catalog-hermetic",
+        "profileId": "morrow-catalog",
+        "environment": "test",
+        "localOperator": "morrow-catalog",
+        "sessionId": "catalog-list",
+        "stateDirectory": "/tmp/morrow-meridian-catalog-profile",
+        "mode": "read-only"
       },
       "priority": 100,
       "required": true,
-      "enabled": true,
-      "env": {}
+      "enabled": true
     },
     {
       "id": "example-legacy",
