@@ -1,17 +1,17 @@
 const EXACT_READBACKS = Object.freeze({
-  create_new_quiz: { read: "get_new_quiz", dynamic: { assignment_id: "id" }, strategy: "created-resource" },
+  create_new_quiz: { read: "get_new_quiz", dynamic: { assignment_id: "id" }, targetField: "id", strategy: "created-resource" },
   update_single_quiz: { read: "get_new_quiz", strategy: "updated-resource" },
   delete_new_quiz: { read: "get_new_quiz", strategy: "deleted-resource" },
-  create_quiz_item: { read: "get_quiz_item", dynamic: { item_id: "id" }, strategy: "created-resource" },
+  create_quiz_item: { read: "get_quiz_item", dynamic: { item_id: "id" }, targetField: "id", strategy: "created-resource" },
   update_quiz_item: { read: "get_quiz_item", strategy: "updated-resource" },
   delete_quiz_item: { read: "get_quiz_item", strategy: "deleted-resource" },
-  create_bank: { read: "get_bank", dynamic: { bank_id: "id" }, strategy: "created-resource" },
+  create_bank: { read: "get_bank", dynamic: { bank_id: "id" }, targetField: "id", strategy: "created-resource" },
   archive_bank: { read: "get_bank", strategy: "deleted-or-archived-resource" },
-  attach_item: { read: "list_entries", targetArgument: "item_id", strategy: "collection-contains-target", ignoredAssertions: ["item_id"] },
-  create_item: { read: "list_entries", targetResponse: "id", strategy: "collection-contains-target" },
-  update_item: { read: "list_entries", targetArgument: "item_id", strategy: "collection-contains-target" },
+  attach_item: { read: "list_entries", targetArgument: "item_id", targetField: "entry_id", strategy: "collection-contains-target", ignoredAssertions: ["item_id"] },
+  create_item: { read: "list_entries", targetResponse: "id", targetField: "entry_id", strategy: "collection-contains-target" },
+  update_item: { read: "list_entries", targetArgument: "item_id", targetField: "entry_id", strategy: "collection-contains-target" },
   delete_entry: { read: "get_entry", strategy: "deleted-resource" },
-  share_bank: { read: "list_shares", targetArgument: "entity_id", strategy: "collection-contains-target" },
+  share_bank: { read: "list_shares", targetArgument: "entity_id", targetField: "entity_id", strategy: "collection-contains-target" },
 });
 
 function normalizedPath(value) {
@@ -167,6 +167,7 @@ export function planBrowserReadback(operations, write, args, writeData) {
       : write.method === "POST"
         ? valueByKey(writeData, "id")
         : undefined;
+  const targetField = targetId === undefined || targetId === null ? undefined : override?.targetField || "id";
   return {
     schema: "morrow.browser-readback-plan.v1",
     strategy: strategy || "updated-resource",
@@ -174,16 +175,23 @@ export function planBrowserReadback(operations, write, args, writeData) {
     arguments: argumentsValue,
     assertions: requestedAssertions(write, args, override?.ignoredAssertions || []),
     ...(targetId === undefined || targetId === null ? {} : { targetId: String(targetId) }),
+    ...(targetField ? { targetField } : {}),
   };
 }
 
-function collectionContains(value, target) {
-  if (value === null || value === undefined) return false;
-  if (typeof value !== "object") return String(value) === String(target);
-  if (Array.isArray(value)) return value.some((entry) => collectionContains(entry, target));
-  return Object.entries(value).some(([key, child]) => (
-    /(?:^|_)(?:id|entry_id|item_id|entity_id|bank_id)$/i.test(key) && String(child) === String(target)
-  )) || Object.values(value).some((child) => child && typeof child === "object" && collectionContains(child, target));
+function targetRecords(value, target, targetField, depth = 0, output = []) {
+  if (depth > 12 || value === null || value === undefined) return output;
+  if (Array.isArray(value)) {
+    for (const entry of value) targetRecords(entry, target, targetField, depth + 1, output);
+    return output;
+  }
+  if (typeof value !== "object") return output;
+  if (String(pathValue(value, [targetField])) === String(target)) {
+    output.push(value);
+    return output;
+  }
+  for (const child of Object.values(value)) targetRecords(child, target, targetField, depth + 1, output);
+  return output;
 }
 
 export function evaluateBrowserReadback(plan, readResult) {
@@ -201,29 +209,45 @@ export function evaluateBrowserReadback(plan, readResult) {
       ? { schema: "morrow.browser-verification.v1", status: "verified", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "fresh_readback_archived" }
       : { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "resource_remains_active" };
   }
-  if (plan.strategy === "collection-omits-target" && plan.targetId) {
-    return collectionContains(readResult.data, plan.targetId)
-      ? { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "target_still_present" }
-      : { schema: "morrow.browser-verification.v1", status: "verified", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "fresh_collection_omits_target" };
+  if (!plan.targetId && (plan.assertions || []).length === 0) {
+    return { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "no_exact_postcondition" };
   }
-  if (plan.strategy === "collection-contains-target" && plan.targetId && !collectionContains(readResult.data, plan.targetId)) {
-    return { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "target_missing_from_collection" };
+  if (["collection-contains-target", "collection-omits-target"].includes(plan.strategy) && readResult.truncated === true) {
+    return { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "collection_readback_incomplete" };
   }
-  let matched = plan.targetId && collectionContains(readResult.data, plan.targetId) ? 1 : 0;
-  let missing = 0;
-  for (const assertion of plan.assertions || []) {
-    const values = assertion.paths.flatMap((path) => pathCandidates(readResult.data, path));
-    if (values.length === 0) {
-      missing += 1;
-      continue;
+  if (["collection-contains-target", "collection-omits-target"].includes(plan.strategy) && !plan.targetId) {
+    return { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "collection_target_unresolved" };
+  }
+  if (plan.strategy === "collection-omits-target") {
+    return targetRecords(readResult.data, plan.targetId, plan.targetField || "id").length === 0
+      ? { schema: "morrow.browser-verification.v1", status: "verified", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "fresh_collection_omits_target" }
+      : { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "target_still_present" };
+  }
+  const records = plan.targetId ? targetRecords(readResult.data, plan.targetId, plan.targetField || "id") : [readResult.data];
+  if (plan.targetId && records.length === 0) {
+    return { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "target_missing_from_readback" };
+  }
+  let missing = false;
+  let mismatch = null;
+  for (const record of records) {
+    let matched = true;
+    for (const assertion of plan.assertions || []) {
+      const values = assertion.paths.flatMap((path) => pathCandidates(record, path));
+      if (values.length === 0) {
+        missing = true;
+        matched = false;
+        break;
+      }
+      if (!values.some((value) => equivalent(value, assertion.expected))) {
+        mismatch = assertion.inputName;
+        matched = false;
+        break;
+      }
     }
-    if (!values.some((value) => equivalent(value, assertion.expected))) {
-      return { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: `requested_field_mismatch:${assertion.inputName}` };
-    }
-    matched += 1;
+    if (matched) return { schema: "morrow.browser-verification.v1", status: "verified", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "fresh_readback_matches_requested_postcondition" };
   }
-  if (missing > 0 || matched === 0) {
-    return { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: missing > 0 ? "requested_fields_not_returned" : "no_exact_postcondition" };
+  if (missing) {
+    return { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "requested_fields_not_returned" };
   }
-  return { schema: "morrow.browser-verification.v1", status: "verified", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: "fresh_readback_matches_requested_postcondition" };
+  return { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: plan.strategy, readTool: plan.readOperation.toolName, evidence: `requested_field_mismatch:${mismatch || "unknown"}` };
 }

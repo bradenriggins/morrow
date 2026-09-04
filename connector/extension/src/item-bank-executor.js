@@ -44,6 +44,13 @@ export async function executeItemBankInPage(input) {
   if (!input.courseId || courseClaims.length === 0 || courseClaims.some((value) => value !== input.courseId)) return { matched: false };
   const operation = input.operation;
   if (!operation || operation.service !== "item_bank" || !["GET", "POST", "PATCH", "DELETE"].includes(operation.method)) return { matched: false };
+  if (input.contextOnly === true) return { matched: true, ok: true, sent: false };
+  if (operation.nickname === "list_banks" && input.arguments?.course_id !== undefined) {
+    const requestedCourse = id(input.arguments.course_id);
+    if (!requestedCourse || requestedCourse !== input.courseId) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_course_mismatch" };
+    }
+  }
   let path = operation.path;
   const query = new URLSearchParams();
   const formValues = {};
@@ -60,30 +67,18 @@ export async function executeItemBankInPage(input) {
   if (!/^\/api\/banks(?:[/?#]|$)/.test(path) || path.includes("://") || path.split(/[?#]/)[0].split("/").includes("..") || /\{[^}]+\}/.test(path)) {
     return { matched: true, ok: false, sent: false, error: "item_bank_path_refused" };
   }
-  if (query.size) path += `${path.includes("?") ? "&" : "?"}${query}`;
   let body;
   if (operation.nickname === "create_bank") body = { bank: { title: String(formValues.title), language: "en" } };
   else if (operation.nickname === "attach_item") body = { bank_entry: { bank_id: String(input.arguments.bank_id), entry_type: "Item", entry_id: String(formValues.item_id) } };
   else if (operation.nickname === "share_bank") body = { shared_bank: { entity_id: String(formValues.entity_id), entityType: String(formValues.entity_type), bank_id: String(input.arguments.bank_id), permission: "read" } };
-  else if (operation.nickname === "create_item" || operation.nickname === "update_item") body = formValues.item;
+  else if (operation.nickname === "create_item" || operation.nickname === "update_item") {
+    body = formValues.item && typeof formValues.item === "object" && !Array.isArray(formValues.item) && Object.hasOwn(formValues.item, "item")
+      ? formValues.item
+      : { item: formValues.item };
+  }
   else if (Object.keys(formValues).length) body = formValues;
   const headers = { Accept: "application/json", Authorization: token, AuthType: "Signature" };
   if (body !== undefined) headers["Content-Type"] = "application/json";
-  let response;
-  try {
-    response = await fetch(`https://${apiHost}${path}`, {
-      method: operation.method,
-      headers,
-      credentials: "omit",
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
-  } catch {
-    return { matched: true, ok: false, sent: operation.method !== "GET", outcomeUnknown: operation.method !== "GET", error: "item_bank_request_failed" };
-  }
-  const text = await response.text();
-  if (new TextEncoder().encode(text).byteLength > MAX_BYTES) return { matched: true, ok: false, sent: true, outcomeUnknown: operation.method !== "GET", error: "item_bank_response_too_large" };
-  let data = null;
-  try { data = text ? JSON.parse(text) : null; } catch { data = text.slice(0, MAX_BYTES); }
   const sanitize = (value, depth = 0) => {
     if (depth > 24) return null;
     if (Array.isArray(value)) return value.slice(0, 10_000).map((entry) => sanitize(entry, depth + 1));
@@ -95,5 +90,58 @@ export async function executeItemBankInPage(input) {
     }
     return output;
   };
-  return { matched: true, ok: response.ok, sent: true, status: response.status, data: sanitize(data), apiHost, outcomeUnknown: false };
+  const pageParameter = operation.method === "GET" && ["list_banks", "list_entries"].includes(operation.nickname)
+    ? operation.parameters.find((parameter) => parameter.inputName === "page")
+    : null;
+  const requestedStartPage = Number(query.get(pageParameter?.wireName || "") || 1);
+  const startPage = Number.isInteger(requestedStartPage) && requestedStartPage > 0 ? requestedStartPage : 1;
+  const requestedMaxPages = Number(input.arguments?.morrow_max_pages || 25);
+  const maxPages = pageParameter
+    ? Math.max(1, Math.min(Number.isInteger(requestedMaxPages) ? requestedMaxPages : 25, 50))
+    : 1;
+  const pages = [];
+  let truncated = false;
+  let status = 0;
+  for (let offset = 0; offset < maxPages; offset += 1) {
+    const requestQuery = new URLSearchParams(query);
+    if (pageParameter) requestQuery.set(pageParameter.wireName, String(startPage + offset));
+    const requestPath = requestQuery.size ? `${path}${path.includes("?") ? "&" : "?"}${requestQuery}` : path;
+    let response;
+    try {
+      response = await fetch(`https://${apiHost}${requestPath}`, {
+        method: operation.method,
+        headers,
+        credentials: "omit",
+        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+      });
+    } catch {
+      return { matched: true, ok: false, sent: operation.method !== "GET", outcomeUnknown: operation.method !== "GET", error: "item_bank_request_failed" };
+    }
+    status = response.status;
+    const text = await response.text();
+    if (new TextEncoder().encode(text).byteLength > MAX_BYTES) return { matched: true, ok: false, sent: true, outcomeUnknown: operation.method !== "GET", error: "item_bank_response_too_large" };
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch { data = text.slice(0, MAX_BYTES); }
+    if (!response.ok) return { matched: true, ok: false, sent: true, status: response.status, data: sanitize(data), apiHost, outcomeUnknown: false };
+    pages.push(data);
+    if (!pageParameter || !Array.isArray(data) || data.length === 0) break;
+    truncated = offset + 1 === maxPages;
+  }
+  const collection = pages.length === 1 ? pages[0] : pages.flatMap((page) => Array.isArray(page) ? page : [page]);
+  const collectionRead = operation.method === "GET" && ["list_banks", "list_entries", "list_shares"].includes(operation.nickname);
+  const dataTruncated = collectionRead && Array.isArray(collection) && collection.length > 10_000;
+  const collectionShapeUnknown = collectionRead && pages.some((page) => !Array.isArray(page));
+  return {
+    matched: true,
+    ok: true,
+    sent: true,
+    status,
+    data: sanitize(collection),
+    apiHost,
+    outcomeUnknown: false,
+    ...(collectionRead ? {
+      ...(pageParameter ? { pageCount: pages.length } : {}),
+      truncated: truncated || dataTruncated || collectionShapeUnknown,
+    } : {}),
+  };
 }

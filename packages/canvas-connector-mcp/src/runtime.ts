@@ -44,7 +44,14 @@ export class CanvasConnectorRuntime {
       pairingEnabled: true,
       onPairApproved: config.approveExtensionId,
     });
-    await bridge.start();
+    try {
+      await bridge.start();
+    } catch (error) {
+      if (error && typeof error === "object" && "code" in error && error.code === "EADDRINUSE") {
+        throw new Error(`Morrow's Chrome bridge port ${config.port} is already in use. Only one AI client can run this Morrow installation at a time. The existing bridge was not changed.`, { cause: error });
+      }
+      throw error;
+    }
     return new CanvasConnectorRuntime(catalog, bridge);
   }
 
@@ -67,6 +74,14 @@ export class CanvasConnectorRuntime {
   async call(toolName: string, rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
     const operation = this.operations.get(toolName);
     if (!operation) throw new Error(`Canvas connector has no operation named ${toolName}`);
+    if (operation.service === "item_bank" && !operation.readOnly && operation.nickname !== "create_bank") {
+      return failedProblem({
+        schema: "morrow.bridge.problem.v1",
+        code: "item_bank_dependency_review_required",
+        message: "Changes to an existing Item Bank require a complete dependency and affected-course review. This release cannot yet establish that evidence.",
+        recoverable: false,
+      });
+    }
     const split = splitBridgeCallArguments(rawArguments);
     const kind = operation.readOnly ? "invoke_read" : "invoke_write";
     try {

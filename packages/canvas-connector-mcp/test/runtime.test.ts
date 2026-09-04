@@ -115,5 +115,9 @@ describe("CanvasConnectorRuntime", () => {
     });
     expect(granted).toMatchObject({ ok: true });
     expect(calls).toBe(1);
+    const held = runtime.catalog.operations.find((operation) => operation.service === "item_bank" && operation.nickname === "update_item")!;
+    expect(await runtime.call(held.toolName, { bank_id: "91", item_id: "501", item: { title: "Updated" } }))
+      .toMatchObject({ ok: false, problem: { code: "item_bank_dependency_review_required" } });
+    expect(calls).toBe(1);
   });
 });

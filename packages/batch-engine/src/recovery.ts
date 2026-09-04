@@ -10,6 +10,7 @@ export type BatchRecoveryMode = typeof BATCH_RECOVERY_MODES[number];
 export const BATCH_RECOVERY_ACTIONS = Object.freeze([
   "retry_read_only",
   "source_task_recovered",
+  "direct_effect_verified",
   "failed_before_send",
   "inspection_required",
 ] as const);
@@ -75,6 +76,7 @@ interface ChildRow {
   source_id: string;
   source_tool_name: string;
   source_operation_id: string | null;
+  gateway_operation_id: string | null;
   state: string;
 }
 
@@ -86,6 +88,12 @@ interface OperationRow {
   normalized_result_digest: string | null;
   upstream_result_digest: string | null;
   error_digest: string | null;
+}
+
+interface VerifiedDirectEffectRow {
+  operation_id: string;
+  source_result_state: string | null;
+  readback_digest: string;
 }
 
 interface CountRow {
@@ -255,10 +263,42 @@ function operationForChild(
   return row || null;
 }
 
+function verifiedDirectEffectForChild(
+  database: DatabaseSync,
+  child: ChildRow,
+): VerifiedDirectEffectRow | null {
+  if (!child.gateway_operation_id?.startsWith("op:") || !child.source_operation_id) return null;
+  const table = database.prepare(`
+    SELECT 1 AS present FROM sqlite_master
+    WHERE type='table' AND name='provider_effect_operations'
+  `).get() as unknown as { present: number } | undefined;
+  if (!table) return null;
+  const row = database.prepare(`
+    SELECT operation_id, source_result_state, readback_digest
+    FROM provider_effect_operations
+    WHERE operation_id=?
+      AND source_id=?
+      AND source_tool_name=?
+      AND source_operation_id=?
+      AND source_task_id IS NULL
+      AND state='verified'
+      AND verification_status='verified'
+      AND readback_digest IS NOT NULL
+    LIMIT 1
+  `).get(
+    child.gateway_operation_id,
+    child.source_id,
+    child.source_tool_name,
+    child.source_operation_id,
+  ) as unknown as VerifiedDirectEffectRow | undefined;
+  return row || null;
+}
+
 function childDecision(
   batchMode: BatchMode,
   child: ChildRow,
   operation: OperationRow | null,
+  verifiedDirectEffect: VerifiedDirectEffectRow | null,
 ): Omit<BatchRecoveryChild, "schema" | "applied"> {
   if (batchMode === "read_only") {
     return {
@@ -273,6 +313,22 @@ function childDecision(
       sourceTaskId: operation?.source_task_id || null,
       sourceResultState: operation?.source_result_state || null,
       detailDigest: sha256Text("read_only_unknown_is_safe_to_retry"),
+    };
+  }
+
+  if (verifiedDirectEffect) {
+    return {
+      childId: child.child_id,
+      ordinal: child.ordinal,
+      sourceId: child.source_id,
+      sourceToolName: child.source_tool_name,
+      sourceOperationId: child.source_operation_id,
+      action: "direct_effect_verified",
+      gatewayOperationId: verifiedDirectEffect.operation_id,
+      gatewayOperationState: "verified",
+      sourceTaskId: null,
+      sourceResultState: verifiedDirectEffect.source_result_state,
+      detailDigest: verifiedDirectEffect.readback_digest,
     };
   }
 
@@ -394,6 +450,25 @@ function applyDecision(
     return Number(result.changes) === 1;
   }
 
+  if (decision.action === "direct_effect_verified") {
+    const result = database.prepare(`
+      UPDATE gateway_batch_children
+      SET state='succeeded', gateway_operation_id=?, gateway_operation_state='verified',
+          source_result_state=?, source_task_id=NULL, result_digest=?, error_digest=NULL,
+          updated_at=?, terminal_at=?, revision=revision+1
+      WHERE batch_id=? AND child_id=? AND state='unknown'
+    `).run(
+      decision.gatewayOperationId,
+      decision.sourceResultState,
+      decision.detailDigest,
+      now,
+      now,
+      batchId,
+      decision.childId,
+    );
+    return Number(result.changes) === 1;
+  }
+
   const result = database.prepare(`
     UPDATE gateway_batch_children
     SET state='failed', gateway_operation_id=?, gateway_operation_state=?,
@@ -435,7 +510,7 @@ export function recoverBatchState(input: RecoverBatchStateInput): BatchRecoveryR
     const before = countRow(database, batchId);
     const rows = database.prepare(`
       SELECT batch_id, child_id, ordinal, source_id, source_tool_name,
-             source_operation_id, state
+             source_operation_id, gateway_operation_id, state
       FROM gateway_batch_children
       WHERE batch_id=? AND state='unknown' AND ordinal>?
       ORDER BY ordinal ASC LIMIT ?
@@ -443,7 +518,12 @@ export function recoverBatchState(input: RecoverBatchStateInput): BatchRecoveryR
 
     const children: BatchRecoveryChild[] = [];
     for (const row of rows) {
-      const decision = childDecision(batch.mode, row, operationForChild(database, row));
+      const decision = childDecision(
+        batch.mode,
+        row,
+        operationForChild(database, row),
+        verifiedDirectEffectForChild(database, row),
+      );
       const applied = mode === "apply_safe"
         ? applyDecision(database, batchId, decision, now)
         : false;

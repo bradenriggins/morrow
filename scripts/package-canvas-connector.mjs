@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deterministicZip, stableJson } from "./lib/release-candidate.mjs";
+import { deterministicZip, stableJson } from "./lib/deterministic-archive.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const extensionRoot = resolve(root, "connector/extension");

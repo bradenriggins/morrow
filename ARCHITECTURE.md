@@ -139,7 +139,7 @@ Batch state is durable in SQLite. Arguments and manifests use authenticated encr
 
 ## Trust boundaries
 
-- **AI client:** may choose and call tools; cannot approve.
+- **AI client:** may choose and call tools. MCP exposes no approval tool. A separate local page records approval, but it cannot prove human presence against local HTTP or browser automation.
 - **Morrow MCP:** may plan and reserve effects; has no Canvas secret.
 - **Approval page:** may approve only one exact, unexpired durable plan on loopback.
 - **Extension:** may use only paired commands, admitted operations, current bindings, and unused receipts.

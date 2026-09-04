@@ -47,7 +47,7 @@ Morrow does not reuse a ChatGPT or Claude in-app browser session. The Chrome con
 
 ## Capability surface
 
-The generated catalog currently contains 1,130 governed Canvas operations:
+The generated catalog currently describes 1,130 Canvas operations. A catalog entry is not proof of live compatibility:
 
 - 1,118 operations generated from the current official Canvas API definitions;
 - 568 reads and 562 writes;
@@ -56,7 +56,7 @@ The generated catalog currently contains 1,130 governed Canvas operations:
 
 The surface includes course and account discovery, pages, modules, assignments, groups, discussions, announcements, files, folders, Classic Quizzes, New Quizzes, Item Banks, rubrics, outcomes, enrollments, submissions, gradebook operations, migrations, Blueprints, reports, webhooks, and other official Canvas families.
 
-The Item Bank bridge supports:
+The Item Bank bridge implements request contracts for:
 
 - list, get, create, share, and archive banks;
 - list and get entries;
@@ -64,6 +64,8 @@ The Item Bank bridge supports:
 - attach an item to a bank;
 - delete an entry;
 - list bank shares.
+
+Existing-bank writes are currently held: archive, share, attach, create item, update item, and delete entry. These operations can affect other courses and quizzes. They cannot dispatch until Morrow can establish a complete dependency and affected-course review. Bank reads and bank creation remain enabled. Live Item Bank compatibility is not yet verified.
 
 Morrow keeps 64-bit Canvas identifiers as exact decimal strings. It generates tool schemas and routes from provider definitions. It rejects unknown fields, missing required values, cross-origin bindings, stale tabs, stale connection generations, mismatched operation keys, and expired commands before provider dispatch.
 
@@ -111,7 +113,7 @@ Load `connector/extension` from `chrome://extensions` with **Developer mode** an
 pnpm package:connector
 ```
 
-Install Morrow into one or more clients:
+Configure Morrow in any of these clients. This release supports one active client runtime per local installation; it does not yet share one running bridge across simultaneous clients:
 
 ```bash
 pnpm morrow mcp install codex --scope project --upstreams "$PWD/morrow.upstreams.json"

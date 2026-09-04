@@ -7,10 +7,13 @@ import test from "node:test";
 import {
   deterministicZip,
   buildCycloneDxSbom,
+  publicPackageManifest,
   scanCandidateEntries,
   sha256,
   stageCandidateSet,
   validateSourceOriginLedger,
+  ZERO_TOLERANCE_TARGETS,
+  zeroToleranceState,
 } from "../lib/release-candidate.mjs";
 
 test("candidate archive bytes are deterministic", () => {
@@ -33,6 +36,22 @@ test("candidate SBOM is deterministic and names each staged package", () => {
   const second = buildCycloneDxSbom({ candidateName: "morrow-v1.0.0-rc.0-test", sourceFiles: [...sourceFiles].reverse() });
   assert.deepEqual(first, second);
   assert.deepEqual(first.components.map((component) => component.name), ["@morrow/gateway", "morrow"]);
+});
+
+test("public candidate package only exposes shipped commands", () => {
+  const manifest = JSON.parse(publicPackageManifest(Buffer.from(JSON.stringify({
+    name: "morrow",
+    scripts: {
+      build: "pnpm -r build",
+      "package:connector": "node scripts/package-canvas-connector.mjs",
+      "package:rc": "node scripts/package-profile.mjs --all",
+      test: "pnpm test",
+    },
+  }))).toString("utf8"));
+  assert.deepEqual(manifest.scripts, {
+    build: "pnpm -r build",
+    "package:connector": "node scripts/package-canvas-connector.mjs",
+  });
 });
 
 test("public package scan checks docs, JSON, and source maps", () => {
@@ -91,6 +110,7 @@ test("candidate set receipts bind the final digest of every profile", () => {
     mkdirSync(resolve(root, "config"), { recursive: true });
     mkdirSync(resolve(root, "artifacts/canvas-api"), { recursive: true });
     const packageBytes = Buffer.from('{"name":"morrow-test","version":"1.0.0-rc.0"}\n');
+    writeFileSync(resolve(root, ".gitignore"), "artifacts/\n");
     writeFileSync(resolve(root, "package.json"), packageBytes);
     writeFileSync(resolve(root, "config/release-profiles.json"), JSON.stringify({
       schema: "morrow.release-profiles.v1",
@@ -106,7 +126,7 @@ test("candidate set receipts bind the final digest of every profile", () => {
     execFileSync("git", ["init", "-q"], { cwd: root });
     execFileSync("git", ["config", "user.email", "test@example.invalid"], { cwd: root });
     execFileSync("git", ["config", "user.name", "Morrow Test"], { cwd: root });
-    execFileSync("git", ["add", "package.json", "config/release-profiles.json"], { cwd: root });
+    execFileSync("git", ["add", ".gitignore", "package.json", "config/release-profiles.json"], { cwd: root });
     execFileSync("git", ["commit", "-qm", "fixture"], { cwd: root });
     const sourceCommit = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
     writeFileSync(resolve(root, "config/source-origin-ledger.json"), JSON.stringify({
@@ -143,6 +163,27 @@ test("candidate set receipts bind the final digest of every profile", () => {
       assert.deepEqual(receipt.promotionReceipts.binding.candidateDigests, expected);
       assert.deepEqual(receipt.zeroTolerance.binding.candidateDigests, expected);
     }
+    const binding = {
+      commit: receipts[0].commit,
+      tree: receipts[0].tree,
+      catalogDigest: "e".repeat(64),
+      candidateDigests: expected,
+    };
+    const evidenceRoot = "artifacts/release/evidence-test";
+    mkdirSync(resolve(root, evidenceRoot), { recursive: true });
+    const log = resolve(root, evidenceRoot, "proof.log");
+    writeFileSync(log, "passed");
+    const evidence = [{ path: "proof.log", sha256: sha256("passed") }];
+    writeFileSync(resolve(root, "artifacts/release/zero-tolerance-receipt.json"), JSON.stringify({
+      schema: "morrow.zero-tolerance-receipt.v1", status: "passed", binding, evidenceRoot,
+      checks: ZERO_TOLERANCE_TARGETS.map((id) => ({
+        id, status: "passed", count: 0, evidence,
+        receiptDigest: sha256(JSON.stringify({ binding, id, evidenceDigests: evidence })),
+      })),
+    }));
+    assert.equal(zeroToleranceState(root).passed, true);
+    writeFileSync(log, "changed after verification");
+    assert.equal(zeroToleranceState(root).passed, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

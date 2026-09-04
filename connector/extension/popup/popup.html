@@ -4,18 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Morrow Canvas Connector</title>
+  <link rel="stylesheet" href="../brand/theme.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <main>
-    <header><div class="mark">M</div><div><h1>Morrow</h1><p>Canvas Connector</p></div><span id="pulse" aria-hidden="true"></span></header>
-    <section class="status"><span id="status-label">Checking local MCP…</span><strong id="status-value">—</strong></section>
+    <header class="brand"><img src="../brand/morrow.png" width="38" height="38" alt=""><div><h1>Morrow</h1><p>Canvas Connector</p></div><span id="pulse" aria-hidden="true"></span></header>
+    <section class="status" role="status"><span id="status-label">Checking local MCP…</span><strong id="status-value">—</strong></section>
     <section id="account" class="account" hidden><span>Connected Canvas account</span><strong id="account-origin"></strong></section>
     <button id="primary" type="button">Connect to Morrow MCP</button>
     <button id="disconnect" class="secondary" type="button" hidden>Disconnect and revoke access</button>
     <p id="detail">Morrow uses this connector for your signed-in Canvas session. Canvas credentials stay in Chrome.</p>
     <p id="error" role="alert" hidden></p>
-    <footer>1,130 governed Canvas operations · New Quizzes · Item Banks</footer>
+    <footer>Canvas · New Quizzes · Item Banks<br>Uses your current Canvas permissions.</footer>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

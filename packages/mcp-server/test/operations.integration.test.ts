@@ -127,7 +127,7 @@ describe("outer provider effects", () => {
       const view = await fetch(url as string);
       const body = await view.text();
       expect(body).toContain("Review this operation");
-      expect(body).toContain("The AI cannot select either action");
+      expect(body).toContain("MCP tools cannot submit this decision");
       expect(body).toContain("Show complete frozen plan");
       const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
       const cookie = view.headers.get("set-cookie")?.split(";", 1)[0];
@@ -136,7 +136,7 @@ describe("outer provider effects", () => {
       const refused = await fetch(`${url}/approve`, {
         method: "POST",
         headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookie! },
-        body: "nonce=wrong",
+        body: new URLSearchParams({ nonce: nonce! }),
       });
       expect(refused.status).toBe(409);
       expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "awaiting_approval" });

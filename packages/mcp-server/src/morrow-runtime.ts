@@ -473,7 +473,19 @@ export class MorrowRuntime {
 
       for (const child of page.children) {
         const current = this.sourceSettlements.get(batchId, child.childId);
-        if (child.sourceTaskId && !current.sourceTaskId) {
+        if (
+          child.state === "succeeded"
+          && !child.sourceTaskId
+          && child.gatewayOperationId
+          && child.gatewayOperationState === "verified"
+          && current.state !== "succeeded"
+        ) {
+          this.sourceSettlements.markDirectVerified(
+            batchId,
+            child.childId,
+            child.gatewayOperationId,
+          );
+        } else if (child.sourceTaskId && !current.sourceTaskId) {
           this.sourceSettlements.markStaged(batchId, child.childId, {
             sourceTaskId: child.sourceTaskId,
             ...(child.gatewayOperationId ? { gatewayOperationId: child.gatewayOperationId } : {}),

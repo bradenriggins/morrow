@@ -140,6 +140,9 @@ importers:
       '@morrow/batch-engine':
         specifier: workspace:*
         version: link:../batch-engine
+      '@morrow/bridge-loopback':
+        specifier: workspace:*
+        version: link:../bridge-loopback
       '@morrow/contracts':
         specifier: workspace:*
         version: link:../contracts

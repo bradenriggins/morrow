@@ -28,6 +28,7 @@ export const SOURCE_DISPOSITIONS = Object.freeze([
   "direct_owned",
   "adapted_owned",
   "clean_reimplementation",
+  "third_party_redistributable",
   "private_runtime_dependency",
   "rights_hold",
   "retired",

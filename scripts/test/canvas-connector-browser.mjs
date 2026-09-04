@@ -16,6 +16,21 @@ const ROOT = resolve(import.meta.dirname, "../..");
 const EXTENSION = resolve(ROOT, "connector/extension");
 const OUTPUT = resolve(ROOT, "output/playwright/canvas-connector");
 
+async function captureThemes(page, name, width = 900) {
+  await page.setViewportSize({ width, height: 760 });
+  await page.evaluate(async () => {
+    await document.fonts.load('13px "Google Sans Flex"');
+    await document.fonts.ready;
+  });
+  assert.equal(await page.locator(".brand img").evaluate((image) => image.complete && image.naturalWidth > 0), true);
+  assert.equal(await page.evaluate(() => document.fonts.check('13px "Google Sans Flex"')), true);
+  for (const colorScheme of ["light", "dark"]) {
+    await page.emulateMedia({ colorScheme });
+    await page.locator("main").screenshot({ path: join(OUTPUT, `${name}-${colorScheme}.png`) });
+  }
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+}
+
 async function waitFor(probe, message, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   let last;
@@ -121,7 +136,7 @@ await new Promise((resolveRequest, rejectRequest) => {
   }).once("error", rejectRequest);
 });
 
-const runtime = await CanvasConnectorRuntime.start({
+const connectorConfig = {
   statePath: join(temporary, "connector.json"),
   catalogPath: resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json"),
   token: "browser-test-connector-secret-".repeat(3),
@@ -129,7 +144,8 @@ const runtime = await CanvasConnectorRuntime.start({
   runtimeRevision: "1.0.0-rc.0",
   allowedExtensionIds: [],
   approveExtensionId: async () => undefined,
-});
+};
+let runtime = await CanvasConnectorRuntime.start(connectorConfig);
 
 const approvalSnapshot = {
   schema: "morrow.operation.v1",
@@ -179,9 +195,13 @@ try {
   const operationApprovalPage = context.pages()[0] || await context.newPage();
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/${encodeURIComponent(approvalSnapshot.operationId)}`);
   await operationApprovalPage.getByRole("heading", { name: "Review this operation" }).waitFor();
-  await operationApprovalPage.getByText("The AI cannot select either action").waitFor();
+  await operationApprovalPage.getByText("MCP tools cannot submit this decision").waitFor();
   await operationApprovalPage.getByRole("button", { name: "Approve once" }).waitFor();
-  await operationApprovalPage.screenshot({ path: join(OUTPUT, "approval-operation.png"), fullPage: true });
+  await captureThemes(operationApprovalPage, "approval-operation");
+  await captureThemes(operationApprovalPage, "approval-operation-narrow", 320);
+  await operationApprovalPage.getByRole("button", { name: "Approve once" }).click();
+  await operationApprovalPage.getByRole("heading", { name: "Approved once" }).waitFor();
+  await captureThemes(operationApprovalPage, "approval-recorded");
   process.stderr.write("[browser-test] operation approval UI ready\n");
 
   const worker = await waitFor(
@@ -199,14 +219,23 @@ try {
   let popup = await context.newPage();
   await popup.goto(`chrome-extension://${EXTENSION_ID}/popup/popup.html`);
   await popup.getByRole("button", { name: "Connect to Morrow MCP" }).waitFor();
+  await captureThemes(popup, "popup-unpaired", 360);
   const approvalPromise = context.waitForEvent("page");
   await popup.getByRole("button", { name: "Connect to Morrow MCP" }).click();
   const approval = await approvalPromise;
   await approval.waitForURL(/^http:\/\/127\.0\.0\.1:32147\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/);
   await approval.getByText("Canvas credentials stay inside Chrome").waitFor();
+  await captureThemes(approval, "pairing");
   process.stderr.write("[browser-test] pairing review ready\n");
+  const pairingApprovedAt = performance.now();
   await approval.getByRole("button", { name: "Approve" }).click();
   await approval.getByText(/approved/i).waitFor();
+  await captureThemes(approval, "pairing-approved");
+  await popup.bringToFront();
+  await popup.getByText("Ready", { exact: true }).waitFor({ timeout: 5_000 });
+  assert.equal(runtime.bridge.health().connected, true);
+  const pairingReadyMs = Math.round(performance.now() - pairingApprovedAt);
+  process.stderr.write(`[browser-test] pairing ready without restart in ${pairingReadyMs}ms\n`);
 
   await context.close();
   context = await launchBrowser();
@@ -239,7 +268,40 @@ try {
 
   await popup.reload();
   await popup.getByText("Connected Canvas account").waitFor();
-  await popup.screenshot({ path: join(OUTPUT, "popup-paired.png") });
+  await captureThemes(popup, "popup-paired", 360);
+
+  await replacementWorker.evaluate(() => {
+    globalThis.savedScriptExecutor = chrome.scripting.executeScript;
+    globalThis.itemBankCalls = [];
+    chrome.scripting.executeScript = async (details) => {
+      if (details.func?.name !== "executeItemBankInPage") return globalThis.savedScriptExecutor(details);
+      globalThis.itemBankCalls.push(details.args[0].contextOnly === true ? "probe" : "write");
+      return [1, 2].map((frameId) => ({ frameId, result: { matched: true, ok: true, sent: false } }));
+    };
+  });
+  try {
+    const ambiguous = await runtime.call("canvas_item_bank_create_bank", {
+      title: "Must not be created",
+      _morrow: {
+        source_binding_id: binding.sourceBindingId,
+        operation_id: "operation:ambiguous-bank-test",
+        outer_grant: {
+          plan_digest: "a".repeat(64), approval_grant_digest: "b".repeat(64),
+          effect_receipt_id: "effect:ambiguous-bank-test", dispatch_attempt: 1,
+          gateway_process_id: "gateway:browser-test",
+        },
+      },
+    });
+    assert.equal(ambiguous.ok, false);
+    assert.match(JSON.stringify(ambiguous), /item_bank_context_ambiguous/);
+    assert.deepEqual(await replacementWorker.evaluate(() => globalThis.itemBankCalls), ["probe"]);
+  } finally {
+    await replacementWorker.evaluate(() => {
+      chrome.scripting.executeScript = globalThis.savedScriptExecutor;
+      delete globalThis.savedScriptExecutor;
+      delete globalThis.itemBankCalls;
+    });
+  }
 
   const read = await runtime.call("canvas_get_new_quiz", {
     course_id: "42",
@@ -298,6 +360,21 @@ try {
   assert.equal(canvas.writes(), 1);
   assert.deepEqual(canvas.requests().filter((request) => request === "POST /api/v1/users/self/favorites/courses/42"), ["POST /api/v1/users/self/favorites/courses/42"]);
 
+  await runtime.close();
+  runtime = await CanvasConnectorRuntime.start({ ...connectorConfig, token: "replacement-bridge-secret-".repeat(3) });
+  await waitFor(async () => {
+    const stored = await replacementWorker.evaluate(() => chrome.storage.local.get(["token", "bindings"]));
+    return !stored.token && !(stored.bindings || []).length;
+  }, "rejected pairing did not clear stale authority", 10_000);
+  await popup.bringToFront();
+  await popup.getByRole("button", { name: "Connect to Morrow MCP" }).waitFor();
+  await captureThemes(popup, "popup-reconnect", 360);
+  const replacementApprovalPromise = context.waitForEvent("page");
+  await popup.getByRole("button", { name: "Connect to Morrow MCP" }).click();
+  const replacementApproval = await replacementApprovalPromise;
+  await replacementApproval.getByRole("button", { name: "Approve connector" }).click();
+  await popup.bringToFront();
+  await popup.getByText("Ready", { exact: true }).waitFor({ timeout: 5_000 });
   await popup.getByRole("button", { name: "Disconnect and revoke access" }).click();
   await popup.getByText("Not paired").waitFor();
   await waitFor(() => !runtime.bridge.health().connected, "connector did not disconnect");
@@ -307,7 +384,7 @@ try {
   });
   assert.deepEqual(revoked, { token: null, bindingCount: 0 });
 
-  process.stdout.write(`${JSON.stringify({ ok: true, extensionId: EXTENSION_ID, binding: binding.sourceBindingId, newQuiz: "New Quiz 77", newQuizItemWrites: canvas.quizItemWrites(), writes: canvas.writes(), replayRefused: true, disconnectClearedPairing: true, screenshots: [join(OUTPUT, "popup-paired.png"), join(OUTPUT, "approval-operation.png")] })}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, pairingReadyMs, ambiguousItemBankFramesRefused: true, stalePairingRecovered: true, extensionId: EXTENSION_ID, binding: binding.sourceBindingId, newQuiz: "New Quiz 77", newQuizItemWrites: canvas.quizItemWrites(), writes: canvas.writes(), replayRefused: true, disconnectClearedPairing: true, screenshots: ["popup-paired-light", "popup-paired-dark", "pairing-light", "pairing-dark", "approval-operation-light", "approval-operation-dark", "approval-operation-narrow-light", "approval-operation-narrow-dark"].map((name) => join(OUTPUT, `${name}.png`)) })}\n`);
 } finally {
   await context?.close().catch(() => undefined);
   await new Promise((resolveClose) => canvas.server.close(resolveClose));

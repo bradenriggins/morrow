@@ -25,6 +25,8 @@ import {
 } from "@morrow/bridge-protocol";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
+import { brandHead, brandHeader, serveBrandAsset } from "./brand.js";
+export { brandHead, brandHeader, serveBrandAsset } from "./brand.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_AUTH_TIMEOUT_MS = 5_000;
@@ -255,7 +257,7 @@ export class LoopbackBridgeServer {
       "content-type": contentType,
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
-      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+      "content-security-policy": "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
       ...(origin ? { "access-control-allow-origin": origin, vary: "Origin" } : {}),
     };
   }
@@ -297,9 +299,9 @@ export class LoopbackBridgeServer {
   private pairingPage(request: PairingRequest): string {
     const extension = request.extensionId.replace(/[<>&"']/g, "");
     const status = request.status === "pending"
-      ? `<form method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Approve connector</button><button class="secondary" name="decision" value="deny">Deny</button></form>`
+      ? `<form class="actions" method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Approve connector</button><button class="secondary" name="decision" value="deny">Deny</button></form>`
       : `<p class="settled">This pairing request is ${request.status}.</p>`;
-    return `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Pair Morrow Canvas Connector</title><style>body{margin:0;background:#0b0d10;color:#f4f6f8;font:16px/1.5 ui-sans-serif,system-ui;display:grid;min-height:100vh;place-items:center}.card{width:min(560px,calc(100vw - 40px));background:#141820;border:1px solid #2b3440;border-radius:20px;padding:32px;box-shadow:0 24px 80px #0008}h1{font-size:25px;margin:0 0 12px}p{color:#b8c2ce}.identity{font:13px ui-monospace,monospace;background:#0b0d10;padding:12px;border-radius:10px;overflow-wrap:anywhere}form{display:flex;gap:12px;margin-top:24px}button{border:0;border-radius:10px;background:#78e08f;color:#07110a;font-weight:750;padding:12px 18px;cursor:pointer}.secondary{background:#2a313d;color:#f4f6f8}.settled{color:#78e08f}</style><body><main class="card"><h1>Connect Morrow to Chrome</h1><p>This allows the local Morrow MCP to use Canvas sessions from this extension. Canvas credentials stay inside Chrome.</p><p class="identity">Extension ${extension}</p>${status}</main></body></html>`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect Chrome · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><p class="eyebrow">Connect your browser</p><h1>Connect Morrow to Chrome</h1><p>This allows the local Morrow MCP to use Canvas sessions from this extension. Canvas credentials stay inside Chrome.</p><p class="identity">Extension ${extension}</p>${status}</section></article><p class="foot">Local connection · 127.0.0.1</p></main></body></html>`;
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -309,6 +311,7 @@ export class LoopbackBridgeServer {
       return;
     }
     const url = new URL(request.url || "/", `http://${host}`);
+    if (request.method === "GET" && serveBrandAsset(url.pathname, response)) return;
     this.prunePairings();
     if (request.method === "OPTIONS" && url.pathname.startsWith(`${BRIDGE_PATH}/pair`)) {
       const identity = this.pairingOrigin(request);
@@ -379,7 +382,7 @@ export class LoopbackBridgeServer {
     }
     if (match[2] === "decision" && request.method === "POST") {
       const origin = String(request.headers.origin || "");
-      if (origin && origin !== `http://${host}`) return this.json(response, 403, { error: "local_origin_required" });
+      if (origin !== `http://${host}`) return this.json(response, 403, { error: "local_origin_required" });
       const bytes: Buffer[] = [];
       for await (const chunk of request) bytes.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       const decision = new URLSearchParams(Buffer.concat(bytes).toString("utf8")).get("decision");

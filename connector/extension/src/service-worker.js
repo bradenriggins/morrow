@@ -50,10 +50,30 @@ async function connectBridge() {
     bindings: await publicBindings(),
     sentAt: Date.now(),
   }));
-  socket.onmessage = (event) => void handleBridgeMessage(JSON.parse(event.data));
-  socket.onclose = () => {
-    if (state.socket === socket) state.socket = null;
+  socket.onmessage = (event) => {
+    const message = JSON.parse(event.data);
+    void handleBridgeMessage(message).then(() => {
+      if (message?.schema === "morrow.bridge.ready.v1" && state.socket === socket) {
+        void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+      }
+    });
+  };
+  socket.onclose = (event) => {
+    if (state.socket !== socket) return;
+    state.socket = null;
     state.generation = 0;
+    void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+    if (event.code === 4403) {
+      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+      state.reconnectTimer = null;
+      void (async () => {
+        const latest = await storage();
+        if (latest.token !== stored.token) return;
+        await chrome.alarms.clear("morrow-pairing");
+        await chrome.storage.local.remove(["token", "bindings", "pairing"]);
+      })();
+      return;
+    }
     scheduleReconnect();
   };
   socket.onerror = () => undefined;
@@ -133,10 +153,21 @@ async function executeItemBank(binding, operation, args) {
       target: { tabId: binding.tabId, allFrames: true },
       world: "MAIN",
       func: executeItemBankInPage,
-      args: [{ operation, arguments: args, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId }],
+      args: [{ operation, arguments: args, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true }],
     });
-    const matches = rows.map((row) => row.result).filter((result) => result?.matched === true);
-    return matches.length === 1 ? matches[0] : { ok: false, sent: false, error: matches.length ? "item_bank_context_ambiguous" : "item_bank_context_not_established" };
+    const matches = rows.filter((row) => row.result?.matched === true);
+    if (matches.length !== 1) return { ok: false, sent: false, error: matches.length ? "item_bank_context_ambiguous" : "item_bank_context_not_established" };
+    try {
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: binding.tabId, frameIds: [matches[0].frameId] },
+        world: "MAIN",
+        func: executeItemBankInPage,
+        args: [{ operation, arguments: args, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId }],
+      });
+      return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "item_bank_result_missing" };
+    } catch {
+      return { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "item_bank_execution_interrupted" };
+    }
   } catch (error) {
     return { ok: false, sent: false, error: String(error?.message || error) };
   }
@@ -155,6 +186,9 @@ async function handleCommand(command) {
   const operation = state.operations.get(command.toolName);
   if (!operation || operation.key !== command.operationKey || operation.readOnly !== (command.kind === "invoke_read")) {
     return sendResult(command, false, null, problem("operation_catalog_mismatch", "The command does not match the connector catalog.", false));
+  }
+  if (operation.service === "item_bank" && !operation.readOnly && operation.nickname !== "create_bank") {
+    return sendResult(command, false, null, problem("item_bank_dependency_review_required", "Changes to an existing Item Bank require a complete dependency and affected-course review. This release cannot yet establish that evidence.", false));
   }
   const binding = await bindingFor(command.sourceBindingId);
   if (!binding?.runtimeVerified) return sendResult(command, false, null, problem("canvas_binding_required", "Select one connected Canvas account.", true));
@@ -208,19 +242,36 @@ async function requestPairing() {
 
 async function pollPairing() {
   const { pairing } = await storage();
-  if (!pairing?.statusUrl) return;
+  if (!pairing?.statusUrl || !Number.isFinite(pairing.expiresAt) || Date.now() >= pairing.expiresAt) {
+    const latest = await storage();
+    if (latest.pairing?.statusUrl !== pairing?.statusUrl) return;
+    await chrome.storage.local.remove("pairing");
+    await chrome.alarms.clear("morrow-pairing");
+    return;
+  }
   const response = await fetch(pairing.statusUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ extensionId: chrome.runtime.id }),
   }).catch(() => null);
+  if (response?.status === 404 || response?.status === 410) {
+    const latest = await storage();
+    if (latest.pairing?.statusUrl !== pairing.statusUrl) return;
+    await chrome.storage.local.remove("pairing");
+    await chrome.alarms.clear("morrow-pairing");
+    return;
+  }
   if (!response?.ok) return;
   const status = await response.json();
   if (status.status === "approved" && status.token) {
+    const latest = await storage();
+    if (latest.pairing?.statusUrl !== pairing.statusUrl) return;
     await chrome.storage.local.set({ token: status.token, pairing: null });
     await chrome.alarms.clear("morrow-pairing");
     await connectBridge();
   } else if (status.status === "denied" || Date.now() >= status.expiresAt) {
+    const latest = await storage();
+    if (latest.pairing?.statusUrl !== pairing.statusUrl) return;
     await chrome.storage.local.set({ pairing: null });
     await chrome.alarms.clear("morrow-pairing");
   }
@@ -278,10 +329,13 @@ async function connectCanvasTab(requestedTabId) {
 }
 
 async function status() {
+  const before = await storage();
+  if (before.pairing?.status === "pending") await pollPairing();
   const stored = await storage();
   return {
     paired: Boolean(stored.token),
     pairing: stored.pairing?.status === "pending",
+    connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
     connected: state.socket?.readyState === WebSocket.OPEN && state.generation > 0,
     bindingCount: (stored.bindings || []).length,
     bindings: (stored.bindings || []).map((binding) => ({ sourceBindingId: binding.sourceBindingId, origin: binding.origin, courseId: binding.courseId, runtimeVerified: binding.runtimeVerified })),
@@ -322,6 +376,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "morrow-pairing") void pollPairing(); });
+chrome.tabs.onUpdated.addListener((_tabId, change, tab) => {
+  if (change.status !== "complete" || !tab.url?.startsWith(httpUrl("/pair/"))) return;
+  void storage().then(({ pairing }) => {
+    if (pairing?.approvalUrl === tab.url) return pollPairing();
+  });
+});
 chrome.runtime.onStartup.addListener(() => { void pollPairing(); void connectBridge(); });
 chrome.runtime.onInstalled.addListener(() => { void connectBridge(); });
 void pollPairing();

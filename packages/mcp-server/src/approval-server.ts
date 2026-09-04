@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import type { JsonObject } from "@morrow/contracts";
+import { brandHead, brandHeader, serveBrandAsset } from "@morrow/bridge-loopback";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -45,8 +46,8 @@ function sendHtml(response: ServerResponse, status: number, body: string, cookie
   response.writeHead(status, {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
-    "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
-    "referrer-policy": "no-referrer",
+    "content-security-policy": "default-src 'none'; style-src 'self'; img-src 'self'; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
     "set-cookie": cookie,
   });
@@ -63,12 +64,12 @@ function escapeHtml(value: unknown): string {
 }
 
 function pageShell(title: string, eyebrow: string, body: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title><style>:root{color-scheme:dark;font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#080a0d;color:#f5f7fa}*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 50% -20%,#193025 0,transparent 45%),#080a0d}.wrap{width:min(760px,calc(100% - 32px));margin:0 auto;padding:48px 0 72px}.brand{display:flex;align-items:center;gap:12px;margin-bottom:40px}.mark{display:grid;place-items:center;width:38px;height:38px;border:1px solid #39433e;border-radius:12px;background:#111713;color:#8ff0aa;font-weight:800}.brand strong{font-size:15px;letter-spacing:.01em}.brand span{display:block;color:#89948e;font-size:12px;margin-top:2px}.card{overflow:hidden;border:1px solid #28322d;border-radius:22px;background:#101411;box-shadow:0 28px 90px #0008}.hero{padding:32px 32px 25px;border-bottom:1px solid #252d29}.eyebrow{margin:0 0 10px;color:#84e89e;font-size:12px;font-weight:750;letter-spacing:.12em;text-transform:uppercase}h1{margin:0;font-size:clamp(28px,5vw,42px);line-height:1.06;letter-spacing:-.035em}p{color:#abb5af;line-height:1.6}.notice{display:flex;gap:10px;margin-top:22px;padding:13px 15px;border:1px solid #34443b;border-radius:12px;background:#162019;color:#cce8d4;font-size:13px}.notice:before{content:"✓";color:#8ff0aa;font-weight:900}.facts{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:#252d29;border-bottom:1px solid #252d29}.fact{min-width:0;padding:18px;background:#101411}.fact span{display:block;margin-bottom:6px;color:#7f8b84;font-size:11px;text-transform:uppercase;letter-spacing:.08em}.fact strong{display:block;overflow:hidden;color:#e9eeeb;font:600 13px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;text-overflow:ellipsis;white-space:nowrap}.section{padding:26px 32px;border-bottom:1px solid #252d29}.section h2{margin:0 0 14px;font-size:13px;letter-spacing:.03em}.fields{display:flex;flex-wrap:wrap;gap:8px}.pill{padding:7px 10px;border:1px solid #303a35;border-radius:999px;background:#151a17;color:#c9d1cc;font:12px ui-monospace,SFMono-Regular,Menlo,monospace}details{border:1px solid #29322e;border-radius:12px;background:#0b0e0c}summary{cursor:pointer;padding:13px 15px;color:#b8c2bc;font-size:13px;font-weight:650}pre{max-height:360px;overflow:auto;margin:0;padding:0 15px 16px;color:#9eaaa3;font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;overflow-wrap:anywhere}.actions{display:flex;gap:12px;padding:24px 32px 32px}.actions form{flex:1}.actions button{width:100%;border:0;border-radius:12px;padding:14px 18px;font:750 14px inherit;cursor:pointer}.approve{background:#8ff0aa;color:#071109;box-shadow:0 8px 25px #57db7926}.cancel{border:1px solid #333d38!important;background:#171c19;color:#d8ded9}.foot{margin:18px 4px 0;color:#6f7973;font-size:12px;text-align:center}.outcome{padding:34px}.outcome h1{font-size:34px}.outcome p{max-width:560px}@media(max-width:620px){.wrap{padding-top:24px}.brand{margin-bottom:24px}.hero,.section,.actions{padding-left:20px;padding-right:20px}.facts{grid-template-columns:1fr}.actions{flex-direction:column}}</style></head><body><main class="wrap"><div class="brand"><div class="mark">M</div><div><strong>Morrow</strong><span>Canvas operations layer</span></div></div><article class="card" aria-label="${escapeHtml(eyebrow)}">${body}</article><p class="foot">Local review · 127.0.0.1 · No Canvas credential is shown</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title>${brandHead}</head><body><main class="wrap">${brandHeader}<article class="card" aria-label="${escapeHtml(eyebrow)}">${body}</article><p class="foot">Local review · 127.0.0.1 · No Canvas credential is shown</p></main></body></html>`;
 }
 
 function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string): string {
   const summary = escapeHtml(JSON.stringify(snapshot, null, 2));
-  const escapedId = escapeHtml(target.id);
+  const escapedId = escapeHtml(encodeURIComponent(target.id));
   const noun = target.kind === "batches" ? "batch" : "operation";
   const plan = snapshot.plan && typeof snapshot.plan === "object" && !Array.isArray(snapshot.plan)
     ? snapshot.plan as JsonObject
@@ -76,13 +77,19 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string): stri
   const tool = typeof plan.tool === "string" ? plan.tool : target.kind === "batches" ? "Multi-course batch" : "Canvas operation";
   const risk = plan.risk && typeof plan.risk === "object" && !Array.isArray(plan.risk)
     ? String((plan.risk as JsonObject).approvalClass || "standard")
-    : "standard";
-  const changed = Array.isArray(plan.changedFields) ? plan.changedFields.map((field) => `<span class="pill">${escapeHtml(field)}</span>`).join("") : "";
-  const expiresAt = String(snapshot.approvalExpiresAt || snapshot.expiresAt || "15 minutes after page load");
+    : target.kind === "batches" ? "Per operation" : "standard";
+  const request = plan.arguments && typeof plan.arguments === "object" && !Array.isArray(plan.arguments)
+    ? plan.arguments as JsonObject : {};
+  const changed = Object.entries(request).filter(([key]) => key !== "_morrow").map(([key, value]) =>
+    `<div><dt>${escapeHtml(key)}</dt><dd>${escapeHtml(typeof value === "string" ? value : JSON.stringify(value, null, 2))}</dd></div>`).join("");
+  const expiry = String(snapshot.approvalExpiresAt || snapshot.expiresAt || "");
+  const expiresAt = Number.isFinite(Date.parse(expiry))
+    ? new Date(expiry).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "long" })
+    : "15 minutes after page load";
   const targetCount = plan.targetSet && typeof plan.targetSet === "object" && !Array.isArray(plan.targetSet)
     ? String((plan.targetSet as JsonObject).count || 1)
     : String(snapshot.targetCount || 1);
-  return pageShell(`Review ${noun}`, `Awaiting your decision`, `<header class="hero"><p class="eyebrow">Awaiting your decision</p><h1>Review this ${noun}</h1><p>Morrow froze this request before any Canvas write. Approval applies only to the exact plan below and can be used once.</p><div class="notice">This decision is separate from your AI conversation. The AI cannot select either action.</div></header><div class="facts"><div class="fact"><span>Operation</span><strong title="${escapeHtml(tool)}">${escapeHtml(tool)}</strong></div><div class="fact"><span>Targets</span><strong>${escapeHtml(targetCount)}</strong></div><div class="fact"><span>Risk</span><strong>${escapeHtml(risk)}</strong></div></div>${changed ? `<section class="section"><h2>Fields requested to change</h2><div class="fields">${changed}</div></section>` : ""}<section class="section"><h2>Frozen evidence</h2><p>This plan expires at ${escapeHtml(expiresAt)}. Expand the record to inspect its complete targets, arguments, authority, catalog digest, and readback method.</p><details><summary>Show complete frozen plan</summary><pre>${summary}</pre></details></section><div class="actions"><form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">Approve once</button></form><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel request</button></form></div>`);
+  return pageShell(`Review ${noun}`, `Awaiting your decision`, `<header class="hero"><p class="eyebrow">Awaiting your decision</p><h1>Review this ${noun}</h1><p>Morrow froze this request before any Canvas write. Approval applies only to the exact plan below and can be used once.</p><div class="notice">Review and approve this request yourself. MCP tools cannot submit this decision.</div></header><div class="facts"><div class="fact"><span>Operation</span><strong title="${escapeHtml(tool)}">${escapeHtml(tool)}</strong></div><div class="fact"><span>Targets</span><strong>${escapeHtml(targetCount)}</strong></div><div class="fact"><span>Risk</span><strong>${escapeHtml(risk)}</strong></div></div>${changed ? `<section class="section"><h2>Requested values and targets</h2><dl class="request">${changed}</dl></section>` : ""}<section class="section"><h2>Frozen evidence</h2><p>This plan expires at ${escapeHtml(expiresAt)}. Expand the record to inspect its complete targets, arguments, authority, catalog digest, and readback method.</p><details><summary>Show complete frozen plan</summary><pre>${summary}</pre></details></section><div class="actions"><form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">Approve once</button></form><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel request</button></form></div>`);
 }
 
 function outcomeHtml(target: ApprovalTarget, action: "approve" | "cancel"): string {
@@ -162,6 +169,11 @@ export class LoopbackApprovalServer {
     const method = request.method || "GET";
     const url = new URL(request.url || "/", `http://${LOOPBACK_HOST}`);
     try {
+      if (!this.baseUrl || request.headers.host !== new URL(this.baseUrl).host) {
+        sendJson(response, 403, { schema: "morrow.problem.v1", code: "local_host_required" });
+        return;
+      }
+      if (method === "GET" && serveBrandAsset(url.pathname, response)) return;
       if (method === "GET" && url.pathname === "/operations") {
         sendJson(response, 200, this.controller.operationList());
         return;
@@ -194,8 +206,8 @@ export class LoopbackApprovalServer {
         const requestOrigin = String(request.headers.origin || "");
         const requestReferer = String(request.headers.referer || "");
         const baseUrl = this.baseUrl;
-        const originValid = !requestOrigin || requestOrigin === baseUrl;
-        const refererValid = !requestReferer || requestReferer === `${baseUrl}/${target.kind}/${encodeURIComponent(target.id)}`;
+        const originValid = requestOrigin === baseUrl;
+        const refererValid = requestReferer === `${baseUrl}/${target.kind}/${encodeURIComponent(target.id)}`;
         const formNonce = await readFormNonce(request);
         const cookieNonce = cookieValue(request, "morrow_approval");
         if (

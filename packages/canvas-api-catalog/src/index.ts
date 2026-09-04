@@ -98,6 +98,9 @@ export function canvasOperationMap(catalog: CanvasApiCatalog): ReadonlyMap<strin
 
 function capability(operation: CanvasApiOperation): SourceCapabilityMetadata {
   const destructive = operation.risk === "destructive";
+  const profile = operation.service === "item_bank" && !operation.readOnly && operation.nickname !== "create_bank"
+    ? { state: "profile_limited" as const, reason: "Existing Item Bank mutations require complete dependency and affected-course evidence that is not yet available." }
+    : { state: "supported" as const };
   return {
     family: operation.family,
     provider: "canvas",
@@ -128,8 +131,8 @@ function capability(operation: CanvasApiOperation): SourceCapabilityMetadata {
       comparator: "frozen-json-digest",
     },
     profiles: {
-      "private-full": { state: "supported" },
-      "public-canvas": { state: "supported" },
+      "private-full": profile,
+      "public-canvas": profile,
       sandbox: { state: "profile_limited", reason: "The live connector is replaced by the synthetic Canvas estate." },
       "read-only": operation.readOnly
         ? { state: "supported" }

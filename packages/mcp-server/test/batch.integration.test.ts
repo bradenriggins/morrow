@@ -1,8 +1,13 @@
+import { once } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { WebSocket } from "ws";
+import { describe, expect, it, vi } from "vitest";
+import { BRIDGE_PROTOCOL_VERSION, BRIDGE_SCHEMAS, parseBridgeJson, serializeBridgeMessage, type BridgeCommand } from "@morrow/bridge-protocol";
+import { loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
 import { sha256Json } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
@@ -59,6 +64,61 @@ function readback(courseId: string) {
       expected_digest: sha256Json({ source: "meridian", course_id: courseId }),
     },
   };
+}
+
+async function availablePort(): Promise<number> {
+  const server = createServer();
+  await new Promise<void>((resolveListen) => server.listen(0, "127.0.0.1", resolveListen));
+  const address = server.address();
+  if (!address || typeof address === "string") throw new Error("test port unavailable");
+  const port = address.port;
+  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  return port;
+}
+
+function connectorConfig(directory: string, port: number) {
+  const root = resolve("../..");
+  return parseGatewayConfig({
+    schema: "morrow.upstreams.v1",
+    profile: "private-full",
+    upstreams: [{
+      id: "canvas-session",
+      label: "Morrow Canvas Connector",
+      kind: "mcp-stdio",
+      command: process.execPath,
+      args: [resolve(root, "packages/canvas-connector-mcp/dist/index.js")],
+      cwd: root,
+      env: {
+        MORROW_CANVAS_CATALOG_PATH: resolve(root, "artifacts/canvas-api/canvas-api-catalog.json"),
+        MORROW_CANVAS_CONNECTOR_STATE: join(directory, "connector.json"),
+        MORROW_CANVAS_CONNECTOR_PORT: String(port),
+        MORROW_CANVAS_CONNECTOR_TOKEN: "gateway-connector-secret-".repeat(3),
+        MORROW_CANVAS_CONNECTOR_EXTENSION_IDS: "a".repeat(32),
+      },
+      sourceDisposition: "adapted_owned",
+      outputPrivacy: {},
+      outputPrivacyDefault: {
+        allowedFields: [],
+        fieldPolicy: "scrub-sensitive",
+        dataClass: "learner",
+        maxRecords: 10_000,
+        maxBytes: 2_000_000,
+        freeText: "allow",
+        learnerTokens: true,
+        artifactInspection: "deny",
+        aiClientAdmission: "allow",
+      },
+    }],
+    filters: { excludePrefixes: [], excludeNames: [] },
+    operationJournal: { path: join(directory, "gateway.sqlite3") },
+    privacy: {
+      canvasOrigin: "browser-session",
+      account: "local",
+      principal: "local",
+      learnerVaultPath: join(directory, "vault.json"),
+    },
+    maxCatalogTools: 2_000,
+  });
 }
 
 async function approveBatch(url: string): Promise<string> {
@@ -313,6 +373,122 @@ describe("MorrowRuntime durable batches", () => {
       expect(JSON.stringify(detail)).not.toContain("Never returned");
     } finally {
       await second.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
+
+  it("recovers a verified direct connector effect after child settlement crashes without redispatch", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-direct-batch-recovery-"));
+    const statePath = join(directory, "morrow.sqlite3");
+    const keyPath = join(directory, "batch.key");
+    const port = await availablePort();
+    const catalog = loadCanvasApiCatalog(resolve("../..", "artifacts/canvas-api/canvas-api-catalog.json"));
+    const sourceBindingId = "canvas:batch-recovery";
+    let first: MorrowRuntime | undefined;
+    let second: MorrowRuntime | undefined;
+    let socket: WebSocket | undefined;
+    let writeCommands = 0;
+    try {
+      first = await MorrowRuntime.connect(connectorConfig(directory, port), { statePath, batchKeyPath: keyPath });
+      socket = new WebSocket(`ws://127.0.0.1:${port}/morrow-bridge/v1`, {
+        origin: `chrome-extension://${"a".repeat(32)}`,
+      });
+      await once(socket, "open");
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.hello,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        token: "gateway-connector-secret-".repeat(3),
+        extensionId: "a".repeat(32),
+        runtimeRevision: "1.0.0-rc.0",
+        catalogDigest: catalog.catalogDigest,
+        bindings: [{
+          sourceBindingId,
+          provider: "canvas",
+          origin: "https://school.instructure.com",
+          principalFingerprint: "c".repeat(64),
+          sessionGeneration: 1,
+          runtimeVerified: true,
+        }],
+        sentAt: Date.now(),
+      }));
+      await once(socket, "message");
+      socket.on("message", (raw) => {
+        const value = parseBridgeJson(raw.toString()) as { schema?: string };
+        if (value.schema !== BRIDGE_SCHEMAS.command) return;
+        const command = value as BridgeCommand;
+        expect(command.kind).toBe("invoke_write");
+        writeCommands += 1;
+        socket?.send(serializeBridgeMessage({
+          schema: BRIDGE_SCHEMAS.result,
+          protocolVersion: BRIDGE_PROTOCOL_VERSION,
+          requestId: command.requestId,
+          operationId: command.operationId,
+          generation: command.generation,
+          ok: true,
+          result: {
+            schema: "morrow.canvas-browser-result.v1",
+            ok: true,
+            sent: true,
+            status: 200,
+            data: { id: "77", name: "Recovered Course" },
+            verification: {
+              schema: "morrow.browser-verification.v1",
+              status: "verified",
+              strategy: "collection-contains-target",
+              readTool: "canvas_list_favorite_courses",
+              evidence: "fresh_readback_matches_requested_postcondition",
+            },
+          },
+          completedAt: Date.now(),
+        }));
+      });
+
+      const created = first.batchCreate({
+        name: "Recover direct connector write",
+        mode: "stage_writes",
+        concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["77"], complete: true },
+        operations: [{
+          childId: "course:77",
+          courseId: "77",
+          tool: "canvas_add_course_to_favorites",
+          sourceBindingId,
+          arguments: { id: "77" },
+        }],
+      });
+      const batchId = String((created.batch as { batchId: string }).batchId);
+      await approveBatch(String(created.approvalUrl));
+      const crash = vi.spyOn(first.batches, "settleChild").mockImplementationOnce(() => {
+        throw new Error("simulated crash after verified direct effect");
+      });
+      await expect(first.batchRun({ batchId, maxChildren: 1 })).rejects.toThrow(
+        "simulated crash after verified direct effect",
+      );
+      crash.mockRestore();
+
+      const beforeRestart = first.batches.listChildren(batchId, 0, 10).children[0]!;
+      expect(first.gateway.operationGet(String(beforeRestart.gatewayOperationId))).toMatchObject({
+        state: "verified",
+        verificationStatus: "verified",
+      });
+      expect(writeCommands).toBe(1);
+
+      await first.close();
+      first = undefined;
+      socket.close();
+      second = await MorrowRuntime.connect(connectorConfig(directory, port), { statePath, batchKeyPath: keyPath });
+
+      const recovered = second.batchGet({ batchId, limit: 10 });
+      expect(recovered.batch).toMatchObject({ state: "completed", succeededChildren: 1, unknownChildren: 0 });
+      expect(recovered.children).toMatchObject([
+        { childId: "course:77", state: "succeeded", gatewayOperationState: "verified" },
+      ]);
+      expect(recovered.sourceSettlement).toMatchObject({ outcome: "succeeded", succeeded: 1, terminal: true });
+      expect(writeCommands).toBe(1);
+    } finally {
+      socket?.close();
+      await second?.close();
+      await first?.close();
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);

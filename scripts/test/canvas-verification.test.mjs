@@ -126,5 +126,57 @@ test("Item Bank verification refuses mismatches and incomplete evidence", () => 
     item_id: "502",
     item: { title: "Revised" },
   }, { id: "502" });
+  assert.equal(update.targetField, "entry_id");
+  assert.equal(share.targetField, "entity_id");
   assert.equal(evaluateBrowserReadback(update, { ok: false, status: 503 }).status, "unconfirmed");
+
+  const crossedUpdate = evaluateBrowserReadback(update, {
+    ok: true,
+    status: 200,
+    data: [
+      { entry_id: "502", item: { id: "502", title: "Old title" } },
+      { entry_id: "503", item: { id: "503", title: "Revised" } },
+    ],
+  });
+  assert.equal(crossedUpdate.status, "mismatch");
+
+  const crossedShare = evaluateBrowserReadback(share, {
+    ok: true,
+    status: 200,
+    data: [
+      { entity_id: "42", entity_type: "User" },
+      { entity_id: "99", entity_type: "Course" },
+    ],
+  });
+  assert.equal(crossedShare.status, "mismatch");
+
+  assert.equal(evaluateBrowserReadback(update, {
+    ok: true,
+    status: 200,
+    data: [{ id: "502", entry_id: "701", item: { id: "502", title: "Revised" } }],
+  }).status, "mismatch");
+  assert.equal(evaluateBrowserReadback(share, {
+    ok: true,
+    status: 200,
+    data: [{ id: "42", entity_id: "99", entity_type: "Course" }],
+  }).status, "mismatch");
+
+  assert.equal(evaluateBrowserReadback({
+    strategy: "updated-resource",
+    readOperation: { toolName: "canvas_item_bank_get_bank" },
+    assertions: [],
+  }, { ok: true, status: 200, data: { id: "901" } }).status, "unconfirmed");
+
+  assert.equal(evaluateBrowserReadback({
+    strategy: "collection-omits-target",
+    targetId: "701",
+    readOperation: { toolName: "canvas_item_bank_list_entries" },
+    assertions: [],
+  }, { ok: true, status: 200, data: { entries: [] }, truncated: true }).status, "unconfirmed");
+  assert.equal(evaluateBrowserReadback({
+    strategy: "collection-omits-target",
+    targetId: "701",
+    readOperation: { toolName: "canvas_item_bank_list_entries" },
+    assertions: [],
+  }, { ok: true, status: 200, data: [] }).status, "verified");
 });

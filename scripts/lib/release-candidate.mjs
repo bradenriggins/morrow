@@ -10,6 +10,9 @@ import {
 import { dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFileSync } from "node:child_process";
+import { deterministicZip, stableJson } from "./deterministic-archive.mjs";
+
+export { deterministicZip, stableJson } from "./deterministic-archive.mjs";
 
 export const RELEASE_VERSION = "1.0.0-rc.0";
 export const REQUIRED_EXTERNAL_RECEIPTS = Object.freeze([
@@ -36,8 +39,6 @@ export const ZERO_TOLERANCE_TARGETS = Object.freeze([
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_ROOT = resolve(HERE, "../..");
-const DOS_TIME = ((0 << 11) | (0 << 5) | 0) >>> 0;
-const DOS_DATE = (((2020 - 1980) << 9) | (1 << 5) | 1) >>> 0;
 
 function git(root, args, encoding = "utf8") {
   return execFileSync("git", ["-C", root, ...args], {
@@ -48,16 +49,6 @@ function git(root, args, encoding = "utf8") {
 
 export function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
-}
-
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map(stableValue);
-  if (!value || typeof value !== "object") return value;
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
-}
-
-export function stableJson(value) {
-  return `${JSON.stringify(stableValue(value), null, 2)}\n`;
 }
 
 function readJson(path) {
@@ -124,72 +115,7 @@ function assertOutputPath(root, output) {
   return candidate;
 }
 
-function crc32(buffer) {
-  let crc = 0xffffffff;
-  for (const byte of buffer) {
-    crc ^= byte;
-    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
-  }
-  return (crc ^ 0xffffffff) >>> 0;
-}
-
-export function deterministicZip(entries) {
-  let offset = 0;
-  const local = [];
-  const central = [];
-  for (const entry of [...entries].sort((left, right) => left.path.localeCompare(right.path))) {
-    const name = Buffer.from(entry.path, "utf8");
-    const data = Buffer.from(entry.data);
-    const crc = crc32(data);
-    const header = Buffer.alloc(30);
-    header.writeUInt32LE(0x04034b50, 0);
-    header.writeUInt16LE(20, 4);
-    header.writeUInt16LE(0x0800, 6);
-    header.writeUInt16LE(0, 8);
-    header.writeUInt16LE(DOS_TIME, 10);
-    header.writeUInt16LE(DOS_DATE, 12);
-    header.writeUInt32LE(crc, 14);
-    header.writeUInt32LE(data.length, 18);
-    header.writeUInt32LE(data.length, 22);
-    header.writeUInt16LE(name.length, 26);
-    header.writeUInt16LE(0, 28);
-    local.push(header, name, data);
-
-    const record = Buffer.alloc(46);
-    record.writeUInt32LE(0x02014b50, 0);
-    record.writeUInt16LE(20, 4);
-    record.writeUInt16LE(20, 6);
-    record.writeUInt16LE(0x0800, 8);
-    record.writeUInt16LE(0, 10);
-    record.writeUInt16LE(DOS_TIME, 12);
-    record.writeUInt16LE(DOS_DATE, 14);
-    record.writeUInt32LE(crc, 16);
-    record.writeUInt32LE(data.length, 20);
-    record.writeUInt32LE(data.length, 24);
-    record.writeUInt16LE(name.length, 28);
-    record.writeUInt16LE(0, 30);
-    record.writeUInt16LE(0, 32);
-    record.writeUInt16LE(0, 34);
-    record.writeUInt16LE(0, 36);
-    record.writeUInt32LE(0, 38);
-    record.writeUInt32LE(offset, 42);
-    central.push(record, name);
-    offset += header.length + name.length + data.length;
-  }
-  const centralData = Buffer.concat(central);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(0, 4);
-  end.writeUInt16LE(0, 6);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(centralData.length, 12);
-  end.writeUInt32LE(offset, 16);
-  end.writeUInt16LE(0, 20);
-  return Buffer.concat([...local, centralData, end]);
-}
-
-export function buildCycloneDxSbom({ candidateName, sourceFiles, version = RELEASE_VERSION }) {
+export function buildCycloneDxSbom({ candidateName, sourceFiles, evidence = [], version = RELEASE_VERSION }) {
   const manifests = sourceFiles
     .filter((file) => file.path === "package.json" || /^packages\/[^/]+\/package\.json$/.test(file.path))
     .map((file) => ({ path: file.path, packageJson: JSON.parse(Buffer.from(file.data).toString("utf8")) }));
@@ -233,6 +159,10 @@ export function buildCycloneDxSbom({ candidateName, sourceFiles, version = RELEA
         name: candidateName,
         version,
       },
+      properties: evidence.map((entry) => ({
+        name: "morrow:release-evidence",
+        value: `${entry.path}:${sha256(entry.data)}`,
+      })).sort((left, right) => left.value.localeCompare(right.value)),
     },
     components,
     dependencies,
@@ -248,6 +178,26 @@ function checksumManifest(entries) {
 
 function validDigest(value) {
   return typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+}
+
+function validThirdPartyEvidence(entry, files) {
+  const evidence = entry?.thirdParty;
+  if (!evidence || typeof evidence !== "object" || Array.isArray(evidence)) return false;
+  const sourceUrl = typeof evidence.sourceUrl === "string" ? evidence.sourceUrl.trim() : "";
+  try {
+    if (new URL(sourceUrl).protocol !== "https:") return false;
+  } catch {
+    return false;
+  }
+  const licensePath = typeof evidence.licensePath === "string" ? evidence.licensePath : "";
+  const licenseFile = files.get(licensePath);
+  return evidence.license === "SIL-OFL-1.1"
+    && typeof evidence.copyright === "string"
+    && evidence.copyright.trim().length > 0
+    && validDigest(evidence.assetSha256)
+    && evidence.assetSha256 === entry.sha256
+    && validDigest(evidence.licenseSha256)
+    && licenseFile?.sha256 === evidence.licenseSha256;
 }
 
 export function validateSourceOriginLedger({ root = DEFAULT_ROOT, files, commit }) {
@@ -314,10 +264,17 @@ function sourceRightsState(root, files, visibility) {
   if (visibility !== "public") {
     return { schema: "morrow.source-rights-validation.v1", required: false, passed: true, missing: [], invalid: [] };
   }
-  const path = resolve(root, "config/source-rights.manifest.json");
-  const manifest = existsSync(path) ? readJson(path) : { files: [] };
+  const manifestPath = "config/source-rights.manifest.json";
+  let manifestData = null;
+  try {
+    manifestData = trackedBuffer(root, manifestPath);
+  } catch {
+    manifestData = null;
+  }
+  const manifest = manifestData ? JSON.parse(Buffer.from(manifestData).toString("utf8")) : { files: [] };
   const records = new Map((Array.isArray(manifest.files) ? manifest.files : []).map((entry) => [entry.path, entry]));
-  const allowed = new Set(["direct_owned", "adapted_owned", "clean_reimplementation"]);
+  const stagedFiles = new Map(files.map((file) => [file.path, file]));
+  const allowed = new Set(["direct_owned", "adapted_owned", "clean_reimplementation", "third_party_redistributable"]);
   const missing = [];
   const invalid = [];
   for (const file of files) {
@@ -326,14 +283,16 @@ function sourceRightsState(root, files, visibility) {
       missing.push(file.path);
       continue;
     }
-    if (!allowed.has(entry.disposition) || entry.sha256 !== file.sha256 || typeof entry.review !== "string" || !entry.review.trim()) {
+    const thirdPartyValid = entry.disposition !== "third_party_redistributable" || validThirdPartyEvidence(entry, stagedFiles);
+    if (!allowed.has(entry.disposition) || entry.sha256 !== file.sha256 || typeof entry.review !== "string" || !entry.review.trim() || !thirdPartyValid) {
       invalid.push(file.path);
     }
   }
   return {
     schema: "morrow.source-rights-validation.v1",
     required: true,
-    manifestPath: relative(root, path),
+    manifestPath,
+    manifestSha256: manifestData ? sha256(manifestData) : null,
     passed: manifest.schema === "morrow.source-rights.v1" && missing.length === 0 && invalid.length === 0,
     missing,
     invalid,
@@ -407,20 +366,32 @@ function promotionReceiptState(root) {
   return externalReceiptSet(root, REQUIRED_PROMOTION_RECEIPTS);
 }
 
-function zeroToleranceState(root) {
+export function zeroToleranceState(root) {
   const path = process.env.MORROW_ZERO_TOLERANCE_RECEIPT_PATH
     ? resolve(process.env.MORROW_ZERO_TOLERANCE_RECEIPT_PATH)
     : resolve(root, "artifacts/release/zero-tolerance-receipt.json");
   const supplied = existsSync(path) ? readJson(path) : { checks: [] };
   const binding = currentEvidenceBinding(root);
-  const bindingMatches = supplied.binding?.commit === binding.commit
+  const bindingMatches = supplied.status === "passed"
+    && !git(root, ["status", "--porcelain", "--untracked-files=normal"]).trim()
+    && supplied.binding?.tree === git(root, ["rev-parse", "HEAD^{tree}"]).trim()
+    && supplied.binding?.commit === binding.commit
     && supplied.binding?.catalogDigest === binding.catalogDigest
     && supplied.binding?.candidateDigests?.privateFull === binding.candidateDigests.privateFull
     && supplied.binding?.candidateDigests?.publicCanvas === binding.candidateDigests.publicCanvas;
   const byId = new Map((Array.isArray(supplied.checks) ? supplied.checks : []).map((entry) => [entry.id, entry]));
   const checks = ZERO_TOLERANCE_TARGETS.map((id) => {
     const entry = byId.get(id);
-    const passed = bindingMatches && entry?.status === "passed" && entry.count === 0 && validDigest(entry.receiptDigest);
+    const evidenceValid = Array.isArray(entry?.evidence) && entry.evidence.length > 0
+      && typeof supplied.evidenceRoot === "string"
+      && /^artifacts\/release\/evidence-[a-zA-Z0-9-]+$/.test(supplied.evidenceRoot)
+      && entry.evidence.every((evidence) => {
+        if (!/^[a-zA-Z0-9-]+\.log$/.test(evidence.path) || !validDigest(evidence.sha256)) return false;
+        const evidencePath = resolve(root, supplied.evidenceRoot, evidence.path);
+        return existsSync(evidencePath) && sha256(readFileSync(evidencePath)) === evidence.sha256;
+      });
+    const passed = bindingMatches && evidenceValid && entry?.status === "passed" && entry.count === 0
+      && entry.receiptDigest === sha256(JSON.stringify({ binding: supplied.binding, id, evidenceDigests: entry.evidence }));
     return { id, status: passed ? "passed" : "missing", count: passed ? 0 : null, blocking: !passed };
   });
   return { path: existsSync(path) ? path : null, binding, bindingMatches, checks, passed: checks.every((entry) => !entry.blocking) };
@@ -492,17 +463,110 @@ function candidateName(profile) {
   return `morrow-v${RELEASE_VERSION}-${process.platform}-${process.arch}-${profile}`;
 }
 
+const PUBLIC_ROOT_SCRIPTS = new Set([
+  "build",
+  "clean",
+  "typecheck",
+  "start",
+  "setup",
+  "morrow",
+  "clients:render",
+  "catalog:canvas",
+  "catalog:canvas:check",
+  "package:connector",
+  "package:connector:check",
+]);
+
+export function publicPackageManifest(data) {
+  const manifest = JSON.parse(Buffer.from(data).toString("utf8"));
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest) || !manifest.scripts || typeof manifest.scripts !== "object") {
+    throw new Error("Public candidate requires a root package manifest with scripts.");
+  }
+  const scripts = Object.fromEntries(Object.entries(manifest.scripts)
+    .filter(([name]) => PUBLIC_ROOT_SCRIPTS.has(name)));
+  return Buffer.from(stableJson({ ...manifest, scripts }));
+}
+
+function publicWorkspacePackageManifest(data) {
+  const manifest = JSON.parse(Buffer.from(data).toString("utf8"));
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    throw new Error("Public candidate package manifest is invalid.");
+  }
+  const scripts = manifest.scripts && typeof manifest.scripts === "object"
+    ? Object.fromEntries(Object.entries(manifest.scripts).filter(([name]) => name !== "test"))
+    : undefined;
+  return Buffer.from(stableJson({ ...manifest, ...(scripts ? { scripts } : {}) }));
+}
+
+function candidateSourceFiles(sourceFiles, visibility) {
+  if (visibility !== "public") return { files: sourceFiles, publicPackage: null };
+  const sourcePackage = sourceFiles.find((file) => file.path === "package.json");
+  if (!sourcePackage) throw new Error("Public candidate requires package.json.");
+  const publicPackage = publicPackageManifest(sourcePackage.data);
+  const manifests = [];
+  return {
+    files: sourceFiles.map((file) => {
+      const data = file.path === "package.json"
+        ? publicPackage
+        : /^packages\/[^/]+\/package\.json$/.test(file.path)
+          ? publicWorkspacePackageManifest(file.data)
+          : file.data;
+      if (data !== file.data) {
+        manifests.push({
+          path: file.path,
+          sourceSha256: sha256(file.data),
+          stagedSha256: sha256(data),
+          scripts: Object.keys(JSON.parse(data.toString("utf8")).scripts || {}).sort(),
+        });
+      }
+      return data === file.data ? file : { ...file, data };
+    }),
+    publicPackage: { manifests },
+  };
+}
+
+function candidateEvidence(root, visibility, profileFiles) {
+  if (visibility !== "public") return [];
+  const sourceRights = { sourcePath: "config/source-rights.manifest.json", path: "release/source-rights.manifest.json" };
+  const sourceOrigin = { sourcePath: "config/source-origin-ledger.json", path: "release/source-origin-ledger.json" };
+  return [sourceRights, sourceOrigin].flatMap((entry) => {
+    try {
+      const sourceData = trackedBuffer(root, entry.sourcePath);
+      const data = entry === sourceOrigin
+        ? Buffer.from(stableJson({
+          ...JSON.parse(Buffer.from(sourceData).toString("utf8")),
+          entries: JSON.parse(Buffer.from(sourceData).toString("utf8")).entries
+            .filter((record) => profileFiles.some((file) => file.path === record.path))
+            .map((record) => ({
+              ...record,
+              testMapping: Array.isArray(record.testMapping)
+                ? record.testMapping.filter((path) => profileFiles.some((file) => file.path === path))
+                : [],
+            })),
+        }))
+        : sourceData;
+      return [{ ...entry, data, sourceSha256: sha256(sourceData) }];
+    } catch {
+      return [];
+    }
+  });
+}
+
 export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-full", verifyRebuild = false }) {
   const profile = loadProfile(root, profileName);
   const output = assertOutputPath(root, candidateDirectory(root, profileName));
   const commit = git(root, ["rev-parse", "HEAD"]).trim();
   const tree = git(root, ["rev-parse", "HEAD^{tree}"]).trim();
-  const sourceFiles = trackedFiles(root)
+  const profileSourceFiles = trackedFiles(root)
     .filter((path) => profileIncludes(path, profile))
     .map((path) => ({ path, data: trackedBuffer(root, path) }));
+  const profileFiles = profileSourceFiles.map((file) => ({ path: file.path, bytes: file.data.length, sha256: sha256(file.data) }));
+  const sourceOrigin = validateSourceOriginLedger({ root, files: profileFiles, commit });
+  const sourceRights = sourceRightsState(root, profileFiles, profile.visibility);
+  const staged = candidateSourceFiles(profileSourceFiles, profile.visibility);
+  const sourceFiles = staged.files;
   const files = sourceFiles.map((file) => ({ path: file.path, bytes: file.data.length, sha256: sha256(file.data) }));
-  const sourceOrigin = validateSourceOriginLedger({ root, files, commit });
-  const sourceRights = sourceRightsState(root, files, profile.visibility);
+  const releaseEvidence = candidateEvidence(root, profile.visibility, profileFiles);
   const markerScan = scanCandidateEntries(sourceFiles, profile.visibility);
   const externalReceipts = externalReceiptState(root);
   const promotionReceipts = promotionReceiptState(root);
@@ -519,6 +583,13 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
     sourceFilesDigest: sha256(stableJson(files)),
     sourceOrigin,
     sourceRights,
+    ...(staged.publicPackage ? { publicPackage: staged.publicPackage } : {}),
+    evidence: releaseEvidence.map((entry) => ({
+      sourcePath: entry.sourcePath,
+      sourceSha256: entry.sourceSha256,
+      path: entry.path,
+      sha256: sha256(entry.data),
+    })),
     markerScan,
     localEvidenceOnly: true,
   };
@@ -530,12 +601,19 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
     mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
     writeFileSync(target, file.data, { mode: 0o600 });
   }
+  for (const evidence of releaseEvidence) {
+    const target = resolve(stageRoot, evidence.path);
+    mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
+    writeFileSync(target, evidence.data, { mode: 0o600 });
+  }
   const sbomData = Buffer.from(stableJson(buildCycloneDxSbom({
     candidateName: candidateName(profileName),
     sourceFiles,
+    evidence: releaseEvidence,
   })));
   const checksumData = Buffer.from(checksumManifest([
     ...sourceFiles,
+    ...releaseEvidence,
     { path: "release/sbom.cdx.json", data: sbomData },
   ]));
   const completedStageManifest = {
@@ -552,6 +630,7 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
 
   const archiveEntries = [
     ...sourceFiles,
+    ...releaseEvidence,
     { path: "release/checksums.sha256", data: checksumData },
     { path: "release/sbom.cdx.json", data: sbomData },
     { path: "release/stage-manifest.json", data: stageManifestData },
@@ -625,14 +704,20 @@ export function scanStagedCandidate({ root = DEFAULT_ROOT, profileName = "privat
   const stageManifestPath = resolve(candidateDirectory(root, profileName), "stage/release/stage-manifest.json");
   const manifest = readJson(stageManifestPath);
   const stageRoot = resolve(candidateDirectory(root, profileName), "stage");
-  const entries = manifest.sourceFiles.map((file) => ({
+  const sourceFiles = manifest.sourceFiles.map((file) => ({
     path: file.path,
     data: readFileSync(resolve(stageRoot, file.path)),
-  })).concat([
+  }));
+  const releaseEvidence = (Array.isArray(manifest.evidence) ? manifest.evidence : []).map((evidence) => ({
+    path: evidence.path,
+    data: readFileSync(resolve(stageRoot, evidence.path)),
+  }));
+  const releaseFiles = [
     { path: "release/checksums.sha256", data: readFileSync(resolve(stageRoot, "release/checksums.sha256")) },
     { path: "release/sbom.cdx.json", data: readFileSync(resolve(stageRoot, "release/sbom.cdx.json")) },
     { path: "release/stage-manifest.json", data: readFileSync(stageManifestPath) },
-  ]);
+  ];
+  const entries = sourceFiles.concat(releaseEvidence, releaseFiles);
   const scan = scanCandidateEntries(entries, manifest.visibility);
   const archivePath = resolve(root, receipt.packagePath);
   const archiveMatches = existsSync(archivePath) && sha256(readFileSync(archivePath)) === receipt.packageDigest;
@@ -640,9 +725,18 @@ export function scanStagedCandidate({ root = DEFAULT_ROOT, profileName = "privat
     const path = resolve(stageRoot, file.path);
     return existsSync(path) && statSync(path).isFile() && sha256(readFileSync(path)) === file.sha256;
   });
+  const evidenceMatches = (Array.isArray(manifest.evidence) ? manifest.evidence : []).every((evidence) => {
+    const path = resolve(stageRoot, evidence.path);
+    return existsSync(path) && statSync(path).isFile() && sha256(readFileSync(path)) === evidence.sha256;
+  });
   const stageManifestMatches = sha256(readFileSync(stageManifestPath)) === receipt.stageManifestDigest;
   const sbomMatches = sha256(readFileSync(resolve(stageRoot, "release/sbom.cdx.json"))) === receipt.sbomDigest;
   const checksumsMatch = sha256(readFileSync(resolve(stageRoot, "release/checksums.sha256"))) === receipt.checksumsDigest;
+  const checksumContentsMatch = readFileSync(resolve(stageRoot, "release/checksums.sha256")).equals(Buffer.from(checksumManifest([
+    ...sourceFiles,
+    ...releaseEvidence,
+    { path: "release/sbom.cdx.json", data: readFileSync(resolve(stageRoot, "release/sbom.cdx.json")) },
+  ])));
   const report = {
     schema: "morrow.package-scan-report.v1",
     profile: profileName,
@@ -650,11 +744,13 @@ export function scanStagedCandidate({ root = DEFAULT_ROOT, profileName = "privat
     packageDigest: receipt.packageDigest,
     archiveMatches,
     sourceFilesMatch,
+    evidenceMatches,
     stageManifestMatches,
     sbomMatches,
     checksumsMatch,
+    checksumContentsMatch,
     scan,
-    passed: archiveMatches && sourceFilesMatch && stageManifestMatches && sbomMatches && checksumsMatch && scan.passed,
+    passed: archiveMatches && sourceFilesMatch && evidenceMatches && stageManifestMatches && sbomMatches && checksumsMatch && checksumContentsMatch && scan.passed,
   };
   writeJson(resolve(root, "artifacts/release", `package-scan-${profileName}.json`), report);
   return report;
@@ -704,6 +800,9 @@ export function conformanceReport({ root = DEFAULT_ROOT, profileName = "private-
     { id: "external_live_receipts", passed: receipt?.externalReceipts?.passed === true },
     { id: "zero_tolerance_receipt", passed: receipt?.zeroTolerance?.passed === true },
     { id: "candidate_promotable", passed: receipt?.promotable === true },
+    { id: "promotion_receipts", passed: promotionReceiptState(root).passed },
+    { id: "current_zero_tolerance_evidence", passed: zeroToleranceState(root).passed },
+    { id: "stable_promotion_ready", passed: receipt?.stablePromotionReady === true },
   ];
   const report = {
     schema: "morrow.conformance-report.v1",

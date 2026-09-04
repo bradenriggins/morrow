@@ -91,7 +91,7 @@ describe("LoopbackBridgeServer", () => {
     const pairing = await created.json() as { approvalUrl: string; statusUrl: string };
     const decision = await fetch(`${pairing.approvalUrl}/decision`, {
       method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(pairing.approvalUrl).origin },
       body: "decision=approve",
       redirect: "manual",
     });

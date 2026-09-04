@@ -41,7 +41,8 @@
         "morrow.upstreams.connector.example.json",
         "morrow.upstreams.public-canvas.example.json",
         "scripts/generate-canvas-api-catalog.mjs",
-        "scripts/package-canvas-connector.mjs"
+        "scripts/package-canvas-connector.mjs",
+        "scripts/lib/deterministic-archive.mjs"
       ],
       "exclude": [
         "packages/*/test/",

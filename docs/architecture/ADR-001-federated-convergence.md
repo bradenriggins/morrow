@@ -29,7 +29,7 @@ The runtime has no dependency on legacy Morrow, ExamplePlatform, their extension
 - Each row has an explicit profile, authority, privacy, route, and verification disposition.
 - Reads execute only through a current runtime-verified binding.
 - Writes plan first and require separate local approval.
-- The model cannot approve an operation.
+- MCP exposes no operation-approval tool. Approval uses a separate local browser page. This prevents approval through the MCP surface; it does not prove human presence against software with local HTTP or browser control.
 - Each approved effect can dispatch once.
 - Provider readback, not dispatch response, determines verified success.
 - Ambiguous writes are never replayed automatically.

@@ -24,7 +24,9 @@ describe("Canvas API catalog", () => {
   it("publishes official Canvas and Item Bank operations in the public Canvas profile", () => {
     const tools = canvasCatalogTools(catalog);
     expect(tools).toHaveLength(catalog.counts.totalOperations);
-    expect(tools.filter((tool) => tool.capability?.profiles["public-canvas"].state !== "supported")).toEqual([]);
+    const held = tools.filter((tool) => tool.capability?.profiles["public-canvas"].state !== "supported");
+    expect(held).toHaveLength(6);
+    expect(held.every((tool) => tool.capability?.family === "new-quizzes-item-banks" && tool.annotations?.readOnlyHint === false)).toBe(true);
     expect(tools.filter((tool) => tool.capability?.family === "new-quizzes-item-banks")).toHaveLength(12);
   });
 });

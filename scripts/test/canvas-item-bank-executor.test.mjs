@@ -54,16 +54,16 @@ function input(nickname, argumentsValue) {
 
 test("all Item Bank operations use exact routes, methods, queries, and bodies", async () => {
   const cases = [
-    ["list_banks", { course_id: "42", page: 2, per_page: 50 }, "GET", "/api/banks?course_id=42&page=2&per_page=50", undefined],
+    ["list_banks", { course_id: "42", page: 2, per_page: 50, morrow_max_pages: 1 }, "GET", "/api/banks?course_id=42&page=2&per_page=50", undefined],
     ["get_bank", { bank_id: "91" }, "GET", "/api/banks/91", undefined],
-    ["list_entries", { bank_id: "91", page: 3, per_page: 20 }, "GET", "/api/banks/91/bank_entries?page=3&per_page=20", undefined],
+    ["list_entries", { bank_id: "91", page: 3, per_page: 20, morrow_max_pages: 1 }, "GET", "/api/banks/91/bank_entries?page=3&per_page=20", undefined],
     ["get_entry", { bank_id: "91", bank_entry_id: "401" }, "GET", "/api/banks/91/bank_entries/401", undefined],
     ["list_shares", { bank_id: "91" }, "GET", "/api/banks/91/shared_banks", undefined],
     ["create_bank", { title: "Question bank" }, "POST", "/api/banks", { bank: { title: "Question bank", language: "en" } }],
     ["archive_bank", { bank_id: "91" }, "DELETE", "/api/banks/91", undefined],
     ["attach_item", { bank_id: "91", item_id: "501" }, "POST", "/api/banks/91/bank_entries", { bank_entry: { bank_id: "91", entry_type: "Item", entry_id: "501" } }],
-    ["create_item", { bank_id: "91", item: { title: "Reusable question", interaction_type_slug: "essay" } }, "POST", "/api/banks/91/items", { title: "Reusable question", interaction_type_slug: "essay" }],
-    ["update_item", { bank_id: "91", item_id: "501", item: { title: "Revised question" } }, "PATCH", "/api/banks/91/items/501", { title: "Revised question" }],
+    ["create_item", { bank_id: "91", item: { title: "Reusable question", interaction_type_slug: "essay" } }, "POST", "/api/banks/91/items", { item: { title: "Reusable question", interaction_type_slug: "essay" } }],
+    ["update_item", { bank_id: "91", item_id: "501", item: { title: "Revised question" } }, "PATCH", "/api/banks/91/items/501", { item: { title: "Revised question" } }],
     ["delete_entry", { bank_id: "91", bank_entry_id: "401" }, "DELETE", "/api/banks/91/bank_entries/401", undefined],
     ["share_bank", { bank_id: "91", entity_type: "Course", entity_id: "42" }, "POST", "/api/banks/91/shared_banks", { shared_bank: { entity_id: "42", entityType: "Course", bank_id: "91", permission: "read" } }],
   ];
@@ -92,6 +92,11 @@ test("all Item Bank operations use exact routes, methods, queries, and bodies", 
       assert.equal(JSON.stringify(result).includes(token), false, nickname);
       assert.equal(JSON.stringify(result).includes("must not escape"), false, nickname);
     }
+    let calls = 0;
+    globalThis.fetch = async () => { calls += 1; return new Response("{}"); };
+    const probe = await executeItemBankInPage({ ...input("create_bank", { title: "Question bank" }), contextOnly: true });
+    assert.deepEqual(probe, { matched: true, ok: true, sent: false });
+    assert.equal(calls, 0);
   });
 });
 
@@ -122,5 +127,42 @@ test("Item Bank transport loss marks writes unknown and reads safe to repeat", a
     assert.deepEqual(write, { matched: true, ok: false, sent: true, outcomeUnknown: true, error: "item_bank_request_failed" });
     const read = await executeItemBankInPage(input("list_banks", {}));
     assert.deepEqual(read, { matched: true, ok: false, sent: false, outcomeUnknown: false, error: "item_bank_request_failed" });
+  });
+});
+
+test("Item Bank list reads stay course-bound and report bounded pagination", async () => {
+  await withPageContext(async () => {
+    let calls = 0;
+    globalThis.fetch = async (url) => {
+      calls += 1;
+      const page = new URL(url).searchParams.get("page");
+      return new Response(JSON.stringify([{ id: page }]), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const mismatched = await executeItemBankInPage(input("list_banks", { course_id: "43" }));
+    assert.deepEqual(mismatched, { matched: true, ok: false, sent: false, error: "item_bank_course_mismatch" });
+    assert.equal(calls, 0);
+
+    const result = await executeItemBankInPage(input("list_banks", { course_id: "42", morrow_max_pages: 2 }));
+    assert.equal(calls, 2);
+    assert.equal(result.pageCount, 2);
+    assert.equal(result.truncated, true);
+    assert.deepEqual(result.data, [{ id: "1" }, { id: "2" }]);
+  });
+});
+
+test("Item Bank lists flag sanitized and unknown collection data as incomplete", async () => {
+  await withPageContext(async () => {
+    globalThis.fetch = async (url) => {
+      const page = new URL(url).searchParams.get("page");
+      const data = page === "1" ? Array.from({ length: 10_001 }, () => ({})) : [];
+      return new Response(JSON.stringify(data), { status: 200, headers: { "content-type": "application/json" } });
+    };
+    const sanitized = await executeItemBankInPage(input("list_banks", { course_id: "42", morrow_max_pages: 2 }));
+    assert.equal(sanitized.truncated, true);
+    assert.equal(sanitized.data.length, 10_000);
+
+    globalThis.fetch = async () => new Response(JSON.stringify({ entries: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    const wrapped = await executeItemBankInPage(input("list_entries", { bank_id: "91", morrow_max_pages: 2 }));
+    assert.equal(wrapped.truncated, true);
   });
 });

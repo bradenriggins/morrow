@@ -16,6 +16,7 @@ Morrow `1.0.0-rc.0` is a local release candidate. It is not yet a stable public 
 - MindTap and Connect are not supported, listed, or callable.
 - The connector can act only with the permissions of the current signed-in Canvas user.
 - The connector needs an open, signed-in Canvas tab. Item Bank operations also need an authenticated New Quizzes frame for the selected tenant and course.
+- Six existing-bank mutation contracts are held pending complete dependency and affected-course evidence. Bank reads and creation remain enabled. A matching request contract does not establish safe cross-course effects.
 - The connector does not reuse authentication from ChatGPT, Claude, or another application's in-app browser.
 - Chrome grants optional site access per Canvas origin. A school that blocks extensions, frame execution, local WebSockets, or Canvas API access can prevent operation.
 - Content Security Policy or a future Canvas UI change can require a connector update. Catalog and browser tests detect known contract drift, but they cannot prevent provider changes.
@@ -25,13 +26,14 @@ Morrow `1.0.0-rc.0` is a local release candidate. It is not yet a stable public 
 - A provider timeout or lost response after send can become `applied_or_unknown`. Morrow does not replay it.
 - Large read results use bounded process-local handles. These handles do not survive a gateway restart.
 - Durable operation and batch state is local to one Morrow installation. It is not a hosted synchronization service.
+- Multiple clients can be configured, but only one can run the installation at a time. The Chrome bridge uses one local port. A second runtime reports the conflict and does not replace the existing bridge.
 - Morrow does not bypass Canvas role, course, account, New Quizzes, or Item Bank permissions.
 
 ## Security boundary
 
 The browser connector prevents credentials from entering MCP messages, client configuration, logs, or durable operation records. It does not protect a computer that is already compromised, a malicious Chrome extension with broader access, or a malicious local process running as the same operating-system user.
 
-The local approval page proves a separate human action at the Morrow loopback boundary. It is not multi-person institutional approval. Institutions can add their own policy outside Morrow.
+The local approval page requires a separate decision outside the MCP tool surface. It checks the local origin, page nonce, and browser cookie. It cannot prove human presence against software with local HTTP or browser control. It is not multi-person institutional approval.
 
 ## Release behavior
 

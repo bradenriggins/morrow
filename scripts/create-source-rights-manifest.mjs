@@ -54,6 +54,25 @@ const adaptedPrefixes = [
   "packages/upstream-mcp/",
 ];
 
+const thirdPartyFiles = new Map([
+  ["connector/extension/brand/GoogleSansFlex-latin.woff2", {
+    assetSha256: "843339f4e027cee857331299135de9f3be36fe2e23782c8f785262104ec5ad11",
+    copyright: "Copyright 2015 Google LLC. All Rights Reserved.",
+    license: "SIL-OFL-1.1",
+    licensePath: "connector/extension/brand/FONT-LICENSE.txt",
+    licenseSha256: "2ad6cadc54969a39d46fa01e37e5e78c54b9c06e4f0b15235a4105993a149126",
+    sourceUrl: "https://fonts.google.com/specimen/Google+Sans+Flex",
+  }],
+  ["connector/extension/brand/FONT-LICENSE.txt", {
+    assetSha256: "2ad6cadc54969a39d46fa01e37e5e78c54b9c06e4f0b15235a4105993a149126",
+    copyright: "Copyright 2015 Google LLC. All Rights Reserved.",
+    license: "SIL-OFL-1.1",
+    licensePath: "connector/extension/brand/FONT-LICENSE.txt",
+    licenseSha256: "2ad6cadc54969a39d46fa01e37e5e78c54b9c06e4f0b15235a4105993a149126",
+    sourceUrl: "https://openfontlicense.org",
+  }],
+]);
+
 const reviewer = option("--reviewer");
 const authorization = option("--authorization");
 const profiles = JSON.parse(readFileSync(resolve(root, "config/release-profiles.json"), "utf8"));
@@ -68,14 +87,23 @@ const files = git(["ls-tree", "-r", "--name-only", "HEAD"])
   .filter((path) => !(profile.exclude || []).some((rule) => matches(path, rule)))
   .sort()
   .map((path) => {
-    const disposition = adaptedPrefixes.some((prefix) => path.startsWith(prefix))
+    const thirdParty = thirdPartyFiles.get(path);
+    const bytes = tracked(path);
+    const digest = sha256(bytes);
+    if (thirdParty && thirdParty.assetSha256 !== digest) {
+      throw new Error(`third-party asset digest drift: ${path}`);
+    }
+    const disposition = thirdParty
+      ? "third_party_redistributable"
+      : adaptedPrefixes.some((prefix) => path.startsWith(prefix))
       ? "adapted_owned"
       : "direct_owned";
     return {
       path,
-      sha256: sha256(tracked(path)),
+      sha256: digest,
       disposition,
       review: `${authorization}; reviewer=${reviewer}; source=HEAD`,
+      ...(thirdParty ? { thirdParty } : {}),
     };
   });
 

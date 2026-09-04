@@ -6,6 +6,16 @@ export interface SourceRightsRecord {
   readonly sha256: string;
   readonly disposition: SourceDisposition;
   readonly review: string;
+  readonly thirdParty?: ThirdPartySourceEvidence;
+}
+
+export interface ThirdPartySourceEvidence {
+  readonly assetSha256: string;
+  readonly copyright: string;
+  readonly license: "SIL-OFL-1.1";
+  readonly licensePath: string;
+  readonly licenseSha256: string;
+  readonly sourceUrl: string;
 }
 
 export interface SourceRightsManifest {
@@ -22,6 +32,7 @@ const PUBLIC_DISPOSITIONS = new Set<SourceDisposition>([
   "direct_owned",
   "adapted_owned",
   "clean_reimplementation",
+  "third_party_redistributable",
 ]);
 const PRIVATE_MARKER = new RegExp(`(?:${["ch", "cp"].join("")}|${["meridian", "vps"].join("-")})`, "i");
 
@@ -31,6 +42,38 @@ function exactPath(value: unknown): string {
     throw new TypeError("source rights path is invalid");
   }
   return path;
+}
+
+function exactSha256(value: unknown, label: string, path: string): string {
+  const digest = typeof value === "string" ? value.toLowerCase() : "";
+  if (!/^[0-9a-f]{64}$/.test(digest)) throw new TypeError(`${label} is invalid for ${path}`);
+  return digest;
+}
+
+function thirdPartyEvidence(value: unknown, path: string, assetSha256: string): ThirdPartySourceEvidence {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`third-party source evidence is required for ${path}`);
+  }
+  const evidence = value as Record<string, unknown>;
+  const sourceUrl = typeof evidence.sourceUrl === "string" ? evidence.sourceUrl.trim() : "";
+  try {
+    if (new URL(sourceUrl).protocol !== "https:") throw new Error("unsupported protocol");
+  } catch {
+    throw new TypeError(`third-party source URL is invalid for ${path}`);
+  }
+  const copyright = typeof evidence.copyright === "string" ? evidence.copyright.trim() : "";
+  if (!copyright || copyright.length > 500) throw new TypeError(`third-party copyright is invalid for ${path}`);
+  if (evidence.license !== "SIL-OFL-1.1") throw new TypeError(`third-party license is invalid for ${path}`);
+  const evidenceAssetSha256 = exactSha256(evidence.assetSha256, "third-party asset digest", path);
+  if (evidenceAssetSha256 !== assetSha256) throw new TypeError(`third-party asset digest does not match ${path}`);
+  return {
+    sourceUrl,
+    copyright,
+    license: "SIL-OFL-1.1",
+    assetSha256: evidenceAssetSha256,
+    licensePath: exactPath(evidence.licensePath),
+    licenseSha256: exactSha256(evidence.licenseSha256, "third-party license digest", path),
+  };
 }
 
 export function parseSourceRightsManifest(value: unknown): SourceRightsManifest {
@@ -46,14 +89,27 @@ export function parseSourceRightsManifest(value: unknown): SourceRightsManifest 
     const path = exactPath(record.path);
     const disposition = record.disposition as SourceDisposition;
     if (!SOURCE_DISPOSITIONS.includes(disposition)) throw new TypeError(`source rights disposition is invalid for ${path}`);
-    const sha256 = typeof record.sha256 === "string" ? record.sha256.toLowerCase() : "";
-    if (!/^[0-9a-f]{64}$/.test(sha256)) throw new TypeError(`source rights digest is invalid for ${path}`);
+    const sha256 = exactSha256(record.sha256, "source rights digest", path);
     const review = typeof record.review === "string" ? record.review.trim() : "";
     if (!review || review.length > 500) throw new TypeError(`source rights review is invalid for ${path}`);
     if (paths.has(path)) throw new TypeError(`source rights path is duplicated: ${path}`);
     paths.add(path);
-    return { path, sha256, disposition, review };
+    const thirdParty = disposition === "third_party_redistributable"
+      ? thirdPartyEvidence(record.thirdParty, path, sha256)
+      : undefined;
+    if (disposition !== "third_party_redistributable" && record.thirdParty !== undefined) {
+      throw new TypeError(`third-party source evidence is only valid for third-party content: ${path}`);
+    }
+    return { path, sha256, disposition, review, ...(thirdParty ? { thirdParty } : {}) };
   });
+  const records = new Map(files.map((record) => [record.path, record]));
+  for (const record of files) {
+    if (!record.thirdParty) continue;
+    const licenseRecord = records.get(record.thirdParty.licensePath);
+    if (!licenseRecord || licenseRecord.sha256 !== record.thirdParty.licenseSha256) {
+      throw new TypeError(`third-party license record is invalid for ${record.path}`);
+    }
+  }
   return { schema: "morrow.source-rights.v1", files };
 }
 

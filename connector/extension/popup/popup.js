@@ -18,16 +18,23 @@ async function message(type, fields = {}) {
 function render(status) {
   current = status;
   pulse.classList.toggle("online", status.connected);
-  label.textContent = status.connected ? "Local MCP" : status.pairing ? "Pairing" : status.paired ? "Local MCP" : "Setup";
-  value.textContent = status.connected ? "Connected" : status.pairing ? "Waiting for approval" : status.paired ? "Starting connector…" : "Not paired";
+  label.textContent = status.connected || status.connecting ? "Local MCP" : status.pairing ? "Pairing" : status.paired ? "MCP offline" : "Setup";
+  value.textContent = status.connected ? "Ready" : status.pairing ? "Waiting for approval" : status.connecting ? "Connecting…" : status.paired ? "Waiting to reconnect" : "Not paired";
   const binding = status.bindings?.at(-1);
   account.hidden = !binding;
   accountOrigin.textContent = binding ? `${binding.origin}${binding.courseId ? ` · Course ${binding.courseId}` : ""}${status.bindingCount > 1 ? ` · ${status.bindingCount} accounts` : ""}` : "";
   disconnect.hidden = !status.paired;
-  primary.textContent = !status.paired ? "Connect to Morrow MCP" : "Connect this Canvas tab";
-  detail.textContent = !status.paired
-    ? "Start the Morrow MCP first. Then approve one local pairing page. No Canvas token is copied."
-    : "Open the exact signed-in Canvas course, then connect it. Morrow requests access only to that site.";
+  primary.disabled = Boolean(status.pairing || (status.paired && !status.connected));
+  primary.textContent = status.pairing ? "Waiting for approval" : !status.paired ? "Connect to Morrow MCP" : "Connect this Canvas tab";
+  detail.textContent = status.pairing
+    ? "Approve the local pairing page. This popup will update when you return."
+    : !status.paired
+      ? "Start the Morrow MCP first. Then approve one local pairing page. No Canvas token is copied."
+      : status.connecting
+        ? "Connecting to the Morrow MCP. This connector will update when the local bridge is ready."
+        : !status.connected
+        ? "The Morrow MCP is offline. Start or restart it. This connector will reconnect automatically."
+        : "Open the exact signed-in Canvas course, then connect it. Morrow requests access only to that site.";
 }
 
 async function refresh() {
@@ -73,7 +80,7 @@ primary.addEventListener("click", async () => {
   } catch (cause) {
     showError(cause);
   } finally {
-    primary.disabled = false;
+    primary.disabled = Boolean(current?.pairing || (current?.paired && !current?.connected));
   }
 });
 
@@ -88,6 +95,17 @@ disconnect.addEventListener("click", async () => {
   } finally {
     disconnect.disabled = false;
   }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) void refresh();
+});
+window.addEventListener("focus", () => void refresh());
+chrome.storage.onChanged.addListener((_changes, areaName) => {
+  if (areaName === "local") void refresh();
+});
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.type === "morrow_bridge_status_changed") void refresh();
 });
 
 await refresh();
