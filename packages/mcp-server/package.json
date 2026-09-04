@@ -29,5 +29,8 @@
     "@morrow/operation-journal": "workspace:*",
     "@morrow/upstream-mcp": "workspace:*",
     "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0"
   }
 }

@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+GIT_LOCAL_ENV_VARS=$(git rev-parse --local-env-vars)
+cd "$REPO_ROOT"
+unset $GIT_LOCAL_ENV_VARS
+
+pnpm test

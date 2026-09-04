@@ -99,6 +99,7 @@ describe("verifyLocalGitSourceAttestation", () => {
           root: fixture.root,
           expectedRevision: fixture.revision,
           requireTrackedClean: false,
+          allowedTrackedPaths: ["source.txt"],
         },
       )).toMatchObject({ verified: true, trackedClean: false });
     } finally {
