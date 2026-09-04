@@ -374,13 +374,20 @@ function externalReceiptSet(root, ids) {
     ? resolve(process.env.MORROW_EXTERNAL_RECEIPTS_PATH)
     : resolve(root, "artifacts/release/external-receipts.json");
   const supplied = existsSync(path) ? readJson(path) : { receipts: [] };
+  const binding = currentEvidenceBinding(root);
   const byId = new Map((Array.isArray(supplied.receipts) ? supplied.receipts : []).map((entry) => [entry.id, entry]));
   const receipts = ids.map((id) => {
     const entry = byId.get(id);
     const verified = entry?.status === "verified"
       && validDigest(entry.receiptDigest)
       && typeof entry.verifier === "string"
-      && typeof entry.verifiedAt === "string";
+      && entry.verifier.trim().length > 0
+      && typeof entry.verifiedAt === "string"
+      && Number.isFinite(Date.parse(entry.verifiedAt))
+      && entry.commit === binding.commit
+      && entry.catalogDigest === binding.catalogDigest
+      && entry.candidateDigests?.privateFull === binding.candidateDigests.privateFull
+      && entry.candidateDigests?.publicCanvas === binding.candidateDigests.publicCanvas;
     return {
       id,
       status: verified ? "verified" : "missing",
@@ -388,7 +395,7 @@ function externalReceiptSet(root, ids) {
       ...(verified ? { receiptDigest: entry.receiptDigest } : {}),
     };
   });
-  return { path: existsSync(path) ? path : null, receipts, passed: receipts.every((entry) => !entry.blocking) };
+  return { path: existsSync(path) ? path : null, binding, receipts, passed: receipts.every((entry) => !entry.blocking) };
 }
 
 function externalReceiptState(root) {
@@ -404,13 +411,37 @@ function zeroToleranceState(root) {
     ? resolve(process.env.MORROW_ZERO_TOLERANCE_RECEIPT_PATH)
     : resolve(root, "artifacts/release/zero-tolerance-receipt.json");
   const supplied = existsSync(path) ? readJson(path) : { checks: [] };
+  const binding = currentEvidenceBinding(root);
+  const bindingMatches = supplied.binding?.commit === binding.commit
+    && supplied.binding?.catalogDigest === binding.catalogDigest
+    && supplied.binding?.candidateDigests?.privateFull === binding.candidateDigests.privateFull
+    && supplied.binding?.candidateDigests?.publicCanvas === binding.candidateDigests.publicCanvas;
   const byId = new Map((Array.isArray(supplied.checks) ? supplied.checks : []).map((entry) => [entry.id, entry]));
   const checks = ZERO_TOLERANCE_TARGETS.map((id) => {
     const entry = byId.get(id);
-    const passed = entry?.status === "passed" && entry.count === 0 && validDigest(entry.receiptDigest);
+    const passed = bindingMatches && entry?.status === "passed" && entry.count === 0 && validDigest(entry.receiptDigest);
     return { id, status: passed ? "passed" : "missing", count: passed ? 0 : null, blocking: !passed };
   });
-  return { path: existsSync(path) ? path : null, checks, passed: checks.every((entry) => !entry.blocking) };
+  return { path: existsSync(path) ? path : null, binding, bindingMatches, checks, passed: checks.every((entry) => !entry.blocking) };
+}
+
+function currentEvidenceBinding(root) {
+  const receiptDigest = (profile) => {
+    const path = resolve(root, "artifacts/candidates", profile, "receipt.json");
+    if (!existsSync(path)) return null;
+    const receipt = readJson(path);
+    return validDigest(receipt.packageDigest) ? receipt.packageDigest : null;
+  };
+  const catalogPath = resolve(root, "artifacts/catalogs/merged-capabilities.json");
+  const catalog = existsSync(catalogPath) ? readJson(catalogPath) : {};
+  return {
+    commit: git(root, ["rev-parse", "HEAD"]).trim(),
+    catalogDigest: validDigest(catalog.digest) ? catalog.digest : null,
+    candidateDigests: {
+      privateFull: receiptDigest("private-full"),
+      publicCanvas: receiptDigest("public-canvas"),
+    },
+  };
 }
 
 export function validateAppendixCPathMap(root = DEFAULT_ROOT) {
