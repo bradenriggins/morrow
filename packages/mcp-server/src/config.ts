@@ -28,6 +28,7 @@ const OutputPrivacyDescriptorSchema = z.object({
   freeText: z.enum(["allow", "deny"]).default("deny"),
   learnerTokens: z.boolean().default(false),
   artifactInspection: z.enum(["deny", "text", "trusted-generated"]).default("deny"),
+  aiClientAdmission: z.enum(["allow", "deny"]).default("allow"),
 });
 
 const LocalGitAttestationSchema = z.object({

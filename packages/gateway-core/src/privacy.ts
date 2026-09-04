@@ -43,6 +43,7 @@ export interface OutputPrivacyDescriptor {
   readonly freeText: "allow" | "deny";
   readonly learnerTokens: boolean;
   readonly artifactInspection: "deny" | "text" | "trusted-generated";
+  readonly aiClientAdmission: "allow" | "deny";
 }
 
 export const DENY_ALL_OUTPUT: OutputPrivacyDescriptor = Object.freeze({
@@ -53,6 +54,7 @@ export const DENY_ALL_OUTPUT: OutputPrivacyDescriptor = Object.freeze({
   freeText: "deny",
   learnerTokens: false,
   artifactInspection: "deny",
+  aiClientAdmission: "deny",
 });
 
 export interface LearnerScope {
@@ -275,6 +277,7 @@ function privacyError(code: string): JsonObject {
 
 function exactDescriptor(value: OutputPrivacyDescriptor | undefined): OutputPrivacyDescriptor {
   const descriptor = value || DENY_ALL_OUTPUT;
+  const aiClientAdmission = descriptor.aiClientAdmission ?? "allow";
   if (
     !Array.isArray(descriptor.allowedFields)
     || !["public", "course", "learner"].includes(descriptor.dataClass)
@@ -282,8 +285,9 @@ function exactDescriptor(value: OutputPrivacyDescriptor | undefined): OutputPriv
     || !Number.isInteger(descriptor.maxBytes) || descriptor.maxBytes < 0 || descriptor.maxBytes > 10_000_000
     || !["allow", "deny"].includes(descriptor.freeText)
     || !["deny", "text", "trusted-generated"].includes(descriptor.artifactInspection)
+    || !["allow", "deny"].includes(aiClientAdmission)
   ) throw new TypeError("output privacy descriptor is invalid");
-  return descriptor;
+  return { ...descriptor, aiClientAdmission };
 }
 
 function learnerIdentity(value: JsonObject): LearnerIdentity | null {
@@ -311,11 +315,10 @@ function projectValue(value: unknown, descriptor: OutputPrivacyDescriptor, conte
   }
   for (const [key, child] of Object.entries(value)) {
     if (!descriptor.allowedFields.includes(key) || SENSITIVE_FIELDS.has(key)) continue;
-    if (
-      typeof child === "string"
-      && descriptor.freeText === "deny"
-      && (key === "html" || key === "body" || key === "content" || containsSensitiveText(child))
-    ) continue;
+    if (typeof child === "string") {
+      if (descriptor.freeText === "deny" && (key === "html" || key === "body" || key === "content")) continue;
+      if (containsSensitiveText(child)) throw new Error("privacy_sensitive_text_refused");
+    }
     const projected = projectValue(child, descriptor, context, depth + 1);
     if (projected !== undefined) output[key] = projected;
   }
@@ -342,6 +345,7 @@ function projectContent(
       if (descriptor.freeText !== "allow") {
         continue;
       }
+      if (containsSensitiveText(block.text)) throw new Error("privacy_sensitive_text_refused");
       if (Buffer.byteLength(block.text, "utf8") > descriptor.maxBytes) {
         throw new Error("privacy_byte_limit_exceeded");
       }
@@ -377,6 +381,7 @@ export function projectOutput(
   const descriptor = exactDescriptor(context.descriptor);
   if (!isJsonObject(value)) return privacyError("privacy_output_invalid");
   if (value.isError === true) return privacyError("upstream_error_sanitized");
+  if (descriptor.aiClientAdmission !== "allow") return privacyError("privacy_ai_client_admission_denied");
   try {
     const content = projectContent(value.content, descriptor, context);
     const structured = isJsonObject(value.structuredContent)

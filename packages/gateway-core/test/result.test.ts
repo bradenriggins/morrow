@@ -27,6 +27,7 @@ describe("normalizeUpstreamResult", () => {
           freeText: "allow",
           learnerTokens: false,
           artifactInspection: "deny",
+          aiClientAdmission: "allow",
         },
       },
     });

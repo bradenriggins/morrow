@@ -32,6 +32,7 @@ const learnerDescriptor = {
   freeText: "deny" as const,
   learnerTokens: true,
   artifactInspection: "deny" as const,
+  aiClientAdmission: "allow" as const,
 };
 
 function normalize(value: unknown, privacy: OutputPrivacyContext) {
@@ -78,6 +79,18 @@ describe("privacy output boundary", () => {
 
     expect(result.structuredContent).toMatchObject({ code: "privacy_output_denied" });
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
+  });
+
+  it("refuses sensitive values after free-text fields are selected", () => {
+    const textResult = normalize({
+      content: [{ type: "text", text: "Bearer top-secret" }],
+    }, { descriptor: { ...learnerDescriptor, freeText: "allow" } });
+    const fieldResult = normalize({
+      structuredContent: { status: "student@example.test" },
+    }, { descriptor: { ...learnerDescriptor, allowedFields: ["status"], freeText: "allow" } });
+
+    expect(textResult.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
+    expect(fieldResult.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
   });
 
   it("PRIV-04 refuses opaque artifacts without trusted generation", () => {
