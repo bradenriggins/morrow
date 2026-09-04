@@ -1,10 +1,1926 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
-  "status": "blocked-pending-per-file-review",
-  "entries": [],
+  "status": "reviewed",
+  "candidateCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+  "entries": [
+    {
+      "path": ".githooks/pre-commit",
+      "sourceCommit": "f61b8ca2d3f210fb8656d37b1554a73e8e8afa22",
+      "originalPath": ".githooks/pre-commit",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "64a84481c5ead0a19821df4635cec66f8c1431ddf91298406a0db849c279584f"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": ".github/workflows/ci.yml",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "670dd56c9f4dd2f7b159ece873aa4cfeb63995cc34d306eea15a84ba4bb11470",
+      "afterDigest": "ac17d14f53b324e2599dc0c0425565920669d1ec4cfad2f612cdebc54ff44e89"
+    },
+    {
+      "path": ".gitignore",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": ".gitignore",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "4102d398a17c01f6420f8bca793b93033774a337e7a34b1b77fc236f6b3d3c69",
+      "afterDigest": "8e40e30137868635d0088ec60c98ab3858f8ca2c0514f629be61e56f8deb3381"
+    },
+    {
+      "path": ".npmrc",
+      "sourceCommit": "3c75495883996c93a73f04867e1e40536a0a8d19",
+      "originalPath": ".npmrc",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a6b535050ffed7bf041c71335beb770abb893edc91eb663b0e54955cf9170758"
+    },
+    {
+      "path": "ARCHITECTURE.md",
+      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "originalPath": "ARCHITECTURE.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "b2a64339b7c31ecf57d86cf1a31a41c134780d2eeac66f4222617435c4868206",
+      "afterDigest": "7da970b1b2a4aa0f8976e7d6f27159d5ea6188942532414b2dae70a996324565"
+    },
+    {
+      "path": "LIMITATIONS.md",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "LIMITATIONS.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "f5950e41786d9b510d267c53fccccb1a565386f0ded56a3d483c0742f9e91287",
+      "afterDigest": "9da0229bc77a98998b25f59d05f90080e50f9d86c91cf3494014498d6437d53a"
+    },
+    {
+      "path": "README.md",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "README.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "fb7a6564bdcacf4828498be6e5eff41cb603206cf9679b8ba4ac88876fe1102d",
+      "afterDigest": "05acff3916acdb494aba0318e2be11a56367f4b856b8d7f398061027d82a82fb"
+    },
+    {
+      "path": "SOURCE-ORIGIN.md",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "SOURCE-ORIGIN.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "36bafdf00e6eaf35cf283091d629868bf8698effa97ef8c0b87a6553b688ba34",
+      "afterDigest": "d2f2b6c1331ae72ce4ebf6424d1c0e065afe7ef4ed4e7c25642b7cc155517e0d"
+    },
+    {
+      "path": "WEEKEND-HANDOFF.md",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "WEEKEND-HANDOFF.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "cf0f4e53b5a3b8828be61668b966fa164ad9edd16d2d2b1accd2f5f895bf51f7",
+      "afterDigest": "5cb1937abfa78934015f83b6afa3081d0ba8804e287e614998c3d92f6858c425"
+    },
+    {
+      "path": "artifacts/catalogs/.gitkeep",
+      "sourceCommit": "3c75495883996c93a73f04867e1e40536a0a8d19",
+      "originalPath": "artifacts/catalogs/.gitkeep",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "config/appendix-c-path-map.json",
+      "sourceCommit": "f9e0b0379c470dd15a77b277077fb0ca5cd6f74a",
+      "originalPath": "config/appendix-c-path-map.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "6e7b69bc07c25a61b395a28e8e7883e4f673552e3343cdd53207d1a9079d16c0",
+      "afterDigest": "29c4b1dbdc0f3e8e1eab1c4a112a2d1c2b98bb076ee406ac6646fbb74d6284cd"
+    },
+    {
+      "path": "config/catalog-aliases.proposed.json",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "config/catalog-aliases.proposed.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "fca4d0dffa7eb081a23d564e6c061e326f52897bfa9ab5bab93a5167c6ea5b2f",
+      "afterDigest": "0091009daf619fda66e2a3ce9aff25dea5859dd566c96d7ff81a02757c7ed65d"
+    },
+    {
+      "path": "config/publication-selections.example.json",
+      "sourceCommit": "387a43e0e43411564b669abe861617346f1ba736",
+      "originalPath": "config/publication-selections.example.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "7d190028ed7a3b0fe7253db06f67ac73f537ce8dc1d0da9323125c80533f8947"
+    },
+    {
+      "path": "config/release-profiles.json",
+      "sourceCommit": "f9e0b0379c470dd15a77b277077fb0ca5cd6f74a",
+      "originalPath": "config/release-profiles.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "b9a51f29cf0f5adfd68875f61c6fd49067654412969c0e6e15afe52ec801469c",
+      "afterDigest": "1b6c52a8744aa19efefac8961cb13fec6c4fbd2d8b1bc0cd15c7f416ded5cfe3"
+    },
+    {
+      "path": "config/source-rights.manifest.json",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "config/source-rights.manifest.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "214a3554e726d0a24dca0117d854d9f6b2b71020fbf3641e98080bc007a8ddea"
+    },
+    {
+      "path": "docs/architecture/ADR-001-federated-convergence.md",
+      "sourceCommit": "ca3605a84909de8cf139dce2fd2db9d0969eafdc",
+      "originalPath": "docs/architecture/ADR-001-federated-convergence.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "90ab2acd6e196ac452e7250fb24bdffe605bd6ddf8445d5a9940da5527431423"
+    },
+    {
+      "path": "docs/architecture/ADR-002-local-extension-bridge.md",
+      "sourceCommit": "a68353861b581b71ab7a9e349a70085bb090602a",
+      "originalPath": "docs/architecture/ADR-002-local-extension-bridge.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "8a64d7313080aa1ce3f8b1b17122e3b4adcaa25ba73955cc0dcc3ac0bb943047"
+    },
+    {
+      "path": "docs/implementation/APPENDIX-C-PATH-MAP.md",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "docs/implementation/APPENDIX-C-PATH-MAP.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "84fcc178eab13de5ccb84f827ddb7eb4ee2a5885b914ee8687c3ec0e3d7d159e"
+    },
+    {
+      "path": "docs/implementation/CATALOG-BASELINE-EXCEPTIONS.md",
+      "sourceCommit": "26eb6cda20f0384291718ae741398d7f094c4105",
+      "originalPath": "docs/implementation/CATALOG-BASELINE-EXCEPTIONS.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "f40c70b4b8149fa064ae75236cd5b6630202e69f333767d0a7454087795b5749"
+    },
+    {
+      "path": "docs/implementation/CATALOG-RECONCILIATION.md",
+      "sourceCommit": "26eb6cda20f0384291718ae741398d7f094c4105",
+      "originalPath": "docs/implementation/CATALOG-RECONCILIATION.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "82b5c65a6b8be56b5ff17562e0bbb35edbd2f9ef0cdf0cbcff57c743e7065210",
+      "afterDigest": "2b2cad733b4a1eb6b1e666e9c5a389429a053b0542bc226e98a19a785c62efef"
+    },
+    {
+      "path": "docs/implementation/MORROW-LEGACY-BRIDGE.md",
+      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "originalPath": "docs/implementation/MORROW-LEGACY-BRIDGE.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "fe6dfbaa7de04b7bfbce5f87bb32bd95776a0301582d6849838cf255ad8e9361",
+      "afterDigest": "d69b0cc2ecd0e1e4cd4488012321289e66f4d6b35e9ff93c06fbb6ae607d7ae5"
+    },
+    {
+      "path": "docs/implementation/EXAMPLE-WORKTREE.md",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "docs/implementation/EXAMPLE-WORKTREE.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "5e5b7cab493db20850f71a76c7171335e6df3a64dfa0e5fd7811c4b33a04e5a1",
+      "afterDigest": "fde10343ae1cdc6c4046aa4a52010d8225283f54043ee0b24439005d49897ad0"
+    },
+    {
+      "path": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "585ddcf69c575bd506c197d71f229216145b1d3c29d3b7e6c2c45cd9d688c955"
+    },
+    {
+      "path": "docs/sources/donor-manifest.json",
+      "sourceCommit": "ca3605a84909de8cf139dce2fd2db9d0969eafdc",
+      "originalPath": "docs/sources/donor-manifest.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "eb17c7ba5b657b634abd2ccd22313d41f901f094646653d751ba76df226d6753"
+    },
+    {
+      "path": "integrations/example-legacy/extension/morrow-gateway-bridge-bindings.js",
+      "sourceCommit": "e893e1bf0322a49de2adcc622919cdcb0540cea4",
+      "originalPath": "integrations/example-legacy/extension/morrow-gateway-bridge-bindings.js",
+      "ownership": "adapted",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "c43323877102a8560a696fbe44fb73d6e1d71ffcff387414362ec8906fd8cba6",
+      "afterDigest": "d3f7762a0759a29fa3e1c3c825606efb4aa2243b504636d09736060229801116"
+    },
+    {
+      "path": "integrations/example-legacy/extension/morrow-gateway-bridge-protocol.js",
+      "sourceCommit": "276c4617372a5c7a162f34df6c99640ece482427",
+      "originalPath": "integrations/example-legacy/extension/morrow-gateway-bridge-protocol.js",
+      "ownership": "adapted",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "11a23044083bdfb5137932a1cd0e47f0c52a2dfeaf6e8e8894e42876d9251b54"
+    },
+    {
+      "path": "integrations/example-legacy/extension/morrow-gateway-bridge-runtime.js",
+      "sourceCommit": "a16ab78a72d0e9600b6ac3c6e59ccb82a46993b7",
+      "originalPath": "integrations/example-legacy/extension/morrow-gateway-bridge-runtime.js",
+      "ownership": "adapted",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "a93502cf1d9cedeba2e2d42a1ad5cb908434ac3dde006fcd7eebf8fd3f0f16e7",
+      "afterDigest": "a002b60c2c1921c1045f8ce4f6f217b488fe73faea7dab32cdd21f5fc638e063"
+    },
+    {
+      "path": "integrations/example-legacy/extension/morrow-gateway-bridge.js",
+      "sourceCommit": "276c4617372a5c7a162f34df6c99640ece482427",
+      "originalPath": "integrations/example-legacy/extension/morrow-gateway-bridge.js",
+      "ownership": "adapted",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "f42d57897381f3eed8c0f690d20929ef0e4adcfd925a84a59f5224bcfe9fa00f"
+    },
+    {
+      "path": "integrations/example-legacy/extension/morrow-gateway-bridge.local.example.js",
+      "sourceCommit": "276c4617372a5c7a162f34df6c99640ece482427",
+      "originalPath": "integrations/example-legacy/extension/morrow-gateway-bridge.local.example.js",
+      "ownership": "adapted",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "7b3f82bb184db5c9f392699c34f96b2f102e6cc891c5fb8eaafe2ccc142b3671"
+    },
+    {
+      "path": "morrow.upstreams.example.json",
+      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "originalPath": "morrow.upstreams.example.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "3bd0cd6e59a064fe047e0254a396d92522fc3d51ac8036ea9304388d033395b6",
+      "afterDigest": "a24680c7fb565cddb688a667e7ceaf7fdc15c91e4ff95db86de5d24dca104496"
+    },
+    {
+      "path": "morrow.upstreams.meridian-private.example.json",
+      "sourceCommit": "08f77683d1d8152182b6d035fcdcca497c377f14",
+      "originalPath": "morrow.upstreams.meridian-private.example.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "2b1e51add32326927ee751944f80acd54c540c276d6b66ee66780f4fe6cd795a",
+      "afterDigest": "9e62b0b27a8b5fb8764e748aebe5bccc1c55be95b4d9e948ac2482b37055070b"
+    },
+    {
+      "path": "morrow.upstreams.public-canvas.example.json",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "morrow.upstreams.public-canvas.example.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "2b81dc43073bc316b5f2ae8a50b79ddd7a426ac80ebbf0dffc2f962f70a1d54c",
+      "afterDigest": "664b44493757f6d5bbcbe485453c76475a2b7b36eb6e0d05a67d9f8d0aca2607"
+    },
+    {
+      "path": "morrow.upstreams.read-only.example.json",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "morrow.upstreams.read-only.example.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "40826ca020e4b8dd4019e9e8125e377e8a239a88c9ff9641d474e8de70716a9c",
+      "afterDigest": "fbffabfe12a804f1b4eafe95cfe7b07114c7345fe3a69fc55d328c917d5d1ef3"
+    },
+    {
+      "path": "morrow.upstreams.sandbox.example.json",
+      "sourceCommit": "26eb6cda20f0384291718ae741398d7f094c4105",
+      "originalPath": "morrow.upstreams.sandbox.example.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "867f1b146d9b45f80049b1b2789807e35d4a6b5d8a0c143a0754fe544cd5fca9"
+    },
+    {
+      "path": "morrow.upstreams.with-legacy-bridge.example.json",
+      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "originalPath": "morrow.upstreams.with-legacy-bridge.example.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "260dfd485cb02fa736113b2fa02b66bff645b8457a87c41e644e9c0bf1a3521f",
+      "afterDigest": "591f64f9921eae17fca0e1a2332ccd221bd5590cc0e1479f4fc861686b8ae39a"
+    },
+    {
+      "path": "package.json",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "9b195fa51e912f2bb513145e1196e1a4eef93944a52fc2dd4bbc41ea5aa709fd",
+      "afterDigest": "e75c1e28014aa67b6fd03318b11452b374f018ebe89c12591562f16f489ccf1e"
+    },
+    {
+      "path": "packages/batch-engine/package.json",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/batch-engine/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "3817ad677d689b1d1bc0bc0e1ef8bd4d4cb90bee1ab62d7d465c9fe82c6fed47",
+      "afterDigest": "2c5ad591460319750b1932ff8109fc83a75d3958757ffd0cd1c8eaa175b42f14"
+    },
+    {
+      "path": "packages/batch-engine/src/facade.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/batch-engine/src/facade.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/batch-engine/test/batch-requirements.test.ts",
+        "packages/batch-engine/test/batch.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "91e419fd247ce0840fa5d7419dbf49a6e8f5efd60191bb705178308da57f829b",
+      "afterDigest": "c600a65b7f5d62833a95bb28251202cbae6ec80231b49d42ff6ff438de8f3db1"
+    },
+    {
+      "path": "packages/batch-engine/src/index.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/batch-engine/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/batch-engine/test/batch-requirements.test.ts",
+        "packages/batch-engine/test/batch.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "100a716e513f23c08df49689fe92ab33d1903749b346db0d3fc32351cf431149",
+      "afterDigest": "4f0c6dc97eca76077927f16f35431bb2cb54eb3ba88bce093c21b71fb2f6d719"
+    },
+    {
+      "path": "packages/batch-engine/src/node-sqlite-compat.d.ts",
+      "sourceCommit": "46d95cf1110eca429dd2248869c7927771d06f52",
+      "originalPath": "packages/batch-engine/src/node-sqlite-compat.d.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/batch-engine/test/batch-requirements.test.ts",
+        "packages/batch-engine/test/batch.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "8e1e61028b7e401b02c0edd747960d74b3511b0754c83afd8e85ba68265a798a"
+    },
+    {
+      "path": "packages/batch-engine/src/public.ts",
+      "sourceCommit": "a862bd80c8f38693a2a20baf096db853292926d2",
+      "originalPath": "packages/batch-engine/src/public.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/batch-engine/test/batch-requirements.test.ts",
+        "packages/batch-engine/test/batch.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "f2aa61b618036c65579a0d54868dc4c0f73af2632bcb8c81f6106c628c99c3a8",
+      "afterDigest": "e03729178de1b1f10729b6c8bf0da46a8ea5650d069682e3bf6ed0b286a123b3"
+    },
+    {
+      "path": "packages/batch-engine/src/recovery.ts",
+      "sourceCommit": "5b6fc8507db894535f1e17e35129b14ad06da7da",
+      "originalPath": "packages/batch-engine/src/recovery.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/batch-engine/test/batch-requirements.test.ts",
+        "packages/batch-engine/test/batch.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "d9ee9daa794e880875bc08212a6bd9a6dd1ee50e179c427bbacf8bbbe48ffd40"
+    },
+    {
+      "path": "packages/batch-engine/src/settlement.ts",
+      "sourceCommit": "ddbab5e44cd7e1c8b651e3c0038756aa2eafedad",
+      "originalPath": "packages/batch-engine/src/settlement.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/batch-engine/test/batch-requirements.test.ts",
+        "packages/batch-engine/test/batch.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "da2a54f7757b5c3c8fd9747c40fe8dc1a402b65e8d756ff98bf5ac6f37095ddd"
+    },
+    {
+      "path": "packages/batch-engine/test/batch-requirements.test.ts",
+      "sourceCommit": "0173b7efab207cc048984ad8fb61fa66153758b7",
+      "originalPath": "packages/batch-engine/test/batch-requirements.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "5abb2e782824628d62ece8ec5e2baf8531cee8f3baf2d2e11628b34a63f3fe43"
+    },
+    {
+      "path": "packages/batch-engine/test/batch.test.ts",
+      "sourceCommit": "c018fe184150f5ad23430e783b84191c0ecfed02",
+      "originalPath": "packages/batch-engine/test/batch.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d43d83301c817359e03e6636dae7b541b6738faf86e444a88b0a531939e3afbe",
+      "afterDigest": "467cc06ee741e0a9dcadbd541279c293c629a7231cfa0fd9544f16f71d7c945a"
+    },
+    {
+      "path": "packages/batch-engine/test/recovery.test.ts",
+      "sourceCommit": "e72a4ad11f3bc93b4cd557144b0f91c675204471",
+      "originalPath": "packages/batch-engine/test/recovery.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "c04d37c51e581de5613d3ea91aa94c48e13d464aed0c65fc8a3a3c53be3746c0"
+    },
+    {
+      "path": "packages/batch-engine/test/scale.test.ts",
+      "sourceCommit": "0173b7efab207cc048984ad8fb61fa66153758b7",
+      "originalPath": "packages/batch-engine/test/scale.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "626d8112a19897244e52f3704a949cd3ed193587fe73116e58e4eb4e1cc3703e",
+      "afterDigest": "ecf064c535090209c8553df0163697207e7cbd0e4b7dad1693672275086325b2"
+    },
+    {
+      "path": "packages/batch-engine/test/settlement.test.ts",
+      "sourceCommit": "c57acb3c7eaed850882ae97ca824d67f16bf2687",
+      "originalPath": "packages/batch-engine/test/settlement.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "ebd08a3432c974b2023e68c4444026cf7adba9eeec1c2b966c7092692eb64121"
+    },
+    {
+      "path": "packages/batch-engine/tsconfig.json",
+      "sourceCommit": "6efd2f1dd83e30dcb955d6f765c774d057a42ec9",
+      "originalPath": "packages/batch-engine/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/bridge-loopback/package.json",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/bridge-loopback/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "da7a9f8117e7a05620afa21174b85dbba31723d24a81bfaa550cfa6ebb4556eb",
+      "afterDigest": "26a1219eac42861ac761456f4854b8d790288f8f84172d6a7a665960b852ee65"
+    },
+    {
+      "path": "packages/bridge-loopback/src/index.ts",
+      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "originalPath": "packages/bridge-loopback/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/bridge-loopback/test/server.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "1560689548db42c6628ca0972508890db9307d363c30853fa8d41a167b631f3a",
+      "afterDigest": "c9540956dca93bbe5dcf3b67279e9f0db4dbb9fdfe733bb03288756d19dfe53f"
+    },
+    {
+      "path": "packages/bridge-loopback/test/server.test.ts",
+      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "originalPath": "packages/bridge-loopback/test/server.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "f81f79a0b59e2d7996e275313f61edd146f371c4d8fc2c4202110048bf739ace",
+      "afterDigest": "97f2e75388d2ce43ecb6586598c66a5fd2f8def4fa05ba363b4b0c1f360e946c"
+    },
+    {
+      "path": "packages/bridge-loopback/tsconfig.json",
+      "sourceCommit": "970ca57edbbc5768bb93913814cf540739579b56",
+      "originalPath": "packages/bridge-loopback/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/bridge-protocol/package.json",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/bridge-protocol/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "fe9f4ef28dfcfda50e55baff042f5a493b25b4a217c595de0bf52ab208ac4f0a",
+      "afterDigest": "dce9603c1566ff818147146d1d7a4d7a983159b474cbe07e4f752015faa2a43f"
+    },
+    {
+      "path": "packages/bridge-protocol/src/index.ts",
+      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "originalPath": "packages/bridge-protocol/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/bridge-protocol/test/protocol.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "7097814805261644ced06b64d8e284d3436a39d1593fbf52e72a31ba3116744c",
+      "afterDigest": "b970f64b2e9b256a935c576312fb2f3f8861f105617ea91b43b358aaf650b5ed"
+    },
+    {
+      "path": "packages/bridge-protocol/test/protocol.test.ts",
+      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "originalPath": "packages/bridge-protocol/test/protocol.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "ea5a27e0953cfbdd560f64a03c437d83d3a183f1c3ed1a384b5829200ce92b6a",
+      "afterDigest": "5f5953fdedc4e316e9d039e3266146c72f4b7d9886f577eb1cd19c1ff6a83a03"
+    },
+    {
+      "path": "packages/bridge-protocol/tsconfig.json",
+      "sourceCommit": "970ca57edbbc5768bb93913814cf540739579b56",
+      "originalPath": "packages/bridge-protocol/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/client-config/package.json",
+      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "originalPath": "packages/client-config/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "b99d7c729e8c12fab49cdf6d670f7cbafbc8fd40e73b4f58163b73feddbbe4c6",
+      "afterDigest": "c04488a174a5085a28845bc6d4b8186ae3a31cc12be5d82f0eda3738a0e6307e"
+    },
+    {
+      "path": "packages/client-config/src/cli.ts",
+      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "originalPath": "packages/client-config/src/cli.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/client-config/test/client-config.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "2b5ca7010213bd36b340f71c40d79a81e4e5a844fc70252dc617bce36bc42d65",
+      "afterDigest": "f01b7017d23ba121ab72565a81ee1e9f9e12319af372ec14f2e3d02cd9d96285"
+    },
+    {
+      "path": "packages/client-config/src/index.ts",
+      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "originalPath": "packages/client-config/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/client-config/test/client-config.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "ac1d0e00433a10062527a0bb2880720e90ffd60f54094c2b27b715b0f9ab4524",
+      "afterDigest": "2cd29b134996decfee4bee16293a09271a60b2af7f60198df1bb8fa4c76db717"
+    },
+    {
+      "path": "packages/client-config/test/client-config.test.ts",
+      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "originalPath": "packages/client-config/test/client-config.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "9020bfdbedb8854249989b0e046a214c5abbacb650e84eddd70575d0e47fc59b",
+      "afterDigest": "67577f8c8cb8904597186dbe05820c9924410dbed525467a4da5b2b18b1651b4"
+    },
+    {
+      "path": "packages/client-config/tsconfig.json",
+      "sourceCommit": "c90c0876d1b09883c714578fce50ae5a14dd5324",
+      "originalPath": "packages/client-config/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/contracts/package.json",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/contracts/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "b336b210df5e7bd631108c2d1c17793181cd0785b554c7e60c643512eb6183cf",
+      "afterDigest": "9d6c6dc71568dc0edaadbde61ab6e2a6b37bb15345dee31676664de0e40d0f91"
+    },
+    {
+      "path": "packages/contracts/src/index.ts",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "packages/contracts/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d4e4648c4ea80e715802d544fa96d1c071fec7ba14d0c4c57ee5d285c0ab0685",
+      "afterDigest": "f748aab8c3a8f03e5599253f5a92b33a205352bc9d807511f6eb9c5b174ff0e2"
+    },
+    {
+      "path": "packages/contracts/tsconfig.json",
+      "sourceCommit": "3c75495883996c93a73f04867e1e40536a0a8d19",
+      "originalPath": "packages/contracts/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/gateway-core/package.json",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/gateway-core/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d52d18df70baea416cdf8735832a69a5bba0a48a6588c8238bc3fa66a98785c8",
+      "afterDigest": "d61020f04bc515344a4b8620f89152d9381ab70b1cde380aaefc2fc55b3803ba"
+    },
+    {
+      "path": "packages/gateway-core/src/catalog.ts",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "packages/gateway-core/src/catalog.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/gateway-core/test/catalog.test.ts",
+        "packages/gateway-core/test/native-controls.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "ddb314d37230d0e82a1937e1867c48dbcca23f16b37204738605b10f431ce18a",
+      "afterDigest": "7e783b263da9be57d4111914940284f5663657e53f10e59239b64f0113a61485"
+    },
+    {
+      "path": "packages/gateway-core/src/index.ts",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "packages/gateway-core/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/gateway-core/test/catalog.test.ts",
+        "packages/gateway-core/test/native-controls.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "1d197b16a221448447847f1d204599783c0b17da10ffb5b4d510d990fbe69529",
+      "afterDigest": "3dc2d55ed5d3ecb816cdfbca322d8ceb611f968910638d3a21b55e23183685a0"
+    },
+    {
+      "path": "packages/gateway-core/src/privacy.ts",
+      "sourceCommit": "336452e2a410f9da864abb1bbe367eb24c752f64",
+      "originalPath": "packages/gateway-core/src/privacy.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/gateway-core/test/catalog.test.ts",
+        "packages/gateway-core/test/native-controls.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "7b02bf7dda49d2385e022a42349f4e92d82e64fdf0228ec0105fdea825865539",
+      "afterDigest": "7dc38bff611bf024616156c6fabc5ce1e2eb3acc8eb9d9e65f6afbcf134c72e8"
+    },
+    {
+      "path": "packages/gateway-core/src/publication-candidate.ts",
+      "sourceCommit": "5ce6aa573430eacb155f457ab31feecd449eb511",
+      "originalPath": "packages/gateway-core/src/publication-candidate.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/gateway-core/test/catalog.test.ts",
+        "packages/gateway-core/test/native-controls.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "47b1e77b8c4d6536194f35f43dfb942d9ebb1e97ab28aa796b39eebe2937379b"
+    },
+    {
+      "path": "packages/gateway-core/src/publication.ts",
+      "sourceCommit": "26eb6cda20f0384291718ae741398d7f094c4105",
+      "originalPath": "packages/gateway-core/src/publication.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/gateway-core/test/catalog.test.ts",
+        "packages/gateway-core/test/native-controls.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "4d13c0b534fd44215cac21f8661792f5821fa1fd37272daeb92f8617a06a091b",
+      "afterDigest": "17fe7d673792b1bb1730833b5c2af8c6e1ec738b084793f6fb33539f3e47b178"
+    },
+    {
+      "path": "packages/gateway-core/src/reconcile.ts",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "packages/gateway-core/src/reconcile.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/gateway-core/test/catalog.test.ts",
+        "packages/gateway-core/test/native-controls.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d12439d7512148842032be0f28aebc8d5f7539bad165f4709a4f302168748847",
+      "afterDigest": "278b77596e39c7c906b73f97a12365d4ce3d72d8980fc2991c856fd283480832"
+    },
+    {
+      "path": "packages/gateway-core/src/result.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/gateway-core/src/result.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/gateway-core/test/catalog.test.ts",
+        "packages/gateway-core/test/native-controls.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d3c4947e132942d2a6c6b689c270aa0bf1619186c222e174aaa5d153e8812f78",
+      "afterDigest": "40cfb440457cd28fb3cacd31fd5ed846e7db5e87f1119e0600dfb1ed8f9aaf2c"
+    },
+    {
+      "path": "packages/gateway-core/src/source-rights.ts",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "packages/gateway-core/src/source-rights.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/gateway-core/test/catalog.test.ts",
+        "packages/gateway-core/test/native-controls.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "060a87376d8078b83c0bf04721782fb884628d5d2bbc47339b7a9d54beeb0805"
+    },
+    {
+      "path": "packages/gateway-core/test/catalog.test.ts",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "packages/gateway-core/test/catalog.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "b0052c78e64172901b755c79ef80d00e24f3e5c95e51e0ad124b2361973ff1d1",
+      "afterDigest": "4b1b98fd55aaab8cdc27db36a24921f0e1d17ad8a4c03be9608af75756d4be75"
+    },
+    {
+      "path": "packages/gateway-core/test/native-controls.test.ts",
+      "sourceCommit": "546e29c4d547223e9a013b166948166787fa6b14",
+      "originalPath": "packages/gateway-core/test/native-controls.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "7feb95ebc9cb869d04b1b6b974e5bcfcc03affc04c7c8954d169bc8debe50dbb"
+    },
+    {
+      "path": "packages/gateway-core/test/privacy.test.ts",
+      "sourceCommit": "336452e2a410f9da864abb1bbe367eb24c752f64",
+      "originalPath": "packages/gateway-core/test/privacy.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "469003df8d6c024f172ec1ff79b8c9d81fe3dbca893a478f25b26fae5cc9126c",
+      "afterDigest": "03363cc309439e1a4e9a0b7454eb41869928b30dc32c7e769d1d754b8b5e6b5b"
+    },
+    {
+      "path": "packages/gateway-core/test/publication-candidate.test.ts",
+      "sourceCommit": "5b53e0e577484c8e30f2c298a674689724f2221f",
+      "originalPath": "packages/gateway-core/test/publication-candidate.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "7cfb325c2967b3172b1650b1deb9704f3504d13d4fa569681a1f23da8ac1b6b1"
+    },
+    {
+      "path": "packages/gateway-core/test/publication.test.ts",
+      "sourceCommit": "760c1b80869f412a22343f484fe488de3f827751",
+      "originalPath": "packages/gateway-core/test/publication.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "02a68cf61665b95df071d46c8467a9a92b4463e4913c472fbbbb68e6c04eeed4"
+    },
+    {
+      "path": "packages/gateway-core/test/reconcile.test.ts",
+      "sourceCommit": "26eb6cda20f0384291718ae741398d7f094c4105",
+      "originalPath": "packages/gateway-core/test/reconcile.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "ba10be579d5128ea6f85a677edf49a0c73905a8d0b991d16ef70c8573c4e2b1c",
+      "afterDigest": "278439f1e167eb5549e468642762ca689587322768f0733e6f72a9bbc2bfe765"
+    },
+    {
+      "path": "packages/gateway-core/test/result.test.ts",
+      "sourceCommit": "336452e2a410f9da864abb1bbe367eb24c752f64",
+      "originalPath": "packages/gateway-core/test/result.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "c66211e3a99e6e933c3acd97ff4fc0f5dfc72cb971faf1c369463f1a4ff2ff54",
+      "afterDigest": "a4957073013e86edef15b4b46270f9b037a8a7bcd82958f7e20f26f3c744a6a0"
+    },
+    {
+      "path": "packages/gateway-core/test/source-rights.test.ts",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "packages/gateway-core/test/source-rights.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "f0ade38c6faee171a6aea9fc1f8bd847d253031fe21e3cc163f011b4327c868e"
+    },
+    {
+      "path": "packages/gateway-core/tsconfig.json",
+      "sourceCommit": "3c75495883996c93a73f04867e1e40536a0a8d19",
+      "originalPath": "packages/gateway-core/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/legacy-bridge-mcp/package.json",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/legacy-bridge-mcp/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "9bf0618973299a315dd8200e9359358aea62678ec01fbe9d396409b7ad5c4d21",
+      "afterDigest": "3060eddc5ac69926a949259bf198013be47e0078dc48d858f4d3643e4785a6fd"
+    },
+    {
+      "path": "packages/legacy-bridge-mcp/src/config.ts",
+      "sourceCommit": "12239dbd69921875752c14dbeee9de81240c063a",
+      "originalPath": "packages/legacy-bridge-mcp/src/config.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/legacy-bridge-mcp/test/runtime.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "0ddc727640fd6569794690ea8407930c8044e70082d48928c5925282f98824ea"
+    },
+    {
+      "path": "packages/legacy-bridge-mcp/src/index.ts",
+      "sourceCommit": "12239dbd69921875752c14dbeee9de81240c063a",
+      "originalPath": "packages/legacy-bridge-mcp/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/legacy-bridge-mcp/test/runtime.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "9d59d550b51019ae1cfda1d32cef4d8cdd494eefe1835ba6c0194c2fcb11e05d"
+    },
+    {
+      "path": "packages/legacy-bridge-mcp/src/runtime.ts",
+      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "originalPath": "packages/legacy-bridge-mcp/src/runtime.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/legacy-bridge-mcp/test/runtime.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "4cdb360007e2fc792549a5e3a2fae05f72b227004284773dfb7f778bff4aa7ba",
+      "afterDigest": "3d09f02a4dfbdc1fe7ee2d257039164f22e665fd993fc0054c7e2e8b1fa2d381"
+    },
+    {
+      "path": "packages/legacy-bridge-mcp/src/server.ts",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/legacy-bridge-mcp/src/server.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/legacy-bridge-mcp/test/runtime.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "ffb249c56167bfea0e89ed9d633c3257c7e7495e14760602755edafc5df20871",
+      "afterDigest": "73e776916a641d3568948fe667cf70ed6fe7f10b99bb54d28eeb79ed338224f3"
+    },
+    {
+      "path": "packages/legacy-bridge-mcp/test/runtime.test.ts",
+      "sourceCommit": "12239dbd69921875752c14dbeee9de81240c063a",
+      "originalPath": "packages/legacy-bridge-mcp/test/runtime.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "dc789d7ab95bd8a53e7c9d296e0826e572bb7da2ddef4d22ef1161fa2fcbc1e6"
+    },
+    {
+      "path": "packages/legacy-bridge-mcp/tsconfig.json",
+      "sourceCommit": "12239dbd69921875752c14dbeee9de81240c063a",
+      "originalPath": "packages/legacy-bridge-mcp/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/mcp-server/package.json",
+      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "originalPath": "packages/mcp-server/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "50a54decab29896334b4259f9a0a29fdca278c313962fe683dbaa8a9c6354cae",
+      "afterDigest": "43d2e090de01bfa504a3935791bcc89f6b067439cb23e7dd18f3e14281693b1a"
+    },
+    {
+      "path": "packages/mcp-server/src/approval-entry.ts",
+      "sourceCommit": "f9e0b0379c470dd15a77b277077fb0ca5cd6f74a",
+      "originalPath": "packages/mcp-server/src/approval-entry.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "1f04f84f95ae689407114bcf3b25500f76d1adfcc8c3effeedb4a20af92b4aab"
+    },
+    {
+      "path": "packages/mcp-server/src/approval-server.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/mcp-server/src/approval-server.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "32aec26d061ebbb9bd6d85e78a4c635aec718cff189941a8a8ac75c892383363",
+      "afterDigest": "e1dfcc0ac19321dea72295886c89fd90ac1465f4155f3781b670cebcf036af45"
+    },
+    {
+      "path": "packages/mcp-server/src/batch-recovery.ts",
+      "sourceCommit": "0173b7efab207cc048984ad8fb61fa66153758b7",
+      "originalPath": "packages/mcp-server/src/batch-recovery.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "c7f86a4f3ac9631ac15d1e8e17cfd2a531ad3c2db86b6eb263573df614c2f1fe",
+      "afterDigest": "af21afa79f22c09bd576619a9de3818c3308ffe9702ddbe1eb8645cb8af98135"
+    },
+    {
+      "path": "packages/mcp-server/src/batch-tools.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/mcp-server/src/batch-tools.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "0182cf9ebcc5ded1258947ee5dcbcee73ec50a5b355313daebc6409b0fbad51b",
+      "afterDigest": "db30c01b2557fd7f65bb0a55431038c2addbce3b291337b24894af1fc69b3f40"
+    },
+    {
+      "path": "packages/mcp-server/src/batch-window-scheduler.ts",
+      "sourceCommit": "8117d9f23ac18608d08769891f3b292d1b898965",
+      "originalPath": "packages/mcp-server/src/batch-window-scheduler.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "828bee4c84f9377da64e86d3bdafff484a27713f73cc6f15bf18c099bfd0710b"
+    },
+    {
+      "path": "packages/mcp-server/src/config.ts",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "packages/mcp-server/src/config.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "3c27a3eb89f0f05f0af365d24e62399cee1626c5456d5697f0bef544b8bbc05a",
+      "afterDigest": "ad06d5d7a57949695310ab0ebb40399f0805aee81a590ba66b6d67fffe9ad529"
+    },
+    {
+      "path": "packages/mcp-server/src/full-server.ts",
+      "sourceCommit": "56018bd10c9751d230aee2140869d9c0cdc11e24",
+      "originalPath": "packages/mcp-server/src/full-server.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "4560d4a6668588b2ea9805d269658c2d66361180104b8b4f6d218bd2185ec47e",
+      "afterDigest": "afcae9e11086855d012afa0cddaac0484e09a6e6f716c5e23965c15dd7fa865b"
+    },
+    {
+      "path": "packages/mcp-server/src/index.ts",
+      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "originalPath": "packages/mcp-server/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d1be5a452267c98c4e3263ffb5797b9a2bd0f9c4b74fad96737ad040e7589873",
+      "afterDigest": "a234d78b9a742ea20026071c0e0f0680e7931e52f9a8062ed4ff8c2e81746989"
+    },
+    {
+      "path": "packages/mcp-server/src/meridian-catalog-truth.ts",
+      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "originalPath": "packages/mcp-server/src/meridian-catalog-truth.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "18665f0eb33327f49331d224055035144a5e53b3e1639b73925c21919dff22c9"
+    },
+    {
+      "path": "packages/mcp-server/src/meridian-runtime-adapter.ts",
+      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "originalPath": "packages/mcp-server/src/meridian-runtime-adapter.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "667f85b4d6e130c77e17162c4bee4b02c925f13d12bdc2957c5b602b4c2e2fa3"
+    },
+    {
+      "path": "packages/mcp-server/src/morrow-runtime.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/mcp-server/src/morrow-runtime.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "9a9bb42b9eaf8253b9e576d54fad57e4e0c523d5cd5d43fbfa2714bb816faf98",
+      "afterDigest": "67aedc0e7a6fb96f32d70353fcde111c1343a4f0a6ec86e120838fb6a5140773"
+    },
+    {
+      "path": "packages/mcp-server/src/operation-tools.ts",
+      "sourceCommit": "7f6735531e8ec2594c4ec8be851a8a6ba0563cc2",
+      "originalPath": "packages/mcp-server/src/operation-tools.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "6b1131d0133c5fc62bb6218194439170f5ba38b70a196a0343a6ca2567927a11",
+      "afterDigest": "bb0795a6072bd868e3f14173413fe05444f1798171301867369370b51cf8aafc"
+    },
+    {
+      "path": "packages/mcp-server/src/result-artifacts.ts",
+      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "originalPath": "packages/mcp-server/src/result-artifacts.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "2c5c23c70c6938c916f3989586e15dcb7ba5c6f6f54e47304c765ce750978a2a"
+    },
+    {
+      "path": "packages/mcp-server/src/runtime.ts",
+      "sourceCommit": "08f77683d1d8152182b6d035fcdcca497c377f14",
+      "originalPath": "packages/mcp-server/src/runtime.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "0c38729af28c586fff8917d2cbe8d3278f44099fc39c2aaccc2d4013c5a1e7ef",
+      "afterDigest": "941ce16a29a2fa56a8891bb6042edfad743624426e976a0249782fdfa09f1f7e"
+    },
+    {
+      "path": "packages/mcp-server/src/server-instructions.ts",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "packages/mcp-server/src/server-instructions.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "153bf6e01ac8ed738ba058947a073b4f68597d6a1b8b1af1bb13304723553249",
+      "afterDigest": "a27e0a697ed7f4025e071a8536e6d2a5c390c5b085fcf503efabe703bc285b28"
+    },
+    {
+      "path": "packages/mcp-server/src/server.ts",
+      "sourceCommit": "56018bd10c9751d230aee2140869d9c0cdc11e24",
+      "originalPath": "packages/mcp-server/src/server.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "17743b7deb07bf23747d8564e91e9ffa75e664ec13e094b53d51dd4d28bd59e1",
+      "afterDigest": "ca77819d14d4520eff6226b3c3ecccfb7227c5750dcee544a9a6e24a2dc8e79a"
+    },
+    {
+      "path": "packages/mcp-server/src/source-attestation.ts",
+      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "originalPath": "packages/mcp-server/src/source-attestation.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "f544d142d565fe93f6440afcb14c9d4816ad1021d4f862a85ecd45237997176e",
+      "afterDigest": "a50af315ec1b556d5d01c1296827b5e6030cd5bd64bd92efc73cf55602f79c18"
+    },
+    {
+      "path": "packages/mcp-server/src/state-lease.ts",
+      "sourceCommit": "28bf08f10eff2bfb30812672b4e3f2853cefe382",
+      "originalPath": "packages/mcp-server/src/state-lease.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a11a5ca18997e4404ae87d8b0fa9bfe6d03f44d598e5e4783511e4487a20e63f"
+    },
+    {
+      "path": "packages/mcp-server/src/strict-stdio.ts",
+      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "originalPath": "packages/mcp-server/src/strict-stdio.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/attestation.integration.test.ts",
+        "packages/mcp-server/test/batch-window-scheduler.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "ba4000ed70afc14992741b4f6983b5da89a28ea629422b1edcded4304aa672d5"
+    },
+    {
+      "path": "packages/mcp-server/test/attestation.integration.test.ts",
+      "sourceCommit": "8b656e10963b0f76c1ac5b833e8bdad3a93856c3",
+      "originalPath": "packages/mcp-server/test/attestation.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "3a868cb99ae754cd42b08c9aaa03e294147c47ea3d7a74321d966990d10a37d9",
+      "afterDigest": "aee3e425b85976666930d7816a79d118a854dbf70636e8951cfb507da070fb7d"
+    },
+    {
+      "path": "packages/mcp-server/test/batch-window-scheduler.test.ts",
+      "sourceCommit": "b5c2affb36b1d143ef8bcd6aa1da2b8e1d58e41c",
+      "originalPath": "packages/mcp-server/test/batch-window-scheduler.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "9be37e4880e3d4d0ffd29d9e49059cc17ee237c96b35694d38c51525e5a913f0",
+      "afterDigest": "f4a264b4b8660ad1281782e05e595e9ea87bf3d5a27352f0e7147ad944adbfed"
+    },
+    {
+      "path": "packages/mcp-server/test/batch.integration.test.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/mcp-server/test/batch.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "9ff6420dcb9da13959fa35120e2391ef6e8d9086bf17c51b90d48ec40edcd14e",
+      "afterDigest": "e6b13a8ec4094d866f44a8fad740db4a03ab89555a9ede14dee1f648ac2e08b3"
+    },
+    {
+      "path": "packages/mcp-server/test/config-attestation.test.ts",
+      "sourceCommit": "46d343328c24fba34d1f677bc43ff7418f86c1e1",
+      "originalPath": "packages/mcp-server/test/config-attestation.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "f55dc4add37b6358e8d6e75c906b3d6b8932e2d86001b4088fac3d70ec9bd0eb"
+    },
+    {
+      "path": "packages/mcp-server/test/config.test.ts",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "packages/mcp-server/test/config.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "7340d2b4414a95fd1a08634ca82ae9c23313e3545c26d3e5416a51bc89338793",
+      "afterDigest": "1188a6db18a5dbd3ba432ee9535ac5fcc025cbd87fc857c34d3d077c620ad77e"
+    },
+    {
+      "path": "packages/mcp-server/test/fixtures/fake-batch-upstream.mjs",
+      "sourceCommit": "5c6dacfb251473db733276e22d60d1e1b4c6cdf8",
+      "originalPath": "packages/mcp-server/test/fixtures/fake-batch-upstream.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "12d435c564bf0463908c154f6d561a4f44f8415ea68ebd7b8f8611b70a161cd3",
+      "afterDigest": "fe1945632ddba117075b1cda3e0c6881d167a23b73036bc0149b68cc3df7db93"
+    },
+    {
+      "path": "packages/mcp-server/test/fixtures/fake-reconnecting-upstream.mjs",
+      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "originalPath": "packages/mcp-server/test/fixtures/fake-reconnecting-upstream.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "58db769ed4eaaaa9dfbeebecd608a3341a876a966de0e0b5cd9e6e78dd17d519"
+    },
+    {
+      "path": "packages/mcp-server/test/fixtures/fake-upstream.mjs",
+      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "originalPath": "packages/mcp-server/test/fixtures/fake-upstream.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "8282d8f02a06c152665b027cde48c6ffdf04c943a006fbde7770b0b88ccc3241",
+      "afterDigest": "b9352c63532f992fed99c234f862ca97b9a8e79428bda318c89cad881bd5f668"
+    },
+    {
+      "path": "packages/mcp-server/test/gateway.integration.test.ts",
+      "sourceCommit": "7f6735531e8ec2594c4ec8be851a8a6ba0563cc2",
+      "originalPath": "packages/mcp-server/test/gateway.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "922c1cacebde290e0c95649c3f7efbcfc08f78d57eb32a5e1c9c40e7c330d924",
+      "afterDigest": "82dd6339bc41a9e44031e7ccc337c05a3bb3c83a920f145226870db542ce7bd4"
+    },
+    {
+      "path": "packages/mcp-server/test/legacy-read-routing.integration.test.ts",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "packages/mcp-server/test/legacy-read-routing.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "f89e6e3fa33949386ce8e75e217b647c15db07bdb283f9861a04c822b431bc68",
+      "afterDigest": "305e4126f9b09d1e83fc32a329d073067039923fd6b8242d887836737f35fbac"
+    },
+    {
+      "path": "packages/mcp-server/test/meridian-runtime.test.ts",
+      "sourceCommit": "08f77683d1d8152182b6d035fcdcca497c377f14",
+      "originalPath": "packages/mcp-server/test/meridian-runtime.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "7ecd88061bd0364902767bf2a7d7f014cb9647b35e1e4a8bb3aa4e61477b7dc1",
+      "afterDigest": "b6c7d460a1d438f8176b8bde3b4cbac58d2a5090f37c7d43d11b2e7df39a03b5"
+    },
+    {
+      "path": "packages/mcp-server/test/operations.integration.test.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/mcp-server/test/operations.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "04d7f68f916d74c0e6f300ae1f1dba6b7bc856ea61837af028cf2c06ce14a612",
+      "afterDigest": "e1b68ad8e9371fcde0f68a2d1e1a4fd050e2c866a3c459a39871b7a76c8f1f9f"
+    },
+    {
+      "path": "packages/mcp-server/test/protocol.integration.test.ts",
+      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "originalPath": "packages/mcp-server/test/protocol.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "3f679a1eb59a0c4f50d0ec89f0cec288df709bafeaf467ae945ba01486fcc493"
+    },
+    {
+      "path": "packages/mcp-server/test/public-profile-config.test.ts",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "packages/mcp-server/test/public-profile-config.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "c3568b2b855edcb873f0b8feb17fee65efee44fb6c7c5cb9107a674cad9fb9e7",
+      "afterDigest": "d82a8ce55e644d0435b26cd02486b3da74624459d8bd34af9a7c0f176746e13e"
+    },
+    {
+      "path": "packages/mcp-server/test/public-profile.integration.test.ts",
+      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "originalPath": "packages/mcp-server/test/public-profile.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "38be9e3bc55983d6c0e0665fcd48094396b67fbde80175fd271184cef391fe1a",
+      "afterDigest": "845fc08e1910f7b79d85b94f44779432294750ce2521c10cd2a33e6ba0985a3f"
+    },
+    {
+      "path": "packages/mcp-server/test/server-instructions.test.ts",
+      "sourceCommit": "9c57f18bf6b5702810b36133f5fee9c6ba271a1d",
+      "originalPath": "packages/mcp-server/test/server-instructions.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "fc45f62b7e0c75d5498fd8216a93833de87a22a9c3ed412cac4ee508aa14d1c8"
+    },
+    {
+      "path": "packages/mcp-server/test/source-attestation.test.ts",
+      "sourceCommit": "f61b8ca2d3f210fb8656d37b1554a73e8e8afa22",
+      "originalPath": "packages/mcp-server/test/source-attestation.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "77fe9965f6f22929bee83db8cd61bee8f5f0ce32559ce0e901c0e25d690cc11e",
+      "afterDigest": "916b36278aced8d3bec3acbe938518956a77d9b7c27e91aa3efa0b28cb063589"
+    },
+    {
+      "path": "packages/mcp-server/test/state-lease.test.ts",
+      "sourceCommit": "0a7184289246646b3da4ee71d74212487a67eba1",
+      "originalPath": "packages/mcp-server/test/state-lease.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "e0f24a832c211efa9ecf9de64757de1e365b2a896dd22449dafbc78c9654a382"
+    },
+    {
+      "path": "packages/mcp-server/test/stdio-entry.integration.test.ts",
+      "sourceCommit": "7f6735531e8ec2594c4ec8be851a8a6ba0563cc2",
+      "originalPath": "packages/mcp-server/test/stdio-entry.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d7acfafb41ba99ae1e684bef7accd1b21c51f18514b402efebb76a349d0e9518",
+      "afterDigest": "4617b3f64a01d50cd3510b8c993a9ae5acfcf282717edbeb18775151ac31f0fe"
+    },
+    {
+      "path": "packages/mcp-server/tsconfig.json",
+      "sourceCommit": "24ec6146cd2579c83b18b15d3d97a69faa42eda6",
+      "originalPath": "packages/mcp-server/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/operation-journal/package.json",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/operation-journal/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d0b36011fcb446b45dd1779cd4cd132a88d38bfb20c7fa573afc377e8e5bd0b9",
+      "afterDigest": "e2e8fba13b7c75f14ebfefa3adecaf23e5f6e51799df4d6be244854b704ade25"
+    },
+    {
+      "path": "packages/operation-journal/src/effect-broker.ts",
+      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "originalPath": "packages/operation-journal/src/effect-broker.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/operation-journal/test/effect-broker.test.ts",
+        "packages/operation-journal/test/journal.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "c0763074994cde3e1b4ddba0e76b015b06dd758d9a94e5dd091874484c3e7d0d",
+      "afterDigest": "2d0d23b879918555c689b4d9737fbe3ca0c0d2a0e89a24d68820f52ec7409551"
+    },
+    {
+      "path": "packages/operation-journal/src/index.ts",
+      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "originalPath": "packages/operation-journal/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/operation-journal/test/effect-broker.test.ts",
+        "packages/operation-journal/test/journal.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "373d82e320260763681f1104ab10abb305beb5e8f4b8fedddfacdd0e184c16ff",
+      "afterDigest": "efb467b7089063de3e8d0e9708d6d1e955fff9f22e7b1aaa2a59443ccccebae3"
+    },
+    {
+      "path": "packages/operation-journal/test/effect-broker.test.ts",
+      "sourceCommit": "7f6735531e8ec2594c4ec8be851a8a6ba0563cc2",
+      "originalPath": "packages/operation-journal/test/effect-broker.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "3ce8a89a69a6f957c4a078a875f704c79151a0d5cdf531a327e23476f0414bc4",
+      "afterDigest": "6f4384fcd736e5e80c33847b0f17104cb1c13d1b2db228530efe84d6d4116225"
+    },
+    {
+      "path": "packages/operation-journal/test/journal.test.ts",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "packages/operation-journal/test/journal.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "0a8d8c74b60cd5a9d098a9aaa3f457ad56138f2668c673da02f2322cc88048f2",
+      "afterDigest": "2871e501a2ae59bbefcbc5cb6803bc3f73b44a16d95f8bcfeb0ee7fbe1733d0c"
+    },
+    {
+      "path": "packages/operation-journal/tsconfig.json",
+      "sourceCommit": "be961a8c4ab1a055e52edd5090f6f509394c06f6",
+      "originalPath": "packages/operation-journal/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/upstream-mcp/package.json",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "packages/upstream-mcp/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "d60fdeb4aa1c47059c99e1b4170d3a74606480e46419463d5ae5acd04bb3edba",
+      "afterDigest": "9dc5b0af7987486f67ecfbb7c535177dda8d4663b1d0639302c33573750d8275"
+    },
+    {
+      "path": "packages/upstream-mcp/src/index.ts",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "packages/upstream-mcp/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "f0a8efa127570c7a17b57a7af6d500a502d2b2ed73a8e8d19cc74dda14c47e03",
+      "afterDigest": "285a95d73e042bcebebe7535726c4617ef0dc5ae7a7e6a8f0a4e4b3fbb03efa3"
+    },
+    {
+      "path": "packages/upstream-mcp/src/strict-stdio.ts",
+      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "originalPath": "packages/upstream-mcp/src/strict-stdio.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "9b7ceef3241ed09b785251b7c3c90b5855427b65178a80a30132a9849bc6b671"
+    },
+    {
+      "path": "packages/upstream-mcp/tsconfig.json",
+      "sourceCommit": "24ec6146cd2579c83b18b15d3d97a69faa42eda6",
+      "originalPath": "packages/upstream-mcp/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "originalPath": "pnpm-lock.yaml",
+      "ownership": "generated",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "fbb8f2315139dc6dcea82ff957527ab37dbddb917588ee267b7d711991d9aaed",
+      "afterDigest": "0190f242cceb31bf4d0c3cfd57984eae26c16e7deed69495fc0b6066f6a8fd20"
+    },
+    {
+      "path": "pnpm-workspace.yaml",
+      "sourceCommit": "3c75495883996c93a73f04867e1e40536a0a8d19",
+      "originalPath": "pnpm-workspace.yaml",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "d115dc6c83ba283a7d17146ad456056f3f70b003edb8c312a52880b48b034001"
+    },
+    {
+      "path": "scripts/capture-upstream-catalog.mjs",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "scripts/capture-upstream-catalog.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "ffc700b64e446cbc9dc9192ec5a3d85ba48281af4b8da3b5dce1fe918a7b0b2b",
+      "afterDigest": "0213f5090f6c94d24a37f25a7d4e177d06160573dd0d113d8ca48abaad995d8e"
+    },
+    {
+      "path": "scripts/catalog-report.mjs",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "scripts/catalog-report.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "5fe0826abff29b38ff1234c6c10848042753ecc34fd38153d3f2d1b2b137af64",
+      "afterDigest": "154e5be1b5688028afc2c820bcfc829277ef3692bb72d3e22478a1bc13e38a72"
+    },
+    {
+      "path": "scripts/check-catalog-artifacts.mjs",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "scripts/check-catalog-artifacts.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "6a7fe231003437d4bf212ba826e37810aa00f094816a86d297b702f27be77195",
+      "afterDigest": "6983f514011454392d24cd15106dc62335acb6c6e3fcdc337546a4cc07dac10c"
+    },
+    {
+      "path": "scripts/conformance-report.mjs",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "scripts/conformance-report.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "ff9fb9a6f2a653a552747e6c9e38f0a74e0622ed4cebd72a17adba62a56a9821"
+    },
+    {
+      "path": "scripts/create-publication-policy.mjs",
+      "sourceCommit": "1c170977dbe74ed98d03699cb39d83dcce8eb150",
+      "originalPath": "scripts/create-publication-policy.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "5e43429f25ab0596e857fcfee9552f612c9cb677f8674199873e0c4e30bbfce6"
+    },
+    {
+      "path": "scripts/create-source-origin-ledger.mjs",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "scripts/create-source-origin-ledger.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "84835e2f5cbd2f5e165c3ebf5b8bfd2a762c05de3fb9cef4aca5db2d103ccfda"
+    },
+    {
+      "path": "scripts/export-example-legacy-catalog.mjs",
+      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "originalPath": "scripts/export-example-legacy-catalog.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "eab68c49e15346ef3fbcf886c7e11b2b2b734f5665178e71e75e149b006f705d",
+      "afterDigest": "67c2ad99de42a59a878469e707bf77600da4c126bab6937db79d88ae7d65ea93"
+    },
+    {
+      "path": "scripts/install-example-legacy-bridge.mjs",
+      "sourceCommit": "276c4617372a5c7a162f34df6c99640ece482427",
+      "originalPath": "scripts/install-example-legacy-bridge.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "f312caf0a59103917d269570472af80fc26177486a870b3c4f620dc487326a62"
+    },
+    {
+      "path": "scripts/lib/legacy-bridge-overlay.mjs",
+      "sourceCommit": "276c4617372a5c7a162f34df6c99640ece482427",
+      "originalPath": "scripts/lib/legacy-bridge-overlay.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "522ebff984efe1ad0b997644b0431a79a6a9a4c33cca3b619d0dfeb31d440f09"
+    },
+    {
+      "path": "scripts/lib/release-candidate.mjs",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "scripts/lib/release-candidate.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "b4895217c9ed5d3217dabf7b4f22a3b4c03d67826c6aaabcaad25f0881073cea",
+      "afterDigest": "cdb5d7f72580ec3097c514a2d1b827bca6688f90aa6e5147662f04b9481158d7"
+    },
+    {
+      "path": "scripts/package-profile.mjs",
+      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "originalPath": "scripts/package-profile.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "6fc88ec099c65dee07791c2242020e37c29c3163801ca8ee50fbf4c4d4b10c77",
+      "afterDigest": "fd3beedb8bfe0a07adfb90c65cf30249c4242a9f3a35cc760fccc711447b1e44"
+    },
+    {
+      "path": "scripts/reconcile-catalogs.mjs",
+      "sourceCommit": "e43d879c4890bcde71310583314bc6852e88c038",
+      "originalPath": "scripts/reconcile-catalogs.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "5e34f2106e495bb1342776df6ced833a6daa6fd1196d2202e2f50a2d6304a424"
+    },
+    {
+      "path": "scripts/remove-example-legacy-bridge.mjs",
+      "sourceCommit": "276c4617372a5c7a162f34df6c99640ece482427",
+      "originalPath": "scripts/remove-example-legacy-bridge.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "3c88f98db8c8461af404215adbd0c7f154e02905a3deb46036c79bf18a73f459"
+    },
+    {
+      "path": "scripts/scan-held-provider-inputs.mjs",
+      "sourceCommit": "26eb6cda20f0384291718ae741398d7f094c4105",
+      "originalPath": "scripts/scan-held-provider-inputs.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "462e97c8fc05a22467de586b6e2773f99c1c4deff0b1dbd7b54ed383d00d2356"
+    },
+    {
+      "path": "scripts/test/legacy-bridge-overlay.test.mjs",
+      "sourceCommit": "276c4617372a5c7a162f34df6c99640ece482427",
+      "originalPath": "scripts/test/legacy-bridge-overlay.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "6e01299f6540be402af6811ac688f4080595d8d4b7609645f17b13e7682cbdde"
+    },
+    {
+      "path": "scripts/test/publication-policy.test.mjs",
+      "sourceCommit": "1cf36be2fb4de797a10cdddaa34ec48d8e74dad1",
+      "originalPath": "scripts/test/publication-policy.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a1914b01e866ef1fe11f1c0a175f6f925ff1bc03f4952216615626e2e3cb4fd2"
+    },
+    {
+      "path": "scripts/test/release-gates.test.mjs",
+      "sourceCommit": "f9e0b0379c470dd15a77b277077fb0ca5cd6f74a",
+      "originalPath": "scripts/test/release-gates.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "071b6b762ea8fcd8e9ada0abee94f2fe6ade18d037fd85e9169deabd495e1f1d",
+      "afterDigest": "e0e8a814d7eaa0cb9210b47953e119ea2a9126de9269a8497a4d4d52478cdbe5"
+    },
+    {
+      "path": "scripts/test/source-rights-cli.test.mjs",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "scripts/test/source-rights-cli.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "994f19d1855bcaf8a1b8f7de57255f65b0cc7c3db2e1bbd8dc35ecd20c5a8724"
+    },
+    {
+      "path": "scripts/validate-source-rights.mjs",
+      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "originalPath": "scripts/validate-source-rights.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "edf6ab9deab5aaeadad9bc7218764463624426b83d5b522e123aebc99fe8d00f"
+    },
+    {
+      "path": "scripts/weekend-check.mjs",
+      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "originalPath": "scripts/weekend-check.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "846879a0a4c70af98ae5a09e82e17cd7694156884825c975951479329d865352"
+    },
+    {
+      "path": "tsconfig.base.json",
+      "sourceCommit": "3c75495883996c93a73f04867e1e40536a0a8d19",
+      "originalPath": "tsconfig.base.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "87fe4790e8f588c357efa665a1215777a8b284df559dc7c21591674f988a0e68"
+    }
+  ],
   "notes": [
-    "A release candidate is blocked until every staged source file has one reviewed entry.",
-    "An entry must bind the original path, ownership classification, dependencies, test mapping, reviewer, and before/after digests.",
-    "This empty ledger is intentional. It prevents local staging from being mistaken for public-source approval."
+    "Entries bind every tracked candidate source to its last source commit and current file digest.",
+    "Extra entries are allowed because private and public profiles include different reviewed subsets.",
+    "This technical origin review does not grant public source rights or publication authorization."
   ]
 }
