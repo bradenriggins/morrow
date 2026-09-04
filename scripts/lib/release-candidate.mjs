@@ -590,6 +590,19 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
   return receipt;
 }
 
+export function stageCandidateSet({
+  root = DEFAULT_ROOT,
+  profileNames,
+  verifyRebuild = false,
+}) {
+  for (const profileName of profileNames) {
+    stageCandidate({ root, profileName, verifyRebuild });
+  }
+  return profileNames.map((profileName) => (
+    stageCandidate({ root, profileName, verifyRebuild })
+  ));
+}
+
 export function readCandidateReceipt(root = DEFAULT_ROOT, profileName = "private-full") {
   const path = resolve(candidateDirectory(root, profileName), "receipt.json");
   if (!existsSync(path)) return null;
