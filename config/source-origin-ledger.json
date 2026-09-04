@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "fbe0ee9d9fa06dfc091603e0cef25bdca8193d68",
+  "candidateCommit": "e9cb2a61837dcd9f7b8da5904d2c1f779d8a5ed5",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -2061,6 +2061,17 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "063db10d0f621d2bf1e64a258da6d7d09c190d433b428a9cefb741db7de1d56c",
       "afterDigest": "13ee7082cf98529b769bddd62b531f526e3ba7a7cb30e8897c0848d60bce65c1"
+    },
+    {
+      "path": "scripts/create-zero-tolerance-receipt.mjs",
+      "sourceCommit": "e9cb2a61837dcd9f7b8da5904d2c1f779d8a5ed5",
+      "originalPath": "scripts/create-zero-tolerance-receipt.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "7e79d21965fdde6ca43ef448db362618df4d32aa5927fbefe0a50e3be943a131"
     },
     {
       "path": "scripts/export-example-legacy-catalog.mjs",
