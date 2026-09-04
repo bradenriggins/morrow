@@ -27,6 +27,27 @@ The upstream example files and the gateway config default `filters.excludePrefix
 
 The upstream example files set `maxCatalogTools` to `1000`. The gateway config schema accepts a positive integer through `5000` and defaults to `1000`.
 
+## Release-candidate boundary
+
+`1.0.0-rc.0` identifies a local candidate format. It is not a tag, publication,
+provider authorization, or release claim.
+
+`pnpm package:rc` can create deterministic local bytes and a receipt that binds
+them to one commit and tree. The receipt remains non-promotable until these
+external receipts are verified:
+
+- authorized live Canvas proof;
+- client-parity proof;
+- independent clean-machine reproduction; and
+- publication authorization.
+
+The candidate also blocks until every staged source file has a reviewed
+source-origin ledger entry and every zero-tolerance check has a zero-count
+receipt. `pnpm weekend:check` and `pnpm conformance:report` must fail while any
+of these records are absent. The Appendix C implementation map is
+`config/appendix-c-path-map.json`; it records current architecture paths and
+does not make deferred donor-owned behavior release-ready.
+
 ## Stop conditions
 
 Stop the branch when any change would do one of these acts. This list comes from `docs/implementation/EXAMPLE-WORKTREE.md`:

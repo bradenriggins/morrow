@@ -88,7 +88,7 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
   const server = new McpServer(
     {
       name: "morrow",
-      version: "1.0.0-alpha.1",
+      version: "1.0.0-rc.0",
     },
     {
       instructions: MORROW_SERVER_INSTRUCTIONS,

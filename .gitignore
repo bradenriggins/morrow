@@ -9,5 +9,7 @@ morrow.upstreams.json
 .morrow/
 artifacts/catalogs/*.json
 !artifacts/catalogs/.gitkeep
+artifacts/candidates/
+artifacts/release/
 .DS_Store
 Thumbs.db

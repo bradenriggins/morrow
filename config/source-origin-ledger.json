@@ -1,0 +1,10 @@
+{
+  "schema": "morrow.source-origin-ledger.v1",
+  "status": "blocked-pending-per-file-review",
+  "entries": [],
+  "notes": [
+    "A release candidate is blocked until every staged source file has one reviewed entry.",
+    "An entry must bind the original path, ownership classification, dependencies, test mapping, reviewer, and before/after digests.",
+    "This empty ledger is intentional. It prevents local staging from being mistaken for public-source approval."
+  ]
+}

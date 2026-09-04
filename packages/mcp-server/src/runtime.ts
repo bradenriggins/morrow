@@ -579,7 +579,7 @@ export class GatewayRuntime {
     const sources = [...this.upstreams.values()].map((upstream) => upstream.health());
     return {
       schema: "morrow.health.v1",
-      version: "1.0.0-alpha.1",
+      version: "1.0.0-rc.0",
       ready: sources.every((source) => (
         !source.required
         || (

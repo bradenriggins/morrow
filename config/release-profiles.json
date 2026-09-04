@@ -1,0 +1,31 @@
+{
+  "schema": "morrow.release-profiles.v1",
+  "candidateVersion": "1.0.0-rc.0",
+  "profiles": {
+    "private-full": {
+      "visibility": "private",
+      "include": ["*"],
+      "exclude": ["packages/*/test/", "scripts/test/"],
+      "description": "Complete tracked convergence source for local evidence only. It is not a publication payload."
+    },
+    "public-canvas": {
+      "visibility": "public",
+      "include": [
+        "package.json",
+        "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
+        "tsconfig.base.json",
+        "packages/contracts/",
+        "packages/gateway-core/",
+        "packages/mcp-server/",
+        "packages/operation-journal/",
+        "packages/upstream-mcp/",
+        "packages/batch-engine/",
+        "docs/release/",
+        "config/publication-selections.example.json"
+      ],
+      "exclude": ["packages/*/test/"],
+      "description": "Reviewed Canvas-oriented source projection. External source rights, policy authorization, live proof, and independent reproduction remain required."
+    }
+  }
+}

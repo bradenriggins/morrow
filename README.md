@@ -21,6 +21,16 @@ Checkpoint C now adds the bounded Morrow legacy extension bridge. It presents th
 
 Canvas is the initial provider. MindTap and Connect are removed from the merged catalog and remain outside supported claims pending written permission or formal developer terms.
 
+## Local RC evidence only
+
+The workspace uses version `1.0.0-rc.0` for local candidate semantics. It does
+not publish or tag software. `pnpm package:rc` creates deterministic local
+candidate bytes, scans included source, docs, examples, JSON, and source maps,
+and writes a commit-bound receipt. `pnpm weekend:check` remains blocked until
+the source-origin ledger, all zero-tolerance evidence, authorized live Canvas
+proof, client parity, independent reproduction, and publication authorization
+are present. See [LIMITATIONS.md](LIMITATIONS.md).
+
 ## Quick start with ExamplePlatform
 
 Requirements:
