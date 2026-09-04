@@ -528,6 +528,41 @@ export class ProviderEffectBroker {
     });
   }
 
+  settleInnerApproval(
+    operationIdValue: string,
+    outcome: "ready_for_readback" | "failed_no_effect" | "effect_unknown",
+  ): EffectOperationRecord {
+    const operationId = identifier(operationIdValue, "operation id");
+    const now = this.instant();
+    return this.transaction(() => {
+      const current = this.get(operationId);
+      if (current.state !== "awaiting_inner_approval") {
+        throw new Error(`inner operation cannot settle from ${current.state}`);
+      }
+      const state: EffectOperationState = outcome === "ready_for_readback"
+        ? "awaiting_verification"
+        : outcome === "failed_no_effect"
+          ? "failed"
+          : "applied_or_unknown";
+      const attention = outcome === "ready_for_readback"
+        ? ["fresh_readback_required"]
+        : outcome === "failed_no_effect"
+          ? ["inner_operation_failed_without_effect"]
+          : ["inner_operation_effect_unknown"];
+      this.database.prepare(`
+        UPDATE provider_effect_operations
+        SET state=?, attention_json=?, updated_at=?, terminal_at=? WHERE operation_id=?
+      `).run(
+        state,
+        JSON.stringify(attention),
+        now,
+        state === "awaiting_verification" ? null : now,
+        operationId,
+      );
+      return this.get(operationId);
+    });
+  }
+
   settleFailure(operationIdValue: string, detail: unknown, mayHaveApplied: boolean): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
     const now = this.instant();

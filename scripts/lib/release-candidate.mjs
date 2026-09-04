@@ -40,7 +40,10 @@ const DOS_TIME = ((0 << 11) | (0 << 5) | 0) >>> 0;
 const DOS_DATE = (((2020 - 1980) << 9) | (1 << 5) | 1) >>> 0;
 
 function git(root, args, encoding = "utf8") {
-  return execFileSync("git", ["-C", root, ...args], { encoding });
+  return execFileSync("git", ["-C", root, ...args], {
+    encoding,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
 }
 
 export function sha256(value) {

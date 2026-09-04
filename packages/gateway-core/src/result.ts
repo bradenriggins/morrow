@@ -23,9 +23,14 @@ export interface CanonicalMorrowResultInput {
   readonly result?: JsonObject;
   readonly operationId?: string;
   readonly tool: string;
+  readonly backend?: string;
   readonly phase: string;
+  readonly status?: string;
+  readonly completeness?: "complete" | "limited" | "unknown";
   readonly effectState?: string;
   readonly verificationStatus: "not_applicable" | "not_requested" | "unconfirmed" | "verified";
+  readonly verificationProvider?: string;
+  readonly verificationEvidence?: readonly JsonObject[];
   readonly attention?: readonly string[];
   readonly limitations?: readonly string[];
   readonly receipts?: JsonObject;
@@ -37,6 +42,19 @@ export function canonicalMorrowResult(input: CanonicalMorrowResultInput): JsonOb
     ? structuredClone(upstream.structuredContent)
     : null;
   const meta = isJsonObject(upstream._meta) ? structuredClone(upstream._meta) : {};
+  const status = input.status || (upstream.isError === true
+    ? "failed"
+    : input.verificationStatus === "verified"
+      ? "verified"
+      : input.effectState === "awaiting_approval" || input.effectState === "awaiting_inner_approval"
+        ? "awaiting_approval"
+        : input.effectState === "applied_or_unknown"
+          ? "indeterminate"
+          : input.verificationStatus === "unconfirmed"
+            ? "unconfirmed"
+            : "succeeded");
+  const completeness = input.completeness
+    || (upstream.isError === true ? "unknown" : input.limitations?.length ? "limited" : "complete");
   return {
     content: Array.isArray(upstream.content)
       ? structuredClone(upstream.content)
@@ -45,16 +63,21 @@ export function canonicalMorrowResult(input: CanonicalMorrowResultInput): JsonOb
     structuredContent: {
       schema: "morrow.result.v1",
       tool: input.tool,
+      backend: input.backend || "gateway",
+      status,
       phase: input.phase,
+      completeness,
       ...(input.operationId ? { operationId: input.operationId } : {}),
       ...(input.effectState ? { effectState: input.effectState } : {}),
       verification: {
         status: input.verificationStatus,
+        ...(input.verificationProvider ? { provider: input.verificationProvider } : {}),
+        evidence: input.verificationEvidence ? structuredClone(input.verificationEvidence) : [],
       },
-      ...(input.receipts ? { receipts: structuredClone(input.receipts) } : {}),
-      ...(input.attention && input.attention.length > 0 ? { attention: [...input.attention] } : {}),
-      ...(input.limitations && input.limitations.length > 0 ? { limitations: [...input.limitations] } : {}),
-      ...(structured ? { data: structured } : {}),
+      receipts: input.receipts ? structuredClone(input.receipts) : {},
+      attention: input.attention ? [...input.attention] : [],
+      limitations: input.limitations ? [...input.limitations] : [],
+      data: structured || {},
     },
     _meta: meta,
   };

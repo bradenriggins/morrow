@@ -65,6 +65,26 @@ export class DurableBatchStore {
     return this.inner.getManifest(batchId);
   }
 
+  bindGatewayOperation(
+    batchId: string,
+    childId: string,
+    operationId: string,
+    operationState: string,
+  ): BatchChildRecord {
+    return this.inner.bindGatewayOperation(batchId, childId, operationId, operationState);
+  }
+
+  deferSourceSettlement(batchId: string): BatchRecord {
+    return this.inner.deferSourceSettlement(batchId);
+  }
+
+  finalizeSourceSettlement(
+    batchId: string,
+    state: "completed" | "partial" | "failed" | "cancelled" | "inspection_required",
+  ): BatchRecord {
+    return this.inner.finalizeSourceSettlement(batchId, state);
+  }
+
   list(limit = 50): readonly BatchRecord[] {
     return this.inner.list(limit);
   }

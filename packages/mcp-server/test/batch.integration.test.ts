@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { sha256Json } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 
@@ -48,6 +49,37 @@ function config() {
     operationJournal: { path: ":memory:" },
     maxCatalogTools: 50,
   });
+}
+
+function readback(courseId: string) {
+  return {
+    readback: {
+      tool: "canvas_page_get",
+      arguments: { course_id: courseId },
+      expected_digest: sha256Json({ source: "meridian", course_id: courseId }),
+    },
+  };
+}
+
+async function approveBatch(url: string): Promise<string> {
+  const view = await fetch(url);
+  const body = await view.text();
+  const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
+  const cookie = view.headers.get("set-cookie")?.split(";", 1)[0];
+  expect(nonce).toBeTruthy();
+  expect(cookie).toBeTruthy();
+  const approval = await fetch(`${url}/approve`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: cookie!,
+      origin: new URL(url).origin,
+      referer: url,
+    },
+    body: new URLSearchParams({ nonce: nonce! }),
+  });
+  expect(approval.status).toBe(200);
+  return body;
 }
 
 describe("MorrowRuntime durable batches", () => {
@@ -105,16 +137,19 @@ describe("MorrowRuntime durable batches", () => {
           childId: `course:${course}`,
           tool: "edit_page",
           sourceBindingId: `canvas:${course}`,
-          arguments: { course_id: String(course), title: `Course ${course}` },
+          arguments: { course_id: String(course), title: `Course ${course}`, _morrow: readback(String(course)) },
         })),
       });
       const batch = created.batch as { batchId: string; concurrency: number };
       expect(batch.concurrency).toBe(4);
-      expect(String(created.note)).toContain("source-task reconciliation");
+      expect(String(created.note)).toContain("loopback page");
       expect(created.sourceSettlement).toMatchObject({ outcome: "not_started", notStarted: 2 });
+      const approvalBody = await approveBatch(String(created.approvalUrl));
+      expect(approvalBody).toContain("course:41");
+      expect(approvalBody).toContain("course:42");
 
       const result = await runtime.batchRun({ batchId: batch.batchId, maxChildren: 10 });
-      expect((result.batch as { state: string }).state).toBe("completed");
+      expect((result.batch as { state: string }).state).toBe("paused");
       expect(result.providerOutcomeFinal).toBe(false);
       expect(result.sourceSettlement).toMatchObject({
         outcome: "awaiting_approval",
@@ -147,6 +182,14 @@ describe("MorrowRuntime durable batches", () => {
         terminal: true,
       });
       expect(secondReconciliation.providerOutcomeFinal).toBe(true);
+      expect((secondReconciliation.batch as { state: string }).state).toBe("completed");
+      expect(runtime.gateway.operationList(10)).toMatchObject({
+        returned: 2,
+        operations: [
+          { state: "verified", verificationStatus: "verified" },
+          { state: "verified", verificationStatus: "verified" },
+        ],
+      });
 
       const defaultTerminalRecheck = await runtime.batchReconcile({
         batchId: batch.batchId,
@@ -205,10 +248,12 @@ describe("MorrowRuntime durable batches", () => {
           arguments: {
             course_id: String(index + 1),
             fixture_outcome: entry.outcome,
+            _morrow: readback(String(index + 1)),
           },
         })),
       });
       const batch = created.batch as { batchId: string };
+      await approveBatch(String(created.approvalUrl));
       await runtime.batchRun({ batchId: batch.batchId, maxChildren: 10 });
       const reconciled = await runtime.batchReconcile({ batchId: batch.batchId, maxChildren: 10 });
       expect(reconciled.sourceSettlement).toMatchObject({
@@ -241,10 +286,11 @@ describe("MorrowRuntime durable batches", () => {
           childId: "course:700",
           tool: "edit_page",
           sourceBindingId: "canvas:700",
-          arguments: { course_id: "700", title: "Never returned" },
+          arguments: { course_id: "700", title: "Never returned", _morrow: readback("700") },
         }],
       });
       batchId = (created.batch as { batchId: string }).batchId;
+      await approveBatch(String(created.approvalUrl));
       await first.batchRun({ batchId, maxChildren: 1 });
     } finally {
       await first.close();

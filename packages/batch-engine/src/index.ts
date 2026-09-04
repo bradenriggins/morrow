@@ -1025,6 +1025,62 @@ export class DurableBatchStore {
     return batchRecord(row);
   }
 
+  bindGatewayOperation(
+    batchIdValue: string,
+    childIdValue: string,
+    operationIdValue: string,
+    operationStateValue: string,
+  ): BatchChildRecord {
+    const batchId = exactName(batchIdValue, "batch id");
+    const childIdValueResolved = exactName(childIdValue, "child id");
+    const operationId = exactName(operationIdValue, "gateway operation id");
+    const operationState = exactName(operationStateValue, "gateway operation state");
+    return this.transaction(() => {
+      const current = this.selectChild.get(batchId, childIdValueResolved) as ChildRow | undefined;
+      if (!current) throw new Error("batch child does not exist");
+      if (current.state !== "pending") throw new Error("only a pending batch child can bind its frozen operation");
+      if (current.gateway_operation_id && current.gateway_operation_id !== operationId) {
+        throw new Error("batch child is already bound to a different gateway operation");
+      }
+      this.database.prepare(`
+        UPDATE gateway_batch_children
+        SET gateway_operation_id=?, gateway_operation_state=?, updated_at=?, revision=revision+1
+        WHERE batch_id=? AND child_id=?
+      `).run(operationId, operationState, this.instant(), batchId, childIdValueResolved);
+      return childRecord(this.selectChild.get(batchId, childIdValueResolved) as ChildRow);
+    });
+  }
+
+  deferSourceSettlement(batchIdValue: string): BatchRecord {
+    const batchId = exactName(batchIdValue, "batch id");
+    return this.transaction(() => {
+      this.getBatch(batchId);
+      this.database.prepare(`
+        UPDATE gateway_batches
+        SET state='paused', terminal_at=NULL, updated_at=?, revision=revision+1
+        WHERE batch_id=?
+      `).run(this.instant(), batchId);
+      return this.getBatch(batchId);
+    });
+  }
+
+  finalizeSourceSettlement(
+    batchIdValue: string,
+    state: "completed" | "partial" | "failed" | "cancelled" | "inspection_required",
+  ): BatchRecord {
+    const batchId = exactName(batchIdValue, "batch id");
+    return this.transaction(() => {
+      this.getBatch(batchId);
+      const now = this.instant();
+      this.database.prepare(`
+        UPDATE gateway_batches
+        SET state=?, terminal_at=?, updated_at=?, revision=revision+1
+        WHERE batch_id=?
+      `).run(state, now, now, batchId);
+      return this.getBatch(batchId);
+    });
+  }
+
   getManifest(batchIdValue: string): FrozenBatchManifest {
     this.assertOpen();
     const batchId = exactName(batchIdValue, "batch id");

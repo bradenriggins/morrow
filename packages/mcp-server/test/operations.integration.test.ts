@@ -75,9 +75,14 @@ describe("outer provider effects", () => {
       const id = operationId(planned);
       expect(planned.structuredContent).toMatchObject({
         schema: "morrow.result.v1",
+        backend: "example-legacy",
+        status: "awaiting_approval",
         phase: "planned",
+        completeness: "complete",
         effectState: "awaiting_approval",
-        verification: { status: "unconfirmed" },
+        verification: { status: "unconfirmed", evidence: [] },
+        attention: [],
+        limitations: [],
       });
       expect(runtime.operationGet(id)).toMatchObject({
         schema: "morrow.operation.v1",

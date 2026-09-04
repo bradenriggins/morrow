@@ -102,7 +102,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_create",
     {
-      description: "Freeze an explicit multi-operation manifest against the current Morrow catalog. read_only batches may use any admitted read tool. stage_writes batches accept Morrow legacy write tools with an exact source binding and create no provider mutation at this step.",
+      description: "Freeze an explicit multi-operation manifest against the current Morrow catalog. Discovered course sets remain unavailable until a gateway-owned resolver receipt exists. stage_writes creates no provider mutation at this step.",
       inputSchema: z.object({
         name: z.string().min(1).max(200),
         mode: z.enum(BATCH_MODES),
@@ -190,7 +190,7 @@ export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): v
   server.registerTool(
     "morrow_batch_get",
     {
-      description: "Inspect one batch, its source-settlement summary, and a bounded page of child records. Decrypted child arguments are never returned.",
+      description: "Inspect one batch, an encrypted manifest reference, its source-settlement summary, and a bounded page of child records. The full manifest and decrypted child arguments are never returned.",
       inputSchema: z.object({
         batch_id: z.string().min(8).max(160),
         offset: z.number().int().min(0).default(0),

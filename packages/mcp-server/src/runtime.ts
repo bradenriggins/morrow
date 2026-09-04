@@ -745,6 +745,7 @@ export class GatewayRuntime {
       ...(result ? { result } : {}),
       operationId: record.operationId,
       tool: record.publicToolName,
+      backend: record.sourceId,
       phase,
       effectState: record.state,
       verificationStatus,
@@ -845,8 +846,29 @@ export class GatewayRuntime {
       return canonicalMorrowResult({
         result,
         tool: publicName,
+        backend: mapping.upstreamId,
         phase: "read",
         verificationStatus: "not_applicable",
+      });
+    }
+    return this.planOperation(publicName, args);
+  }
+
+  planOperation(
+    publicName: string,
+    args: Readonly<Record<string, unknown>>,
+  ): JsonObject {
+    const mapping = this.toolByPublicName.get(publicName);
+    if (!mapping || mapping.annotations?.readOnlyHint === true) {
+      return canonicalMorrowResult({
+        tool: publicName,
+        phase: "rejected",
+        verificationStatus: "not_requested",
+        result: {
+          content: [{ type: "text", text: "Morrow can only plan one current mutating capability." }],
+          isError: true,
+          structuredContent: { schema: "morrow.problem.v1", code: "write_plan_unavailable" },
+        },
       });
     }
     try {
@@ -972,6 +994,16 @@ export class GatewayRuntime {
       readbackDigest === operation.readback.expectedDigest,
     );
     return this.effectResult(settled, "verified_readback", fresh);
+  }
+
+  async settleInnerOperation(
+    operationId: string,
+    outcome: "ready_for_readback" | "failed_no_effect" | "effect_unknown",
+  ): Promise<JsonObject> {
+    const settled = this.effects.settleInnerApproval(operationId, outcome);
+    return settled.state === "awaiting_verification"
+      ? this.verifyOperation(operationId)
+      : this.effectResult(settled, "inner_operation_settled");
   }
 
   async reconcileOperation(operationId: string): Promise<JsonObject> {

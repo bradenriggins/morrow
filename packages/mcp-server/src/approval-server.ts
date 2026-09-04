@@ -11,13 +11,26 @@ export interface ApprovalOperationController {
   approveOperation(operationId: string): JsonObject;
   cancelOperation(operationId: string): JsonObject;
   setApprovalBaseUrl(baseUrl: string): void;
+  batchApprovalGet?(batchId: string): JsonObject;
+  approveBatch?(batchId: string): JsonObject;
+  cancelBatchApproval?(batchId: string): JsonObject;
 }
 
-function operationPath(pathname: string): { operationId: string; action?: "approve" | "cancel" } | null {
-  const match = /^\/operations\/([^/]+?)(?:\/(approve|cancel))?$/.exec(pathname);
+interface ApprovalTarget {
+  readonly kind: "operations" | "batches";
+  readonly id: string;
+  readonly action?: "approve" | "cancel";
+}
+
+function approvalPath(pathname: string): ApprovalTarget | null {
+  const match = /^\/(operations|batches)\/([^/]+?)(?:\/(approve|cancel))?$/.exec(pathname);
   if (!match) return null;
   try {
-    return { operationId: decodeURIComponent(match[1]!), ...(match[2] ? { action: match[2] as "approve" | "cancel" } : {}) };
+    return {
+      kind: match[1] as ApprovalTarget["kind"],
+      id: decodeURIComponent(match[2]!),
+      ...(match[3] ? { action: match[3] as "approve" | "cancel" } : {}),
+    };
   } catch {
     return null;
   }
@@ -40,13 +53,14 @@ function sendHtml(response: ServerResponse, status: number, body: string, cookie
   response.end(body);
 }
 
-function html(operationId: string, operation: JsonObject, nonce: string): string {
-  const summary = JSON.stringify(operation, null, 2)
+function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string): string {
+  const summary = JSON.stringify(snapshot, null, 2)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
-  const escapedId = operationId.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
-  return `<!doctype html><meta charset="utf-8"><title>Morrow approval</title><h1>Morrow approval</h1><p>Review the frozen operation. Approval can be used once.</p><pre>${summary}</pre><form method="post" action="/operations/${escapedId}/approve"><input type="hidden" name="nonce" value="${nonce}"><button type="submit">Approve once</button></form><form method="post" action="/operations/${escapedId}/cancel"><input type="hidden" name="nonce" value="${nonce}"><button type="submit">Cancel</button></form>`;
+  const escapedId = target.id.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll('"', "&quot;");
+  const noun = target.kind === "batches" ? "batch" : "operation";
+  return `<!doctype html><meta charset="utf-8"><title>Morrow approval</title><h1>Morrow approval</h1><p>Review the complete frozen ${noun}. Approval can be used once.</p><pre>${summary}</pre><form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${nonce}"><button type="submit">Approve once</button></form><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${nonce}"><button type="submit">Cancel</button></form>`;
 }
 
 function cookieValue(request: IncomingMessage, name: string): string | null {
@@ -120,31 +134,36 @@ export class LoopbackApprovalServer {
         sendJson(response, 200, this.controller.operationList());
         return;
       }
-      const target = operationPath(url.pathname);
+      const target = approvalPath(url.pathname);
       if (!target) {
         sendJson(response, 404, { schema: "morrow.problem.v1", code: "not_found" });
         return;
       }
       if (method === "GET" && !target.action) {
-        const operation = this.controller.operationGet(target.operationId);
+        const snapshot = target.kind === "batches"
+          ? this.controller.batchApprovalGet?.(target.id)
+          : this.controller.operationGet(target.id);
+        if (!snapshot) throw new Error("batch approval is unavailable");
         const nonce = randomBytes(32).toString("base64url");
-        this.nonces.set(target.operationId, { value: nonce, expiresAt: Date.now() + 15 * 60_000 });
-        const cookiePath = `/operations/${encodeURIComponent(target.operationId)}`;
+        const nonceKey = `${target.kind}:${target.id}`;
+        this.nonces.set(nonceKey, { value: nonce, expiresAt: Date.now() + 15 * 60_000 });
+        const cookiePath = `/${target.kind}/${encodeURIComponent(target.id)}`;
         sendHtml(
           response,
           200,
-          html(target.operationId, operation, nonce),
+          html(target, snapshot, nonce),
           `morrow_approval=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900`,
         );
         return;
       }
       if (method === "POST" && target.action) {
-        const expected = this.nonces.get(target.operationId);
+        const nonceKey = `${target.kind}:${target.id}`;
+        const expected = this.nonces.get(nonceKey);
         const requestOrigin = String(request.headers.origin || "");
         const requestReferer = String(request.headers.referer || "");
         const baseUrl = this.baseUrl;
         const originValid = !requestOrigin || requestOrigin === baseUrl;
-        const refererValid = !requestReferer || requestReferer === `${baseUrl}/operations/${encodeURIComponent(target.operationId)}`;
+        const refererValid = !requestReferer || requestReferer === `${baseUrl}/${target.kind}/${encodeURIComponent(target.id)}`;
         const formNonce = await readFormNonce(request);
         const cookieNonce = cookieValue(request, "morrow_approval");
         if (
@@ -155,13 +174,18 @@ export class LoopbackApprovalServer {
           || !exactSecret(formNonce, expected.value)
           || !exactSecret(cookieNonce, expected.value)
         ) {
-          this.nonces.delete(target.operationId);
+          this.nonces.delete(nonceKey);
           throw new Error("approval nonce is missing, expired, or invalid");
         }
-        this.nonces.delete(target.operationId);
-        const result = target.action === "approve"
-          ? this.controller.approveOperation(target.operationId)
-          : this.controller.cancelOperation(target.operationId);
+        this.nonces.delete(nonceKey);
+        const result = target.kind === "batches"
+          ? target.action === "approve"
+            ? this.controller.approveBatch?.(target.id)
+            : this.controller.cancelBatchApproval?.(target.id)
+          : target.action === "approve"
+            ? this.controller.approveOperation(target.id)
+            : this.controller.cancelOperation(target.id);
+        if (!result) throw new Error("batch approval action is unavailable");
         sendJson(response, 200, result);
         return;
       }
