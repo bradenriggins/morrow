@@ -27,7 +27,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "a12b3d181b34b6f99e5d93fbe80837a55076c02b5939f47a4ce87202ae409050",
+      "sha256": "66c06f6093633902d1af96b8f8d1852690ba4b9c335d8834110dd5de0f824771",
       "disposition": "direct_owned",
       "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
     },
