@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "94a63d41f7797b1b532432c22b918906146ba559",
+  "candidateCommit": "ae878f31c3ae57e73e4bc7b0c7e55b24522117e2",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -27,14 +27,14 @@
     },
     {
       "path": ".gitignore",
-      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": ".gitignore",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "4102d398a17c01f6420f8bca793b93033774a337e7a34b1b77fc236f6b3d3c69",
-      "afterDigest": "8e40e30137868635d0088ec60c98ab3858f8ca2c0514f629be61e56f8deb3381"
+      "beforeDigest": "8e40e30137868635d0088ec60c98ab3858f8ca2c0514f629be61e56f8deb3381",
+      "afterDigest": "1549baf9994504fd53be53338021568b949ed4dcd5e9f94c1bad26db6e8b2180"
     },
     {
       "path": ".npmrc",
@@ -49,58 +49,80 @@
     },
     {
       "path": "ARCHITECTURE.md",
-      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "ARCHITECTURE.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b2a64339b7c31ecf57d86cf1a31a41c134780d2eeac66f4222617435c4868206",
-      "afterDigest": "7da970b1b2a4aa0f8976e7d6f27159d5ea6188942532414b2dae70a996324565"
+      "beforeDigest": "7da970b1b2a4aa0f8976e7d6f27159d5ea6188942532414b2dae70a996324565",
+      "afterDigest": "3ae7de98485a69ffeb6580ef7986a8e2afa8140d50cae95458a1f4fc4db02f3c"
+    },
+    {
+      "path": "LICENSE",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "LICENSE",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "f37f80963047fbbf92f6da766ca977de53d8ee56f60d1d26cf17b22cda65cace"
     },
     {
       "path": "LIMITATIONS.md",
-      "sourceCommit": "ef2b347607b5d669ef2223c02ed5fdf20c888d70",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "LIMITATIONS.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d8f5ba7817be45a16fd153ae2b4e67e7c939f3fcf8f68e58e242c9f4459e202d",
-      "afterDigest": "394e4298658945a327e4f22b69e46369fbf80d40f38617ba3760bcc14d8647ad"
+      "beforeDigest": "394e4298658945a327e4f22b69e46369fbf80d40f38617ba3760bcc14d8647ad",
+      "afterDigest": "9635245750c8ee7f4659453686f3709f4b933a576d7929ebaaeb77fd428db71f"
     },
     {
       "path": "README.md",
-      "sourceCommit": "ef2b347607b5d669ef2223c02ed5fdf20c888d70",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "344b5fe225b7a77ffd2b3ac16d0d78c86fa1f8f860ad64f66abd245350aada6e",
-      "afterDigest": "cb9272b9cdcedb1d34ee7c1229354b8a1758616584f8b96e9aa7c65ea1068ab1"
+      "beforeDigest": "cb9272b9cdcedb1d34ee7c1229354b8a1758616584f8b96e9aa7c65ea1068ab1",
+      "afterDigest": "a12b3d181b34b6f99e5d93fbe80837a55076c02b5939f47a4ce87202ae409050"
     },
     {
       "path": "SOURCE-ORIGIN.md",
-      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "SOURCE-ORIGIN.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "36bafdf00e6eaf35cf283091d629868bf8698effa97ef8c0b87a6553b688ba34",
-      "afterDigest": "d2f2b6c1331ae72ce4ebf6424d1c0e065afe7ef4ed4e7c25642b7cc155517e0d"
+      "beforeDigest": "d2f2b6c1331ae72ce4ebf6424d1c0e065afe7ef4ed4e7c25642b7cc155517e0d",
+      "afterDigest": "1a203b4888a539af396a5c78a683047bf5b9daad29d5cc7f5c5f553400656b67"
     },
     {
       "path": "WEEKEND-HANDOFF.md",
-      "sourceCommit": "ef2b347607b5d669ef2223c02ed5fdf20c888d70",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "WEEKEND-HANDOFF.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ca30817db16b28d59ea3d8b86e3d7cd730a635afc946e0c5d8fafb204aa8d15f",
-      "afterDigest": "98d0b77881e29ad9273d2e75bac57a13cf919e423ebab9337a451567c68e9796"
+      "beforeDigest": "98d0b77881e29ad9273d2e75bac57a13cf919e423ebab9337a451567c68e9796",
+      "afterDigest": "0a01ac5a8694003d72151faf661e8cb278bdbdfa4a66d42ab0c0abfdc6f61762"
+    },
+    {
+      "path": "artifacts/canvas-api/canvas-api-catalog.json",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "artifacts/canvas-api/canvas-api-catalog.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "3840ba0f81318d5d727fd862986b00d52821214d7227154caa036d190d0a2868"
     },
     {
       "path": "artifacts/catalogs/.gitkeep",
@@ -115,14 +137,14 @@
     },
     {
       "path": "config/appendix-c-path-map.json",
-      "sourceCommit": "f9e0b0379c470dd15a77b277077fb0ca5cd6f74a",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "config/appendix-c-path-map.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "6e7b69bc07c25a61b395a28e8e7883e4f673552e3343cdd53207d1a9079d16c0",
-      "afterDigest": "29c4b1dbdc0f3e8e1eab1c4a112a2d1c2b98bb076ee406ac6646fbb74d6284cd"
+      "beforeDigest": "29c4b1dbdc0f3e8e1eab1c4a112a2d1c2b98bb076ee406ac6646fbb74d6284cd",
+      "afterDigest": "8f3bf9b5cffda6e262b3b011ae162f4d0c1bfd03d6855426ca16055e9d637766"
     },
     {
       "path": "config/catalog-aliases.proposed.json",
@@ -137,58 +159,157 @@
     },
     {
       "path": "config/publication-selections.example.json",
-      "sourceCommit": "387a43e0e43411564b669abe861617346f1ba736",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "config/publication-selections.example.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "7d190028ed7a3b0fe7253db06f67ac73f537ce8dc1d0da9323125c80533f8947"
+      "beforeDigest": "7d190028ed7a3b0fe7253db06f67ac73f537ce8dc1d0da9323125c80533f8947",
+      "afterDigest": "a8cc524b430eca079718453c6c08b32f34072e33aafb2a141e49b10fb911c788"
     },
     {
       "path": "config/release-profiles.json",
-      "sourceCommit": "f9e0b0379c470dd15a77b277077fb0ca5cd6f74a",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "config/release-profiles.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b9a51f29cf0f5adfd68875f61c6fd49067654412969c0e6e15afe52ec801469c",
-      "afterDigest": "1b6c52a8744aa19efefac8961cb13fec6c4fbd2d8b1bc0cd15c7f416ded5cfe3"
+      "beforeDigest": "1b6c52a8744aa19efefac8961cb13fec6c4fbd2d8b1bc0cd15c7f416ded5cfe3",
+      "afterDigest": "78c447c1551654b8ec8ecdea791cee2e5621b7a0503d47b0c8b3dc03ec46ec2f"
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "sourceCommit": "ae878f31c3ae57e73e4bc7b0c7e55b24522117e2",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "214a3554e726d0a24dca0117d854d9f6b2b71020fbf3641e98080bc007a8ddea",
+      "afterDigest": "eb63d6ee31f3afd2c2027f75378be1066d1dd0f92cce43acf3c38495e459a6fd"
+    },
+    {
+      "path": "connector/extension/generated/canvas-api-catalog.json",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/generated/canvas-api-catalog.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "214a3554e726d0a24dca0117d854d9f6b2b71020fbf3641e98080bc007a8ddea"
+      "afterDigest": "3840ba0f81318d5d727fd862986b00d52821214d7227154caa036d190d0a2868"
+    },
+    {
+      "path": "connector/extension/manifest.json",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/manifest.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "7320785a46a11b574fc1bf300a00c8b1fec31c1bc20e2cc5f76182314a0b9fe5"
+    },
+    {
+      "path": "connector/extension/popup/popup.css",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/popup/popup.css",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "14162c826e76dff1e725d0bc7b164feff15b44ede488ef44c4fbb4e5b0f0abeb"
+    },
+    {
+      "path": "connector/extension/popup/popup.html",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/popup/popup.html",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "bdf0c0fa53f48a19ce895b1f1afcb6f85919239f533b163f7c9aee1b601248f1"
+    },
+    {
+      "path": "connector/extension/popup/popup.js",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/popup/popup.js",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "017fecdcada8850ca57e51aa2fc369738ede8c3e2ebf19a3dee60df4499ad939"
+    },
+    {
+      "path": "connector/extension/src/canvas-content.js",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/src/canvas-content.js",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "6e458da4954258a82f52da23383b8f2ba7d0ac86e8c4c2c633fd11341dde7e9f"
+    },
+    {
+      "path": "connector/extension/src/item-bank-executor.js",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/src/item-bank-executor.js",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "fd717b38eaf4ee056acd7abc01c589fda65df396a8f6a531c0e3cfad20c7e7cc"
+    },
+    {
+      "path": "connector/extension/src/service-worker.js",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/src/service-worker.js",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "ff435177fe8ff48918f2a143d564ab4bc7ef9f8c5e4a6c529930bd8a5983a430"
+    },
+    {
+      "path": "connector/extension/src/verification.js",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "connector/extension/src/verification.js",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "be571441e2217b0a42b77f5836b34ebc69f41a52e50a75fd5f82b51d569cd00e"
     },
     {
       "path": "docs/architecture/ADR-001-federated-convergence.md",
-      "sourceCommit": "ca3605a84909de8cf139dce2fd2db9d0969eafdc",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "docs/architecture/ADR-001-federated-convergence.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "90ab2acd6e196ac452e7250fb24bdffe605bd6ddf8445d5a9940da5527431423"
+      "beforeDigest": "90ab2acd6e196ac452e7250fb24bdffe605bd6ddf8445d5a9940da5527431423",
+      "afterDigest": "8f9999757b038c3dfc31686a1f54f34c74dee451bfd2f87a1449dc1155bdc1a1"
     },
     {
       "path": "docs/architecture/ADR-002-local-extension-bridge.md",
-      "sourceCommit": "a68353861b581b71ab7a9e349a70085bb090602a",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "docs/architecture/ADR-002-local-extension-bridge.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "8a64d7313080aa1ce3f8b1b17122e3b4adcaa25ba73955cc0dcc3ac0bb943047"
+      "beforeDigest": "8a64d7313080aa1ce3f8b1b17122e3b4adcaa25ba73955cc0dcc3ac0bb943047",
+      "afterDigest": "ca364a63655eec0858e0ca7b409e19553609cf0da87b16925e6407c8ea603ec3"
     },
     {
       "path": "docs/implementation/APPENDIX-C-PATH-MAP.md",
@@ -214,14 +335,14 @@
     },
     {
       "path": "docs/implementation/CATALOG-RECONCILIATION.md",
-      "sourceCommit": "26eb6cda20f0384291718ae741398d7f094c4105",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "docs/implementation/CATALOG-RECONCILIATION.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "82b5c65a6b8be56b5ff17562e0bbb35edbd2f9ef0cdf0cbcff57c743e7065210",
-      "afterDigest": "2b2cad733b4a1eb6b1e666e9c5a389429a053b0542bc226e98a19a785c62efef"
+      "beforeDigest": "2b2cad733b4a1eb6b1e666e9c5a389429a053b0542bc226e98a19a785c62efef",
+      "afterDigest": "177e4ddf31699b19629c5a2432c451d430b076cbc14d4638eae32cce01379b45"
     },
     {
       "path": "docs/implementation/MORROW-LEGACY-BRIDGE.md",
@@ -236,25 +357,25 @@
     },
     {
       "path": "docs/implementation/EXAMPLE-WORKTREE.md",
-      "sourceCommit": "94a63d41f7797b1b532432c22b918906146ba559",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "docs/implementation/EXAMPLE-WORKTREE.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "fde10343ae1cdc6c4046aa4a52010d8225283f54043ee0b24439005d49897ad0",
-      "afterDigest": "68e0b8f7a2e5220b2b60821617029fb70f06e86eba803da9274a905e0c3fb7dd"
+      "beforeDigest": "68e0b8f7a2e5220b2b60821617029fb70f06e86eba803da9274a905e0c3fb7dd",
+      "afterDigest": "af97a8838232f1718e0cb22c5bad27050843948f2c8a2722b584aaf5b69977be"
     },
     {
       "path": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
-      "sourceCommit": "00027be29d17adf955ca75b7e373027502d8ec1e",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "585ddcf69c575bd506c197d71f229216145b1d3c29d3b7e6c2c45cd9d688c955"
+      "beforeDigest": "585ddcf69c575bd506c197d71f229216145b1d3c29d3b7e6c2c45cd9d688c955",
+      "afterDigest": "fa9e7ece11729efed2943a08e2ce5ee1011db6405a57d7a1b19337bdcb3a8ab6"
     },
     {
       "path": "docs/sources/donor-manifest.json",
@@ -323,15 +444,26 @@
       "afterDigest": "7b3f82bb184db5c9f392699c34f96b2f102e6cc891c5fb8eaafe2ccc142b3671"
     },
     {
+      "path": "morrow.upstreams.connector.example.json",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "morrow.upstreams.connector.example.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "2cd2036bd8047e11d8dec16eb148f8916548d5355cec9c6a7cb1d98b22e85315"
+    },
+    {
       "path": "morrow.upstreams.example.json",
-      "sourceCommit": "efb2da3fbbfd6206f3e05e40d0a2b04442a91b79",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "morrow.upstreams.example.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "3bd0cd6e59a064fe047e0254a396d92522fc3d51ac8036ea9304388d033395b6",
-      "afterDigest": "a24680c7fb565cddb688a667e7ceaf7fdc15c91e4ff95db86de5d24dca104496"
+      "beforeDigest": "a24680c7fb565cddb688a667e7ceaf7fdc15c91e4ff95db86de5d24dca104496",
+      "afterDigest": "29a9a77c812a27a84de8e69910bf941036ed479aa5151ad15898dc43d59651ec"
     },
     {
       "path": "morrow.upstreams.meridian-private.example.json",
@@ -346,14 +478,14 @@
     },
     {
       "path": "morrow.upstreams.public-canvas.example.json",
-      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "morrow.upstreams.public-canvas.example.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2b81dc43073bc316b5f2ae8a50b79ddd7a426ac80ebbf0dffc2f962f70a1d54c",
-      "afterDigest": "664b44493757f6d5bbcbe485453c76475a2b7b36eb6e0d05a67d9f8d0aca2607"
+      "beforeDigest": "664b44493757f6d5bbcbe485453c76475a2b7b36eb6e0d05a67d9f8d0aca2607",
+      "afterDigest": "2e562082d2ff9a9697e70581d724d691df6368077a5e2afa56762d4e6f2cd1d4"
     },
     {
       "path": "morrow.upstreams.read-only.example.json",
@@ -390,14 +522,14 @@
     },
     {
       "path": "package.json",
-      "sourceCommit": "94a63d41f7797b1b532432c22b918906146ba559",
+      "sourceCommit": "54ddc64d00c420b465b7bf219d4548f23283ac49",
       "originalPath": "package.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f05a10e45f69e2e059618b77fbba09b37a3a62c716797d9dcf175f0ce72498cd",
-      "afterDigest": "8adff818e77dfce5cb887a13b82390bdbdd4cf57b4478f5f7fcded795c0ba8e8"
+      "beforeDigest": "799442687b0225cb883ce5878ee51f09d5110cbdc5957ce353be5953b9589f82",
+      "afterDigest": "3fb66969d950ea0367b418d901879e66934ab80d0382ccbfb4ae4d8486b39096"
     },
     {
       "path": "packages/batch-engine/package.json",
@@ -426,7 +558,7 @@
     },
     {
       "path": "packages/batch-engine/src/index.ts",
-      "sourceCommit": "ef2b347607b5d669ef2223c02ed5fdf20c888d70",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/batch-engine/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -435,8 +567,8 @@
         "packages/batch-engine/test/batch.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "4f0c6dc97eca76077927f16f35431bb2cb54eb3ba88bce093c21b71fb2f6d719",
-      "afterDigest": "9024a78994aead2be91e0205d493498985ccae1531a42aecfafcac5028a3d5cf"
+      "beforeDigest": "9024a78994aead2be91e0205d493498985ccae1531a42aecfafcac5028a3d5cf",
+      "afterDigest": "21a3c6e160b00cb842fad5eb4251454ee23443aa9b0b98c1f8cbd34bba13311b"
     },
     {
       "path": "packages/batch-engine/src/node-sqlite-compat.d.ts",
@@ -482,7 +614,7 @@
     },
     {
       "path": "packages/batch-engine/src/settlement.ts",
-      "sourceCommit": "ddbab5e44cd7e1c8b651e3c0038756aa2eafedad",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/batch-engine/src/settlement.ts",
       "ownership": "new",
       "dependencies": [],
@@ -491,8 +623,8 @@
         "packages/batch-engine/test/batch.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "da2a54f7757b5c3c8fd9747c40fe8dc1a402b65e8d756ff98bf5ac6f37095ddd"
+      "beforeDigest": "da2a54f7757b5c3c8fd9747c40fe8dc1a402b65e8d756ff98bf5ac6f37095ddd",
+      "afterDigest": "bf6b10e5fabb8871f9e6ffd36b2e7e2ca9eb9b2e611cea3143c79ff4504bd0ba"
     },
     {
       "path": "packages/batch-engine/test/batch-requirements.test.ts",
@@ -507,14 +639,14 @@
     },
     {
       "path": "packages/batch-engine/test/batch.test.ts",
-      "sourceCommit": "c018fe184150f5ad23430e783b84191c0ecfed02",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/batch-engine/test/batch.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d43d83301c817359e03e6636dae7b541b6738faf86e444a88b0a531939e3afbe",
-      "afterDigest": "467cc06ee741e0a9dcadbd541279c293c629a7231cfa0fd9544f16f71d7c945a"
+      "beforeDigest": "467cc06ee741e0a9dcadbd541279c293c629a7231cfa0fd9544f16f71d7c945a",
+      "afterDigest": "9fec3d6633da14568068260c67fb91941a872f884a95e34e7b3cd9529ed9e435"
     },
     {
       "path": "packages/batch-engine/test/recovery.test.ts",
@@ -540,14 +672,14 @@
     },
     {
       "path": "packages/batch-engine/test/settlement.test.ts",
-      "sourceCommit": "c57acb3c7eaed850882ae97ca824d67f16bf2687",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/batch-engine/test/settlement.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "ebd08a3432c974b2023e68c4444026cf7adba9eeec1c2b966c7092692eb64121"
+      "beforeDigest": "ebd08a3432c974b2023e68c4444026cf7adba9eeec1c2b966c7092692eb64121",
+      "afterDigest": "b3c1c12fe4eb3c4ef798022f5c0c039ed48d7e25b58911dd37e744e0c4ed369f"
     },
     {
       "path": "packages/batch-engine/tsconfig.json",
@@ -573,7 +705,7 @@
     },
     {
       "path": "packages/bridge-loopback/src/index.ts",
-      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/bridge-loopback/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -581,19 +713,19 @@
         "packages/bridge-loopback/test/server.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "1560689548db42c6628ca0972508890db9307d363c30853fa8d41a167b631f3a",
-      "afterDigest": "c9540956dca93bbe5dcf3b67279e9f0db4dbb9fdfe733bb03288756d19dfe53f"
+      "beforeDigest": "c9540956dca93bbe5dcf3b67279e9f0db4dbb9fdfe733bb03288756d19dfe53f",
+      "afterDigest": "f0aa15dd7b1e18a2d494d905766c0988f18537161742c510f83a88591cb6dc25"
     },
     {
       "path": "packages/bridge-loopback/test/server.test.ts",
-      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/bridge-loopback/test/server.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f81f79a0b59e2d7996e275313f61edd146f371c4d8fc2c4202110048bf739ace",
-      "afterDigest": "97f2e75388d2ce43ecb6586598c66a5fd2f8def4fa05ba363b4b0c1f360e946c"
+      "beforeDigest": "97f2e75388d2ce43ecb6586598c66a5fd2f8def4fa05ba363b4b0c1f360e946c",
+      "afterDigest": "569b800b3d35d4748eed23ee632fdca2e60523b9a6e733c9c368739368628aed"
     },
     {
       "path": "packages/bridge-loopback/tsconfig.json",
@@ -619,7 +751,7 @@
     },
     {
       "path": "packages/bridge-protocol/src/index.ts",
-      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/bridge-protocol/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -627,19 +759,19 @@
         "packages/bridge-protocol/test/protocol.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "7097814805261644ced06b64d8e284d3436a39d1593fbf52e72a31ba3116744c",
-      "afterDigest": "b970f64b2e9b256a935c576312fb2f3f8861f105617ea91b43b358aaf650b5ed"
+      "beforeDigest": "b970f64b2e9b256a935c576312fb2f3f8861f105617ea91b43b358aaf650b5ed",
+      "afterDigest": "ed52df44733d40af1eb73b37921eb562346b56ddad1dc43e758f8e8d6a9352f3"
     },
     {
       "path": "packages/bridge-protocol/test/protocol.test.ts",
-      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/bridge-protocol/test/protocol.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ea5a27e0953cfbdd560f64a03c437d83d3a183f1c3ed1a384b5829200ce92b6a",
-      "afterDigest": "5f5953fdedc4e316e9d039e3266146c72f4b7d9886f577eb1cd19c1ff6a83a03"
+      "beforeDigest": "5f5953fdedc4e316e9d039e3266146c72f4b7d9886f577eb1cd19c1ff6a83a03",
+      "afterDigest": "38b4237f3d134390533c33aa8ccfac463946e566b2ebd4a95e7919ecefb5a2cb"
     },
     {
       "path": "packages/bridge-protocol/tsconfig.json",
@@ -651,6 +783,137 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "afterDigest": "a2c353baddf47787e313489a705377d479738f219808eebce41b8bda23aff1b4"
+    },
+    {
+      "path": "packages/canvas-api-catalog/package.json",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-api-catalog/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "28ad6dadd1d14809dd074a804b965c50a3325d4ee23349670c1e2641d3fc89a9"
+    },
+    {
+      "path": "packages/canvas-api-catalog/src/index.ts",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-api-catalog/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/canvas-api-catalog/test/catalog.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "e96ac29466c86aad58c6a27f1cb42b2e52a10d021fa0fac12882f797ed52a1c6"
+    },
+    {
+      "path": "packages/canvas-api-catalog/test/catalog.test.ts",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-api-catalog/test/catalog.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "8a9d6020a40f53391ea6415d04b92bc02fba67fd362bdf11df231dec300e686b"
+    },
+    {
+      "path": "packages/canvas-api-catalog/tsconfig.json",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-api-catalog/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "2d7b3bb8c244034a0c123fad7913ee4d68501f6b4019400e51e1e047265f8ba3"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/package.json",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-connector-mcp/package.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "06348e7f4f95d091285b46004a8291dd7489c4f740fef3a4d44155843f6321fa"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/src/config.ts",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-connector-mcp/src/config.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/canvas-connector-mcp/test/runtime.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "7b9a0dfdafe7c1f88e6b785d958f93474e597cbf52a74337192c0e47e0b8c684"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/src/index.ts",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-connector-mcp/src/index.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/canvas-connector-mcp/test/runtime.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "15c591eba52cbe03ab7a35658b6a5ac98df851ddd10f452a8fbb84059422ee56"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/src/runtime.ts",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-connector-mcp/src/runtime.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/canvas-connector-mcp/test/runtime.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "408a5225d1946f7841b014202499643ffec913d85b4044600c53c217bf54cb6d"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/src/server.ts",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-connector-mcp/src/server.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/canvas-connector-mcp/test/runtime.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "19faa4f6b26b60b5f25e317d6bfc28a70cf36f321f7f6bf7f8c785c21c27d93c"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/test/runtime.test.ts",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-connector-mcp/test/runtime.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "15b3eb1271087b3607e835ccea3041e434ffbff694cd6b02d52fd5d3db658f86"
+    },
+    {
+      "path": "packages/canvas-connector-mcp/tsconfig.json",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/canvas-connector-mcp/tsconfig.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "4352824d5e9d013b01733b175da2ce508be5174aff309214dae3a5673ee04160"
     },
     {
       "path": "packages/client-config/package.json",
@@ -665,7 +928,7 @@
     },
     {
       "path": "packages/client-config/src/cli.ts",
-      "sourceCommit": "94a63d41f7797b1b532432c22b918906146ba559",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/client-config/src/cli.ts",
       "ownership": "new",
       "dependencies": [],
@@ -673,12 +936,12 @@
         "packages/client-config/test/client-config.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f01b7017d23ba121ab72565a81ee1e9f9e12319af372ec14f2e3d02cd9d96285",
-      "afterDigest": "1944b0f3a4a8df354b336651c7bcd31fdbbd3746d06d3060834b6c7b77315d31"
+      "beforeDigest": "1944b0f3a4a8df354b336651c7bcd31fdbbd3746d06d3060834b6c7b77315d31",
+      "afterDigest": "d078b5b3a5a3f41fe6848f9ed1bb41b7be6544ff25b6deaada3a99fcae16f387"
     },
     {
       "path": "packages/client-config/src/index.ts",
-      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/client-config/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -686,19 +949,19 @@
         "packages/client-config/test/client-config.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ac1d0e00433a10062527a0bb2880720e90ffd60f54094c2b27b715b0f9ab4524",
-      "afterDigest": "2cd29b134996decfee4bee16293a09271a60b2af7f60198df1bb8fa4c76db717"
+      "beforeDigest": "2cd29b134996decfee4bee16293a09271a60b2af7f60198df1bb8fa4c76db717",
+      "afterDigest": "5878a0411491588ff9a920ae190d9f1c96562e84299c03ccca65a90e3ec6dadf"
     },
     {
       "path": "packages/client-config/test/client-config.test.ts",
-      "sourceCommit": "94a63d41f7797b1b532432c22b918906146ba559",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/client-config/test/client-config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "67577f8c8cb8904597186dbe05820c9924410dbed525467a4da5b2b18b1651b4",
-      "afterDigest": "f6d2bb34a795861309675d25f17faa8dc5c58a8a0b1381e857a9f9399a5d276f"
+      "beforeDigest": "f6d2bb34a795861309675d25f17faa8dc5c58a8a0b1381e857a9f9399a5d276f",
+      "afterDigest": "b5e149e6ae519ec8b8f7ded0dc189444021d87041278cb8afebdaca025b8db17"
     },
     {
       "path": "packages/client-config/tsconfig.json",
@@ -724,14 +987,14 @@
     },
     {
       "path": "packages/contracts/src/index.ts",
-      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/contracts/src/index.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d4e4648c4ea80e715802d544fa96d1c071fec7ba14d0c4c57ee5d285c0ab0685",
-      "afterDigest": "f748aab8c3a8f03e5599253f5a92b33a205352bc9d807511f6eb9c5b174ff0e2"
+      "beforeDigest": "f748aab8c3a8f03e5599253f5a92b33a205352bc9d807511f6eb9c5b174ff0e2",
+      "afterDigest": "b684d01a8a63745ebb271a0c0d4fa5d9c385a3bfe43a770523275d77a0a79246"
     },
     {
       "path": "packages/contracts/tsconfig.json",
@@ -785,7 +1048,7 @@
     },
     {
       "path": "packages/gateway-core/src/privacy.ts",
-      "sourceCommit": "336452e2a410f9da864abb1bbe367eb24c752f64",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/gateway-core/src/privacy.ts",
       "ownership": "new",
       "dependencies": [],
@@ -794,8 +1057,8 @@
         "packages/gateway-core/test/native-controls.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "7b02bf7dda49d2385e022a42349f4e92d82e64fdf0228ec0105fdea825865539",
-      "afterDigest": "7dc38bff611bf024616156c6fabc5ce1e2eb3acc8eb9d9e65f6afbcf134c72e8"
+      "beforeDigest": "7dc38bff611bf024616156c6fabc5ce1e2eb3acc8eb9d9e65f6afbcf134c72e8",
+      "afterDigest": "4e119a282f24da917312cfa298cfb544a1eaca3f93fe431982303b4b4bf946de"
     },
     {
       "path": "packages/gateway-core/src/publication-candidate.ts",
@@ -855,7 +1118,7 @@
     },
     {
       "path": "packages/gateway-core/src/source-rights.ts",
-      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "sourceCommit": "db41ca1808a1e3554581c9b92f0ba3a43adc535a",
       "originalPath": "packages/gateway-core/src/source-rights.ts",
       "ownership": "new",
       "dependencies": [],
@@ -864,8 +1127,8 @@
         "packages/gateway-core/test/native-controls.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "060a87376d8078b83c0bf04721782fb884628d5d2bbc47339b7a9d54beeb0805"
+      "beforeDigest": "343ece293b0861fd5e7f08afeff428db123d1d3611b7a613b2ebc0829db89bef",
+      "afterDigest": "d6d9732514de6094d41ce55ce12aae7583a2b31ade5e61606e2cd7fec6a86689"
     },
     {
       "path": "packages/gateway-core/test/catalog.test.ts",
@@ -891,14 +1154,14 @@
     },
     {
       "path": "packages/gateway-core/test/privacy.test.ts",
-      "sourceCommit": "336452e2a410f9da864abb1bbe367eb24c752f64",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/gateway-core/test/privacy.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "469003df8d6c024f172ec1ff79b8c9d81fe3dbca893a478f25b26fae5cc9126c",
-      "afterDigest": "03363cc309439e1a4e9a0b7454eb41869928b30dc32c7e769d1d754b8b5e6b5b"
+      "beforeDigest": "03363cc309439e1a4e9a0b7454eb41869928b30dc32c7e769d1d754b8b5e6b5b",
+      "afterDigest": "92c4b7b0052e8b77bd1a9bf4783745c7d73c26875d243a21b39e85242e686b51"
     },
     {
       "path": "packages/gateway-core/test/publication-candidate.test.ts",
@@ -1005,7 +1268,7 @@
     },
     {
       "path": "packages/legacy-bridge-mcp/src/runtime.ts",
-      "sourceCommit": "956a8277311084daaa091392fecac211acce5cdf",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/legacy-bridge-mcp/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1013,8 +1276,8 @@
         "packages/legacy-bridge-mcp/test/runtime.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "4cdb360007e2fc792549a5e3a2fae05f72b227004284773dfb7f778bff4aa7ba",
-      "afterDigest": "3d09f02a4dfbdc1fe7ee2d257039164f22e665fd993fc0054c7e2e8b1fa2d381"
+      "beforeDigest": "3d09f02a4dfbdc1fe7ee2d257039164f22e665fd993fc0054c7e2e8b1fa2d381",
+      "afterDigest": "28de5eaf8879f2c0c6210bbe8ea4ab749b6db325ea6eb5da6a255afe360f2eed"
     },
     {
       "path": "packages/legacy-bridge-mcp/src/server.ts",
@@ -1031,14 +1294,14 @@
     },
     {
       "path": "packages/legacy-bridge-mcp/test/runtime.test.ts",
-      "sourceCommit": "12239dbd69921875752c14dbeee9de81240c063a",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/legacy-bridge-mcp/test/runtime.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "dc789d7ab95bd8a53e7c9d296e0826e572bb7da2ddef4d22ef1161fa2fcbc1e6"
+      "beforeDigest": "dc789d7ab95bd8a53e7c9d296e0826e572bb7da2ddef4d22ef1161fa2fcbc1e6",
+      "afterDigest": "be412e2fae58a8b887aa5b1829770fd6b1708073f8475920544c3a28e91a2202"
     },
     {
       "path": "packages/legacy-bridge-mcp/tsconfig.json",
@@ -1053,14 +1316,14 @@
     },
     {
       "path": "packages/mcp-server/package.json",
-      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/package.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "50a54decab29896334b4259f9a0a29fdca278c313962fe683dbaa8a9c6354cae",
-      "afterDigest": "43d2e090de01bfa504a3935791bcc89f6b067439cb23e7dd18f3e14281693b1a"
+      "beforeDigest": "43d2e090de01bfa504a3935791bcc89f6b067439cb23e7dd18f3e14281693b1a",
+      "afterDigest": "1ef8185c6ceba19843c9ab705f5deef6587ddc9b25772b3b4e2e34e037da2bac"
     },
     {
       "path": "packages/mcp-server/src/approval-entry.ts",
@@ -1078,7 +1341,7 @@
     },
     {
       "path": "packages/mcp-server/src/approval-server.ts",
-      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/src/approval-server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1087,8 +1350,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "32aec26d061ebbb9bd6d85e78a4c635aec718cff189941a8a8ac75c892383363",
-      "afterDigest": "e1dfcc0ac19321dea72295886c89fd90ac1465f4155f3781b670cebcf036af45"
+      "beforeDigest": "e1dfcc0ac19321dea72295886c89fd90ac1465f4155f3781b670cebcf036af45",
+      "afterDigest": "985d9690e238a92c39b806df2da45df4ee7020f8e19f94c326b8c6da5cd8a385"
     },
     {
       "path": "packages/mcp-server/src/batch-recovery.ts",
@@ -1106,7 +1369,7 @@
     },
     {
       "path": "packages/mcp-server/src/batch-tools.ts",
-      "sourceCommit": "ef2b347607b5d669ef2223c02ed5fdf20c888d70",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/src/batch-tools.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1115,8 +1378,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "737def9d961475e8c998890f07dd2b00da7d69a5dc5df7e18bbded5f0b683878",
-      "afterDigest": "7fea7f5f7867e9fa2d0d0656c1d3ac95c14180346c40eac94cfe7e6c7b67e00f"
+      "beforeDigest": "7fea7f5f7867e9fa2d0d0656c1d3ac95c14180346c40eac94cfe7e6c7b67e00f",
+      "afterDigest": "7c4544964afd5d193eaabccbef26a09a1dfa53c18eda5454a57d632cba391d29"
     },
     {
       "path": "packages/mcp-server/src/batch-window-scheduler.ts",
@@ -1134,7 +1397,7 @@
     },
     {
       "path": "packages/mcp-server/src/config.ts",
-      "sourceCommit": "0f74ac8c743224ec7bd3bd4e55a840dde3abd432",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/src/config.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1143,8 +1406,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "415a8d308065af2458f0dc6fed87b7d31922621fc6537b6e524cda40c2e808fc",
-      "afterDigest": "faae0921c7be1e2e96d280be34cc821619a47dbabc5234ad5d7e431d76fdb1d5"
+      "beforeDigest": "faae0921c7be1e2e96d280be34cc821619a47dbabc5234ad5d7e431d76fdb1d5",
+      "afterDigest": "ccdf75bb38530e302c20250075d26b1566900a882617bee25d57e130c1d093e9"
     },
     {
       "path": "packages/mcp-server/src/full-server.ts",
@@ -1204,7 +1467,7 @@
     },
     {
       "path": "packages/mcp-server/src/morrow-runtime.ts",
-      "sourceCommit": "ef2b347607b5d669ef2223c02ed5fdf20c888d70",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/src/morrow-runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1213,8 +1476,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cd9079348e009a934ee95fb08c64ff423ab62b56cf2278db1ac3c661335170ab",
-      "afterDigest": "cb9fb01fd18c6bf9f29f9518ecb87bb0de2cb0b913cb9833bc57530d7617c563"
+      "beforeDigest": "cb9fb01fd18c6bf9f29f9518ecb87bb0de2cb0b913cb9833bc57530d7617c563",
+      "afterDigest": "08da69477e3c8dc08cd8f1b08a5ee977622f659b897ca63a293c7f0d026fe858"
     },
     {
       "path": "packages/mcp-server/src/operation-tools.ts",
@@ -1246,7 +1509,7 @@
     },
     {
       "path": "packages/mcp-server/src/runtime.ts",
-      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1255,8 +1518,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "941ce16a29a2fa56a8891bb6042edfad743624426e976a0249782fdfa09f1f7e",
-      "afterDigest": "c5359cd7841316b7e6fc6c11cf8db091fa27b13e8c005b2b2413cfdbba9267ef"
+      "beforeDigest": "c5359cd7841316b7e6fc6c11cf8db091fa27b13e8c005b2b2413cfdbba9267ef",
+      "afterDigest": "819f7484d9dde1d17ff6eaac8b9d58f510c444c8ba7f46571971ae6557484cdf"
     },
     {
       "path": "packages/mcp-server/src/sandbox-upstream.ts",
@@ -1274,7 +1537,7 @@
     },
     {
       "path": "packages/mcp-server/src/server-instructions.ts",
-      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/src/server-instructions.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1283,12 +1546,12 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "153bf6e01ac8ed738ba058947a073b4f68597d6a1b8b1af1bb13304723553249",
-      "afterDigest": "a27e0a697ed7f4025e071a8536e6d2a5c390c5b085fcf503efabe703bc285b28"
+      "beforeDigest": "a27e0a697ed7f4025e071a8536e6d2a5c390c5b085fcf503efabe703bc285b28",
+      "afterDigest": "d7475f2d9344b9227ea95d2c5f1b0afd96aa9fe28bb1a8b6ea5175dcc69c1062"
     },
     {
       "path": "packages/mcp-server/src/server.ts",
-      "sourceCommit": "56018bd10c9751d230aee2140869d9c0cdc11e24",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/src/server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1297,8 +1560,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "17743b7deb07bf23747d8564e91e9ffa75e664ec13e094b53d51dd4d28bd59e1",
-      "afterDigest": "ca77819d14d4520eff6226b3c3ecccfb7227c5750dcee544a9a6e24a2dc8e79a"
+      "beforeDigest": "ca77819d14d4520eff6226b3c3ecccfb7227c5750dcee544a9a6e24a2dc8e79a",
+      "afterDigest": "7dde570cd0d8440e15c72fc72f37cf6ecbd88f1e32de33d49a8b1546438ac116"
     },
     {
       "path": "packages/mcp-server/src/source-attestation.ts",
@@ -1330,7 +1593,7 @@
     },
     {
       "path": "packages/mcp-server/src/strict-stdio.ts",
-      "sourceCommit": "976307770f07ad96c54c2e69d73a9adf717c970f",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/src/strict-stdio.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1339,8 +1602,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "ba4000ed70afc14992741b4f6983b5da89a28ea629422b1edcded4304aa672d5"
+      "beforeDigest": "ba4000ed70afc14992741b4f6983b5da89a28ea629422b1edcded4304aa672d5",
+      "afterDigest": "c3da5a7cf26795d40c34fb5a864794cd3135387a06c5502b82e20ce68e91d0fe"
     },
     {
       "path": "packages/mcp-server/test/attestation.integration.test.ts",
@@ -1376,6 +1639,17 @@
       "afterDigest": "e6b13a8ec4094d866f44a8fad740db4a03ab89555a9ede14dee1f648ac2e08b3"
     },
     {
+      "path": "packages/mcp-server/test/canvas-connector.integration.test.ts",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "packages/mcp-server/test/canvas-connector.integration.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "b5c51d12e293b308afd007a303cf7e782d9388bede923a5ae7664bd730e2a656"
+    },
+    {
       "path": "packages/mcp-server/test/config-attestation.test.ts",
       "sourceCommit": "46d343328c24fba34d1f677bc43ff7418f86c1e1",
       "originalPath": "packages/mcp-server/test/config-attestation.test.ts",
@@ -1388,14 +1662,14 @@
     },
     {
       "path": "packages/mcp-server/test/config.test.ts",
-      "sourceCommit": "0f74ac8c743224ec7bd3bd4e55a840dde3abd432",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/test/config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "6b56dd85ea01385aafc900f7ada54efd2c77af66fee02e90dc75f1e876b7d868",
-      "afterDigest": "3298f1fcd9c5bc98f1fb4854483ab499e0e855df9e56aed46d5fb46955214eeb"
+      "beforeDigest": "3298f1fcd9c5bc98f1fb4854483ab499e0e855df9e56aed46d5fb46955214eeb",
+      "afterDigest": "90374894511786380bb46c7ffa198e782eabde1074dc08a498670e54e17b23cb"
     },
     {
       "path": "packages/mcp-server/test/fixtures/fake-batch-upstream.mjs",
@@ -1465,14 +1739,14 @@
     },
     {
       "path": "packages/mcp-server/test/operations.integration.test.ts",
-      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/mcp-server/test/operations.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "04d7f68f916d74c0e6f300ae1f1dba6b7bc856ea61837af028cf2c06ce14a612",
-      "afterDigest": "e1b68ad8e9371fcde0f68a2d1e1a4fd050e2c866a3c459a39871b7a76c8f1f9f"
+      "beforeDigest": "e1b68ad8e9371fcde0f68a2d1e1a4fd050e2c866a3c459a39871b7a76c8f1f9f",
+      "afterDigest": "b8a4292ded3a3c13c7b6560296338c4ea7b1114250590285482a3add78d638a8"
     },
     {
       "path": "packages/mcp-server/test/protocol.integration.test.ts",
@@ -1586,7 +1860,7 @@
     },
     {
       "path": "packages/operation-journal/src/effect-broker.ts",
-      "sourceCommit": "d4c5d3fbe35ea983129fc6915cd24db095a25ab5",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/operation-journal/src/effect-broker.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1595,8 +1869,8 @@
         "packages/operation-journal/test/journal.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c0763074994cde3e1b4ddba0e76b015b06dd758d9a94e5dd091874484c3e7d0d",
-      "afterDigest": "2d0d23b879918555c689b4d9737fbe3ca0c0d2a0e89a24d68820f52ec7409551"
+      "beforeDigest": "2d0d23b879918555c689b4d9737fbe3ca0c0d2a0e89a24d68820f52ec7409551",
+      "afterDigest": "ffd8ea911e0b60744fe655fcb14c340133b887a3f7f8996763d0c6cac4788cff"
     },
     {
       "path": "packages/operation-journal/src/index.ts",
@@ -1658,14 +1932,14 @@
     },
     {
       "path": "packages/upstream-mcp/src/index.ts",
-      "sourceCommit": "c00433e3ad0f8e76357895bd0f021bc33f9f634e",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "packages/upstream-mcp/src/index.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f0a8efa127570c7a17b57a7af6d500a502d2b2ed73a8e8d19cc74dda14c47e03",
-      "afterDigest": "285a95d73e042bcebebe7535726c4617ef0dc5ae7a7e6a8f0a4e4b3fbb03efa3"
+      "beforeDigest": "285a95d73e042bcebebe7535726c4617ef0dc5ae7a7e6a8f0a4e4b3fbb03efa3",
+      "afterDigest": "51d56f4005c95166d982b5e0cd866ba6e512bb56c4d7afad9f5357fa21a4f000"
     },
     {
       "path": "packages/upstream-mcp/src/strict-stdio.ts",
@@ -1691,14 +1965,14 @@
     },
     {
       "path": "pnpm-lock.yaml",
-      "sourceCommit": "a32a80760103002e7c5b60aee39038a01485cc85",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
       "originalPath": "pnpm-lock.yaml",
       "ownership": "generated",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "fbb8f2315139dc6dcea82ff957527ab37dbddb917588ee267b7d711991d9aaed",
-      "afterDigest": "0190f242cceb31bf4d0c3cfd57984eae26c16e7deed69495fc0b6066f6a8fd20"
+      "beforeDigest": "0190f242cceb31bf4d0c3cfd57984eae26c16e7deed69495fc0b6066f6a8fd20",
+      "afterDigest": "c95367dca3b17b22e537542d9f1a06bce3a32f9da3f9335dbec1a59ffcd892d3"
     },
     {
       "path": "pnpm-workspace.yaml",
@@ -1768,14 +2042,25 @@
     },
     {
       "path": "scripts/create-source-origin-ledger.mjs",
-      "sourceCommit": "883245f28e89bb8176934eb4de5dafb3fc2a2833",
+      "sourceCommit": "db41ca1808a1e3554581c9b92f0ba3a43adc535a",
       "originalPath": "scripts/create-source-origin-ledger.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "84835e2f5cbd2f5e165c3ebf5b8bfd2a762c05de3fb9cef4aca5db2d103ccfda"
+      "beforeDigest": "84835e2f5cbd2f5e165c3ebf5b8bfd2a762c05de3fb9cef4aca5db2d103ccfda",
+      "afterDigest": "e7713a3f5d6ae26c92cb996562bd166a5a7ed64ab84598a2bc1b4cf5d156fc02"
+    },
+    {
+      "path": "scripts/create-source-rights-manifest.mjs",
+      "sourceCommit": "db41ca1808a1e3554581c9b92f0ba3a43adc535a",
+      "originalPath": "scripts/create-source-rights-manifest.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "063db10d0f621d2bf1e64a258da6d7d09c190d433b428a9cefb741db7de1d56c",
+      "afterDigest": "13ee7082cf98529b769bddd62b531f526e3ba7a7cb30e8897c0848d60bce65c1"
     },
     {
       "path": "scripts/export-example-legacy-catalog.mjs",
@@ -1787,6 +2072,17 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "eab68c49e15346ef3fbcf886c7e11b2b2b734f5665178e71e75e149b006f705d",
       "afterDigest": "67c2ad99de42a59a878469e707bf77600da4c126bab6937db79d88ae7d65ea93"
+    },
+    {
+      "path": "scripts/generate-canvas-api-catalog.mjs",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "scripts/generate-canvas-api-catalog.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "51b739cc2b844ee939d5162763a9785351be8984f9c08241bf1ca80cd3db27ff"
     },
     {
       "path": "scripts/install-example-legacy-bridge.mjs",
@@ -1812,14 +2108,25 @@
     },
     {
       "path": "scripts/lib/release-candidate.mjs",
-      "sourceCommit": "19479316d456b59f69c0fc5efbd159c5610084a9",
+      "sourceCommit": "db41ca1808a1e3554581c9b92f0ba3a43adc535a",
       "originalPath": "scripts/lib/release-candidate.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "391842159c94390a9b67dad8b23c45a938dba62f65cb5bd0f0efa9d533fcd2a4",
-      "afterDigest": "5efe3bc7d8d13d3d1f03756925f49c20c4df75edbb989e90cd2cb4f1a3883b51"
+      "beforeDigest": "c6f0f2bdf4993fdbf5fb2d26e301cba999fbc9a904cb0efbcae6412eccad7f97",
+      "afterDigest": "0c6897d6c163c8f651d432482c5edbb566ea1f485e4fb5e009a38ddb2ae0afdc"
+    },
+    {
+      "path": "scripts/package-canvas-connector.mjs",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "scripts/package-canvas-connector.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "9ab1efbd9599ad182652eec1cfacbf88aeeaa1634ed9d928a2313067badd7c2f"
     },
     {
       "path": "scripts/package-profile.mjs",
@@ -1864,6 +2171,50 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "afterDigest": "462e97c8fc05a22467de586b6e2773f99c1c4deff0b1dbd7b54ed383d00d2356"
+    },
+    {
+      "path": "scripts/test/canvas-connector-browser.mjs",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "scripts/test/canvas-connector-browser.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "c83d40d37ed0cee1b510bb8b9952c01fd66dd9b02e621cef040199bce8b6ed67"
+    },
+    {
+      "path": "scripts/test/canvas-connector-package.test.mjs",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "scripts/test/canvas-connector-package.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "5c7939a0b198fdccc82e92609ec156156a5db201433cc24a84155584b1e8c848"
+    },
+    {
+      "path": "scripts/test/canvas-item-bank-executor.test.mjs",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "scripts/test/canvas-item-bank-executor.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "052fb998b6bf2e8495a062edba3a6ca7698ee6bebaa957967af54ce51bb0086e"
+    },
+    {
+      "path": "scripts/test/canvas-verification.test.mjs",
+      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "originalPath": "scripts/test/canvas-verification.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "3697521daa73b1b25f55c86d91f030171d4ecc28aba097a4dd75f14617df820d"
     },
     {
       "path": "scripts/test/legacy-bridge-overlay.test.mjs",
@@ -1911,14 +2262,14 @@
     },
     {
       "path": "scripts/validate-source-rights.mjs",
-      "sourceCommit": "f9ded53f69533d597420e65126a6683dd3d8b940",
+      "sourceCommit": "db41ca1808a1e3554581c9b92f0ba3a43adc535a",
       "originalPath": "scripts/validate-source-rights.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "edf6ab9deab5aaeadad9bc7218764463624426b83d5b522e123aebc99fe8d00f"
+      "beforeDigest": "d59611e0b05129c6f7f359c7b8d377935d38a5370392718cef3ec835d839d55e",
+      "afterDigest": "0e2dd73a8823f2b096ca702a775f7a7517f1217948e2b6c5739f24d5ed3022f8"
     },
     {
       "path": "scripts/weekend-check.mjs",
