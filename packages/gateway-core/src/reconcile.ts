@@ -48,6 +48,7 @@ export interface CatalogAliasRule {
   readonly preferredSourceId: string;
   readonly members: readonly CatalogAliasMember[];
   readonly reason: string;
+  readonly allowContractDrift?: boolean;
 }
 
 export interface CatalogToolEvidence {
@@ -66,7 +67,7 @@ export interface CatalogToolEvidence {
 }
 
 export type ReconciliationRowKind = "alias" | "exact_name" | "source_only";
-export type ReconciliationRowStatus = "compatible" | "contract_drift" | "single";
+export type ReconciliationRowStatus = "compatible" | "compatible_by_rule" | "contract_drift" | "single";
 
 export interface CatalogSelection {
   readonly sourceId: string;
@@ -331,6 +332,7 @@ function normalizeAliasRule(value: CatalogAliasRule): CatalogAliasRule {
     preferredSourceId,
     members,
     reason: requiredText(value.reason, "alias.reason", 1000),
+    allowContractDrift: value.allowContractDrift === true,
   };
 }
 
@@ -347,6 +349,7 @@ export function parseCatalogAliasRules(value: unknown): readonly CatalogAliasRul
       publicName: requiredText(rule.publicName, "alias.publicName", 128),
       preferredSourceId: requiredText(rule.preferredSourceId, "alias.preferredSourceId", 64),
       reason: requiredText(rule.reason, "alias.reason", 1000),
+      allowContractDrift: rule.allowContractDrift === true,
       members: rule.members.map((member) => {
         if (!isJsonObject(member)) throw new TypeError("Alias members must be objects");
         return {
@@ -420,12 +423,12 @@ export function reconcileCatalogs(
     rows.push({
       id: `alias:${alias.id}`,
       kind: "alias",
-      status: compatible ? "compatible" : "contract_drift",
+      status: compatible ? "compatible" : alias.allowContractDrift ? "compatible_by_rule" : "contract_drift",
       publicName: alias.publicName,
-      selected: compatible
+      selected: compatible || alias.allowContractDrift
         ? { sourceId: preferred.sourceId, toolName: preferred.toolName }
         : null,
-      reviewRequired: !compatible,
+      reviewRequired: !compatible && alias.allowContractDrift !== true,
       annotationsAligned: alignment(members, "annotationsSha256"),
       descriptionsAligned: alignment(members, "descriptionSha256"),
       reason: alias.reason,

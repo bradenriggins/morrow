@@ -42,6 +42,7 @@ export interface StdioUpstreamOptions {
   readonly catalogTruth?: CatalogTruthHealth;
   readonly supervision?: UpstreamSupervisionOptions;
   readonly now?: () => Date;
+  readonly beforeConnect?: () => void | Promise<void>;
 }
 
 export interface UpstreamCallOptions {
@@ -208,6 +209,7 @@ export class StdioMcpUpstream {
 
   private async connectOnce(): Promise<readonly UpstreamTool[]> {
     if (this.closed) throw new Error(`Upstream ${this.id} is closed`);
+    await this.options.beforeConnect?.();
     this.reconnectState = "connecting";
     this.nextRetryAt = undefined;
     const client = new Client({

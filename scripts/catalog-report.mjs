@@ -13,7 +13,7 @@ import { RUNTIME_PROFILES, sha256Json } from "../packages/contracts/dist/index.j
 
 function argumentsValue(argv) {
   const sources = [];
-  let aliases = "";
+  let aliases = resolve("config/catalog-aliases.proposed.json");
   let outputDirectory = "artifacts/catalogs";
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
@@ -30,6 +30,10 @@ function argumentsValue(argv) {
     } else {
       throw new Error(`Unknown argument ${flag}`);
     }
+  }
+  if (sources.length === 0) {
+    sources.push(resolve("artifacts/catalogs/example-legacy.canvas.json"));
+    sources.push(resolve("artifacts/catalogs/meridian.live.json"));
   }
   if (sources.length < 2) throw new Error("At least two --source paths are required");
   return { sources, aliases, outputDirectory };
@@ -57,13 +61,28 @@ async function main() {
     tools: catalog.tools,
   }));
   const merged = mergeCatalog(sources);
-  const parity = reconcileCatalogs(catalogs, {
+  const rawParity = reconcileCatalogs(catalogs, {
     aliases,
     sourcePriority: catalogs.map((catalog) => catalog.source.id),
   });
-  const acceptedRouting = parity.rows.map((row) => ({
+  const held = (member) => /(^|[_-])(mindtap|connect)([_-]|$)/i.test(member.toolName)
+    || ["mindtap", "connect"].includes(String(member.provider || "").toLowerCase());
+  const parityRows = rawParity.rows.map((row) => row.members.some(held)
+    ? { ...row, status: "rights_hold", selected: null, reviewRequired: false, reason: "Held provider excluded before collision resolution." }
+    : row);
+  const parity = {
+    ...rawParity,
+    rows: parityRows,
+    counts: {
+      ...rawParity.counts,
+      reviewRequired: parityRows.filter((row) => row.reviewRequired).length,
+      rightsHold: parityRows.filter((row) => row.status === "rights_hold").length,
+    },
+    digest: sha256Json({ ...rawParity, generatedAt: null, rows: parityRows }),
+  };
+  const acceptedRouting = parityRows.map((row) => ({
     canonicalName: row.publicName,
-    state: row.selected ? "supported" : "broken_at_baseline",
+    state: row.status === "rights_hold" ? "rights_hold" : row.selected ? "supported" : "broken_at_baseline",
     ...(row.selected ? { backend: row.selected.sourceId, sourceToolName: row.selected.toolName } : {}),
     aliases: row.kind === "alias"
       ? row.members
@@ -94,6 +113,12 @@ async function main() {
     digest: merged.digest,
     capabilities: merged.tools.map((tool) => tool.capability),
   };
+  const acceptedAliases = acceptedRouting.flatMap((route) => route.aliases.map((alias) => ({
+    alias,
+    canonicalName: route.canonicalName,
+    backend: route.backend,
+  })));
+  const unresolved = parityRows.filter((row) => row.reviewRequired);
   const markdown = [
     "# Catalog report",
     "",
@@ -116,8 +141,14 @@ async function main() {
     writeAtomic(resolve(options.outputDirectory, "merged-capabilities.json"), capabilityReport),
     writeAtomic(resolve(options.outputDirectory, "parity-report.json"), parityReport),
     writeAtomic(resolve(options.outputDirectory, "profile-report.json"), profileReport),
+    writeAtomic(resolve(options.outputDirectory, "aliases.json"), { schema: "morrow.catalog-alias-output.v1", aliases: acceptedAliases }),
+    writeAtomic(resolve(options.outputDirectory, "unresolved-collisions.json"), { schema: "morrow.catalog-unresolved.v1", rows: unresolved }),
     writeFile(resolve(options.outputDirectory, "catalog-report.md"), markdown, "utf8"),
+    writeFile(resolve(options.outputDirectory, "parity-report.md"), markdown, "utf8"),
   ]);
+  if (unresolved.length > 0) {
+    throw new Error(`${unresolved.length} catalog collision rows require an explicit compatibility decision`);
+  }
   process.stdout.write([
     `catalogDigest=${merged.digest}`,
     `capabilities=${merged.tools.length}`,

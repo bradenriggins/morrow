@@ -21,8 +21,8 @@ describe("gateway configuration", () => {
       profile: "private-full",
       upstreams: [
         {
-          id: "meridian",
-          label: "ExamplePlatform",
+          id: "fixture",
+          label: "Fixture",
           kind: "mcp-stdio",
           command: "python3",
           args: ["${SERVER}"],

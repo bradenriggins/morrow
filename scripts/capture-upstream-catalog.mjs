@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { buildSourceCatalog } from "../packages/gateway-core/dist/index.js";
 import { loadGatewayConfig } from "../packages/mcp-server/dist/config.js";
+import { buildExamplePlatformSshLaunch } from "../packages/mcp-server/dist/meridian-runtime-adapter.js";
 import { StdioMcpUpstream } from "../packages/upstream-mcp/dist/index.js";
 
 function safeFileSegment(value) {
@@ -32,13 +33,27 @@ async function main() {
   if (selected.length === 0) throw new Error(`No configured upstream matches ${requestedSource}`);
 
   for (const source of selected) {
+    const launch = source.kind === "meridian-ssh"
+      ? buildExamplePlatformSshLaunch({
+          host: source.host,
+          remoteRoot: source.remoteRoot,
+          serverPath: source.serverPath,
+          runtimeProfile: source.runtimeProfile,
+        })
+      : {
+          command: source.command,
+          args: source.args,
+          ...(source.cwd ? { cwd: source.cwd } : {}),
+          env: source.env,
+        };
     const upstream = new StdioMcpUpstream({
       id: source.id,
       label: source.label,
-      command: source.command,
-      args: source.args,
-      ...(source.cwd ? { cwd: source.cwd } : {}),
-      env: source.env,
+      command: launch.command,
+      args: launch.args,
+      ...(source.kind === "mcp-stdio" && source.cwd ? { cwd: source.cwd } : {}),
+      ...(source.kind === "mcp-stdio" ? { env: source.env } : {}),
+      ...(source.kind === "meridian-ssh" ? { stderr: "ignore" } : {}),
       priority: source.priority,
       required: true,
     });

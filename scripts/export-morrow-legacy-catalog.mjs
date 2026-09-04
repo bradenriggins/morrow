@@ -17,6 +17,18 @@ function requiredEnvironment(name) {
   return value;
 }
 
+function resolveLegacyRoot() {
+  if (process.env.MORROW_LEGACY_ROOT?.trim()) return resolve(process.env.MORROW_LEGACY_ROOT);
+  const worktrees = execFileSync("git", ["worktree", "list", "--porcelain"], { encoding: "utf8" });
+  const blocks = worktrees.trim().split(/\n\n+/);
+  for (const block of blocks) {
+    const path = /^worktree (.+)$/m.exec(block)?.[1];
+    const commit = /^HEAD ([0-9a-f]+)$/m.exec(block)?.[1];
+    if (path && commit === PINNED_COMMIT) return resolve(path);
+  }
+  throw new Error("MORROW_LEGACY_ROOT is required when the pinned donor worktree is not present");
+}
+
 function git(root, ...args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
 }
@@ -48,7 +60,7 @@ async function importModule(root, relativePath, commit) {
 }
 
 async function main() {
-  const legacyRoot = resolve(requiredEnvironment("MORROW_LEGACY_ROOT"));
+  const legacyRoot = resolveLegacyRoot();
   const expectedCommit = String(process.env.MORROW_LEGACY_EXPECTED_COMMIT || PINNED_COMMIT).trim();
   const expectedCount = process.env.MORROW_LEGACY_EXPECTED_CANVAS_TOOLS === undefined
     ? undefined

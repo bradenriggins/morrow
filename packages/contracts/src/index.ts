@@ -274,14 +274,28 @@ export function parseMorrowCapabilityDescriptorV1(value: unknown): MorrowCapabil
   }
   requiredDescriptorString(value.canonicalName, "canonicalName");
   requiredDescriptorString(value.family, "family");
+  requiredDescriptorString(value.description, "description");
   if (value.provider !== "canvas" && value.provider !== "local") {
     throw new TypeError("provider must be canvas or local");
   }
   if (!Array.isArray(value.aliases) || value.aliases.some((alias) => typeof alias !== "string")) {
     throw new TypeError("aliases must be a string array");
   }
-  if (!isJsonObject(value.inputSchema) || !Array.isArray(value.sourceImplementations)) {
+  if (!isJsonObject(value.inputSchema) || !Array.isArray(value.sourceImplementations) || value.sourceImplementations.length === 0) {
     throw new TypeError("inputSchema and sourceImplementations are required");
+  }
+  for (const implementation of value.sourceImplementations) {
+    if (!isJsonObject(implementation) || !["morrow", "meridian"].includes(String(implementation.system))) {
+      throw new TypeError("sourceImplementations contains an invalid source system");
+    }
+    for (const field of ["toolName", "revision", "sourcePath", "sourceExport"] as const) {
+      requiredDescriptorString(implementation[field], `sourceImplementations.${field}`);
+    }
+    for (const field of ["sourceDigest", "schemaDigest"] as const) {
+      if (!/^[0-9a-f]{64}$/.test(String(implementation[field] || ""))) {
+        throw new TypeError(`sourceImplementations.${field} must be a SHA-256 digest`);
+      }
+    }
   }
   if (!isJsonObject(value.behavior) || !isJsonObject(value.authority) || !isJsonObject(value.route)) {
     throw new TypeError("behavior, authority, and route are required");
@@ -292,6 +306,17 @@ export function parseMorrowCapabilityDescriptorV1(value: unknown): MorrowCapabil
   ]) {
     if (typeof value.behavior[key] !== "boolean") throw new TypeError(`behavior.${key} must be boolean`);
   }
+  if (value.behavior.readOnly === value.behavior.mutating) {
+    throw new TypeError("behavior must declare exactly one of readOnly or mutating");
+  }
+  requiredDescriptorString(value.authority.scopeClass, "authority.scopeClass");
+  requiredDescriptorString(value.authority.dataClass, "authority.dataClass");
+  if (!["none", "standard", "destructive", "learner", "grade", "blueprint"].includes(String(value.authority.approvalClass))) {
+    throw new TypeError("authority.approvalClass is invalid");
+  }
+  if (!["meridian", "morrow-node", "morrow-extension", "composite"].includes(String(value.route.backend))) {
+    throw new TypeError("route.backend is invalid");
+  }
   if (!isJsonObject(value.profiles)) throw new TypeError("profiles are required");
   for (const profile of RUNTIME_PROFILES) {
     const entry = value.profiles[profile];
@@ -299,7 +324,7 @@ export function parseMorrowCapabilityDescriptorV1(value: unknown): MorrowCapabil
       throw new TypeError(`profiles.${profile} is invalid`);
     }
   }
-  requiredDescriptorString(value.catalogDigest, "catalogDigest");
+  if (!/^[0-9a-f]{64}$/.test(String(value.catalogDigest || ""))) throw new TypeError("catalogDigest must be a SHA-256 digest");
   if (!isJsonObject(value.evidence)) throw new TypeError("evidence is required");
   return value as unknown as MorrowCapabilityDescriptorV1;
 }

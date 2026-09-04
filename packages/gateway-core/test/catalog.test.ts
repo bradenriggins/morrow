@@ -94,4 +94,27 @@ describe("mergeCatalog", () => {
       reason: "held_provider",
     });
   });
+
+  it("rejects an incomplete capability descriptor", () => {
+    expect(() => parseMorrowCapabilityDescriptorV1({
+      schema: "morrow.capability.v1",
+      canonicalName: "canvas_page_get",
+      aliases: [],
+      family: "canvas-operation",
+      provider: "canvas",
+      description: "Read a page.",
+      inputSchema: { type: "object" },
+      sourceImplementations: [],
+      behavior: {
+        readOnly: true, mutating: false, destructive: false, irreversible: false,
+        supportsDryRun: false, supportsReadback: false, supportsUndo: false,
+        supportsBatch: false, requiresBrowser: false, requiresLiveCanvas: true,
+      },
+      authority: { scopeClass: "canvas", approvalClass: "none", dataClass: "course" },
+      route: {},
+      profiles: Object.fromEntries(["private-full", "public-canvas", "sandbox", "read-only"].map((profile) => [profile, { state: "supported" }])),
+      catalogDigest: "a".repeat(64),
+      evidence: {},
+    })).toThrow(/sourceImplementations/);
+  });
 });

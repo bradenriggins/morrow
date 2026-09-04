@@ -474,7 +474,16 @@ export class GatewayRuntime {
         ...(attestation ? { sourceAttestation: attestation } : {}),
         ...(truth ? { catalogTruth: truth.health } : {}),
         ...(upstreamConfig.kind === "meridian-ssh"
-          ? { supervision: upstreamConfig.supervision }
+          ? {
+              supervision: upstreamConfig.supervision,
+              beforeConnect: () => {
+                verifyRemoteGitSshSourceAttestation(
+                  upstreamConfig.id,
+                  upstreamConfig.repository,
+                  upstreamConfig.attestation,
+                );
+              },
+            }
           : {}),
       });
       upstreams.set(upstream.id, upstream);

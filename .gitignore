@@ -8,6 +8,7 @@ coverage/
 morrow.upstreams.json
 .morrow/
 artifacts/catalogs/*.json
+artifacts/catalogs/*.md
 !artifacts/catalogs/.gitkeep
 artifacts/candidates/
 artifacts/release/

@@ -442,7 +442,11 @@ export async function loadGatewayConfig(
 
   if (existsSync(path)) {
     const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
-    return parseGatewayConfig(raw, environment);
+    const config = parseGatewayConfig(raw, environment);
+    if (config.upstreams.some((upstream) => upstream.id.toLowerCase() === "meridian" && upstream.kind !== "meridian-ssh")) {
+      throw new Error("ExamplePlatform must run through a meridian-ssh upstream.");
+    }
+    return config;
   }
 
   if (environment.MORROW_MERIDIAN_SERVER_PATH?.trim()) {

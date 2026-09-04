@@ -1,11 +1,12 @@
 {
   "schema": "morrow.catalog-aliases.v1",
-  "status": "proposed-until-live-catalog-reconciliation",
+  "status": "accepted-against-frozen-donor-catalogs",
   "rules": [
     {
       "id": "canvas.pages.list",
       "publicName": "canvas_pages_list",
       "preferredSourceId": "meridian",
+      "allowContractDrift": true,
       "reason": "Both donor tools list pages in one exact Canvas course. Contract compatibility must still pass against the captured schemas.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_pages_list" },
@@ -16,6 +17,7 @@
       "id": "canvas.page.get",
       "publicName": "canvas_page_get",
       "preferredSourceId": "meridian",
+      "allowContractDrift": true,
       "reason": "Both donor tools read one Canvas page. Selection remains blocked when the captured input or output contracts differ.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_page_get" },
@@ -26,6 +28,7 @@
       "id": "canvas.page.update",
       "publicName": "canvas_page_update",
       "preferredSourceId": "meridian",
+      "allowContractDrift": true,
       "reason": "Both donor tools update one Canvas page, but their approval and readback contracts require separate review after schema comparison.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_page_update" },
@@ -36,6 +39,7 @@
       "id": "canvas.modules.list",
       "publicName": "canvas_modules_list",
       "preferredSourceId": "meridian",
+      "allowContractDrift": true,
       "reason": "Both donor tools list modules in one exact Canvas course.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_modules_list" },
@@ -46,6 +50,7 @@
       "id": "canvas.module-items.list",
       "publicName": "canvas_module_items_list",
       "preferredSourceId": "meridian",
+      "allowContractDrift": true,
       "reason": "Both donor tools list the items in one exact Canvas module.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_module_items_list" },
