@@ -46,12 +46,29 @@ describe("bridge protocol", () => {
   it("strips local routing controls before donor execution", () => {
     const split = splitBridgeCallArguments({
       course_id: "42",
-      _morrow: { source_binding_id: "binding-42", operation_id: "operation:12345678" },
+      _morrow: {
+        source_binding_id: "binding-42",
+        operation_id: "operation:12345678",
+        outer_grant: {
+          plan_digest: digest,
+          approval_grant_digest: "b".repeat(64),
+          effect_receipt_id: "effect:12345678",
+          dispatch_attempt: 1,
+          gateway_process_id: "gateway:12345678",
+        },
+      },
     });
     expect(split.arguments).toEqual({ course_id: "42" });
     expect(split.options).toEqual({
       sourceBindingId: "binding-42",
       operationId: "operation:12345678",
+      outerGrant: {
+        planDigest: digest,
+        approvalGrantDigest: "b".repeat(64),
+        effectReceiptId: "effect:12345678",
+        dispatchAttempt: 1,
+        gatewayProcessId: "gateway:12345678",
+      },
     });
   });
 });

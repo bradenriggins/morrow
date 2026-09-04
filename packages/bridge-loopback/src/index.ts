@@ -17,6 +17,7 @@ import {
   type BridgeClientMessage,
   type BridgeCommand,
   type BridgeCommandKind,
+  type BridgeOuterGrant,
   type BridgeHello,
   type BridgePing,
   type BridgeReady,
@@ -50,6 +51,7 @@ export interface BridgeInvocation {
   readonly sourceBindingId?: string;
   readonly taskId?: string;
   readonly operationId?: string;
+  readonly outerGrant?: BridgeOuterGrant;
   readonly timeoutMs?: number;
 }
 
@@ -171,6 +173,7 @@ export class LoopbackBridgeServer {
   private readonly heartbeatMs: number;
   private readonly allowMissingOriginForTests: boolean;
   private readonly pending = new Map<string, PendingRequest>();
+  private readonly usedOuterEffectReceipts = new Set<string>();
   private readonly httpServer: HttpServer;
   private readonly webSocketServer: WebSocketServer;
   private active: ActiveClient | null = null;
@@ -415,6 +418,21 @@ export class LoopbackBridgeServer {
     if (invocation.kind === "task_get" && !invocation.taskId) {
       throw new TypeError("task_get requires taskId");
     }
+    if (invocation.kind === "stage_write" && invocation.outerGrant) {
+      if (this.usedOuterEffectReceipts.has(invocation.outerGrant.effectReceiptId)) {
+        throw new BridgeOutcomeUnknownError({
+          schema: BRIDGE_SCHEMAS.command,
+          protocolVersion: BRIDGE_PROTOCOL_VERSION,
+          requestId,
+          operationId,
+          kind: invocation.kind,
+          generation: active.generation,
+          createdAt: now,
+          expiresAt: now + timeoutMs,
+        }, "The gateway effect receipt was already used. Morrow will not resend this write.", false);
+      }
+      this.usedOuterEffectReceipts.add(invocation.outerGrant.effectReceiptId);
+    }
     const command: BridgeCommand = {
       schema: BRIDGE_SCHEMAS.command,
       protocolVersion: BRIDGE_PROTOCOL_VERSION,
@@ -425,6 +443,7 @@ export class LoopbackBridgeServer {
       ...(invocation.arguments ? { arguments: structuredClone(invocation.arguments) } : {}),
       ...(invocation.sourceBindingId ? { sourceBindingId: invocation.sourceBindingId } : {}),
       ...(invocation.taskId ? { taskId: invocation.taskId } : {}),
+      ...(invocation.outerGrant ? { outerGrant: structuredClone(invocation.outerGrant) } : {}),
       generation: active.generation,
       createdAt: now,
       expiresAt: now + timeoutMs,

@@ -26,6 +26,7 @@ import {
   type JsonObject,
 } from "@morrow/contracts";
 import type { GatewayConfig } from "./config.js";
+import { LoopbackApprovalServer } from "./approval-server.js";
 import { GatewayRuntime } from "./runtime.js";
 
 export const MORROW_BATCH_TOOL_NAMES = Object.freeze([
@@ -316,15 +317,18 @@ export class MorrowRuntime {
   readonly gateway: GatewayRuntime;
   readonly batches: DurableBatchStore;
   readonly sourceSettlements: BatchSourceSettlementStore;
+  readonly approval: LoopbackApprovalServer;
 
   private constructor(
     gateway: GatewayRuntime,
     batches: DurableBatchStore,
     sourceSettlements: BatchSourceSettlementStore,
+    approval: LoopbackApprovalServer,
   ) {
     this.gateway = gateway;
     this.batches = batches;
     this.sourceSettlements = sourceSettlements;
+    this.approval = approval;
   }
 
   static async connect(
@@ -352,9 +356,17 @@ export class MorrowRuntime {
         );
       const batches = new DurableBatchStore({ path, encryptionKey: key });
       const sourceSettlements = new BatchSourceSettlementStore({ path });
-      const runtime = new MorrowRuntime(gateway, batches, sourceSettlements);
-      await runtime.recoverStartupBatches();
-      return runtime;
+      try {
+        const approval = new LoopbackApprovalServer(gateway);
+        await approval.start();
+        const runtime = new MorrowRuntime(gateway, batches, sourceSettlements, approval);
+        await runtime.recoverStartupBatches();
+        return runtime;
+      } catch (error) {
+        sourceSettlements.close();
+        batches.close();
+        throw error;
+      }
     } catch (error) {
       await gateway.close();
       throw error;
@@ -626,7 +638,7 @@ export class MorrowRuntime {
             operation_id: child.sourceOperationId,
           };
         }
-        const resultValue = await this.gateway.call(child.publicToolName, forwarded);
+        const resultValue = await this.gateway.callSourceOwned(child.publicToolName, forwarded);
         const outcome = childResult(this.gateway, batch, child, resultValue);
         if (batch.mode === "stage_writes") {
           try {
@@ -723,7 +735,7 @@ export class MorrowRuntime {
     ));
 
     const reconciled = await mapLimit(candidates, Math.min(batch.concurrency, 4), async (settlement) => {
-      const result = await this.gateway.call(inspectionTool.publicName, {
+      const result = await this.gateway.callSourceOwned(inspectionTool.publicName, {
         task_id: settlement.sourceTaskId,
         ...(settlement.sourceBindingId
           ? { source_binding_id: settlement.sourceBindingId }
@@ -807,6 +819,7 @@ export class MorrowRuntime {
   }
 
   async close(): Promise<void> {
+    await this.approval.close();
     this.sourceSettlements.close();
     this.batches.close();
     await this.gateway.close();

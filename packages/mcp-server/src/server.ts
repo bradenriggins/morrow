@@ -6,7 +6,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
-import { sha256Text, type JsonObject } from "@morrow/contracts";
+import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import { GATEWAY_OPERATION_STATES } from "@morrow/operation-journal";
 import type { GatewayRuntime } from "./runtime.js";
 import { MORROW_SERVER_INSTRUCTIONS } from "./server-instructions.js";
@@ -27,6 +27,45 @@ function safeInspectionFailure(error: unknown): CallToolResult {
       schema: "morrow.problem.v1",
       code: "gateway_operation_unavailable",
       detailDigest: sha256Text(detail),
+    },
+  };
+}
+
+function publicToolInputSchema(schema: JsonObject): JsonObject {
+  const output = structuredClone(schema);
+  const properties = isJsonObject(output.properties) ? output.properties : {};
+  const existing = isJsonObject(properties._morrow) ? properties._morrow : {};
+  const controls = isJsonObject(existing.properties) ? existing.properties : {};
+  return {
+    ...output,
+    type: "object",
+    properties: {
+      ...properties,
+      _morrow: {
+        ...existing,
+        type: "object",
+        properties: {
+          ...controls,
+          readback: {
+            type: "object",
+            description: "Optional frozen fresh-readback comparator for a mutating operation.",
+            properties: {
+              tool: { type: "string", minLength: 1, maxLength: 160 },
+              arguments: { type: "object" },
+              expected_digest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+            },
+            required: ["tool", "arguments", "expected_digest"],
+            additionalProperties: false,
+          },
+          approval_ttl_ms: {
+            type: "integer",
+            minimum: 60000,
+            maximum: 86400000,
+            description: "Optional local human-approval expiry in milliseconds.",
+          },
+        },
+        additionalProperties: false,
+      },
     },
   };
 }
@@ -191,7 +230,7 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
       {
         ...(tool.title ? { title: tool.title } : {}),
         ...(tool.description ? { description: tool.description } : {}),
-        inputSchema: fromJsonSchema(tool.inputSchema),
+        inputSchema: fromJsonSchema(publicToolInputSchema(tool.inputSchema)),
         ...(tool.annotations
           ? { annotations: tool.annotations as McpToolAnnotations }
           : {}),

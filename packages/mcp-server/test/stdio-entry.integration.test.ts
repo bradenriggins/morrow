@@ -16,7 +16,7 @@ describe("Morrow stdio entry", () => {
       profile: "private-full",
       sourcePolicy: { requireAttestation: false },
       upstreams: [{
-        id: "fixture",
+        id: "example-legacy",
         label: "Fixture",
         kind: "mcp-stdio",
         command: process.execPath,
@@ -24,7 +24,7 @@ describe("Morrow stdio entry", () => {
         priority: 1,
         required: true,
         enabled: true,
-        env: {},
+        env: { FAKE_SOURCE: "example-legacy" },
         outputPrivacy: {
           canvas_page_get: {
             allowedFields: ["source", "course_id"],
@@ -121,12 +121,36 @@ describe("Morrow stdio entry", () => {
         },
       });
       expect(resumed.isError).not.toBe(true);
+      for (const name of [
+        "morrow_operation_get",
+        "morrow_operation_list",
+        "morrow_operation_dispatch",
+        "morrow_operation_cancel",
+        "morrow_operation_reconcile",
+        "morrow_operation_verify",
+        "morrow_operation_undo",
+      ]) expect(listed.tools.some((tool) => tool.name === name)).toBe(true);
+      expect(listed.tools.some((tool) => tool.name === "morrow_operation_approve")).toBe(false);
       const result = await client.callTool({
         name: "canvas_page_get",
         arguments: { course_id: "1" },
       });
       expect(result.isError).not.toBe(true);
-      expect(result.structuredContent).toMatchObject({ source: "fake", course_id: "1" });
+      expect(result.structuredContent).toMatchObject({
+        schema: "morrow.result.v1",
+        verification: { status: "not_applicable" },
+        data: { source: "example-legacy", course_id: "1" },
+      });
+      const planned = await client.callTool({
+        name: "morrow_legacy_only",
+        arguments: { value: "surface-test" },
+      });
+      const operationId = (planned.structuredContent as { operationId?: string }).operationId;
+      expect(operationId).toMatch(/^op:/);
+      const loaded = await client.callTool({ name: "morrow_operation_get", arguments: { operation_id: operationId } });
+      expect(loaded.structuredContent).toMatchObject({ schema: "morrow.operation.v1", state: "awaiting_approval" });
+      const cancelled = await client.callTool({ name: "morrow_operation_cancel", arguments: { operation_id: operationId } });
+      expect(cancelled.structuredContent).toMatchObject({ schema: "morrow.result.v1", effectState: "cancelled" });
     } finally {
       await client.close();
       await rm(directory, { recursive: true, force: true });

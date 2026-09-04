@@ -69,9 +69,11 @@ describe("GatewayRuntime stdio federation", () => {
       }]);
 
       const primary = await runtime.call("canvas_page_get", { course_id: "101" });
-      expect(primary.structuredContent).toEqual({
-        source: "meridian",
-        course_id: "101",
+      expect(primary.structuredContent).toMatchObject({
+        schema: "morrow.result.v1",
+        phase: "read",
+        verification: { status: "not_applicable" },
+        data: { source: "meridian", course_id: "101" },
       });
       expect(primary._meta).toEqual({
         "io.morrow/gateway": expect.objectContaining({
@@ -85,9 +87,9 @@ describe("GatewayRuntime stdio federation", () => {
       });
 
       const alias = await runtime.call("morrow_legacy__canvas_page_get", { course_id: "202" });
-      expect(alias.structuredContent).toEqual({
-        source: "example-legacy",
-        course_id: "202",
+      expect(alias.structuredContent).toMatchObject({
+        schema: "morrow.result.v1",
+        data: { source: "example-legacy", course_id: "202" },
       });
 
       const firstDedupe = await runtime.call("morrow_legacy_only", {
@@ -96,21 +98,22 @@ describe("GatewayRuntime stdio federation", () => {
       });
       expect(firstDedupe.isError).not.toBe(true);
       expect(firstDedupe.structuredContent).toMatchObject({
-        source: "example-legacy",
-        tool: "morrow_legacy_only",
-        operation_id: "operation:dedupe-1234",
+        schema: "morrow.result.v1",
+        phase: "planned",
+        effectState: "awaiting_approval",
       });
       const replay = await runtime.call("morrow_legacy_only", {
         value: "write-once",
         _morrow: { operation_id: "operation:dedupe-1234" },
       });
-      expect(replay.isError).toBe(true);
+      expect(replay.isError).not.toBe(true);
       expect(replay.structuredContent).toMatchObject({
-        code: "operation_already_recorded",
+        schema: "morrow.result.v1",
+        operationId: (firstDedupe.structuredContent as { operationId: string }).operationId,
       });
 
       const recent = runtime.operationsRecent({ limit: 10 });
-      expect(recent.returned).toBe(3);
+      expect(recent.returned).toBe(2);
       const operations = recent.operations as { operationId: string; state: string }[];
       expect(operations.every((operation) => operation.state === "response_received")).toBe(true);
       expect(runtime.operationGet(operations[0]!.operationId)).toMatchObject({
@@ -134,7 +137,7 @@ describe("GatewayRuntime stdio federation", () => {
         collisionCount: 1,
         excludedToolCount: 4,
         operationJournal: {
-          totalOperations: 3,
+          totalOperations: 2,
           unresolvedOperations: 0,
           unknownOperations: 0,
         },

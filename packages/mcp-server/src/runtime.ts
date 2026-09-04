@@ -19,6 +19,7 @@ import {
   applyPublicationPolicy,
   ArtifactGenerationRegistry,
   LearnerVault,
+  canonicalMorrowResult,
   mergeCatalog,
   normalizeUpstreamResult,
   resolveLearnerTokens,
@@ -27,8 +28,12 @@ import {
 import {
   GatewayOperationConflictError,
   GatewayOperationJournal,
+  ProviderEffectBroker,
   classifySourceResult,
+  effectOperationProjection,
   operationRecordProjection,
+  type EffectOperationRecord,
+  type FrozenReadbackPlan,
   type GatewayOperationRecord,
   type GatewayOperationState,
 } from "@morrow/operation-journal";
@@ -44,6 +49,13 @@ export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_profile_status",
   "morrow_operation_get",
   "morrow_operations_recent",
+  "morrow_operation_list",
+  "morrow_operation_dispatch",
+  "morrow_operation_cancel",
+  "morrow_operation_reconcile",
+  "morrow_operation_verify",
+  "morrow_operation_undo",
+  "morrow_operation_approve",
 ] as const);
 
 export interface CatalogSearchInput {
@@ -137,6 +149,7 @@ function withSourceOperationId(
 } {
   const forwarded = structuredClone(args) as Record<string, unknown>;
   if (mapping.upstreamId !== "example-legacy") {
+    delete forwarded._morrow;
     return { forwarded };
   }
 
@@ -144,6 +157,9 @@ function withSourceOperationId(
     if (isJsonObject(forwarded._morrow)) {
       const routing = { ...forwarded._morrow };
       delete routing.operation_id;
+      delete routing.readback;
+      delete routing.approval_ttl_ms;
+      delete routing.outer_grant;
       if (Object.keys(routing).length > 0) forwarded._morrow = routing;
       else delete forwarded._morrow;
     }
@@ -160,6 +176,52 @@ function withSourceOperationId(
     forwarded,
     sourceOperationId,
     ...(routing.suppliedOperationId ? { idempotencyKey: routing.suppliedOperationId } : {}),
+  };
+}
+
+interface OuterOperationControls {
+  readonly request: JsonObject;
+  readonly readback?: FrozenReadbackPlan;
+  readonly approvalTtlMs?: number;
+}
+
+function outerOperationControls(args: Readonly<Record<string, unknown>>): OuterOperationControls {
+  const request = structuredClone(args) as JsonObject;
+  if (!isJsonObject(request._morrow)) return { request };
+  const routing = { ...request._morrow };
+  const rawReadback = routing.readback;
+  const rawTtl = routing.approval_ttl_ms;
+  delete routing.readback;
+  delete routing.approval_ttl_ms;
+  delete routing.outer_grant;
+  if (Object.keys(routing).length > 0) request._morrow = routing;
+  else delete request._morrow;
+
+  let readback: FrozenReadbackPlan | undefined;
+  if (rawReadback !== undefined) {
+    if (!isJsonObject(rawReadback) || typeof rawReadback.tool !== "string" || !isJsonObject(rawReadback.arguments)
+      || typeof rawReadback.expected_digest !== "string" || !/^[0-9a-f]{64}$/.test(rawReadback.expected_digest)) {
+      throw new TypeError("_morrow.readback requires tool, arguments, and expected_digest");
+    }
+    readback = {
+      tool: rawReadback.tool,
+      arguments: structuredClone(rawReadback.arguments),
+      expectedDigest: rawReadback.expected_digest,
+    };
+  }
+  const approvalTtlMs = rawTtl === undefined
+    ? undefined
+    : typeof rawTtl === "number" && Number.isInteger(rawTtl) && rawTtl >= 60_000 && rawTtl <= 24 * 60 * 60_000
+      ? rawTtl
+      : (() => { throw new TypeError("_morrow.approval_ttl_ms must be 60000 through 86400000"); })();
+  return { request, ...(readback ? { readback } : {}), ...(approvalTtlMs ? { approvalTtlMs } : {}) };
+}
+
+function resultComparable(value: JsonObject): JsonObject {
+  if (isJsonObject(value.structuredContent)) return structuredClone(value.structuredContent);
+  return {
+    content: Array.isArray(value.content) ? structuredClone(value.content) : [],
+    isError: value.isError === true,
   };
 }
 
@@ -285,9 +347,11 @@ function applyProfileAvailability(catalog: CatalogSnapshot, profile: RuntimeProf
 async function closeStartupResources(
   upstreams: ReadonlyMap<string, StdioMcpUpstream>,
   journal: GatewayOperationJournal,
+  effects: ProviderEffectBroker,
 ): Promise<void> {
   await Promise.allSettled([...upstreams.values()].map((candidate) => candidate.close()));
   journal.close();
+  effects.close();
 }
 
 export class GatewayRuntime {
@@ -297,15 +361,19 @@ export class GatewayRuntime {
   private readonly upstreams: ReadonlyMap<string, StdioMcpUpstream>;
   private readonly toolByPublicName: ReadonlyMap<string, CatalogTool>;
   private readonly journal: GatewayOperationJournal;
+  private readonly effects: ProviderEffectBroker;
   private readonly publicationPolicy: PublicationPolicyHealth | undefined;
   private readonly learnerVault: LearnerVault;
   private readonly artifacts: ArtifactGenerationRegistry;
+  private approvalBaseUrl: string | null = null;
+  private readonly gatewayProcessId = `gateway:${randomUUID()}`;
 
   private constructor(
     config: GatewayConfig,
     upstreams: ReadonlyMap<string, StdioMcpUpstream>,
     catalog: CatalogSnapshot,
     journal: GatewayOperationJournal,
+    effects: ProviderEffectBroker,
     publicationPolicy?: PublicationPolicyHealth,
     learnerVault = new LearnerVault(":memory:"),
     artifacts = new ArtifactGenerationRegistry(),
@@ -314,6 +382,7 @@ export class GatewayRuntime {
     this.upstreams = upstreams;
     this.catalog = catalog;
     this.journal = journal;
+    this.effects = effects;
     this.publicationPolicy = publicationPolicy;
     this.learnerVault = learnerVault;
     this.artifacts = artifacts;
@@ -333,6 +402,9 @@ export class GatewayRuntime {
         ? ":memory:"
         : config.privacy.learnerVaultPath,
     );
+    const effects = new ProviderEffectBroker({
+      path: options.journalPath || config.operationJournal.path,
+    });
     const upstreams = new Map<string, StdioMcpUpstream>();
     const sources: CatalogSource[] = [];
 
@@ -370,7 +442,7 @@ export class GatewayRuntime {
         });
       } catch (error) {
         if (upstream.required) {
-          await closeStartupResources(upstreams, journal);
+          await closeStartupResources(upstreams, journal, effects);
           throw new Error(
             `Required upstream ${upstream.id} failed to connect`,
             { cause: error },
@@ -427,11 +499,12 @@ export class GatewayRuntime {
         upstreams,
         catalog,
         journal,
+        effects,
         publicationPolicy,
         learnerVault,
       );
     } catch (error) {
-      await closeStartupResources(upstreams, journal);
+      await closeStartupResources(upstreams, journal, effects);
       throw error;
     }
   }
@@ -519,6 +592,9 @@ export class GatewayRuntime {
   }
 
   operationGet(operationId: string): JsonObject {
+    if (operationId.startsWith("op:")) {
+      return effectOperationProjection(this.effects.get(operationId));
+    }
     return operationRecordProjection(this.journal.get(operationId));
   }
 
@@ -536,16 +612,244 @@ export class GatewayRuntime {
     };
   }
 
+  operationList(limit = 50): JsonObject {
+    const operations = this.effects.list(limit).map(effectOperationProjection);
+    return {
+      schema: "morrow.operations.list.v1",
+      returned: operations.length,
+      operations,
+    };
+  }
+
+  approvalUrl(operationId: string): string | null {
+    return this.approvalBaseUrl ? `${this.approvalBaseUrl}/operations/${encodeURIComponent(operationId)}` : null;
+  }
+
+  setApprovalBaseUrl(baseUrl: string): void {
+    const parsed = new URL(baseUrl);
+    if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1") {
+      throw new TypeError("approval service must use the loopback address");
+    }
+    this.approvalBaseUrl = parsed.origin;
+  }
+
+  approveOperation(operationId: string): JsonObject {
+    return effectOperationProjection(this.effects.approve(operationId));
+  }
+
+  cancelOperation(operationId: string): JsonObject {
+    return effectOperationProjection(this.effects.cancel(operationId));
+  }
+
+  private effectResult(record: EffectOperationRecord, phase: string, result?: JsonObject): JsonObject {
+    const verificationStatus = record.verificationStatus === "verified"
+      ? "verified"
+      : record.readback ? "unconfirmed" : "not_requested";
+    return canonicalMorrowResult({
+      ...(result ? { result } : {}),
+      operationId: record.operationId,
+      tool: record.publicToolName,
+      phase,
+      effectState: record.state,
+      verificationStatus,
+      attention: record.attention,
+      limitations: record.state === "awaiting_inner_approval"
+        ? ["The source still requires its own human approval. Morrow did not infer provider completion."]
+        : record.state === "awaiting_verification"
+          ? ["A fresh, frozen readback comparator is required before Morrow can report verified."]
+          : record.state === "applied_or_unknown"
+            ? ["Morrow will not replay this operation because the provider effect may have occurred."]
+            : undefined,
+      receipts: {
+        planDigest: record.planDigest,
+        ...(record.approvalGrantDigest ? { approvalGrantDigest: record.approvalGrantDigest } : {}),
+        ...(record.effectReceiptId ? { effectReceiptId: record.effectReceiptId } : {}),
+        dispatchAttempt: record.dispatchAttempt,
+        ...(record.readbackDigest ? { readbackDigest: record.readbackDigest } : {}),
+        ...(this.approvalUrl(record.operationId) && record.state === "awaiting_approval"
+          ? { approvalUrl: this.approvalUrl(record.operationId) }
+          : {}),
+      },
+    });
+  }
+
+  private planEffect(
+    mapping: CatalogTool,
+    controls: OuterOperationControls,
+    correctionOf?: string,
+  ): EffectOperationRecord {
+    const routed = withSourceOperationId(mapping, controls.request);
+    const routing = legacyRouting(controls.request);
+    return this.effects.create({
+      publicToolName: mapping.publicName,
+      sourceId: mapping.upstreamId,
+      sourceToolName: mapping.upstreamName,
+      catalogDigest: this.catalog.digest,
+      request: controls.request,
+      forwardedRequest: routed.forwarded as JsonObject,
+      ...(routed.sourceOperationId ? { sourceOperationId: routed.sourceOperationId } : {}),
+      ...(routing.sourceBindingId ? { sourceBindingId: routing.sourceBindingId } : {}),
+      ...(controls.readback ? { readback: controls.readback } : {}),
+      ...(controls.approvalTtlMs ? { approvalTtlMs: controls.approvalTtlMs } : {}),
+      ...(correctionOf ? { correctionOf } : {}),
+    });
+  }
+
   async call(publicName: string, args: Readonly<Record<string, unknown>>): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
     if (!mapping) {
-      return {
+      return canonicalMorrowResult({
+        tool: publicName,
+        phase: "rejected",
+        verificationStatus: "not_applicable",
+        result: {
         content: [{ type: "text", text: `Unknown Morrow tool ${publicName}.` }],
         isError: true,
         structuredContent: {
           schema: "morrow.problem.v1",
           code: "tool_not_found",
         },
+        },
+      });
+    }
+    if (mapping.annotations?.readOnlyHint === true) {
+      const result = await this.callSourceOwned(publicName, args);
+      return canonicalMorrowResult({
+        result,
+        tool: publicName,
+        phase: "read",
+        verificationStatus: "not_applicable",
+      });
+    }
+    try {
+      const operation = this.planEffect(mapping, outerOperationControls(args));
+      return this.effectResult(operation, "planned");
+    } catch (error) {
+      const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+      return canonicalMorrowResult({
+        tool: publicName,
+        phase: "rejected",
+        verificationStatus: "not_requested",
+        result: {
+          content: [{ type: "text", text: "Morrow could not freeze this operation plan." }],
+          isError: true,
+          structuredContent: {
+            schema: "morrow.problem.v1",
+            code: "operation_plan_invalid",
+            detailDigest: sha256Text(detail),
+          },
+        },
+      });
+    }
+  }
+
+  async dispatchOperation(operationId: string): Promise<JsonObject> {
+    let reserved: EffectOperationRecord;
+    try {
+      reserved = this.effects.reserveDispatch(operationId);
+    } catch (error) {
+      const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+      return canonicalMorrowResult({
+        operationId,
+        tool: "morrow_operation_dispatch",
+        phase: "rejected",
+        verificationStatus: "not_requested",
+        result: {
+          content: [{ type: "text", text: "Morrow did not dispatch this operation." }],
+          isError: true,
+          structuredContent: { schema: "morrow.problem.v1", code: "operation_dispatch_refused", detailDigest: sha256Text(detail) },
+        },
+      });
+    }
+    if (reserved.state !== "dispatching") return this.effectResult(reserved, "dispatch_refused");
+    const mapping = this.toolByPublicName.get(reserved.publicToolName);
+    if (!mapping) {
+      const settled = this.effects.settleFailure(reserved.operationId, "frozen_tool_mapping_missing", false);
+      return this.effectResult(settled, "dispatch_failed");
+    }
+    const forwarded = structuredClone(reserved.forwardedRequest) as Record<string, unknown>;
+    if (mapping.upstreamId === "example-legacy") {
+      forwarded._morrow = {
+        ...(isJsonObject(forwarded._morrow) ? forwarded._morrow : {}),
+        operation_id: reserved.sourceOperationId || reserved.operationId,
+        outer_grant: {
+          plan_digest: reserved.planDigest,
+          approval_grant_digest: reserved.approvalGrantDigest,
+          effect_receipt_id: reserved.effectReceiptId,
+          dispatch_attempt: reserved.dispatchAttempt,
+          gateway_process_id: this.gatewayProcessId,
+        },
+      };
+    }
+    const result = await this.callSourceOwned(mapping.publicName, forwarded);
+    const source = classifySourceResult(result);
+    if (result.isError === true) {
+      const meta = isJsonObject(result._meta) && isJsonObject(result._meta["io.morrow/gateway"])
+        ? result._meta["io.morrow/gateway"] : {};
+      const definitelyNotSent = meta.gatewayOperationState === "failed_before_send" || source.state === "not_sent";
+      const settled = this.effects.settleFailure(reserved.operationId, result, !definitelyNotSent);
+      return this.effectResult(settled, "dispatch_failed", result);
+    }
+    const innerApprovalRequired = /awaiting.*approval|pending.*approval|staged/i.test(source.state || "")
+      || (mapping.upstreamId === "example-legacy" && Boolean(source.taskId));
+    const settled = this.effects.settleResponse(reserved.operationId, {
+      upstreamResultDigest: sha256Json(result),
+      ...(source.state ? { sourceResultState: source.state } : {}),
+      ...(source.taskId ? { sourceTaskId: source.taskId } : {}),
+      innerApprovalRequired,
+    });
+    return this.effectResult(settled, "dispatched", result);
+  }
+
+  async verifyOperation(operationId: string): Promise<JsonObject> {
+    const operation = this.effects.get(operationId);
+    if (!operation.readback) {
+      return this.effectResult(operation, "verification_unsupported");
+    }
+    if (operation.state === "awaiting_inner_approval") {
+      return this.effectResult(operation, "verification_requires_inner_approval");
+    }
+    const mapping = this.toolByPublicName.get(operation.readback.tool);
+    if (!mapping || mapping.annotations?.readOnlyHint !== true) {
+      return this.effectResult(operation, "verification_unsupported");
+    }
+    const fresh = await this.callSourceOwned(mapping.publicName, operation.readback.arguments);
+    if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
+    const readbackDigest = sha256Json(resultComparable(fresh));
+    const settled = this.effects.recordReadback(
+      operation.operationId,
+      readbackDigest,
+      readbackDigest === operation.readback.expectedDigest,
+    );
+    return this.effectResult(settled, "verified_readback", fresh);
+  }
+
+  reconcileOperation(operationId: string): JsonObject {
+    const operation = this.effects.get(operationId);
+    return this.effectResult(operation, "reconciliation_requires_provider_evidence");
+  }
+
+  undoOperation(
+    operationId: string,
+    correctionTool: string,
+    correctionArguments: Readonly<Record<string, unknown>>,
+  ): JsonObject {
+    const original = this.effects.get(operationId);
+    const mapping = this.toolByPublicName.get(correctionTool);
+    if (!mapping || mapping.annotations?.readOnlyHint === true) {
+      throw new Error("A correction must use one current mutating Morrow tool");
+    }
+    const correction = this.planEffect(mapping, outerOperationControls(correctionArguments), original.operationId);
+    return this.effectResult(correction, "correction_planned");
+  }
+
+  async callSourceOwned(publicName: string, args: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+    const mapping = this.toolByPublicName.get(publicName);
+    if (!mapping) {
+      return {
+        content: [{ type: "text", text: `Unknown Morrow tool ${publicName}.` }],
+        isError: true,
+        structuredContent: { schema: "morrow.problem.v1", code: "tool_not_found" },
       };
     }
 
@@ -663,6 +967,7 @@ export class GatewayRuntime {
   async close(): Promise<void> {
     await Promise.allSettled([...this.upstreams.values()].map((upstream) => upstream.close()));
     this.journal.close();
+    this.effects.close();
   }
 
   recordGeneratedArtifact(bytes: Uint8Array): string {

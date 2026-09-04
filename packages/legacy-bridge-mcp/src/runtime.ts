@@ -103,6 +103,7 @@ export class LegacyBridgeRuntime {
         arguments: split.arguments,
         sourceBindingId: split.options.sourceBindingId,
         operationId: operationId(split.options.operationId),
+        ...(split.options.outerGrant ? { outerGrant: split.options.outerGrant } : {}),
       });
       if (!response.ok) return failedProblem(response.problem);
       return {

@@ -126,4 +126,33 @@ describe("LoopbackBridgeServer", () => {
     })).rejects.toBeInstanceOf(BridgeOutcomeUnknownError);
     expect(calls).toBe(1);
   });
+
+  it("accepts a gateway outer effect receipt once", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedDonorRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const socket = await connect(server);
+    let calls = 0;
+    commandHandler(socket, (command) => {
+      calls += 1;
+      expect(command.outerGrant).toMatchObject({ effectReceiptId: "effect:12345678", dispatchAttempt: 1 });
+      return { taskId: "task-1" };
+    });
+    const outerGrant = {
+      planDigest: digest,
+      approvalGrantDigest: "b".repeat(64),
+      effectReceiptId: "effect:12345678",
+      dispatchAttempt: 1 as const,
+      gatewayProcessId: "gateway:12345678",
+    };
+    await server.invoke({ kind: "stage_write", toolName: "edit_page", outerGrant });
+    await expect(server.invoke({ kind: "stage_write", toolName: "edit_page", outerGrant }))
+      .rejects.toBeInstanceOf(BridgeOutcomeUnknownError);
+    expect(calls).toBe(1);
+  });
 });

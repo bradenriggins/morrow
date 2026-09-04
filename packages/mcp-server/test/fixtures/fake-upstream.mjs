@@ -50,6 +50,13 @@ function createServer() {
         _morrow: z.object({
           operation_id: z.string().optional(),
           source_binding_id: z.string().optional(),
+          outer_grant: z.object({
+            plan_digest: z.string(),
+            approval_grant_digest: z.string(),
+            effect_receipt_id: z.string(),
+            dispatch_attempt: z.literal(1),
+            gateway_process_id: z.string(),
+          }).optional(),
         }).optional(),
       }),
       annotations: {

@@ -70,9 +70,19 @@ export interface BridgeCommand {
   readonly arguments?: JsonObject;
   readonly sourceBindingId?: string;
   readonly taskId?: string;
+  /** Gateway-owned evidence for a dispatched outer effect. */
+  readonly outerGrant?: BridgeOuterGrant;
   readonly generation: number;
   readonly createdAt: number;
   readonly expiresAt: number;
+}
+
+export interface BridgeOuterGrant {
+  readonly planDigest: string;
+  readonly approvalGrantDigest: string;
+  readonly effectReceiptId: string;
+  readonly dispatchAttempt: 1;
+  readonly gatewayProcessId: string;
 }
 
 export interface BridgeProblem {
@@ -123,6 +133,7 @@ export type BridgeServerMessage = BridgeReady | BridgeCommand | BridgePing;
 export interface MorrowBridgeCallOptions {
   readonly sourceBindingId?: string;
   readonly operationId?: string;
+  readonly outerGrant?: BridgeOuterGrant;
 }
 
 const TOOL_OR_SOURCE = /^[A-Za-z0-9_.:@-]{1,160}$/;
@@ -150,6 +161,22 @@ function requiredInteger(value: unknown, label: string, minimum = 0): number {
 function optionalString(value: unknown, label: string, maxLength: number): string | undefined {
   if (value === undefined || value === null || value === "") return undefined;
   return requiredString(value, label, maxLength);
+}
+
+function parseOuterGrant(value: unknown): BridgeOuterGrant {
+  if (!isJsonObject(value)) throw new TypeError("_morrow.outer_grant must be an object");
+  const planDigest = requiredString(value.plan_digest, "_morrow.outer_grant.plan_digest", 64);
+  const approvalGrantDigest = requiredString(value.approval_grant_digest, "_morrow.outer_grant.approval_grant_digest", 64);
+  const effectReceiptId = requiredString(value.effect_receipt_id, "_morrow.outer_grant.effect_receipt_id", 160);
+  const gatewayProcessId = requiredString(value.gateway_process_id, "_morrow.outer_grant.gateway_process_id", 160);
+  if (!HEX_SHA256.test(planDigest) || !HEX_SHA256.test(approvalGrantDigest)) {
+    throw new TypeError("_morrow.outer_grant digests must be SHA-256 values");
+  }
+  if (!TOOL_OR_SOURCE.test(effectReceiptId) || !TOOL_OR_SOURCE.test(gatewayProcessId)) {
+    throw new TypeError("_morrow.outer_grant receipt and gateway id have invalid formats");
+  }
+  if (value.dispatch_attempt !== 1) throw new TypeError("_morrow.outer_grant.dispatch_attempt must be 1");
+  return { planDigest, approvalGrantDigest, effectReceiptId, dispatchAttempt: 1, gatewayProcessId };
 }
 
 function parseBinding(value: unknown): BridgeBinding {
@@ -342,6 +369,19 @@ export function augmentBridgeInputSchema(inputSchema: JsonObject): JsonObject {
             maxLength: 160,
             description: "Optional stable caller identity for this requested operation.",
           },
+          outer_grant: {
+            type: "object",
+            description: "Gateway-owned dispatch grant. Callers cannot create this grant.",
+            properties: {
+              plan_digest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+              approval_grant_digest: { type: "string", pattern: "^[0-9a-f]{64}$" },
+              effect_receipt_id: { type: "string", minLength: 8, maxLength: 160 },
+              dispatch_attempt: { type: "integer", const: 1 },
+              gateway_process_id: { type: "string", minLength: 8, maxLength: 160 },
+            },
+            required: ["plan_digest", "approval_grant_digest", "effect_receipt_id", "dispatch_attempt", "gateway_process_id"],
+            additionalProperties: false,
+          },
         },
         additionalProperties: false,
       },
@@ -360,10 +400,11 @@ export function splitBridgeCallArguments(value: Readonly<Record<string, unknown>
     return { arguments: input as JsonObject, options: {} };
   }
   if (!isJsonObject(rawOptions)) throw new TypeError("_morrow must be an object");
-  const unknown = Object.keys(rawOptions).find((key) => !["source_binding_id", "operation_id"].includes(key));
+  const unknown = Object.keys(rawOptions).find((key) => !["source_binding_id", "operation_id", "outer_grant"].includes(key));
   if (unknown) throw new TypeError(`unsupported _morrow field ${unknown}`);
   const sourceBindingId = optionalString(rawOptions.source_binding_id, "_morrow.source_binding_id", 160);
   const operationId = optionalString(rawOptions.operation_id, "_morrow.operation_id", 160);
+  const outerGrant = rawOptions.outer_grant === undefined ? undefined : parseOuterGrant(rawOptions.outer_grant);
   if (sourceBindingId && !TOOL_OR_SOURCE.test(sourceBindingId)) {
     throw new TypeError("_morrow.source_binding_id has an invalid format");
   }
@@ -375,6 +416,7 @@ export function splitBridgeCallArguments(value: Readonly<Record<string, unknown>
     options: {
       ...(sourceBindingId ? { sourceBindingId } : {}),
       ...(operationId ? { operationId } : {}),
+      ...(outerGrant ? { outerGrant } : {}),
     },
   };
 }

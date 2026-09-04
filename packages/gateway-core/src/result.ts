@@ -19,6 +19,47 @@ export interface ResultContext {
   readonly privacy?: OutputPrivacyContext;
 }
 
+export interface CanonicalMorrowResultInput {
+  readonly result?: JsonObject;
+  readonly operationId?: string;
+  readonly tool: string;
+  readonly phase: string;
+  readonly effectState?: string;
+  readonly verificationStatus: "not_applicable" | "not_requested" | "unconfirmed" | "verified";
+  readonly attention?: readonly string[];
+  readonly limitations?: readonly string[];
+  readonly receipts?: JsonObject;
+}
+
+export function canonicalMorrowResult(input: CanonicalMorrowResultInput): JsonObject {
+  const upstream = input.result ? structuredClone(input.result) : {};
+  const structured = isJsonObject(upstream.structuredContent)
+    ? structuredClone(upstream.structuredContent)
+    : null;
+  const meta = isJsonObject(upstream._meta) ? structuredClone(upstream._meta) : {};
+  return {
+    content: Array.isArray(upstream.content)
+      ? structuredClone(upstream.content)
+      : [{ type: "text", text: `Morrow ${input.phase.replaceAll("_", " ")}.` }],
+    ...(upstream.isError === true ? { isError: true } : {}),
+    structuredContent: {
+      schema: "morrow.result.v1",
+      tool: input.tool,
+      phase: input.phase,
+      ...(input.operationId ? { operationId: input.operationId } : {}),
+      ...(input.effectState ? { effectState: input.effectState } : {}),
+      verification: {
+        status: input.verificationStatus,
+      },
+      ...(input.receipts ? { receipts: structuredClone(input.receipts) } : {}),
+      ...(input.attention && input.attention.length > 0 ? { attention: [...input.attention] } : {}),
+      ...(input.limitations && input.limitations.length > 0 ? { limitations: [...input.limitations] } : {}),
+      ...(structured ? { data: structured } : {}),
+    },
+    _meta: meta,
+  };
+}
+
 function textError(text: string, detailDigest: string): JsonObject {
   return {
     content: [{ type: "text", text }],

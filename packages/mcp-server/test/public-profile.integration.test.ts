@@ -208,13 +208,19 @@ describe("public-canvas runtime profile", () => {
 
       const selected = await runtime.call("canvas_page_get", { course_id: "101" });
       expect(selected.isError).not.toBe(true);
-      expect(selected.structuredContent).toEqual({ source: "meridian", course_id: "101" });
+      expect(selected.structuredContent).toMatchObject({
+        schema: "morrow.result.v1",
+        verification: { status: "not_applicable" },
+        data: { source: "meridian", course_id: "101" },
+      });
 
       const omitted = await runtime.call("meridian_only", {});
       expect(omitted).toMatchObject({
         isError: true,
         structuredContent: {
-          code: "tool_not_found",
+          schema: "morrow.result.v1",
+          verification: { status: "not_applicable" },
+          data: { code: "tool_not_found" },
         },
       });
     } finally {

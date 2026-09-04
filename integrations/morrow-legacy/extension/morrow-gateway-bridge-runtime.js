@@ -39,6 +39,29 @@ function exactCommandInput(command) {
     : {};
 }
 
+function verifiedOuterGrant(command) {
+  const grant = command && command.outerGrant;
+  if (grant === undefined) return null;
+  const digest = /^[0-9a-f]{64}$/;
+  const identifier = /^[A-Za-z0-9_.:@-]{8,160}$/;
+  if (
+    !grant || typeof grant !== 'object'
+    || !digest.test(String(grant.planDigest || ''))
+    || !digest.test(String(grant.approvalGrantDigest || ''))
+    || !identifier.test(String(grant.effectReceiptId || ''))
+    || Number(grant.dispatchAttempt) !== 1
+    || !identifier.test(String(grant.gatewayProcessId || ''))
+  ) {
+    throw bridgeError('bridge_outer_grant_invalid', 'The gateway outer effect grant is invalid.');
+  }
+  return {
+    plan_digest: String(grant.planDigest),
+    approval_grant_digest: String(grant.approvalGrantDigest),
+    effect_receipt_id: String(grant.effectReceiptId),
+    gateway_process_id: String(grant.gatewayProcessId),
+  };
+}
+
 function admittedCapability(toolName, expectedWrite) {
   const definition = TOOL_BY_NAME.get(toolName);
   const capability = getCapability('canvas', toolName);
@@ -99,6 +122,7 @@ async function stageWrite(command) {
   const canvasUrl = String(binding.canvasBase || binding.canvasUrl || binding.origin || '').trim();
   const courseId = resolveMorrowBridgeCourseId(input, binding);
   const operationId = String(command.operationId || '').trim();
+  const outerGrant = verifiedOuterGrant(command);
   const task = await stageChatTask({
     plan: {
       kind: 'morrow_gateway_write',
@@ -124,6 +148,7 @@ async function stageWrite(command) {
         operation_type: toolName,
         source: 'morrow_gateway',
         bridge_operation_id: operationId,
+        ...(outerGrant || {}),
       },
       lineage: courseId ? { course_id: courseId } : {},
     },
