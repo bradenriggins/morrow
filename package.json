@@ -30,6 +30,7 @@
     "catalog:canvas:check": "node scripts/generate-canvas-api-catalog.mjs --check",
     "publication:build": "pnpm build && node scripts/create-publication-policy.mjs",
     "source-rights:check": "pnpm build && node scripts/validate-source-rights.mjs",
+    "source-rights:generate": "node scripts/create-source-rights-manifest.mjs",
     "source-origin:generate": "node scripts/create-source-origin-ledger.mjs",
     "test:catalog": "pnpm --dir packages/gateway-core exec vitest run test/catalog.test.ts test/reconcile.test.ts test/publication.test.ts test/publication-candidate.test.ts",
     "test:protocol": "pnpm --dir packages/bridge-protocol exec vitest run test/protocol.test.ts && pnpm --dir packages/bridge-loopback exec vitest run test/server.test.ts && pnpm --dir packages/mcp-server exec vitest run test/protocol.integration.test.ts test/gateway.integration.test.ts test/meridian-runtime.test.ts test/sandbox-profile.integration.test.ts",
