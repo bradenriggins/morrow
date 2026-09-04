@@ -29,7 +29,7 @@
     "catalog:canvas": "node scripts/generate-canvas-api-catalog.mjs",
     "catalog:canvas:check": "node scripts/generate-canvas-api-catalog.mjs --check",
     "publication:build": "pnpm build && node scripts/create-publication-policy.mjs",
-    "source-rights:check": "pnpm build && node scripts/validate-source-rights.mjs",
+    "source-rights:check": "pnpm build && node scripts/validate-source-rights.mjs --root .",
     "source-rights:generate": "node scripts/create-source-rights-manifest.mjs",
     "source-origin:generate": "node scripts/create-source-origin-ledger.mjs",
     "test:catalog": "pnpm --dir packages/gateway-core exec vitest run test/catalog.test.ts test/reconcile.test.ts test/publication.test.ts test/publication-candidate.test.ts",
