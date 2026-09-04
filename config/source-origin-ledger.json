@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+  "candidateCommit": "0f74ac8c743224ec7bd3bd4e55a840dde3abd432",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -60,14 +60,14 @@
     },
     {
       "path": "LIMITATIONS.md",
-      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+      "sourceCommit": "0f74ac8c743224ec7bd3bd4e55a840dde3abd432",
       "originalPath": "LIMITATIONS.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9da0229bc77a98998b25f59d05f90080e50f9d86c91cf3494014498d6437d53a",
-      "afterDigest": "5d15ba1dd1771e412331a1cd5964a9876e53a8b78c4be33cafbf92640bd1f362"
+      "beforeDigest": "5d15ba1dd1771e412331a1cd5964a9876e53a8b78c4be33cafbf92640bd1f362",
+      "afterDigest": "d8f5ba7817be45a16fd153ae2b4e67e7c939f3fcf8f68e58e242c9f4459e202d"
     },
     {
       "path": "README.md",
@@ -93,14 +93,14 @@
     },
     {
       "path": "WEEKEND-HANDOFF.md",
-      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+      "sourceCommit": "0f74ac8c743224ec7bd3bd4e55a840dde3abd432",
       "originalPath": "WEEKEND-HANDOFF.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5cb1937abfa78934015f83b6afa3081d0ba8804e287e614998c3d92f6858c425",
-      "afterDigest": "d8ea05779c332bb248eff201cc6be9dfb3d0e5fecd0d6cdb52b27f0fc48984e6"
+      "beforeDigest": "d8ea05779c332bb248eff201cc6be9dfb3d0e5fecd0d6cdb52b27f0fc48984e6",
+      "afterDigest": "ca30817db16b28d59ea3d8b86e3d7cd730a635afc946e0c5d8fafb204aa8d15f"
     },
     {
       "path": "artifacts/catalogs/.gitkeep",
@@ -1134,7 +1134,7 @@
     },
     {
       "path": "packages/mcp-server/src/config.ts",
-      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+      "sourceCommit": "0f74ac8c743224ec7bd3bd4e55a840dde3abd432",
       "originalPath": "packages/mcp-server/src/config.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1143,8 +1143,8 @@
         "packages/mcp-server/test/batch-window-scheduler.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ad06d5d7a57949695310ab0ebb40399f0805aee81a590ba66b6d67fffe9ad529",
-      "afterDigest": "415a8d308065af2458f0dc6fed87b7d31922621fc6537b6e524cda40c2e808fc"
+      "beforeDigest": "415a8d308065af2458f0dc6fed87b7d31922621fc6537b6e524cda40c2e808fc",
+      "afterDigest": "faae0921c7be1e2e96d280be34cc821619a47dbabc5234ad5d7e431d76fdb1d5"
     },
     {
       "path": "packages/mcp-server/src/full-server.ts",
@@ -1388,14 +1388,14 @@
     },
     {
       "path": "packages/mcp-server/test/config.test.ts",
-      "sourceCommit": "119bd8d8795dc21a452d0c02233f3b1ae73a9c3a",
+      "sourceCommit": "0f74ac8c743224ec7bd3bd4e55a840dde3abd432",
       "originalPath": "packages/mcp-server/test/config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "1188a6db18a5dbd3ba432ee9535ac5fcc025cbd87fc857c34d3d077c620ad77e",
-      "afterDigest": "6b56dd85ea01385aafc900f7ada54efd2c77af66fee02e90dc75f1e876b7d868"
+      "beforeDigest": "6b56dd85ea01385aafc900f7ada54efd2c77af66fee02e90dc75f1e876b7d868",
+      "afterDigest": "3298f1fcd9c5bc98f1fb4854483ab499e0e855df9e56aed46d5fb46955214eeb"
     },
     {
       "path": "packages/mcp-server/test/fixtures/fake-batch-upstream.mjs",
