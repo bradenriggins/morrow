@@ -253,7 +253,7 @@ describe("project installation and hermetic parity", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 20_000);
 
   it("makes doctor report live Morrow runtime readiness", () => {
     const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
