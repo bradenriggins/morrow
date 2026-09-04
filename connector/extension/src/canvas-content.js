@@ -114,7 +114,7 @@
     return { url, body };
   }
 
-  async function canvasProfile() {
+  async function canvasProfile(includeCourseName = false) {
     const response = await fetch(new URL("/api/v1/users/self/profile", location.origin), {
       credentials: "include",
       headers: { Accept: "application/json+canvas-string-ids" },
@@ -125,7 +125,19 @@
     const id = String(profile?.id || "").trim();
     if (!/^[1-9][0-9]*$/.test(id)) throw new Error("canvas_profile_id_invalid");
     const courseId = location.pathname.match(/\/courses\/([1-9][0-9]*)(?:\/|$)/)?.[1] || null;
-    return { id, name: String(profile?.name || profile?.short_name || "Canvas user").slice(0, 200), origin: location.origin, courseId };
+    let courseName;
+    if (includeCourseName && courseId) {
+      const courseResponse = await fetch(new URL(`/api/v1/courses/${courseId}`, location.origin), {
+        credentials: "include",
+        headers: { Accept: "application/json+canvas-string-ids" },
+        cache: "no-store",
+      });
+      if (!courseResponse.ok) throw new Error("canvas_course_unavailable");
+      const course = JSON.parse(await readBounded(courseResponse));
+      if (String(course?.id) !== courseId) throw new Error("canvas_course_mismatch");
+      courseName = String(course.name || "").trim().slice(0, 300);
+    }
+    return { id, name: String(profile?.name || profile?.short_name || "Canvas user").slice(0, 200), origin: location.origin, courseId, ...(courseName ? { courseName } : {}) };
   }
 
   async function executeCanvas(operation, args, expectedPrincipalId) {
@@ -166,15 +178,19 @@
     let lastResponse = null;
     for (let page = 0; next && page < maxPages; page += 1) {
       let response;
-      for (let attempt = 0; attempt < (isRead ? 3 : 1); attempt += 1) {
-        response = await fetch(next, options);
-        if (response.status !== 429 || !isRead || attempt === 2) break;
-        const seconds = Math.min(30, Math.max(1, Number(response.headers.get("Retry-After") || 1)));
-        await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
+      let payload;
+      try {
+        for (let attempt = 0; attempt < (isRead ? 3 : 1); attempt += 1) {
+          response = await fetch(next, options);
+          if (response.status !== 429 || !isRead || attempt === 2) break;
+          const seconds = Math.min(30, Math.max(1, Number(response.headers.get("Retry-After") || 1)));
+          await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
+        }
+        payload = parsePayload(await readBounded(response), response.headers.get("Content-Type"));
+      } catch {
+        return { ok: false, sent: true, outcomeUnknown: !isRead, error: isRead ? "canvas_read_failed" : "canvas_write_response_unknown" };
       }
       lastResponse = response;
-      const text = await readBounded(response);
-      const payload = parsePayload(text, response.headers.get("Content-Type"));
       if (!response.ok) {
         return { ok: false, sent: true, status: response.status, error: payload, requestUrl: url.pathname };
       }
@@ -195,7 +211,7 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "morrow_canvas_probe") {
-      canvasProfile().then((profile) => sendResponse({ ok: true, profile }), (error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+      canvasProfile(true).then((profile) => sendResponse({ ok: true, profile }), (error) => sendResponse({ ok: false, error: String(error?.message || error) }));
       return true;
     }
     if (message?.type === "morrow_canvas_execute") {

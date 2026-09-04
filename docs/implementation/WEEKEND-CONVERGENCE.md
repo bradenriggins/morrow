@@ -2,7 +2,9 @@
 
 This record maps Revision 3 of the weekend plan to the standalone Morrow implementation.
 
-The plan used donor wrapping as an allowed weekend method. The completed architecture extracted the required behavior into a directly owned MCP and Chrome connector. This exceeds the two-install product requirement without changing the plan's authority, durability, privacy, or evidence contracts.
+Revision 3 calls for reusing working Morrow and ExamplePlatform capabilities. The later product direction changes the installation boundary to a local MCP component and a Chrome connector. Neither legacy runtime is a required user installation.
+
+The current standalone architecture does not, by itself, prove that all required behavior has been carried over. A generated Canvas API catalog is not evidence of complete instructional-design workflows. The full weekend goal remains open until the requirements and user paths below have current proof.
 
 ## Product target
 
@@ -13,7 +15,7 @@ The plan used donor wrapping as an allowed weekend method. The completed archite
 | Explicit row disposition | Every row has route, profile, authority, privacy, risk, and evidence metadata. |
 | Governed reads and writes | All generated calls pass through the Morrow result and authority boundary. |
 | Restart-safe cross-course work | SQLite operation and batch journals retain child truth and uncertain effects. |
-| Four client classes | Codex, Claude Code, Claude desktop chat, and Gemini CLI configs resolve to the same stdio server. |
+| Client configuration | Codex, Claude Code, Claude desktop chat, and Gemini CLI configs resolve to the same stdio server. Full live client scenarios remain unverified. |
 | Provider exclusion | MindTap and Connect are denied by catalog generation, gateway filters, and package scans. |
 | Private and public packages | Deterministic private/full and public/Canvas package profiles exist. |
 | Browser-only operations | The directly owned Chrome connector uses the signed-in Canvas session. |
@@ -59,7 +61,7 @@ Official New Quizzes routes are generated from Canvas definitions. New Quiz item
 
 The Item Bank contract defines twelve signed-browser operations. The in-page executor covers all methods, paths, queries, and bodies. It rejects a wrong origin, referrer, course, principal, token, path, or catalog key before network dispatch. It strips secret-shaped keys from returned objects. The New Quizzes token stays in the frame's main world.
 
-Every Item Bank write enters the same plan, approval, receipt, dispatch, and verification lifecycle as an official Canvas write.
+Bank creation enters the same plan, approval, receipt, dispatch, and verification lifecycle as an official Canvas write. Six changes to existing banks remain disabled until Morrow can establish their dependencies and affected courses. The twelve request contracts do not prove complete Item Bank support.
 
 ## Batches
 
@@ -93,3 +95,14 @@ The extension packager creates stable bytes from the exact manifest, popup, runt
 - CONNECTOR: pairing, binding, permissions, Canvas read/write, New Quiz JSON write, all Item Bank transports, readback, replay refusal, restart, disconnect, and packaging.
 
 Live Canvas, real-client, independent-reproduction, source-rights, provider-policy, and publication receipts stay external and must remain explicit until completed.
+
+## Remaining completion evidence
+
+| Requirement | Evidence still required |
+|---|---|
+| Existing Morrow and ExamplePlatform workflow breadth, sections 2.4 and 5 | Source and execution parity for the required planners, course repair, projects, files, reports, evidence, workflows, and schedules. A larger API catalog does not satisfy this requirement. |
+| New Quizzes and Item Banks | Live question and bank operations, affected-course checks, scoring and ordering readback, and learner-access checks for each advertised workflow. Existing-bank mutation holds must be resolved before claiming full support. |
+| Actual Chrome connection, section 8 | Identify and test the new connector in the user's regular signed-in profile. The temporary test browser does not prove that installation. |
+| Live operation and batch path, sections 12.4 and 14 | Current disposable-target reads, plans, reviews, single sends, fresh comparisons, interruptions, corrections, and cleanup through the new MCP and connector. |
+| Client parity and installation, sections 14.7 and 17 | Complete the eleven-step scenario in each advertised client. Reproduce the candidate on an independent clean machine. |
+| Release and claims, sections 15 and 17 | Rebuild the exact candidate, attach current receipts, and obtain publication authorization. Do not label synthetic test results as live compatibility or a completed product. |

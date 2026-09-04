@@ -53,6 +53,7 @@ function startCanvas(directory) {
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", key, "-out", certificate], { stdio: "ignore" });
   let writes = 0;
   let quizItemWrites = 0;
+  let unreadableWriteResponses = 0;
   const requests = [];
   let quizItem = null;
   const server = createHttpsServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
@@ -68,6 +69,7 @@ function startCanvas(directory) {
       return;
     }
     if (url.pathname === "/api/v1/users/self/profile") return json(200, { id: "7", name: "Synthetic Instructor" });
+    if (url.pathname === "/api/v1/courses/42") return json(200, { id: "42", name: "Introduction to Human Biology" });
     if (url.pathname === "/api/quiz/v1/courses/42/quizzes/77") return json(200, { id: "77", title: "New Quiz 77", published: true });
     if (url.pathname === "/api/quiz/v1/courses/42/quizzes/77/items/145" && request.method === "GET") {
       return quizItem ? json(200, quizItem) : json(404, { error: "not_found" });
@@ -104,6 +106,12 @@ function startCanvas(directory) {
       return;
     }
     if (url.pathname === "/api/v1/users/self/favorites/courses") return json(200, [{ id: "42", name: "Synthetic Canvas Course" }]);
+    if (url.pathname === "/api/v1/users/self/favorites/courses/43" && request.method === "POST") {
+      unreadableWriteResponses += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{unreadable response after apply");
+      return;
+    }
     if (url.pathname === "/api/v1/users/self/favorites/courses/42" && request.method === "POST") {
       if (request.headers["x-csrf-token"] !== "synthetic-csrf" || !String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
         return json(403, { error: "missing browser session", csrf: request.headers["x-csrf-token"] || null, hasCookie: String(request.headers.cookie || "").includes("canvas_session=synthetic") });
@@ -113,7 +121,7 @@ function startCanvas(directory) {
     }
     json(404, { error: "not_found", path: url.pathname });
   });
-  return { server, writes: () => writes, quizItemWrites: () => quizItemWrites, requests: () => [...requests] };
+  return { server, writes: () => writes, quizItemWrites: () => quizItemWrites, unreadableWriteResponses: () => unreadableWriteResponses, requests: () => [...requests] };
 }
 
 const temporary = mkdtempSync(join(tmpdir(), "morrow-connector-browser-"));
@@ -318,11 +326,14 @@ try {
   assert.match(binding.sourceBindingId, /^canvas:[0-9a-f]{20}:g1$/);
   assert.equal(binding.origin, new URL(canvasUrl).origin);
   assert.equal(binding.courseId, "42");
+  assert.equal(binding.courseName, "Introduction to Human Biology");
   process.stderr.write("[browser-test] exact Canvas account bound\n");
 
   await popup.reload();
   await popup.locator("#account").waitFor();
-  assert.equal(await popup.locator("#canvas-value").innerText(), "Saved connection");
+  assert.equal(await popup.locator("#canvas-value").innerText(), "Course tab open");
+  assert.match(await popup.locator("#account-origin").innerText(), /Introduction to Human Biology/);
+  assert.doesNotMatch(await popup.locator("#account-origin").innerText(), /Course 42/);
   assert.equal(await popup.locator("#account-last-checked").getAttribute("datetime").then((value) => Number.isFinite(Date.parse(value))), true);
   assert.equal(await popup.locator("#primary").isHidden(), true);
   await captureThemes(popup, "popup-paired", 360);
@@ -419,6 +430,32 @@ try {
   assert.equal(replay.ok, false);
   assert.equal(canvas.writes(), 1);
   assert.deepEqual(canvas.requests().filter((request) => request === "POST /api/v1/users/self/favorites/courses/42"), ["POST /api/v1/users/self/favorites/courses/42"]);
+
+  const uncertainArgs = {
+    id: "43",
+    _morrow: { source_binding_id: binding.sourceBindingId, operation_id: "operation:unreadable-write", outer_grant: { ...grant, effect_receipt_id: "effect:unreadable-write" } },
+  };
+  const uncertain = await runtime.call("canvas_add_course_to_favorites", uncertainArgs);
+  assert.equal(uncertain.ok, false);
+  assert.equal(uncertain.problem?.code, "write_outcome_unknown", JSON.stringify(uncertain));
+  assert.equal(uncertain.problem?.recoverable, false);
+  assert.equal(canvas.unreadableWriteResponses(), 1);
+  assert.equal((await runtime.call("canvas_add_course_to_favorites", uncertainArgs)).ok, false);
+  assert.equal(canvas.unreadableWriteResponses(), 1);
+
+  await canvasPage.close();
+  await waitFor(() => runtime.bridge.listBindings()[0]?.runtimeVerified === false, "closed Canvas tab still advertised as available");
+  await popup.locator("#canvas-value").filter({ hasText: /^Course tab needed$/ }).waitFor();
+  await popup.getByRole("button", { name: "Connect Canvas course", exact: true }).waitFor();
+  assert.equal((await runtime.call("canvas_get_new_quiz", { course_id: "42", assignment_id: "77", _morrow: { source_binding_id: binding.sourceBindingId } })).resultState, "not_sent");
+  await captureThemes(popup, "popup-course-closed", 360);
+  canvasPage = await context.newPage();
+  await canvasPage.goto(canvasUrl);
+  const newTabId = await replacementWorker.evaluate(async (url) => (await chrome.tabs.query({})).find((tab) => tab.url === url)?.id, canvasUrl);
+  assert.equal((await popup.evaluate(async (tabId) => chrome.runtime.sendMessage({ type: "morrow_connect_canvas", tabId }), newTabId)).ok, true);
+  const rebound = await waitFor(() => runtime.bridge.listBindings().find((entry) => entry.runtimeVerified && entry.sourceBindingId !== binding.sourceBindingId), "Canvas tab did not reconnect with fresh authority");
+  assert.equal(rebound.sessionGeneration, 2);
+  await popup.locator("#canvas-value").filter({ hasText: /^Course tab open$/ }).waitFor();
 
   await runtime.close();
   runtime = await CanvasConnectorRuntime.start({ ...connectorConfig, token: "replacement-bridge-secret-".repeat(3) });

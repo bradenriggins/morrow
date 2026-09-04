@@ -26,13 +26,14 @@ function render(status) {
   label.textContent = "Morrow";
   value.textContent = status.connected ? "Connected" : status.pairing ? "Waiting for approval" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
   const binding = status.bindings?.at(-1);
+  const courseOpen = binding?.runtimeVerified === true;
   account.hidden = !binding;
-  accountOrigin.textContent = binding ? `${binding.origin}${binding.courseId ? ` · Course ${binding.courseId}` : ""}${status.bindingCount > 1 ? ` · ${status.bindingCount} saved connections` : ""}` : "";
+  accountOrigin.textContent = binding ? `${binding.courseName || "Canvas"} · ${binding.origin}${status.bindingCount > 1 ? ` · ${status.bindingCount} saved connections` : ""}` : "";
   setLastChecked(binding?.lastSeenAt);
-  canvasValue.textContent = binding ? "Saved connection" : "Not connected";
+  canvasValue.textContent = binding ? courseOpen ? "Course tab open" : "Course tab needed" : "Not connected";
   disconnect.hidden = !status.paired;
-  primary.hidden = Boolean(status.connected && binding);
-  canvasAction.hidden = !(status.connected && binding);
+  primary.hidden = Boolean(status.connected && courseOpen);
+  canvasAction.hidden = !(status.connected && courseOpen);
   primary.textContent = status.pairing ? "Waiting for approval" : !status.paired ? "Connect Morrow" : !status.connected ? "Waiting for your AI app" : "Connect Canvas course";
   detail.textContent = status.pairing
     ? "Confirm this connection on the Morrow page that opens. Then return to this popup."
@@ -42,8 +43,10 @@ function render(status) {
         ? "Connecting to Morrow. Keep this popup open or return in a moment."
         : !status.connected
         ? "Open the AI app where you added Morrow. This popup will reconnect when Morrow is ready."
-        : binding
-          ? "Return to your AI conversation. Morrow checks your Canvas sign-in before each request."
+        : courseOpen
+          ? "Keep this Canvas course open and return to your AI conversation. Morrow checks your sign-in before each request."
+          : binding
+            ? "The saved Canvas course is no longer open. Open a signed-in Canvas course in Chrome, then select Connect Canvas course."
           : "Morrow is connected. Open a signed-in Canvas course in Chrome, then select Connect Canvas course.";
   updateControls(status);
 }

@@ -31,7 +31,29 @@ async function storage() {
 
 async function publicBindings() {
   const stored = await storage();
-  return (stored.bindings || []).map(({ principalId: _principalId, tabId: _tabId, ...binding }) => binding);
+  return await Promise.all((stored.bindings || []).map(async ({ principalId: _principalId, tabId, ...binding }) => ({
+    ...binding,
+    runtimeVerified: binding.runtimeVerified && canvasTabMatches(await chrome.tabs.get(tabId).catch(() => null), binding),
+  })));
+}
+
+function canvasTabMatches(tab, binding) {
+  if (!tab?.url) return false;
+  const url = new URL(tab.url);
+  return url.origin === binding.origin && (!binding.courseId || url.pathname.match(/^\/courses\/([1-9][0-9]*)(?:\/|$)/)?.[1] === binding.courseId);
+}
+
+async function publishBindings() {
+  const bindings = await publicBindings();
+  if (state.socket?.readyState === WebSocket.OPEN && state.generation) {
+    state.socket.send(JSON.stringify({ schema: "morrow.bridge.bindings.v1", protocolVersion: PROTOCOL_VERSION, generation: state.generation, bindings, sentAt: Date.now() }));
+  }
+  void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+}
+
+async function canvasTabChanged(tabId) {
+  const { bindings = [] } = await storage();
+  if (bindings.some((binding) => binding.tabId === tabId)) await publishBindings();
 }
 
 async function connectBridge() {
@@ -134,8 +156,10 @@ async function reserveReceipt(command) {
 }
 
 async function executeCanvas(binding, operation, args) {
+  let sent = false;
   try {
     await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
+    sent = true;
     return await chrome.tabs.sendMessage(binding.tabId, {
       type: "morrow_canvas_execute",
       operation,
@@ -143,7 +167,7 @@ async function executeCanvas(binding, operation, args) {
       principalId: binding.principalId,
     }, { frameId: 0 });
   } catch (error) {
-    return { ok: false, sent: false, error: String(error?.message || error) };
+    return { ok: false, sent, outcomeUnknown: sent && !operation.readOnly, error: sent && !operation.readOnly ? "canvas_write_response_unknown" : String(error?.message || error) };
   }
 }
 
@@ -193,7 +217,7 @@ async function handleCommand(command) {
   const binding = await bindingFor(command.sourceBindingId);
   if (!binding?.runtimeVerified) return sendResult(command, false, null, problem("canvas_binding_required", "Select one connected Canvas account.", true));
   const tab = await chrome.tabs.get(binding.tabId).catch(() => null);
-  if (!tab?.url || new URL(tab.url).origin !== binding.origin) return sendResult(command, false, null, problem("canvas_binding_stale", "The connected Canvas tab is no longer available.", true));
+  if (!canvasTabMatches(tab, binding)) return sendResult(command, false, null, problem("canvas_binding_stale", "The connected Canvas course is no longer open. Open the course and connect it again.", true));
   if (!await reserveReceipt(command)) return sendResult(command, false, null, problem("effect_receipt_refused", "The provider effect receipt is missing or was already used.", false));
   const result = await executeOperation(binding, operation, command.arguments || {});
   if (!result?.ok) {
@@ -317,14 +341,13 @@ async function connectCanvasTab(requestedTabId) {
     runtimeVerified: true,
     lastSeenAt: Date.now(),
     ...(probe.profile.courseId ? { courseId: probe.profile.courseId } : {}),
+    ...(probe.profile.courseName ? { courseName: probe.profile.courseName } : {}),
     principalId: probe.profile.id,
     tabId: tab.id,
   };
   const bindings = [...(stored.bindings || []).filter((candidate) => candidate.principalFingerprint !== digest || candidate.origin !== binding.origin), binding];
   await chrome.storage.local.set({ bindings });
-  if (state.socket?.readyState === WebSocket.OPEN && state.generation) {
-    state.socket.send(JSON.stringify({ schema: "morrow.bridge.bindings.v1", protocolVersion: PROTOCOL_VERSION, generation: state.generation, bindings: await publicBindings(), sentAt: Date.now() }));
-  }
+  await publishBindings();
   return binding;
 }
 
@@ -332,13 +355,14 @@ async function status() {
   const before = await storage();
   if (before.pairing?.status === "pending") await pollPairing();
   const stored = await storage();
+  const bindings = await publicBindings();
   return {
     paired: Boolean(stored.token),
     pairing: stored.pairing?.status === "pending",
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
     connected: state.socket?.readyState === WebSocket.OPEN && state.generation > 0,
-    bindingCount: (stored.bindings || []).length,
-    bindings: (stored.bindings || []).map((binding) => ({ sourceBindingId: binding.sourceBindingId, origin: binding.origin, courseId: binding.courseId, runtimeVerified: binding.runtimeVerified, lastSeenAt: binding.lastSeenAt })),
+    bindingCount: bindings.length,
+    bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, origin: binding.origin, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, lastSeenAt: binding.lastSeenAt })),
   };
 }
 
@@ -376,7 +400,9 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "morrow-pairing") void pollPairing(); });
-chrome.tabs.onUpdated.addListener((_tabId, change, tab) => {
+chrome.tabs.onRemoved.addListener((tabId) => { void canvasTabChanged(tabId); });
+chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+  if (change.url) void canvasTabChanged(tabId);
   if (change.status !== "complete" || !tab.url?.startsWith(httpUrl("/pair/"))) return;
   void storage().then(({ pairing }) => {
     if (pairing?.approvalUrl === tab.url) return pollPairing();

@@ -121,13 +121,13 @@
     },
     {
       "path": "connector/extension/popup/popup.js",
-      "sha256": "f124b8bf08af6d65800e103c694a4f49f0d3c8dc559c57ff0d1507b1a15774cc",
+      "sha256": "79ac97c9b5bae9eb560d6c4159427bb26a2b2ac4721256f0fb5bf84172775f8a",
       "disposition": "direct_owned",
       "review": "User requested the new Morrow implementation and original Morrow branding; local candidate only; no publication authorization; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/src/canvas-content.js",
-      "sha256": "6e458da4954258a82f52da23383b8f2ba7d0ac86e8c4c2c633fd11341dde7e9f",
+      "sha256": "e3711b3d599b08e7856a3e067d20d5c0aa9eb63281706053db41f522e93b2292",
       "disposition": "direct_owned",
       "review": "User requested the new Morrow implementation and original Morrow branding; local candidate only; no publication authorization; reviewer=Codex technical source review; source=HEAD"
     },
@@ -139,7 +139,7 @@
     },
     {
       "path": "connector/extension/src/service-worker.js",
-      "sha256": "cc56b6f0d0056b942c6a87d5bf58e0a6f993c861601a14c0546bb1f3cf97e960",
+      "sha256": "c3c7002d08ed36cc935d6f5b35c894fe29d3460600d6a031923782ccfc4d8f06",
       "disposition": "direct_owned",
       "review": "User requested the new Morrow implementation and original Morrow branding; local candidate only; no publication authorization; reviewer=Codex technical source review; source=HEAD"
     },
@@ -163,7 +163,7 @@
     },
     {
       "path": "docs/implementation/EXAMPLE-WORKTREE.md",
-      "sha256": "af97a8838232f1718e0cb22c5bad27050843948f2c8a2722b584aaf5b69977be",
+      "sha256": "c0b6ac6835ac2a30e262d12c2b1e3c6c9ee303cddb897f00f7f89d00674a783c",
       "disposition": "direct_owned",
       "review": "User requested the new Morrow implementation and original Morrow branding; local candidate only; no publication authorization; reviewer=Codex technical source review; source=HEAD"
     },
