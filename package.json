@@ -3,6 +3,9 @@
   "version": "1.0.0-alpha.1",
   "private": true,
   "type": "module",
+  "bin": {
+    "morrow": "./packages/client-config/dist/cli.js"
+  },
   "packageManager": "pnpm@10.6.1",
   "engines": {
     "node": ">=22.13"
@@ -15,7 +18,8 @@
     "scripts:test": "node --test scripts/test/*.test.mjs",
     "check": "pnpm test",
     "start": "pnpm --filter @morrow/mcp-server start",
-    "clients:render": "pnpm build && node packages/client-config/dist/cli.js",
+    "morrow": "node packages/client-config/dist/cli.js",
+    "clients:render": "pnpm build && node packages/client-config/dist/cli.js clients render",
     "catalog:legacy": "pnpm build && node scripts/export-example-legacy-catalog.mjs",
     "catalog:capture": "pnpm build && node scripts/capture-upstream-catalog.mjs",
     "catalog:reconcile": "pnpm build && node scripts/reconcile-catalogs.mjs",

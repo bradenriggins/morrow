@@ -4,13 +4,17 @@ import {
   mkdirSync,
   renameSync,
   statSync,
+  readFileSync,
   writeFileSync,
 } from "node:fs";
 import {
   isAbsolute,
+  dirname,
+  join,
   relative,
   resolve,
 } from "node:path";
+import { homedir } from "node:os";
 import { randomUUID } from "node:crypto";
 import { sha256Text } from "@morrow/contracts";
 
@@ -20,6 +24,8 @@ export const SUPPORTED_MORROW_CLIENTS = Object.freeze([
   "gemini-cli",
 ] as const);
 export type SupportedMorrowClient = typeof SUPPORTED_MORROW_CLIENTS[number];
+export const MORROW_CLIENT_SCOPES = Object.freeze(["project", "user"] as const);
+export type MorrowClientScope = typeof MORROW_CLIENT_SCOPES[number];
 
 export interface ClientConfigBundleOptions {
   readonly repositoryRoot: string;
@@ -52,6 +58,33 @@ export interface ClientConfigBundle {
 export interface WriteClientConfigBundleOptions extends ClientConfigBundleOptions {
   readonly outputDirectory: string;
   readonly force?: boolean;
+}
+
+export interface InstallMorrowClientOptions extends ClientConfigBundleOptions {
+  readonly client: SupportedMorrowClient;
+  readonly scope?: MorrowClientScope;
+}
+
+export interface InstalledMorrowClient {
+  readonly client: SupportedMorrowClient;
+  readonly scope: MorrowClientScope;
+  readonly path: string;
+  readonly changed: boolean;
+}
+
+export interface ClientParityReport {
+  readonly schema: "morrow.client-parity-report.v1";
+  readonly proofLevel: "hermetic_config_only";
+  readonly realClientExecution: "not_run";
+  readonly scenarios: readonly string[];
+  readonly clients: readonly {
+    readonly client: SupportedMorrowClient;
+    readonly command: string;
+    readonly args: readonly string[];
+    readonly cwd: string;
+    readonly environmentNames: readonly string[];
+    readonly equivalent: boolean;
+  }[];
 }
 
 const SERVER_NAME = /^[a-z][a-z0-9_-]{0,62}$/;
@@ -103,6 +136,13 @@ function assertWithinRepository(repositoryRoot: string, path: string): void {
 
 function jsonFile(value: unknown): string {
   return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+function jsonObject(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new TypeError(`${label} must contain a JSON object`);
+  }
+  return value as Record<string, unknown>;
 }
 
 function tomlString(value: string): string {
@@ -202,9 +242,10 @@ function installPosix(input: {
     "#!/usr/bin/env sh",
     "set -eu",
     "",
-    `codex mcp add ${posixQuote(input.serverName)} --env ${posixQuote(environment)} -- ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
-    `claude mcp add ${posixQuote(input.serverName)} --scope user --env ${posixQuote(environment)} -- ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
-    `gemini mcp add --scope user -e ${posixQuote(environment)} ${posixQuote(input.serverName)} ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
+    "# Use `morrow mcp install <client> --scope project` for safe project configuration writes.",
+    "# Codex project configuration is .codex/config.toml; its documented mcp add command is user scoped.",
+    `claude mcp add ${posixQuote(input.serverName)} --scope project --env ${posixQuote(environment)} -- ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
+    `gemini mcp add --scope project -e ${posixQuote(environment)} ${posixQuote(input.serverName)} ${posixQuote(input.command)} ${posixQuote(input.serverEntryPath)}`,
     "",
   ].join("\n");
 }
@@ -219,9 +260,10 @@ function installPowerShell(input: {
   return [
     "$ErrorActionPreference = 'Stop'",
     "",
-    `codex mcp add ${powershellQuote(input.serverName)} --env ${powershellQuote(environment)} -- ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
-    `claude mcp add ${powershellQuote(input.serverName)} --scope user --env ${powershellQuote(environment)} -- ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
-    `gemini mcp add --scope user -e ${powershellQuote(environment)} ${powershellQuote(input.serverName)} ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
+    "# Use `morrow mcp install <client> --scope project` for safe project configuration writes.",
+    "# Codex project configuration is .codex/config.toml; its documented mcp add command is user scoped.",
+    `claude mcp add ${powershellQuote(input.serverName)} --scope project --env ${powershellQuote(environment)} -- ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
+    `gemini mcp add --scope project -e ${powershellQuote(environment)} ${powershellQuote(input.serverName)} ${powershellQuote(input.command)} ${powershellQuote(input.serverEntryPath)}`,
     "",
   ].join("\n");
 }
@@ -243,7 +285,7 @@ function readme(input: {
     "- codex.config.toml: merge into user or project Codex configuration.",
     "- claude.mcp.json: merge the mcpServers entry into Claude Code configuration.",
     "- gemini.settings.json: merge the mcpServers entry into Gemini CLI settings.",
-    "- install.posix.sh and install.powershell.ps1: optional CLI registration commands.",
+    "- install.posix.sh and install.powershell.ps1: project-scope registration commands for Claude Code and Gemini CLI. Use morrow mcp install for all supported clients.",
     "- verify.txt: client-neutral verification sequence.",
     "",
     "Do not commit this directory. Absolute local paths identify your machine.",
@@ -369,6 +411,147 @@ function assertRegularFile(path: string, label: string): void {
 
 function safeChmod(path: string, mode: number): void {
   try { chmodSync(path, mode); } catch { /* best effort on non-POSIX filesystems */ }
+}
+
+function writePrivateText(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+  safeChmod(dirname(path), 0o700);
+  const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  writeFileSync(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
+  safeChmod(temporary, 0o600);
+  renameSync(temporary, path);
+  safeChmod(path, 0o600);
+}
+
+function exactScope(scope: MorrowClientScope | undefined): MorrowClientScope {
+  const value = scope || "project";
+  if (!(MORROW_CLIENT_SCOPES as readonly string[]).includes(value)) {
+    throw new TypeError("scope must be project or user");
+  }
+  return value;
+}
+
+function exactClient(client: SupportedMorrowClient): SupportedMorrowClient {
+  if (!(SUPPORTED_MORROW_CLIENTS as readonly string[]).includes(client)) {
+    throw new TypeError("client must be codex, claude-code, or gemini-cli");
+  }
+  return client;
+}
+
+function installPath(
+  client: SupportedMorrowClient,
+  scope: MorrowClientScope,
+  repositoryRoot: string,
+): string {
+  const root = scope === "project" ? repositoryRoot : homedir();
+  switch (client) {
+    case "codex": return join(root, ".codex", "config.toml");
+    case "claude-code": return scope === "project" ? join(root, ".mcp.json") : join(root, ".claude.json");
+    case "gemini-cli": return join(root, ".gemini", "settings.json");
+  }
+}
+
+function serverEntry(
+  bundle: ClientConfigBundle,
+  client: SupportedMorrowClient,
+  upstreamConfigPath?: string,
+): Record<string, unknown> {
+  const name = client === "codex" ? "codex.config.toml"
+    : client === "claude-code" ? "claude.mcp.json"
+      : "gemini.settings.json";
+  const content = bundle.files.find((entry) => entry.path === name)?.content;
+  if (!content) throw new Error(`Morrow did not generate ${name}`);
+  if (client === "codex") {
+    return {
+      command: bundle.command,
+      args: [...bundle.args],
+      cwd: bundle.cwd,
+      env: { MORROW_UPSTREAMS_FILE: exactAbsolutePath(upstreamConfigPath || "", "upstreamConfigPath") },
+    };
+  }
+  const parsed = jsonObject(JSON.parse(content), name);
+  return jsonObject(jsonObject(parsed.mcpServers, `${name}.mcpServers`)[bundle.serverName], `${name}.${bundle.serverName}`);
+}
+
+function codexSection(bundle: ClientConfigBundle): string {
+  const fragment = bundle.files.find((entry) => entry.path === "codex.config.toml")?.content;
+  if (!fragment) throw new Error("Morrow did not generate the Codex configuration");
+  return fragment;
+}
+
+function installJsonEntry(path: string, serverName: string, entry: Record<string, unknown>): boolean {
+  const document = existsSync(path)
+    ? jsonObject(JSON.parse(readFileSync(path, "utf8")), path)
+    : {};
+  const mcpServers = document.mcpServers === undefined
+    ? {}
+    : jsonObject(document.mcpServers, `${path}.mcpServers`);
+  const existing = mcpServers[serverName];
+  if (existing !== undefined) {
+    if (JSON.stringify(existing) === JSON.stringify(entry)) return false;
+    throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
+  }
+  document.mcpServers = { ...mcpServers, [serverName]: entry };
+  writePrivateText(path, jsonFile(document));
+  return true;
+}
+
+function installCodexEntry(path: string, serverName: string, section: string): boolean {
+  const current = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const heading = `[mcp_servers.${serverName}]`;
+  if (current.includes(heading)) {
+    if (current.includes(section.trim())) return false;
+    throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
+  }
+  writePrivateText(path, `${current.trimEnd()}${current.trim() ? "\n\n" : ""}${section}`);
+  return true;
+}
+
+export function installMorrowClient(options: InstallMorrowClientOptions): InstalledMorrowClient {
+  const bundle = buildClientConfigBundle(options);
+  assertRegularFile(bundle.args[0]!, "Morrow server entry");
+  assertRegularFile(exactAbsolutePath(options.upstreamConfigPath, "upstreamConfigPath"), "Upstream configuration");
+  const client = exactClient(options.client);
+  const scope = exactScope(options.scope);
+  const path = installPath(client, scope, bundle.cwd);
+  const changed = client === "codex"
+    ? installCodexEntry(path, bundle.serverName, codexSection(bundle))
+    : installJsonEntry(path, bundle.serverName, serverEntry(bundle, client));
+  return { client, scope, path, changed };
+}
+
+export function buildClientParityReport(options: ClientConfigBundleOptions): ClientParityReport {
+  const bundle = buildClientConfigBundle(options);
+  const clients = SUPPORTED_MORROW_CLIENTS.map((client) => {
+    const entry = serverEntry(bundle, client, options.upstreamConfigPath);
+    const equivalent = entry.command === bundle.command
+      && JSON.stringify(entry.args) === JSON.stringify(bundle.args)
+      && entry.cwd === bundle.cwd
+      && JSON.stringify(entry.env) === JSON.stringify({ MORROW_UPSTREAMS_FILE: options.upstreamConfigPath });
+    return {
+      client,
+      command: String(entry.command),
+      args: Array.isArray(entry.args) ? entry.args.map(String) : [],
+      cwd: String(entry.cwd),
+      environmentNames: Object.keys(jsonObject(entry.env, `${client}.env`)).sort(),
+      equivalent,
+    };
+  });
+  return {
+    schema: "morrow.client-parity-report.v1",
+    proofLevel: "hermetic_config_only",
+    realClientExecution: "not_run",
+    scenarios: [
+      "health",
+      "catalog",
+      "read_operation",
+      "invalid_input",
+      "cancel_before_dispatch",
+      "large_result_page",
+      "operation_inspection",
+    ],
+    clients,
+  };
 }
 
 export function writeClientConfigBundle(

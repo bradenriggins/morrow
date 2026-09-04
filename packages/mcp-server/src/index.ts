@@ -10,6 +10,7 @@ import {
   RuntimeStateLease,
   hardenMorrowStateFiles,
 } from "./state-lease.js";
+import { StrictStdioServerTransport } from "./strict-stdio.js";
 
 const config = await loadGatewayConfig();
 const lease = RuntimeStateLease.acquire(config.operationJournal.path);
@@ -42,6 +43,7 @@ try {
   );
   serverHandle = serveStdio(() => createFullMorrowServer(runtime!), {
     onerror: (error) => console.error(`[morrow] protocol error ${error.message}`),
+    transport: new StrictStdioServerTransport(),
   });
 } catch (error) {
   await close();

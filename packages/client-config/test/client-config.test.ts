@@ -1,9 +1,13 @@
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   buildClientConfigBundle,
+  buildClientParityReport,
+  installMorrowClient,
   writeClientConfigBundle,
 } from "../src/index.js";
 
@@ -98,6 +102,76 @@ describe("buildClientConfigBundle", () => {
       upstreamConfigPath: "/tmp/morrow.upstreams.json",
       serverName: "Morrow with spaces",
     })).toThrow(/serverName/);
+  });
+});
+
+describe("project installation and hermetic parity", () => {
+  it("installs project-scoped configurations without credentials and reports config-only parity", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-install-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      const options = { repositoryRoot, upstreamConfigPath, serverEntryPath, nodeCommand: process.execPath };
+
+      const codex = installMorrowClient({ ...options, client: "codex" });
+      const claude = installMorrowClient({ ...options, client: "claude-code" });
+      const gemini = installMorrowClient({ ...options, client: "gemini-cli" });
+      expect([codex, claude, gemini]).toEqual(expect.arrayContaining([
+        expect.objectContaining({ scope: "project", changed: true }),
+      ]));
+      expect(await readFile(join(repositoryRoot, ".codex", "config.toml"), "utf8"))
+        .toContain("[mcp_servers.morrow]");
+      expect(JSON.parse(await readFile(join(repositoryRoot, ".mcp.json"), "utf8")))
+        .toMatchObject({ mcpServers: { morrow: { env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath } } } });
+      expect(JSON.parse(await readFile(join(repositoryRoot, ".gemini", "settings.json"), "utf8")))
+        .toMatchObject({ mcpServers: { morrow: { trust: false } } });
+
+      const report = buildClientParityReport(options);
+      expect(report).toMatchObject({
+        schema: "morrow.client-parity-report.v1",
+        proofLevel: "hermetic_config_only",
+        realClientExecution: "not_run",
+      });
+      expect(report.clients).toHaveLength(3);
+      expect(report.clients.every((client) => client.equivalent)).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes the project-scoped unified CLI and JSON diagnostics", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-cli-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      const install = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "gemini", "--upstreams", upstreamConfigPath,
+        "--repository", repositoryRoot,
+      ], { encoding: "utf8" });
+      expect(install.status).toBe(0);
+      expect(install.stdout).toContain("scope=project");
+
+      const doctor = spawnSync(process.execPath, [
+        cliPath, "doctor", "--json", "--repository", repositoryRoot, "--upstreams", upstreamConfigPath,
+      ], { encoding: "utf8" });
+      expect(doctor.status).toBe(0);
+      expect(JSON.parse(doctor.stdout)).toMatchObject({
+        schema: "morrow.doctor.v1",
+        projectScopeDefault: true,
+        upstreamConfigExists: true,
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 

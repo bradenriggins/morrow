@@ -95,7 +95,7 @@ Generated donor catalogs and reconciliation output live under `artifacts/catalog
 
 ## MCP client install
 
-The public Morrow endpoint is a local stdio server. After `pnpm install` and `pnpm build`, the root script `pnpm start` runs `@morrow/mcp-server` (`node dist/index.js`). That package declares the bin `morrow-mcp`. `packages/mcp-server/src/server.ts` calls `serveStdio`.
+The public Morrow endpoint is a local stdio server. After `pnpm install` and `pnpm build`, the root script `pnpm start` runs `@morrow/mcp-server` (`node dist/index.js`). The client-config package declares the unified `morrow` command. The public endpoint serves both MCP SDK protocol eras through one stdio factory.
 
 Start the process from the repository root. The gateway loads `morrow.upstreams.json` from the process working directory, or from `MORROW_UPSTREAMS_FILE` when that variable is set. If that file is absent, set `MORROW_MERIDIAN_SERVER_PATH`. Optional `MORROW_PYTHON_COMMAND` defaults to `python3`.
 
@@ -106,80 +106,29 @@ Example upstream files that exist in this repository:
 
 Named tools registered in this repository:
 
-- Gateway: `morrow_health`, `morrow_catalog`
+- Gateway: `morrow_health`, `morrow_catalog`, `morrow_operation_get`, `morrow_operations_recent`, and `morrow_result_page`
+- Reserved interface: `morrow_operation_cancel` returns `operation_cancel_not_available` until source-task cancellation is implemented.
 - Legacy bridge, when that upstream is enabled: `morrow_legacy_bridge_health`, `morrow_legacy_bindings`, `morrow_legacy_task_get`
 
-The gateway also forwards tools imported from connected upstreams. Do not add tool names that are not registered in code.
+The gateway also forwards tools imported from connected upstreams. A request cancelled before dispatch does not call the source. A request cancelled after dispatch is recorded as source-unknown and must not be replayed. Large results return a process-local result handle. Read it with `morrow_result_page` in bounded pages.
 
-A client config file path is not in this repository. The JSON below wraps the stdio command the server actually runs.
+Generate each project configuration after the build. Project scope is the default. The configuration's only environment setting is the absolute `MORROW_UPSTREAMS_FILE` path. It does not copy Canvas credentials, donor tokens, bridge tokens, or session data.
 
-### Codex
-
-Config file path not in repo; this is the stdio command the server actually runs.
-
-```json
-{
-  "mcpServers": {
-    "morrow": {
-      "command": "pnpm",
-      "args": ["start"],
-      "env": {
-        "MORROW_MERIDIAN_SERVER_PATH": "/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py"
-      }
-    }
-  }
-}
+```bash
+pnpm morrow mcp install codex --scope project --upstreams "$PWD/morrow.upstreams.json"
+pnpm morrow mcp install claude --scope project --upstreams "$PWD/morrow.upstreams.json"
+pnpm morrow mcp install gemini --scope project --upstreams "$PWD/morrow.upstreams.json"
+pnpm morrow doctor --json --upstreams "$PWD/morrow.upstreams.json"
+pnpm morrow conformance --json --upstreams "$PWD/morrow.upstreams.json"
 ```
 
-### Claude Code / Claude Desktop
+The commands install these project-scoped files:
 
-Config file path not in repo; this is the stdio command the server actually runs.
+- Codex: `.codex/config.toml`
+- Claude Code: `.mcp.json`
+- Gemini CLI: `.gemini/settings.json`
 
-```json
-{
-  "mcpServers": {
-    "morrow": {
-      "command": "pnpm",
-      "args": ["start"],
-      "env": {
-        "MORROW_MERIDIAN_SERVER_PATH": "/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py"
-      }
-    }
-  }
-}
-```
-
-### Gemini CLI
-
-Config file path not in repo; this is the stdio command the server actually runs.
-
-```json
-{
-  "mcpServers": {
-    "morrow": {
-      "command": "pnpm",
-      "args": ["start"],
-      "env": {
-        "MORROW_MERIDIAN_SERVER_PATH": "/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py"
-      }
-    }
-  }
-}
-```
-
-Equivalent bin after `pnpm build`, from the repository root:
-
-```json
-{
-  "command": "pnpm",
-  "args": ["exec", "morrow-mcp"],
-  "env": {
-    "MORROW_MERIDIAN_SERVER_PATH": "/absolute/path/to/example-attestation-repo/scripts/team/mcp/meridian_server.py"
-  }
-}
-```
-
-For the two-upstream example, copy `morrow.upstreams.with-legacy-bridge.example.json` to `morrow.upstreams.json` and add the environment variables already documented in the Quick start and bridge sections (`MORROW_NEW_REPO_ROOT`, `MORROW_LEGACY_CATALOG_PATH`, `MORROW_LEGACY_BRIDGE_TOKEN`).
+`morrow conformance --json` is a deterministic configuration harness. It proves matching command, arguments, working directory, and allowed environment names. It does not prove that the installed Codex, Claude Code, or Gemini CLI binary can connect. Run each real client separately before making that claim.
 
 ## Documentation
 

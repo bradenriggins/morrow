@@ -2,6 +2,7 @@ import {
   McpServer,
   fromJsonSchema,
   type CallToolResult,
+  type ServerContext,
   type ToolAnnotations as McpToolAnnotations,
 } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
@@ -70,6 +71,19 @@ function publicToolInputSchema(schema: JsonObject): JsonObject {
   };
 }
 
+function safeResultArtifactFailure(error: unknown): CallToolResult {
+  const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+  return {
+    content: [{ type: "text", text: "Morrow could not find the requested local result artifact." }],
+    isError: true,
+    structuredContent: {
+      schema: "morrow.problem.v1",
+      code: "result_artifact_unavailable",
+      detailDigest: sha256Text(detail),
+    },
+  };
+}
+
 export function createMorrowServer(runtime: GatewayRuntime): McpServer {
   const server = new McpServer(
     {
@@ -101,6 +115,35 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
           : "Morrow is not ready. Inspect the structured source status.",
         health as unknown as JsonObject,
       );
+    },
+  );
+
+  server.registerTool(
+    "morrow_result_page",
+    {
+      description: "Read one bounded page from a local Morrow large-result artifact. Artifacts are process-local and are not durable records.",
+      inputSchema: z.object({
+        handle: z.string().min(8).max(160),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(16_000).default(16_000),
+      }),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async ({ handle, offset, limit }) => {
+      try {
+        const page = runtime.resultPage(handle, offset, limit);
+        return textAndStructured(
+          `Returned ${page.returned} characters from local result artifact ${handle}.`,
+          page,
+        );
+      } catch (error) {
+        return safeResultArtifactFailure(error);
+      }
     },
   );
 
@@ -242,8 +285,10 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
           },
         },
       },
-      async (input): Promise<CallToolResult> => {
-        const result = await runtime.call(tool.publicName, input as Record<string, unknown>);
+      async (input, context: ServerContext): Promise<CallToolResult> => {
+        const result = await runtime.call(tool.publicName, input as Record<string, unknown>, {
+          signal: context.mcpReq.signal,
+        });
         return result as unknown as CallToolResult;
       },
     );

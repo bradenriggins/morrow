@@ -1,6 +1,5 @@
 import { Client } from "@modelcontextprotocol/client";
 import {
-  StdioClientTransport,
   getDefaultEnvironment,
 } from "@modelcontextprotocol/client/stdio";
 import {
@@ -16,6 +15,7 @@ import {
   type SourceAttestationHealth,
   type UpstreamTool,
 } from "@morrow/contracts";
+import { StrictStdioClientTransport } from "./strict-stdio.js";
 
 export interface StdioUpstreamOptions {
   readonly id: string;
@@ -32,6 +32,9 @@ export interface StdioUpstreamOptions {
 }
 
 export type StdioUpstreamHealth = GatewaySourceHealth;
+
+const UPSTREAM_STDERR_LIMIT = 8_000;
+const UPSTREAM_MAX_BUFFER_SIZE = 1_000_000;
 
 function compareAscii(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -87,8 +90,12 @@ export class StdioMcpUpstream {
       name: `morrow-upstream-${this.id}`,
       version: "1.0.0-alpha.1",
     });
+    let protocolError: Error | undefined;
+    client.onerror = (error) => {
+      protocolError = error;
+    };
 
-    const transport = new StdioClientTransport({
+    const transport = new StrictStdioClientTransport({
       command: this.options.command,
       args: [...(this.options.args ?? [])],
       env: {
@@ -96,11 +103,19 @@ export class StdioMcpUpstream {
         ...(this.options.env ?? {}),
       },
       ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
+      maxBufferSize: UPSTREAM_MAX_BUFFER_SIZE,
+    });
+    let stderr = "";
+    transport.stderr?.on("data", (chunk: Buffer | string) => {
+      if (stderr.length >= UPSTREAM_STDERR_LIMIT) return;
+      stderr += chunk.toString().slice(0, UPSTREAM_STDERR_LIMIT - stderr.length);
     });
 
     try {
       await client.connect(transport);
+      if (protocolError) throw protocolError;
       const listed = await client.listTools();
+      if (protocolError) throw protocolError;
       const normalized = listed.tools.map((tool): UpstreamTool => {
         const raw = tool as unknown as JsonObject;
         const annotations = normalizeAnnotations(raw.annotations);
@@ -148,21 +163,26 @@ export class StdioMcpUpstream {
       this.errorDigest = undefined;
       return this.tools;
     } catch (error) {
-      this.errorDigest = sha256Text(error instanceof Error ? `${error.name}:${error.message}` : String(error));
+      const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+      this.errorDigest = sha256Text(stderr ? `${detail}\n${stderr}` : detail);
       this.catalogDigest = undefined;
       await client.close().catch(() => undefined);
       throw error;
     }
   }
 
-  async callTool(name: string, args: Readonly<Record<string, unknown>>): Promise<unknown> {
+  async callTool(
+    name: string,
+    args: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<unknown> {
     if (!this.client) {
       throw new Error(`Upstream ${this.id} is not connected`);
     }
     return this.client.callTool({
       name: normalizeToolName(name),
       arguments: { ...args },
-    });
+    }, options);
   }
 
   health(): StdioUpstreamHealth {

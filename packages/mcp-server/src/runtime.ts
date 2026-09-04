@@ -39,6 +39,7 @@ import {
 } from "@morrow/operation-journal";
 import { StdioMcpUpstream } from "@morrow/upstream-mcp";
 import type { GatewayConfig } from "./config.js";
+import { ResultArtifactStore } from "./result-artifacts.js";
 import { verifyLocalGitSourceAttestation } from "./source-attestation.js";
 
 export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
@@ -56,6 +57,7 @@ export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_operation_verify",
   "morrow_operation_undo",
   "morrow_operation_approve",
+  "morrow_result_page",
 ] as const);
 
 export interface CatalogSearchInput {
@@ -362,6 +364,7 @@ export class GatewayRuntime {
   private readonly toolByPublicName: ReadonlyMap<string, CatalogTool>;
   private readonly journal: GatewayOperationJournal;
   private readonly effects: ProviderEffectBroker;
+  private readonly resultArtifacts = new ResultArtifactStore();
   private readonly publicationPolicy: PublicationPolicyHealth | undefined;
   private readonly learnerVault: LearnerVault;
   private readonly artifacts: ArtifactGenerationRegistry;
@@ -695,7 +698,15 @@ export class GatewayRuntime {
     });
   }
 
-  async call(publicName: string, args: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+  resultPage(handle: string, offset?: number, limit?: number): JsonObject {
+    return this.resultArtifacts.page(handle, offset, limit) as unknown as JsonObject;
+  }
+
+  async call(
+    publicName: string,
+    args: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
     if (!mapping) {
       return canonicalMorrowResult({
@@ -713,7 +724,7 @@ export class GatewayRuntime {
       });
     }
     if (mapping.annotations?.readOnlyHint === true) {
-      const result = await this.callSourceOwned(publicName, args);
+      const result = await this.callSourceOwned(publicName, args, options);
       return canonicalMorrowResult({
         result,
         tool: publicName,
@@ -843,13 +854,29 @@ export class GatewayRuntime {
     return this.effectResult(correction, "correction_planned");
   }
 
-  async callSourceOwned(publicName: string, args: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+  async callSourceOwned(
+    publicName: string,
+    args: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
     if (!mapping) {
       return {
         content: [{ type: "text", text: `Unknown Morrow tool ${publicName}.` }],
         isError: true,
         structuredContent: { schema: "morrow.problem.v1", code: "tool_not_found" },
+      };
+    }
+
+    if (options.signal?.aborted) {
+      return {
+        content: [{ type: "text", text: `Morrow cancelled ${publicName} before source dispatch.` }],
+        isError: true,
+        structuredContent: {
+          schema: "morrow.problem.v1",
+          code: "request_cancelled_before_dispatch",
+          recoverable: true,
+        },
       };
     }
 
@@ -887,6 +914,22 @@ export class GatewayRuntime {
 
     if (!prepared.created) {
       return replayResult(mapping, this.catalog.digest, prepared.record, this.config.profile);
+    }
+
+    if (options.signal?.aborted) {
+      const cancelled = this.journal.recordFailedBeforeSend(
+        prepared.record.operationId,
+        new Error("request cancelled before source dispatch"),
+      );
+      return attachOperationMeta({
+        content: [{ type: "text", text: `Morrow cancelled ${publicName} before source dispatch.` }],
+        isError: true,
+        structuredContent: {
+          schema: "morrow.problem.v1",
+          code: "request_cancelled_before_dispatch",
+          recoverable: true,
+        },
+      }, mapping, this.catalog.digest, cancelled, this.config.profile);
     }
 
     const upstream = this.upstreams.get(mapping.upstreamId);
@@ -942,7 +985,7 @@ export class GatewayRuntime {
     }
     const dispatched = this.journal.markDispatched(prepared.record.operationId);
     try {
-      const result = await upstream.callTool(mapping.upstreamName, dispatchedArguments);
+      const result = await upstream.callTool(mapping.upstreamName, dispatchedArguments, options);
       const normalized = normalizeUpstreamResult(result, baseContext);
       const source = classifySourceResult(result);
       const complete = this.journal.recordResponse(dispatched.operationId, {
@@ -951,15 +994,23 @@ export class GatewayRuntime {
         ...(source.state ? { sourceResultState: source.state } : {}),
         ...(source.taskId ? { sourceTaskId: source.taskId } : {}),
       });
-      return attachOperationMeta(normalized, mapping, this.catalog.digest, complete, this.config.profile);
+      return this.resultArtifacts.bound(
+        attachOperationMeta(normalized, mapping, this.catalog.digest, complete, this.config.profile),
+      );
     } catch (error) {
       const unknown = this.journal.recordSourceUnknown(dispatched.operationId, error);
-      return attachOperationMeta(
-        safeUpstreamFailure(error, baseContext),
-        mapping,
-        this.catalog.digest,
-        unknown,
-        this.config.profile,
+      const failure = safeUpstreamFailure(error, baseContext);
+      if (options.signal?.aborted) {
+        failure.structuredContent = {
+          schema: "morrow.problem.v1",
+          code: "request_cancelled_after_dispatch",
+          recoverable: false,
+          source: mapping.upstreamId,
+          detailDigest: sha256Text(error instanceof Error ? `${error.name}:${error.message}` : String(error)),
+        };
+      }
+      return this.resultArtifacts.bound(
+        attachOperationMeta(failure, mapping, this.catalog.digest, unknown, this.config.profile),
       );
     }
   }

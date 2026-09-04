@@ -12,6 +12,8 @@ These limits come from the Morrow legacy bridge note:
 - The overlay targets the pinned donor revision. A new donor revision requires a catalog re-export and a review of the patch anchors.
 - Browser-session capabilities remain dependent on the existing extension and its live Canvas bindings.
 - MindTap and Connect never enter the source catalog used by this bridge.
+- The client conformance report is a hermetic configuration check. It is not real-client proof. Codex, Claude Code, and Gemini CLI must each connect and run the required scenario before a client-support claim is made.
+- `morrow_operation_cancel` is an interface placeholder. It does not cancel a provider task.
 
 ## Held providers
 
