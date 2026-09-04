@@ -92,6 +92,50 @@ export function createMorrowServer(runtime: GatewayRuntime): McpServer {
   );
 
   server.registerTool(
+    "morrow_catalog_search",
+    {
+      description: "Search the current profile's supported capability catalog without returning full schemas.",
+      inputSchema: z.object({
+        query: z.string().optional(),
+        source: z.string().optional(),
+        offset: z.number().int().min(0).default(0),
+        limit: z.number().int().min(1).max(100).default(50),
+      }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async (input) => {
+      const result = runtime.searchCatalog(input);
+      return textAndStructured(
+        `Found ${result.totalMatches} matching capabilities and returned ${result.returned}.`,
+        result as unknown as JsonObject,
+      );
+    },
+  );
+
+  server.registerTool(
+    "morrow_capability_get",
+    {
+      description: "Return one canonical capability descriptor and its profile availability.",
+      inputSchema: z.object({ name: z.string().min(1).max(128) }),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async ({ name }) => textAndStructured(
+      `Loaded capability ${name}.`,
+      runtime.capabilityGet(name),
+    ),
+  );
+
+  server.registerTool(
+    "morrow_profile_status",
+    {
+      description: "Return active profile authority identity and the capabilities unavailable in that profile.",
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    },
+    async () => textAndStructured("Loaded current Morrow profile status.", runtime.profileStatus()),
+  );
+
+  server.registerTool(
     "morrow_operation_get",
     {
       description: "Inspect one durable gateway operation record by its opaque operation id. This does not query or change the source provider.",

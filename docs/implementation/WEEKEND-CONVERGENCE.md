@@ -6,7 +6,7 @@ This branch establishes the gateway foundation, donor catalog reconciliation, an
 
 Morrow can connect to one or more internal stdio MCP upstreams, import typed tool lists, remove held MindTap and Connect tools, resolve exact-name collisions, register the merged tools through the official TypeScript SDK, and forward calls back to the source that owns them.
 
-It also contains deterministic tools to export the 270-row current Canvas-facing catalog from `example-legacy`, capture the live catalog of configured MCP upstreams, and reconcile exact names and explicitly reviewed semantic aliases.
+It also contains deterministic tools to export the current callable Canvas catalog from `example-legacy`, capture the live catalog of configured MCP upstreams, and reconcile exact names and explicitly reviewed semantic aliases. Live donor receipts, rather than the PDF estimates, set the count baseline.
 
 Checkpoint C adds an authenticated loopback WebSocket server and a reversible extension overlay. Read tools execute through the current donor runtime. Write tools are staged into the donor task store and remain blocked on the existing human approval surface.
 

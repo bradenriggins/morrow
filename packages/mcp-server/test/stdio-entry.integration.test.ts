@@ -47,6 +47,27 @@ describe("Morrow stdio entry", () => {
       await client.connect(transport);
       const listed = await client.listTools();
       expect(listed.tools.some((tool) => tool.name === "canvas_page_get")).toBe(true);
+      expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
+        "morrow_catalog_search",
+        "morrow_capability_get",
+        "morrow_profile_status",
+      ]));
+      const profile = await client.callTool({
+        name: "morrow_profile_status",
+        arguments: {},
+      });
+      expect(profile.structuredContent).toMatchObject({
+        schema: "morrow.profile-status.v1",
+        profile: "private-full",
+      });
+      const capability = await client.callTool({
+        name: "morrow_capability_get",
+        arguments: { name: "canvas_page_get" },
+      });
+      expect(capability.structuredContent).toMatchObject({
+        schema: "morrow.capability-get.v1",
+        descriptor: { canonicalName: "canvas_page_get" },
+      });
       const result = await client.callTool({
         name: "canvas_page_get",
         arguments: { course_id: "1" },

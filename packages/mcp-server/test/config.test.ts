@@ -43,4 +43,15 @@ describe("gateway configuration", () => {
     expect(parsed.filters.excludePrefixes).toEqual(["mindtap_", "connect_"]);
     expect(parsed.operationJournal.path).toBe("/tmp/morrow-state/morrow.sqlite3");
   });
+
+  it("accepts the sandbox and read-only runtime profiles", () => {
+    for (const profile of ["sandbox", "read-only"]) {
+      expect(parseGatewayConfig({
+        schema: "morrow.upstreams.v1",
+        profile,
+        upstreams: [{ id: "fixture", label: "Fixture", kind: "mcp-stdio", command: "node" }],
+        operationJournal: { path: ":memory:" },
+      }).profile).toBe(profile);
+    }
+  });
 });

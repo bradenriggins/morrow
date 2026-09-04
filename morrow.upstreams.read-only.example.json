@@ -1,0 +1,29 @@
+{
+  "schema": "morrow.upstreams.v1",
+  "profile": "read-only",
+  "sourcePolicy": { "requireAttestation": true },
+  "upstreams": [{
+    "id": "meridian",
+    "label": "ExamplePlatform",
+    "kind": "mcp-stdio",
+    "command": "${MORROW_PYTHON_COMMAND:-python3}",
+    "args": ["${MORROW_MERIDIAN_SERVER_PATH}"],
+    "repository": "example-owner/example-attestation-repo",
+    "revision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+    "attestation": {
+      "kind": "local-git",
+      "root": "${MORROW_MERIDIAN_ROOT}",
+      "expectedRevision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+      "requireTrackedClean": true,
+      "expectedToolCount": 222
+    },
+    "priority": 100,
+    "required": true,
+    "enabled": true,
+    "env": {}
+  }],
+  "filters": { "excludePrefixes": ["mindtap_", "connect_"], "excludeNames": [] },
+  "operationJournal": { "path": "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}" },
+  "batchScheduler": { "maxConcurrentWindows": 1 },
+  "maxCatalogTools": 1000
+}

@@ -130,4 +130,37 @@ describe("reconcileCatalogs", () => {
       }],
     })).toThrow("references missing tool");
   });
+
+  it("refuses an alias that would reintroduce a held provider", () => {
+    expect(() => reconcileCatalogs([
+      catalog("meridian", [{ name: "canvas_pages_list" }]),
+      catalog("example-legacy", [{ name: "list_pages" }]),
+    ], {
+      aliases: [{
+        id: "held.alias",
+        publicName: "canvas_pages_list",
+        preferredSourceId: "meridian",
+        reason: "Invalid held-provider alias.",
+        members: [
+          { sourceId: "meridian", toolName: "canvas_pages_list" },
+          { sourceId: "example-legacy", toolName: "connect_pages_list" },
+        ],
+      }],
+    })).toThrow("held provider");
+    expect(() => reconcileCatalogs([
+      catalog("meridian", [{ name: "canvas_pages_list" }]),
+      catalog("example-legacy", [{ name: "list_pages" }]),
+    ], {
+      aliases: [{
+        id: "safe.alias",
+        publicName: "connect_pages_list",
+        preferredSourceId: "meridian",
+        reason: "Invalid public alias.",
+        members: [
+          { sourceId: "meridian", toolName: "canvas_pages_list" },
+          { sourceId: "example-legacy", toolName: "list_pages" },
+        ],
+      }],
+    })).toThrow("held provider");
+  });
 });

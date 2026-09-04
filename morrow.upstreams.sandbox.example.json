@@ -1,0 +1,22 @@
+{
+  "schema": "morrow.upstreams.v1",
+  "profile": "sandbox",
+  "upstreams": [{
+    "id": "sandbox",
+    "label": "Synthetic Canvas fixture",
+    "kind": "mcp-stdio",
+    "command": "${MORROW_SANDBOX_MCP_COMMAND}",
+    "args": [],
+    "priority": 100,
+    "required": true,
+    "enabled": true,
+    "env": {
+      "MORROW_SANDBOX": "1",
+      "MORROW_ALLOW_EXTERNAL_NETWORK": "0"
+    }
+  }],
+  "filters": { "excludePrefixes": ["mindtap_", "connect_"], "excludeNames": [] },
+  "operationJournal": { "path": "${MORROW_SANDBOX_STATE_PATH:-:memory:}" },
+  "batchScheduler": { "maxConcurrentWindows": 1 },
+  "maxCatalogTools": 1000
+}

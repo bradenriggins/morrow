@@ -11,6 +11,7 @@ import {
   type GatewayHealth,
   type JsonObject,
   type PublicationPolicyHealth,
+  type RuntimeProfile,
   type SourceAttestationHealth,
   type ToolAnnotations,
 } from "@morrow/contracts";
@@ -35,6 +36,9 @@ import { verifyLocalGitSourceAttestation } from "./source-attestation.js";
 export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_health",
   "morrow_catalog",
+  "morrow_catalog_search",
+  "morrow_capability_get",
+  "morrow_profile_status",
   "morrow_operation_get",
   "morrow_operations_recent",
 ] as const);
@@ -161,6 +165,7 @@ function attachOperationMeta(
   mapping: CatalogTool,
   catalogDigest: string,
   operation: GatewayOperationRecord,
+  profile: RuntimeProfile,
 ): JsonObject {
   const output = structuredClone(result);
   const existingMeta = isJsonObject(output._meta) ? output._meta : {};
@@ -186,6 +191,14 @@ function attachOperationMeta(
       ...(operation.sourceOperationId ? { sourceOperationId: operation.sourceOperationId } : {}),
       ...(operation.sourceResultState ? { sourceResultState: operation.sourceResultState } : {}),
       ...(operation.sourceTaskId ? { sourceTaskId: operation.sourceTaskId } : {}),
+      profile,
+      authorityDigest: sha256Json({
+        profile,
+        publicToolName: mapping.publicName,
+        upstreamId: mapping.upstreamId,
+        upstreamToolName: mapping.upstreamName,
+        catalogDigest,
+      }),
     } satisfies GatewayCallMeta,
   };
   return output;
@@ -195,6 +208,7 @@ function replayResult(
   mapping: CatalogTool,
   catalogDigest: string,
   operation: GatewayOperationRecord,
+  profile: RuntimeProfile,
 ): JsonObject {
   return attachOperationMeta({
     content: [{
@@ -208,7 +222,7 @@ function replayResult(
       recoverable: operation.state === "failed_before_send",
       operation: operationRecordProjection(operation),
     },
-  }, mapping, catalogDigest, operation);
+  }, mapping, catalogDigest, operation, profile);
 }
 
 function verifyConfiguredSources(
@@ -233,6 +247,36 @@ function readPublicationManifest(path: string): unknown {
   } catch (error) {
     throw new Error(`Morrow could not read publication policy ${path}`, { cause: error });
   }
+}
+
+function applyProfileAvailability(catalog: CatalogSnapshot, profile: RuntimeProfile): CatalogSnapshot {
+  const unavailable = catalog.tools
+    .filter((tool) => tool.capability?.profiles[profile]?.state !== "supported")
+    .map((tool) => ({
+      upstreamId: tool.upstreamId,
+      upstreamName: tool.upstreamName,
+      reason: "profile_unavailable" as const,
+      detail:
+        tool.capability?.profiles[profile]?.reason ??
+        `Unavailable in the ${profile} profile.`,
+    }));
+  if (unavailable.length === 0) return catalog;
+  const tools = catalog.tools.filter((tool) => tool.capability?.profiles[profile]?.state === "supported");
+  return {
+    ...catalog,
+    tools,
+    excluded: [...catalog.excluded, ...unavailable].sort((left, right) => (
+      compareAscii(left.upstreamId, right.upstreamId)
+      || compareAscii(left.upstreamName, right.upstreamName)
+      || compareAscii(left.reason, right.reason)
+    )),
+    countsBySource: Object.fromEntries(
+      Object.keys(catalog.countsBySource).map((sourceId) => [
+        sourceId,
+        tools.filter((tool) => tool.upstreamId === sourceId).length,
+      ]),
+    ),
+  };
 }
 
 async function closeStartupResources(
@@ -307,6 +351,7 @@ export class GatewayRuntime {
           id: upstream.id,
           label: upstream.label,
           priority: upstream.priority,
+          ...(upstreamConfig.revision ? { revision: upstreamConfig.revision } : {}),
           tools,
         });
       } catch (error) {
@@ -355,6 +400,7 @@ export class GatewayRuntime {
         catalog = applied.catalog;
         publicationPolicy = applied.receipt;
       }
+      catalog = applyProfileAvailability(catalog, config.profile);
 
       if (catalog.tools.length > config.maxCatalogTools) {
         throw new Error(
@@ -423,6 +469,40 @@ export class GatewayRuntime {
     };
   }
 
+  capabilityGet(name: string): JsonObject {
+    const capability = this.toolByPublicName.get(name.trim())?.capability;
+    if (!capability) {
+      return {
+        schema: "morrow.problem.v1",
+        code: "capability_not_found",
+        profile: this.config.profile,
+      };
+    }
+    return {
+      schema: "morrow.capability-get.v1",
+      profile: this.config.profile,
+      descriptor: capability,
+    };
+  }
+
+  profileStatus(): JsonObject {
+    const profile = this.config.profile;
+    const supported = this.catalog.tools.filter((tool) => tool.capability?.profiles[profile]?.state === "supported");
+    const unavailable = this.catalog.excluded.filter((tool) => tool.reason === "profile_unavailable");
+    return {
+      schema: "morrow.profile-status.v1",
+      profile,
+      authorityDigest: sha256Json({
+        profile,
+        catalogDigest: this.catalog.digest,
+        supported: supported.map((tool) => tool.publicName),
+      }),
+      supportedToolCount: supported.length,
+      unavailableToolCount: unavailable.length,
+      unavailable,
+    };
+  }
+
   operationGet(operationId: string): JsonObject {
     return operationRecordProjection(this.journal.get(operationId));
   }
@@ -487,7 +567,7 @@ export class GatewayRuntime {
     }
 
     if (!prepared.created) {
-      return replayResult(mapping, this.catalog.digest, prepared.record);
+      return replayResult(mapping, this.catalog.digest, prepared.record, this.config.profile);
     }
 
     const upstream = this.upstreams.get(mapping.upstreamId);
@@ -504,7 +584,7 @@ export class GatewayRuntime {
           code: "upstream_unavailable",
           source: mapping.upstreamId,
         },
-      }, mapping, this.catalog.digest, failed);
+      }, mapping, this.catalog.digest, failed, this.config.profile);
     }
 
     const dispatched = this.journal.markDispatched(prepared.record.operationId);
@@ -519,7 +599,7 @@ export class GatewayRuntime {
         ...(source.state ? { sourceResultState: source.state } : {}),
         ...(source.taskId ? { sourceTaskId: source.taskId } : {}),
       });
-      return attachOperationMeta(normalized, mapping, this.catalog.digest, complete);
+      return attachOperationMeta(normalized, mapping, this.catalog.digest, complete, this.config.profile);
     } catch (error) {
       const unknown = this.journal.recordSourceUnknown(dispatched.operationId, error);
       return attachOperationMeta(
@@ -527,6 +607,7 @@ export class GatewayRuntime {
         mapping,
         this.catalog.digest,
         unknown,
+        this.config.profile,
       );
     }
   }

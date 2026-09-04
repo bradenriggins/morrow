@@ -344,6 +344,18 @@ export function applyPublicationPolicy(
     selectedTools.push({
       ...tool,
       publicName: rule.publicName,
+      ...(tool.capability
+        ? {
+            capability: {
+              ...tool.capability,
+              canonicalName: rule.publicName,
+              profiles: {
+                ...tool.capability.profiles,
+                "public-canvas": { state: "supported" },
+              },
+            },
+          }
+        : {}),
     });
     countsBySource[rule.sourceId] = (countsBySource[rule.sourceId] || 0) + 1;
   }

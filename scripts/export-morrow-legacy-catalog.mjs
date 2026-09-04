@@ -6,9 +6,10 @@ import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { buildSourceCatalog } from "../packages/gateway-core/dist/index.js";
+import { sha256Json } from "../packages/contracts/dist/index.js";
 
 const PINNED_COMMIT = "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4";
-const EXPECTED_CANVAS_TOOL_COUNT = 270;
+const PDF_ESTIMATE_CANVAS_TOOL_COUNT = 270;
 
 function requiredEnvironment(name) {
   const value = String(process.env[name] || "").trim();
@@ -18,6 +19,16 @@ function requiredEnvironment(name) {
 
 function git(root, ...args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
+}
+
+function assertPinnedSourceFiles(root, commit, relativePaths) {
+  for (const relativePath of relativePaths) {
+    const expectedBlob = git(root, "rev-parse", `${commit}:${relativePath}`);
+    const actualBlob = execFileSync("git", ["hash-object", resolve(root, relativePath)], {
+      encoding: "utf8",
+    }).trim();
+    assert.equal(actualBlob, expectedBlob, `Legacy Morrow source differs from ${commit}:${relativePath}`);
+  }
 }
 
 function capabilityAnnotations(capability) {
@@ -39,7 +50,9 @@ async function importModule(root, relativePath, commit) {
 async function main() {
   const legacyRoot = resolve(requiredEnvironment("MORROW_LEGACY_ROOT"));
   const expectedCommit = String(process.env.MORROW_LEGACY_EXPECTED_COMMIT || PINNED_COMMIT).trim();
-  const expectedCount = Number(process.env.MORROW_LEGACY_EXPECTED_CANVAS_TOOLS || EXPECTED_CANVAS_TOOL_COUNT);
+  const expectedCount = process.env.MORROW_LEGACY_EXPECTED_CANVAS_TOOLS === undefined
+    ? undefined
+    : Number(process.env.MORROW_LEGACY_EXPECTED_CANVAS_TOOLS);
   const outputPath = resolve(
     process.cwd(),
     String(process.env.MORROW_LEGACY_CATALOG_OUTPUT || "artifacts/catalogs/example-legacy.canvas.json"),
@@ -47,34 +60,57 @@ async function main() {
 
   const commit = git(legacyRoot, "rev-parse", "HEAD");
   assert.equal(commit, expectedCommit, "Legacy Morrow is not at the expected donor commit");
-  const trackedStatus = git(legacyRoot, "status", "--porcelain=v1", "--untracked-files=no");
-  assert.equal(trackedStatus, "", "Legacy Morrow has tracked changes; refuse a non-reproducible export");
+  const isBare = git(legacyRoot, "rev-parse", "--is-bare-repository") === "true";
+  if (isBare) {
+    assertPinnedSourceFiles(legacyRoot, commit, [
+      "extension/tool-registry.js",
+      "extension/providers/capability-registry.js",
+      "extension/tools/admin-tools.js",
+    ]);
+  } else {
+    const trackedStatus = git(legacyRoot, "status", "--porcelain=v1", "--untracked-files=no");
+    assert.equal(trackedStatus, "", "Legacy Morrow has tracked changes; refuse a non-reproducible export");
+  }
 
   const toolRegistry = await importModule(legacyRoot, "extension/tool-registry.js", commit);
   const capabilityRegistry = await importModule(legacyRoot, "extension/providers/capability-registry.js", commit);
   const adminTools = await importModule(legacyRoot, "extension/tools/admin-tools.js", commit);
 
+  const providerDefinitions = toolRegistry.getToolsForProvider("canvas");
+  const adminDefinitions = adminTools.ADMIN_TOOL_DEFINITIONS;
   const definitions = [
-    ...toolRegistry.getToolsForProvider("canvas"),
-    ...adminTools.ADMIN_TOOL_DEFINITIONS,
+    ...providerDefinitions.map((definition) => ({
+      definition,
+      sourcePath: "extension/tool-registry.js",
+      sourceExport: "getToolsForProvider('canvas')",
+    })),
+    ...adminDefinitions.map((definition) => ({
+      definition,
+      sourcePath: "extension/tools/admin-tools.js",
+      sourceExport: "ADMIN_TOOL_DEFINITIONS",
+    })),
   ];
   const capabilityRows = new Map(
     capabilityRegistry.listCapabilities("canvas").map((row) => [row.capability, row]),
   );
 
   const byName = new Map();
-  for (const definition of definitions) {
+  for (const { definition } of definitions) {
     const name = String(definition?.name || "").trim();
     assert.match(name, /^[A-Za-z0-9_.-]{1,128}$/, "Invalid Canvas tool name");
     assert.equal(byName.has(name), false, `Duplicate Canvas tool name ${name}`);
     byName.set(name, definition);
   }
-  assert.equal(byName.size, expectedCount, "Canvas tool count differs from the expected donor surface");
+  if (expectedCount !== undefined) {
+    assert.equal(byName.size, expectedCount, "Canvas tool count differs from MORROW_LEGACY_EXPECTED_CANVAS_TOOLS");
+  }
 
   const tools = [...byName.entries()]
     .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
     .map(([name, definition]) => {
       const capability = capabilityRows.get(name) || null;
+      const source = definitions.find((entry) => entry.definition === definition);
+      const readOnly = capability?.write !== true;
       return {
         name,
         ...(typeof definition.title === "string" && definition.title.trim()
@@ -88,6 +124,41 @@ async function main() {
           properties: {},
         },
         annotations: capabilityAnnotations(capability),
+        capability: {
+          family: "canvas-operation",
+          provider: "canvas",
+          sourcePath: source?.sourcePath || "unknown",
+          sourceExport: source?.sourceExport || "unknown",
+          sourceDigest: sha256Json(definition),
+          behavior: {
+            readOnly,
+            mutating: !readOnly,
+            destructive: capability?.destructive === true,
+            requiresBrowser: true,
+            requiresLiveCanvas: true,
+          },
+          authority: {
+            scopeClass: "canvas",
+            approvalClass: capability?.destructive === true ? "destructive" : readOnly ? "none" : "standard",
+            dataClass: "unknown",
+          },
+          route: { backend: "morrow-extension" },
+          profiles: {
+            "private-full": { state: "supported" },
+            "public-canvas": { state: "rights_hold", reason: "Requires an explicit publication selection." },
+            sandbox: { state: "profile_limited", reason: "No synthetic fixture is attached." },
+            "read-only": readOnly
+              ? { state: "supported" }
+              : { state: "profile_limited", reason: "Provider writes are disabled." },
+          },
+          evidence: {
+            sourcePath: { state: "known" },
+            sourceExport: { state: "known" },
+            sourceDigest: { state: "known" },
+            supportsDryRun: { state: "unknown", reason: "Registry export has no dry-run declaration." },
+            supportsReadback: { state: "unknown", reason: "Registry export has no readback declaration." },
+          },
+        },
       };
     });
 
@@ -107,7 +178,11 @@ async function main() {
   process.stdout.write([
     `wrote=${outputPath}`,
     `sourceCommit=${commit}`,
+    `providerDefinitions=${providerDefinitions.length}`,
+    `adminDefinitions=${adminDefinitions.length}`,
     `tools=${artifact.count}`,
+    `pdfEstimate=${PDF_ESTIMATE_CANVAS_TOOL_COUNT}`,
+    `baselineException=${artifact.count === PDF_ESTIMATE_CANVAS_TOOL_COUNT ? "none" : "pdf_canvas_count_estimate_drift"}`,
     `digest=${artifact.digest}`,
     "",
   ].join("\n"));

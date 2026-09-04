@@ -36,7 +36,7 @@ The default output is `artifacts/catalogs/meridian.live.json`.
 MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
 ```
 
-The exporter requires the pinned donor commit by default, refuses tracked donor changes, and verifies the 270-row current Canvas-facing surface before writing `artifacts/catalogs/example-legacy.canvas.json`.
+The exporter requires the pinned donor commit by default and records the live callable Canvas surface before writing `artifacts/catalogs/example-legacy.canvas.json`. It refuses tracked changes in a worktree donor, or verifies each imported source blob against the pinned commit when the donor uses a bare Git metadata directory. The PDF's 270-row estimate is a baseline exception; the pinned live registry currently exposes 284 callable tools.
 
 ## Reconcile
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { mergeCatalog } from "../src/index.js";
+import { parseMorrowCapabilityDescriptorV1 } from "@morrow/contracts";
 
 const emptySchema = { type: "object", properties: {} };
 
@@ -61,5 +62,36 @@ describe("mergeCatalog", () => {
     const first = mergeCatalog(source, { generatedAt: "2026-09-03T00:00:00.000Z" });
     const second = mergeCatalog(source, { generatedAt: "2026-09-04T00:00:00.000Z" });
     expect(first.digest).toBe(second.digest);
+  });
+
+  it("emits a validated descriptor and excludes held source ids before routing", () => {
+    const snapshot = mergeCatalog([
+      {
+        id: "meridian",
+        label: "ExamplePlatform",
+        priority: 100,
+        revision: "a".repeat(40),
+        tools: [{ name: "canvas_page_get", inputSchema: emptySchema, annotations: { readOnlyHint: true } }],
+      },
+      {
+        id: "mindtap",
+        label: "Held",
+        priority: 50,
+        tools: [{ name: "unprefixed_tool", inputSchema: emptySchema }],
+      },
+    ]);
+
+    const descriptor = snapshot.tools[0]?.capability;
+    expect(descriptor).toBeDefined();
+    expect(parseMorrowCapabilityDescriptorV1(descriptor)).toMatchObject({
+      canonicalName: "canvas_page_get",
+      profiles: { "read-only": { state: "supported" } },
+      catalogDigest: snapshot.digest,
+    });
+    expect(snapshot.excluded).toContainEqual({
+      upstreamId: "mindtap",
+      upstreamName: "unprefixed_tool",
+      reason: "held_provider",
+    });
   });
 });

@@ -37,7 +37,7 @@ const StdioUpstreamSchema = z.object({
 
 const GatewayConfigSchema = z.object({
   schema: z.literal("morrow.upstreams.v1"),
-  profile: z.enum(["private-full", "public-canvas"]).default("private-full"),
+  profile: z.enum(["private-full", "public-canvas", "sandbox", "read-only"]).default("private-full"),
   upstreams: z.array(StdioUpstreamSchema).min(1),
   sourcePolicy: z.object({
     requireAttestation: z.boolean().default(false),
@@ -239,7 +239,7 @@ export async function loadGatewayConfig(
                 expectedRevision: "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
                 requireTrackedClean: true,
                 allowedTrackedPaths: [],
-                expectedToolCount: 205,
+                expectedToolCount: 222,
               },
             }
           : {}),

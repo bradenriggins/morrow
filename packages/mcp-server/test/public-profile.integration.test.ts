@@ -156,12 +156,12 @@ describe("public-canvas runtime profile", () => {
         {
           upstreamId: "meridian",
           upstreamName: "mindtap_hidden",
-          reason: "excluded_prefix",
+          reason: "held_provider",
         },
         {
           upstreamId: "meridian",
           upstreamName: "connect_hidden",
-          reason: "excluded_prefix",
+          reason: "held_provider",
         },
       ]));
 

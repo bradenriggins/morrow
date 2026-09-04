@@ -43,7 +43,47 @@ async function main() {
       required: true,
     });
     try {
-      const tools = await upstream.connect();
+      const tools = (await upstream.connect()).map((tool) => {
+        const provider = tool.name.startsWith("mindtap_")
+          ? "mindtap"
+          : tool.name.startsWith("connect_") ? "connect" : "canvas";
+        return {
+          ...tool,
+          capability: {
+            family: "canvas-operation",
+            provider,
+            sourceExport: "MCP tools/list",
+            behavior: {
+              readOnly: tool.annotations?.readOnlyHint === true,
+              mutating: tool.annotations?.readOnlyHint !== true,
+              destructive: tool.annotations?.destructiveHint === true,
+            },
+            authority: {
+              scopeClass: "unknown",
+              approvalClass: tool.annotations?.destructiveHint === true
+                ? "destructive"
+                : tool.annotations?.readOnlyHint === true ? "none" : "standard",
+              dataClass: "unknown",
+            },
+            route: { backend: source.id === "meridian" ? "meridian" : "morrow-extension" },
+            profiles: {
+              "private-full": { state: "supported" },
+              "public-canvas": { state: "rights_hold", reason: "Publication approval is not present in tools/list." },
+              sandbox: { state: "profile_limited", reason: "No synthetic fixture is attached." },
+              "read-only": tool.annotations?.readOnlyHint === true
+                ? { state: "supported" }
+                : { state: "profile_limited", reason: "Provider writes are disabled." },
+            },
+            evidence: {
+              sourcePath: { state: "unknown", reason: "MCP tools/list does not expose donor module paths." },
+              sourceExport: { state: "known" },
+              sourceDigest: { state: "unknown", reason: "MCP tools/list does not expose module digests." },
+              supportsDryRun: { state: "unknown", reason: "MCP tools/list does not expose dry-run support." },
+              supportsReadback: { state: "unknown", reason: "MCP tools/list does not expose readback support." },
+            },
+          },
+        };
+      });
       const artifact = buildSourceCatalog({
         id: source.id,
         label: source.label,

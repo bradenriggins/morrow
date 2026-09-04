@@ -8,6 +8,7 @@ import {
   sha256Text,
   type ToolAnnotations,
   type UpstreamTool,
+  type SourceCapabilityMetadata,
 } from "@morrow/contracts";
 
 export type SourceCatalogKind = "mcp-stdio" | "donor-export" | "synthetic";
@@ -59,6 +60,9 @@ export interface CatalogToolEvidence {
   readonly outputSchemaSha256?: string;
   readonly annotationsSha256: string;
   readonly contractSha256: string;
+  readonly sourcePath?: string;
+  readonly sourceExport?: string;
+  readonly sourceDigest?: string;
 }
 
 export type ReconciliationRowKind = "alias" | "exact_name" | "source_only";
@@ -122,6 +126,10 @@ const CATALOG_KINDS = new Set<SourceCatalogKind>([
   "synthetic",
 ]);
 
+function isHeldProviderIdentifier(value: string): boolean {
+  return /(^|[_-])(mindtap|connect)([_-]|$)/i.test(value);
+}
+
 function compareAscii(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -155,6 +163,9 @@ function normalizeCatalogTool(value: unknown): UpstreamTool {
   const annotations = normalizeAnnotations(value.annotations);
   const title = optionalText(value.title, "tool.title", 300);
   const description = optionalText(value.description, "tool.description", 20_000);
+  const capability = isJsonObject(value.capability)
+    ? structuredClone(value.capability) as SourceCapabilityMetadata
+    : undefined;
   return {
     name: normalizeToolName(value.name),
     ...(title ? { title } : {}),
@@ -164,6 +175,7 @@ function normalizeCatalogTool(value: unknown): UpstreamTool {
       ? { outputSchema: normalizeInputSchema(value.outputSchema) }
       : {}),
     ...(annotations ? { annotations } : {}),
+    ...(capability ? { capability } : {}),
   };
 }
 
@@ -270,6 +282,9 @@ function toolEvidence(catalog: SourceCatalogSnapshot, tool: UpstreamTool): Catal
     ...(outputSchemaSha256 ? { outputSchemaSha256 } : {}),
     annotationsSha256,
     contractSha256,
+    ...(tool.capability?.sourcePath ? { sourcePath: tool.capability.sourcePath } : {}),
+    ...(tool.capability?.sourceExport ? { sourceExport: tool.capability.sourceExport } : {}),
+    ...(tool.capability?.sourceDigest ? { sourceDigest: tool.capability.sourceDigest } : {}),
   };
 }
 
@@ -283,10 +298,14 @@ function normalizeAliasRule(value: CatalogAliasRule): CatalogAliasRule {
   if (!/^[a-z0-9][a-z0-9._-]{0,127}$/.test(id)) {
     throw new TypeError(`Invalid alias id: ${id}`);
   }
-  const members = value.members.map((member) => ({
-    sourceId: normalizeSourceId(member.sourceId),
-    toolName: normalizeToolName(member.toolName),
-  }));
+  const members = value.members.map((member) => {
+    const sourceId = normalizeSourceId(member.sourceId);
+    const toolName = normalizeToolName(member.toolName);
+    if (isHeldProviderIdentifier(sourceId) || isHeldProviderIdentifier(toolName)) {
+      throw new Error(`Alias ${id} references a held provider capability`);
+    }
+    return { sourceId, toolName };
+  });
   if (members.length < 2) {
     throw new Error(`Alias ${id} must contain at least two members`);
   }
@@ -302,9 +321,13 @@ function normalizeAliasRule(value: CatalogAliasRule): CatalogAliasRule {
   if (!sourceIds.has(preferredSourceId)) {
     throw new Error(`Alias ${id} preferred source is not a member`);
   }
+  const publicName = normalizeToolName(value.publicName);
+  if (isHeldProviderIdentifier(id) || isHeldProviderIdentifier(publicName)) {
+    throw new Error(`Alias ${id} exposes a held provider capability`);
+  }
   return {
     id,
-    publicName: normalizeToolName(value.publicName),
+    publicName,
     preferredSourceId,
     members,
     reason: requiredText(value.reason, "alias.reason", 1000),

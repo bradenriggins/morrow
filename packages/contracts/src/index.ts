@@ -3,6 +3,90 @@ import { createHash } from "node:crypto";
 export type JsonObject = Record<string, unknown>;
 export type JsonSchema = JsonObject;
 
+export const RUNTIME_PROFILES = [
+  "private-full",
+  "public-canvas",
+  "sandbox",
+  "read-only",
+] as const;
+
+export type RuntimeProfile = (typeof RUNTIME_PROFILES)[number];
+export type CapabilityProfileState =
+  | "supported"
+  | "profile_limited"
+  | "rights_hold"
+  | "private_only"
+  | "broken_at_baseline";
+
+export interface CapabilityFieldEvidence {
+  readonly state: "known" | "unknown" | "blocked";
+  readonly reason?: string;
+}
+
+export interface SourceCapabilityMetadata {
+  readonly family?: string;
+  readonly provider?: "canvas" | "local" | "mindtap" | "connect";
+  readonly sourcePath?: string;
+  readonly sourceExport?: string;
+  readonly sourceDigest?: string;
+  readonly behavior?: Partial<MorrowCapabilityDescriptorV1["behavior"]>;
+  readonly authority?: Partial<MorrowCapabilityDescriptorV1["authority"]>;
+  readonly route?: Partial<MorrowCapabilityDescriptorV1["route"]>;
+  readonly profiles?: Partial<Record<RuntimeProfile, CapabilityProfileAvailability>>;
+  readonly evidence?: Readonly<Record<string, CapabilityFieldEvidence>>;
+}
+
+export interface CapabilityProfileAvailability {
+  readonly state: CapabilityProfileState;
+  readonly reason?: string;
+}
+
+export interface MorrowCapabilityDescriptorV1 {
+  readonly schema: "morrow.capability.v1";
+  readonly canonicalName: string;
+  readonly aliases: readonly string[];
+  readonly family: string;
+  readonly provider: "canvas" | "local";
+  readonly description: string;
+  readonly inputSchema: JsonSchema;
+  readonly sourceImplementations: readonly {
+    readonly system: "morrow" | "meridian";
+    readonly toolName: string;
+    readonly revision: string;
+    readonly sourcePath: string;
+    readonly sourceExport: string;
+    readonly sourceDigest: string;
+    readonly schemaDigest: string;
+  }[];
+  readonly behavior: {
+    readonly readOnly: boolean;
+    readonly mutating: boolean;
+    readonly destructive: boolean;
+    readonly irreversible: boolean;
+    readonly supportsDryRun: boolean;
+    readonly supportsReadback: boolean;
+    readonly supportsUndo: boolean;
+    readonly supportsBatch: boolean;
+    readonly requiresBrowser: boolean;
+    readonly requiresLiveCanvas: boolean;
+  };
+  readonly authority: {
+    readonly scopeClass: string;
+    readonly approvalClass: "none" | "standard" | "destructive" | "learner" | "grade" | "blueprint";
+    readonly dataClass: string;
+  };
+  readonly route: {
+    readonly backend: "meridian" | "morrow-node" | "morrow-extension" | "composite";
+    readonly planBackend?: string;
+    readonly dispatchBackend?: string;
+    readonly readbackBackend?: string;
+    readonly comparator?: string;
+  };
+  readonly profiles: Readonly<Record<RuntimeProfile, CapabilityProfileAvailability>>;
+  readonly catalogDigest: string;
+  readonly evidence: Readonly<Record<string, CapabilityFieldEvidence>>;
+}
+
 export interface ToolAnnotations {
   readonly readOnlyHint?: boolean;
   readonly destructiveHint?: boolean;
@@ -17,6 +101,7 @@ export interface UpstreamTool {
   readonly inputSchema: JsonSchema;
   readonly outputSchema?: JsonSchema;
   readonly annotations?: ToolAnnotations;
+  readonly capability?: SourceCapabilityMetadata;
 }
 
 export interface CatalogSource {
@@ -24,6 +109,7 @@ export interface CatalogSource {
   readonly label: string;
   readonly priority: number;
   readonly tools: readonly UpstreamTool[];
+  readonly revision?: string;
 }
 
 export interface CatalogTool {
@@ -36,6 +122,8 @@ export interface CatalogTool {
   readonly inputSchema: JsonSchema;
   readonly outputSchema?: JsonSchema;
   readonly annotations?: ToolAnnotations;
+  readonly aliases?: readonly string[];
+  readonly capability?: MorrowCapabilityDescriptorV1;
 }
 
 export interface CatalogCollision {
@@ -48,7 +136,8 @@ export interface CatalogCollision {
 export interface ExcludedCatalogTool {
   readonly upstreamId: string;
   readonly upstreamName: string;
-  readonly reason: "excluded_name" | "excluded_prefix" | "publication_policy";
+  readonly reason: "excluded_name" | "excluded_prefix" | "held_provider" | "profile_unavailable" | "publication_policy";
+  readonly detail?: string;
 }
 
 export interface CatalogSnapshot {
@@ -140,10 +229,53 @@ export interface GatewayCallMeta {
   readonly sourceOperationId?: string;
   readonly sourceResultState?: string;
   readonly sourceTaskId?: string;
+  readonly profile?: RuntimeProfile;
+  readonly authorityDigest?: string;
 }
 
 export function isJsonObject(value: unknown): value is JsonObject {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function requiredDescriptorString(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) throw new TypeError(`${label} must be a non-empty string`);
+  return value.trim();
+}
+
+export function parseMorrowCapabilityDescriptorV1(value: unknown): MorrowCapabilityDescriptorV1 {
+  if (!isJsonObject(value) || value.schema !== "morrow.capability.v1") {
+    throw new TypeError("Expected morrow.capability.v1");
+  }
+  requiredDescriptorString(value.canonicalName, "canonicalName");
+  requiredDescriptorString(value.family, "family");
+  if (value.provider !== "canvas" && value.provider !== "local") {
+    throw new TypeError("provider must be canvas or local");
+  }
+  if (!Array.isArray(value.aliases) || value.aliases.some((alias) => typeof alias !== "string")) {
+    throw new TypeError("aliases must be a string array");
+  }
+  if (!isJsonObject(value.inputSchema) || !Array.isArray(value.sourceImplementations)) {
+    throw new TypeError("inputSchema and sourceImplementations are required");
+  }
+  if (!isJsonObject(value.behavior) || !isJsonObject(value.authority) || !isJsonObject(value.route)) {
+    throw new TypeError("behavior, authority, and route are required");
+  }
+  for (const key of [
+    "readOnly", "mutating", "destructive", "irreversible", "supportsDryRun", "supportsReadback",
+    "supportsUndo", "supportsBatch", "requiresBrowser", "requiresLiveCanvas",
+  ]) {
+    if (typeof value.behavior[key] !== "boolean") throw new TypeError(`behavior.${key} must be boolean`);
+  }
+  if (!isJsonObject(value.profiles)) throw new TypeError("profiles are required");
+  for (const profile of RUNTIME_PROFILES) {
+    const entry = value.profiles[profile];
+    if (!isJsonObject(entry) || !["supported", "profile_limited", "rights_hold", "private_only", "broken_at_baseline"].includes(String(entry.state))) {
+      throw new TypeError(`profiles.${profile} is invalid`);
+    }
+  }
+  requiredDescriptorString(value.catalogDigest, "catalogDigest");
+  if (!isJsonObject(value.evidence)) throw new TypeError("evidence is required");
+  return value as unknown as MorrowCapabilityDescriptorV1;
 }
 
 function canonicalize(value: unknown, path: string): unknown {
