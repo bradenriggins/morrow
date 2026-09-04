@@ -80,6 +80,7 @@ function trackedFiles(root) {
 function trackedBuffer(root, path) {
   return execFileSync("git", ["-C", root, "show", `HEAD:${path}`], {
     stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 64 * 1024 * 1024,
   });
 }
 

@@ -7,6 +7,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const maxBuffer = 64 * 1024 * 1024;
 
 function git(args, encoding = "utf8") {
   return execFileSync("git", ["-C", root, ...args], {
@@ -22,6 +23,7 @@ function sha256(bytes) {
 function tracked(path) {
   return execFileSync("git", ["-C", root, "show", `HEAD:${path}`], {
     stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer,
   });
 }
 

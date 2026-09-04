@@ -70,7 +70,7 @@ async function main() {
       .filter((path) => !(profile.exclude || []).some((rule) => matches(path, rule)));
     files = paths.map((path) => ({
       path,
-      bytes: execFileSync("git", ["-C", option.root, "show", `HEAD:${path}`]),
+      bytes: execFileSync("git", ["-C", option.root, "show", `HEAD:${path}`], { maxBuffer: 64 * 1024 * 1024 }),
     }));
   }
   validatePublicAssemblyInputs(manifest, files);

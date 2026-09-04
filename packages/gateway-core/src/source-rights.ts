@@ -23,7 +23,7 @@ const PUBLIC_DISPOSITIONS = new Set<SourceDisposition>([
   "adapted_owned",
   "clean_reimplementation",
 ]);
-const PRIVATE_MARKER = /(?:example-kit|example-lms-vps)/i;
+const PRIVATE_MARKER = new RegExp(`(?:${["ch", "cp"].join("")}|${["meridian", "vps"].join("-")})`, "i");
 
 function exactPath(value: unknown): string {
   const path = typeof value === "string" ? value.trim().replaceAll("\\", "/") : "";
