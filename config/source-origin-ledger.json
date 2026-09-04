@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "e9cb2a61837dcd9f7b8da5904d2c1f779d8a5ed5",
+  "candidateCommit": "9868f8210da9e5b34cf0bfee2707211cf750619f",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -181,14 +181,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "ae878f31c3ae57e73e4bc7b0c7e55b24522117e2",
+      "sourceCommit": "9868f8210da9e5b34cf0bfee2707211cf750619f",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "214a3554e726d0a24dca0117d854d9f6b2b71020fbf3641e98080bc007a8ddea",
-      "afterDigest": "eb63d6ee31f3afd2c2027f75378be1066d1dd0f92cce43acf3c38495e459a6fd"
+      "beforeDigest": "eb63d6ee31f3afd2c2027f75378be1066d1dd0f92cce43acf3c38495e459a6fd",
+      "afterDigest": "1e38ad9c4392d6e8bba657a494e2043303eba2fff45b116cf74c7f26906acc65"
     },
     {
       "path": "connector/extension/generated/canvas-api-catalog.json",
@@ -522,14 +522,14 @@
     },
     {
       "path": "package.json",
-      "sourceCommit": "54ddc64d00c420b465b7bf219d4548f23283ac49",
+      "sourceCommit": "7d7cce29dc64fb0ced634f18f59232c569a974e7",
       "originalPath": "package.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "799442687b0225cb883ce5878ee51f09d5110cbdc5957ce353be5953b9589f82",
-      "afterDigest": "3fb66969d950ea0367b418d901879e66934ab80d0382ccbfb4ae4d8486b39096"
+      "beforeDigest": "3fb66969d950ea0367b418d901879e66934ab80d0382ccbfb4ae4d8486b39096",
+      "afterDigest": "9dadcabebff8b39a5a0a8d7ebc3836ed620ed7fdc293d5a4b13d649efa3f71f7"
     },
     {
       "path": "packages/batch-engine/package.json",
