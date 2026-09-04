@@ -17,7 +17,7 @@
     "test": "pnpm build && pnpm -r --if-present test && pnpm scripts:test",
     "scripts:test": "node --test scripts/test/*.test.mjs",
     "check": "pnpm test",
-    "start": "pnpm --filter @morrow-lms/gateway start",
+    "start": "node packages/mcp-server/dist/index.js",
     "setup": "pnpm build && node packages/client-config/dist/cli.js setup",
     "morrow": "node packages/client-config/dist/cli.js",
     "clients:render": "pnpm build && node packages/client-config/dist/cli.js clients render",
