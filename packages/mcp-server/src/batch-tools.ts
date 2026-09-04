@@ -7,7 +7,6 @@ import {
 import { sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
 import { recoverGatewayBatch } from "./batch-recovery.js";
-import { BatchWindowScheduler } from "./batch-window-scheduler.js";
 import type { MorrowRuntime } from "./morrow-runtime.js";
 
 function textAndStructured(summary: string, structuredContent: JsonObject): CallToolResult {
@@ -77,9 +76,7 @@ function ratePolicy(value: z.infer<typeof BatchRatePolicySchema> | undefined) {
 }
 
 export function registerBatchTools(server: McpServer, runtime: MorrowRuntime): void {
-  const scheduler = new BatchWindowScheduler({
-    maxConcurrentWindows: runtime.gateway.config.batchScheduler.maxConcurrentWindows,
-  });
+  const scheduler = runtime.batchScheduler;
 
   server.registerTool(
     "morrow_batch_health",

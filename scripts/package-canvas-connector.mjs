@@ -9,7 +9,6 @@ import { deterministicZip, stableJson } from "./lib/deterministic-archive.mjs";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const extensionRoot = resolve(root, "connector/extension");
 const outputRoot = resolve(root, "artifacts/connector");
-const archivePath = resolve(outputRoot, "morrow-canvas-connector-v1.0.0.zip");
 const receiptPath = resolve(outputRoot, "receipt.json");
 
 function sha256(value) {
@@ -31,6 +30,7 @@ function extensionId(publicKey) {
 }
 
 const manifest = JSON.parse(readFileSync(resolve(extensionRoot, "manifest.json"), "utf8"));
+const archivePath = resolve(outputRoot, `morrow-canvas-connector-v${manifest.version}.zip`);
 const sourceFiles = files(extensionRoot).map((path) => ({
   path: relative(extensionRoot, path).replaceAll("\\", "/"),
   data: readFileSync(path),

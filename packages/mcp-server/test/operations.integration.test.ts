@@ -116,7 +116,7 @@ describe("outer provider effects", () => {
           readback: {
             tool: "canvas_page_get",
             arguments: { course_id: "101" },
-            expected_digest: "a".repeat(64),
+            expected_digest: sha256Json({ source: "example-legacy", course_id: "101" }),
           },
         },
       });
@@ -156,11 +156,11 @@ describe("outer provider effects", () => {
         body: new URLSearchParams({ nonce: validNonce! }),
       });
       expect(approval.status).toBe(200);
-      expect(await approval.text()).toContain("Return to your chat and say “Continue.”");
-      expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "approved" });
+      expect(await approval.text()).not.toContain("Continue");
+      await expect.poll(() => runtime.gateway.operationGet(id).state).toBe("verified");
       const settled = await fetch(url as string);
       const settledBody = await settled.text();
-      expect(settledBody).toContain("Already approved");
+      expect(settledBody).toContain("Changes confirmed");
       expect(settledBody).not.toContain('<button class="approve"');
       const stale = await fetch(`${url}/approve`, {
         method: "POST",

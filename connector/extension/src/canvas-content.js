@@ -5,6 +5,83 @@
   const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
   const MAX_PAGES = 50;
 
+  function pageId(value) {
+    if (typeof value !== "string" && !(typeof value === "number" && Number.isSafeInteger(value))) return null;
+    return /^[1-9][0-9]{0,18}$/.test(String(value)) ? String(value) : null;
+  }
+
+  async function bodyDigest(body) {
+    return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function pageJson(url) {
+    const response = await fetch(url, { credentials: "include", cache: "no-store", headers: { Accept: "application/json+canvas-string-ids" } });
+    if (!response.ok) throw new Error("page_check_unavailable");
+    return JSON.parse(await readBounded(response));
+  }
+
+  function pageTextChange(body, find, replacement) {
+    const escape = (text) => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+    if (typeof body !== "string" || typeof find !== "string" || !find || typeof replacement !== "string" || find === replacement) throw new Error("page_text_invalid");
+    const anchor = escape(find);
+    const start = body.indexOf(anchor);
+    if (start < 0 || body.indexOf(anchor, start + 1) !== -1) throw new Error("page_text_not_unique");
+    const end = start + anchor.length;
+    for (const entity of body.matchAll(/&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]+);?/g)) {
+      const entityStart = entity.index;
+      const entityEnd = entityStart + entity[0].length;
+      if ((entityStart < start && start < entityEnd) || (entityStart < end && end < entityEnd)) throw new Error("page_text_inside_entity");
+    }
+    const tags = /<!--[\s\S]*?-->|<(?:(?:"[^"]*"|'[^']*'|[^'">])*)>/g;
+    let blocked = false;
+    for (const match of body.matchAll(tags)) {
+      const at = match.index;
+      if (at >= end) break;
+      if (at + match[0].length > start) throw new Error("page_text_inside_markup");
+      if (/^<(script|style|iframe|object|embed|textarea|title)\b/i.test(match[0])) blocked = true;
+      if (/^<\/(script|style|iframe|object|embed|textarea|title)\s*>/i.test(match[0])) blocked = false;
+    }
+    if (blocked) throw new Error("page_text_inside_embedded_content");
+    return body.slice(0, start) + escape(replacement) + body.slice(end);
+  }
+
+  async function checkPageSource(operation, args, url, courseId) {
+    const guard = args.morrow_page_guard;
+    if (operation.toolName !== "canvas_update_create_page_courses" || String(args.course_id) !== courseId
+      || !guard?.fields || Object.keys(args).some((key) => key.startsWith("wiki_page_"))) throw new Error("page_check_invalid");
+    const [page, revision] = await Promise.all([pageJson(url), pageJson(`${url.href}/revisions/latest`)]);
+    if (pageId(page.page_id) !== guard.page_id || typeof page.body !== "string"
+      || page.editor === "block_editor" || page.block_editor_attributes != null
+      || await bodyDigest(page.body) !== guard.body_sha256
+      || pageId(revision.revision_id) !== guard.revision_id || revision.latest !== true
+      || revision.body !== page.body || revision.url !== page.url || revision.title !== page.title
+      || !["url", "title", "published", "front_page", "editing_roles"].every((field) => Object.hasOwn(guard.fields, field) && page[field] === guard.fields[field])) {
+      throw new Error("page_changed: This page changed or could not be checked. No change was sent. Create a new review from the current page.");
+    }
+    return pageTextChange(page.body, guard.find_text, guard.replace_text);
+  }
+
+  async function verifyPageChange(args, url) {
+    const guard = args.morrow_page_guard;
+    const base = { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: "lossless-page-revision", priorRevisionId: guard.revision_id };
+    try {
+      const [page, revision, history] = await Promise.all([pageJson(url), pageJson(`${url.href}/revisions/latest`), pageJson(`${url.href}/revisions?per_page=2`)]);
+      const latestId = pageId(revision.revision_id);
+      const exactHistory = Array.isArray(history) && history.length === 2
+        && history.every((row) => row && pageId(row.revision_id))
+        && new Set(history.map((row) => pageId(row.revision_id))).size === 2
+        && history.some((row) => pageId(row.revision_id) === guard.revision_id)
+        && history.some((row) => pageId(row.revision_id) === latestId && row.latest === true);
+      const samePage = pageId(page.page_id) === guard.page_id && page.body === args.wiki_page_body
+        && revision.body === args.wiki_page_body && revision.url === guard.fields.url && revision.title === guard.fields.title
+        && ["url", "title", "published", "front_page", "editing_roles"].every((field) => page[field] === guard.fields[field]);
+      if (!latestId || !exactHistory || latestId === guard.revision_id || revision.latest !== true || !samePage) return { ...base, reason: "page_or_revision_chain_did_not_match" };
+      return { ...base, status: "verified", createdRevisionId: latestId, evidence: "full_page_preserved_and_one_new_revision" };
+    } catch {
+      return { ...base, reason: "page_readback_incomplete" };
+    }
+  }
+
   async function readBounded(response) {
     if (!response.body) return "";
     const reader = response.body.getReader();
@@ -94,7 +171,9 @@
     const body = [];
     for (const parameter of operation.parameters) {
       const value = args[parameter.inputName];
-      if (value === undefined || value === null || value === "") {
+      const preserveGuardedEmptyPageBody = operation.toolName === "canvas_update_create_page_courses"
+        && Boolean(args.morrow_page_guard) && parameter.inputName === "wiki_page_body";
+      if (value === undefined || value === null || (value === "" && !preserveGuardedEmptyPageBody)) {
         if (parameter.required) throw new TypeError(`${parameter.inputName} is required`);
         continue;
       }
@@ -140,10 +219,16 @@
     return { id, name: String(profile?.name || profile?.short_name || "Canvas user").slice(0, 200), origin: location.origin, courseId, ...(courseName ? { courseName } : {}) };
   }
 
-  async function executeCanvas(operation, args, expectedPrincipalId) {
+  async function executeCanvas(operation, args, expectedPrincipalId, expiresAt) {
     const profile = await canvasProfile();
     if (profile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-    const { url, body } = requestParts(operation, args);
+    let { url, body } = requestParts(operation, args);
+    if (args.morrow_page_guard) {
+      args = { ...args, wiki_page_body: await checkPageSource(operation, args, url, profile.courseId) };
+      ({ url, body } = requestParts(operation, args));
+      const currentProfile = await canvasProfile();
+      if (currentProfile.id !== expectedPrincipalId || currentProfile.courseId !== String(args.course_id)) throw new Error("canvas_principal_changed");
+    }
     const isRead = operation.method === "GET";
     const headers = new Headers({ Accept: "application/json+canvas-string-ids" });
     const options = { method: operation.method, credentials: "include", headers, cache: "no-store" };
@@ -173,6 +258,7 @@
       }
     }
     const maxPages = Math.max(1, Math.min(Number(args.morrow_max_pages || 25), MAX_PAGES));
+    if (!isRead && (!Number.isFinite(expiresAt) || Date.now() >= expiresAt)) throw new Error("canvas_request_expired_before_send");
     const pages = [];
     let next = url.href;
     let lastResponse = null;
@@ -197,11 +283,15 @@
       pages.push(payload);
       next = isRead ? nextLink(response.headers.get("Link"), location.origin) : null;
     }
+    const data = pages.length === 1 ? pages[0] : pages.flatMap((page) => Array.isArray(page) ? page : [page]);
+    const pageRead = isRead && /^\/api\/v1\/courses\/[1-9][0-9]*\/pages\/[^/]+$/.test(url.pathname) && typeof data?.body === "string";
     return {
       ok: true,
       sent: true,
       status: lastResponse?.status || 0,
-      data: pages.length === 1 ? pages[0] : pages.flatMap((page) => Array.isArray(page) ? page : [page]),
+      data,
+      ...(pageRead ? { pageBodySha256: await bodyDigest(data.body) } : {}),
+      ...(args.morrow_page_guard ? { verification: await verifyPageChange(args, url) } : {}),
       pageCount: pages.length,
       truncated: Boolean(next),
       requestCost: lastResponse?.headers.get("X-Request-Cost") || null,
@@ -215,7 +305,7 @@
       return true;
     }
     if (message?.type === "morrow_canvas_execute") {
-      executeCanvas(message.operation, message.arguments || {}, message.principalId)
+      executeCanvas(message.operation, message.arguments || {}, message.principalId, message.expiresAt)
         .then((result) => sendResponse(result), (error) => sendResponse({ ok: false, sent: false, error: String(error?.message || error) }));
       return true;
     }

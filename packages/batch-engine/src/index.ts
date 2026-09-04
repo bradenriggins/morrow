@@ -237,6 +237,8 @@ export interface RunBatchWindowOptions {
   readonly ratePolicy?: BatchRatePolicyInput;
   readonly sleep?: (milliseconds: number) => Promise<void>;
   readonly random?: () => number;
+  readonly signal?: AbortSignal;
+  readonly stopOnUnverified?: boolean;
 }
 
 export interface BatchWindowResult {

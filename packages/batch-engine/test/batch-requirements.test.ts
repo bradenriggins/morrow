@@ -214,4 +214,62 @@ describe("BAT durable batch requirements", () => {
     expect(slept).toEqual([100]);
     store.close();
   });
+
+  it("pauses an automatic write window before a rate-reduced next wave after an unverified result", async () => {
+    const store = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
+    const created = store.create({
+      name: "Guarded writes",
+      mode: "stage_writes",
+      catalogDigest,
+      concurrency: 2,
+      operationFamily: "page_edit",
+      profileDigest,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      courseSet: { source: "explicit", courseIds: ["1", "2", "3"], complete: true },
+      children: [1, 2, 3].map((index) => ({
+        ...readChild(index), readOnly: false, publicToolName: "canvas_page_edit", sourceToolName: "canvas_page_edit",
+      })),
+    });
+    const dispatched: string[] = [];
+    const result = await runBatchWindow(store, created.batch.batchId, async ({ child }) => {
+      dispatched.push(child.childId);
+      return {
+        state: "unknown",
+        resultDigest: sha256Json({ childId: child.childId }),
+        gatewayOperationState: "awaiting_verification",
+      };
+    }, {
+      expectedCatalogDigest: catalogDigest,
+      expectedCourseSetDigest: created.manifest.courseSet.digest,
+      expectedProfileDigest: profileDigest,
+      maxChildren: 3,
+      ratePolicy: { requestCost: 10, rateLimitRemaining: 10 },
+      stopOnUnverified: true,
+    });
+    expect(dispatched).toEqual(["course:1"]);
+    expect(result.batch).toMatchObject({ state: "paused", pendingChildren: 2, unknownChildren: 1 });
+    store.close();
+  });
+
+  it("stops an automatic window during retry backoff without dispatching claimed work", async () => {
+    const store = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
+    const created = readBatch(store, 2);
+    const controller = new AbortController();
+    const dispatched: string[] = [];
+    const result = await runBatchWindow(store, created.batch.batchId, async ({ child }) => {
+      dispatched.push(child.childId);
+      return { state: "succeeded", resultDigest: sha256Json({ childId: child.childId }) };
+    }, {
+      expectedCatalogDigest: catalogDigest,
+      expectedCourseSetDigest: created.manifest.courseSet.digest,
+      expectedProfileDigest: profileDigest,
+      maxChildren: 2,
+      ratePolicy: { retryAfterMs: 300_000 },
+      signal: controller.signal,
+      sleep: async () => { controller.abort(); },
+    });
+    expect(dispatched).toEqual([]);
+    expect(result.batch).toMatchObject({ state: "paused", pendingChildren: 2, runningChildren: 0 });
+    store.close();
+  });
 });

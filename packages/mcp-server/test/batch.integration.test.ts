@@ -121,27 +121,6 @@ function connectorConfig(directory: string, port: number) {
   });
 }
 
-async function approveBatch(url: string): Promise<string> {
-  const view = await fetch(url);
-  const body = await view.text();
-  const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
-  const cookie = view.headers.get("set-cookie")?.split(";", 1)[0];
-  expect(nonce).toBeTruthy();
-  expect(cookie).toBeTruthy();
-  const approval = await fetch(`${url}/approve`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/x-www-form-urlencoded",
-      cookie: cookie!,
-      origin: new URL(url).origin,
-      referer: url,
-    },
-    body: new URLSearchParams({ nonce: nonce! }),
-  });
-  expect(approval.status).toBe(200);
-  return body;
-}
-
 describe("MorrowRuntime durable batches", () => {
   it("runs read-only children in bounded windows and never exposes stored arguments", async () => {
     const runtime = await MorrowRuntime.connect(config(), { statePath: ":memory:" });
@@ -215,9 +194,10 @@ describe("MorrowRuntime durable batches", () => {
       } finally {
         clock.mockRestore();
       }
-      const approvalBody = await approveBatch(String(created.approvalUrl));
+      const approvalBody = await (await fetch(String(created.approvalUrl))).text();
       expect(approvalBody).toContain("course:41");
       expect(approvalBody).toContain("course:42");
+      runtime.approveBatch(batch.batchId);
 
       const result = await runtime.batchRun({ batchId: batch.batchId, maxChildren: 10 });
       expect((result.batch as { state: string }).state).toBe("paused");
@@ -324,7 +304,7 @@ describe("MorrowRuntime durable batches", () => {
         })),
       });
       const batch = created.batch as { batchId: string };
-      await approveBatch(String(created.approvalUrl));
+      runtime.approveBatch(batch.batchId);
       await runtime.batchRun({ batchId: batch.batchId, maxChildren: 10 });
       const reconciled = await runtime.batchReconcile({ batchId: batch.batchId, maxChildren: 10 });
       expect(reconciled.sourceSettlement).toMatchObject({
@@ -361,7 +341,7 @@ describe("MorrowRuntime durable batches", () => {
         }],
       });
       batchId = (created.batch as { batchId: string }).batchId;
-      await approveBatch(String(created.approvalUrl));
+      first.approveBatch(batchId);
       await first.batchRun({ batchId, maxChildren: 1 });
     } finally {
       await first.close();
@@ -410,7 +390,7 @@ describe("MorrowRuntime durable batches", () => {
         protocolVersion: BRIDGE_PROTOCOL_VERSION,
         token: "gateway-connector-secret-".repeat(3),
         extensionId: "a".repeat(32),
-        runtimeRevision: "1.0.0-rc.0",
+        runtimeRevision: "1.0.0-rc.1",
         catalogDigest: catalog.catalogDigest,
         bindings: [{
           sourceBindingId,
@@ -468,7 +448,7 @@ describe("MorrowRuntime durable batches", () => {
         }],
       });
       const batchId = String((created.batch as { batchId: string }).batchId);
-      await approveBatch(String(created.approvalUrl));
+      first.approveBatch(batchId);
       const crash = vi.spyOn(first.batches, "settleChild").mockImplementationOnce(() => {
         throw new Error("simulated crash after verified direct effect");
       });

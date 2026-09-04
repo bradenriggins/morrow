@@ -198,6 +198,41 @@ function windowRate(
 
 type RatePolicy = NonNullable<RunBatchWindowOptions["ratePolicy"]>;
 
+function abortableSleep(
+  sleep: (milliseconds: number) => Promise<void>,
+  milliseconds: number,
+  signal?: AbortSignal,
+  cancelable = false,
+): Promise<void> {
+  if (!signal) return sleep(milliseconds);
+  if (signal.aborted) return Promise.resolve();
+  const activeSignal = signal;
+  if (cancelable) {
+    return new Promise((resolveValue) => {
+      const timer = setTimeout(done, milliseconds);
+      function done(): void {
+        clearTimeout(timer);
+        activeSignal.removeEventListener("abort", done);
+        resolveValue();
+      }
+      activeSignal.addEventListener("abort", done, { once: true });
+    });
+  }
+  return new Promise((resolveValue, reject) => {
+    let settled = false;
+    const finish = (error?: unknown) => {
+      if (settled) return;
+      settled = true;
+      activeSignal.removeEventListener("abort", onAbort);
+      if (error) reject(error);
+      else resolveValue();
+    };
+    const onAbort = () => finish();
+    activeSignal.addEventListener("abort", onAbort, { once: true });
+    void sleep(milliseconds).then(() => finish(), (error) => finish(error));
+  });
+}
+
 function mergeRateObservations(
   current: RatePolicy,
   observations: readonly (BatchExecutionResult["ratePolicy"] | undefined)[],
@@ -248,19 +283,24 @@ export async function runBatchWindow(
     };
   }
   const maxChildren = Math.max(1, Math.min(options.maxChildren ?? 50, 500));
-  const claimed = store.claimPending(batchId, maxChildren);
   const settled: BatchChildRecord[] = [];
-  let next = 0;
+  let available = maxChildren;
   let minimumConcurrency = rate.concurrency;
   let totalBackoffMs = 0;
-  while (next < claimed.length) {
+  while (available > 0) {
+    if (options.signal?.aborted) {
+      store.pause(batchId);
+      break;
+    }
     if (rate.backoffMs > 0) {
-      await sleep(rate.backoffMs);
+      await abortableSleep(sleep, rate.backoffMs, options.signal, options.sleep === undefined);
       totalBackoffMs += rate.backoffMs;
       policy = { ...policy, retryAfterMs: undefined };
+      if (options.signal?.aborted) continue;
     }
-    const wave = claimed.slice(next, next + rate.concurrency);
-    next += wave.length;
+    const wave = store.claimPending(batchId, Math.min(available, rate.concurrency));
+    if (wave.length === 0) break;
+    available -= wave.length;
     const executions = await Promise.all(wave.map(async (child) => {
       try {
         const argumentsValue = store.readArguments(child.batchId, child.childId);
@@ -286,6 +326,12 @@ export async function runBatchWindow(
     policy = mergeRateObservations(policy, executions.map((execution) => execution.result.ratePolicy));
     rate = windowRate(started, manifest, policy, random);
     minimumConcurrency = Math.min(minimumConcurrency, rate.concurrency);
+    if (options.stopOnUnverified && executions.some(({ result }) => (
+      result.state !== "succeeded" || result.gatewayOperationState !== "verified"
+    ))) {
+      store.pause(batchId);
+      break;
+    }
   }
   const batch = store.finishWindow(batchId);
   return {

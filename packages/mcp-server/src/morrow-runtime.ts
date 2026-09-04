@@ -26,8 +26,9 @@ import {
   type JsonObject,
 } from "@morrow/contracts";
 import type { GatewayConfig } from "./config.js";
-import { LoopbackApprovalServer } from "./approval-server.js";
+import { LoopbackApprovalServer, operationStatus } from "./approval-server.js";
 import { GatewayRuntime } from "./runtime.js";
+import { BatchWindowScheduler } from "./batch-window-scheduler.js";
 
 export const MORROW_BATCH_TOOL_NAMES = Object.freeze([
   "morrow_batch_health",
@@ -87,6 +88,8 @@ export interface RunGatewayBatchInput {
   readonly maxChildren?: number;
   readonly courseSetDigest?: string;
   readonly profileDigest?: string;
+  readonly signal?: AbortSignal;
+  readonly stopOnUnverified?: boolean;
 }
 
 export interface ReconcileGatewayBatchInput {
@@ -349,6 +352,7 @@ export class MorrowRuntime {
   readonly batches: DurableBatchStore;
   readonly sourceSettlements: BatchSourceSettlementStore;
   readonly approval: LoopbackApprovalServer;
+  readonly batchScheduler: BatchWindowScheduler;
 
   private constructor(
     gateway: GatewayRuntime,
@@ -360,6 +364,9 @@ export class MorrowRuntime {
     this.batches = batches;
     this.sourceSettlements = sourceSettlements;
     this.approval = approval;
+    this.batchScheduler = new BatchWindowScheduler({
+      maxConcurrentWindows: gateway.config.batchScheduler.maxConcurrentWindows,
+    });
   }
 
   static async connect(
@@ -394,10 +401,13 @@ export class MorrowRuntime {
           operationList: (limit) => gateway.operationList(limit),
           operationReviewContext: (operationId, cache) => gateway.operationReviewContext(operationId, cache),
           approveOperation: (operationId) => gateway.approveOperation(operationId),
+          runApprovedOperation: (operationId) => gateway.dispatchOperation(operationId),
           cancelOperation: (operationId) => gateway.cancelOperation(operationId),
           setApprovalBaseUrl: (baseUrl) => gateway.setApprovalBaseUrl(baseUrl),
           batchApprovalGet: (batchId) => runtime.batchApprovalGet(batchId),
+          batchApprovalStatus: (batchId) => runtime.batchApprovalStatus(batchId),
           approveBatch: (batchId) => runtime.approveBatch(batchId),
+          runApprovedBatch: (batchId, signal) => runtime.runApprovedBatch(batchId, signal),
           cancelBatchApproval: (batchId) => runtime.cancelBatchApproval(batchId),
         });
         runtime = new MorrowRuntime(gateway, batches, sourceSettlements, approval);
@@ -714,7 +724,7 @@ export class MorrowRuntime {
         ? { approvalUrl: `${this.approval.baseUrl}/batches/${encodeURIComponent(detail.batch.batchId)}` }
         : {}),
       note: input.mode === "stage_writes"
-        ? "A human must approve the exact frozen batch on the loopback page. Running it then reserves and dispatches each provider effect once. Success requires connector-owned fresh readback for every child."
+        ? "A human reviews the exact frozen batch on the loopback page. One click starts bounded execution and displays its result there. Do not ask for a typed Continue. Success requires connector-owned fresh readback for every child."
         : "Running this batch performs bounded read-only operations.",
     };
   }
@@ -722,6 +732,7 @@ export class MorrowRuntime {
   batchApprovalGet(batchId: string): JsonObject {
     const batch = this.batches.getBatch(batchId);
     const manifest = this.batches.getManifest(batchId);
+    const courseIds = new Map(manifest.children.map((child) => [child.childId, child.courseId]));
     const children: JsonObject[] = [];
     let offset = 0;
     for (;;) {
@@ -733,7 +744,7 @@ export class MorrowRuntime {
         children.push({
           childId: child.childId,
           ordinal: child.ordinal,
-          courseId: manifest.children.find((entry) => entry.childId === child.childId)?.courseId || null,
+          courseId: courseIds.get(child.childId) || null,
           tool: child.publicToolName,
           operation,
         });
@@ -754,6 +765,35 @@ export class MorrowRuntime {
       approvalCoverageChildCount: manifest.approvalCoverageChildCount,
       targetCount: children.length,
       children,
+    };
+  }
+
+  batchApprovalStatus(batchId: string): JsonObject {
+    const batch = this.batches.getBatch(batchId);
+    const states: Record<string, string> = {};
+    let confirmedChildren = 0;
+    let offset = 0;
+    for (;;) {
+      const page = this.batches.listChildren(batchId, offset, 500);
+      for (const child of page.children) {
+        if (child.gatewayOperationState === "verified") confirmedChildren += 1;
+        states[String(child.ordinal - 1)] = operationStatus(
+          child.state === "pending" ? "awaiting_approval"
+            : child.state === "running" ? "dispatching"
+              : child.state === "cancelled" ? "cancelled"
+                : child.state === "failed" ? "failed"
+                  : child.gatewayOperationState || child.state,
+        );
+      }
+      if (page.nextOffset === null) break;
+      offset = page.nextOffset;
+    }
+    return {
+      schema: "morrow.batch-approval-status.v1",
+      batch,
+      totalChildren: batch.totalChildren,
+      confirmedChildren,
+      states,
     };
   }
 
@@ -785,6 +825,39 @@ export class MorrowRuntime {
       }
     }
     return this.batchCancel(batchId);
+  }
+
+  async runApprovedBatch(batchId: string, signal: AbortSignal): Promise<void> {
+    try {
+      while (!signal.aborted) {
+        const result = await this.batchScheduler.run(batchId, async () => {
+          if (signal.aborted) {
+            this.batches.pause(batchId);
+            return null;
+          }
+          const current = this.batches.getBatch(batchId);
+          if (!["planned", "running"].includes(current.state)) return null;
+          return this.batchRun({
+            batchId,
+            maxChildren: current.concurrency,
+            signal,
+            stopOnUnverified: current.mode === "stage_writes",
+          });
+        });
+        if (!result) return;
+        const batch = result.batch as unknown as BatchRecord;
+        const children = result.children as JsonObject[];
+        if (batch.state !== "running") return;
+        if (Number(result.processed) === 0 || children.some((child) => child.gatewayOperationState !== "verified")) {
+          this.batches.pause(batchId);
+          return;
+        }
+      }
+      this.batches.pause(batchId);
+    } catch (error) {
+      this.batches.quarantine(batchId);
+      throw error;
+    }
   }
 
   batchGet(input: GatewayBatchPageInput): JsonObject {
@@ -911,10 +984,12 @@ export class MorrowRuntime {
         maxChildren: input.maxChildren,
         ...(input.courseSetDigest ? { expectedCourseSetDigest: input.courseSetDigest } : {}),
         ...(input.profileDigest ? { expectedProfileDigest: input.profileDigest } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        ...(input.stopOnUnverified ? { stopOnUnverified: true } : {}),
       },
     );
     const sourceSettlement = this.sourceSettlements.summary(input.batchId);
-    const finalBatch = result.batch.mode === "stage_writes" && !sourceSettlement.terminal
+    const finalBatch = result.batch.mode === "stage_writes" && !sourceSettlement.terminal && result.batch.pendingChildren === 0
       ? this.batches.deferSourceSettlement(input.batchId)
       : result.batch;
     return {
@@ -1102,6 +1177,7 @@ export class MorrowRuntime {
 
   async close(): Promise<void> {
     await this.approval.close();
+    this.batchScheduler.close();
     this.sourceSettlements.close();
     this.batches.close();
     await this.gateway.close();

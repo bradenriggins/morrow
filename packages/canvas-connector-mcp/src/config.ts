@@ -92,7 +92,7 @@ export async function loadCanvasConnectorConfig(
     catalogPath,
     token,
     port: exactPort(environment.MORROW_CANVAS_CONNECTOR_PORT || state.port),
-    runtimeRevision: String(environment.MORROW_CANVAS_CONNECTOR_REVISION || "1.0.0-rc.0").trim(),
+    runtimeRevision: String(environment.MORROW_CANVAS_CONNECTOR_REVISION || "1.0.0-rc.1").trim(),
     allowedExtensionIds,
     approveExtensionId: async (extensionId: string) => {
       const latest = await loadOrCreate(statePath);

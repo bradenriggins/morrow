@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { createServer as createHttpsServer, get as httpsGet } from "node:https";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -56,6 +57,9 @@ function startCanvas(directory) {
   let unreadableWriteResponses = 0;
   const requests = [];
   let quizItem = null;
+  let pageWrites = 0;
+  let pageRevision = 1;
+  const lesson = { page_id: "91", url: "lesson", title: "Cell structure", body: '<h2>Cell structure</h2><p>Cells have membranes.</p><img src="/courses/42/files/8" alt="Cell">', published: true, front_page: false, editing_roles: "teachers" };
   const server = createHttpsServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
     const url = new URL(request.url || "/", "https://127.0.0.1");
     requests.push(`${request.method} ${url.pathname}`);
@@ -70,6 +74,24 @@ function startCanvas(directory) {
     }
     if (url.pathname === "/api/v1/users/self/profile") return json(200, { id: "7", name: "Synthetic Instructor" });
     if (url.pathname === "/api/v1/courses/42") return json(200, { id: "42", name: "Introduction to Human Biology" });
+    if (url.pathname === "/api/v1/courses/42/pages/lesson/revisions/latest") return json(200, { revision_id: String(pageRevision), latest: true, url: lesson.url, title: lesson.title, body: lesson.body });
+    if (url.pathname === "/api/v1/courses/42/pages/lesson/revisions") return json(200, [pageRevision, pageRevision - 1].filter((id) => id > 0).map((id) => ({ revision_id: String(id), latest: id === pageRevision })));
+    if (url.pathname === "/api/v1/courses/42/pages/lesson") {
+      if (request.method === "GET") return json(200, lesson);
+      if (request.method === "PUT") {
+        const chunks = [];
+        request.on("data", (chunk) => chunks.push(chunk));
+        request.on("end", () => {
+          const body = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
+          assert.deepEqual([...body.keys()], ["wiki_page[body]"]);
+          lesson.body = body.get("wiki_page[body]");
+          pageRevision += 1;
+          pageWrites += 1;
+          json(200, lesson);
+        });
+        return;
+      }
+    }
     if (url.pathname === "/api/quiz/v1/courses/42/quizzes/77") return json(200, { id: "77", title: "New Quiz 77", published: true });
     if (url.pathname === "/api/quiz/v1/courses/42/quizzes/77/items/145" && request.method === "GET") {
       return quizItem ? json(200, quizItem) : json(404, { error: "not_found" });
@@ -121,7 +143,7 @@ function startCanvas(directory) {
     }
     json(404, { error: "not_found", path: url.pathname });
   });
-  return { server, writes: () => writes, quizItemWrites: () => quizItemWrites, unreadableWriteResponses: () => unreadableWriteResponses, requests: () => [...requests] };
+  return { server, writes: () => writes, quizItemWrites: () => quizItemWrites, pageWrites: () => pageWrites, lesson: () => ({ ...lesson }), changeLesson: () => { lesson.body += "<p>Another edit.</p>"; pageRevision += 1; }, setLesson: (body) => { lesson.body = body; pageRevision += 1; }, unreadableWriteResponses: () => unreadableWriteResponses, requests: () => [...requests] };
 }
 
 const temporary = mkdtempSync(join(tmpdir(), "morrow-connector-browser-"));
@@ -150,7 +172,7 @@ const connectorConfig = {
   catalogPath: resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json"),
   token: "browser-test-connector-secret-".repeat(3),
   port: 32147,
-  runtimeRevision: "1.0.0-rc.0",
+  runtimeRevision: "1.0.0-rc.1",
   allowedExtensionIds: [],
   approveExtensionId: async () => undefined,
 };
@@ -173,12 +195,27 @@ const approvalSnapshot = {
     readback: { tool: "canvas_get_quiz_item", expectedDigest: "c".repeat(64) },
   },
 };
+const approvalStates = new Map();
+let finishApproval;
+let finishBatchApproval;
+let batchState = "planned";
+let batchOperationState = "awaiting_approval";
+const batchSnapshot = () => ({
+  batch: { state: batchState }, expiresAt: approvalSnapshot.approvalExpiresAt,
+  children: [
+    { operation: { ...approvalSnapshot, state: batchOperationState } },
+    { operation: { ...approvalSnapshot, state: batchOperationState, operationId: "op:second-batch-item", plan: { ...approvalSnapshot.plan, tool: "canvas_delete_quiz_item", risk: { approvalClass: "destructive" }, arguments: { course_id: "84", assignment_id: "99", item_id: "19" } } } },
+  ],
+});
 const operationApproval = new LoopbackApprovalServer({
   operationGet: (id) => ({ ...approvalSnapshot, operationId: id,
+    state: approvalStates.get(id) || approvalSnapshot.state,
+    ...(id === "op:page-edit" ? { plan: { ...approvalSnapshot.plan, tool: "canvas_update_create_page_courses", arguments: { course_id: "42", url_or_id: "lesson", _morrow: { page_guard: { find_text: "Cells have membranes.", replace_text: "Cells have protective membranes." } } } } } : {}),
     ...(id === "op:expired-ui-test" ? { approvalExpiresAt: new Date(Date.now() - 60_000).toISOString() } : {}),
   }),
   operationReviewContext: async (id) => ({ targets: id === "op:missing-names"
     ? [{ field: "course_id", label: "Course", name: "" }, { field: "assignment_id", label: "Quiz", name: "" }]
+    : id === "op:page-edit" ? [{ field: "course_id", label: "Course", name: "Introduction to Human Biology" }, { field: "url_or_id", label: "Page", name: "Cell structure" }]
     : id === "op:second-batch-item" ? [
       { field: "course_id", label: "Course", name: "Human Anatomy", url: "https://canvas.example.edu/courses/84" },
       { field: "assignment_id", label: "Quiz", name: "Week 2: Bones and Muscles", url: "https://canvas.example.edu/courses/84/assignments/99" },
@@ -189,15 +226,36 @@ const operationApproval = new LoopbackApprovalServer({
     ],
   }),
   operationList: () => ({ schema: "morrow.operations.v1", operations: [approvalSnapshot] }),
-  approveOperation: (id) => ({ ...approvalSnapshot, state: id === "op:expired-on-submit" ? "cancelled" : "approved" }),
-  cancelOperation: () => ({ ...approvalSnapshot, state: "cancelled" }),
-  batchApprovalGet: () => ({
-    batch: { state: "planned" }, expiresAt: approvalSnapshot.approvalExpiresAt,
-    children: [
-      { operation: approvalSnapshot },
-      { operation: { ...approvalSnapshot, operationId: "op:second-batch-item", plan: { ...approvalSnapshot.plan, tool: "canvas_delete_quiz_item", risk: { approvalClass: "destructive" }, arguments: { course_id: "84", assignment_id: "99", item_id: "19" } } } },
-    ],
+  approveOperation: (id) => {
+    approvalStates.set(id, id === "op:expired-on-submit" ? "cancelled" : "approved");
+    return { ...approvalSnapshot, state: approvalStates.get(id) };
+  },
+  runApprovedOperation: async (id) => {
+    approvalStates.set(id, "dispatching");
+    await new Promise((resolve) => { finishApproval = resolve; });
+    approvalStates.set(id, "verified");
+  },
+  cancelOperation: (id) => {
+    approvalStates.set(id, "cancelled");
+    return { ...approvalSnapshot, state: "cancelled" };
+  },
+  batchApprovalGet: batchSnapshot,
+  batchApprovalStatus: () => ({
+    batch: { state: batchState }, totalChildren: 2,
+    confirmedChildren: batchState === "completed" ? 2 : 0,
+    states: { 0: batchState === "completed" ? "Confirmed in Canvas" : "In progress", 1: batchState === "completed" ? "Confirmed in Canvas" : "In progress" },
   }),
+  approveBatch: () => {
+    batchOperationState = "approved";
+    return batchSnapshot();
+  },
+  runApprovedBatch: async () => {
+    batchState = "running";
+    batchOperationState = "dispatching";
+    await new Promise((resolve) => { finishBatchApproval = resolve; });
+    batchOperationState = "verified";
+    batchState = "completed";
+  },
   setApprovalBaseUrl: () => undefined,
 });
 const operationApprovalBaseUrl = await operationApproval.start();
@@ -225,7 +283,7 @@ try {
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/${encodeURIComponent(approvalSnapshot.operationId)}`);
   await operationApprovalPage.getByRole("heading", { name: "Add this quiz question?" }).waitFor();
   await operationApprovalPage.getByRole("link", { name: "Introduction to Human Biology", exact: false }).waitFor();
-  await operationApprovalPage.getByRole("button", { name: "Approve question" }).waitFor();
+  await operationApprovalPage.getByRole("button", { name: "Add this question" }).waitFor();
   assert.equal(await operationApprovalPage.locator("details").getAttribute("open"), null);
   assert.equal(await operationApprovalPage.locator(".destination").innerText().then((text) => text.includes("Week 3: Blood and Circulation")), true);
   assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Course ID|Assignment ID|Evidence question/);
@@ -234,17 +292,38 @@ try {
   await operationApprovalPage.frameLocator("iframe.text-preview").getByText("What is the main function of red blood cells?").waitFor();
   await captureThemes(operationApprovalPage, "approval-operation");
   await captureThemes(operationApprovalPage, "approval-operation-narrow", 320);
-  await operationApprovalPage.getByRole("button", { name: "Approve question" }).click();
-  await operationApprovalPage.getByRole("heading", { name: 'Return to your chat and say “Continue.”' }).waitFor();
-  await captureThemes(operationApprovalPage, "approval-recorded");
+  await operationApprovalPage.getByRole("button", { name: "Add this question" }).click();
+  await operationApprovalPage.getByRole("heading", { name: "Applying your changes" }).waitFor();
+  assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Continue/);
+  await captureThemes(operationApprovalPage, "approval-running");
+  finishApproval();
+  await operationApprovalPage.getByRole("heading", { name: "Changes confirmed" }).waitFor();
+  await captureThemes(operationApprovalPage, "approval-confirmed");
+  await captureThemes(operationApprovalPage, "approval-confirmed-narrow", 320);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/batches/batch-ui-test`);
   await operationApprovalPage.getByRole("heading", { name: "Check these 2 changes" }).waitFor();
   assert.equal(await operationApprovalPage.locator(".request").count(), 2);
   assert.equal(await operationApprovalPage.locator(".warning").innerText(), "This removes content. It cannot be undone from this screen.");
   assert.match(await operationApprovalPage.locator(".destination").nth(1).innerText(), /Human Anatomy[\s\S]+Outdated practice question/);
   await captureThemes(operationApprovalPage, "approval-batch");
+  await operationApprovalPage.getByRole("button", { name: "Apply these changes" }).click();
+  await operationApprovalPage.getByRole("heading", { name: "Applying your changes" }).waitFor();
+  await operationApprovalPage.getByText("0 of 2 changes confirmed in Canvas.", { exact: true }).waitFor();
+  finishBatchApproval();
+  await operationApprovalPage.getByRole("heading", { name: "Changes confirmed" }).waitFor();
+  assert.deepEqual(await operationApprovalPage.locator("[data-operation-status]").allTextContents(), ["Confirmed in Canvas", "Confirmed in Canvas"]);
+  assert.equal(await operationApprovalPage.getByRole("button", { name: "Stop remaining changes" }).count(), 0);
+  await captureThemes(operationApprovalPage, "approval-batch-confirmed");
+  await captureThemes(operationApprovalPage, "approval-batch-confirmed-narrow", 320);
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Apage-edit`);
+  await operationApprovalPage.getByRole("heading", { name: "Change this page text?" }).waitFor();
+  assert.match(await operationApprovalPage.locator(".request").innerText(), /Current text[\s\S]*Cells have membranes\.[\s\S]*Replacement[\s\S]*Cells have protective membranes\./);
+  assert.equal(await operationApprovalPage.getByRole("button", { name: "Change this text" }).count(), 1);
+  assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Course ID|Url or ID|page_guard/);
+  await captureThemes(operationApprovalPage, "approval-page-correction");
+  await captureThemes(operationApprovalPage, "approval-page-correction-narrow", 360);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Amissing-names`);
-  assert.equal(await operationApprovalPage.getByRole("button", { name: "Approve question" }).count(), 0);
+  assert.equal(await operationApprovalPage.getByRole("button", { name: "Add this question" }).count(), 0);
   assert.match(await operationApprovalPage.locator("body").innerText(), /could not identify the course or activity/);
   assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Course ID|Assignment ID/);
   await captureThemes(operationApprovalPage, "approval-missing-names");
@@ -260,9 +339,9 @@ try {
   assert.equal(await operationApprovalPage.locator("button").count(), 0);
   await captureThemes(operationApprovalPage, "approval-expired");
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aexpired-on-submit`);
-  await operationApprovalPage.getByRole("button", { name: "Approve question" }).click();
+  await operationApprovalPage.getByRole("button", { name: "Add this question" }).click();
   await operationApprovalPage.getByRole("heading", { name: "Request cancelled" }).waitFor();
-  assert.equal(await operationApprovalPage.getByRole("heading", { name: 'Return to your chat and say “Continue.”' }).count(), 0);
+  assert.equal(await operationApprovalPage.getByRole("heading", { name: "Changes confirmed" }).count(), 0);
   process.stderr.write("[browser-test] operation approval UI ready\n");
 
   const worker = await waitFor(
@@ -416,6 +495,42 @@ try {
     dispatch_attempt: 1,
     gateway_process_id: "gateway:browser-test",
   };
+  const pageBefore = canvas.lesson();
+  const pageRead = await runtime.call("canvas_show_page_courses", { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: binding.sourceBindingId } });
+  assert.equal(pageRead.result.pageBodySha256, createHash("sha256").update(pageBefore.body).digest("hex"));
+  const pageGuard = { page_id: "91", revision_id: "1", body_sha256: pageRead.result.pageBodySha256, fields: { url: "lesson", title: pageBefore.title, published: true, front_page: false, editing_roles: "teachers" }, find_text: "Cells have membranes.", replace_text: "Cells have protective membranes." };
+  const pageArgs = { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: binding.sourceBindingId, page_guard: pageGuard, outer_grant: { ...grant, effect_receipt_id: "effect:page-edit-test" } } };
+  const pageWrite = await runtime.call("canvas_update_create_page_courses", pageArgs);
+  assert.equal(pageWrite.ok, true, JSON.stringify(pageWrite));
+  assert.equal(pageWrite.result.verification.status, "verified", JSON.stringify(pageWrite));
+  assert.equal(pageWrite.result.verification.createdRevisionId, "2");
+  assert.deepEqual(canvas.lesson(), { ...pageBefore, body: pageBefore.body.replace(pageGuard.find_text, pageGuard.replace_text) });
+  assert.equal(canvas.pageWrites(), 1);
+  canvas.changeLesson();
+  const stalePage = await runtime.call("canvas_update_create_page_courses", { ...pageArgs, _morrow: { ...pageArgs._morrow, outer_grant: { ...grant, effect_receipt_id: "effect:stale-page-test" } } });
+  assert.equal(stalePage.ok, false);
+  assert.equal(stalePage.resultState, "not_sent");
+  assert.match(JSON.stringify(stalePage), /page_changed/);
+  assert.equal(canvas.pageWrites(), 1);
+  canvas.setLesson("Remove this.");
+  const removalBefore = canvas.lesson();
+  const removalRead = await runtime.call("canvas_show_page_courses", { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: binding.sourceBindingId } });
+  const removalGuard = { page_id: "91", revision_id: "4", body_sha256: removalRead.result.pageBodySha256, fields: { url: "lesson", title: removalBefore.title, published: true, front_page: false, editing_roles: "teachers" }, find_text: "Remove this.", replace_text: "" };
+  const removalWrite = await runtime.call("canvas_update_create_page_courses", { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: binding.sourceBindingId, page_guard: removalGuard, outer_grant: { ...grant, effect_receipt_id: "effect:page-removal-test" } } });
+  assert.equal(removalWrite.ok, true, JSON.stringify(removalWrite));
+  assert.equal(removalWrite.result.verification.status, "verified", JSON.stringify(removalWrite));
+  assert.equal(canvas.lesson().body, "");
+  assert.equal(canvas.pageWrites(), 2);
+  canvas.setLesson("<p>Use &times here.</p>");
+  const entityBefore = canvas.lesson();
+  const entityRead = await runtime.call("canvas_show_page_courses", { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: binding.sourceBindingId } });
+  const entityGuard = { page_id: "91", revision_id: "6", body_sha256: entityRead.result.pageBodySha256, fields: { url: "lesson", title: entityBefore.title, published: true, front_page: false, editing_roles: "teachers" }, find_text: "times", replace_text: "plus" };
+  const entityWrite = await runtime.call("canvas_update_create_page_courses", { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: binding.sourceBindingId, page_guard: entityGuard, outer_grant: { ...grant, effect_receipt_id: "effect:page-entity-test" } } });
+  assert.equal(entityWrite.ok, false);
+  assert.equal(entityWrite.resultState, "not_sent");
+  assert.match(JSON.stringify(entityWrite), /page_text_inside_entity/);
+  assert.equal(canvas.lesson().body, entityBefore.body);
+  assert.equal(canvas.pageWrites(), 2);
   const write = await runtime.call("canvas_add_course_to_favorites", {
     id: "42",
     _morrow: { source_binding_id: binding.sourceBindingId, operation_id: "operation:browser-test", outer_grant: grant },

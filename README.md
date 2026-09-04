@@ -43,20 +43,21 @@ want to change.
 
 Reading Canvas does not need a change approval. For a change, Morrow gives your
 AI app a review link. Open it to see the courses, items, and requested values.
-For a new quiz question, choose **Approve question** or **Cancel**. A group of
-changes lists each request and uses **Approve changes**. Course and activity names
+For a new quiz question, choose **Add this question** or **Cancel**. A group of
+changes lists each request and uses **Apply these changes**. Course and activity names
 come from Canvas. If Morrow cannot identify them, approval stays unavailable until
 the details load. Internal references stay in **Technical details**.
 
-Approval does not mean the work is complete. Return to your AI conversation and
-ask Morrow to continue. Morrow then checks Canvas and reports the result. If the
-result is uncertain, ask it to check the existing request. Do not repeat the
+One click starts the approved work. The review shows progress and the checked
+result automatically. You do not need to type “Continue.” Keep your AI app and
+Chrome open while Morrow works. If the result is uncertain, ask Morrow in your
+chat to check the existing request. Do not repeat the
 change. To change your request before approval, cancel it and ask for a new one.
 
 The review page is part of Morrow and runs on your computer. No separate review
 app is installed. Morrow does not expose an AI tool that submits approval.
 
-After approval, the AI client calls `morrow_operation_dispatch` with the operation ID. Morrow checks the account, course, catalog, connection generation, target set, profile, approval, and effect receipt again. The connector sends the Canvas request once. It then performs a fresh provider readback. Morrow reports `verified` only when that readback satisfies the frozen postcondition.
+The local review starts the existing operation dispatcher after approval. Morrow checks the account, course, catalog, connection generation, target set, profile, approval, and effect receipt again. The connector sends the Canvas request once. It then performs a fresh provider readback. Morrow reports `verified` only when that readback satisfies the frozen postcondition. The result remains on the review page; automatic continuation inside a chat app is a separate, unverified client capability.
 
 If delivery becomes ambiguous, Morrow records `applied_or_unknown` and refuses automatic replay. A later reconciliation performs only the frozen readback.
 
@@ -125,6 +126,7 @@ Morrow supports durable read and write batches across explicit course sets.
 
 - Every child has an exact course, tool, arguments digest, source binding, dependency set, and operation ID.
 - One local page shows the complete frozen target set before approval.
+- One click starts the approved write batch through bounded windows. The review updates its confirmed count. It stops starting more work after an unconfirmed result. **Stop remaining changes** cancels unsent operations; a request already sent can still finish.
 - Each write child receives its own single-use effect receipt.
 - Approved concurrency and rate controls cannot change during execution.
 - Child results remain independently true when another child fails or becomes uncertain.
@@ -167,9 +169,11 @@ To build a ZIP of the extension:
 pnpm package:connector
 ```
 
-Extract `artifacts/connector/morrow-canvas-connector-v1.0.0.zip`. Use **Load
+Extract `artifacts/connector/morrow-canvas-connector-v1.0.1.zip`. Use **Load
 unpacked** to select the extracted folder that contains `manifest.json`, not the
 ZIP file. Keep that folder in place while the extension is installed.
+
+Bridge 1.0.1 adds checked page-text changes. Update the local MCP and bridge together, then reconnect them. An older bridge cannot run this workflow.
 
 Configure Morrow in any of these clients. This release supports one active client runtime per local installation; it does not yet share one running bridge across simultaneous clients:
 
@@ -199,11 +203,16 @@ Use these tools to inspect and control the layer:
 - `morrow_catalog`, `morrow_catalog_search`, and `morrow_capability_get` provide bounded discovery across the full surface.
 - `morrow_canvas_connector_health` reports the local connector transport.
 - `morrow_canvas_bindings` lists bounded, non-secret Canvas session bindings.
+- `morrow_plan_page_correction` prepares one exact text change on a Canvas page. The review shows the course, page, current text, and replacement. The bridge preserves the surrounding page and checks the saved page and its revision history.
 - `morrow_operation_*` tools inspect, dispatch, cancel, reconcile, verify, and create separate corrective operations.
 - `morrow_batch_*` tools create, inspect, run, pause, recover, reconcile, cancel, and page durable batches.
 - `morrow_result_page` retrieves bounded pages for large local results.
 
 Provider operations use generated `canvas_*` names. A call to a read tool executes. A call to a write tool creates a plan.
+
+For example, ask your AI: “On the Cell structure page in Introduction to Human Biology, change ‘Cells have membranes.’ to ‘Cells have protective membranes.’ Keep everything else.” Morrow reads the current page before it creates the review. **Change this text** starts the work and shows the result on that page. It checks for newer edits before sending. It reports a checked result only when the saved page and one new revision match the approved change.
+
+This page workflow changes a unique phrase within one text section. It does not support block-editor pages, text split across HTML tags, or an automatic undo. Canvas does not lock the page during these checks. Avoid editing it until the result is checked. Live Canvas verification of this workflow remains outstanding.
 
 ## Verification
 

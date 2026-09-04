@@ -13,6 +13,7 @@ function failedProblem(problem: BridgeProblem | undefined): JsonObject {
   return {
     schema: "morrow.canvas-connector.result.v1",
     ok: false,
+    ...(["canvas_request_not_sent", "page_guard_unavailable"].includes(problem?.code || "") ? { resultState: "not_sent" } : {}),
     problem: problem || {
       schema: "morrow.bridge.problem.v1",
       code: "bridge_result_missing",
@@ -83,13 +84,19 @@ export class CanvasConnectorRuntime {
       });
     }
     const split = splitBridgeCallArguments(rawArguments);
+    if ("morrow_page_guard" in split.arguments) throw new TypeError("Page checks must use Morrow's local controls.");
+    if (split.options.pageGuard) {
+      if (toolName !== "canvas_update_create_page_courses" || this.bridge.health().runtimeRevision !== "1.0.0-rc.1") {
+        return failedProblem({ schema: "morrow.bridge.problem.v1", code: "page_guard_unavailable", message: "This page correction needs the current Morrow extension and a connected course.", recoverable: true });
+      }
+    }
     const kind = operation.readOnly ? "invoke_read" : "invoke_write";
     try {
       const response = await this.bridge.invoke({
         kind,
         toolName,
         operationKey: operation.key,
-        arguments: split.arguments,
+        arguments: { ...split.arguments, ...(split.options.pageGuard ? { morrow_page_guard: split.options.pageGuard } : {}) },
         sourceBindingId: split.options.sourceBindingId,
         operationId: split.options.operationId || `operation:${randomUUID()}`,
         ...(split.options.outerGrant ? { outerGrant: split.options.outerGrant } : {}),

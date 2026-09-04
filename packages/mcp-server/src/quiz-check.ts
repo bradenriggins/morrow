@@ -2,7 +2,7 @@ import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
 import type { GatewayRuntime } from "./runtime.js";
-import { MAX_RESULT_ARTIFACT_CHARACTERS } from "./result-artifacts.js";
+import { canvasReadResult } from "./canvas-read.js";
 
 const canvasId = z.string().regex(/^[1-9][0-9]{0,18}$/);
 const inputSchema = z.object({
@@ -34,33 +34,6 @@ function name(value: unknown, fallback: string): string {
   return typeof value === "string" && value.trim() ? value.trim().slice(0, 300) : fallback;
 }
 
-function readData(runtime: CheckRuntime, response: JsonObject): unknown {
-  let result = response;
-  const artifact = result.structuredContent;
-  if (isJsonObject(artifact) && artifact.schema === "morrow.result-artifact.v1") {
-    if (typeof artifact.handle !== "string" || typeof artifact.totalCharacters !== "number"
-      || artifact.totalCharacters > MAX_RESULT_ARTIFACT_CHARACTERS) throw new Error("Saved result is unavailable.");
-    let text = "";
-    let offset: number | null = 0;
-    do {
-      const page = runtime.resultPage(artifact.handle, offset);
-      if (typeof page.text !== "string" || (page.nextOffset !== null && typeof page.nextOffset !== "number")) throw new Error("Saved result is incomplete.");
-      text += page.text;
-      offset = page.nextOffset;
-    } while (offset !== null);
-    result = JSON.parse(text) as JsonObject;
-  }
-  const content = result.structuredContent;
-  const browser = isJsonObject(content) ? content.result : null;
-  if (result.isError === true || !isJsonObject(content)
-    || content.schema !== "morrow.canvas-connector.result.v1" || content.ok !== true
-    || content.commandKind !== "invoke_read" || !isJsonObject(browser)
-    || browser.ok !== true || browser.sent !== true || browser.truncated !== false) {
-    throw new Error("Canvas did not return a complete readable result.");
-  }
-  return browser.data;
-}
-
 export async function checkNewQuiz(runtime: CheckRuntime, value: CheckInput, callerSignal?: AbortSignal): Promise<CallToolResult> {
   const input = inputSchema.parse(value);
   const findings: Finding[] = [];
@@ -81,9 +54,9 @@ export async function checkNewQuiz(runtime: CheckRuntime, value: CheckInput, cal
     });
     if (matches.length !== 1) throw new Error("The Canvas read tool is unavailable or ambiguous.");
     source = matches[0]!.upstreamId;
-    return readData(runtime, await runtime.callSourceOwned(matches[0]!.publicName, {
+    return canvasReadResult(runtime, await runtime.callSourceOwned(matches[0]!.publicName, {
       ...args, _morrow: { source_binding_id: input.source_binding_id },
-    }, { signal }));
+    }, { signal })).data;
   }
 
   try {

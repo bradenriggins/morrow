@@ -4,14 +4,15 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { WebSocket } from "ws";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { BRIDGE_PROTOCOL_VERSION, BRIDGE_SCHEMAS, parseBridgeJson, serializeBridgeMessage, type BridgeCommand } from "@morrow/bridge-protocol";
 import { loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
-import { isJsonObject, type JsonObject } from "@morrow/contracts";
+import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { GatewayRuntime } from "../src/runtime.js";
 import { checkNewQuiz } from "../src/quiz-check.js";
+import { planPageCorrection } from "../src/page-correction.js";
 
 async function availablePort(): Promise<number> {
   const server = createServer();
@@ -109,7 +110,7 @@ describe("Canvas connector gateway path", () => {
         protocolVersion: BRIDGE_PROTOCOL_VERSION,
         token: "gateway-connector-secret-".repeat(3),
         extensionId,
-        runtimeRevision: "1.0.0-rc.0",
+        runtimeRevision: "1.0.0-rc.1",
         catalogDigest: connectorCatalog.catalogDigest,
         bindings: [{ sourceBindingId, provider: "canvas", origin: "https://school.instructure.com", principalFingerprint: "c".repeat(64), sessionGeneration: 1, runtimeVerified: true }],
         sentAt: Date.now(),
@@ -118,6 +119,8 @@ describe("Canvas connector gateway path", () => {
       const ready = parseBridgeJson(readyRaw.toString()) as { generation: number };
       let writeCommands = 0;
       let partialQuiz = false;
+      let filteredPage = false;
+      const lesson = { page_id: "91", url: "lesson", title: "Cell structure", body: "<h2>Cell structure</h2><p>Cells have membranes.</p>", published: true, front_page: false, editing_roles: "teachers" };
       const repeatedBody = `<p>${"Explain the process. ".repeat(4_000)}</p>`;
       const quizItems = [
         { id: "1", position: 1, points_possible: 5, entry_type: "Item", entry: {
@@ -159,7 +162,10 @@ describe("Canvas connector gateway path", () => {
             sent: true,
             status: 200,
             truncated: partialQuiz && command.toolName === "canvas_list_quiz_items",
-            data: command.toolName === "canvas_get_new_quiz"
+            ...(command.toolName === "canvas_show_page_courses" ? { pageBodySha256: sha256Text(lesson.body) } : {}),
+            data: command.toolName === "canvas_show_page_courses" ? { ...lesson, body: filteredPage ? "[filtered]" : lesson.body }
+              : command.toolName === "canvas_show_revision_courses_latest" ? { revision_id: "1", latest: true, url: lesson.url, title: lesson.title, body: lesson.body }
+              : command.toolName === "canvas_get_new_quiz"
               ? { id: command.arguments.assignment_id, course_id: "42", title: command.arguments.assignment_id === "77" ? "Cell Structure Check" : "Practice quiz" }
               : command.toolName === "canvas_list_quiz_items"
                 ? command.arguments.assignment_id === "77" ? quizItems : [{ ...quizItems[3], id: "8" }]
@@ -195,6 +201,29 @@ describe("Canvas connector gateway path", () => {
       expect(JSON.stringify(partial)).toContain("Do not treat this as a complete check");
       expect(writeCommands).toBe(0);
       partialQuiz = false;
+
+      const pageInput = { source_binding_id: sourceBindingId, course_id: "42", page_url: "lesson", find_text: "Cells have membranes.", replace_text: "Cells have protective membranes." };
+      const pagePlan = await planPageCorrection(runtime, pageInput);
+      expect(pagePlan.isError, JSON.stringify(pagePlan)).not.toBe(true);
+      const savedPagePlan = runtime.effects.get(operationId(pagePlan as unknown as JsonObject));
+      expect(savedPagePlan.plan.arguments).toMatchObject({ course_id: "42", url_or_id: "lesson", _morrow: { page_guard: { page_id: "91", revision_id: "1", body_sha256: sha256Text(lesson.body), find_text: pageInput.find_text, replace_text: pageInput.replace_text } } });
+      expect(savedPagePlan.plan.arguments).not.toHaveProperty("wiki_page_body");
+      expect(JSON.stringify(pagePlan)).not.toContain(lesson.body);
+      expect(writeCommands).toBe(0);
+      runtime.cancelOperation(savedPagePlan.operationId);
+      filteredPage = true;
+      const filteredPlan = await planPageCorrection(runtime, pageInput);
+      expect(filteredPlan.isError).toBe(true);
+      expect(JSON.stringify(filteredPlan)).toContain("No change was planned");
+      expect(writeCommands).toBe(0);
+      filteredPage = false;
+      const originalLessonBody = lesson.body;
+      lesson.body = "<p>Use &times here.</p>";
+      const entityPlan = await planPageCorrection(runtime, { ...pageInput, find_text: "times", replace_text: "plus" });
+      expect(entityPlan.isError).toBe(true);
+      expect(JSON.stringify(entityPlan)).toContain("HTML character reference");
+      expect(writeCommands).toBe(0);
+      lesson.body = originalLessonBody;
 
       const reviewPlan = await runtime.call("canvas_create_quiz_item", {
         course_id: "42", assignment_id: "77", item_entry_title: "Cell structure",
@@ -279,7 +308,7 @@ describe("Canvas connector gateway path", () => {
         protocolVersion: BRIDGE_PROTOCOL_VERSION,
         token: "gateway-connector-secret-".repeat(3),
         extensionId,
-        runtimeRevision: "1.0.0-rc.0",
+        runtimeRevision: "1.0.0-rc.1",
         catalogDigest: connectorCatalog.catalogDigest,
         bindings: [{ sourceBindingId, provider: "canvas", origin: "https://school.instructure.com", principalFingerprint: "c".repeat(64), sessionGeneration: 1, runtimeVerified: true }],
         sentAt: Date.now(),
@@ -294,6 +323,7 @@ describe("Canvas connector gateway path", () => {
       });
       const receipts = new Set<string>();
       let writeCommands = 0;
+      let confirmed = true;
       socket.on("message", (raw) => {
         const value = parseBridgeJson(raw.toString()) as { schema?: string };
         if (value.schema !== BRIDGE_SCHEMAS.command) return;
@@ -317,7 +347,7 @@ describe("Canvas connector gateway path", () => {
             data: { id, name: `Course ${id}` },
             verification: {
               schema: "morrow.browser-verification.v1",
-              status: "verified",
+              status: confirmed ? "verified" : "unconfirmed",
               strategy: "collection-contains-target",
               readTool: "canvas_list_favorite_courses",
               evidence: "fresh_readback_matches_requested_postcondition",
@@ -330,7 +360,7 @@ describe("Canvas connector gateway path", () => {
       const created = runtime.batchCreate({
         name: "Favorite two courses",
         mode: "stage_writes",
-        concurrency: 2,
+        concurrency: 1,
         courseSet: { source: "explicit", courseIds: ["41", "42"], complete: true },
         operations: ["41", "42"].map((courseId) => ({
           childId: `course:${courseId}`,
@@ -342,10 +372,19 @@ describe("Canvas connector gateway path", () => {
       });
       const batchId = String((created.batch as JsonObject).batchId);
       await approveBatch(String(created.approvalUrl));
-      const result = await runtime.batchRun({ batchId, maxChildren: 2 });
+      await expect.poll(() => runtime.batchGet({ batchId }).batch).toMatchObject({ state: "completed" });
+      const operationGet = vi.spyOn(runtime.gateway, "operationGet");
+      const status = runtime.batchApprovalStatus(batchId);
+      expect(operationGet).not.toHaveBeenCalled();
+      operationGet.mockRestore();
+      expect(status).toMatchObject({
+        confirmedChildren: 2,
+        totalChildren: 2,
+        states: { 0: "Confirmed in Canvas", 1: "Confirmed in Canvas" },
+      });
+      const result = runtime.batchGet({ batchId });
       expect(result.batch).toMatchObject({ state: "completed" });
       expect(result.sourceSettlement).toMatchObject({ outcome: "succeeded", succeeded: 2, terminal: true });
-      expect(result.providerOutcomeFinal).toBe(true);
       expect(writeCommands).toBe(2);
       expect(receipts.size).toBe(2);
       const detail = runtime.batchResultsPage({ batchId, limit: 10 });
@@ -356,6 +395,49 @@ describe("Canvas connector gateway path", () => {
       const reconciled = await runtime.batchReconcile({ batchId, maxChildren: 10 });
       expect(reconciled.processed).toBe(0);
       expect(reconciled.sourceSettlement).toMatchObject({ outcome: "succeeded", succeeded: 2 });
+
+      confirmed = false;
+      const uncertain = runtime.batchCreate({
+        name: "Stop after an unconfirmed result", mode: "stage_writes", concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["41", "42"], complete: true },
+        operations: ["41", "42"].map((courseId) => ({
+          childId: `course:${courseId}`, courseId, tool: "canvas_add_course_to_favorites",
+          sourceBindingId, arguments: { id: courseId },
+        })),
+      });
+      const uncertainId = String((uncertain.batch as JsonObject).batchId);
+      const uncertainUrl = String(uncertain.approvalUrl);
+      await approveBatch(uncertainUrl);
+      await expect.poll(async () => (await (await fetch(`${uncertainUrl}/status`)).json()).active).toBe(false);
+      expect(runtime.batchGet({ batchId: uncertainId }).batch).toMatchObject({ state: "paused", pendingChildren: 1 });
+      const uncertainView = await (await fetch(uncertainUrl)).text();
+      expect(uncertainView).toContain("0 of 2 changes confirmed in Canvas");
+      expect(uncertainView).toContain("<p data-operation-status>Needs checking</p>");
+      expect(uncertainView).toContain("<p data-operation-status>Not started</p>");
+      expect(uncertainView).not.toContain("Changes confirmed");
+      expect(writeCommands).toBe(3);
+
+      const queued = runtime.batchCreate({
+        name: "Do not start queued work during shutdown", mode: "stage_writes", concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["43"], complete: true },
+        operations: [{ childId: "course:43", courseId: "43", tool: "canvas_add_course_to_favorites",
+          sourceBindingId, arguments: { id: "43" } }],
+      });
+      const queuedId = String((queued.batch as JsonObject).batchId);
+      runtime.approveBatch(queuedId);
+      let releaseWindow!: () => void;
+      const heldWindow = runtime.batchScheduler.run("hold-window", () => new Promise<void>((resolve) => {
+        releaseWindow = resolve;
+      }));
+      await expect.poll(() => runtime.batchScheduler.health().activeWindows).toBe(1);
+      const shutdown = new AbortController();
+      const queuedWork = runtime.runApprovedBatch(queuedId, shutdown.signal);
+      await expect.poll(() => runtime.batchScheduler.health().waitingWindows).toBe(1);
+      shutdown.abort();
+      releaseWindow();
+      await Promise.all([heldWindow, queuedWork]);
+      expect(writeCommands).toBe(3);
+      expect(runtime.batchGet({ batchId: queuedId }).batch).toMatchObject({ state: "paused", pendingChildren: 1 });
     } finally {
       socket.close();
       await runtime.close();

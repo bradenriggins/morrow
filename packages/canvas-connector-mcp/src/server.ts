@@ -63,7 +63,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
     server.registerTool(tool.name, {
       ...(tool.title ? { title: tool.title } : {}),
       ...(tool.description ? { description: tool.description } : {}),
-      inputSchema: fromJsonSchema(augmentBridgeInputSchema(tool.inputSchema)),
+      inputSchema: fromJsonSchema(augmentBridgeInputSchema(tool.inputSchema, tool.name === "canvas_update_create_page_courses")),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       _meta: { "io.morrow/capability": tool.capability },
     }, async (argumentsValue) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {})));

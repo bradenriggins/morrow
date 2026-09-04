@@ -38,7 +38,7 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
     "morrow_operation_dispatch",
     {
       title: "Send approved changes",
-      description: "Dispatch one previously frozen operation after a human grants approval through Morrow's separate loopback approval service. This never creates approval.",
+      description: "Send a frozen, approved operation only if it has not started. The local review normally starts it automatically. Check its saved state first; never dispatch an already running or uncertain operation. This never creates approval.",
       inputSchema: z.object({ operation_id: z.string().min(8).max(160) }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },

@@ -138,7 +138,27 @@ export interface MorrowBridgeCallOptions {
   readonly sourceBindingId?: string;
   readonly operationId?: string;
   readonly outerGrant?: BridgeOuterGrant;
+  readonly pageGuard?: JsonObject;
 }
+
+export const PAGE_GUARD_SCHEMA: JsonObject = {
+  type: "object",
+  properties: {
+    page_id: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
+    revision_id: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
+    body_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+    find_text: { type: "string", minLength: 1, maxLength: 10000 },
+    replace_text: { type: "string", maxLength: 10000 },
+    fields: {
+      type: "object",
+      properties: { url: { type: "string" }, title: { type: "string" }, published: { type: "boolean" }, front_page: { type: "boolean" }, editing_roles: { type: "string" } },
+      required: ["url", "title", "published", "front_page", "editing_roles"],
+      additionalProperties: false,
+    },
+  },
+  required: ["page_id", "revision_id", "body_sha256", "find_text", "replace_text", "fields"],
+  additionalProperties: false,
+};
 
 const TOOL_OR_SOURCE = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const REQUEST_ID = /^[A-Za-z0-9_.:-]{8,160}$/;
@@ -358,7 +378,7 @@ export function parseBridgeJson(text: string): unknown {
   return JSON.parse(text) as unknown;
 }
 
-export function augmentBridgeInputSchema(inputSchema: JsonObject): JsonObject {
+export function augmentBridgeInputSchema(inputSchema: JsonObject, includePageGuard = false): JsonObject {
   const schema = structuredClone(normalizeInputSchema(inputSchema));
   const properties = isJsonObject(schema.properties) ? schema.properties : {};
   return {
@@ -382,6 +402,7 @@ export function augmentBridgeInputSchema(inputSchema: JsonObject): JsonObject {
             maxLength: 160,
             description: "Optional stable caller identity for this requested operation.",
           },
+          ...(includePageGuard ? { page_guard: PAGE_GUARD_SCHEMA } : {}),
           outer_grant: {
             type: "object",
             description: "Gateway-owned dispatch grant. Callers cannot create this grant.",
@@ -413,11 +434,25 @@ export function splitBridgeCallArguments(value: Readonly<Record<string, unknown>
     return { arguments: input as JsonObject, options: {} };
   }
   if (!isJsonObject(rawOptions)) throw new TypeError("_morrow must be an object");
-  const unknown = Object.keys(rawOptions).find((key) => !["source_binding_id", "operation_id", "outer_grant"].includes(key));
+  const unknown = Object.keys(rawOptions).find((key) => !["source_binding_id", "operation_id", "outer_grant", "page_guard"].includes(key));
   if (unknown) throw new TypeError(`unsupported _morrow field ${unknown}`);
   const sourceBindingId = optionalString(rawOptions.source_binding_id, "_morrow.source_binding_id", 160);
   const operationId = optionalString(rawOptions.operation_id, "_morrow.operation_id", 160);
   const outerGrant = rawOptions.outer_grant === undefined ? undefined : parseOuterGrant(rawOptions.outer_grant);
+  const pageGuard = rawOptions.page_guard;
+  if (pageGuard !== undefined && (!isJsonObject(pageGuard)
+    || Object.keys(pageGuard).some((key) => !["page_id", "revision_id", "body_sha256", "fields", "find_text", "replace_text"].includes(key))
+    || typeof pageGuard.page_id !== "string" || !DECIMAL_ID.test(pageGuard.page_id)
+    || typeof pageGuard.revision_id !== "string" || !DECIMAL_ID.test(pageGuard.revision_id)
+    || typeof pageGuard.body_sha256 !== "string" || !HEX_SHA256.test(pageGuard.body_sha256)
+    || typeof pageGuard.find_text !== "string" || !pageGuard.find_text || pageGuard.find_text.length > 10000
+    || typeof pageGuard.replace_text !== "string" || pageGuard.replace_text.length > 10000
+    || !isJsonObject(pageGuard.fields)
+    || Object.keys(pageGuard.fields).some((key) => !["url", "title", "published", "front_page", "editing_roles"].includes(key))
+    || typeof pageGuard.fields.url !== "string" || typeof pageGuard.fields.title !== "string"
+    || typeof pageGuard.fields.published !== "boolean" || typeof pageGuard.fields.front_page !== "boolean" || typeof pageGuard.fields.editing_roles !== "string")) {
+    throw new TypeError("The page correction needs a complete source page and revision.");
+  }
   if (sourceBindingId && !TOOL_OR_SOURCE.test(sourceBindingId)) {
     throw new TypeError("_morrow.source_binding_id has an invalid format");
   }
@@ -430,6 +465,7 @@ export function splitBridgeCallArguments(value: Readonly<Record<string, unknown>
       ...(sourceBindingId ? { sourceBindingId } : {}),
       ...(operationId ? { operationId } : {}),
       ...(outerGrant ? { outerGrant } : {}),
+      ...(isJsonObject(pageGuard) ? { pageGuard: structuredClone(pageGuard) } : {}),
     },
   };
 }

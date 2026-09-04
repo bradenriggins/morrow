@@ -329,7 +329,7 @@ export async function resolveApprovalReviewContext(
 ): Promise<ApprovalReviewContext> {
   const review = input.cache ? input : { ...input, cache: new Map() };
   const { operation, tools } = input;
-  if (operation.state !== "awaiting_approval" || !operation.sourceBindingId) return { targets: [] };
+  if (!operation.sourceBindingId) return { targets: [] };
   const args = planArguments(operation);
   const mapping = operationTool(operation, tools);
   if (!args || !mapping) return { targets: [] };

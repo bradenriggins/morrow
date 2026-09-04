@@ -19,6 +19,7 @@ The current standalone architecture does not, by itself, prove that all required
 | Provider exclusion | MindTap and Connect are denied by catalog generation, gateway filters, and package scans. |
 | Private and public packages | Deterministic private/full and public/Canvas package profiles exist. |
 | Browser-only operations | The directly owned Chrome connector uses the signed-in Canvas session. |
+| Coordinated specialist work | Required by the current product goal. Source, course, and assessment specialists must share a bounded task, with independent review and one controlled write path. This product workflow is not implemented yet. Development review agents are not evidence of this capability. |
 
 ## Operation lifecycle
 
@@ -67,7 +68,7 @@ Bank creation enters the same plan, approval, receipt, dispatch, and verificatio
 
 Batch creation accepts only an explicit complete course set for writes. It freezes child order, course IDs, tool names, source bindings, argument digests, dependencies, catalog digest, profile digest, approval coverage, request estimate, rate policy, expiry, readback digests, and correction facts.
 
-One approval page shows every child. Each child still receives a separate effect record and receipt. The scheduler limits active windows and per-batch concurrency. It records every child independently and exposes bounded result pages.
+One approval page shows every child. One click now starts approved execution and shows progress and final status on that page. Single operations use the existing effect dispatcher. Write batches use bounded windows through the same scheduler as MCP tools; no typed Continue is needed. Each child still receives a separate effect record and receipt. The scheduler limits active windows and per-batch concurrency. It records every child independently and exposes bounded result pages. Automatic continuation stops on uncertain outcomes before the next group of requests. Closing the local runtime also stops unsent work during a rate-limit delay. Sent work remains subject to saved-state recovery. Automatic chat continuation and embedded chat reviews remain unimplemented and unverified.
 
 Recovery distinguishes safe queued work from an interrupted or uncertain provider effect. The latter moves to inspection or readback. It is never sent again automatically.
 
@@ -97,6 +98,10 @@ The extension packager creates stable bytes from the exact manifest, popup, runt
 Live Canvas, real-client, independent-reproduction, source-rights, provider-policy, and publication receipts stay external and must remain explicit until completed.
 
 ## Remaining completion evidence
+
+The native `morrow_plan_page_correction` workflow now freezes the complete page identity, body hash, metadata, latest revision, and one exact visible-text replacement. Bridge 1.0.1 constructs the new HTML from freshly checked source. It sends only the body field and verifies the full page, unchanged settings, and one new revision. Planning rejects filtered source. Dispatch rejects stale source before sending. Synthetic browser and MCP tests cover this path; live Canvas proof and automatic corrective undo remain open. This implements one bounded page workflow, not the full legacy page, project, evidence, or repair families.
+
+The page URL catalog parameter now accepts Canvas slugs and explicit `page_id:` identifiers. It was incorrectly constrained to decimal IDs by the generic identifier rule. The API operation count is unchanged.
 
 | Requirement | Evidence still required |
 |---|---|

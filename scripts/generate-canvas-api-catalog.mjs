@@ -68,6 +68,7 @@ function pathSlug(path) {
 function schemaType(parameter) {
   const type = String(parameter.type || "").toLowerCase();
   const format = String(parameter.format || "").toLowerCase();
+  if (parameter.name === "url_or_id") return { type: "string", minLength: 1, maxLength: 1000 };
   if (format === "int64" || /(?:^|_)id$/.test(parameter.name) || /\[(?:\w+_)?id\]$/.test(parameter.name)) {
     return { type: "string", pattern: "^[1-9][0-9]*$" };
   }

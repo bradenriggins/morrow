@@ -23,6 +23,7 @@ Morrow `1.0.0-rc.0` is a local release candidate. It is not yet a stable public 
 - Only exact explicit course sets can create write batches. Morrow does not treat partial discovery as an all-courses target.
 - A write without a safe frozen readback route is refused or remains unconfirmed. It is never reported as verified.
 - Undo is a new correction operation. Morrow does not pretend that every Canvas action has a lossless inverse.
+- Checked page-text changes require bridge 1.0.1 and the matching local MCP. They replace one unique phrase in a complete, unfiltered rich-text page. They do not support block-editor pages, phrases split across HTML tags, or automatic undo. A fresh page and revision check detects stale reviews, but Canvas supplies no documented atomic edit lock for this request. Concurrent edits can still make the result unconfirmed.
 - A provider timeout or lost response after send can become `applied_or_unknown`. Morrow does not replay it.
 - Large read results use bounded process-local handles. These handles do not survive a gateway restart.
 - Durable operation and batch state is local to one Morrow installation. It is not a hosted synchronization service.

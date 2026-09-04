@@ -4,7 +4,7 @@ import { evaluateBrowserReadback, planBrowserReadback } from "./verification.js"
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
 const PROTOCOL_VERSION = 1;
-const RUNTIME_REVISION = "1.0.0-rc.0";
+const RUNTIME_REVISION = "1.0.0-rc.1";
 const state = { socket: null, generation: 0, catalog: null, operations: new Map(), reconnectTimer: null };
 
 async function catalog() {
@@ -155,7 +155,7 @@ async function reserveReceipt(command) {
   return true;
 }
 
-async function executeCanvas(binding, operation, args) {
+async function executeCanvas(binding, operation, args, expiresAt) {
   let sent = false;
   try {
     await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
@@ -165,6 +165,7 @@ async function executeCanvas(binding, operation, args) {
       operation,
       arguments: args,
       principalId: binding.principalId,
+      expiresAt,
     }, { frameId: 0 });
   } catch (error) {
     return { ok: false, sent, outcomeUnknown: sent && !operation.readOnly, error: sent && !operation.readOnly ? "canvas_write_response_unknown" : String(error?.message || error) };
@@ -197,10 +198,10 @@ async function executeItemBank(binding, operation, args) {
   }
 }
 
-async function executeOperation(binding, operation, args) {
+async function executeOperation(binding, operation, args, expiresAt) {
   return operation.service === "item_bank"
     ? await executeItemBank(binding, operation, args)
-    : await executeCanvas(binding, operation, args);
+    : await executeCanvas(binding, operation, args, expiresAt);
 }
 
 async function handleCommand(command) {
@@ -219,15 +220,18 @@ async function handleCommand(command) {
   const tab = await chrome.tabs.get(binding.tabId).catch(() => null);
   if (!canvasTabMatches(tab, binding)) return sendResult(command, false, null, problem("canvas_binding_stale", "The connected Canvas course is no longer open. Open the course and connect it again.", true));
   if (!await reserveReceipt(command)) return sendResult(command, false, null, problem("effect_receipt_refused", "The provider effect receipt is missing or was already used.", false));
-  const result = await executeOperation(binding, operation, command.arguments || {});
+  const result = await executeOperation(binding, operation, command.arguments || {}, command.expiresAt);
   if (!result?.ok) {
     const unknown = result?.outcomeUnknown === true || (result?.sent === true && command.kind === "invoke_write" && !Number.isInteger(result.status));
-    return sendResult(command, false, null, problem(unknown ? "write_outcome_unknown" : "canvas_request_failed", errorMessage(result?.error || `Canvas returned HTTP ${result?.status || 0}`).slice(0, 900), !unknown));
+    return sendResult(command, false, null, problem(unknown ? "write_outcome_unknown" : result?.sent === false ? "canvas_request_not_sent" : "canvas_request_failed", errorMessage(result?.error || `Canvas returned HTTP ${result?.status || 0}`).slice(0, 900), !unknown));
   }
   let verification;
   if (command.kind === "invoke_write") {
-    const plan = planBrowserReadback([...state.operations.values()], operation, command.arguments || {}, result.data);
-    if (plan) {
+    const guardedPage = command.arguments?.morrow_page_guard;
+    const plan = guardedPage ? null : planBrowserReadback([...state.operations.values()], operation, command.arguments || {}, result.data);
+    if (guardedPage) {
+      verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "page_verification_missing" };
+    } else if (plan) {
       const readback = await executeOperation(binding, plan.readOperation, plan.arguments);
       verification = evaluateBrowserReadback(plan, readback);
     } else {

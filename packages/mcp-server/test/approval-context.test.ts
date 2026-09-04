@@ -85,10 +85,10 @@ function connector(data: JsonObject): JsonObject {
 }
 
 describe("approval review context", () => {
-  it("uses the saved binding to resolve exact course and New Quiz names", async () => {
+  it("uses the saved binding to resolve exact course and New Quiz names after completion", async () => {
     const calls: { publicName: string; args: Readonly<Record<string, unknown>> }[] = [];
     const context = await resolveApprovalReviewContext({
-      operation: operation(),
+      operation: { ...operation(), state: "verified" },
       tools,
       read: async (publicName, args) => {
         calls.push({ publicName, args });
