@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "ae878f31c3ae57e73e4bc7b0c7e55b24522117e2",
+  "candidateCommit": "fbe0ee9d9fa06dfc091603e0cef25bdca8193d68",
   "entries": [
     {
       "path": ".githooks/pre-commit",
@@ -2108,14 +2108,14 @@
     },
     {
       "path": "scripts/lib/release-candidate.mjs",
-      "sourceCommit": "db41ca1808a1e3554581c9b92f0ba3a43adc535a",
+      "sourceCommit": "fbe0ee9d9fa06dfc091603e0cef25bdca8193d68",
       "originalPath": "scripts/lib/release-candidate.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c6f0f2bdf4993fdbf5fb2d26e301cba999fbc9a904cb0efbcae6412eccad7f97",
-      "afterDigest": "0c6897d6c163c8f651d432482c5edbb566ea1f485e4fb5e009a38ddb2ae0afdc"
+      "beforeDigest": "0c6897d6c163c8f651d432482c5edbb566ea1f485e4fb5e009a38ddb2ae0afdc",
+      "afterDigest": "6fb5d59d44c7803f37b19baba6eec523bf5da235e3890f9470afd63940674dcf"
     },
     {
       "path": "scripts/package-canvas-connector.mjs",
@@ -2240,14 +2240,14 @@
     },
     {
       "path": "scripts/test/release-gates.test.mjs",
-      "sourceCommit": "19479316d456b59f69c0fc5efbd159c5610084a9",
+      "sourceCommit": "fbe0ee9d9fa06dfc091603e0cef25bdca8193d68",
       "originalPath": "scripts/test/release-gates.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e0e8a814d7eaa0cb9210b47953e119ea2a9126de9269a8497a4d4d52478cdbe5",
-      "afterDigest": "459f2d38afff285ea87affce7b58e2ae2462d028684dc354fb1d6d051a7c9a0c"
+      "beforeDigest": "459f2d38afff285ea87affce7b58e2ae2462d028684dc354fb1d6d051a7c9a0c",
+      "afterDigest": "ebe8f68e65f502d4660cb06d8f576fb87f9cde351ad895ddf1bb0060ee4224fd"
     },
     {
       "path": "scripts/test/source-rights-cli.test.mjs",
