@@ -141,7 +141,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "3fb66969d950ea0367b418d901879e66934ab80d0382ccbfb4ae4d8486b39096",
+      "sha256": "9dadcabebff8b39a5a0a8d7ebc3836ed620ed7fdc293d5a4b13d649efa3f71f7",
       "disposition": "direct_owned",
       "review": "Repository owner authorized open Morrow implementation and owned-source adaptation on 2026-09-04; reviewer=Codex technical review; source=HEAD"
     },
