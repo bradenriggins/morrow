@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Morrow launch preview</title>
+  <style>
+    @font-face { font-family: "Google Sans Flex"; src: url("assets/GoogleSansFlex-latin.woff2") format("woff2"); font-weight: 100 900; }
+    * { box-sizing: border-box; }
+    body { width: 1920px; height: 1080px; margin: 0; overflow: hidden; background: #faf8f2; color: #302b37; font-family: "Google Sans Flex", Arial, sans-serif; }
+    #root { position: relative; width: 1920px; height: 1080px; overflow: hidden; container-type: size; }
+    .scene, .ground { position: absolute; inset: 0; }
+    .scene { opacity: 0; overflow: hidden; }
+    #scene-claim { opacity: 1; }
+    .ground { background: #faf8f2; }
+    .rule { position: absolute; top: 84px; left: 96px; right: 96px; height: 2px; background: rgba(93,39,141,.18); }
+    .progress { position: absolute; left: 96px; right: 96px; bottom: 56px; height: 3px; background: rgba(93,39,141,.13); }
+    .progress i { display: block; height: 3px; background: #5d278d; }
+    .content { position: relative; width: 100%; height: 100%; padding: 122px 144px 108px; }
+    .mono, .eyebrow, .demo, .chip, .caption { font-family: ui-monospace, Menlo, monospace; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; }
+    .eyebrow { color: #5d278d; font-size: 15px; }
+    .caption { position: absolute; right: 144px; bottom: 76px; color: #6a6370; font-size: 13px; }
+    .demo, .chip { display: inline-flex; align-items: center; width: fit-content; padding: 10px 14px; border: 1px solid rgba(93,39,141,.23); border-radius: 999px; background: rgba(93,39,141,.07); color: #5d278d; font-size: 12px; }
+    .demo { top: 112px; right: 380px; bottom: auto; background: rgba(255,255,255,.9); }
+    .chip b { width: 8px; height: 8px; margin-right: 9px; border-radius: 50%; background: #5d278d; }
+    .brand { display: flex; align-items: center; gap: 16px; font-size: 26px; font-weight: 760; letter-spacing: -.035em; }
+    .brand:before { display: block; width: 54px; height: 54px; background: center / contain no-repeat url("assets/morrow-orbit.png"); content: ""; }
+    .claim-copy { position: absolute; top: 320px; left: 144px; width: 850px; }
+    .claim-copy h1 { margin: 18px 0 28px; font-size: 104px; line-height: 1.05; letter-spacing: -.07em; }
+    .claim-copy h1 span + span { margin-top: 8px; }
+    .claim-copy h1 span { display: block; }
+    .claim-copy p { max-width: 610px; margin: 0; color: #5e5762; font-size: 28px; line-height: 1.42; }
+    .claim-list { display: flex; align-items: center; gap: 12px; margin-top: 40px; font-size: 19px; font-weight: 650; }
+    .claim-list i { width: 8px; height: 8px; border-radius: 50%; background: #5d278d; }
+    .orbit { position: absolute; right: 146px; top: 228px; width: 620px; height: 620px; }
+    .ring { position: absolute; border: 2px solid rgba(93,39,141,.16); border-radius: 50%; }
+    .ring.a { inset: 4px 34px 26px 0; transform: rotate(-20deg); }
+    .ring.b { inset: 67px 0 57px 56px; transform: rotate(38deg); }
+    .ring.c { inset: 144px 107px 129px 104px; border-color: rgba(93,39,141,.3); }
+    .orbit-logo { position: absolute; top: 50%; left: 50%; width: 212px; height: 212px; transform: translate(-50%,-50%); background: center / contain no-repeat url("assets/morrow-orbit.png"); }
+    .orbit .mono { position: absolute; bottom: 0; right: 0; color: #6a6370; font-size: 13px; }
+    .corner { position: absolute; top: 112px; right: 144px; color: #6a6370; font-size: 13px; }
+    .header { display: flex; justify-content: space-between; align-items: flex-start; gap: 40px; }
+    .header h2 { max-width: 920px; margin: 14px 0 0; font-size: 64px; line-height: 1.02; letter-spacing: -.055em; }
+    .board { position: relative; height: 640px; margin-top: 44px; }
+    .window, .card, .approval, .result { border: 1.5px solid rgba(93,39,141,.22); border-radius: 20px; background: rgba(255,255,255,.78); }
+    .window { position: absolute; inset: 0; overflow: hidden; }
+    .topbar { display: flex; align-items: center; height: 64px; padding: 0 26px; border-bottom: 1px solid rgba(93,39,141,.16); color: #655e69; font-size: 17px; font-weight: 650; }
+    .dots { display: flex; gap: 8px; margin-right: 18px; }
+    .dots i { width: 10px; height: 10px; border-radius: 50%; background: rgba(93,39,141,.25); }
+    .dots i:first-child { background: #5d278d; }
+    .compare-grid { display: grid; grid-template-columns: .8fr 1.2fr 1.2fr; gap: 22px; height: calc(100% - 64px); padding: 28px; }
+    .pane { position: relative; overflow: hidden; padding: 24px; border: 1px solid rgba(93,39,141,.16); border-radius: 15px; background: rgba(93,39,141,.035); }
+    .pane .mono { color: #5d278d; font-size: 12px; }
+    .pane h3 { margin: 14px 0; font-size: 25px; letter-spacing: -.03em; }
+    .pane p { color: #5e5762; font-size: 18px; line-height: 1.45; }
+    .source-quote { max-width: 280px; margin-top: 30px; color: #302b37 !important; font-size: 27px !important; font-weight: 700; letter-spacing: -.035em; line-height: 1.14 !important; }
+    .lines { display: grid; gap: 12px; margin-top: 24px; }
+    .lines i { display: block; height: 13px; border-radius: 9px; background: rgba(48,43,55,.13); }
+    .lines i:nth-child(2) { width: 84%; } .lines i:nth-child(3) { width: 92%; } .lines i:nth-child(4) { width: 68%; }
+    .callout { position: absolute; left: 22px; right: 22px; bottom: 22px; padding: 15px; border-left: 4px solid #5d278d; border-radius: 10px; background: rgba(93,39,141,.08); color: #4b414f; font-size: 17px; line-height: 1.35; }
+    .callout span, .change-pair span { display: block; margin-bottom: 5px; color: #5d278d; font-family: ui-monospace, Menlo, monospace; font-size: 11px; font-weight: 700; letter-spacing: .11em; text-transform: uppercase; }
+    .callout strong { display: block; color: #302b37; font-size: 20px; letter-spacing: -.025em; }
+    .option { display: flex; align-items: center; gap: 11px; margin-top: 10px; padding: 13px; border: 1px solid rgba(93,39,141,.13); border-radius: 10px; background: #fff; color: #5e5762; font-size: 17px; }
+    .option i { width: 17px; height: 17px; border: 2px solid #5d278d; border-radius: 50%; }
+    .option span { flex: 1; } .option em { color: #7e5a71; font-size: 13px; font-style: normal; font-weight: 650; }
+    .marker { position: absolute; padding: 10px 13px; border-radius: 999px; background: #5d278d; color: #fff; font-size: 13px; font-weight: 700; }
+    #marker-lesson { top: 245px; left: 41%; } #marker-quiz { right: 38px; bottom: 44px; }
+    .review-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; height: auto; }
+    .card { display: flex; flex-direction: column; justify-content: space-between; padding: 38px; }
+    .card-head { display: flex; align-items: center; justify-content: space-between; font-size: 26px; font-weight: 720; letter-spacing: -.035em; }
+    .n { display: grid; place-items: center; width: 42px; height: 42px; border-radius: 50%; background: #5d278d; color: #fff; font-size: 18px; }
+    .card h3 { max-width: 600px; margin: 34px 0 15px; font-size: 40px; line-height: 1.07; letter-spacing: -.05em; }
+    .card p { margin: 0; color: #5e5762; font-size: 22px; line-height: 1.38; }
+    .change-pair { display: grid; gap: 12px; margin-top: 8px; }
+    .change-pair div { padding: 13px 15px; border-radius: 10px; background: rgba(93,39,141,.055); }
+    .change-pair div:last-child { background: rgba(46,135,104,.10); }
+    .change-pair div:last-child span { color: #21694f; }
+    .change-pair strong { display: block; color: #302b37; font-size: 25px; letter-spacing: -.035em; line-height: 1.13; }
+    .proposed { padding: 20px; border-left: 4px solid #5d278d; border-radius: 10px; background: rgba(93,39,141,.07); color: #453b4c; font-size: 18px; line-height: 1.4; }
+    .approval-wrap, .result-wrap { display: grid; height: 100%; place-items: center; }
+    .approval { width: 1010px; padding: 42px; }
+    .approval h3 { margin: 15px 0 8px; font-size: 42px; letter-spacing: -.05em; }
+    .approval > p { margin: 0 0 28px; color: #5e5762; font-size: 21px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 18px 0; border-top: 1px solid rgba(93,39,141,.16); }
+    .row strong { display: block; font-size: 21px; letter-spacing: -.02em; } .row span { display: block; margin-top: 4px; color: #68616c; font-size: 16px; }
+    .tick { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; background: #5d278d; color: #fff; font-size: 18px; font-weight: 800; }
+    .approval-foot { display: flex; justify-content: space-between; align-items: center; gap: 24px; margin-top: 32px; color: #696270; font-size: 17px; }
+    button { min-width: 250px; padding: 18px 26px; border: 0; border-radius: 999px; background: #5d278d; color: #fff; font: inherit; font-size: 19px; font-weight: 720; }
+    #approval-recorded { margin-top: 18px; color: #1f654d; font-size: 17px; font-weight: 680; opacity: 0; }
+    .cursor { position: absolute; right: 196px; bottom: 92px; z-index: 4; width: 36px; height: 48px; border-top: 3px solid #302b37; border-left: 3px solid #302b37; transform: rotate(-22deg); opacity: 0; }
+    .cursor:after { position: absolute; right: -3px; bottom: -3px; width: 13px; height: 13px; border-right: 3px solid #302b37; border-bottom: 3px solid #302b37; content: ""; }
+    .ripple { position: absolute; right: 210px; bottom: 111px; width: 12px; height: 12px; border: 3px solid #5d278d; border-radius: 50%; opacity: 0; }
+    .result { width: 1120px; padding: 44px; }
+    .result-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 30px; margin-bottom: 26px; }
+    .result-head h3 { margin: 14px 0 0; font-size: 50px; letter-spacing: -.05em; }
+    .good { padding: 12px 16px; border-radius: 999px; background: rgba(46,135,104,.11); color: #21694f; font-size: 15px; font-weight: 720; }
+    .result-note { margin: 25px 0 0; color: #635c68; font-size: 18px; }
+    .close { display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+    .close .rings { position: absolute; top: 140px; width: 780px; height: 780px; border: 2px solid rgba(93,39,141,.1); border-radius: 50%; }
+    .close .rings:before, .close .rings:after { position: absolute; inset: 78px; border: 2px solid rgba(93,39,141,.1); border-radius: 50%; content: ""; }
+    .close .rings:after { inset: 156px; }
+    .close-logo { position: relative; width: 104px; height: 104px; margin-bottom: 26px; background: center / contain no-repeat url("assets/morrow-orbit.png"); }
+    .close h2 { position: relative; margin: 18px 0; font-size: 86px; line-height: .98; letter-spacing: -.068em; }
+    .close h2 span { display: block; } .close p { position: relative; margin: 0; color: #5e5762; font-size: 26px; }
+    .close-actions { position: relative; display: flex; gap: 14px; margin-top: 38px; }
+    .close-actions span { padding: 12px 18px; border: 1px solid rgba(93,39,141,.22); border-radius: 999px; color: #5d278d; font-size: 16px; font-weight: 680; }
+  </style>
+</head>
+<body>
+  <div id="root" data-composition-id="morrow-launch-preview" data-width="1920" data-height="1080" data-start="0" data-duration="25.2">
+    <section id="scene-claim" class="scene" aria-label="Morrow launch claim">
+      <div class="ground"></div><div class="rule"></div>
+      <div id="claim-orbit" class="orbit" data-layout-ignore><i id="ring-a" class="ring a"></i><i id="ring-b" class="ring b"></i><i id="ring-c" class="ring c"></i><i id="orbit-logo" class="orbit-logo"></i><span id="orbit-note" class="mono">MORROW / LOCAL PREVIEW</span></div>
+      <div class="content"><div id="claim-brand" class="brand">Morrow</div><div class="claim-copy"><div id="claim-eyebrow" class="eyebrow">AI-ASSISTED CANVAS WORK</div><h1 id="claim-title"><span>Your AI.</span><span>Your Canvas work.</span></h1><p id="claim-detail">Bring a source, a lesson, and a quiz into one readable review.</p><div id="claim-list" class="claim-list"><i></i> Compare · Review · Approve · Check</div></div></div>
+      <div class="progress"><i style="width:16.7%"></i></div><span class="caption" style="left:144px;right:auto">SILENT PRODUCT PREVIEW</span>
+    </section>
+
+    <section id="scene-compare" class="scene" aria-label="Illustrative comparison demonstration">
+      <div class="ground"></div><div class="rule"></div><div class="content"><div class="header"><div><div id="compare-eyebrow" class="eyebrow">START WITH THE SOURCE</div><h2 id="compare-title">Compare before you change.</h2></div><span id="compare-chip" class="chip"><b></b>REVIEW READY</span></div>
+        <div class="board"><div id="compare-window" class="window"><div class="topbar"><span class="dots"><i></i><i></i><i></i></span>Morrow review workspace</div><div class="compare-grid">
+          <article id="source-pane" class="pane"><div class="mono">SOURCE STATEMENT</div><h3>Cell biology</h3><p class="source-quote">Ribosomes assemble proteins.</p><div class="callout">Source statement used for this review.</div></article>
+          <article id="lesson-pane" class="pane"><div class="mono">CANVAS LESSON</div><h3>Cell lesson</h3><p>The lesson currently says:</p><div class="callout"><span>Before</span><strong>Ribosomes produce ATP.</strong></div></article>
+          <article id="quiz-pane" class="pane"><div class="mono">CANVAS QUIZ</div><h3>Which structure assembles proteins?</h3><div class="option"><i></i><span>Mitochondria</span><em>marked correct</em></div><div class="option"><i></i><span>Ribosomes</span><em>source answer</em></div></article>
+        </div><span id="marker-lesson" class="marker">lesson mismatch</span><span id="marker-quiz" class="marker">answer-key mismatch</span></div></div>
+      </div><div class="progress"><i style="width:33.4%"></i></div><span class="caption demo" data-layout-allow-overlap>Product demonstration — illustrative</span>
+    </section>
+
+    <section id="scene-review" class="scene" aria-label="Illustrative proposed corrections">
+      <div class="ground"></div><div class="rule"></div><div class="content"><div class="header"><div><div id="review-eyebrow" class="eyebrow">MAKE THE REVIEW CLEAR</div><h2 id="review-title">Two proposed corrections.</h2></div><span id="review-chip" class="chip"><b></b>2 PROPOSED</span></div>
+      <div class="board review-grid"><article id="lesson-card" class="card"><div><div class="card-head">Lesson correction <span class="n">1</span></div><h3>Lesson wording</h3><div class="change-pair"><div><span>Before</span><strong>Ribosomes produce ATP.</strong></div><div><span>After</span><strong>Ribosomes assemble proteins.</strong></div></div></div><div class="proposed">Proposed correction from the reviewed source statement.</div></article>
+      <article id="quiz-card" class="card"><div><div class="card-head">Quiz correction <span class="n">2</span></div><h3>Answer key</h3><div class="change-pair"><div><span>Before</span><strong>Mitochondria</strong></div><div><span>After</span><strong>Ribosomes</strong></div></div></div><div class="proposed">For: “Which structure assembles proteins?”</div></article></div></div>
+      <div class="progress"><i style="width:50%"></i></div><span class="caption demo" data-layout-allow-overlap>Product demonstration — illustrative</span>
+    </section>
+
+    <section id="scene-approve" class="scene" aria-label="Illustrative approval demonstration">
+      <div class="ground"></div><div class="rule"></div><div class="content"><div class="header"><div><div id="approve-eyebrow" class="eyebrow">YOU STAY IN CONTROL</div><h2 id="approve-title">Approve the selected changes.</h2></div><span id="approve-chip" class="chip"><b></b>APPROVAL REQUIRED</span></div>
+      <div class="board approval-wrap"><div id="approval-shell" class="approval"><div class="mono" style="color:#5d278d;font-size:12px">REVIEW SUMMARY</div><h3>2 selected changes</h3><p>Each proposed correction remains visible before approval.</p><div class="row"><div><strong>Lesson wording</strong><span>Ribosomes assemble proteins.</span></div><i class="tick">✓</i></div><div class="row"><div><strong>Quiz answer key</strong><span>Mitochondria → Ribosomes</span></div><i class="tick">✓</i></div><div class="approval-foot"><span>Approval is shown as an illustrative action.</span><button id="approval-button" type="button">Approve 2 changes</button></div><div id="approval-recorded">Approval recorded in this illustrative demonstration.</div></div><i id="approval-cursor" class="cursor" data-layout-ignore></i><i id="approval-ripple" class="ripple" data-layout-ignore></i></div></div>
+      <div class="progress"><i style="width:66.7%"></i></div><span class="caption demo" data-layout-allow-overlap>Product demonstration — illustrative</span>
+    </section>
+
+    <section id="scene-result" class="scene" aria-label="Illustrative checked result">
+      <div class="ground"></div><div class="rule"></div><div class="content"><div class="header"><div><div id="result-eyebrow" class="eyebrow">SHOW WHAT HAPPENED</div><h2 id="result-title">Checked result.</h2></div><span id="result-chip" class="chip"><b></b>RESULT STATE</span></div>
+      <div class="board result-wrap"><div id="result-shell" class="result"><div class="result-head"><div><div class="mono" style="color:#5d278d;font-size:12px">RESULT</div><h3>Changes checked</h3></div><span class="good">ILLUSTRATIVE STATUS</span></div><div id="result-lesson" class="row"><div><strong>Lesson wording</strong><span>Ribosomes assemble proteins.</span></div><i class="tick">✓</i></div><div id="result-quiz" class="row"><div><strong>Quiz answer key</strong><span>Ribosomes is the proposed correct answer.</span></div><i class="tick">✓</i></div><p id="result-note" class="result-note">This demo shows a review state. It is not a live Canvas receipt.</p></div></div></div>
+      <div class="progress"><i style="width:83.4%"></i></div><span class="caption demo" data-layout-allow-overlap>Product demonstration — illustrative</span>
+    </section>
+
+    <section id="scene-close" class="scene" aria-label="Morrow closing promise">
+      <div class="ground"></div><div class="content close"><i class="rings" data-layout-ignore></i><i id="close-logo" class="close-logo"></i><div id="close-eyebrow" class="eyebrow">MORROW</div><h2 id="close-title"><span>Your AI.</span><span>Your Canvas work.</span></h2><p id="close-detail">Compare. Review. Approve. Check.</p><div id="close-actions" class="close-actions"><span>LOCAL PREVIEW</span><span>SILENT</span></div></div><div class="progress"><i style="width:100%"></i></div>
+    </section>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+  <script>
+    window.__timelines = window.__timelines || {};
+    const tl = gsap.timeline({ paused: true });
+    tl.fromTo("#claim-brand", {opacity:0,y:24}, {opacity:1,y:0,duration:.55,ease:"power3.out"}, .22)
+      .fromTo("#claim-eyebrow", {opacity:0,y:28}, {opacity:1,y:0,duration:.48,ease:"power3.out"}, .62)
+      .fromTo("#claim-title span", {opacity:0,y:64}, {opacity:1,y:0,duration:.72,stagger:.2,ease:"power3.out"}, .9)
+      .fromTo("#claim-detail", {opacity:0,y:25}, {opacity:1,y:0,duration:.5,ease:"power3.out"}, 1.85)
+      .fromTo("#claim-list", {opacity:0,y:18}, {opacity:1,y:0,duration:.45,ease:"power3.out"}, 2.25)
+      .fromTo("#ring-a", {opacity:0,scale:.82,rotate:-42}, {opacity:1,scale:1,rotate:-20,duration:.9,ease:"power3.out"}, .55)
+      .fromTo("#ring-b", {opacity:0,scale:.76,rotate:2}, {opacity:1,scale:1,rotate:38,duration:1.05,ease:"power3.out"}, .75)
+      .fromTo("#ring-c,#orbit-logo,#orbit-note", {opacity:0,scale:.84}, {opacity:1,scale:1,duration:.7,stagger:.1,ease:"power3.out"}, 1.2);
+    tl.to("#scene-claim", {opacity:0,duration:.42,ease:"power2.inOut"}, 3.82).to("#scene-compare", {opacity:1,duration:.42,ease:"power2.out"}, 3.82)
+      .fromTo("#compare-eyebrow,#compare-title,#compare-chip", {opacity:0,y:24}, {opacity:1,y:0,duration:.48,stagger:.1,ease:"power3.out"}, 4.08)
+      .fromTo("#compare-window", {opacity:0,y:42}, {opacity:1,y:0,duration:.62,ease:"power3.out"}, 4.52)
+      .fromTo("#source-pane", {opacity:0,x:-32}, {opacity:1,x:0,duration:.46,ease:"power3.out"}, 4.95)
+      .fromTo("#lesson-pane", {opacity:0,y:30}, {opacity:1,y:0,duration:.46,ease:"power3.out"}, 5.34)
+      .fromTo("#quiz-pane", {opacity:0,x:32}, {opacity:1,x:0,duration:.46,ease:"power3.out"}, 5.73)
+      .fromTo("#marker-lesson,#marker-quiz", {opacity:0,scale:.88}, {opacity:1,scale:1,duration:.4,stagger:.22,ease:"power3.out"}, 5.98);
+    tl.to("#scene-compare", {opacity:0,duration:.42,ease:"power2.inOut"}, 8.22).to("#scene-review", {opacity:1,duration:.42,ease:"power2.out"}, 8.22)
+      .fromTo("#review-eyebrow,#review-title,#review-chip", {opacity:0,y:25}, {opacity:1,y:0,duration:.5,stagger:.1,ease:"power3.out"}, 8.45)
+      .fromTo("#lesson-card", {opacity:0,x:-54}, {opacity:1,x:0,duration:.62,ease:"power3.out"}, 9.04)
+      .fromTo("#quiz-card", {opacity:0,x:54}, {opacity:1,x:0,duration:.62,ease:"power3.out"}, 10.32);
+    tl.to("#scene-review", {opacity:0,duration:.42,ease:"power2.inOut"}, 13.62).to("#scene-approve", {opacity:1,duration:.42,ease:"power2.out"}, 13.62)
+      .fromTo("#approve-eyebrow,#approve-title,#approve-chip", {opacity:0,y:25}, {opacity:1,y:0,duration:.48,stagger:.1,ease:"power3.out"}, 13.92)
+      .fromTo("#approval-shell", {opacity:0,y:44,scale:.98}, {opacity:1,y:0,scale:1,duration:.68,ease:"power3.out"}, 14.45)
+      .fromTo("#approval-cursor", {opacity:0,x:-210,y:110}, {opacity:1,x:0,y:0,duration:.62,ease:"power3.out"}, 15.62)
+      .to("#approval-button", {scale:.96,duration:.12,ease:"power1.out"}, 16.36).to("#approval-button", {scale:1,duration:.24,ease:"power3.out"}, 16.48)
+      .fromTo("#approval-ripple", {opacity:0,scale:.4}, {opacity:.75,scale:4.6,duration:.34,ease:"power2.out"}, 16.39).to("#approval-ripple", {opacity:0,duration:.2,ease:"power1.out"}, 16.73).to("#approval-recorded", {opacity:1,duration:.36,ease:"power2.out"}, 16.78);
+    tl.to("#scene-approve", {opacity:0,duration:.42,ease:"power2.inOut"}, 18.22).to("#scene-result", {opacity:1,duration:.42,ease:"power2.out"}, 18.22)
+      .fromTo("#result-eyebrow,#result-title,#result-chip", {opacity:0,y:24}, {opacity:1,y:0,duration:.48,stagger:.1,ease:"power3.out"}, 18.48)
+      .fromTo("#result-shell", {opacity:0,y:42}, {opacity:1,y:0,duration:.58,ease:"power3.out"}, 19.02)
+      .fromTo("#result-lesson", {opacity:0,x:-28}, {opacity:1,x:0,duration:.4,ease:"power3.out"}, 19.72)
+      .fromTo("#result-quiz", {opacity:0,x:-28}, {opacity:1,x:0,duration:.4,ease:"power3.out"}, 20.2)
+      .fromTo("#result-note", {opacity:0,y:18}, {opacity:1,y:0,duration:.4,ease:"power3.out"}, 20.7);
+    tl.to("#scene-result", {opacity:0,duration:.42,ease:"power2.inOut"}, 22.32).to("#scene-close", {opacity:1,duration:.42,ease:"power2.out"}, 22.32)
+      .fromTo("#close-logo", {opacity:0,y:20,scale:.82}, {opacity:1,y:0,scale:1,duration:.52,ease:"power3.out"}, 22.55)
+      .fromTo("#close-eyebrow", {opacity:0,y:18}, {opacity:1,y:0,duration:.38,ease:"power3.out"}, 22.88)
+      .fromTo("#close-title", {opacity:0,y:42}, {opacity:1,y:0,duration:.64,ease:"power3.out"}, 23.12)
+      .fromTo("#close-detail,#close-actions", {opacity:0,y:18}, {opacity:1,y:0,duration:.4,stagger:.12,ease:"power3.out"}, 23.8);
+    window.__timelines["morrow-launch-preview"] = tl;
+  </script>
+</body>
+</html>
