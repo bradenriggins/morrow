@@ -4,15 +4,21 @@ Status: active implementation and contract research, 5 September 2026.
 
 ## Goal
 
-Use the same signed-in Chrome bridge for Canvas, Moodle, and Blackboard. Bring their practical course-work features as close to parity as their verified interfaces permit. Make the website, film, marketing copy, and diagrams explain the actual product in clear language.
+Use the same signed-in Chrome bridge for Canvas, Moodle, and Blackboard. Build full Moodle functionality, with Canvas as the parity baseline. Cover Moodle's own core functions as well as equivalent Canvas tasks. Bring Blackboard as close to the same capability level as its verified interfaces permit. Make the website, film, marketing copy, and diagrams explain the actual product in clear language.
 
 The user added this requirement after the first website and film review. The earlier Moodle and Blackboard token-file preview is not the desired final connection model.
+
+The user then made the Moodle scope explicit: “ALL MOODLE FUNCTIONALITY BUILT IN. JUST LIKE CANVAS.” The earlier 30-operation package is an intermediate result. It is not the completion target. A missing implementation or test account remains unfinished work; it does not remove that function from the target.
+
+The complete core module, question-type, and cross-cutting work list is in [MOODLE-FULL-FUNCTIONALITY.md](MOODLE-FULL-FUNCTIONALITY.md). The Canvas audit also found incomplete workflows behind its larger catalog: six Item Bank writes remain blocked, and general file uploads do not yet complete saved-byte verification. Those limits remain part of the parity assessment.
 
 ## Scope and acceptance
 
 - One extension connection flow serves the three platforms. Each request binds the platform, site, signed-in account, and exact course. Platform sign-in credentials stay inside Chrome.
 - Preserve review before write, a single approved send, a fresh result check, and an explicit uncertain state. A missing response must never trigger an automatic repeat write.
-- Assess parity by educator tasks: course discovery, lesson content, sections or modules, files, assignments, quizzes and questions, publication, dates, and result checks. An endpoint count does not establish feature parity.
+- Assess parity by complete tasks: course discovery and creation; sections and all core activities and resources; files and folders; assignments and submissions; quizzes, all core question types and question banks; gradebook and feedback; people, enrolment, groups and groupings; calendar and dates; completion and access rules; course settings; import, backup, restore and reports; and core administration. Keep role and site permission requirements explicit. An endpoint count does not establish feature parity.
+- Record each function's native browser contract, implementation state, review and result-check behavior, local test evidence, and live evidence. Compare against Canvas's executable behavior, not only its advertised catalog. Every unresolved row stays in the work list.
+- Inventory optional plugins separately because their functions depend on the installed site. Do not describe arbitrary third-party plugin support as complete core Moodle support.
 - Use documented or directly established browser-session contracts. Refuse unavailable features with a clear explanation. Distinguish implementation, local browser proof, and live tenant proof.
 - Remove the obsolete Moodle and Blackboard token-file route when its replacement works. Preserve the existing Canvas path and its verification controls.
 - Check all active marketing text and diagrams for clear benefits, readable labels, and claims supported by the current implementation. Use “assistant” consistently.
@@ -40,7 +46,7 @@ These results cover the audience revision. They do not establish the requested t
 
 Canvas and Moodle now use the same extension pairing, authenticated local connection, approval flow, and single-use effect receipt. Moodle binds the exact HTTPS site, including its installation subpath, signed-in account, and open course. The previous direct-token Moodle and Blackboard implementation and startup route were removed. Blackboard has no executable browser fallback.
 
-The Moodle catalog now has 30 operations: fifteen reads and fifteen writes. It covers course discovery and settings, course structure, hidden Page, Assignment and Quiz creation, section text, activity settings, dates, visibility, and moving an activity between sections. Operation counts describe implementation breadth. They do not prove parity or live support for every operation.
+The Moodle source catalog now has 31 operations: sixteen reads and fifteen writes. It covers course discovery and settings, course structure, hidden Page, Assignment and Quiz creation, section text, activity settings, dates, visibility, moving an activity between sections, and Resource root-file metadata. The verified private package at `7b09aaa21` contains the preceding 30 operations. Operation counts describe implementation breadth. They do not prove parity or live support for every operation.
 
 On 5 September, the real Moodle 5.2 public sandbox completed six reads through the Morrow gateway, connector process, extension, and signed-in page. A hidden disposable Page then completed a separately reviewed update. Operation `op:8fb1abba-d941-4392-ba34-aab46754aeb2` dispatched once and reached `verified`. A fresh form read and the actual Moodle Page both showed the exact requested content. Repeating that operation was refused. Root inspected the actual review, result, and Moodle screenshots.
 
@@ -119,6 +125,16 @@ The result check constructs the exact expected state: remove the activity once f
 The full bridge workflow passed in the official Moodle 5.2 public demo on 5 September. It created one hidden Page under `op:8fb93f7a-404f-4291-8bf7-a4e5c00fac98`, then showed it under a separate approval, `op:bbc9c34c-9c79-4935-aaaf-09a8175648c6`. Move operation `op:e8de28f8-7145-4c5f-8563-c5140b9ed788` moved Page `5` from Topic 1, section `4`, to General, section `1`. Each operation dispatched once, reached `verified`, and refused replay. Fresh state showed the source list become empty and the destination list become `[1, 5]`, preserving the existing News forum. Page content and format stayed equal. Root inspected the actual Moodle sections and Page, plus the review and result at 390 and 1280 px. An independent reviewer accepted the receipt and screenshots. Receipt: `output/live-moodle/activity-move-receipt.json`, captured at 21:05:45 UTC. This is dated evidence from an hourly-reset public demo. It does not prove all activity types, attached-file moves, or broader tenant support.
 
 The live review also exposed a presentation gap: it did not show the known source section. The review now resolves that section from the fresh activity state and displays “Current section.” A missing, ambiguous, or nameless source blocks approval. Verified move results omit the generic earlier-values note and retain the confirmed outcome sentence. A local replay used the real review-context resolver and approval server with the dated live receipt. Root inspected review and result screens at 390 and 1280 px. They showed Topic 1 as the current section and General as the destination, with no overflow or earlier-values note. Receipt: `output/live-moodle/activity-move-review-copy/local-replay-receipt.json`. This later presentation check made no Moodle request or change. Independent source review accepted the correction, and the full gate passed with 153 workspace tests and 23 script tests.
+
+## Resource file metadata proof
+
+`moodle_get_resource_files` reads an exact course Resource through its native settings form. Moodle prepares private draft copies of the saved files. Morrow returns only filename, relative path, byte size, the native media-type label, and main-file status. The result discloses editor preparation and confirms that no form was submitted. Complete empty listings are allowed. Nonempty listings require one main file. Folders, incomplete lists, malformed metadata, and ambiguous targets are refused. Native draft IDs, file URLs, session fields, file bytes, and hashes stay out of the tool result.
+
+The first live reads found that Moodle returns file `sortorder` as a decimal string. The parser now accepts canonical nonnegative decimal strings as well as safe integer values, then checks main-file status. This matches the actual response and Moodle's direct DB-field return. Sources: [stored-file sort order](https://github.com/moodle/moodle/blob/v5.2.2/public/lib/filestorage/stored_file.php) and [native draft listing](https://github.com/moodle/moodle/blob/v5.2.2/public/lib/filelib.php). The existing browser fixture covers this native string value and refusal of a nested listing. Both focused tests passed. Independent review accepted the source correction.
+
+The real gateway, connector process, extension, and signed-in Moodle page then read one hidden disposable File activity in course 2. Its exact filename, 34-byte size, root path, main-file flag, and “Text file” label matched a separate native editor listing. Root inspected the actual native editor screenshot. The campaign recorded two read-only journal entries and zero write effects. Receipt: `output/live-moodle/resource-files-read-2026-09-05T21-58-41-035Z-receipt.json`, captured before the 22:00 UTC public-demo reset. Earlier refusal records are retained. A later test-script assertion initially mistook read journal entries for writes; the final check inspects both the read journal and the separate effect list.
+
+The fixture was created separately with Moodle's native file picker and a new local text file. That preparation does not establish Morrow upload support. This feature reads root metadata only. File transfers, folders, replacement, editor attachments, and saved-byte verification remain open in the full Moodle work list.
 
 ## Current website confirmation
 

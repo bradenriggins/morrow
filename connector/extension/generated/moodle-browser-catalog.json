@@ -246,6 +246,33 @@
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/page/mod_form.php#L34-L61"
     },
     {
+      "key": "moodle.form.course.modedit.resource.files.read.v1",
+      "toolName": "moodle_get_resource_files",
+      "provider": "moodle",
+      "summary": "List Moodle Resource files",
+      "description": "List safe metadata for root files in one exact Moodle Resource. Moodle prepares a private draft copy in its native settings form. This read never submits the form or changes saved files.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/resource/mod_form.php#L57-L62"
+    },
+    {
       "key": "moodle.form.course.modedit.page.create.read.v1",
       "toolName": "moodle_get_page_creation_form",
       "provider": "moodle",

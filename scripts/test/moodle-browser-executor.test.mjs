@@ -29,6 +29,13 @@ const pageWriteOperation = {
   readOnly: false,
 };
 
+const resourceFilesReadOperation = {
+  key: "moodle.form.course.modedit.resource.files.read.v1",
+  toolName: "moodle_get_resource_files",
+  provider: "moodle",
+  readOnly: true,
+};
+
 const pageCreateReadOperation = {
   key: "moodle.form.course.modedit.page.create.read.v1",
   toolName: "moodle_get_page_creation_form",
@@ -136,6 +143,14 @@ function pageCreationForm(state) {
   </form></body></html>`;
 }
 
+function resourceForm(name, draftId) {
+  return `<!doctype html><html><body><form method="post" action="/course/modedit.php?update=58&amp;return=0">
+    <input name="update" value="58"><input name="course" value="2"><input name="modulename" value="resource"><input name="name" value="${name}">
+    <div data-fieldtype="filemanager"><input type="hidden" name="files" value="${draftId}"></div>
+    <input type="submit" name="submitbutton" value="Save and return to course">
+  </form></body></html>`;
+}
+
 function assignmentForm(state, draftId, { moduleId = 8, creation = false } = {}) {
   const action = creation ? "/course/modedit.php?add=assign&amp;course=2&amp;sectionid=7&amp;return=0" : `/course/modedit.php?update=${moduleId}&amp;return=0`;
   const identity = creation
@@ -220,6 +235,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     gradingDueEnabled: false,
     gradePass: "",
   };
+  const resource = { name: "Evidence files", visible: true, visibleOld: true };
   const hiddenSectionActivity = { visible: false, visibleOld: false, stealth: false };
   const quizActivity = { visible: true, visibleOld: true };
   const posts = [];
@@ -234,6 +250,15 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
   let changeName = false;
   let draftId = 700;
   let draftFileCount = 0;
+  let resourceDraftId = 9001;
+  let resourceListing = {
+    filecount: 2,
+    list: [
+      { filename: "brief.pdf", filepath: "/", type: "file", size: 512, sortorder: "1", mimetype: "PDF document" },
+      { filename: "evidence.zip", filepath: "/", type: "zip", size: null, sortorder: 0, mimetype: "ZIP archive" },
+    ],
+    tree: { children: [] },
+  };
   let sectionVisible = false;
   let sectionHasRestrictions = false;
   let leaveHiddenActivityVisibleOnSectionHide = false;
@@ -294,6 +319,8 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
             if (call.args.action === "section_hide") {
               createdPage.visibleOld = createdPage.visible;
               createdPage.visible = false;
+              resource.visibleOld = resource.visible;
+              resource.visible = false;
               hiddenSectionActivity.visibleOld = hiddenSectionActivity.visible;
               if (!leaveHiddenActivityVisibleOnSectionHide) hiddenSectionActivity.visible = false;
               quizActivity.visibleOld = quizActivity.visible;
@@ -302,6 +329,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
               sectionHasRestrictions = false;
             } else if (call.args.action === "section_show") {
               createdPage.visible = createdPage.visibleOld;
+              resource.visible = resource.visibleOld;
               hiddenSectionActivity.visible = hiddenSectionActivity.visibleOld;
               quizActivity.visible = quizActivity.visibleOld;
               sectionVisible = true;
@@ -324,6 +352,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
             section: [{ id: 7, number: 4, title: "Week 4: Evidence", visible: sectionVisible, hasrestrictions: sectionHasRestrictions, component: "" }],
             cm: [
               ...(createdPage ? [{ id: 55, module: "page", sectionid: 7, name: createdPage.name, visible: createdPage.visible, uservisible: true, accessvisible: createdPage.visible, hascmrestrictions: false, stealth: createdPage.visible && !sectionVisible, allowstealth: sectionVisible }] : []),
+              { id: 58, module: "resource", sectionid: 7, name: resource.name, visible: resource.visible, uservisible: true, accessvisible: resource.visible, hascmrestrictions: false, stealth: resource.visible && !sectionVisible, allowstealth: sectionVisible },
               { id: 57, module: "url", sectionid: 7, name: "Already hidden resource", visible: hiddenSectionActivity.visible, uservisible: true, accessvisible: hiddenSectionActivity.visible, hascmrestrictions: false, stealth: hiddenSectionActivity.stealth, allowstealth: sectionVisible },
               { id: 9, module: "quiz", sectionid: 7, name: "Evidence quiz", visible: quizActivity.visible, uservisible: true, accessvisible: quizActivity.visible, hascmrestrictions: false, stealth: quizActivity.visible && !sectionVisible, allowstealth: sectionVisible },
               ...(createdAssignment ? [{ id: 56, module: "assign", sectionid: 7, visible: createdAssignment.visible }] : []),
@@ -337,9 +366,10 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
       const chunks = [];
       request.on("data", (chunk) => chunks.push(chunk));
       request.on("end", () => {
-        draftListIds.push(new URLSearchParams(Buffer.concat(chunks).toString("utf8")).get("itemid"));
+        const itemId = new URLSearchParams(Buffer.concat(chunks).toString("utf8")).get("itemid");
+        draftListIds.push(itemId);
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ filecount: draftFileCount, filesize: draftFileCount, list: draftFileCount ? [{ filename: "existing.pdf" }] : [] }));
+        response.end(JSON.stringify(itemId === String(resourceDraftId) ? resourceListing : { filecount: draftFileCount, filesize: draftFileCount, list: draftFileCount ? [{ filename: "existing.pdf" }] : [] }));
       });
       return;
     }
@@ -363,6 +393,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
       else if (url.searchParams.get("add") === "assign") response.end(assignmentForm(assignmentCreationDefaults, ++draftId, { creation: true }));
       else if (url.searchParams.get("update") === "6") response.end(pageForm(state, 6));
       else if (url.searchParams.get("update") === "55" && createdPage) response.end(pageForm(createdPage, 55));
+      else if (url.searchParams.get("update") === "58") response.end(resourceForm(resource.name, resourceDraftId));
       else if (url.searchParams.get("update") === "8") response.end(assignmentForm(assignment, ++draftId));
       else if (url.searchParams.get("update") === "56" && createdAssignment) response.end(assignmentForm(createdAssignment, ++draftId, { moduleId: 56 }));
       else response.writeHead(404).end();
@@ -521,6 +552,44 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     assert.equal(creationPost.get("displayoptions[display]"), "1");
     assert.equal(creationPost.get("completionexpected[enabled]"), null);
 
+    const resourceDraftRequests = draftListIds.length;
+    const resourceFiles = await executeInBrowser(page, {
+      mode: "execute",
+      operation: resourceFilesReadOperation,
+      arguments: { course_id: 2, module_id: 58 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(resourceFiles.ok, true);
+    assert.deepEqual(resourceFiles.data, {
+      course_id: 2,
+      module_id: 58,
+      name: "Evidence files",
+      files: [
+        { filename: "brief.pdf", relative_path: "brief.pdf", size_bytes: 512, media_type_label: "PDF document", main_file: true },
+        { filename: "evidence.zip", relative_path: "evidence.zip", size_bytes: 0, media_type_label: "ZIP archive", main_file: false },
+      ],
+      provenance: { source: "native_resource_settings_form", private_draft_copy_prepared: true, form_submitted: false, root_folder_only: true },
+    });
+    assert.deepEqual(resourceFiles.targets, [
+      { field: "course_id", label: "Course", name: "Week 1" },
+      { field: "module_id", label: "Resource", name: "Evidence files" },
+    ]);
+    assert.ok(requests.includes("GET /course/modedit.php?update=58&return=0"));
+    assert.equal(draftListIds.length, resourceDraftRequests + 1);
+    assert.equal(JSON.stringify(resourceFiles.data).includes("9001"), false);
+    assert.equal(requests.some((entry) => entry.startsWith("GET /mod/resource/view.php")), false);
+
+    resourceListing = { ...resourceListing, tree: { children: [{ filepath: "/nested/", children: [] }] } };
+    assert.deepEqual(await executeInBrowser(page, {
+      mode: "execute",
+      operation: resourceFilesReadOperation,
+      arguments: { course_id: 2, module_id: 58 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    }), { ok: false, sent: false, error: "moodle_resource_files_listing_refused" });
+    assert.equal(draftListIds.length, resourceDraftRequests + 2);
+
     const quizQuestions = await executeInBrowser(page, {
       mode: "execute",
       operation: quizQuestionsReadOperation,
@@ -651,7 +720,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     assert.equal(assignmentRead.targets[0].name, "Week 1");
     assert.equal(assignmentRead.snapshot_digest, assignmentReadAgain.snapshot_digest);
     assert.deepEqual(assignmentRead.data.due_date, { year: 2026, month: 9, day: 5, hour: 9, minute: 30 });
-    assert.notEqual(draftListIds[0], draftListIds[1]);
+    assert.notEqual(draftListIds[draftListIds.length - 2], draftListIds[draftListIds.length - 1]);
 
     const assignmentWrite = await executeInBrowser(page, {
       mode: "execute",

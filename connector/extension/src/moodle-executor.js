@@ -18,6 +18,7 @@ export async function executeMoodleInPage(input) {
     "moodle.form.course.edit.summary.read.v1": { toolName: "moodle_get_course_summary", readOnly: true, kind: "course-form-read" },
     "moodle.form.course.editsection.read.v1": { toolName: "moodle_get_section", readOnly: true, kind: "section-form-read" },
     "moodle.form.course.modedit.page.read.v1": { toolName: "moodle_get_page", readOnly: true, kind: "page-form-read" },
+    "moodle.form.course.modedit.resource.files.read.v1": { toolName: "moodle_get_resource_files", readOnly: true, kind: "resource-files-read" },
     "moodle.form.course.modedit.page.create.read.v1": { toolName: "moodle_get_page_creation_form", readOnly: true, kind: "page-create-form-read" },
     "moodle.form.course.modedit.assign.read.v1": { toolName: "moodle_get_assignment", readOnly: true, kind: "assignment-form-read" },
     "moodle.form.course.modedit.quiz.read.v1": { toolName: "moodle_get_quiz", readOnly: true, kind: "quiz-form-read" },
@@ -179,7 +180,7 @@ export async function executeMoodleInPage(input) {
   const validateArguments = (definition, raw, binding, context) => {
     const value = withoutMorrow(raw);
     if (!value) return { error: "moodle_arguments_invalid" };
-    const courseKinds = new Set(["course", "structure", "assignments", "quizzes", "quiz-questions-read", "quiz-question-read", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read", "course-form-write", "section-form-write", "page-form-write", "page-create-form-write", "assignment-form-write", "quiz-form-write", "assignment-create-form-write", "quiz-create-form-write", "course-show", "course-hide", "section-show", "section-hide", "activity-show", "activity-hide", "activity-move"]);
+    const courseKinds = new Set(["course", "structure", "assignments", "quizzes", "quiz-questions-read", "quiz-question-read", "course-form-read", "section-form-read", "page-form-read", "resource-files-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read", "course-form-write", "section-form-write", "page-form-write", "page-create-form-write", "assignment-form-write", "quiz-form-write", "assignment-create-form-write", "quiz-create-form-write", "course-show", "course-hide", "section-show", "section-hide", "activity-show", "activity-hide", "activity-move"]);
     if (definition.kind === "list-courses") {
       if (!only(value, ["limit"]) || (value.limit !== undefined && (!Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > MAX_ITEMS))) return { error: "moodle_arguments_invalid" };
       return { value: { limit: value.limit || 50 } };
@@ -189,7 +190,7 @@ export async function executeMoodleInPage(input) {
       if (!courseId) return { error: "moodle_course_mismatch" };
       value.course_id = courseId;
     }
-    const moduleKinds = new Set(["quiz-questions-read", "quiz-question-read", "page-form-read", "assignment-form-read", "quiz-form-read", "page-form-write", "assignment-form-write", "quiz-form-write", "activity-show", "activity-hide", "activity-move"]);
+    const moduleKinds = new Set(["quiz-questions-read", "quiz-question-read", "page-form-read", "resource-files-read", "assignment-form-read", "quiz-form-read", "page-form-write", "assignment-form-write", "quiz-form-write", "activity-show", "activity-hide", "activity-move"]);
     const sectionKinds = new Set(["section-form-read", "section-form-write", "page-create-form-read", "page-create-form-write", "assignment-create-form-read", "assignment-create-form-write", "quiz-create-form-read", "quiz-create-form-write", "section-show", "section-hide"]);
     if (moduleKinds.has(definition.kind)) {
       if (!id(value.module_id)) return { error: "moodle_arguments_invalid" };
@@ -204,10 +205,10 @@ export async function executeMoodleInPage(input) {
       value.slot_id = id(value.slot_id);
       return { value };
     }
-    const reads = new Set(["course", "structure", "assignments", "quizzes", "quiz-questions-read", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read"]);
+    const reads = new Set(["course", "structure", "assignments", "quizzes", "quiz-questions-read", "course-form-read", "section-form-read", "page-form-read", "resource-files-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read"]);
     if (reads.has(definition.kind)) {
       const allowed = creationModule(definition.kind) || definition.kind.startsWith("section") ? ["course_id", "section_id"]
-        : (definition.kind.startsWith("page") || definition.kind.startsWith("assignment") || definition.kind.startsWith("quiz")) ? ["course_id", "module_id"]
+        : (definition.kind.startsWith("page") || definition.kind.startsWith("resource") || definition.kind.startsWith("assignment") || definition.kind.startsWith("quiz")) ? ["course_id", "module_id"]
           : ["course_id"];
       if (!only(value, allowed)) return { error: "moodle_arguments_invalid" };
       return { value };
@@ -305,7 +306,7 @@ export async function executeMoodleInPage(input) {
     return new TextDecoder().decode(bytes);
   };
   const draftItemId = (value) => typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)) ? value : "";
-  const listDraftFiles = async (context, itemId) => {
+  const readDraftListing = async (context, itemId) => {
     let response;
     try {
       response = await fetch(urlFor(context, "/repository/draftfiles_ajax.php", { action: "list" }), {
@@ -316,15 +317,14 @@ export async function executeMoodleInPage(input) {
         body: new URLSearchParams({ sesskey: context.sesskey, itemid: itemId, filepath: "/" }),
       });
     } catch {
-      return "unverified";
+      return null;
     }
     let text;
-    try { text = await readText(response); } catch { return "unverified"; }
-    if (!response.ok) return "unverified";
+    try { text = await readText(response); } catch { return null; }
+    if (!response.ok) return null;
     let payload;
-    try { payload = JSON.parse(text); } catch { return "unverified"; }
-    if (!isObject(payload) || !Number.isSafeInteger(payload.filecount) || payload.filecount < 0 || !Array.isArray(payload.list)) return "unverified";
-    return payload.filecount === 0 && payload.list.length === 0 ? "empty" : "nonempty";
+    try { payload = JSON.parse(text); } catch { return null; }
+    return isObject(payload) ? payload : null;
   };
   const inspectFileManagers = async (context, form, formData) => {
     const managers = [];
@@ -334,7 +334,10 @@ export async function executeMoodleInPage(input) {
       if (!name || seen.has(name)) continue;
       seen.add(name);
       const itemId = draftItemId(formData.get(name));
-      managers.push({ name, state: itemId ? await listDraftFiles(context, itemId) : "unverified" });
+      const listing = itemId ? await readDraftListing(context, itemId) : null;
+      const state = !listing || !Number.isSafeInteger(listing.filecount) || listing.filecount < 0 || !Array.isArray(listing.list)
+        ? "unverified" : listing.filecount === 0 && listing.list.length === 0 ? "empty" : "nonempty";
+      managers.push({ name, state, listing });
     }
     return managers;
   };
@@ -401,6 +404,9 @@ export async function executeMoodleInPage(input) {
         type: spec.type, module: spec.module, creation: true, expectedPath: "/course/modedit.php", endpoint: urlFor(context, "/course/modedit.php", { add: spec.module, course: courseId, sectionid: args.section_id, return: 0 }), expected: { course: courseId, add: spec.module, modulename: spec.module, section: args.section_number, return: "0" }, required: ["course", "add", "modulename", "section", "return", "name", spec.body, "visible", ...spec.dates.map(({ field }) => `${field}[enabled]`)], courseId, sectionId: args.section_id, sectionNumber: args.section_number, sectionName: args.section_name,
       };
     }
+    if (kind === "resource-files-read") return {
+      type: "resource", expectedPath: "/course/modedit.php", endpoint: urlFor(context, "/course/modedit.php", { update: args.module_id, return: 0 }), expected: { update: args.module_id, course: courseId, modulename: "resource" }, required: ["name", "files"], courseId, moduleId: args.module_id, strictIdentity: true, finalRoute: { update: args.module_id, return: "0" },
+    };
     const module = kind.startsWith("page") ? "page" : kind.startsWith("assignment") ? "assign" : "quiz";
     const required = module === "page" ? ["name", "page[text]"] : module === "assign" ? ["name", "introeditor[text]", "duedate[enabled]"] : ["name", "introeditor[text]", "timeopen[enabled]", "timeclose[enabled]"];
     return {
@@ -453,6 +459,7 @@ export async function executeMoodleInPage(input) {
       return data;
     }
     if (descriptor.type === "page") return { course_id: Number(descriptor.courseId), module_id: Number(descriptor.moduleId), name: one(values, "name"), content: one(values, "page[text]"), content_format: Number(one(values, "page[format]")) };
+    if (descriptor.type === "resource") return { course_id: Number(descriptor.courseId), module_id: Number(descriptor.moduleId), name: one(values, "name") };
     if (descriptor.type === "assign") return { course_id: Number(descriptor.courseId), module_id: Number(descriptor.moduleId), name: one(values, "name"), instructions: one(values, "introeditor[text]"), instructions_format: Number(one(values, "introeditor[format]")), available_from: dateFromForm(values, "allowsubmissionsfromdate"), due_date: dateFromForm(values, "duedate"), cutoff_at: dateFromForm(values, "cutoffdate"), grading_due_at: dateFromForm(values, "gradingduedate") };
     return { course_id: Number(descriptor.courseId), module_id: Number(descriptor.moduleId), name: one(values, "name"), instructions: one(values, "introeditor[text]"), instructions_format: Number(one(values, "introeditor[format]")), open_at: dateFromForm(values, "timeopen"), close_at: dateFromForm(values, "timeclose") };
   };
@@ -461,14 +468,14 @@ export async function executeMoodleInPage(input) {
     try { response = await fetch(descriptor.endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } }); } catch { return { ok: false, sent: false, error: "moodle_form_read_failed" }; }
     let text;
     try { text = await readText(response); } catch { return { ok: false, sent: false, status: response.status, error: "moodle_form_read_failed" }; }
-    if (!response.ok || typeof DOMParser === "undefined" || typeof FormData === "undefined") return { ok: false, sent: false, status: response.status, error: "moodle_form_read_failed" };
+    if (!response.ok || typeof DOMParser === "undefined" || typeof FormData === "undefined" || (descriptor.finalRoute && !finalRouteMatches(response.url, descriptor.endpoint, descriptor.finalRoute))) return { ok: false, sent: false, status: response.status, error: "moodle_form_read_failed" };
     let documentValue;
     try { documentValue = new DOMParser().parseFromString(text, "text/html"); } catch { return { ok: false, sent: false, status: response.status, error: "moodle_form_read_failed" }; }
     const forms = Array.from(documentValue.querySelectorAll("form")).filter((form) => {
       if (String(form.getAttribute("method") || "get").toLowerCase() !== "post") return false;
       try {
         const candidate = new FormData(form);
-        return Object.entries(descriptor.expected).every(([name, expected]) => String(candidate.get(name) || "") === String(expected));
+        return Object.entries(descriptor.expected).every(([name, expected]) => (!descriptor.strictIdentity || candidate.getAll(name).length === 1) && String(candidate.get(name) || "") === String(expected));
       } catch { return false; }
     });
     if (forms.length !== 1) return { ok: false, sent: false, status: response.status, error: "moodle_form_target_invalid" };
@@ -591,7 +598,60 @@ export async function executeMoodleInPage(input) {
     if (!quiz) return error("moodle_quiz_target_invalid");
     return { ok: true, sent: true, status: current.status, course: current.data.course, quiz };
   };
+  const resourceBinding = async (context, args) => {
+    const current = await state(context, args.course_id);
+    if (!current.ok) return current;
+    const matches = current.data.cm.filter((entry) => id(entry?.id) === args.module_id);
+    if (matches.length !== 1 || matches[0]?.module !== "resource") return error("moodle_resource_target_invalid");
+    const name = nativeText(matches[0].name, 1333);
+    if (!name) return error("moodle_resource_target_invalid");
+    return { ok: true, sent: true, status: current.status, course: current.data.course, resource: matches[0], name };
+  };
   const nativeText = (value, maximum = MAX_BYTES) => typeof value === "string" && value.length <= maximum && !value.includes("\u0000") ? value : null;
+  const validResourceFilename = (value) => typeof value === "string" && value.length > 0 && value.length <= 255 && value === value.trim()
+    && value !== "." && value !== ".." && !/[\\/\u0000-\u001f]/.test(value);
+  const resourceFilesFromListing = (payload) => {
+    if (!isObject(payload) || !Number.isSafeInteger(payload.filecount) || payload.filecount < 0 || payload.filecount > MAX_ITEMS || !Array.isArray(payload.list)
+      || payload.list.length !== payload.filecount || !isObject(payload.tree) || !Array.isArray(payload.tree.children) || payload.tree.children.length !== 0) return null;
+    const filenames = new Set();
+    const files = [];
+    for (const entry of payload.list) {
+      const sortOrder = typeof entry?.sortorder === "string" && /^(0|[1-9][0-9]*)$/.test(entry.sortorder) ? Number(entry.sortorder) : entry?.sortorder;
+      if (!isObject(entry) || entry.filepath !== "/" || (entry.type !== "file" && entry.type !== "zip") || !validResourceFilename(entry.filename)
+        || filenames.has(entry.filename) || !Number.isSafeInteger(sortOrder) || sortOrder < 0) return null;
+      const label = nativeText(entry.mimetype, 1333);
+      if (!label || !label.trim()) return null;
+      const size = entry.size === null ? 0 : entry.size;
+      if (!Number.isSafeInteger(size) || size < 0) return null;
+      filenames.add(entry.filename);
+      files.push({ filename: entry.filename, relative_path: entry.filename, size_bytes: size, media_type_label: label, main_file: sortOrder === 1 });
+    }
+    if (files.length > 0 && files.filter((file) => file.main_file).length !== 1) return null;
+    return files.sort((left, right) => left.filename < right.filename ? -1 : left.filename > right.filename ? 1 : 0);
+  };
+  const getResourceFiles = async (context, inputValue, args) => {
+    const bound = await resourceBinding(context, args);
+    if (!bound.ok) return bound;
+    const rechecked = currentContext();
+    if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
+    const form = await loadForm(rechecked, formDescriptor(rechecked, "resource-files-read", args));
+    if (!form.ok) return form;
+    const name = oneFormValue(form.formData, "name", 1333);
+    const draftId = oneFormValue(form.formData, "files", 32);
+    const filesManager = form.fileManagers.length === 1 && form.fileManagers[0]?.name === "files" ? form.fileManagers[0] : null;
+    if (!name || name !== bound.name || !draftItemId(draftId) || !filesManager || form.formData.getAll("files").length !== 1) return error("moodle_resource_files_target_invalid");
+    const listing = filesManager.listing;
+    const files = resourceFilesFromListing(listing);
+    if (!files) return error("moodle_resource_files_listing_refused");
+    const data = {
+      course_id: Number(args.course_id),
+      module_id: Number(args.module_id),
+      name: bound.name,
+      files,
+      provenance: { source: "native_resource_settings_form", private_draft_copy_prepared: true, form_submitted: false, root_folder_only: true },
+    };
+    return { ok: true, sent: true, status: form.status, data, targets: [courseTarget(rechecked, bound.course.fullname || bound.course.name), { field: "module_id", label: "Resource", name: bound.name }], snapshot_digest: await digest(data) };
+  };
   const slotName = (node) => String(node.querySelector(".instancename")?.textContent || "").trim().replace(/\s+/g, " ").slice(0, 1333);
   const parseQuizSlots = (context, documentValue, moduleId) => {
     const roots = Array.from(documentValue.querySelectorAll('ul.slots[role="presentation"]'));
@@ -1073,6 +1133,7 @@ export async function executeMoodleInPage(input) {
       return output;
     }
     if (definition.kind === "quiz-question-read") return getQuizQuestion(context, input, args);
+    if (definition.kind === "resource-files-read") return getResourceFiles(context, input, args);
     if (creationModule(definition.kind) && definition.kind.endsWith("form-read")) {
       const form = await loadCreationForm(context, args, definition.kind);
       if (!form.ok) return form;
