@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Morrow Canvas Connector",
-  "description": "Connect Canvas to Morrow in your AI app. Your Canvas password and sign-in details stay in Chrome.",
+  "description": "Connect Canvas to Morrow from your assistant. Your Canvas password and sign-in details stay in Chrome.",
   "version": "1.0.1",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxKPzBjXyxPr9Ldo6wKJCdBhHje1uXWrm+i1YeziYR0bUge+rH27V6+zGDVRyoLWyID2aNOofpCcBjqIVRH9JjhL8s7RxQa7mrIh6eM3aIEJ2xdaJA3HhNQ6/0QPCU22t64s0dvrkm12uqSJtMnYk0TjFbtKi7nLd1/KDMTPnpH3XWXNp8uRomqu+T0SGVugZNsOlFwOUSy2RMWAILdObolRJbncEILELdhxDjnQMEa7cumWbk2jhAA8nRXANNMo6ljZjmTmiDELAghDKX+wvbXmdkGve8Ns/UbLQi7rb9hSX/XrC5ZM0KpWwThukOBn9gcltxe23EFbqWnVHwqM/hwIDAQAB",
   "minimum_chrome_version": "116",

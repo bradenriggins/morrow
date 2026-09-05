@@ -2,142 +2,120 @@
 
 ## Positioning decision
 
-**Morrow is a course-operations layer for AI-assisted LMS work.**
+**Morrow helps the people behind a course move work forward while they stay in control.**
 
-It turns a course request into a visible operation: bind the account and course, show the exact before and after, obtain approval for that saved request, and read the LMS again. The record ends as verified, unconfirmed, or failed. It does not end at generated text or a provider success response.
+Morrow turns a lesson or quiz update into a reviewed change and a checked result. A compatible assistant can help prepare the request. Morrow keeps the course review, human decision, and result clear.
 
-This is the story that makes the engineering visible. Morrow has an operations layer for course context, authority, approval, dispatch, recovery, and evidence. Course builders see the instructional consequence of that work: they can explain what changed, what stayed the same, and what the LMS saved.
+**Current category language:** Course work, under your control.
 
-## Audience and promise
+**Shared promise:** **Move course work forward. Stay in control.**
 
-**Primary audience:** Instructional designers, course builders, learning-technology teams, and faculty developers who must make accountable course changes.
+## Audience
 
-**Promise:** Bring a course operation to Morrow. Review its exact target and change. Approve it once. See the saved result or the uncertainty that remains.
+**Primary audience:** Instructional designers, course builders, and educators who maintain lessons, quizzes, and course materials.
 
-**Category:** Reviewable course operations with AI.
+**Secondary audience:** AI and education product leaders who want evidence of product judgment across workflow design, implementation, testing, and validation.
 
-**What makes Morrow distinct:** The AI can propose work. Morrow holds the operating conditions around that work: exact account and course binding, readable before-and-after content, a local approval decision, stale-change refusal, fresh readback, and controlled batches. The educator retains instructional judgment.
-
-## Homepage copy
+## Homepage copy source
 
 ### Metadata
 
-**Title:** Morrow — AI for course operations
+**Title:** Morrow — Course work, under your control
 
-**Description:** Morrow is an AI course-operations development preview for clear review, approval, and checked results.
+**Description:** Morrow helps course teams turn lesson and quiz updates into reviewed changes and checked results. Move course work forward. Stay in control.
+
+**Social title:** Morrow — Move course work forward. Stay in control.
+
+**Social description:** Course updates with clear review, checked results, and the teaching decisions in your hands. Private development preview.
 
 ### Navigation
 
-`Workflow` · `Providers` · `Demonstration` · `Behind the build` · `Preview details`
+`Why Morrow` · `Platforms` · `See it in action` · `Behind the build` · `Preview details`
+
+### Section order
+
+1. Hero
+2. Why Morrow
+3. From request to result
+4. See it in action
+5. Learning platforms
+6. Practical questions
+7. Preview details
 
 ### Hero
 
-**Eyebrow:** AI for course operations · Development preview
+**Eyebrow:** For the people behind the course · Development preview
 
-**Headline:** Build the course. Keep the judgment.
+**Headline:** Move course work forward. Stay in control.
 
-**Body:** Morrow helps course teams review, approve, and check course changes with the AI app they choose.
+**Body:** Morrow helps instructional designers, course builders, and educators turn lesson and quiz updates into finished course work. Ask your assistant for a change. Review it in Morrow. See what Canvas saved.
 
-**Primary CTA:** See the Canvas walkthrough
+**Primary CTA:** See Morrow in action
 
-**Secondary CTA:** Preview details
+**Secondary CTA:** Watch the film
 
-**Status line:** AI for course operations · Development preview
+### Why Morrow
 
-### The problem
+**Section heading:** Built around the care your courses deserve.
 
-**A useful draft is not yet a course operation.**
+**Supporting copy:** A course update takes more than a useful draft. It needs the right destination, a careful review, and a check that it saved correctly. Morrow brings those steps together. You keep the teaching decisions.
 
-Course work has a target, permissions, dependencies, and learner consequences. A page may be accurate while its related quiz key is wrong. A request may look successful while the LMS record remains unchanged. A batch may need to stop after one uncertain result. Morrow keeps those conditions visible.
+**Review before you approve.** See the course, the current content, and the proposed change together. Decide before anything changes.
 
-### The course-operation sequence
+**Know what was saved.** Morrow checks the saved result. If it cannot confirm the change, it tells you what still needs attention.
 
-**1. Bind the request.**
+**Keep your sign-in private.** Your Canvas sign-in stays in Chrome. You do not hand it to your assistant. Course content can still be shared with that service.
 
-Morrow binds work to the current account, explicit course, provider capability, and target record. A stale connection, changed target, or mismatched operation does not become a silent write.
+**Choose how you work.** Make requests through a compatible assistant. Morrow keeps the course review and result in one consistent process.
 
-**2. Review what will change.**
+### From request to result
 
-The local review shows the current value, proposed value, affected target, and preserved conditions. Long-form content stays readable. Batches show their complete target set before approval.
+**Section heading:** Ask. Review. Know where things stand.
 
-**3. Approve the saved request.**
+The sequence uses three plain steps: describe the work in your own words; see the change before it reaches students; leave with a clear result. An outdated request stops. An uncertain result stays marked for attention. Morrow does not automatically repeat the change.
 
-One local approval starts the frozen operation. The AI does not approve a course change.
+### See it in action
 
-**4. Read the provider again.**
+**Section heading:** A course change you can follow.
 
-Morrow checks the saved result against the frozen condition. A matching readback can be verified. An uncertain or failed result remains visible, and an ambiguous write is not automatically replayed.
+The lesson and quiz walkthrough is illustrative. It does not connect to Canvas or change course content. The silent film is also illustrative and uses on-screen captions.
 
-### Current Canvas evidence
+### Learning platforms
 
-One selected Canvas sandbox sequence now has live learner-path evidence. An educator-provided source exposed a planted lesson error and a wrong saved New Quiz answer key through two independent review requests and a separate checker. The source-review exchange used a manual MCP host adapter. It is evidence for that bounded adapter path, not native AI-client sampling compatibility.
+**Section heading:** See what has been tested.
 
-An approved lesson correction reached verified readback: one phrase changed while the page title, URL, publication state, front-page state, and editing roles remained unchanged. The New Quiz correction reached verified readback with only question one’s saved scoring value and update time changed. Module links and three publication operations each reached verified readback.
+Canvas has a tested course example through the current Chrome sign-in. Moodle and Blackboard are earlier previews that use separate private connections. Their current scope has documentation and local software tests, not live site tests.
 
-In Canvas Student View, the published lesson showed the corrected text. `Next Module Item` launched the quiz. `Begin` showed all three questions. The submitted result showed 100%, three of three points, the correct ribosomes answer, and all three feedback messages. A separate stale proposal still failed before send, and a later page read showed no effect. This proves one selected sandbox learner route. It does not prove every Canvas operation, learner flow, or learning outcome.
+### Practical questions
 
-### Provider scope
+**Section heading:** Know what to expect.
 
-| Provider | Current operation scope | Setup boundary | Evidence boundary |
-| --- | --- | --- | --- |
-| Canvas | Selected sandbox evidence covers a lesson correction, quiz-key correction, module links, publication, one Student View learner route, and stale-request refusal. | Signed-in Canvas session through the local Chrome connector. | One selected sandbox sequence only. It does not establish every Canvas operation, learner flow, or learning outcome. |
-| Moodle | Six tools: five reads and one course-summary write. | Private, locally saved API connection. | Official API and test validation only. No live Moodle tenant evidence. |
-| Blackboard | Six tools: five reads, including direct Ultra child discovery, and one supported document title/body update. | Private, locally saved API connection. | Official API and test validation only. No live Blackboard tenant evidence. |
+The questions cover intended users, assistant routes, course information, uncertain results, and readiness. The selected Codex course update is the tested assistant route. Claude Code, Claude desktop, and Gemini CLI have setup entries but still need complete live checks.
 
-The operation model is shared. Provider setup, available operations, and evidence remain specific to each provider.
+Canvas sign-in stays in Chrome. Morrow filters restricted fields from course results before sharing them with the connected assistant. Course content can still reach that service. The institution's permissions and data rules still apply.
 
-### For instructional design work
+### Preview details
 
-**Keep the source connected to the operation.**
+**Section heading:** Built with care. Ready for a closer look.
 
-Morrow can compare selected Canvas lesson and New Quiz evidence with educator-provided source text. The review preserves source and target quotes, concrete proposed corrections, reviewer disagreement, and limits before any request changes Canvas.
+The current page invites visitors to explore the example, then the decisions and tests behind Morrow. Private source files are prepared for technical review. General access is not open yet.
 
-**Review assessment structure without pretending to judge it.**
+**Preview CTA:** Explore the work behind Morrow
 
-Morrow can inspect directly saved New Quiz question counts, points, answer settings, and repeated content. A structural check does not establish instructional quality.
-
-**Control related work.**
-
-Bounded batches retain an explicit target set, dependency conditions, per-child result, and stop behavior after uncertainty. They make larger work reviewable without converting it into one opaque request.
-
-### Preview requirements
-
-Morrow is a local development preview. Canvas uses a local Chrome connector and a signed-in test course. Moodle and Blackboard use separate private API connections and are not general-user setup paths. A private evaluator package, one selected AI-client path, clean-machine reproduction, and an approved contact route are required before any evaluator invitation.
-
-### Closing
-
-**Build the course. Keep the judgment.**
-
-Morrow is for course teams that want AI assistance without losing the target, the decision, the saved result, or the limits of the evidence.
-
-**Primary CTA:** See the Canvas walkthrough
-
-**Secondary CTA:** Preview details
-
-## CTA rules
-
-| Stage | Primary CTA | Secondary CTA | Reason |
-| --- | --- | --- | --- |
-| Current private preparation | Review current evidence | Read preview requirements | Neither action implies public availability or a functioning acquisition route. |
-| After evaluator package, proof, and contact approval | Request private evaluation | Read provider scope | The request path exists only for an approved audience. |
-| After public deployment approval | Install Morrow | See supported provider workflows | Installation requires current provider, client, and clean-machine receipts. |
-
-Do not use `Join the waitlist`, `Start free`, `Book a demo`, or `Install now` before their product and operational paths exist.
-
-## Claim boundary
+## Current evidence and claim boundary
 
 Use these claims now:
 
-- Local course-operations development preview.
-- Exact course and account binding, readable review, one local approval, stale-change refusal, fresh readback, and controlled batch behavior.
-- Selected Canvas sandbox evidence: verified lesson and quiz-key corrections, module links, publication, one Student View route to a three-question result, and stale-request refusal.
-- Canvas proof remains selected and bounded. It is not whole-release verification.
-- Moodle and Blackboard have the stated API/test scopes, with private API setup and no live-tenant claim.
+- A selected Canvas test course showed a saved lesson correction, a related quiz-answer correction, an outdated request that stopped without changing the page, and one student path through the corrected lesson and quiz.
+- Canvas Grades and a separate check confirmed the 3 of 3 test result with feedback.
+- A separate page creation was saved and checked against the approved content and settings.
+- A selected Codex request reached a separate Morrow review. After approval, one paragraph was added once and checked against the saved page.
+- Morrow is a private development preview. The source-review test used a manually connected assistant.
+- Moodle and Blackboard have documentation and local software checks only. They need real-site checks before use.
 
 Do not use these claims now:
 
-- Production readiness, institutional approval, customer adoption, performance results, or universal LMS support.
-- Live Moodle or Blackboard operation proof.
-- A full Canvas catalog, every learner flow, whole-release verification, or educational effectiveness.
-- Native ChatGPT, Codex, Claude, or Gemini source-review compatibility.
-- Public installation, hosted synchronization, or a general evaluation path.
+- General access, public release, institutional approval, customer adoption, time savings, or teaching effectiveness.
+- Support for every course action, platform, or assistant configuration.
+- A claim that all course content stays local or that the assistant service does not receive selected course content.
+- A claim that Moodle or Blackboard has a live site test.

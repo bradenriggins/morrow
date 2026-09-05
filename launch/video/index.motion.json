@@ -1,13 +1,14 @@
 {
-  "duration": 25.2,
+  "duration": 33.1,
   "assertions": [
-    { "kind": "appearsBy", "selector": "#claim-title", "bySec": 2.0 },
-    { "kind": "before", "a": "#claim-title", "b": "#compare-canvas" },
-    { "kind": "before", "a": "#compare-canvas", "b": "#approval-shell" },
-    { "kind": "before", "a": "#approval-shell", "b": "#result-shell" },
-    { "kind": "staysInFrame", "selector": "#compare-canvas" },
-    { "kind": "staysInFrame", "selector": "#approval-shell" },
-    { "kind": "staysInFrame", "selector": "#result-shell" },
-    { "kind": "keepsMoving", "withinSelector": "#root", "maxStaticSec": 3 }
+    { "kind": "appearsBy", "selector": "#intro-copy", "bySec": 0.2 },
+    { "kind": "before", "a": "#intro-copy", "b": "#review-gate" },
+    { "kind": "before", "a": "#review-gate", "b": "#verify-field" },
+    { "kind": "before", "a": "#verify-field", "b": "#privacy-field" },
+    { "kind": "before", "a": "#privacy-field", "b": "#choice-field" },
+    { "kind": "before", "a": "#choice-field", "b": "#close-copy" },
+    { "kind": "staysInFrame", "selector": "#course-packet" },
+    { "kind": "staysInFrame", "selector": "#app-selection" },
+    { "kind": "keepsMoving", "withinSelector": "#root", "maxStaticSec": 4.2 }
   ]
 }

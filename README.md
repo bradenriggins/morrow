@@ -1,15 +1,15 @@
 # Morrow
 
-Work in Canvas from your AI conversation.
+Move course work forward. Stay in control.
 
 **Development preview:** Use this version only in a Canvas test course that you
 have permission to change. Browser tests use a simulated Canvas site. Real
-Canvas compatibility and full AI-app testing are not yet complete. Some Item
+Canvas compatibility and full assistant testing are not yet complete. Some Item
 Bank changes are disabled. See [current limits](LIMITATIONS.md).
 
-Morrow is a local, chat-interface-agnostic Canvas operations layer. It gives MCP-compatible AI clients one governed tool surface for Canvas. The AI client supplies intent and calls tools. Morrow owns connection, authority, approval, dispatch, verification, durable state, privacy, and evidence.
+Morrow helps course teams turn lesson and quiz requests into reviewed changes and checked results. Make the request through a compatible assistant, review the exact change in Morrow, and see what Canvas saved. You keep the teaching decisions.
 
-Morrow has no chat interface. Use it from ChatGPT/Codex, Claude Code, the Claude desktop app, Gemini CLI, or another stdio MCP client.
+Morrow runs on your computer and connects to an assistant through MCP. Source setup includes Codex, Claude Code, Claude desktop, and Gemini CLI. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
 
 ## What a user installs
 
@@ -24,32 +24,31 @@ Node.js is the runtime for the current source release. It is part of the MCP ins
 
 ## How a user works with Morrow
 
-1. Add Morrow to your chosen AI app using the installation steps below. Open or restart that app.
+1. Add Morrow to your chosen assistant using the installation steps below. Open or restart that assistant.
 2. Open the Morrow Canvas Connector extension in Chrome.
 3. Select **Connect Morrow**. On the page that opens, select **Allow connection** if you started this request.
 4. Open the Canvas test course you want to use in Chrome and sign in.
 5. Open the extension again and select **Connect Canvas course**. Chrome asks for access to this Canvas site and, if open, its New Quizzes site.
-6. Return to your AI conversation. Ask it to use Morrow to inspect or change the connected course.
+6. Return to your assistant. Ask it to use Morrow to inspect or change the connected course.
 
-The extension shows two separate states: whether Morrow is connected to your AI
-app, and whether you have saved a Canvas connection. It shows when Canvas was
+The extension shows two separate states: whether Morrow is connected to your assistant, and whether you have saved a Canvas connection. It shows when Canvas was
 last checked. A saved connection is not a promise that you are still signed in.
 Morrow checks Canvas again before each request.
 
-You continue working in your AI app. Morrow does not add another chat interface.
+You continue working in your assistant. Morrow does not add another chat interface.
 For example, ask it to list the modules in your connected test course or show
 which assignments have no due date. Be specific about the course and what you
 want to change.
 
 Reading Canvas does not need a change approval. For a change, Morrow gives your
-AI app a review link. Open it to see the courses, items, and requested values.
+assistant a review link. Open it to see the courses, items, and requested values.
 For a new quiz question, choose **Add this question** or **Cancel**. A group of
 changes lists each request and uses **Apply all changes**, with the total count. Course and activity names
 come from Canvas. If Morrow cannot identify them, approval stays unavailable until
 the details load. Internal references stay in **Technical details**.
 
 One click starts the approved work. The review shows progress and the checked
-result automatically. You do not need to type “Continue.” Keep your AI app and
+result automatically. You do not need to type “Continue.” Keep your assistant and
 Chrome open while Morrow works. If the result is uncertain, ask Morrow in your
 chat to check the existing request. Do not repeat the
 change. To change your request before approval, cancel it and ask for a new one.
@@ -96,25 +95,25 @@ You can ask for an outcome that uses more than your learning platform. For
 example: “Create a PDF study guide from Week 4 and send it to Michelle Bradley
 with a message in my voice.”
 
-Morrow reads the course materials. Your AI app then coordinates its installed
+Morrow reads the course materials. Your assistant then coordinates its installed
 document, PDF, contacts, and email tools. The workflow keeps the source titles
 and links, checks the completed file, uses your approved writing preferences,
 resolves the correct recipient, and checks the send result. It must identify
 missing sources or tools instead of silently skipping them.
 
-Morrow provides these instructions to the AI app when it connects. The app
+Morrow provides these instructions to the assistant when it connects. The assistant
 decides which tools and skills to use. This is guidance, not a guarantee that
-every app will trigger every installed skill. Morrow does not install a second
+every assistant will trigger every installed skill. Morrow does not install a second
 document editor, access another plugin's credentials, or use course-change
 approval to authorize email. End-to-end compatibility requires testing in the
-chosen app with its actual tools. That cross-plugin workflow is not yet a
+chosen assistant with its actual tools. That cross-plugin workflow is not yet a
 verified Morrow release claim.
 
 ## Check a New Quiz
 
-Ask your AI app: “Use Morrow to check the Week 3 quiz. It should have 20
+Ask your assistant: “Use Morrow to check the Week 3 quiz. It should have 20
 questions worth 20 question points. Check for repeated question content in the
-Week 2 quiz too.” Your AI app resolves the named course and quizzes, then calls
+Week 2 quiz too.” Your assistant resolves the named course and quizzes, then calls
 `morrow_check_new_quiz` with those exact targets.
 
 The report names the course and quizzes. It checks the number of directly listed
@@ -136,12 +135,12 @@ required before treating it as a production-ready feature.
 Ask: “Compare the Cell Structure lesson and quiz with this revised source.
 Show the conflicts and proposed corrections. Do not change the course yet.”
 
-Morrow can request separate lesson and quiz reviews from your AI app. It then
+Morrow can request separate lesson and quiz reviews from your assistant. It then
 requests a third check of the findings. The report includes exact source quotes,
 proposed corrections, disagreements, and limits. You review the proposals before
 requesting any changes. Morrow does not make changes during this review.
 
-This feature requires an AI app that supports MCP sampling. It currently covers
+This feature requires an assistant that supports MCP sampling. It currently covers
 one Canvas page and up to 40 directly saved choice, multiple-answer, or true/false
 New Quiz questions. It does not review bank draws, essays, media, accessibility,
 or student access. Automated tests cover the model-request flow; real client and
@@ -274,7 +273,7 @@ Canvas authentication stays inside Chrome.
 - The MCP receives a bounded account fingerprint and connection generation. It does not receive cookies, passwords, OAuth tokens, CSRF tokens, or Item Bank bearer tokens.
 - **Disconnect Morrow** clears the saved Morrow connection and requests removal of its Canvas site permissions. If Chrome cannot remove those permissions, the extension explains that they still need removal in Chrome settings. Disconnecting does not sign you out of Canvas or undo changes already sent.
 
-Morrow does not reuse a ChatGPT or Claude in-app browser session. The Chrome connector is the stable provider boundary for every supported chat client.
+Morrow does not reuse a ChatGPT or Claude in-app browser session. Configured assistants use the Chrome connector for Canvas. The selected Codex workflow has a live test record; other assistants still need complete live checks.
 
 ## Capability surface
 
@@ -377,6 +376,8 @@ The generated client files are:
 
 Restart the selected client after configuration. The client then starts Morrow over stdio. The Morrow MCP starts its internal Canvas connector runtime. The Chrome extension connects to that runtime at `127.0.0.1:32147`.
 
+For Codex write requests, use the interactive client so you can answer its tool-approval prompt. **Allow** lets Codex prepare the Morrow request. Review and approve the exact change in Morrow before it is sent to the LMS. With write approval enabled, noninteractive `codex exec` cannot answer that prompt and can cancel the call before it reaches Morrow.
+
 ## Native Morrow tools
 
 Use these tools to inspect and control the layer:
@@ -392,9 +393,9 @@ Use these tools to inspect and control the layer:
 
 Provider operations use generated `canvas_*` names. A call to a read tool executes. A call to a write tool creates a plan.
 
-For example, ask your AI: “On the Cell structure page in Introduction to Human Biology, change ‘Cells have membranes.’ to ‘Cells have protective membranes.’ Keep everything else.” Morrow reads the current page before it creates the review. **Change this text** starts the work and shows the result on that page. It checks for newer edits before sending. It reports a checked result only when the saved page and one new revision match the approved change.
+For example, ask your assistant: “On the Cell structure page in Introduction to Human Biology, change ‘Cells have membranes.’ to ‘Cells have protective membranes.’ Keep everything else.” Morrow reads the current page before it creates the review. **Change this text** starts the work and shows the result on that page. It checks for newer edits before sending. It reports a checked result only when the saved page and one new revision match the approved change.
 
-This page workflow changes a unique phrase within one text section. It does not support block-editor pages, text split across HTML tags, or an automatic undo. Canvas does not lock the page during these checks. Avoid editing it until the result is checked. Live Canvas verification of this workflow remains outstanding.
+This page workflow changes a unique phrase within one text section. It does not support block-editor pages, text split across HTML tags, or an automatic undo. Canvas does not lock the page during these checks. Avoid editing it until the result is checked. A selected live Canvas test confirmed the exact phrase change and unchanged page settings. A stale proposal failed before send, and a fresh read confirmed no later effect. See the [BT2 proof record](docs/implementation/BT2-LIVE-PROOF.md) for the tested scope.
 
 ## Verification
 

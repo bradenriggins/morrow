@@ -30,9 +30,9 @@ export function canvasConnectorSummary(value: JsonObject): string {
     return "Morrow confirmed the Canvas change with a fresh Canvas check.";
   }
   if (verification?.status === "mismatch") {
-    return "Morrow could not confirm this change because Canvas returned a different result. Ask your AI app to check the existing request. Do not repeat this change.";
+    return "Morrow could not confirm this change because Canvas returned a different result. Ask your assistant to check the existing request. Do not repeat this change.";
   }
-  return "Morrow could not confirm this change. Ask your AI app to check the existing request. Do not repeat this change.";
+  return "Morrow could not confirm this change. Ask your assistant to check the existing request. Do not repeat this change.";
 }
 
 function toolResult(value: JsonObject) {

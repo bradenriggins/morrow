@@ -34,17 +34,17 @@ function render(status) {
   disconnect.hidden = !status.paired;
   primary.hidden = Boolean(status.connected && courseOpen);
   canvasAction.hidden = !(status.connected && courseOpen);
-  primary.textContent = status.pairing ? "Waiting for approval" : !status.paired ? "Connect Morrow" : !status.connected ? "Waiting for your AI app" : "Connect Canvas course";
+  primary.textContent = status.pairing ? "Waiting for approval" : !status.paired ? "Connect Morrow" : !status.connected ? "Waiting for your assistant" : "Connect Canvas course";
   detail.textContent = status.pairing
     ? "Confirm this connection on the Morrow page that opens. Then return to this popup."
     : !status.paired
-      ? "Add Morrow to your AI app, then open the app. Select Connect Morrow to continue."
+      ? "Add Morrow to your assistant, then open it. Select Connect Morrow to continue."
       : status.connecting
         ? "Connecting to Morrow. Keep this popup open or return in a moment."
         : !status.connected
-        ? "Open the AI app where you added Morrow. This popup will reconnect when Morrow is ready."
+        ? "Open the assistant where you added Morrow. This popup will reconnect when Morrow is ready."
         : courseOpen
-          ? "Keep this Canvas course open and return to your AI conversation. Morrow checks your sign-in before each request."
+          ? "Keep this Canvas course open and return to the assistant where you started this request. Morrow checks your sign-in before each request."
           : binding
             ? "The saved Canvas course is no longer open. Open a signed-in Canvas course in Chrome, then select Connect Canvas course."
           : "Morrow is connected. Open a signed-in Canvas course in Chrome, then select Connect Canvas course.";
@@ -84,7 +84,7 @@ function showError(cause) {
       ? "Morrow and Morrow Canvas Connector versions do not match. Update or reload Morrow Canvas Connector in Chrome."
     : message.includes("access to this exact canvas site") || message.includes("permission") || message.includes("denied")
       ? "Allow Morrow to access this Canvas site, then try again."
-      : "Morrow could not complete that step. Open the AI app where you added Morrow, then try again.";
+      : "Morrow could not complete that step. Open the assistant where you added Morrow, then try again.";
 }
 
 function clearError() {

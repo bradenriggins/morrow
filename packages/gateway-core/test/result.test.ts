@@ -69,7 +69,7 @@ describe("normalizeUpstreamResult", () => {
     expect(indeterminate).toMatchObject({
       isError: true,
       content: [{
-        text: "Morrow cannot confirm the result. Canvas may have received this change. Ask your AI app to check the existing request. Do not repeat this change.",
+        text: "Morrow cannot confirm the result. Canvas may have received this change. Ask your assistant to check the existing request. Do not repeat this change.",
       }],
       structuredContent: {
         status: "indeterminate",
@@ -90,7 +90,7 @@ describe("normalizeUpstreamResult", () => {
     });
     expect(unconfirmed).toMatchObject({
       content: [{
-        text: "Morrow could not confirm this change. Ask your AI app to check the existing request. Do not repeat this change.",
+        text: "Morrow could not confirm this change. Ask your assistant to check the existing request. Do not repeat this change.",
       }],
       structuredContent: {
         status: "unconfirmed",
@@ -111,7 +111,7 @@ describe("normalizeUpstreamResult", () => {
     });
     expect(awaitingApproval).toMatchObject({
       content: [{
-        text: "Morrow prepared this change and is waiting for approval. Ask your AI app to check the existing request.",
+        text: "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
       }],
       structuredContent: { status: "awaiting_approval" },
     });

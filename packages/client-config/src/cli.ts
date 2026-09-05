@@ -57,7 +57,7 @@ function usage(): string {
   ].join("\n");
 }
 
-const ONE_APP_NOTE = "Use Morrow in one AI app at a time. Your AI app starts Morrow in the background. You do not open a separate Morrow app.";
+const ONE_APP_NOTE = "Use Morrow with one assistant at a time. Your assistant starts Morrow in the background. You do not open a separate Morrow application.";
 
 function setupMessage(configured: {
   readonly path: string;
@@ -72,12 +72,12 @@ function setupMessage(configured: {
     "Next steps:",
     "1. In Chrome, open chrome://extensions. Turn on Developer mode. Select Load unpacked, then choose:",
     `   ${configured.extensionPath}`,
-    "2. From this Morrow repository, configure one AI app:",
+    "2. From this Morrow repository, configure one assistant:",
     "   For Codex: pnpm morrow mcp install codex",
     "   For Claude Code: pnpm morrow mcp install claude",
     "   For Claude Desktop: pnpm morrow mcp install claude-desktop --scope user",
     "   For Gemini CLI: pnpm morrow mcp install gemini",
-    "3. Open or restart that AI app before you use the extension.",
+    "3. Open or restart that assistant before you use the extension.",
     "4. In Chrome, open one signed-in Canvas course. Use Morrow Canvas Connector to connect it.",
     "",
     ONE_APP_NOTE,
@@ -99,10 +99,10 @@ function installMessage(installed: {
   return [
     installed.changed ? `Morrow configuration was installed for ${label}.` : `Morrow configuration for ${label} is already current.`,
     `Configuration file: ${installed.path}`,
-    "This did not open or test the AI app. This step does not connect Canvas.",
+    "This did not open or test the assistant. This step does not connect Canvas.",
     "",
     "Next steps:",
-    `1. Close any other AI app using Morrow. Open or restart ${label}.`,
+    `1. Close any other assistant using Morrow. Open or restart ${label}.`,
     "2. Then in Chrome, open one signed-in Canvas course and use Morrow Canvas Connector to connect it.",
     "",
     ONE_APP_NOTE,
@@ -135,7 +135,7 @@ function doctorMessage(value: Record<string, unknown>): string {
     `Morrow service: ${service}.`,
     `Canvas connection: ${canvas}.`,
     "",
-    "This optional check starts a temporary Morrow process. Close AI apps using Morrow before you run it.",
+    "This optional check starts a temporary Morrow process. Close assistants using Morrow before you run it.",
     `Settings used: ${upstreamConfigPath}`,
     `For technical details, run pnpm morrow doctor --json from: ${repositoryRoot}`,
     "",

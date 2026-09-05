@@ -1,10 +1,10 @@
 # Expert education article outlines
 
-## 1. The unit of AI course work is a reviewable change
+## 1. The unit of AI-assisted course work is a reviewed change
 
 **Audience:** Instructional designers and course builders.
 
-**Thesis:** A useful AI course workflow ends with a reviewable change and a documented result, not with generated text.
+**Thesis:** A useful course workflow that uses AI assistance ends with a reviewed change and a checked result, not generated text alone.
 
 **Outline:**
 
@@ -13,7 +13,8 @@
 3. Walk through a page correction and linked quiz implication without claiming automated alignment.
 4. Explain approval as a decision on an exact saved request.
 5. Explain fresh readback and the value of an explicit unconfirmed state.
-6. Give a one-page review checklist for any AI-assisted course edit.
+6. Show the privacy boundary: Canvas sign-in can stay in Chrome while selected course content can reach a chosen assistant under its own data terms.
+7. Give a one-page review checklist for any course edit that uses AI assistance.
 
 **Morrow role:** One concrete example after the framework. Do not turn the article into a product announcement.
 
@@ -21,7 +22,7 @@
 
 **Audience:** Faculty developers, instructional designers, and assessment leads.
 
-**Thesis:** A reliable content revision checks four connected artifacts: the source, the lesson, the assessment, and the learner path.
+**Thesis:** A reliable content revision checks four connected artifacts: the source, the lesson, the assessment, and the learner path. An assistant can help find issues, but people keep the teaching judgment.
 
 **Outline:**
 
@@ -34,11 +35,11 @@
 
 **Morrow role:** Describe the preview as one implementation of the framework, with current workflow limits stated beside it.
 
-## 3. What a verified Canvas change needs
+## 3. What a checked Canvas change needs
 
 **Audience:** Learning-technology leaders and Canvas support teams.
 
-**Thesis:** An API response or a green automation log does not by itself establish that a course change is ready for learners.
+**Thesis:** An API response or a green automation log does not by itself establish that a course change is ready for learners. The LMS must show what it saved.
 
 **Outline:**
 

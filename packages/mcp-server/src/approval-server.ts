@@ -189,6 +189,8 @@ function readableName(value: string): string {
     assignment_published: "Visible to students",
     wiki_page_published: "Visible to students",
     wiki_page_notify_of_update: "Notify students",
+    wiki_page_editing_roles: "Who can edit",
+    wiki_page_front_page: "Set as front page",
     published: "Visible to students",
     delayed_post_at: "Post on",
     require_initial_post: "Students post before seeing replies",
@@ -365,32 +367,32 @@ function namedTargetsMissing(operations: readonly JsonObject[], contexts: Readon
 }
 
 function keepOpenInstruction(platform: string): string {
-  if (platform === "your learning platforms") return "Keep your AI app open. If this request uses Canvas, keep Chrome open too.";
-  return platform === "Canvas" ? "Keep your AI app and Chrome open while Morrow works." : "Keep your AI app open while Morrow works.";
+  if (platform === "your learning platforms") return "Keep your assistant open. If this request uses Canvas, keep Chrome open too.";
+  return platform === "Canvas" ? "Keep your assistant and Chrome open while Morrow works." : "Keep your assistant open while Morrow works.";
 }
 
 function stateContent(state: string, platform = "Canvas", attention: readonly unknown[] = []): string {
   const content: Record<string, [string, string]> = {
-    approved: ["Changes have not started", "Your approval was saved, but this request is not running. Ask Morrow in your chat to check this saved request before starting anything else."],
+    approved: ["Changes have not started", "Your approval was saved, but this request is not running. Return to your assistant and ask Morrow to check this saved request before starting anything else."],
     verified: ["Changes confirmed", "Morrow checked Canvas and confirmed the requested result."],
-    cancelled: ["Request cancelled", "Morrow will not start more changes for this request. Changes already sent may still finish. Return to your AI conversation to check the result."],
-    expired: ["This review has expired", "Return to your AI conversation and ask Morrow for a new review. Check the new request before approving it."],
+    cancelled: ["Request cancelled", "Morrow will not start more changes for this request. Changes already sent may still finish. Return to the assistant where you started this request to check the result."],
+    expired: ["This review has expired", "Return to the assistant where you started this request and ask Morrow for a new review. Check the new request before approving it."],
     dispatching: ["Applying your changes", `Morrow will check the saved result in Canvas. This page updates automatically. ${keepOpenInstruction(platform)}`],
     running: ["Applying your changes", `Morrow will check the saved result in Canvas. This page updates automatically. ${keepOpenInstruction(platform)}`],
-    awaiting_verification: ["The result needs checking", "Morrow could not confirm the saved result in Canvas. Ask Morrow in your chat to check this saved request. Do not repeat the change."],
-    awaiting_inner_approval: ["Another review is needed", "This request needs another approval before it can finish. Return to your AI conversation for the next review step."],
-    applied_or_unknown: ["The result is not yet confirmed", "Canvas may have received the changes. Return to your AI conversation and ask Morrow to check the result before trying again."],
-    inspection_required: ["Some results need checking", "Canvas may have received some changes. Return to your AI conversation and ask Morrow to check each result. Do not repeat the group of changes."],
-    partial: ["Some requests did not finish", "Return to your AI conversation to see which changes finished and which still need attention. Do not repeat the whole group."],
-    paused: ["Work is paused", "Morrow is not starting more changes. Work already sent may still finish. Return to your AI conversation to check the result or continue."],
-    completed: ["Some results need checking", "The work has stopped, but not every requested change has a confirmed result. Ask Morrow in your chat to check the saved results. Do not repeat the group."],
-    failed: ["This request did not finish", "Return to your AI conversation to find out what happened. Check the result before starting a new request."],
-    interrupted: ["Work stopped before confirmation", "Morrow is not running this request now. Ask Morrow in your chat to check the saved result before trying again."],
+    awaiting_verification: ["The result needs checking", "Morrow could not confirm the saved result in Canvas. Return to your assistant and ask Morrow to check this saved request. Do not repeat the change."],
+    awaiting_inner_approval: ["Another review is needed", "This request needs another approval before it can finish. Return to the assistant where you started this request for the next review step."],
+    applied_or_unknown: ["The result is not yet confirmed", "Canvas may have received the changes. Return to the assistant where you started this request and ask Morrow to check the result before trying again."],
+    inspection_required: ["Some results need checking", "Canvas may have received some changes. Return to the assistant where you started this request and ask Morrow to check each result. Do not repeat the group of changes."],
+    partial: ["Some requests did not finish", "Return to the assistant where you started this request to see which changes finished and which still need attention. Do not repeat the whole group."],
+    paused: ["Work is paused", "Morrow is not starting more changes. Work already sent may still finish. Return to the assistant where you started this request to check the result or continue."],
+    completed: ["Some results need checking", "The work has stopped, but not every requested change has a confirmed result. Return to your assistant and ask Morrow to check the saved results. Do not repeat the group."],
+    failed: ["This request did not finish", "Return to the assistant where you started this request to find out what happened. Check the result before starting a new request."],
+    interrupted: ["Work stopped before confirmation", "Morrow is not running this request now. Return to your assistant and ask Morrow to check the saved result before trying again."],
   };
   const noChangeSent = state === "failed" && attention.includes("dispatch_failed_before_send");
   const [title, detail] = noChangeSent
-    ? ["No change was sent", "Morrow did not send a change to Canvas. Ask Morrow in your AI conversation to read the latest Canvas content and prepare a new review."]
-    : content[state] || ["Check this request", "The request has changed or can no longer be approved here. Return to your AI conversation and ask Morrow to check its current status."];
+    ? ["No change was sent", "Morrow did not send a change to Canvas. Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review."]
+    : content[state] || ["Check this request", "The request has changed or can no longer be approved here. Return to your assistant and ask Morrow to check its current status."];
   return `<section class="outcome"><p class="eyebrow">Request status</p><h1>${title}</h1><p>${detail.replaceAll("Canvas", platform)}</p></section>`;
 }
 
@@ -498,10 +500,10 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     const before = scoreOnlyQuestion && context?.question
       ? '<p class="preview-note">Question details come from the current saved item. Only the answer key is in this request. Morrow will not write the question text, choices, or other settings.</p>'
       : question && context?.question
-        ? '<p class="preview-note">Question details come from the current saved item. The proposed changes are shown below.</p>'
+        ? '<p class="preview-note">Question details come from the current saved item. The requested changes are shown below.</p>'
       : context?.current && Object.keys(context.current).length
-      ? `<details class="current-content"><summary>Current content and values</summary><dl class="request">${requestFields(context.current)}</dl></details><p class="preview-label">Proposed changes</p>`
-      : changeKind(entry.tool) === "Edit" && !pageGuard.find_text ? '<p class="preview-note">Proposed changes are shown below. Current values are not available in this preview.</p>' : "";
+      ? `<details class="current-content"><summary>Current content and values</summary><dl class="request">${requestFields(context.current)}</dl></details><p class="preview-label">Requested changes</p>`
+      : changeKind(entry.tool) === "Edit" && !pageGuard.find_text ? '<p class="preview-note">Requested values are shown below. Earlier values are not available in this review.</p>' : "";
     const preservation = pageGuard.find_text ? '<p>Only this phrase will change. The other page content and settings stay the same.</p><p>Morrow checks for newer edits before sending. Avoid editing this page until the result is checked.</p>' : "";
     const content = `<section class="section change-content">${destination ? `<dl class="destination${addingQuestion ? " question-destination" : ""}">${destination}</dl>` : ""}${before}${preview}${preservation}</section>`;
     if (!batch) return content;
@@ -517,14 +519,14 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
     const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
-    return pageShell("Your result", "Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
+    return pageShell("Your result", "Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
   const changingPageText = !batch && plan.tool === "canvas_update_create_page_courses" && isJsonObject(object(object(plan.arguments)._morrow).page_guard);
   const title = batch ? `Check these ${plans.length} changes` : addingQuestion ? "Add this quiz question?" : changingPageText ? "Change this page text?" : `${readableName(String(plan.tool || "Review this change"))}?`;
   const approveLabel = batch ? `Apply all ${plans.length} changes` : addingQuestion ? "Add this question" : changingPageText ? "Change this text" : "Apply this change";
   const next = (limited
-    ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Ask Morrow in your chat to split this into smaller groups. This page has not approved any changes.</p>'
+    ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Return to your assistant and ask Morrow to split this into smaller groups. This page has not approved any changes.</p>'
     : missingNames
     ? '<p class="warning">Morrow could not identify the course or activity in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
     : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
@@ -722,7 +724,7 @@ export class LoopbackApprovalServer {
     } catch (error) {
       const message = error instanceof Error ? error.message : "approval action failed";
       if (String(request.headers.accept || "").includes("text/html")) {
-        sendHtml(response, 409, pageShell("Review could not be completed", "Check this request", '<section class="outcome"><p class="eyebrow">Check this request</p><h1>Review could not be completed</h1><p>This review may have expired or the request may have changed. Return to your AI conversation and ask Morrow to check its current status.</p><p>Do not repeat the change until Morrow checks the result in Canvas.</p></section>'));
+        sendHtml(response, 409, pageShell("Review could not be completed", "Check this request", '<section class="outcome"><p class="eyebrow">Check this request</p><h1>Review could not be completed</h1><p>This review may have expired or the request may have changed. Return to your assistant and ask Morrow to check its current status.</p><p>Do not repeat the change until Morrow checks the result in Canvas.</p></section>'));
       } else sendJson(response, 409, { schema: "morrow.problem.v1", code: "approval_action_refused", message });
     }
   }

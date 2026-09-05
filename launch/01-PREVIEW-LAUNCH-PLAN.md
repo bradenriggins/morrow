@@ -2,9 +2,9 @@
 
 ## Launch objective
 
-Make the course-operations layer visible through one credible story: **request → review → approval → saved result**. Show the engineering that protects the work without turning the launch into a tool catalog.
+Make Morrow's four commitments visible through one clear story: **review before you approve, know what was saved, keep your sign-in private, and choose how you work**. The website and launch film lead with the shared promise: **Move course work forward. Stay in control.** The case study and evidence record explain the engineering and selected tests.
 
-The public-facing story starts with Canvas because it has selected live evidence. Moodle and Blackboard appear as provider-specific development scopes, not as live-product proof.
+Canvas supplies the concrete access model and selected live evidence. Moodle and Blackboard appear lower in the provider-scope section with their documented API and test limits.
 
 ## Current evidence position
 
@@ -37,24 +37,25 @@ The public-facing story starts with Canvas because it has selected live evidence
 ### Gate 3 — Build a reviewable private evaluation
 
 - Prepare the private source candidate and matching connector archive after the authorized source freeze.
-- Reproduce one selected AI-client path on a clean machine.
+- Reproduce one selected assistant route on a clean machine.
 - Supply a test-course-only evaluator guide and issue intake path.
 - Obtain approval for the exact evaluator audience, delivery method, and contact method.
 
-### Gate 4 — Prepare the proof assets
+### Gate 4 — Prepare the launch assets
 
-- Build one 60-second proof clip around the actual Canvas record: source conflict, bound target, readable before/after, approval, verified lesson and quiz readbacks, the selected Student View result, and stale-request refusal.
-- Add a dated, sanitized evidence panel that names the selected sandbox sequence and its provider limits.
-- Label source review as a manual-adapter path. Do not imply native AI-client sampling.
+- Finish the short launch film in `video/`. One abstract course-work object carries the four pillars through a continuous visual sequence. Its scenes are illustrative.
+- Keep the website promise, wordmark, colors, and typography consistent with the film.
+- Keep the dated evidence panel and hiring case study available for deeper review. Name the selected sandbox sequence and its provider limits.
+- Label source review as a manual-adapter path. Do not imply automatic assistant sampling or present the illustrative film as a live recording.
 - Remove private course data, account data, connection IDs, secrets, and raw logs.
 
 ### Gate 5 — Request public preview approval
 
-Submit the website, proof clip, evidence panel, provider-scope table, posts, article, limits, and current receipts for Braden's approval. Do not deploy, publish, post, send, or invite before that approval.
+Submit the website, launch film, evidence panel, provider-scope table, posts, article, limits, and current receipts for Braden's approval. Do not deploy, publish, post, send, or invite before that approval.
 
 ## Release sequence after approval
 
-1. Publish the evidence-led preview and proof clip.
+1. Publish the pillar-led preview and launch film.
 2. Publish the founder story about the course-operation record.
 3. Publish the Canvas proof demonstration two business days later.
 4. Publish the practical review method two business days after that.
@@ -65,21 +66,21 @@ Use the website and LinkedIn first. Do not run a broad waitlist, paid campaign, 
 
 ## Visual narrative
 
-The proof clip must make five engineering facts visible:
+The launch film follows one course-work object through four visible actions:
 
-1. **Bound source and target:** the source quote, account, course, and page names without exposing identifiers.
-2. **Readable approval:** the exact before-and-after sentence and one human decision on the saved request.
-3. **Saved correction:** the fresh lesson and New Quiz readbacks, including preserved fields and the narrow quiz-key diff.
-4. **Learner result:** the published lesson, `Next Module Item`, three-question quiz, and submitted 100% three-point Student View result with feedback visible.
-5. **Safe refusal:** a stale proposal ending in `failed before send`, followed by an unchanged page state.
+1. **Control:** the object stops for review and moves only after approval.
+2. **Verification:** the approved request aligns with the saved work.
+3. **Privacy:** Canvas sign-in stays inside Chrome. Credentials stay out of assistant messages and saved records. Morrow blocks credential and learner fields from assistant output. The selected course text needed for the request can reach the chosen assistant under that assistant's own data terms.
+4. **Choice:** the selected tested route uses Codex. Other assistant configurations need their own end-to-end proof.
 
-This sequence shows why Morrow is more than a chat prompt and more than a provider response.
+The closing frame uses the full Morrow wordmark and the website promise: **Move course work forward. Stay in control.** The editable [storyboard](video/STORYBOARD.md) defines the current film. The longer proof scripts are optional follow-up concepts.
 
 ## Claim rules
 
 - Say `private evaluation`, `development preview`, `selected Canvas evidence`, and `provider-specific scope`.
-- Say `verified` for the selected lesson correction, narrow New Quiz key correction, two module links, three publication operations, and one Student View learner route.
+- Say `verified` for the selected lesson correction, narrow New Quiz key correction, two module links, three publication operations, unpublished page creation, and selected Codex page update. The Student View learner route has separate observed and API evidence.
 - Say `failed before send` for the stale proposal. Do not call it a completed change.
-- Say `selected sandbox evidence`, not whole-release verification. A separate page-creation test is under investigation and is not launch proof.
+- Keep each result bound to the selected sandbox test. These results do not establish whole-release verification.
 - Say `official API and test validation only` for Moodle and Blackboard until live tenants exist.
 - Do not state a tool count as proof, or infer one provider's proof from another provider's tests.
+- Do not imply that every assistant configuration has the selected Codex route's proof, or that course content remains entirely local.

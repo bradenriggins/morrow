@@ -22,7 +22,7 @@ function verify(toolName, argumentsValue, writeData, readData, expectedReadTool)
 test("created Canvas pages use their page identity and retain exact content checks", () => {
   const page = { page_id: "91", url: "cell-structures", title: "Cell structures", body: "<p>Ribosomes assemble proteins.</p>", published: false, last_edited_by: { id: "7" } };
   const plan = verify("canvas_create_page_courses", {
-    course_id: "42", wiki_page_title: page.title, wiki_page_body: page.body, wiki_page_published: false,
+    course_id: "42", wiki_page_title: page.title, wiki_page_body: page.body, wiki_page_published: false, wiki_page_notify_of_update: false,
   }, page, { ok: true, status: 200, data: page }, "canvas_show_page_courses");
   assert.deepEqual(plan.arguments, { course_id: "42", url_or_id: "cell-structures" });
   assert.equal(plan.targetField, "page_id");

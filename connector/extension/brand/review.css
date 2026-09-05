@@ -36,9 +36,13 @@ p { margin: 12px 0 0; color: var(--text-secondary); font-size: 13px; }
 .decision .actions form { flex: 0 1 auto; width: auto; }
 .decision .actions button { width: auto; min-width: 160px; font-size: 14px; }
 .decision .actions .cancel { min-width: 80px; border-color: transparent; color: var(--text-secondary); }
-.decision details { margin-top: 4px; border: 0; border-radius: 0; background: none; }
-.decision summary { padding: 12px 0; color: var(--text-subtle); font-size: 12px; font-weight: 400; }
-.decision .details-help, .decision pre { padding-left: 0; padding-right: 0; }
+.decision details, .result-details details { margin-top: 4px; border: 0; border-radius: 0; background: none; }
+.decision summary, .result-details summary { padding: 12px 0; color: var(--text-subtle); font-size: 12px; font-weight: 400; }
+.decision .details-help, .decision pre, .result-details pre { padding-left: 0; padding-right: 0; }
+.result-details { padding-top: 0; padding-bottom: 8px; }
+#work-status:has(> .section) .outcome { padding-bottom: 12px; }
+#work-status > .section { padding-top: 0; }
+#work-status > .section > p { margin-top: 0; }
 .next-step > p:first-child { margin-top: 0; color: var(--text); }
 .next-step > p + p { margin-top: 6px; }
 .next-step .keep-open { color: var(--text-subtle); font-size: 12px; }
@@ -49,8 +53,8 @@ p { margin: 12px 0 0; color: var(--text-secondary); font-size: 13px; }
 .request dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .request > .rich-text { grid-template-columns: 1fr; gap: 8px; }
 .formatted-preview { display: flow-root; color: var(--text); font-size: 15px; line-height: 1.65; white-space: normal; overflow-wrap: anywhere; }
-.formatted-preview > :first-child { margin-top: 0; }
-.formatted-preview > :last-child { margin-bottom: 0; }
+.formatted-preview > :first-child, .formatted-preview > :first-child > :first-child { margin-top: 0; }
+.formatted-preview > :last-child, .formatted-preview > :last-child > :last-child { margin-bottom: 0; }
 .formatted-preview p { margin: 0 0 12px; font: inherit; color: inherit; }
 .formatted-preview h1, .formatted-preview h2, .formatted-preview h3, .formatted-preview h4, .formatted-preview h5, .formatted-preview h6 { margin: 24px 0 10px; line-height: 1.3; font-weight: 600; }
 .formatted-preview h1 { font-size: 26px; }
@@ -73,7 +77,7 @@ p { margin: 12px 0 0; color: var(--text-secondary); font-size: 13px; }
 .formatted-preview hr { margin: 20px 0; border: 0; border-top: 1px solid var(--border); }
 .formatted-preview .media-placeholder { display: block; padding: 16px; border: 1px dashed var(--border); border-radius: 6px; color: var(--text-secondary); font-size: 13px; }
 .preview-modes { display: inline-flex; gap: 4px; margin: 0 0 20px; padding: 3px; border: 1px solid var(--border); border-radius: 999px; background: var(--paper); }
-.preview-modes button { min-height: 44px; padding: 6px 14px; font-size: 12px; background: transparent; color: var(--text-secondary); }
+.preview-modes button { min-height: 44px; padding: 6px 14px; border-radius: 999px; font-size: 12px; white-space: nowrap; background: transparent; color: var(--text-secondary); }
 .preview-modes button[aria-pressed="true"] { background: var(--surface); color: var(--accent); box-shadow: 0 1px 3px oklch(0% 0 0 / .12); }
 .question-answers { margin-top: 20px; }
 .preview-label { margin: 0 0 8px; font-size: 12px; font-weight: 500; color: var(--text-secondary); }
@@ -157,16 +161,23 @@ pre { max-height: 360px; overflow: auto; margin: 0; padding: 0 16px 16px; color:
 .pairing .actions { padding: 0; margin-top: 24px; }
 @media (max-width: 480px) {
   .wrap { padding: 24px 0; }
+  .brand { gap: 8px; }
+  h1 { font-size: 22px; }
   .hero, .section, .outcome, .actions { padding: 20px; }
   .hero { padding-bottom: 12px; }
   .change-content { padding-top: 4px; }
   .decision { padding: 16px 20px 4px; }
+  .result-details { padding: 0 20px 8px; }
   .decision .actions { flex-direction: row; flex-wrap: wrap; gap: 8px; }
   .decision .actions button { min-width: 0; padding-inline: 16px; }
   .preview-modes { display: flex; }
   .preview-modes button { flex: 1; padding-inline: 10px; }
-  .question-heading { gap: 12px; }
-  .question-heading h2 { font-size: 17px; }
+  .question-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px 12px; }
+  .question-heading > div { display: contents; }
+  .question-heading .eyebrow { margin-bottom: 0; }
+  .question-heading h2 { grid-column: 1 / -1; font-size: 17px; }
+  .question-points { grid-column: 2; grid-row: 1; }
+  .question-points strong { font-size: 12px; }
   .actions { flex-direction: column; }
   .request > div { grid-template-columns: 1fr; gap: 4px; }
   .batch-review { padding: 8px 20px 20px; }

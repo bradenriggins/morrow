@@ -187,9 +187,9 @@ describe("project installation and hermetic parity", () => {
       expect(setup.status).toBe(0);
       expect(setup.stdout).toContain("Morrow's local settings are ready.");
       expect(setup.stdout).toContain("This step does not connect Canvas.");
-      expect(setup.stdout).toContain("one AI app at a time");
+      expect(setup.stdout).toContain("one assistant at a time");
       expect(setup.stdout).toContain("chrome://extensions");
-      expect(setup.stdout).toContain("Open or restart that AI app before you use the extension.");
+      expect(setup.stdout).toContain("Open or restart that assistant before you use the extension.");
       expect(setup.stdout).not.toContain('"schema"');
 
       const setupJson = spawnSync(process.execPath, [
@@ -206,8 +206,8 @@ describe("project installation and hermetic parity", () => {
       ], { encoding: "utf8" });
       expect(install.status).toBe(0);
       expect(install.stdout).toContain("Morrow configuration was installed for Gemini CLI.");
-      expect(install.stdout).toContain("did not open or test the AI app");
-      expect(install.stdout).toContain("You do not open a separate Morrow app");
+      expect(install.stdout).toContain("did not open or test the assistant");
+      expect(install.stdout).toContain("You do not open a separate Morrow application");
       expect(install.stdout).not.toContain("scope=project");
 
       const doctorText = spawnSync(process.execPath, [

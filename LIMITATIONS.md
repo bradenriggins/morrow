@@ -4,7 +4,7 @@ Morrow `1.0.0-rc.0` is a local release candidate. It is not yet a stable public 
 
 ## Current external gates
 
-- The automated browser campaign uses a synthetic Canvas estate. Authorized live Canvas proof must still record the exact tenant, test account, operations, readbacks, and cleanup.
+- The automated browser campaign uses a synthetic Canvas estate. Separate authorized [BT2 tests](docs/implementation/BT2-LIVE-PROOF.md) record selected live lesson, quiz, module, learner, page-create, and native Codex update results. They do not prove the full Canvas catalog or live Item Bank compatibility.
 - Client configuration parity is tested for ChatGPT/Codex, Claude Code, Claude desktop chat, and Gemini CLI. Each available real client still needs the complete live scenario before a cross-client production claim.
 - An independent clean-machine reproduction has not completed.
 - Public source-rights review and explicit publication authorization are separate release gates.
@@ -12,7 +12,7 @@ Morrow `1.0.0-rc.0` is a local release candidate. It is not yet a stable public 
 
 ## Product limits
 
-- Canvas is the only enabled LMS provider.
+- Canvas uses the signed-in Chrome connector. Moodle and Blackboard have separate, private, hand-configured API previews with five reads and one bounded write each. Their official API and local test evidence does not establish live-tenant compatibility. See [provider scope](README.md#private-moodle-and-blackboard-preview).
 - MindTap and Connect are not supported, listed, or callable.
 - The connector can act only with the permissions of the current signed-in Canvas user.
 - The connector needs an open, signed-in Canvas tab. Item Bank operations also need an authenticated New Quizzes frame for the selected tenant and course.

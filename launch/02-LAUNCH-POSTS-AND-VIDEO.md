@@ -1,144 +1,141 @@
 # Morrow launch posts and video
 
+The main launch film is a short, silent, illustrative sequence. It shows one course request moving through Morrow's four commitments. The drafts below are unsent. They use selected Canvas sandbox evidence only where stated.
+
 ## LinkedIn post 1 — Founder story
 
-**Visual:** Five beats: source and target → readable approval → saved corrections → sandbox learner result → stale request refused. Mark it `Private development preview`.
+**Visual:** The main film. One course request moves through review, checked saved state, private sign-in, and assistant choice. Mark it `Private development preview`.
 
-I have spent months building Morrow around one question:
+I have spent months building Morrow around one promise for course teams:
 
-How do we know an AI-assisted course change is actually finished?
+**Move course work forward. Stay in control.**
 
-Course teams need more than a draft. They need the right course, the current content, a decision they can review, and a result they can check.
+Morrow turns a request from a compatible assistant into a reviewed course change and a checked LMS result. The team sees the exact destination and proposed change before approval. Then Morrow checks what Canvas saved and reports what it can confirm.
 
-Morrow brings that work into one flow: request → review → approval → saved result.
+The work is designed for the details that make course changes hard: a similar course name, a page that changed during planning, an action that may have reached the LMS, or a recommendation that still needs teaching judgment. Morrow stops a stale request before send. It does not repeat an uncertain action automatically. It gives the team a visible result instead of a guessed success.
 
-A recent Canvas sandbox test made this concrete. A source review found a wrong lesson statement and a wrong quiz key. Morrow read Canvas again and confirmed that one lesson phrase changed while the page settings stayed the same. The quiz-key readback showed that only the intended scoring value and update time changed.
+For Canvas, the sign-in stays in Chrome. Credentials stay out of assistant messages and saved records. Morrow's output rules block credential and learner fields from assistant output. The selected course text and metadata needed for a request can still reach the assistant that the team chooses, under that assistant's own account settings and data terms.
 
-The published lesson then led through `Next Module Item` to the three-question quiz in Canvas Student View. The submitted sandbox result showed 100%, three of three points, the correct ribosomes answer, and all three feedback messages.
+A selected Canvas sandbox made the standard concrete. A lesson correction was saved and checked. An outdated request stopped before changing the page. Student View reached the published quiz and returned 3/3 with feedback. Canvas Grades and a separate check confirmed that test result. A separate page creation also matched the approved content and settings after one change.
 
-Then a second request used the old page state. Morrow stopped it before sending. The saved page remained unchanged.
+The installed interactive Codex route also completed one separately reviewed page update. It is a selected tested route, not proof for every Codex or other assistant configuration.
 
-Those details have shaped months of engineering: exact course and account binding, readable changes, controlled batches, fresh readback, and clear outcomes when something cannot be confirmed.
-
-The wider goal is a useful operations layer for course teams across learning platforms. Canvas has selected sandbox evidence. The current Moodle and Blackboard adapters have official API and test validation, with no live-tenant claim. This selected learner route does not verify a full release, every Canvas operation, or learning effectiveness.
-
-I am preparing Morrow for private evaluation, with the workflow and its evidence available for review.
+Morrow is a private development preview for course teams who want AI assistance without giving up the decision or the checked result.
 
 ## LinkedIn post 2 — Product proof
 
-**Visual:** A 35-second proof clip. Use the five beats below. Keep the status strip visible in every frame: `Selected Canvas sandbox evidence · manual source-review adapter · learner route verified`.
+**Visual:** Four cards resolve to short proof frames. Keep the status strip visible: `Selected Canvas sandbox evidence · source review uses a manual adapter`.
 
-Here is the proof standard I want for AI-assisted course work.
+Here is the product standard I want for AI-assisted course work.
 
-Start with the source and the exact course target. Show the conflicting lesson text. Show the proposed replacement before anything is sent.
+**Review before you approve.** See the exact course, item, current content, and proposed change. A person approves the saved request before it reaches the LMS.
 
-Then show the decision: one saved request, reviewed by a person.
+**Know what was saved.** Fresh LMS evidence decides whether a result is verified, unconfirmed, or failed. In one Canvas sandbox, a lesson correction verified. A stale request failed before send. Student View returned 3/3 with feedback, and Grades plus an API read confirmed the result.
 
-Then show the saved results. In the current Canvas test, the approved lesson correction reached fresh readback. One phrase changed. The page title, URL, publication state, front-page state, and editing roles remained the same. The New Quiz comparison showed one scoring value and its update time changed; all other question fields stayed the same.
+**Keep your sign-in private.** Canvas sign-in stays in Chrome. Credentials stay out of assistant messages and saved records. Morrow blocks credential and learner fields from assistant output. Course content needed for the chosen request can still reach the selected assistant under its own account settings and data terms.
 
-Then show the learner sequence: published lesson, `Next Module Item`, three quiz questions, and the submitted sandbox result with three of three points and all feedback visible.
+**Choose how you work.** Morrow does not replace the assistant conversation. A compatible assistant can prepare the request while Morrow keeps review, approval, and checked results in one clear process.
 
-Then show the counterexample. A later stale proposal failed before send. The next read showed no page-body or update-time change.
+The source-review test used a manual adapter. The proof is selected Canvas sandbox evidence, not a claim about every platform, operation, learner flow, or learning outcome.
 
-That is the operating model: request → review → approval → saved result. It also has a truthful failure state.
-
-The source review in this clip uses a manual MCP host adapter. It is not native AI-client sampling proof. This is one selected sandbox route, not a claim about a full Canvas catalog, every learner flow, or learning effectiveness.
-
-Morrow is a private development preview. The public preview will follow only after the current proof and delivery gates close.
+Morrow is a private development preview. The public preview can follow only after the current proof and delivery gates close.
 
 ## LinkedIn post 3 — Practical lesson
 
-**Visual:** A five-part evidence chain: source → bound target → reviewed change → saved result → learner experience. Use a sixth, smaller branch from review: `stale? stop and re-read`.
+**Visual:** Four questions on a clear card. Add a small fifth badge: `stale? stop and read again`.
 
-When AI helps with a course, ask five questions before you call the work finished:
+When AI assistance helps with a course, ask four questions before you call the work finished:
 
-1. What source supports the change?
-2. Which account, course, and record will change?
-3. What does the reviewer approve exactly?
-4. What fresh LMS read proves the intended result and preserved settings?
-5. What learner-path check proves the work is usable?
+1. Can a person see and approve the exact course change before it takes effect?
+2. What fresh LMS evidence proves the saved result?
+3. Where do the Canvas sign-in, course text, and learner data go during the request?
+4. Can the team use a compatible assistant without giving that assistant authority over the course change?
 
-This method applies across learning platforms. The provider changes the setup and available operation. The evidence standard stays the same.
+In Morrow, those questions become four commitments: review before you approve, know what was saved, keep your sign-in private, and choose how you work.
 
-For Canvas, Morrow uses a signed-in Chrome connection. Moodle and Blackboard use separate private API connections. Each provider needs its own scope and its own proof.
+The platform still matters. Canvas uses a signed-in Chrome session. Moodle and Blackboard use separate private API connections. Each platform and assistant route needs its own evidence.
 
-The practical rule is simple: do not turn a generated draft into a completed course change until the evidence chain is complete.
+One selected Canvas sandbox showed a corrected lesson, a stopped stale request, and a 3/3 Student View result confirmed by Grades and API. That is useful proof. It is not a claim that every LMS or course workflow is verified.
 
-Morrow is the development preview I am building around that rule. The framework is useful with or without Morrow.
+The practical rule is simple: do not call a generated draft a completed course change until the team can control it and check the saved result.
 
-## 60-second proof video script
+## Optional 60-second narrated follow-up
 
-**0–12 seconds — Source and target**
+**0–08 seconds — The promise**
 
-On-screen: Sanitized account, course, provider, and page labels lock into one operation card. A source quote sits beside the conflicting lesson sentence. No IDs, learner names, or secrets.
+On-screen: `Move course work forward. Stay in control.` Then four cards: `Review before you approve.` · `Know what was saved.` · `Keep your sign-in private.` · `Choose how you work.`
 
-Voice: “An AI draft is not yet a course operation. Morrow binds the source, account, course, provider, and exact target.”
+Voice: “Morrow gives course teams a clear way to use AI assistance without losing control of the work.”
 
-Lower third: `Selected Canvas sandbox evidence · source review uses a manual MCP host adapter`
+**08–20 seconds — Review before you approve**
 
-**12–22 seconds — Readable approval**
+On-screen: One readable change card. The course, page, current wording, proposed wording, and preserved conditions are visible before approval.
 
-On-screen: Local review with the exact before/after and preserved page fields. A person selects one approval control.
+Voice: “Review the exact course change before it takes effect.”
 
-Voice: “The review makes the source and change readable. A person approves one saved request.”
+**20–32 seconds — Know what was saved**
 
-**22–34 seconds — Saved corrections**
+On-screen: The same card returns from Canvas as `saved and checked`. A second card ends `stopped before change` with `saved page unchanged`.
 
-On-screen: Fresh Canvas lesson readback highlights the corrected phrase and the preserved title, URL, publication state, front-page state, and editing roles. Cut to the New Quiz diff: `scoring value changed` and `all other fields unchanged`.
+Voice: “Morrow checks what the LMS saved. A stale request can stop before it changes anything.”
 
-Voice: “Fresh readback confirmed the lesson correction. The quiz check confirmed one intended scoring value changed while the other question fields stayed the same.”
+**32–43 seconds — Keep your sign-in private**
 
-**34–47 seconds — Learner result**
+On-screen: A local review beside a signed-in Chrome Canvas icon. Labels read `Credentials stay in Chrome` and `Course content can be shared only for the selected assistant request`.
 
-On-screen: Published lesson → `Next Module Item` → three quiz questions → sanitized result panel: `3/3 · feedback shown`. Do not show the learner name.
+Voice: “Canvas sign-in stays in Chrome. The selected course content needed for a request can still reach the assistant you choose.”
 
-Voice: “In Canvas Student View, the corrected lesson led to the quiz. All three questions appeared. The submitted sandbox result showed three of three points and all feedback.”
+**43–52 seconds — Choose how you work**
 
-**47–60 seconds — Safe refusal and scope**
+On-screen: A compatible assistant sends one request to a Morrow review card. The educator makes the final approval decision.
 
-On-screen: A separate request receives `stale change` then `failed before send`. Cut to the unchanged page body and update time. End with `Selected Canvas sandbox evidence · Moodle and Blackboard: API/test scope`.
+Voice: “Choose the assistant that fits the task. Morrow keeps the review and checked-result process clear.”
 
-Voice: “A later stale request did not send, and the next read showed no page change. Morrow keeps evidence specific to each provider and each operation.”
+**52–60 seconds — Selected proof**
+
+On-screen: `Selected Canvas sandbox: correction verified · stale request stopped · Student View 3/3 confirmed by Grades + API`.
+
+Voice: “This is selected Canvas evidence. Each platform and assistant route needs its own proof.”
 
 End card: `Morrow · Private development preview`
 
-## 20-second proof teaser
+## Optional 20-second proof teaser
 
 **0–04 seconds**
 
-On-screen: `A draft is not yet a course operation.`
+On-screen: `Review before you approve. · Know what was saved.`
 
-Voice: “A course change needs more than generated text.”
+Voice: “Course teams need control and a checked saved result.”
 
 **04–08 seconds**
 
-On-screen: Source quote → bound course target → exact before/after.
+On-screen: `Keep your sign-in private. · Choose how you work.`
 
-Voice: “Bind the work. Review the exact change.”
+Voice: “Morrow keeps the sign-in boundary clear and supports a compatible assistant.”
 
 **08–13 seconds**
 
-On-screen: One approval, then fresh lesson and quiz readbacks with `verified`.
+On-screen: `Approve the saved request` → `Read the LMS again`.
 
-Voice: “Approve one saved request. Then read the LMS again.”
+Voice: “Approve the exact change. Then check what the LMS saved.”
 
 **13–17 seconds**
 
-On-screen: Published lesson → quiz → `3/3 · feedback shown`.
+On-screen: `Selected Canvas sandbox · correction verified`.
 
-Voice: “Then follow the selected sandbox learner route.”
+Voice: “One Canvas sandbox correction was saved and checked.”
 
 **17–20 seconds**
 
-On-screen: `stale change` → `failed before send` → `page unchanged`.
+On-screen: `Stale request stopped · Student View 3/3 confirmed`.
 
-Voice: “If the request is stale, stop it before send.”
+Voice: “The stale request stopped, and Student View reached 3/3.”
 
 ## Production rules
 
-- Use only current test-course recordings and statuses established by a receipt.
-- Show the verified lesson correction, narrow quiz-key correction, module links, publication, and Student View route as one selected sandbox sequence.
-- Mark the source review as manual-adapter evidence.
+- Label the main animated launch film as illustrative. Use only current test-course recordings and receipt-backed statuses in any separate live-proof clip.
+- Lead with the four commitments. Use the selected Canvas sandbox only as concise proof.
+- State that the source review used a manual adapter.
 - State that the selected sandbox sequence does not establish a full Canvas catalog, every learner flow, whole-release verification, or learning effectiveness.
-- Do not show learner names, grades, identifiers, tokens, secrets, or raw technical logs.
-- Do not imply live Moodle or Blackboard tenant proof, native AI-client sampling, automatic educational correction, or public availability.
+- Do not show real learner names, grades, identifiers, tokens, secrets, or raw logs. Label the selected sandbox score as test evidence.
+- Do not imply live Moodle or Blackboard tenant proof, all course content stays local, zero risk, automatic assistant sampling, support for every assistant configuration, automatic teaching judgment, or public availability.

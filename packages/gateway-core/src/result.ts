@@ -47,37 +47,37 @@ function canonicalContent(
   if (input.effectState === "awaiting_approval") {
     return [{
       type: "text",
-      text: "Morrow prepared this change and is waiting for approval. Ask your AI app to check the existing request.",
+      text: "Morrow prepared this change and is waiting for approval. Ask your assistant to check the existing request.",
     }];
   }
   if (input.effectState === "awaiting_inner_approval") {
     return [{
       type: "text",
-      text: "Morrow is waiting for another required approval. Ask your AI app to check the existing request.",
+      text: "Morrow is waiting for another required approval. Ask your assistant to check the existing request.",
     }];
   }
   if (input.effectState === "approved") {
     return [{
       type: "text",
-      text: `This change is approved and waiting to be sent to ${provider}. Ask your AI app to check the existing request.`,
+      text: `This change is approved and waiting to be sent to ${provider}. Ask your assistant to check the existing request.`,
     }];
   }
   if (input.effectState === "dispatching") {
     return [{
       type: "text",
-      text: `Morrow is sending this change to ${provider}. Ask your AI app to check the existing request. Do not repeat this change.`,
+      text: `Morrow is sending this change to ${provider}. Ask your assistant to check the existing request. Do not repeat this change.`,
     }];
   }
   if (input.effectState === "awaiting_verification") {
     return [{
       type: "text",
-      text: "Morrow could not confirm this change. Ask your AI app to check the existing request. Do not repeat this change.",
+      text: "Morrow could not confirm this change. Ask your assistant to check the existing request. Do not repeat this change.",
     }];
   }
   if (input.effectState === "applied_or_unknown") {
     return [{
       type: "text",
-      text: `Morrow cannot confirm the result. ${provider} may have received this change. Ask your AI app to check the existing request. Do not repeat this change.`,
+      text: `Morrow cannot confirm the result. ${provider} may have received this change. Ask your assistant to check the existing request. Do not repeat this change.`,
     }];
   }
   if (input.effectState === "cancelled") {
@@ -89,7 +89,7 @@ function canonicalContent(
   if (input.effectState === "failed") {
     return [{
       type: "text",
-      text: "This request did not complete. Ask your AI app to check the existing request.",
+      text: "This request did not complete. Ask your assistant to check the existing request.",
     }];
   }
   return Array.isArray(upstream.content)
