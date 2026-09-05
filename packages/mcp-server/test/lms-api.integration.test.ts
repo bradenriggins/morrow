@@ -44,6 +44,7 @@ describe("Moodle and Blackboard controlled changes", () => {
       const html = await page.text();
       expect(html).toContain(`Biology · ${platform}`);
       expect(html).toContain(`checks them in ${platform}`);
+      expect(html).toContain("Current content and values");
       expect(html).not.toContain("<dt>Expected digest</dt>");
       const nonce = /name="nonce" value="([^"]+)"/.exec(html)?.[1];
       const cookie = page.headers.get("set-cookie")!.split(";", 1)[0]!;

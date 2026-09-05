@@ -26,7 +26,7 @@ import {
   type JsonObject,
 } from "@morrow/contracts";
 import type { GatewayConfig } from "./config.js";
-import { LoopbackApprovalServer, operationStatus } from "./approval-server.js";
+import { LoopbackApprovalServer, operationStatus, reviewPlatform } from "./approval-server.js";
 import { GatewayRuntime } from "./runtime.js";
 import { BatchWindowScheduler } from "./batch-window-scheduler.js";
 
@@ -771,11 +771,13 @@ export class MorrowRuntime {
   batchApprovalStatus(batchId: string): JsonObject {
     const batch = this.batches.getBatch(batchId);
     const states: Record<string, string> = {};
+    const tools = new Set<string>();
     let confirmedChildren = 0;
     let offset = 0;
     for (;;) {
       const page = this.batches.listChildren(batchId, offset, 500);
       for (const child of page.children) {
+        tools.add(child.publicToolName);
         if (child.gatewayOperationState === "verified") confirmedChildren += 1;
         states[String(child.ordinal - 1)] = operationStatus(
           child.state === "pending" ? "awaiting_approval"
@@ -783,6 +785,7 @@ export class MorrowRuntime {
               : child.state === "cancelled" ? "cancelled"
                 : child.state === "failed" ? "failed"
                   : child.gatewayOperationState || child.state,
+          reviewPlatform([child.publicToolName]),
         );
       }
       if (page.nextOffset === null) break;
@@ -790,6 +793,7 @@ export class MorrowRuntime {
     }
     return {
       schema: "morrow.batch-approval-status.v1",
+      platform: reviewPlatform([...tools]),
       batch,
       totalChildren: batch.totalChildren,
       confirmedChildren,

@@ -191,7 +191,21 @@ const approvalSnapshot = {
     changedFields: ["item_entry_title", "item_entry_item_body", "item_points_possible"],
     targetSet: { count: 1, digest: "b".repeat(64) },
     risk: { approvalClass: "standard" },
-    arguments: { course_id: "42", assignment_id: "77", item_entry_title: "Red blood cell function", item_entry_item_body: "<p>What is the main function of red blood cells?</p>", item_points_possible: 5 },
+    arguments: {
+      course_id: "42", assignment_id: "77", item_entry_type: "Item", item_entry_title: "Red blood cell function",
+      item_entry_item_body: "<p>A patient has a low red blood cell count. Which essential function is most directly affected?</p>", item_points_possible: 5,
+      item_entry_interaction_type_slug: "choice", item_entry_scoring_algorithm: "Equivalence",
+      item_entry_interaction_data: { choices: [
+        { id: "11111111-1111-4111-8111-111111111111", position: 1, item_body: "<p>Carry <strong>oxygen</strong> from the lungs to the body.</p>" },
+        { id: "22222222-2222-4222-8222-222222222222", position: 2, item_body: "<p>Defend the body against infection.</p>" },
+        { id: "33333333-3333-4333-8333-333333333333", position: 3, item_body: "<p>Help the blood clot.</p>" },
+        { id: "44444444-4444-4444-8444-444444444444", position: 4, item_body: "<p>Produce antibodies.</p>" },
+      ] },
+      item_entry_scoring_data: { value: "11111111-1111-4111-8111-111111111111" },
+      item_entry_feedback_correct: "<p><strong>Yes.</strong> Hemoglobin in red blood cells binds oxygen and carries it to the tissues.</p>",
+      item_entry_feedback_incorrect: "<p>Think about <strong>hemoglobin</strong>. White blood cells help fight infection; platelets help with clotting.</p>",
+      item_entry_answer_feedback: { "33333333-3333-4333-8333-333333333333": "<p>Platelets perform this function, not red blood cells.</p>" },
+    },
     readback: { tool: "canvas_get_quiz_item", expectedDigest: "c".repeat(64) },
   },
 };
@@ -207,15 +221,33 @@ const batchSnapshot = () => ({
     { operation: { ...approvalSnapshot, state: batchOperationState, operationId: "op:second-batch-item", plan: { ...approvalSnapshot.plan, tool: "canvas_delete_quiz_item", risk: { approvalClass: "destructive" }, arguments: { course_id: "84", assignment_id: "99", item_id: "19" } } } },
   ],
 });
+const largeBatchSnapshot = () => ({ batch: { state: "planned" }, expiresAt: approvalSnapshot.approvalExpiresAt,
+  children: Array.from({ length: 40 }, (_, index) => ({ operation: { ...approvalSnapshot, operationId: `op:bulk-${index + 1}`, plan: { ...approvalSnapshot.plan, arguments: { ...approvalSnapshot.plan.arguments, item_entry_title: `Blood and circulation — question ${index + 1}` } } } })),
+});
+const mixedBatchSnapshot = () => ({ batch: { state: "planned" }, expiresAt: approvalSnapshot.approvalExpiresAt, children: [
+  { operation: { ...approvalSnapshot, operationId: "op:assignment-preview", plan: { ...approvalSnapshot.plan, tool: "canvas_create_assignment", arguments: { course_id: "42", assignment_name: "Patient education plan", assignment_description: "<h3>Your task</h3><p>Write a clear explanation of <strong>oxygen transport</strong> for a patient.</p><ul><li>Use plain language.</li><li>Include one example.</li></ul>", assignment_due_at: "2026-09-08T17:00:00Z", assignment_points_possible: 0, assignment_published: false } } } },
+  { operation: { ...approvalSnapshot, operationId: "op:discussion-preview", plan: { ...approvalSnapshot.plan, tool: "canvas_create_new_discussion_topic_courses", arguments: { course_id: "42", title: "What would you tell the patient?", message: "<p>Explain why a patient with anemia might feel tired.</p><blockquote>Respond to one classmate with a question that deepens the discussion.</blockquote>", require_initial_post: true, published: false } } } },
+  { operation: { ...approvalSnapshot, operationId: "op:moodle-preview", plan: { ...approvalSnapshot.plan, tool: "moodle_update_course_summary", arguments: { connection_id: "moodle-test", course_id: 17, summary: "<h3>Welcome to Biology</h3><p>Explore how <em>structure supports function</em>.</p>", expected_digest: "d".repeat(64), expected_connection: "e".repeat(64) } } } },
+  { operation: { ...approvalSnapshot, operationId: "op:blackboard-preview", plan: { ...approvalSnapshot.plan, tool: "blackboard_update_content", arguments: { connection_id: "blackboard-test", course_id: "_12_1", content_id: "_34_1", title: "Cell structure", body: "<h3>From cells to systems</h3><p>Start with the cell membrane, then follow oxygen into the tissues.</p>", expected_digest: "d".repeat(64), expected_connection: "e".repeat(64) } } } },
+  { operation: { ...batchSnapshot().children[1].operation, state: "awaiting_approval" } },
+] });
 const operationApproval = new LoopbackApprovalServer({
   operationGet: (id) => ({ ...approvalSnapshot, operationId: id,
     state: approvalStates.get(id) || approvalSnapshot.state,
     ...(id === "op:page-edit" ? { plan: { ...approvalSnapshot.plan, tool: "canvas_update_create_page_courses", arguments: { course_id: "42", url_or_id: "lesson", _morrow: { page_guard: { find_text: "Cells have membranes.", replace_text: "Cells have protective membranes." } } } } } : {}),
+    ...(id === "op:short-preview" ? { plan: { ...approvalSnapshot.plan, arguments: { course_id: "42", assignment_id: "77", item_entry_title: "Red blood cell function", item_entry_item_body: "<p>What is the main function of red blood cells?</p>", item_points_possible: 5 } } } : {}),
+    ...(id === "op:lesson-preview" ? { plan: { ...approvalSnapshot.plan, tool: "canvas_update_create_page_courses", arguments: { course_id: "42", url_or_id: "lesson", wiki_page_body: '<h2>Blood has a job to do.</h2><p>Every heartbeat moves a living transport system through your body. Its parts work together to deliver oxygen, respond to infection, and limit blood loss.</p><h3>Three parts. Three essential roles.</h3><table><caption>Blood components at a glance</caption><thead><tr><th scope="col">Component</th><th scope="col">Main role</th></tr></thead><tbody><tr><td><strong>Red blood cells</strong></td><td>Carry oxygen to tissues</td></tr><tr><td><strong>White blood cells</strong></td><td>Help defend against infection</td></tr><tr><td><strong>Platelets</strong></td><td>Help form blood clots</td></tr></tbody></table><blockquote><p><strong>Make the connection</strong><br>If red blood cell levels fall, less oxygen may reach the tissues. How might that affect a patient during exercise?</p></blockquote><h3>Before you move on</h3><ol><li>Explain the role of hemoglobin.</li><li>Distinguish oxygen transport from clotting.</li><li>Use those differences to explain one patient symptom.</li></ol>' } } } : {}),
+    ...(id === "op:unsafe-preview" ? { plan: { ...approvalSnapshot.plan, arguments: { ...approvalSnapshot.plan.arguments, item_entry_item_body: '<p>Safe lesson content.</p><script>window.previewEscaped=true;fetch("/unexpected-write",{method:"POST"})</script><style>body{display:none}</style><img src="https://invalid.example/track" onerror="window.previewEscaped=true" alt="Illustration"><iframe src="/operations"></iframe><form action="/unexpected-write"><input name="nonce"><button>Injected approval</button></form><a href="javascript:alert(1)">Read more</a><meta http-equiv="refresh" content="0;url=https://invalid.example/"><svg onload="window.previewEscaped=true"><foreignObject><div>Untrusted embedded content</div></foreignObject></svg>' } } } : {}),
     ...(id === "op:expired-ui-test" ? { approvalExpiresAt: new Date(Date.now() - 60_000).toISOString() } : {}),
+    ...(id === "op:unnamed-file" ? { plan: { ...approvalSnapshot.plan, tool: "canvas_delete_file", arguments: { id: "88" }, risk: { approvalClass: "destructive" } } } : {}),
   }),
   operationReviewContext: async (id) => ({ targets: id === "op:missing-names"
     ? [{ field: "course_id", label: "Course", name: "" }, { field: "assignment_id", label: "Quiz", name: "" }]
-    : id === "op:page-edit" ? [{ field: "course_id", label: "Course", name: "Introduction to Human Biology" }, { field: "url_or_id", label: "Page", name: "Cell structure" }]
+    : id === "op:unnamed-file" ? []
+    : ["op:assignment-preview", "op:discussion-preview"].includes(id) ? [{ field: "course_id", label: "Course", name: "Introduction to Human Biology" }]
+    : id === "op:moodle-preview" ? [{ field: "connection_id", label: "Connection", name: "Moodle test school" }, { field: "course_id", label: "Course", name: "Biology in Moodle" }]
+    : id === "op:blackboard-preview" ? [{ field: "connection_id", label: "Connection", name: "Blackboard test school" }, { field: "course_id", label: "Course", name: "Biology in Blackboard" }, { field: "content_id", label: "Lesson", name: "Cell structure" }]
+    : ["op:page-edit", "op:lesson-preview"].includes(id) ? [{ field: "course_id", label: "Course", name: "Introduction to Human Biology" }, { field: "url_or_id", label: "Page", name: "Blood and circulation" }]
     : id === "op:second-batch-item" ? [
       { field: "course_id", label: "Course", name: "Human Anatomy", url: "https://canvas.example.edu/courses/84" },
       { field: "assignment_id", label: "Quiz", name: "Week 2: Bones and Muscles", url: "https://canvas.example.edu/courses/84/assignments/99" },
@@ -239,7 +271,7 @@ const operationApproval = new LoopbackApprovalServer({
     approvalStates.set(id, "cancelled");
     return { ...approvalSnapshot, state: "cancelled" };
   },
-  batchApprovalGet: batchSnapshot,
+  batchApprovalGet: (id) => id === "batch-large-preview" ? largeBatchSnapshot() : id === "batch-mixed-preview" ? mixedBatchSnapshot() : batchSnapshot(),
   batchApprovalStatus: () => ({
     batch: { state: batchState }, totalChildren: 2,
     confirmedChildren: batchState === "completed" ? 2 : 0,
@@ -284,14 +316,28 @@ try {
   await operationApprovalPage.getByRole("heading", { name: "Add this quiz question?" }).waitFor();
   await operationApprovalPage.getByRole("link", { name: "Introduction to Human Biology", exact: false }).waitFor();
   await operationApprovalPage.getByRole("button", { name: "Add this question" }).waitFor();
-  assert.equal(await operationApprovalPage.locator("details").getAttribute("open"), null);
+  assert.equal(await operationApprovalPage.locator(".decision details").getAttribute("open"), null);
   assert.equal(await operationApprovalPage.locator(".destination").innerText().then((text) => text.includes("Week 3: Blood and Circulation")), true);
   assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Course ID|Assignment ID|Evidence question/);
-  assert.match(await operationApprovalPage.locator(".request").innerText(), /Red blood cell function/);
-  assert.equal(await operationApprovalPage.locator("iframe.text-preview").getAttribute("sandbox"), "");
-  await operationApprovalPage.frameLocator("iframe.text-preview").getByText("What is the main function of red blood cells?").waitFor();
+  assert.match(await operationApprovalPage.locator(".question-heading").innerText(), /Red blood cell function/);
+  assert.equal(await operationApprovalPage.locator(".answer-option").count(), 4);
+  assert.equal(await operationApprovalPage.getByText("Marked correct", { exact: true }).count(), 1);
+  await operationApprovalPage.getByRole("region", { name: "Question text preview" }).getByText("A patient has a low red blood cell count.", { exact: false }).waitFor();
+  await operationApprovalPage.getByText("Feedback students will see", { exact: true }).click();
   await captureThemes(operationApprovalPage, "approval-operation");
   await captureThemes(operationApprovalPage, "approval-operation-narrow", 320);
+  await operationApprovalPage.getByRole("button", { name: "Try the question" }).click();
+  await operationApprovalPage.getByRole("radio", { name: "Help the blood clot." }).check();
+  await operationApprovalPage.getByRole("button", { name: "Check answer" }).click();
+  await operationApprovalPage.getByText("This does not match the answer key. You can try again.", { exact: true }).waitFor();
+  assert.match(await operationApprovalPage.locator(".practice-result").innerText(), /Platelets perform this function/);
+  await operationApprovalPage.getByRole("radio", { name: "Carry oxygen from the lungs to the body." }).check();
+  await operationApprovalPage.getByRole("button", { name: "Check answer" }).click();
+  await operationApprovalPage.getByText("This matches the answer key.", { exact: true }).waitFor();
+  await captureThemes(operationApprovalPage, "approval-try-question");
+  await captureThemes(operationApprovalPage, "approval-try-question-narrow", 320);
+  assert.equal(approvalStates.size, 0, "trying a question must not approve or execute it");
+  await operationApprovalPage.getByRole("button", { name: "Answer key", exact: true }).click();
   await operationApprovalPage.getByRole("button", { name: "Add this question" }).click();
   await operationApprovalPage.getByRole("heading", { name: "Applying your changes" }).waitFor();
   assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Continue/);
@@ -302,11 +348,12 @@ try {
   await captureThemes(operationApprovalPage, "approval-confirmed-narrow", 320);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/batches/batch-ui-test`);
   await operationApprovalPage.getByRole("heading", { name: "Check these 2 changes" }).waitFor();
-  assert.equal(await operationApprovalPage.locator(".request").count(), 2);
+  assert.equal(await operationApprovalPage.locator(".change-content").count(), 2);
   assert.equal(await operationApprovalPage.locator(".warning").innerText(), "This removes content. It cannot be undone from this screen.");
+  await operationApprovalPage.locator(".change-item > summary").nth(1).click();
   assert.match(await operationApprovalPage.locator(".destination").nth(1).innerText(), /Human Anatomy[\s\S]+Outdated practice question/);
   await captureThemes(operationApprovalPage, "approval-batch");
-  await operationApprovalPage.getByRole("button", { name: "Apply these changes" }).click();
+  await operationApprovalPage.getByRole("button", { name: "Apply all 2 changes" }).click();
   await operationApprovalPage.getByRole("heading", { name: "Applying your changes" }).waitFor();
   await operationApprovalPage.getByText("0 of 2 changes confirmed in Canvas.", { exact: true }).waitFor();
   finishBatchApproval();
@@ -315,6 +362,34 @@ try {
   assert.equal(await operationApprovalPage.getByRole("button", { name: "Stop remaining changes" }).count(), 0);
   await captureThemes(operationApprovalPage, "approval-batch-confirmed");
   await captureThemes(operationApprovalPage, "approval-batch-confirmed-narrow", 320);
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/batches/batch-large-preview`);
+  assert.equal(await operationApprovalPage.locator(".change-item:visible").count(), 10);
+  assert.equal(await operationApprovalPage.locator(".change-item[open]").count(), 0);
+  await operationApprovalPage.getByRole("button", { name: "Next", exact: true }).click();
+  await operationApprovalPage.getByText("Showing 11–20 of 40 changes", { exact: true }).waitFor();
+  await operationApprovalPage.getByLabel("Find a change").fill("question 40");
+  assert.equal(await operationApprovalPage.locator(".change-item:visible").count(), 1);
+  await operationApprovalPage.locator(".change-item:visible > summary").click();
+  await operationApprovalPage.locator(".change-item:visible").getByRole("button", { name: "Try the question" }).click();
+  await operationApprovalPage.locator(".change-item:visible").getByRole("radio", { name: "Help the blood clot." }).check();
+  assert.equal(await operationApprovalPage.getByRole("button", { name: "Apply all 40 changes" }).count(), 1);
+  assert.equal(batchState, "completed", "browsing the next group must not start it");
+  await captureThemes(operationApprovalPage, "approval-large-filtered");
+  await operationApprovalPage.getByLabel("Find a change").fill("");
+  await captureThemes(operationApprovalPage, "approval-large");
+  await captureThemes(operationApprovalPage, "approval-large-narrow", 360);
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/batches/batch-mixed-preview`);
+  assert.match(await operationApprovalPage.locator(".next-step").innerText(), /your learning platforms/);
+  assert.equal(await operationApprovalPage.locator(".change-item").count(), 5);
+  await operationApprovalPage.locator(".change-item > summary").first().click();
+  assert.equal(await operationApprovalPage.getByRole("region", { name: "Assignment instructions preview" }).count(), 1);
+  assert.match(await operationApprovalPage.locator(".change-item").first().innerText(), /Points\s+0[\s\S]+Visible to students\s+No/);
+  assert.equal(await operationApprovalPage.locator("time[datetime='2026-09-08T17:00:00Z']").count(), 1);
+  await captureThemes(operationApprovalPage, "approval-mixed");
+  await captureThemes(operationApprovalPage, "approval-mixed-narrow", 360);
+  await operationApprovalPage.getByLabel("Find a change").fill("patient");
+  assert.match(await operationApprovalPage.locator(".warning").innerText(), /removes content/);
+  assert.equal(await operationApprovalPage.getByRole("button", { name: "Apply all 5 changes" }).count(), 1);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Apage-edit`);
   await operationApprovalPage.getByRole("heading", { name: "Change this page text?" }).waitFor();
   assert.match(await operationApprovalPage.locator(".request").innerText(), /Current text[\s\S]*Cells have membranes\.[\s\S]*Replacement[\s\S]*Cells have protective membranes\./);
@@ -322,6 +397,25 @@ try {
   assert.doesNotMatch(await operationApprovalPage.locator("body").innerText(), /Course ID|Url or ID|page_guard/);
   await captureThemes(operationApprovalPage, "approval-page-correction");
   await captureThemes(operationApprovalPage, "approval-page-correction-narrow", 360);
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Ashort-preview`);
+  assert.ok((await operationApprovalPage.getByRole("region", { name: "Question text preview" }).boundingBox()).height < 90, "short text must not sit in a fixed-height box");
+  await captureThemes(operationApprovalPage, "approval-short");
+  await captureThemes(operationApprovalPage, "approval-short-narrow", 320);
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Alesson-preview`);
+  await operationApprovalPage.getByRole("table").waitFor();
+  await captureThemes(operationApprovalPage, "approval-lesson");
+  await captureThemes(operationApprovalPage, "approval-lesson-narrow", 360);
+  const unexpectedRequests = [];
+  const observeRequest = (request) => { if (/invalid\.example|unexpected-write/.test(request.url())) unexpectedRequests.push(request.url()); };
+  operationApprovalPage.on("request", observeRequest);
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aunsafe-preview`);
+  const safePreview = operationApprovalPage.getByRole("region", { name: "Question text preview" });
+  await safePreview.getByText("Safe lesson content.", { exact: true }).waitFor();
+  assert.equal(await safePreview.locator("script, style, iframe, form, input, button, meta, svg, [onerror], [href], [src]").count(), 0);
+  assert.equal(await operationApprovalPage.evaluate(() => window.previewEscaped), undefined);
+  assert.deepEqual(unexpectedRequests, []);
+  assert.equal(approvalStates.has("op:unsafe-preview"), false);
+  operationApprovalPage.off("request", observeRequest);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Amissing-names`);
   assert.equal(await operationApprovalPage.getByRole("button", { name: "Add this question" }).count(), 0);
   assert.match(await operationApprovalPage.locator("body").innerText(), /could not identify the course or activity/);
@@ -334,6 +428,13 @@ try {
     headers: { origin: new URL(blockedReviewUrl).origin, referer: blockedReviewUrl },
   });
   assert.equal(blockedApproval.status(), 409);
+  await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aunnamed-file`);
+  assert.equal(await operationApprovalPage.getByRole("button", { name: "Apply this change" }).count(), 0);
+  const fileReviewUrl = operationApprovalPage.url();
+  const fileNonce = await operationApprovalPage.locator('input[name="nonce"]').inputValue();
+  const refusedFile = await operationApprovalPage.request.post(`${fileReviewUrl}/approve`, { form: { nonce: fileNonce }, headers: { origin: new URL(fileReviewUrl).origin, referer: fileReviewUrl } });
+  assert.equal(refusedFile.status(), 409);
+  assert.equal(approvalStates.has("op:unnamed-file"), false);
   await operationApprovalPage.goto(`${operationApprovalBaseUrl}/operations/op%3Aexpired-ui-test`);
   await operationApprovalPage.getByRole("heading", { name: "This review has expired" }).waitFor();
   assert.equal(await operationApprovalPage.locator("button").count(), 0);

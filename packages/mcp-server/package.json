@@ -29,12 +29,14 @@
     "@morrow/gateway-core": "workspace:*",
     "@morrow/operation-journal": "workspace:*",
     "@morrow/upstream-mcp": "workspace:*",
+    "sanitize-html": "2.17.7",
     "zod": "^4.2.0"
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.0.0",
     "@morrow/bridge-protocol": "workspace:*",
     "@morrow/canvas-api-catalog": "workspace:*",
+    "@types/sanitize-html": "2.16.1",
     "@types/ws": "^8.18.1",
     "ws": "^8.18.3"
   }

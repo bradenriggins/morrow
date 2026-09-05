@@ -56,6 +56,8 @@ describe("Morrow stdio entry", () => {
 
     try {
       await client.connect(transport);
+      expect(client.getInstructions()).toContain("existing document, PDF, contacts, email, and storage tools/skills");
+      expect(client.getInstructions()).toContain("Morrow approval does not approve email");
       const listed = await client.listTools();
       expect(listed.tools.some((tool) => tool.name === "canvas_page_get")).toBe(true);
       expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([

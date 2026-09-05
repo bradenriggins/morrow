@@ -17,6 +17,7 @@ export interface ApprovalReviewContext {
     readonly url?: string;
   }[];
   readonly limited?: boolean;
+  readonly current?: JsonObject;
 }
 
 export type ApprovalReviewReadCache = Map<string, Promise<JsonObject | null>>;
@@ -253,6 +254,26 @@ function resourceSpec(
       courseId,
     };
   }
+  if (family === "discussion_topics" && courseId && exactId(args.topic_id)) {
+    const id = exactId(args.topic_id)!;
+    return { field: "topic_id", label: "Discussion", id,
+      readTool: "canvas_get_single_topic_courses", readArguments: { course_id: courseId, topic_id: id },
+      entityId: (value) => sameId(value.id, id), nameFields: ["title"],
+      urlPath: ["courses", courseId, "discussion_topics", id], courseId };
+  }
+  if (family === "files" && exactId(args.id) && ["canvas_delete_file", "canvas_update_file"].includes(mapping.upstreamName)) {
+    const id = exactId(args.id)!;
+    return { field: "id", label: "File", id,
+      readTool: "canvas_get_file_files", readArguments: { id },
+      entityId: (value) => sameId(value.id, id), nameFields: ["display_name", "filename"],
+      ...(courseId ? { urlPath: ["courses", courseId, "files", id], courseId } : {}) };
+  }
+  if (family === "rubrics" && courseId && exactId(args.id) && ["canvas_update_single_rubric", "canvas_delete_single"].includes(mapping.upstreamName)) {
+    const id = exactId(args.id)!;
+    return { field: "id", label: "Rubric", id,
+      readTool: "canvas_get_single_rubric_courses", readArguments: { course_id: courseId, id },
+      entityId: (value) => sameId(value.id, id), nameFields: ["title"], courseId };
+  }
   if (family === "modules" && courseId && moduleId) {
     return {
       field: exactId(args.module_id) ? "module_id" : "id",
@@ -278,6 +299,17 @@ function resourceSpec(
     };
   }
   return null;
+}
+
+function moduleItemSpec(mapping: CatalogTool, args: JsonObject, courseId: string | null): TargetSpec | null {
+  const moduleId = exactId(args.module_id);
+  const id = exactId(args.id);
+  if (mapping.capability?.family !== "modules" || !courseId || !moduleId || !id
+    || !["canvas_update_module_item", "canvas_delete_module_item"].includes(mapping.upstreamName)) return null;
+  return { field: "id", label: "Module item", id,
+    readTool: "canvas_show_module_item", readArguments: { course_id: courseId, module_id: moduleId, id },
+    entityId: (value) => sameId(value.id, id) && (value.module_id === undefined || sameId(value.module_id, moduleId)),
+    nameFields: ["title"], courseId };
 }
 
 function questionSpec(
@@ -324,6 +356,16 @@ function resolvedTarget(
   };
 }
 
+function currentContent(args: JsonObject, value: JsonObject): JsonObject {
+  const fields: Record<string, string> = {
+    wiki_page_body: "body", wiki_page_title: "title", wiki_page_published: "published",
+    assignment_description: "description", assignment_name: "name", assignment_points_possible: "points_possible",
+    assignment_due_at: "due_at", assignment_unlock_at: "unlock_at", assignment_lock_at: "lock_at", assignment_published: "published",
+    quiz_instructions: "instructions", quiz_title: "title", body: "body", summary: "summary", title: "title", message: "message", published: "published",
+  };
+  return Object.fromEntries(Object.entries(fields).flatMap(([field, source]) => field in args && Object.hasOwn(value, source) ? [[field, value[source]!]] : []));
+}
+
 export async function resolveApprovalReviewContext(
   input: ApprovalReviewContextInput,
 ): Promise<ApprovalReviewContext> {
@@ -348,7 +390,9 @@ export async function resolveApprovalReviewContext(
       || (operation.state === "awaiting_approval" && (result.snapshot_digest !== args.expected_digest || result.connection_digest !== args.expected_connection))) {
       return { targets: [], ...(read.limited ? { limited: true } : {}) };
     }
-    return { targets: result.targets.filter(isJsonObject).flatMap((target) => {
+    const data = object(result.data) || {};
+    const current = operation.state === "awaiting_approval" ? currentContent(args, object(data.content) || data) : {};
+    return { ...(Object.keys(current).length ? { current } : {}), targets: result.targets.filter(isJsonObject).flatMap((target) => {
       const field = exactText(target.field);
       const label = exactText(target.label);
       const name = exactText(target.name);
@@ -360,9 +404,11 @@ export async function resolveApprovalReviewContext(
   const mapping = operationTool(operation, tools);
   if (!args || !mapping) return { targets: [] };
 
-  const courseId = exactId(args.course_id);
+  const courseField = "course_id" in args ? "course_id"
+    : ["canvas_update_course", "canvas_add_course_to_favorites", "canvas_remove_course_from_favorites"].includes(mapping.upstreamName) ? "id" : null;
+  const courseId = courseField ? exactId(args[courseField]) : null;
   const course = courseId ? {
-    field: "course_id",
+    field: courseField!,
     label: "Course",
     id: courseId,
     readTool: "canvas_get_single_course_courses",
@@ -373,7 +419,8 @@ export async function resolveApprovalReviewContext(
   } satisfies TargetSpec : null;
   const resource = resourceSpec(mapping, args, courseId);
   const question = questionSpec(mapping, args, courseId);
-  const expected = [course, resource, question].filter((target): target is TargetSpec => target !== null);
+  const moduleItem = moduleItemSpec(mapping, args, courseId);
+  const expected = [course, resource, question, moduleItem].filter((target): target is TargetSpec => target !== null);
   if (expected.length === 0) return { targets: [] };
 
   const bindingTool = exactSourceTool(tools, operation.sourceId, "morrow_canvas_bindings", false);
@@ -396,7 +443,12 @@ export async function resolveApprovalReviewContext(
     });
     return [target, response] as const;
   }));
+  const resourceResult = results.find(([target]) => target === resource);
+  const entity = resourceResult?.[1].result ? canvasEntity(resourceResult[1].result) : null;
+  const current = resourceResult && entity && resolvedTarget(resourceResult[0], resourceResult[1].result, origin).name
+    && operation.state === "awaiting_approval" ? currentContent(args, entity) : {};
   return {
+    ...(Object.keys(current).length ? { current } : {}),
     targets: results.map(([target, response]) => resolvedTarget(target, response.result, origin)),
     ...(results.some(([, response]) => response.limited) ? { limited: true } : {}),
   };

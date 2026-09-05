@@ -85,6 +85,22 @@ function connector(data: JsonObject): JsonObject {
 }
 
 describe("approval review context", () => {
+  it("resolves the exact file name before a file deletion", async () => {
+    const base = operation();
+    const deletion = { ...base, publicToolName: "canvas_delete_file", sourceToolName: "canvas_delete_file", plan: { ...base.plan,
+      tool: "canvas_delete_file", sourceTool: "canvas_delete_file", arguments: { id: "88", _morrow: { source_binding_id: sourceBindingId } } } };
+    const context = await resolveApprovalReviewContext({ operation: deletion,
+      tools: [...tools, tool("canvas_delete_file", "canvas_delete_file", false, "files"), tool("canvas_get_file_files", "canvas_get_file_files", true, "files")],
+      read: async (name, args) => {
+        if (name === "morrow_canvas_bindings") return { structuredContent: { schema: "morrow.canvas-bindings.v1", bindings: [{ sourceBindingId, provider: "canvas", runtimeVerified: true, origin: "https://school.instructure.com" }] } };
+        expect(name).toBe("canvas_get_file_files");
+        expect(args).toEqual({ id: "88", _morrow: { source_binding_id: sourceBindingId } });
+        return connector({ id: 88, display_name: "Week 4 study guide.pdf" });
+      },
+    });
+    expect(context.targets).toEqual([{ field: "id", label: "File", name: "Week 4 study guide.pdf" }]);
+  });
+
   it("uses the saved binding to resolve exact course and New Quiz names after completion", async () => {
     const calls: { publicName: string; args: Readonly<Record<string, unknown>> }[] = [];
     const context = await resolveApprovalReviewContext({

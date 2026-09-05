@@ -1,13 +1,12 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { brandHead, brandHeader, serveBrandAsset } from "@morrow/bridge-loopback";
 import type { ApprovalReviewContext, ApprovalReviewReadCache } from "./approval-context.js";
+import { escapeHtml, formattedTextPreview } from "./approval-preview.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
-const PREVIEW_STYLE = "body{margin:8px;font:14px/1.6 system-ui;overflow-wrap:anywhere}p:first-child{margin-top:0}";
-const PREVIEW_STYLE_HASH = createHash("sha256").update(PREVIEW_STYLE).digest("base64");
 
 export interface ApprovalOperationController {
   operationGet(operationId: string): JsonObject;
@@ -53,7 +52,7 @@ function sendHtml(response: ServerResponse, status: number, body: string, cookie
   response.writeHead(status, {
     "content-type": "text/html; charset=utf-8",
     "cache-control": "no-store",
-    "content-security-policy": `default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self' 'sha256-${PREVIEW_STYLE_HASH}'; img-src 'self'; font-src 'self'; frame-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+    "content-security-policy": "default-src 'none'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     "referrer-policy": "same-origin",
     "x-content-type-options": "nosniff",
     ...(cookie ? { "set-cookie": cookie } : {}),
@@ -61,20 +60,81 @@ function sendHtml(response: ServerResponse, status: number, body: string, cookie
   response.end(body);
 }
 
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#39;");
-}
-
 function pageShell(title: string, eyebrow: string, body: string, polling = false): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title>${brandHead}${polling ? '<script src="/review-status.js" defer></script>' : ""}</head><body><main class="wrap">${brandHeader}<article class="card" aria-label="${escapeHtml(eyebrow)}">${body}</article><p class="foot">This page opens only on your computer.</p></main></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title>${brandHead}<script src="/review-status.js" defer></script></head><body${polling ? ' data-polling="true"' : ""}><main class="wrap">${brandHeader}<article class="card" aria-label="${escapeHtml(eyebrow)}">${body}</article><p class="foot">This review stays on your computer.</p></main></body></html>`;
 }
 
-const STATUS_SCRIPT = `const status = document.getElementById("work-status");
+const STATUS_SCRIPT = `const changeList = document.querySelector(".change-list");
+if (changeList) {
+  const items = [...changeList.querySelectorAll(".change-item")];
+  const search = document.getElementById("change-search");
+  const previous = document.getElementById("changes-previous");
+  const next = document.getElementById("changes-next");
+  const count = document.getElementById("changes-count");
+  let page = 0;
+  const render = () => {
+    const query = search.value.trim().toLocaleLowerCase();
+    const matches = items.filter((item) => item.dataset.search.includes(query));
+    const visible = matches.slice(page * 10, (page + 1) * 10);
+    items.forEach((item) => { item.hidden = !visible.includes(item); });
+    count.textContent = matches.length ? "Showing " + (page * 10 + 1) + "–" + Math.min((page + 1) * 10, matches.length) + " of " + matches.length + " changes" : "No changes match your search.";
+    previous.disabled = page === 0;
+    next.disabled = (page + 1) * 10 >= matches.length;
+  };
+  search.addEventListener("input", () => { page = 0; render(); });
+  previous.addEventListener("click", () => { page = Math.max(0, page - 1); render(); });
+  next.addEventListener("click", () => { page += 1; render(); });
+  document.querySelector(".change-list-controls").hidden = false;
+  document.querySelector(".change-pagination").hidden = false;
+  render();
+}
+document.querySelectorAll(".question-preview").forEach((preview) => {
+  const modes = preview.querySelector(".preview-modes");
+  if (!modes) return;
+  modes.hidden = false;
+  const inputs = [...preview.querySelectorAll(".answer-input")];
+  const practice = preview.querySelector(".practice-actions");
+  const result = preview.querySelector(".practice-result");
+  const reset = () => {
+    inputs.forEach((input) => { input.checked = false; });
+    result.replaceChildren();
+    result.hidden = true;
+  };
+  inputs.forEach((input) => input.addEventListener("change", () => { result.replaceChildren(); result.hidden = true; }));
+  modes.querySelectorAll("button").forEach((button) => button.addEventListener("click", () => {
+    preview.dataset.mode = button.dataset.mode;
+    modes.querySelectorAll("button").forEach((mode) => mode.setAttribute("aria-pressed", String(mode === button)));
+    practice.hidden = button.dataset.mode !== "student";
+    reset();
+  }));
+  preview.querySelectorAll(".answer-option").forEach((option) => option.addEventListener("click", (event) => {
+    const input = option.querySelector("input");
+    if (preview.dataset.mode === "student" && event.target !== input && !event.target.closest("details")) input.click();
+  }));
+  preview.querySelector(".practice-reset").addEventListener("click", reset);
+  preview.querySelector(".practice-check").addEventListener("click", () => {
+    result.replaceChildren();
+    const message = document.createElement("p");
+    message.className = "practice-message";
+    if (!inputs.some((input) => input.checked)) message.textContent = "Choose an answer first.";
+    else {
+      const matches = inputs.every((input) => input.checked === (input.dataset.correct === "true"));
+      message.textContent = matches ? "This matches the answer key." : "This does not match the answer key. You can try again.";
+      result.append(message);
+      const feedback = preview.querySelector('[data-feedback="' + (matches ? "correct" : "incorrect") + '"] .formatted-preview');
+      if (feedback) result.append(feedback.cloneNode(true));
+      const general = preview.querySelector('[data-feedback="neutral"] .formatted-preview');
+      if (general) result.append(general.cloneNode(true));
+      inputs.filter((input) => input.checked).forEach((input) => {
+        const answerFeedback = input.closest("li").querySelector(".answer-feedback .formatted-preview");
+        if (answerFeedback) result.append(answerFeedback.cloneNode(true));
+      });
+    }
+    if (!result.contains(message)) result.append(message);
+    result.hidden = false;
+  });
+});
+const status = document.getElementById("work-status");
 const statusNodes = document.querySelectorAll("[data-operation-status]");
 async function refreshStatus() {
   try {
@@ -92,7 +152,7 @@ async function refreshStatus() {
     status.textContent = "Morrow cannot refresh this result. Reload this page to check it. Do not repeat the change.";
   }
 }
-if (status) void refreshStatus();`;
+if (status && document.body.dataset.polling === "true") void refreshStatus();`;
 
 function object(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
@@ -104,6 +164,41 @@ function readableName(value: string): string {
     blackboard_update_content: "Update the Blackboard lesson",
     summary: "Course description",
     body: "Lesson content",
+    canvas_create_page_courses: "Add this page",
+    canvas_update_create_page_courses: "Update this page",
+    canvas_update_create_front_page_courses: "Update the course home page",
+    canvas_create_assignment: "Add this assignment",
+    canvas_edit_assignment: "Update this assignment",
+    canvas_create_new_discussion_topic_courses: "Add this discussion",
+    canvas_update_topic_courses: "Update this discussion",
+    canvas_create_new_quiz: "Add this quiz",
+    canvas_update_single_quiz: "Update this quiz",
+    canvas_delete_file: "Remove this file",
+    canvas_update_file: "Update this file",
+    canvas_delete_single: "Remove this rubric",
+    canvas_update_single_rubric: "Update this rubric",
+    wiki_page_body: "Page content",
+    wiki_page_title: "Page title",
+    assignment_description: "Assignment instructions",
+    assignment_name: "Assignment name",
+    assignment_due_at: "Due date",
+    assignment_unlock_at: "Available from",
+    assignment_lock_at: "Available until",
+    assignment_points_possible: "Points",
+    assignment_submission_types: "Students submit",
+    assignment_published: "Visible to students",
+    wiki_page_published: "Visible to students",
+    wiki_page_notify_of_update: "Notify students",
+    published: "Visible to students",
+    delayed_post_at: "Post on",
+    require_initial_post: "Students post before seeing replies",
+    is_announcement: "Post as an announcement",
+    rubric_data: "Rubric criteria",
+    long_description: "Description",
+    points: "Points",
+    quiz_instructions: "Quiz instructions",
+    quiz_description: "Quiz description",
+    message: "Content preview",
     canvas_create_quiz_item: "Add a quiz question",
     canvas_update_quiz_item: "Update a quiz question",
     canvas_delete_quiz_item: "Delete a quiz question",
@@ -126,24 +221,109 @@ function readableName(value: string): string {
 
 function requestFields(request: JsonObject, omitted: readonly string[] = []): string {
   return Object.entries(request).filter(([key]) => key !== "_morrow" && !omitted.includes(key)).map(([key, value]) => {
-    const richText = ["item_entry_item_body", "question_question_text", "wiki_page_body", "assignment_description", "summary", "body"].includes(key) && typeof value === "string";
-    const preview = richText ? formattedTextPreview(readableName(key), value as string) : requestValue(value);
-    return `<div${richText ? ' class="rich-text"' : ""}><dt>${escapeHtml(readableName(key))}</dt><dd>${preview}</dd></div>`;
+    const richText = isRichText(key, value) || (Array.isArray(value) && value.some(isJsonObject));
+    return `<div${richText ? ' class="rich-text"' : ""}><dt>${escapeHtml(readableName(key))}</dt><dd>${fieldValue(key, value)}</dd></div>`;
   }).join("");
 }
 
-function formattedTextPreview(label: string, value: string): string {
-  const document = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'sha256-${PREVIEW_STYLE_HASH}'; form-action 'none'; base-uri 'none'"><meta name="color-scheme" content="light dark"><style>${PREVIEW_STYLE}</style></head><body>${value}</body></html>`;
-  const mediaNotice = /<(?:img|video|audio|iframe|embed|object)\b/i.test(value)
-    ? '<span class="preview-note">Images and videos are not loaded in this preview.</span>' : "";
-  return `<iframe class="text-preview" title="${escapeHtml(label)} preview" sandbox referrerpolicy="no-referrer" srcdoc="${escapeHtml(document)}"></iframe>${mediaNotice}`;
+function isRichText(key: string, value: unknown): value is string {
+  return typeof value === "string" && /(?:^|_)(?:body|description|instructions|message|summary|question_text|item_body|feedback|feedback_correct|feedback_incorrect|feedback_neutral)$/.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
+}
+
+function fieldValue(key: string, value: unknown): string {
+  if (key === "item_entry_answer_feedback" && isJsonObject(value)) return Object.entries(value).map(([id, content]) => `<section><p class="preview-label">Answer reference: ${escapeHtml(id)}</p>${typeof content === "string" ? formattedTextPreview("Answer feedback", content) : requestValue(content)}</section>`).join("");
+  if (isRichText(key, value)) return formattedTextPreview(readableName(key), value);
+  if (typeof value === "string" && /(?:_at|date|Date)$/.test(key) && /^\d{4}-\d\d-\d\dT\d\d:\d\d.*(?:Z|[+-]\d\d:\d\d)$/.test(value) && Number.isFinite(Date.parse(value))) {
+    return `<time datetime="${escapeHtml(value)}">${escapeHtml(new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }))}</time>`;
+  }
+  return requestValue(value);
+}
+
+function questionPreview(request: JsonObject, omitted: readonly string[]): string {
+  const title = typeof request.item_entry_title === "string" ? request.item_entry_title : "Quiz question";
+  const type = String(request.item_entry_interaction_type_slug || "");
+  const typeNames: Record<string, string> = { choice: "Multiple choice", "multi-answer": "Multiple answer", "true-false": "True or false", essay: "Written response", matching: "Matching", ordering: "Ordering", categorization: "Categorization", "file-upload": "File upload", formula: "Formula", "rich-fill-blank": "Fill in the blank", "hot-spot": "Hot spot", numeric: "Numeric answer" };
+  const covered = [...omitted, "item_entry_title", "item_entry_item_body", "item_points_possible"];
+  if (typeNames[type]) covered.push("item_entry_interaction_type_slug");
+  if (request.item_entry_type === "Item") covered.push("item_entry_type");
+  const points = request.item_points_possible;
+  const pointsLabel = typeof points === "number" || typeof points === "string"
+    ? `<p class="question-points"><strong>${escapeHtml(points)}</strong> ${Number(points) === 1 ? "point" : "points"}</p>` : "";
+  const body = typeof request.item_entry_item_body === "string" ? formattedTextPreview("Question text", request.item_entry_item_body) : "";
+  const interaction = object(request.item_entry_interaction_data);
+  const scoring = object(request.item_entry_scoring_data);
+  const algorithm = String(request.item_entry_scoring_algorithm || "");
+  const feedback = object(request.item_entry_answer_feedback);
+  const trueFalse = type === "true-false" && typeof interaction.true_choice === "string" && typeof interaction.false_choice === "string";
+  const choices = trueFalse
+    ? [{ id: "true", item_body: escapeHtml(interaction.true_choice), position: 1 }, { id: "false", item_body: escapeHtml(interaction.false_choice), position: 2 }]
+    : ["choice", "multi-answer"].includes(type) && Array.isArray(interaction.choices) ? interaction.choices.filter(isJsonObject) : [];
+  const validChoices = choices.length > 0 && (trueFalse || choices.length === (interaction.choices as unknown[])?.length)
+    && choices.every((choice) => typeof choice.id === "string" && choice.id && typeof choice.item_body === "string")
+    && new Set(choices.map((choice) => choice.id)).size === choices.length;
+  let answers = "";
+  let modes = "";
+  if (validChoices) {
+    const ids = choices.map((choice) => String(choice.id));
+    const key = trueFalse && typeof scoring.value === "boolean" ? [String(scoring.value)]
+      : type === "multi-answer" && Array.isArray(scoring.value) ? scoring.value : [scoring.value];
+    const validKey = (type === "multi-answer" ? ["AllOrNothing", "PartialScore"].includes(algorithm) : algorithm === "Equivalence")
+      && key.length > 0 && key.every((id) => typeof id === "string" && ids.includes(id)) && new Set(key).size === key.length;
+    const ordered = choices.every((choice) => typeof choice.position === "number") ? [...choices].sort((a, b) => Number(a.position) - Number(b.position)) : choices;
+    const previewId = randomBytes(8).toString("hex");
+    const rows = ordered.map((choice, index) => {
+      const correct = validKey && key.includes(String(choice.id));
+      const explanation = typeof feedback[String(choice.id)] === "string"
+        ? `<details class="answer-feedback"><summary>Feedback for this answer</summary>${formattedTextPreview("Answer feedback", String(feedback[String(choice.id)]))}</details>` : "";
+      const input = validKey ? `<input class="answer-input" type="${type === "multi-answer" ? "checkbox" : "radio"}" name="answer-${previewId}" aria-labelledby="answer-${previewId}-${index}" data-correct="${correct}">` : "";
+      return `<li class="answer-option${correct ? " answer-correct" : ""}"><span class="answer-letter" aria-hidden="true">${index < 26 ? String.fromCharCode(65 + index) : index + 1}</span>${input}<div class="answer-content"><div id="answer-${previewId}-${index}">${formattedTextPreview("", String(choice.item_body))}</div>${correct ? '<span class="answer-key">Marked correct</span>' : ""}${explanation}</div></li>`;
+    }).join("");
+    const scoringNote = algorithm === "AllOrNothing" ? "All correct answers are required for credit." : algorithm === "PartialScore" ? "Partial credit is enabled." : "";
+    answers = `<div class="question-answers"><p class="preview-label">${type === "multi-answer" ? "Select all that apply" : "Answer choices"}</p><ol class="answer-options">${rows}</ol><p class="preview-note">${validKey ? "Answer key shown for your review." : "The answer key could not be shown. Check the question settings below."}${scoringNote ? " " + scoringNote : ""}</p></div>`;
+    if (validKey) {
+      modes = '<div class="preview-modes" role="group" aria-label="Question preview" hidden><button type="button" data-mode="key" aria-pressed="true">Answer key</button><button type="button" data-mode="student" aria-pressed="false">Try the question</button></div>';
+      answers += '<div class="practice-actions" hidden><div class="practice-result" role="status" aria-live="polite" hidden></div><div class="practice-buttons"><button type="button" class="secondary practice-check">Check answer</button><button type="button" class="cancel practice-reset">Reset</button></div><p class="preview-note">Practice only. Nothing is submitted or saved to Canvas.</p></div>';
+    }
+    const interactionKeys = trueFalse ? ["true_choice", "false_choice"] : ["choices"];
+    if (Object.keys(interaction).every((key) => interactionKeys.includes(key))
+      && choices.every((choice) => Object.keys(choice).every((key) => ["id", "position", "item_body"].includes(key)))) covered.push("item_entry_interaction_data");
+    if (validKey && Object.keys(scoring).every((key) => key === "value")) covered.push("item_entry_scoring_data", "item_entry_scoring_algorithm");
+    if (Object.entries(feedback).every(([id, value]) => ids.includes(id) && typeof value === "string")) covered.push("item_entry_answer_feedback");
+  }
+  const feedbackRows = [["correct", "After a correct answer"], ["incorrect", "After an incorrect answer"], ["neutral", "For every answer"]].flatMap(([key, label]) => {
+    const field = `item_entry_feedback_${key}`;
+    if (typeof request[field] !== "string") return [];
+    covered.push(field);
+    return [`<section data-feedback="${key}"><h3>${label}</h3>${formattedTextPreview(label!, String(request[field]))}</section>`];
+  }).join("");
+  const feedbackPreview = feedbackRows ? `<details class="question-feedback"><summary>Feedback students will see</summary><div class="feedback-content">${feedbackRows}</div></details>` : "";
+  const fields = requestFields(request, covered);
+  return `<div class="question-preview" data-mode="key">${modes}<header class="question-heading"><div><p class="eyebrow">${escapeHtml(typeNames[type] || "Question preview")}</p><h2>${escapeHtml(title)}</h2></div>${pointsLabel}</header>${body}${answers}${feedbackPreview}${fields ? `<details class="question-settings"><summary>More question settings</summary><dl class="request">${fields}</dl></details>` : ""}</div>`;
 }
 
 function requestValue(value: unknown): string {
+  if (Array.isArray(value) && value.length > 0 && value.every(isJsonObject)) {
+    const columns = [...new Set(value.flatMap((entry) => Object.keys(entry).filter((key) => key !== "_morrow")))];
+    if (columns.length > 0 && columns.length <= 8) return `<div class="value-table"><table><thead><tr>${columns.map((key) => `<th scope="col">${escapeHtml(readableName(key))}</th>`).join("")}</tr></thead><tbody>${value.map((entry) => `<tr>${columns.map((key) => `<td>${Object.hasOwn(entry, key) ? fieldValue(key, entry[key]) : "Not specified"}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  }
   if (Array.isArray(value)) return value.length
     ? `<ol class="values">${value.map((entry) => `<li>${requestValue(entry)}</li>`).join("")}</ol>` : "None";
   if (value !== null && typeof value === "object") return `<dl class="request">${requestFields(object(value)) || "Not set"}</dl>`;
   return escapeHtml(value === true ? "Yes" : value === false ? "No" : value === null ? "Not set" : value === "" ? "Empty" : value);
+}
+
+function changeKind(tool: unknown): string {
+  const name = String(tool).replace(/^(canvas|moodle|blackboard)_/, "");
+  if (/^(delete|remove|destroy)_/.test(name)) return "Remove";
+  if (/^(create|add|copy|duplicate|import)_/.test(name)) return "Add";
+  if (/^(update|edit|set|reorder|move)_/.test(name)) return "Edit";
+  return "Change";
+}
+
+function changeTitle(request: JsonObject, context: ApprovalReviewContext | undefined, fallback: string): string {
+  const title = ["item_entry_title", "wiki_page_title", "assignment_name", "quiz_title", "module_name", "module_item_title", "rubric_title", "question_question_name", "title", "name"].map((key) => request[key])
+    .find((value) => typeof value === "string" && value.trim());
+  return typeof title === "string" ? title : context?.targets.filter((target) => target.field !== "connection_id").at(-1)?.name || fallback;
 }
 
 function reviewState(target: ApprovalTarget, snapshot: JsonObject): string {
@@ -166,12 +346,13 @@ function namedTargetsMissing(operations: readonly JsonObject[], contexts: Readon
     if (!/^(canvas|moodle|blackboard)_/.test(String(plan.tool))) return false;
     const request = object(plan.arguments);
     const targets = contexts.get(String(operation.operationId))?.targets || [];
-    return targets.some((item) => !item.name.trim()) || ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id"].some((field) =>
+    return targets.some((item) => !item.name.trim()) || ["id", "course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
       field in request && !targets.some((item) => item.field === field && item.name.trim()));
   });
 }
 
 function keepOpenInstruction(platform: string): string {
+  if (platform === "your learning platforms") return "Keep your AI app open. If this request uses Canvas, keep Chrome open too.";
   return platform === "Canvas" ? "Keep your AI app and Chrome open while Morrow works." : "Keep your AI app open while Morrow works.";
 }
 
@@ -215,6 +396,18 @@ function platformName(tool: unknown): string {
   return String(tool).startsWith("moodle_") ? "Moodle" : String(tool).startsWith("blackboard_") ? "Blackboard" : "Canvas";
 }
 
+export function reviewPlatform(tools: readonly unknown[]): string {
+  const names = [...new Set(tools.map(platformName))];
+  return names.length > 1 ? "your learning platforms" : names[0] || "Canvas";
+}
+
+function snapshotPlatform(snapshot: JsonObject): string {
+  if (typeof snapshot.platform === "string") return snapshot.platform;
+  return Array.isArray(snapshot.children)
+    ? reviewPlatform(snapshot.children.map((child) => object(object(object(child).operation).plan).tool))
+    : platformName(object(snapshot.plan).tool);
+}
+
 function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean): string {
   let state = reviewState(target, snapshot);
   if (active && state === "approved") state = "running";
@@ -222,7 +415,7 @@ function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boo
   const children = Array.isArray(snapshot.children) ? snapshot.children : [];
   const confirmed = Number(snapshot.confirmedChildren || children.filter((child) => object(object(child).operation).state === "verified").length);
   const total = Number(snapshot.totalChildren || children.length);
-  const platform = platformName(object(snapshot.plan).tool);
+  const platform = snapshotPlatform(snapshot);
   return stateContent(state, platform) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "");
 }
 
@@ -231,7 +424,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   const escapedId = escapeHtml(encodeURIComponent(target.id));
   const batch = target.kind === "batches";
   const plan = object(snapshot.plan);
-  const platform = platformName(plan.tool);
+  const platform = snapshotPlatform(snapshot);
   const expiry = String(snapshot.approvalExpiresAt || snapshot.expiresAt || "");
   const expired = Number.isFinite(Date.parse(expiry)) && Date.parse(expiry) <= Date.now();
   const state = reviewState(target, snapshot);
@@ -251,10 +444,23 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     blueprint: "This also affects linked courses. Check which courses are included.",
   };
   const risks = [...new Set(plans.map((entry) => warnings[String(object(entry.risk).approvalClass)]).filter(Boolean))];
+  const commonTargets = batch ? (contexts.get(String(operations[0]?.operationId))?.targets || []).filter((target) => target.name.trim()
+    && operations.every((operation) => {
+      const candidate = object(operation.plan);
+      return candidate.source === plans[0]?.source && candidate.sourceBindingId === plans[0]?.sourceBindingId
+        && platformName(candidate.tool) === platformName(plans[0]?.tool)
+        && object(candidate.arguments).connection_id === object(plans[0]?.arguments).connection_id
+        && object(object(candidate.arguments)._morrow).source_binding_id === object(object(plans[0]?.arguments)._morrow).source_binding_id
+        && JSON.stringify(object(candidate.arguments)[target.field]) === JSON.stringify(object(plans[0]?.arguments)[target.field])
+        && contexts.get(String(operation.operationId))?.targets.some((item) => item.field === target.field && item.name === target.name);
+    })) : [];
+  const counts = new Map<string, number>();
+  plans.forEach((entry) => { const kind = changeKind(entry.tool); counts.set(kind, (counts.get(kind) || 0) + 1); });
+  const batchSummary = batch ? `<div class="batch-overview"><p>${[...counts].map(([kind, count]) => `${count} ${kind === "Add" ? (count === 1 ? "addition" : "additions") : kind === "Edit" ? (count === 1 ? "edit" : "edits") : kind === "Remove" ? (count === 1 ? "removal" : "removals") : (count === 1 ? "other change" : "other changes")}`).join(" · ")}</p>${commonTargets.length ? `<dl class="shared-destination">${commonTargets.map((target) => `<div><dt>${escapeHtml(target.label)}</dt><dd>${escapeHtml(target.name)}</dd></div>`).join("")}</dl>` : ""}<p class="preview-note">${state === "awaiting_approval" ? `Open any item to review its content. Approval includes all ${plans.length} changes, in the order shown.` : "Open any item to see its content and result."}</p></div>` : "";
   const changed = plans.map((entry, index) => {
     const context = contexts.get(String(operations[index]?.operationId));
     const targets = (context?.targets || []).filter((item) => item.name.trim());
-    const destination = targets.map((item) => {
+    const destination = targets.filter((item) => !commonTargets.some((target) => target.field === item.field)).map((item) => {
       const name = escapeHtml(item.name);
       const linkedName = item.url?.startsWith("https://")
         ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${name}<span class="sr-only"> (opens in ${platformName(entry.tool)})</span></a>` : name;
@@ -267,25 +473,40 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     const changes = typeof pageGuard.find_text === "string" && typeof pageGuard.replace_text === "string"
       ? `<div><dt>Current text</dt><dd>${escapeHtml(pageGuard.find_text)}</dd></div><div><dt>Replacement</dt><dd>${pageGuard.replace_text === "" ? "Remove this text" : escapeHtml(pageGuard.replace_text)}</dd></div>`
       : requestFields(request, hiddenFields);
+    const addingQuestion = entry.tool === "canvas_create_quiz_item";
+    const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
+    const preview = question ? questionPreview(request, hiddenFields) : changes ? `<dl class="request">${changes}</dl>` : `<p>${changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above."}</p>`;
+    const before = context?.current && Object.keys(context.current).length
+      ? `<details class="current-content"><summary>Current content and values</summary><dl class="request">${requestFields(context.current)}</dl></details><p class="preview-label">Proposed changes</p>`
+      : changeKind(entry.tool) === "Edit" && !pageGuard.find_text ? '<p class="preview-note">Proposed changes are shown below. Current values are not available in this preview.</p>' : "";
     const preservation = pageGuard.find_text ? '<p>Only this phrase will change. The other page content and settings stay the same.</p><p>Morrow checks for newer edits before sending. Avoid editing this page until the result is checked.</p>' : "";
-    const resultLabel = batch && state !== "awaiting_approval" ? `<p data-operation-status>${operationStatus(String(operations[index]?.state), platformName(entry.tool))}</p>` : "";
-    return `<section class="section">${batch ? `<h2>${index + 1}. ${escapeHtml(name)}</h2>` : ""}${resultLabel}${destination ? `<dl class="destination">${destination}</dl>` : ""}<dl class="request">${changes}</dl>${preservation}</section>`;
+    const content = `<section class="section change-content">${destination ? `<dl class="destination${addingQuestion ? " question-destination" : ""}">${destination}</dl>` : ""}${before}${preview}${preservation}</section>`;
+    if (!batch) return content;
+    const title = changeTitle(request, context, name);
+    const kind = changeKind(entry.tool);
+    const where = targets.map((item) => item.name).join(" · ");
+    const rowWhere = targets.filter((item) => !commonTargets.some((target) => target.field === item.field)).map((item) => item.name).join(" · ");
+    const metadata = (rowWhere !== title ? rowWhere : "") || [request.item_entry_interaction_type_slug ? readableName(String(request.item_entry_interaction_type_slug).replaceAll("-", " ")) : name,
+      typeof request.item_points_possible === "number" ? `${request.item_points_possible} points` : ""].filter(Boolean).join(" · ");
+    const sensitive = warnings[String(object(entry.risk).approvalClass)];
+    return `<details class="change-item" data-search="${escapeHtml(`${title} ${where} ${name} ${kind}`.toLocaleLowerCase())}"><summary><span class="change-number">${index + 1}</span><span class="change-heading"><strong>${escapeHtml(title)}</strong><span class="change-context">${escapeHtml(metadata)}</span>${state !== "awaiting_approval" ? `<span data-operation-status>${operationStatus(String(operations[index]?.state), platformName(entry.tool))}</span>` : ""}</span><span class="change-kind${kind === "Remove" ? " removal" : ""}">${kind}</span></summary>${sensitive ? `<p class="item-warning">${escapeHtml(sensitive)}</p>` : ""}${content}</details>`;
   }).join("");
+  const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
     const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
-    return pageShell("Your result", "Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active)}</div>${changed}${stop}<section class="section"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
+    return pageShell("Your result", "Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
   const changingPageText = !batch && plan.tool === "canvas_update_create_page_courses" && isJsonObject(object(object(plan.arguments)._morrow).page_guard);
   const title = batch ? `Check these ${plans.length} changes` : addingQuestion ? "Add this quiz question?" : changingPageText ? "Change this page text?" : `${readableName(String(plan.tool || "Review this change"))}?`;
-  const approveLabel = batch ? "Apply these changes" : addingQuestion ? "Add this question" : changingPageText ? "Change this text" : "Apply this change";
+  const approveLabel = batch ? `Apply all ${plans.length} changes` : addingQuestion ? "Add this question" : changingPageText ? "Change this text" : "Apply this change";
   const next = (limited
     ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Ask Morrow in your chat to split this into smaller groups. This page has not approved any changes.</p>'
     : missingNames
     ? '<p class="warning">Morrow could not identify the course or activity in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
-    : `<p>One click starts the work. Morrow applies these changes, checks them in Canvas, and shows the result here.</p><p>${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
+    : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
   const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">${approveLabel}</button></form>`;
-  return pageShell(title, "Before Morrow makes changes", `<header class="hero"><p class="eyebrow">Before Morrow makes changes</p><h1>${escapeHtml(title)}</h1><p>${addingQuestion ? "Check the course, quiz, and question below." : "Check that this matches what you asked for."}</p>${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${changed}<section class="section next-step">${next}<details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></section><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div>`);
+  return pageShell(title, "Before Morrow makes changes", `<header class="hero"><p class="eyebrow">Ready for your review</p><h1>${escapeHtml(title)}</h1>${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
 }
 
 function cookieValue(request: IncomingMessage, name: string): string | null {

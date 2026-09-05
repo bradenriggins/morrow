@@ -127,7 +127,7 @@ describe("outer provider effects", () => {
       const view = await fetch(url as string);
       const body = await view.text();
       expect(body).toContain("Before Morrow makes changes");
-      expect(body).toContain("Check that this matches what you asked for");
+      expect(body).toContain("Ready for your review");
       expect(body).toContain("Technical details");
       const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
       const cookie = view.headers.get("set-cookie")?.split(";", 1)[0];

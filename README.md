@@ -44,7 +44,7 @@ want to change.
 Reading Canvas does not need a change approval. For a change, Morrow gives your
 AI app a review link. Open it to see the courses, items, and requested values.
 For a new quiz question, choose **Add this question** or **Cancel**. A group of
-changes lists each request and uses **Apply these changes**. Course and activity names
+changes lists each request and uses **Apply all changes**, with the total count. Course and activity names
 come from Canvas. If Morrow cannot identify them, approval stays unavailable until
 the details load. Internal references stay in **Technical details**.
 
@@ -57,9 +57,58 @@ change. To change your request before approval, cancel it and ask for a new one.
 The review page is part of Morrow and runs on your computer. No separate review
 app is installed. Morrow does not expose an AI tool that submits approval.
 
+### See the content before you send it
+
+The review renders proposed HTML as formatted content, not source code. Pages,
+assignment instructions, discussions, and quiz instructions can show headings,
+lists, tables, quotations, emphasis, and embedded image data. Long content flows
+down the page. Short content does not leave an empty preview box.
+
+For new multiple-choice, multiple-answer, and true/false questions with complete
+supported answer settings, **Answer key** shows the choices, marked answers, and
+feedback. **Try the question** lets you select an answer and see the supplied
+feedback. This practice stays on your computer. It does not submit a student
+attempt, approve the request, or send anything to Canvas. It compares your
+selection with the proposed answer key; it does not establish that the key is
+educationally correct or calculate a Canvas grade.
+
+These previews use Morrow's layout, not Canvas's student player. Unsupported
+question settings remain available below the preview. External images, videos,
+and embedded tools are not fetched. Their placeholders remain visible. Links,
+scripts, forms, and custom styles do not run inside the content. The exact
+original request remains in **Technical details**. These display protections do
+not rewrite the content sent to Canvas.
+
+Large requests use a compact item list. Open an item for its full preview. Search
+by title or course, or move through ten items at a time. Additions, edits, and
+removals have separate labels. The approval button always shows the total number
+of changes. Searching and opening previews do not change that total or exclude
+items from approval. Removal warnings remain visible when a search hides the
+affected item.
+
 The local review starts the existing operation dispatcher after approval. Morrow checks the account, course, catalog, connection generation, target set, profile, approval, and effect receipt again. The connector sends the Canvas request once. It then performs a fresh provider readback. Morrow reports `verified` only when that readback satisfies the frozen postcondition. The result remains on the review page; automatic continuation inside a chat app is a separate, unverified client capability.
 
 If delivery becomes ambiguous, Morrow records `applied_or_unknown` and refuses automatic replay. A later reconciliation performs only the frozen readback.
+
+## Use Morrow with your other tools
+
+You can ask for an outcome that uses more than your learning platform. For
+example: “Create a PDF study guide from Week 4 and send it to Michelle Bradley
+with a message in my voice.”
+
+Morrow reads the course materials. Your AI app then coordinates its installed
+document, PDF, contacts, and email tools. The workflow keeps the source titles
+and links, checks the completed file, uses your approved writing preferences,
+resolves the correct recipient, and checks the send result. It must identify
+missing sources or tools instead of silently skipping them.
+
+Morrow provides these instructions to the AI app when it connects. The app
+decides which tools and skills to use. This is guidance, not a guarantee that
+every app will trigger every installed skill. Morrow does not install a second
+document editor, access another plugin's credentials, or use course-change
+approval to authorize email. End-to-end compatibility requires testing in the
+chosen app with its actual tools. That cross-plugin workflow is not yet a
+verified Morrow release claim.
 
 ## Check a New Quiz
 

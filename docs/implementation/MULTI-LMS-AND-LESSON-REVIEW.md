@@ -31,7 +31,7 @@ The current code uses the SDK's unified input-required workflow. Tests exercise 
 
 ## Connection contract
 
-The default local gateway starts the bundled LMS API source. No extra package or service must be installed. Existing custom upstream files must explicitly include that source. The `public-canvas` profile does not expose Moodle or Blackboard tools.
+Fresh local setup and the default local gateway start the bundled LMS API source. No extra package or service must be installed. Existing custom upstream files stay unchanged and must explicitly include that source. The `public-canvas` runtime profile does not expose Moodle or Blackboard tools.
 
 The source reads `~/.morrow/lms-connections.json`, or the path in `MORROW_LMS_CONNECTIONS_FILE`. The file must use private owner-only permissions on macOS/Linux. Windows file-access controls still require installation-level verification. Do not paste real credentials into an AI conversation or commit this file.
 

@@ -468,6 +468,25 @@ export function buildLocalCanvasConfig(
         artifactInspection: "deny",
         aiClientAdmission: "allow",
       },
+    }, {
+      id: "lms-api",
+      label: "Moodle and Blackboard",
+      kind: "mcp-stdio",
+      command: nodeCommand,
+      args: [resolve(repositoryRoot, "packages/mcp-server/dist/lms-api-entry.js")],
+      cwd: repositoryRoot,
+      sourceDisposition: "direct_owned",
+      priority: 150,
+      required: true,
+      outputPrivacyDefault: {
+        fieldPolicy: "scrub-sensitive",
+        dataClass: "course",
+        maxRecords: 10_000,
+        maxBytes: 2_000_000,
+        freeText: "allow",
+        learnerTokens: true,
+        artifactInspection: "deny",
+      },
     }],
     sourcePolicy: { requireAttestation: false },
     publicationPolicy: { requiredForPublicProfile: false },
@@ -495,6 +514,7 @@ export function writeLocalCanvasConfig(input: {
   const extensionPath = resolve(repositoryRoot, "connector/extension");
   for (const [candidate, label] of [
     [resolve(repositoryRoot, "packages/mcp-server/dist/index.js"), "Morrow MCP server"],
+    [resolve(repositoryRoot, "packages/mcp-server/dist/lms-api-entry.js"), "Moodle and Blackboard connection"],
     [resolve(repositoryRoot, "packages/canvas-connector-mcp/dist/index.js"), "Canvas connector MCP"],
     [resolve(repositoryRoot, "artifacts/canvas-api/canvas-api-catalog.json"), "Canvas API catalog"],
     [resolve(extensionPath, "manifest.json"), "Chrome connector extension"],

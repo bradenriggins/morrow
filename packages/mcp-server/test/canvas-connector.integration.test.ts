@@ -328,9 +328,12 @@ describe("Canvas connector gateway path", () => {
         const value = parseBridgeJson(raw.toString()) as { schema?: string };
         if (value.schema !== BRIDGE_SCHEMAS.command) return;
         const command = value as BridgeCommand;
-        expect(command.kind).toBe("invoke_write");
-        writeCommands += 1;
-        receipts.add(String(command.outerGrant?.effectReceiptId));
+        if (command.kind === "invoke_write") {
+          writeCommands += 1;
+          receipts.add(String(command.outerGrant?.effectReceiptId));
+        } else {
+          expect(command.toolName).toBe("canvas_get_single_course_courses");
+        }
         const id = String(command.arguments?.id);
         socket.send(serializeBridgeMessage({
           schema: BRIDGE_SCHEMAS.result,
@@ -412,8 +415,8 @@ describe("Canvas connector gateway path", () => {
       expect(runtime.batchGet({ batchId: uncertainId }).batch).toMatchObject({ state: "paused", pendingChildren: 1 });
       const uncertainView = await (await fetch(uncertainUrl)).text();
       expect(uncertainView).toContain("0 of 2 changes confirmed in Canvas");
-      expect(uncertainView).toContain("<p data-operation-status>Needs checking</p>");
-      expect(uncertainView).toContain("<p data-operation-status>Not started</p>");
+      expect(uncertainView).toContain("<span data-operation-status>Needs checking</span>");
+      expect(uncertainView).toContain("<span data-operation-status>Not started</span>");
       expect(uncertainView).not.toContain("Changes confirmed");
       expect(writeCommands).toBe(3);
 
