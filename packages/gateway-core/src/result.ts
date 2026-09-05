@@ -29,6 +29,7 @@ export interface CanonicalMorrowResultInput {
   readonly completeness?: "complete" | "limited" | "unknown";
   readonly effectState?: string;
   readonly verificationStatus: "not_applicable" | "not_requested" | "unconfirmed" | "verified";
+  readonly provider?: string;
   readonly verificationProvider?: string;
   readonly verificationEvidence?: readonly JsonObject[];
   readonly attention?: readonly string[];
@@ -40,6 +41,9 @@ function canonicalContent(
   input: CanonicalMorrowResultInput,
   upstream: JsonObject,
 ): readonly JsonObject[] {
+  const provider = input.provider
+    ? `${input.provider.slice(0, 1).toUpperCase()}${input.provider.slice(1)}`
+    : "Canvas";
   if (input.effectState === "awaiting_approval") {
     return [{
       type: "text",
@@ -55,13 +59,13 @@ function canonicalContent(
   if (input.effectState === "approved") {
     return [{
       type: "text",
-      text: "This change is approved and waiting to be sent to Canvas. Ask your AI app to check the existing request.",
+      text: `This change is approved and waiting to be sent to ${provider}. Ask your AI app to check the existing request.`,
     }];
   }
   if (input.effectState === "dispatching") {
     return [{
       type: "text",
-      text: "Morrow is sending this change to Canvas. Ask your AI app to check the existing request. Do not repeat this change.",
+      text: `Morrow is sending this change to ${provider}. Ask your AI app to check the existing request. Do not repeat this change.`,
     }];
   }
   if (input.effectState === "awaiting_verification") {
@@ -73,13 +77,13 @@ function canonicalContent(
   if (input.effectState === "applied_or_unknown") {
     return [{
       type: "text",
-      text: "Morrow cannot confirm the result. Canvas may have received this change. Ask your AI app to check the existing request. Do not repeat this change.",
+      text: `Morrow cannot confirm the result. ${provider} may have received this change. Ask your AI app to check the existing request. Do not repeat this change.`,
     }];
   }
   if (input.effectState === "cancelled") {
     return [{
       type: "text",
-      text: "This change was cancelled before it was sent to Canvas.",
+      text: `This change was cancelled before it was sent to ${provider}.`,
     }];
   }
   if (input.effectState === "failed") {

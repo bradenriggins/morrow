@@ -100,7 +100,8 @@ function descriptorFor(
     requiresBrowser: sourceMetadata?.behavior?.requiresBrowser === true || source.id === "example-legacy",
     requiresLiveCanvas: sourceMetadata?.behavior?.requiresLiveCanvas === true || source.id === "example-legacy",
   };
-  const provider = sourceMetadata?.provider === "local" ? "local" : "canvas";
+  const provider = sourceMetadata?.provider === "local" || sourceMetadata?.provider === "moodle" || sourceMetadata?.provider === "blackboard"
+    ? sourceMetadata.provider : "canvas";
   const routeBackend = sourceMetadata?.route?.backend
     || (source.id === "meridian" ? "meridian" : "morrow-extension");
   const defaultProfileValues = defaultProfiles(source.id);

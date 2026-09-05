@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { sha256Text, type JsonObject } from "@morrow/contracts";
+import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 
 export const MAX_INLINE_RESULT_CHARACTERS = 64_000;
 export const MAX_RESULT_ARTIFACT_CHARACTERS = 1_000_000;
@@ -21,6 +21,31 @@ export interface ResultArtifactPage {
   readonly totalCharacters: number;
   readonly sha256: string;
   readonly text: string;
+}
+
+export function resolveResultArtifact(
+  result: JsonObject,
+  page: (handle: string, offset?: number) => ResultArtifactPage,
+): JsonObject {
+  const artifact = result.structuredContent;
+  if (!isJsonObject(artifact) || artifact.schema !== "morrow.result-artifact.v1") return result;
+  if (typeof artifact.handle !== "string" || typeof artifact.totalCharacters !== "number"
+    || artifact.totalCharacters > MAX_RESULT_ARTIFACT_CHARACTERS) throw new Error("Saved result is unavailable.");
+  let text = "";
+  let offset: number | null = 0;
+  do {
+    const current = page(artifact.handle, offset);
+    if (current.offset !== offset || typeof current.text !== "string"
+      || (current.nextOffset !== null && typeof current.nextOffset !== "number")) {
+      throw new Error("Saved result is incomplete.");
+    }
+    text += current.text;
+    offset = current.nextOffset;
+  } while (offset !== null);
+  if (text.length !== artifact.totalCharacters) throw new Error("Saved result is incomplete.");
+  const resolved: unknown = JSON.parse(text);
+  if (!isJsonObject(resolved)) throw new Error("Saved result is invalid.");
+  return resolved;
 }
 
 function exactOffset(value: number | undefined): number {

@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import {
   McpServer,
+  createRequestStateCodec,
   fromJsonSchema,
   type CallToolResult,
   type ServerContext,
@@ -11,6 +13,7 @@ import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import { GATEWAY_OPERATION_STATES } from "@morrow/operation-journal";
 import type { GatewayRuntime } from "./runtime.js";
 import { MORROW_SERVER_INSTRUCTIONS } from "./server-instructions.js";
+import { registerLessonReviewTool, type LessonReviewState } from "./lesson-review.js";
 
 function textAndStructured(summary: string, structuredContent: JsonObject): CallToolResult {
   return {
@@ -88,6 +91,10 @@ export function createMorrowServer(
   runtime: GatewayRuntime,
   healthProvider: () => JsonObject | Promise<JsonObject> = () => runtime.health() as unknown as JsonObject,
 ): McpServer {
+  const reviewState = createRequestStateCodec<LessonReviewState>({
+    key: randomBytes(32), ttlSeconds: 600,
+    bind: (context) => `${context.mcpReq.method}\0${context.sessionId ?? ""}\0${context.http?.authInfo?.clientId ?? ""}`,
+  });
   const server = new McpServer(
     {
       name: "morrow",
@@ -95,8 +102,10 @@ export function createMorrowServer(
     },
     {
       instructions: MORROW_SERVER_INSTRUCTIONS,
+      requestState: { verify: reviewState.verify },
     },
   );
+  registerLessonReviewTool(server, runtime, reviewState);
 
   server.registerTool(
     "morrow_health",

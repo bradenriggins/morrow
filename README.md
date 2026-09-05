@@ -82,6 +82,38 @@ incomplete. Question points are not the same as Canvas assignment gradebook poin
 This workflow has automated connector tests. Live Canvas verification is still
 required before treating it as a production-ready feature.
 
+## Review a lesson against your source
+
+Ask: “Compare the Cell Structure lesson and quiz with this revised source.
+Show the conflicts and proposed corrections. Do not change the course yet.”
+
+Morrow can request separate lesson and quiz reviews from your AI app. It then
+requests a third check of the findings. The report includes exact source quotes,
+proposed corrections, disagreements, and limits. You review the proposals before
+requesting any changes. Morrow does not make changes during this review.
+
+This feature requires an AI app that supports MCP sampling. It currently covers
+one Canvas page and up to 40 directly saved choice, multiple-answer, or true/false
+New Quiz questions. It does not review bank draws, essays, media, accessibility,
+or student access. Automated tests cover the model-request flow; real client and
+model testing is still required.
+
+## Moodle and Blackboard development preview
+
+The private/full installation also contains Moodle and Blackboard support.
+There is no extra Morrow app to install.
+
+- **Moodle:** Read courses, activities, assignment settings, and quiz settings.
+  Review and apply a course-description change.
+- **Blackboard:** Read courses and content. Review and apply a supported
+  document's title or body change.
+
+These connections use private, locally saved API credentials. They do not use
+the Chrome session. Their connection setup is not yet ready for general users.
+Tests currently use simulated platforms. Full quiz and question-bank authoring
+and live school-account tests remain open. See the
+[implementation checkpoint](docs/implementation/MULTI-LMS-AND-LESSON-REVIEW.md).
+
 ## Canvas authentication
 
 Canvas authentication stays inside Chrome.

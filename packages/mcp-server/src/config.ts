@@ -475,6 +475,7 @@ export async function loadGatewayConfig(
   }
 
   const connectorEntry = resolve(workingDirectory, "packages/canvas-connector-mcp/dist/index.js");
+  const lmsEntry = resolve(workingDirectory, "packages/mcp-server/dist/lms-api-entry.js");
   const catalogPath = resolve(workingDirectory, "artifacts/canvas-api/canvas-api-catalog.json");
   if (existsSync(connectorEntry) && existsSync(catalogPath)) {
     return parseGatewayConfig({
@@ -504,7 +505,22 @@ export async function loadGatewayConfig(
           artifactInspection: "deny",
           aiClientAdmission: "allow",
         },
-      }],
+      }, ...(existsSync(lmsEntry) ? [{
+        id: "lms-api",
+        label: "Moodle and Blackboard",
+        kind: "mcp-stdio",
+        command: process.execPath,
+        args: [lmsEntry],
+        cwd: workingDirectory,
+        env: environment.MORROW_LMS_CONNECTIONS_FILE ? { MORROW_LMS_CONNECTIONS_FILE: environment.MORROW_LMS_CONNECTIONS_FILE } : {},
+        sourceDisposition: "direct_owned",
+        priority: 150,
+        required: true,
+        outputPrivacyDefault: {
+          fieldPolicy: "scrub-sensitive", dataClass: "course", maxRecords: 10_000,
+          maxBytes: 2_000_000, freeText: "allow", learnerTokens: true, artifactInspection: "deny",
+        },
+      }] : [])],
       sourcePolicy: { requireAttestation: false },
       publicationPolicy: { requiredForPublicProfile: false },
       filters: { excludePrefixes: ["mindtap_", "connect_"], excludeNames: [] },

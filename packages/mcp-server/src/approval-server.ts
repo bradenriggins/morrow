@@ -100,6 +100,10 @@ function object(value: unknown): JsonObject {
 
 function readableName(value: string): string {
   const names: Record<string, string> = {
+    moodle_update_course_summary: "Update the Moodle course description",
+    blackboard_update_content: "Update the Blackboard lesson",
+    summary: "Course description",
+    body: "Lesson content",
     canvas_create_quiz_item: "Add a quiz question",
     canvas_update_quiz_item: "Update a quiz question",
     canvas_delete_quiz_item: "Delete a quiz question",
@@ -122,9 +126,9 @@ function readableName(value: string): string {
 
 function requestFields(request: JsonObject, omitted: readonly string[] = []): string {
   return Object.entries(request).filter(([key]) => key !== "_morrow" && !omitted.includes(key)).map(([key, value]) => {
-    const richText = ["item_entry_item_body", "question_question_text", "wiki_page_body", "assignment_description"].includes(key) && typeof value === "string";
+    const richText = ["item_entry_item_body", "question_question_text", "wiki_page_body", "assignment_description", "summary", "body"].includes(key) && typeof value === "string";
     const preview = richText ? formattedTextPreview(readableName(key), value as string) : requestValue(value);
-    return `<div><dt>${escapeHtml(readableName(key))}</dt><dd>${preview}</dd></div>`;
+    return `<div${richText ? ' class="rich-text"' : ""}><dt>${escapeHtml(readableName(key))}</dt><dd>${preview}</dd></div>`;
   }).join("");
 }
 
@@ -159,22 +163,26 @@ function reviewState(target: ApprovalTarget, snapshot: JsonObject): string {
 function namedTargetsMissing(operations: readonly JsonObject[], contexts: ReadonlyMap<string, ApprovalReviewContext>): boolean {
   return operations.some((operation) => {
     const plan = object(operation.plan);
-    if (!String(plan.tool).startsWith("canvas_")) return false;
+    if (!/^(canvas|moodle|blackboard)_/.test(String(plan.tool))) return false;
     const request = object(plan.arguments);
     const targets = contexts.get(String(operation.operationId))?.targets || [];
-    return targets.some((item) => !item.name.trim()) || ["course_id", "assignment_id", "quiz_id"].some((field) =>
+    return targets.some((item) => !item.name.trim()) || ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id"].some((field) =>
       field in request && !targets.some((item) => item.field === field && item.name.trim()));
   });
 }
 
-function stateContent(state: string): string {
+function keepOpenInstruction(platform: string): string {
+  return platform === "Canvas" ? "Keep your AI app and Chrome open while Morrow works." : "Keep your AI app open while Morrow works.";
+}
+
+function stateContent(state: string, platform = "Canvas"): string {
   const content: Record<string, [string, string]> = {
     approved: ["Changes have not started", "Your approval was saved, but this request is not running. Ask Morrow in your chat to check this saved request before starting anything else."],
-    verified: ["Changes confirmed", "Morrow checked Canvas and confirmed the requested result. You can open the course or activity below to see it."],
+    verified: ["Changes confirmed", "Morrow checked Canvas and confirmed the requested result."],
     cancelled: ["Request cancelled", "Morrow will not start more changes for this request. Changes already sent may still finish. Return to your AI conversation to check the result."],
     expired: ["This review has expired", "Return to your AI conversation and ask Morrow for a new review. Check the new request before approving it."],
-    dispatching: ["Applying your changes", "Morrow will check the saved result in Canvas. This page updates automatically. Keep your AI app and Chrome open."],
-    running: ["Applying your changes", "Morrow will check the saved result in Canvas. This page updates automatically. Keep your AI app and Chrome open."],
+    dispatching: ["Applying your changes", `Morrow will check the saved result in Canvas. This page updates automatically. ${keepOpenInstruction(platform)}`],
+    running: ["Applying your changes", `Morrow will check the saved result in Canvas. This page updates automatically. ${keepOpenInstruction(platform)}`],
     awaiting_verification: ["The result needs checking", "Morrow could not confirm the saved result in Canvas. Ask Morrow in your chat to check this saved request. Do not repeat the change."],
     awaiting_inner_approval: ["Another review is needed", "This request needs another approval before it can finish. Return to your AI conversation for the next review step."],
     applied_or_unknown: ["The result is not yet confirmed", "Canvas may have received the changes. Return to your AI conversation and ask Morrow to check the result before trying again."],
@@ -186,21 +194,25 @@ function stateContent(state: string): string {
     interrupted: ["Work stopped before confirmation", "Morrow is not running this request now. Ask Morrow in your chat to check the saved result before trying again."],
   };
   const [title, detail] = content[state] || ["Check this request", "The request has changed or can no longer be approved here. Return to your AI conversation and ask Morrow to check its current status."];
-  return `<section class="outcome"><p class="eyebrow">Request status</p><h1>${title}</h1><p>${detail}</p></section>`;
+  return `<section class="outcome"><p class="eyebrow">Request status</p><h1>${title}</h1><p>${detail.replaceAll("Canvas", platform)}</p></section>`;
 }
 
 function statePage(state: string): string {
   return pageShell("Request status", "Request status", stateContent(state));
 }
 
-export function operationStatus(state: string): string {
+export function operationStatus(state: string, platform = "Canvas"): string {
   const names: Record<string, string> = {
     awaiting_approval: "Not started", approved: "Not started", dispatching: "In progress",
     awaiting_verification: "Needs checking", applied_or_unknown: "Needs checking",
     awaiting_inner_approval: "Another review is needed", verified: "Confirmed in Canvas",
     cancelled: "Cancelled", failed: "Did not finish",
   };
-  return names[state] || "Needs checking";
+  return (names[state] || "Needs checking").replaceAll("Canvas", platform);
+}
+
+function platformName(tool: unknown): string {
+  return String(tool).startsWith("moodle_") ? "Moodle" : String(tool).startsWith("blackboard_") ? "Blackboard" : "Canvas";
 }
 
 function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boolean): string {
@@ -210,7 +222,8 @@ function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boo
   const children = Array.isArray(snapshot.children) ? snapshot.children : [];
   const confirmed = Number(snapshot.confirmedChildren || children.filter((child) => object(object(child).operation).state === "verified").length);
   const total = Number(snapshot.totalChildren || children.length);
-  return stateContent(state) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in Canvas.</p></section>` : "");
+  const platform = platformName(object(snapshot.plan).tool);
+  return stateContent(state, platform) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "");
 }
 
 function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, contexts: ReadonlyMap<string, ApprovalReviewContext>, active: boolean): string {
@@ -218,6 +231,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   const escapedId = escapeHtml(encodeURIComponent(target.id));
   const batch = target.kind === "batches";
   const plan = object(snapshot.plan);
+  const platform = platformName(plan.tool);
   const expiry = String(snapshot.approvalExpiresAt || snapshot.expiresAt || "");
   const expired = Number.isFinite(Date.parse(expiry)) && Date.parse(expiry) <= Date.now();
   const state = reviewState(target, snapshot);
@@ -243,18 +257,18 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     const destination = targets.map((item) => {
       const name = escapeHtml(item.name);
       const linkedName = item.url?.startsWith("https://")
-        ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${name}<span class="sr-only"> (opens in Canvas)</span></a>` : name;
+        ? `<a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${name}<span class="sr-only"> (opens in ${platformName(entry.tool)})</span></a>` : name;
       return `<div><dt>${escapeHtml(item.label)}</dt><dd>${linkedName}</dd></div>`;
     }).join("");
     const request = object(entry.arguments);
     const pageGuard = entry.tool === "canvas_update_create_page_courses" ? object(object(request._morrow).page_guard) : {};
     const name = typeof entry.tool === "string" ? readableName(entry.tool) : "Requested changes";
-    const hiddenFields = missingNames ? ["course_id", "assignment_id", "quiz_id", ...targets.map((item) => item.field)] : targets.map((item) => item.field);
+    const hiddenFields = ["expected_digest", "expected_connection", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id"] : []), ...targets.map((item) => item.field)];
     const changes = typeof pageGuard.find_text === "string" && typeof pageGuard.replace_text === "string"
       ? `<div><dt>Current text</dt><dd>${escapeHtml(pageGuard.find_text)}</dd></div><div><dt>Replacement</dt><dd>${pageGuard.replace_text === "" ? "Remove this text" : escapeHtml(pageGuard.replace_text)}</dd></div>`
       : requestFields(request, hiddenFields);
     const preservation = pageGuard.find_text ? '<p>Only this phrase will change. The other page content and settings stay the same.</p><p>Morrow checks for newer edits before sending. Avoid editing this page until the result is checked.</p>' : "";
-    const resultLabel = batch && state !== "awaiting_approval" ? `<p data-operation-status>${operationStatus(String(operations[index]?.state))}</p>` : "";
+    const resultLabel = batch && state !== "awaiting_approval" ? `<p data-operation-status>${operationStatus(String(operations[index]?.state), platformName(entry.tool))}</p>` : "";
     return `<section class="section">${batch ? `<h2>${index + 1}. ${escapeHtml(name)}</h2>` : ""}${resultLabel}${destination ? `<dl class="destination">${destination}</dl>` : ""}<dl class="request">${changes}</dl>${preservation}</section>`;
   }).join("");
   if (state !== "awaiting_approval") {
@@ -265,11 +279,11 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   const changingPageText = !batch && plan.tool === "canvas_update_create_page_courses" && isJsonObject(object(object(plan.arguments)._morrow).page_guard);
   const title = batch ? `Check these ${plans.length} changes` : addingQuestion ? "Add this quiz question?" : changingPageText ? "Change this page text?" : `${readableName(String(plan.tool || "Review this change"))}?`;
   const approveLabel = batch ? "Apply these changes" : addingQuestion ? "Add this question" : changingPageText ? "Change this text" : "Apply this change";
-  const next = limited
+  const next = (limited
     ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Ask Morrow in your chat to split this into smaller groups. This page has not approved any changes.</p>'
     : missingNames
     ? '<p class="warning">Morrow could not identify the course or activity in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
-    : '<p>One click starts the work. Morrow applies these changes, checks them in Canvas, and shows the result here.</p><p>Keep your AI app and Chrome open while Morrow works.</p>';
+    : `<p>One click starts the work. Morrow applies these changes, checks them in Canvas, and shows the result here.</p><p>${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
   const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">${approveLabel}</button></form>`;
   return pageShell(title, "Before Morrow makes changes", `<header class="hero"><p class="eyebrow">Before Morrow makes changes</p><h1>${escapeHtml(title)}</h1><p>${addingQuestion ? "Check the course, quiz, and question below." : "Check that this matches what you asked for."}</p>${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${changed}<section class="section next-step">${next}<details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></section><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div>`);
 }

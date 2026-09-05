@@ -329,6 +329,32 @@ export async function resolveApprovalReviewContext(
 ): Promise<ApprovalReviewContext> {
   const review = input.cache ? input : { ...input, cache: new Map() };
   const { operation, tools } = input;
+  const lmsMapping = tools.find((tool) => tool.publicName === operation.publicToolName
+    && tool.upstreamId === operation.sourceId && tool.upstreamName === operation.sourceToolName
+    && tool.capability?.route.backend === "lms-api" && tool.annotations?.readOnlyHint !== true);
+  if (lmsMapping) {
+    const plan = object(operation.plan);
+    const args = object(plan?.arguments);
+    const readTool = exactSourceTool(tools, operation.sourceId, lmsMapping.capability?.route.planBackend || "", false);
+    if (!args || !readTool || readTool.capability?.route.backend !== "lms-api"
+      || readTool.capability.provider !== lmsMapping.capability?.provider
+      || plan?.tool !== operation.publicToolName || plan?.source !== operation.sourceId) return { targets: [] };
+    const properties = object(readTool.inputSchema.properties) || {};
+    const readArgs = Object.fromEntries(Object.entries(args).filter(([key]) => key in properties));
+    const read = await boundedRead(review, readTool.publicName, readArgs);
+    const result = object(read.result?.structuredContent);
+    if (read.result?.isError || result?.schema !== "morrow.lms-api.result.v1" || result.ok !== true
+      || result.provider !== lmsMapping.capability?.provider || !Array.isArray(result.targets)
+      || (operation.state === "awaiting_approval" && (result.snapshot_digest !== args.expected_digest || result.connection_digest !== args.expected_connection))) {
+      return { targets: [], ...(read.limited ? { limited: true } : {}) };
+    }
+    return { targets: result.targets.filter(isJsonObject).flatMap((target) => {
+      const field = exactText(target.field);
+      const label = exactText(target.label);
+      const name = exactText(target.name);
+      return field && label && name && field in args ? [{ field, label, name }] : [];
+    }) };
+  }
   if (!operation.sourceBindingId) return { targets: [] };
   const args = planArguments(operation);
   const mapping = operationTool(operation, tools);

@@ -19,9 +19,12 @@ The current standalone architecture does not, by itself, prove that all required
 | Provider exclusion | MindTap and Connect are denied by catalog generation, gateway filters, and package scans. |
 | Private and public packages | Deterministic private/full and public/Canvas package profiles exist. |
 | Browser-only operations | The directly owned Chrome connector uses the signed-in Canvas session. |
-| Coordinated specialist work | Required by the current product goal. Source, course, and assessment specialists must share a bounded task, with independent review and one controlled write path. This product workflow is not implemented yet. Development review agents are not evidence of this capability. |
+| Coordinated specialist work | `morrow_review_lesson` makes separate lesson and quiz model requests, then asks a checker to assess each finding. It preserves source quotes, disagreements, and limits. Synthetic SDK tests pass. Real client/model proof and coordinated course changes remain open. Development review agents are not product evidence. |
+| Moodle and Blackboard | The private/full gateway includes a bundled REST source. It reads course information and supports a Moodle course-description change or a Blackboard document change through the existing review and verification path. Educator setup and live account proof remain open. |
 
 ## Operation lifecycle
+
+The browser lifecycle below describes Canvas. Moodle and Blackboard use saved private REST connections. Their writes check the connected account and current item snapshot, use the same local approval and durable effect journal, send once, and check fresh provider data. These connections do not require Chrome to remain open. See [the implementation checkpoint](MULTI-LMS-AND-LESSON-REVIEW.md) for their exact scope.
 
 ### Read
 

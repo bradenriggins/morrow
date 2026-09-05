@@ -9,7 +9,7 @@ const assets: Record<string, string> = {
 };
 
 export const brandHead = '<link rel="icon" href="/morrow-brand/morrow.png"><link rel="stylesheet" href="/morrow-brand/theme.css"><link rel="stylesheet" href="/morrow-brand/review.css">';
-export const brandHeader = '<div class="brand"><img src="/morrow-brand/morrow.png" width="38" height="38" alt=""><div><strong>Morrow</strong><span>Your Canvas work, connected</span></div></div>';
+export const brandHeader = '<div class="brand"><img src="/morrow-brand/morrow.png" width="38" height="38" alt=""><div><strong>Morrow</strong><span>Your course work, connected</span></div></div>';
 
 export function serveBrandAsset(pathname: string, response: ServerResponse): boolean {
   if (!pathname.startsWith("/morrow-brand/")) return false;

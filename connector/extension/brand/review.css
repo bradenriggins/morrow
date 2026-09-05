@@ -22,7 +22,8 @@ p { margin: 12px 0 0; color: var(--text-secondary); font-size: 13px; }
 .request > div + div { border-top: 1px solid var(--border); }
 .request dt { color: var(--text-secondary); font-size: 13px; overflow-wrap: anywhere; }
 .request dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
-.text-preview { display: block; width: 100%; height: 80px; border: 1px solid var(--border); border-radius: 8px; background: var(--paper); }
+.request > .rich-text { grid-template-columns: 1fr; gap: 8px; }
+.text-preview { display: block; width: 100%; height: 180px; border: 1px solid var(--border); border-radius: 8px; background: var(--paper); }
 .preview-note { display: block; margin-top: 6px; color: var(--text-secondary); font-size: 11px; white-space: normal; }
 .request .request > div { grid-template-columns: 1fr; gap: 4px; }
 .values { margin: 0; padding-left: 20px; }

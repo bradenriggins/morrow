@@ -25,7 +25,7 @@ export interface CapabilityFieldEvidence {
 
 export interface SourceCapabilityMetadata {
   readonly family?: string;
-  readonly provider?: "canvas" | "local" | "mindtap" | "connect";
+  readonly provider?: "canvas" | "moodle" | "blackboard" | "local" | "mindtap" | "connect";
   readonly sourcePath?: string;
   readonly sourceExport?: string;
   readonly sourceDigest?: string;
@@ -40,7 +40,7 @@ export function parseSourceCapabilityMetadata(value: unknown): SourceCapabilityM
   if (value === undefined) return undefined;
   if (!isJsonObject(value)) throw new TypeError("source capability metadata must be an object");
   const output = structuredClone(value) as JsonObject;
-  if (output.provider !== undefined && !["canvas", "local", "mindtap", "connect"].includes(String(output.provider))) {
+  if (output.provider !== undefined && !["canvas", "moodle", "blackboard", "local", "mindtap", "connect"].includes(String(output.provider))) {
     throw new TypeError("source capability provider is invalid");
   }
   for (const field of ["family", "sourcePath", "sourceExport"] as const) {
@@ -63,7 +63,7 @@ export function parseSourceCapabilityMetadata(value: unknown): SourceCapabilityM
   if (output.route !== undefined) {
     if (!isJsonObject(output.route)) throw new TypeError("source capability route is invalid");
     if (output.route.backend !== undefined && ![
-      "meridian", "morrow-node", "morrow-extension", "canvas-connector", "composite",
+      "meridian", "morrow-node", "morrow-extension", "canvas-connector", "lms-api", "composite",
     ].includes(String(output.route.backend))) throw new TypeError("source capability route backend is invalid");
   }
   if (output.profiles !== undefined) {
@@ -88,7 +88,7 @@ export interface MorrowCapabilityDescriptorV1 {
   readonly canonicalName: string;
   readonly aliases: readonly string[];
   readonly family: string;
-  readonly provider: "canvas" | "local";
+  readonly provider: "canvas" | "moodle" | "blackboard" | "local";
   readonly description: string;
   readonly inputSchema: JsonSchema;
   readonly sourceImplementations: readonly {
@@ -118,7 +118,7 @@ export interface MorrowCapabilityDescriptorV1 {
     readonly dataClass: string;
   };
   readonly route: {
-    readonly backend: "meridian" | "morrow-node" | "morrow-extension" | "canvas-connector" | "composite";
+    readonly backend: "meridian" | "morrow-node" | "morrow-extension" | "canvas-connector" | "lms-api" | "composite";
     readonly planBackend?: string;
     readonly dispatchBackend?: string;
     readonly readbackBackend?: string;
@@ -317,8 +317,8 @@ export function parseMorrowCapabilityDescriptorV1(value: unknown): MorrowCapabil
   requiredDescriptorString(value.canonicalName, "canonicalName");
   requiredDescriptorString(value.family, "family");
   requiredDescriptorString(value.description, "description");
-  if (value.provider !== "canvas" && value.provider !== "local") {
-    throw new TypeError("provider must be canvas or local");
+  if (!["canvas", "moodle", "blackboard", "local"].includes(String(value.provider))) {
+    throw new TypeError("provider must be canvas, moodle, blackboard, or local");
   }
   if (!Array.isArray(value.aliases) || value.aliases.some((alias) => typeof alias !== "string")) {
     throw new TypeError("aliases must be a string array");
@@ -356,7 +356,7 @@ export function parseMorrowCapabilityDescriptorV1(value: unknown): MorrowCapabil
   if (!["none", "standard", "destructive", "learner", "grade", "blueprint"].includes(String(value.authority.approvalClass))) {
     throw new TypeError("authority.approvalClass is invalid");
   }
-  if (!["meridian", "morrow-node", "morrow-extension", "canvas-connector", "composite"].includes(String(value.route.backend))) {
+  if (!["meridian", "morrow-node", "morrow-extension", "canvas-connector", "lms-api", "composite"].includes(String(value.route.backend))) {
     throw new TypeError("route.backend is invalid");
   }
   if (!isJsonObject(value.profiles)) throw new TypeError("profiles are required");

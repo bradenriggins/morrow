@@ -340,7 +340,7 @@ function projectValue(value: unknown, descriptor: OutputPrivacyDescriptor, conte
 }
 
 function containsSensitiveText(value: string): boolean {
-  return /(?:bearer\s+|cookie=|csrf|token=|[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|<[^>]+(?:hidden|display\s*:\s*none))/i.test(value);
+  return /(?:bearer\s+|cookie=|csrf|token=|(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|<[^>]+(?:hidden|display\s*:\s*none))/i.test(value);
 }
 
 function projectContent(

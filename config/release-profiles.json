@@ -37,6 +37,7 @@
         "docs/architecture/",
         "docs/release/",
         "docs/implementation/EXAMPLE-WORKTREE.md",
+        "docs/implementation/MULTI-LMS-AND-LESSON-REVIEW.md",
         "config/publication-selections.example.json",
         "morrow.upstreams.connector.example.json",
         "morrow.upstreams.public-canvas.example.json",

@@ -41,7 +41,7 @@ import {
 } from "@morrow/operation-journal";
 import { StdioMcpUpstream } from "@morrow/upstream-mcp";
 import type { GatewayConfig } from "./config.js";
-import { ResultArtifactStore } from "./result-artifacts.js";
+import { resolveResultArtifact, ResultArtifactStore } from "./result-artifacts.js";
 import { loadExamplePlatformCatalogTruth } from "./meridian-catalog-truth.js";
 import {
   verifyLocalGitSourceAttestation,
@@ -56,6 +56,7 @@ import {
 export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_health",
   "morrow_check_new_quiz",
+  "morrow_review_lesson",
   "morrow_catalog",
   "morrow_catalog_search",
   "morrow_capability_get",
@@ -163,7 +164,7 @@ function withSourceOperationId(
 } {
   const forwarded = structuredClone(args) as Record<string, unknown>;
   const bridgeControlled = mapping.upstreamId === "example-legacy"
-    || mapping.capability?.route.backend === "canvas-connector";
+    || usesEmbeddedReadback(mapping);
   if (!bridgeControlled) {
     delete forwarded._morrow;
     return { forwarded };
@@ -245,6 +246,10 @@ function isCanvasConnector(mapping: CatalogTool): boolean {
   return mapping.capability?.route.backend === "canvas-connector";
 }
 
+function usesEmbeddedReadback(mapping: CatalogTool): boolean {
+  return isCanvasConnector(mapping) || mapping.capability?.route.backend === "lms-api";
+}
+
 function connectorReadback(mapping: CatalogTool, request: JsonObject): FrozenReadbackPlan {
   const policy = {
     schema: "morrow.connector-readback-policy.v1",
@@ -260,8 +265,16 @@ function connectorReadback(mapping: CatalogTool, request: JsonObject): FrozenRea
   };
 }
 
-function connectorVerification(value: JsonObject): JsonObject | null {
+function connectorVerification(mapping: CatalogTool, value: JsonObject): JsonObject | null {
   const connector = isJsonObject(value.structuredContent) ? value.structuredContent : null;
+  if (mapping.capability?.route.backend === "lms-api") {
+    const verification = connector && isJsonObject(connector.verification) ? connector.verification : null;
+    return connector?.schema === "morrow.lms-api.result.v1" && connector.ok === true
+      && connector.provider === mapping.capability.provider
+      && verification?.schema === "morrow.lms-verification.v1"
+      && ["verified", "mismatch", "unconfirmed"].includes(String(verification.status))
+      ? structuredClone(verification) : null;
+  }
   if (!connector || connector.schema !== "morrow.canvas-connector.result.v1" || connector.ok !== true) return null;
   const browser = isJsonObject(connector.result) ? connector.result : null;
   const verification = browser && isJsonObject(browser.verification) ? browser.verification : null;
@@ -741,7 +754,9 @@ export class GatewayRuntime {
         operation,
         tools: this.catalog.tools,
         ...(cache ? { cache } : {}),
-        read: (publicName, args, signal) => this.callSourceOwned(publicName, args, { signal }),
+        read: async (publicName, args, signal) => this.resolveResultArtifact(
+          await this.callSourceOwned(publicName, args, { signal }),
+        ),
       });
     } catch {
       return { targets: [] };
@@ -800,6 +815,7 @@ export class GatewayRuntime {
       operationId: record.operationId,
       tool: record.publicToolName,
       backend: record.sourceId,
+      provider: this.toolByPublicName.get(record.publicToolName)?.capability?.provider,
       phase,
       effectState: record.state,
       verificationStatus,
@@ -874,6 +890,10 @@ export class GatewayRuntime {
     return this.resultArtifacts.page(handle, offset, limit) as unknown as JsonObject;
   }
 
+  private resolveResultArtifact(result: JsonObject): JsonObject {
+    return resolveResultArtifact(result, (handle, offset) => this.resultArtifacts.page(handle, offset));
+  }
+
   async call(
     publicName: string,
     args: Readonly<Record<string, unknown>>,
@@ -930,7 +950,7 @@ export class GatewayRuntime {
       if (isCanvasConnector(mapping) && !legacyRouting(supplied.request).sourceBindingId) {
         throw new TypeError("Canvas connector writes require one exact source_binding_id from morrow_canvas_bindings");
       }
-      const controls: OuterOperationControls = supplied.readback || !isCanvasConnector(mapping)
+      const controls: OuterOperationControls = supplied.readback || !usesEmbeddedReadback(mapping)
         ? supplied
         : { ...supplied, readback: connectorReadback(mapping, supplied.request) };
       if (!controls.readback) {
@@ -997,7 +1017,7 @@ export class GatewayRuntime {
       return this.effectResult(settled, "dispatch_failed");
     }
     const forwarded = structuredClone(reserved.forwardedRequest) as Record<string, unknown>;
-    if (mapping.upstreamId === "example-legacy" || mapping.capability?.route.backend === "canvas-connector") {
+    if (mapping.upstreamId === "example-legacy" || usesEmbeddedReadback(mapping)) {
       forwarded._morrow = {
         ...(isJsonObject(forwarded._morrow) ? forwarded._morrow : {}),
         operation_id: reserved.sourceOperationId || reserved.operationId,
@@ -1053,8 +1073,8 @@ export class GatewayRuntime {
       innerApprovalRequired,
     });
     if (settled.state === "awaiting_verification") {
-      if (isCanvasConnector(mapping)) {
-        const verification = connectorVerification(result) || {
+      if (usesEmbeddedReadback(mapping)) {
+        const verification = connectorVerification(mapping, this.resolveResultArtifact(result)) || {
           schema: "morrow.browser-verification.v1",
           status: "unconfirmed",
           reason: "connector_verification_missing",
@@ -1149,7 +1169,7 @@ export class GatewayRuntime {
     if (!mapping || mapping.annotations?.readOnlyHint !== true) {
       return this.effectResult(operation, "verification_unsupported");
     }
-    const fresh = await this.callSourceOwned(mapping.publicName, operation.readback.arguments);
+    const fresh = this.resolveResultArtifact(await this.callSourceOwned(mapping.publicName, operation.readback.arguments));
     if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
     const readbackDigest = sha256Json(resultComparable(fresh));
     const settled = this.effects.recordReadback(
