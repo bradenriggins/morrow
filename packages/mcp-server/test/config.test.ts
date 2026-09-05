@@ -87,16 +87,26 @@ describe("gateway configuration", () => {
     }
   });
 
-  it("starts the local Canvas connector without a separate upstream file", async () => {
+  it("loads Canvas, Moodle, and Blackboard defaults when no upstream file exists", async () => {
     const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
-    const config = await loadGatewayConfig({}, repositoryRoot);
-    expect(config.profile).toBe("private-full");
-    expect(config.upstreams).toMatchObject([{
-      id: "canvas-session",
-      kind: "mcp-stdio",
-      sourceDisposition: "direct_owned",
-      required: true,
-    }]);
-    expect(config.maxCatalogTools).toBe(2000);
+    const directory = await mkdtemp(join(tmpdir(), "morrow-default-config-"));
+    try {
+      const config = await loadGatewayConfig({ MORROW_UPSTREAMS_FILE: join(directory, "missing.json") }, repositoryRoot);
+      expect(config.profile).toBe("private-full");
+      expect(config.upstreams).toMatchObject([{
+        id: "canvas-session",
+        kind: "mcp-stdio",
+        sourceDisposition: "direct_owned",
+        required: true,
+      }, {
+        id: "lms-api",
+        kind: "mcp-stdio",
+        sourceDisposition: "direct_owned",
+        required: true,
+      }]);
+      expect(config.maxCatalogTools).toBe(2000);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
