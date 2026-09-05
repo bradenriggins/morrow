@@ -57,12 +57,26 @@ const assignmentWriteOperation = {
   readOnly: false,
 };
 
+const assignmentCreateReadOperation = {
+  key: "moodle.form.course.modedit.assign.create.read.v1",
+  toolName: "moodle_get_assignment_creation_form",
+  provider: "moodle",
+  readOnly: true,
+};
+
+const assignmentCreateWriteOperation = {
+  key: "moodle.form.course.modedit.assign.create.write.v1",
+  toolName: "moodle_create_assignment",
+  provider: "moodle",
+  readOnly: false,
+};
+
 async function withMoodlePage(callback) {
   const keys = ["location", "M", "document", "fetch"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   try {
     Object.defineProperties(globalThis, {
-      location: { configurable: true, writable: true, value: { origin: "https://sandbox.moodledemo.net", pathname: "/course/view.php" } },
+      location: { configurable: true, writable: true, value: { origin: "https://sandbox.moodledemo.net", pathname: "/course/view.php", href: "https://sandbox.moodledemo.net/course/view.php?id=2" } },
       M: { configurable: true, writable: true, value: { cfg: { wwwroot: "https://sandbox.moodledemo.net", sesskey: "moodle-session-secret", userId: 3, courseId: 2 } } },
       document: { configurable: true, writable: true, value: { body: { className: "path-course course-2" }, querySelector: (selector) => selector === "h1" ? { textContent: "My first course" } : null } },
     });
@@ -108,12 +122,21 @@ function pageCreationForm(state) {
   </form></body></html>`;
 }
 
-function assignmentForm(state, draftId) {
-  return `<!doctype html><html><body><form method="post" action="/course/modedit.php?update=8&amp;return=0">
-    <input name="update" value="8"><input name="course" value="2"><input name="modulename" value="assign">
+function assignmentForm(state, draftId, { moduleId = 8, creation = false } = {}) {
+  const action = creation ? "/course/modedit.php?add=assign&amp;course=2&amp;sectionid=7&amp;return=0" : `/course/modedit.php?update=${moduleId}&amp;return=0`;
+  const identity = creation
+    ? '<input name="course" value="2"><input name="add" value="assign"><input name="modulename" value="assign"><input name="section" value="4"><input name="return" value="0"><input name="coursecontentnotification" value="1">'
+    : `<input name="update" value="${moduleId}"><input name="course" value="2"><input name="modulename" value="assign"><input name="section" value="4">`;
+  return `<!doctype html><html><body><form method="post" action="${action}">
+    ${identity}
     <input name="name" value="${state.name}"><textarea name="introeditor[text]">${state.instructions}</textarea><input name="introeditor[format]" value="1">
+    <input name="visible" value="${state.visible ? 1 : 0}">
     <div data-fieldtype="filemanager"><input type="hidden" name="introattachments" value="${draftId}"></div>
-    <input type="checkbox" name="duedate[enabled]" value="1"><input name="duedate[year]" value="2026"><input name="duedate[month]" value="9"><input name="duedate[day]" value="5"><input name="duedate[hour]" value="9"><input name="duedate[minute]" value="30">
+    <input name="gradepass" value="${state.gradePass}">
+    <input type="checkbox" name="allowsubmissionsfromdate[enabled]" value="1"${state.availableFromEnabled ? " checked" : ""}><input name="allowsubmissionsfromdate[year]" value="2026"><input name="allowsubmissionsfromdate[month]" value="9"><input name="allowsubmissionsfromdate[day]" value="5"><input name="allowsubmissionsfromdate[hour]" value="9"><input name="allowsubmissionsfromdate[minute]" value="30">
+    <input type="checkbox" name="duedate[enabled]" value="1"${state.dueDateEnabled ? " checked" : ""}><input name="duedate[year]" value="2026"><input name="duedate[month]" value="9"><input name="duedate[day]" value="5"><input name="duedate[hour]" value="9"><input name="duedate[minute]" value="30">
+    <input type="checkbox" name="cutoffdate[enabled]" value="1"${state.cutoffEnabled ? " checked" : ""}><input name="cutoffdate[year]" value="2026"><input name="cutoffdate[month]" value="9"><input name="cutoffdate[day]" value="5"><input name="cutoffdate[hour]" value="9"><input name="cutoffdate[minute]" value="30">
+    <input type="checkbox" name="gradingduedate[enabled]" value="1"${state.gradingDueEnabled ? " checked" : ""}><input name="gradingduedate[year]" value="2026"><input name="gradingduedate[month]" value="9"><input name="gradingduedate[day]" value="5"><input name="gradingduedate[hour]" value="9"><input name="gradingduedate[minute]" value="30">
     <input type="submit" name="submitbutton" value="Save and return to course">
   </form></body></html>`;
 }
@@ -122,10 +145,10 @@ async function executeInBrowser(page, input) {
   return page.evaluate(async ({ source, value }) => {
     const execute = (0, eval)(`(${source})`);
     return execute(value);
-  }, { source: executeMoodleInPage.toString(), value: input });
+  }, { source: executeMoodleInPage.toString(), value: JSON.stringify(input) });
 }
 
-test("Moodle executor updates and creates hidden Pages from native forms in Chrome for Testing", async () => {
+test("Moodle executor updates and creates hidden Pages and Assignments from native forms in Chrome for Testing", async () => {
   const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-browser-"));
   const key = join(directory, "key.pem");
   const certificate = join(directory, "certificate.pem");
@@ -143,13 +166,34 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     visible: true,
     completion: { year: 2026, month: 9, day: 5, hour: 9, minute: 30 },
   };
-  const assignment = { name: "Evidence analysis", instructions: "<p>Original brief</p>" };
+  const assignment = {
+    name: "Evidence analysis",
+    instructions: "<p>Original brief</p>",
+    visible: true,
+    availableFromEnabled: false,
+    dueDateEnabled: true,
+    cutoffEnabled: false,
+    gradingDueEnabled: false,
+    gradePass: "0.00",
+  };
+  const assignmentCreationDefaults = {
+    name: "",
+    instructions: "",
+    visible: true,
+    availableFromEnabled: false,
+    dueDateEnabled: false,
+    cutoffEnabled: false,
+    gradingDueEnabled: false,
+    gradePass: "",
+  };
   const posts = [];
   const assignmentPosts = [];
+  const assignmentCreationPosts = [];
   const draftListIds = [];
   const requests = [];
   let structureReads = 0;
   let createdPage = null;
+  let createdAssignment = null;
   let draftId = 700;
   let draftFileCount = 0;
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
@@ -160,7 +204,7 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
       response.end('<!doctype html><body class="path-course course-2"><h1>Week 1</h1></body>');
       return;
     }
-    if (url.pathname === "/mod/page/view.php") {
+    if (url.pathname === "/mod/page/view.php" || url.pathname === "/mod/assign/view.php") {
       response.writeHead(200, { "content-type": "text/html" });
       response.end('<!doctype html><body class="path-course course-2"><h1>Week 1</h1></body>');
       return;
@@ -175,7 +219,10 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
           data: JSON.stringify({
             course: { id: 2, fullname: "Week 1" },
             section: [{ id: 7, number: 4, title: "Week 4: Evidence" }],
-            cm: createdPage ? [{ id: 55, module: "page", sectionid: 7, visible: false }] : [],
+            cm: [
+              ...(createdPage ? [{ id: 55, module: "page", sectionid: 7, visible: false }] : []),
+              ...(createdAssignment ? [{ id: 56, module: "assign", sectionid: 7, visible: createdAssignment.visible }] : []),
+            ],
           }),
         }]));
       });
@@ -198,9 +245,11 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     if (request.method === "GET") {
       response.writeHead(200, { "content-type": "text/html" });
       if (url.searchParams.get("add") === "page") response.end(pageCreationForm(creationDefaults));
+      else if (url.searchParams.get("add") === "assign") response.end(assignmentForm(assignmentCreationDefaults, ++draftId, { creation: true }));
       else if (url.searchParams.get("update") === "6") response.end(pageForm(state, 6));
       else if (url.searchParams.get("update") === "55" && createdPage) response.end(pageForm(createdPage, 55));
       else if (url.searchParams.get("update") === "8") response.end(assignmentForm(assignment, ++draftId));
+      else if (url.searchParams.get("update") === "56" && createdAssignment) response.end(assignmentForm(createdAssignment, ++draftId, { moduleId: 56 }));
       else response.writeHead(404).end();
       return;
     }
@@ -209,9 +258,25 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     request.on("end", () => {
       const values = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
       posts.push(values);
+      if (values.get("add") === "assign") {
+        assignmentCreationPosts.push(values);
+        createdAssignment = {
+          name: values.get("name") || "",
+          instructions: values.get("introeditor[text]") || "",
+          visible: values.get("visible") === "1",
+          availableFromEnabled: values.has("allowsubmissionsfromdate[enabled]"),
+          dueDateEnabled: values.has("duedate[enabled]"),
+          cutoffEnabled: values.has("cutoffdate[enabled]"),
+          gradingDueEnabled: values.has("gradingduedate[enabled]"),
+          gradePass: "0.00",
+        };
+        response.writeHead(303, { location: "/mod/assign/view.php?id=56" }).end();
+        return;
+      }
       if (values.get("update") === "8") {
         assignmentPosts.push(values);
         assignment.instructions = values.get("introeditor[text]") || "";
+        assignment.dueDateEnabled = values.has("duedate[enabled]");
         response.writeHead(303, { location: "/course/view.php" }).end();
         return;
       }
@@ -242,7 +307,7 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
     context = await browser.newContext({ ignoreHTTPSErrors: true });
     const page = await context.newPage();
-    await page.goto(`${origin}/course/view.php`);
+    await page.goto(`${origin}/course/view.php?id=2`);
     await page.evaluate((wwwroot) => {
       globalThis.M = { cfg: { wwwroot, sesskey: "synthetic-session", userId: 3, courseId: 2 } };
     }, origin);
@@ -340,6 +405,11 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     assert.equal(creationPost.get("displayoptions[display]"), "1");
     assert.equal(creationPost.get("completionexpected[enabled]"), null);
 
+    await page.evaluate(() => {
+      history.replaceState(null, "", "/mod/assign/view.php?id=8");
+      document.querySelector("h1").textContent = "Evidence analysis";
+      document.body.insertAdjacentHTML("beforeend", '<nav id="page-navbar"><ol class="breadcrumb"><li><a href="/course/view.php?id=2">Week 1</a></li></ol></nav>');
+    });
     const assignmentRead = await executeInBrowser(page, {
       mode: "execute",
       operation: assignmentReadOperation,
@@ -356,20 +426,96 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     });
     assert.equal(assignmentRead.ok, true);
     assert.equal(assignmentReadAgain.ok, true);
+    assert.equal(assignmentRead.targets[0].name, "Week 1");
     assert.equal(assignmentRead.snapshot_digest, assignmentReadAgain.snapshot_digest);
+    assert.deepEqual(assignmentRead.data.due_date, { year: 2026, month: 9, day: 5, hour: 9, minute: 30 });
     assert.notEqual(draftListIds[0], draftListIds[1]);
 
     const assignmentWrite = await executeInBrowser(page, {
       mode: "execute",
       operation: assignmentWriteOperation,
-      arguments: { course_id: 2, module_id: 8, instructions: "<p>Approved brief</p>", expected_digest: assignmentRead.snapshot_digest },
+      arguments: { course_id: 2, module_id: 8, instructions: "<p>Approved brief</p>", due_date: null, expected_digest: assignmentRead.snapshot_digest },
       binding,
       expiresAt: Date.now() + 60_000,
     });
     assert.equal(assignmentWrite.ok, true);
     assert.deepEqual(assignmentWrite.verification, { schema: "morrow.browser-verification.v1", status: "verified" });
+    assert.equal(assignmentWrite.data.due_date, null);
     assert.equal(assignmentPosts.length, 1);
     assert.equal(assignmentPosts[0].get("introeditor[text]"), "<p>Approved brief</p>");
+    assert.equal(assignmentPosts[0].get("duedate[enabled]"), null);
+
+    const assignmentPreparation = await executeInBrowser(page, {
+      mode: "execute",
+      operation: assignmentCreateReadOperation,
+      arguments: { course_id: 2, section_id: 7 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(assignmentPreparation.ok, true);
+    assert.deepEqual(assignmentPreparation.data, {
+      course_id: 2,
+      section_id: 7,
+      name: "",
+      instructions: "",
+      instructions_format: 1,
+      visible: true,
+      available_from: null,
+      due_date: null,
+      cutoff_at: null,
+      grading_due_at: null,
+    });
+    assert.deepEqual(assignmentPreparation.targets, preparation.targets);
+
+    const createdAssignmentResult = await executeInBrowser(page, {
+      mode: "execute",
+      operation: assignmentCreateWriteOperation,
+      arguments: {
+        course_id: 2,
+        section_id: 7,
+        name: "Evidence practice",
+        instructions: "<p>Read the evidence.</p>",
+        available_from: null,
+        due_date: null,
+        cutoff_at: null,
+        grading_due_at: null,
+        expected_digest: assignmentPreparation.snapshot_digest,
+      },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(createdAssignmentResult.ok, true);
+    assert.deepEqual(createdAssignmentResult.verification, { schema: "morrow.browser-verification.v1", status: "verified" });
+    assert.deepEqual(createdAssignmentResult.data, {
+      course_id: 2,
+      module_id: 56,
+      name: "Evidence practice",
+      instructions: "<p>Read the evidence.</p>",
+      instructions_format: 1,
+      available_from: null,
+      due_date: null,
+      cutoff_at: null,
+      grading_due_at: null,
+      section_id: 7,
+      visible: false,
+    });
+    assert.deepEqual(createdAssignmentResult.targets, assignmentPreparation.targets);
+    assert.equal(assignmentCreationPosts.length, 1);
+    const assignmentCreationPost = assignmentCreationPosts[0];
+    assert.equal(assignmentCreationPost.get("course"), "2");
+    assert.equal(assignmentCreationPost.get("add"), "assign");
+    assert.equal(assignmentCreationPost.get("modulename"), "assign");
+    assert.equal(assignmentCreationPost.get("section"), "4");
+    assert.equal(assignmentCreationPost.get("name"), "Evidence practice");
+    assert.equal(assignmentCreationPost.get("introeditor[text]"), "<p>Read the evidence.</p>");
+    assert.equal(assignmentCreationPost.get("visible"), "0");
+    assert.equal(assignmentCreationPost.get("coursecontentnotification"), null);
+    assert.equal(assignmentCreationPost.get("gradepass"), "");
+    for (const field of ["allowsubmissionsfromdate", "duedate", "cutoffdate", "gradingduedate"]) {
+      assert.equal(assignmentCreationPost.get(`${field}[enabled]`), null);
+    }
+    assert.ok(requests.includes("GET /course/modedit.php?add=assign&course=2&sectionid=7&return=0"));
+    assert.ok(requests.includes("GET /course/modedit.php?update=56&return=0"));
 
     draftFileCount = 1;
     const nonemptyAssignment = await executeInBrowser(page, {
@@ -400,7 +546,7 @@ test("Moodle executor rejects expired work before it calls Moodle", async () => 
   await withMoodlePage(async () => {
     let calls = 0;
     globalThis.fetch = async () => { calls += 1; throw new Error("must not run"); };
-    assert.deepEqual(await executeMoodleInPage(listInput(Date.now() - 1)), { ok: false, sent: false, error: "moodle_execution_expired" });
+    assert.deepEqual(await executeMoodleInPage(JSON.stringify(listInput(Date.now() - 1))), { ok: false, sent: false, error: "moodle_execution_expired" });
     assert.equal(calls, 0);
   });
 });

@@ -486,7 +486,7 @@ export async function resolveApprovalReviewContext(
     if (!result || (operation.state === "awaiting_approval" && result.snapshotDigest !== args.expected_digest)) {
       return { targets: [], ...(read.limited ? { limited: true } : {}) };
     }
-    const current = operation.state === "awaiting_approval" && browserMapping.upstreamName !== "moodle_create_page"
+    const current = operation.state === "awaiting_approval" && !["moodle_create_page", "moodle_create_assignment", "moodle_create_quiz"].includes(browserMapping.upstreamName)
       ? currentContent(args, result.data, browserMapping.upstreamName) : {};
     return {
       ...(Object.keys(current).length ? { current } : {}),

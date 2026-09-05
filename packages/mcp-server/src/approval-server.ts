@@ -160,6 +160,10 @@ function object(value: unknown): JsonObject {
 
 function readableName(value: string): string {
   const names: Record<string, string> = {
+    moodle_get_assignment_creation_form: "Prepare a Moodle assignment",
+    moodle_create_assignment: "Add this Moodle Assignment",
+    moodle_get_quiz_creation_form: "Prepare a Moodle quiz",
+    moodle_create_quiz: "Add this Moodle Quiz",
     moodle_get_page_creation_form: "Prepare a Moodle lesson page",
     moodle_create_page: "Add this Moodle Page",
     moodle_list_my_courses: "List my Moodle courses",
@@ -191,7 +195,10 @@ function readableName(value: string): string {
     summary: "Summary",
     content: "Page content",
     instructions: "Instructions",
+    available_from: "Submissions open",
     due_date: "Due date and time",
+    cutoff_at: "Final submission deadline",
+    grading_due_at: "Grading due",
     open_at: "Open date and time",
     close_at: "Close date and time",
     visible: "Visible to learners",
@@ -285,7 +292,7 @@ function moodleCivilDate(value: unknown): string | null {
 function fieldValue(key: string, value: unknown): string {
   if (key === "item_entry_answer_feedback" && isJsonObject(value)) return Object.entries(value).map(([id, content]) => `<section><p class="preview-label">Answer reference: ${escapeHtml(id)}</p>${typeof content === "string" ? formattedTextPreview("Answer feedback", content) : requestValue(content)}</section>`).join("");
   if (isRichText(key, value)) return formattedTextPreview(readableName(key), value);
-  if (["due_date", "open_at", "close_at"].includes(key)) {
+  if (["available_from", "due_date", "cutoff_at", "grading_due_at", "open_at", "close_at"].includes(key)) {
     const civil = moodleCivilDate(value);
     if (civil) return civil;
   }
@@ -555,7 +562,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     const hiddenFields = ["expected_digest", "expected_connection", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id"] : []), ...targets.map((item) => item.field)];
     const changes = typeof pageGuard.find_text === "string" && typeof pageGuard.replace_text === "string"
       ? `<div><dt>Current text</dt><dd>${escapeHtml(pageGuard.find_text)}</dd></div><div><dt>Replacement</dt><dd>${pageGuard.replace_text === "" ? "Remove this text" : escapeHtml(pageGuard.replace_text)}</dd></div>`
-      : requestFields(entry.tool === "moodle_create_page" ? { ...request, visible: false } : request, hiddenFields);
+      : requestFields(["moodle_create_page", "moodle_create_assignment", "moodle_create_quiz"].includes(String(entry.tool)) ? { ...request, visible: false } : request, hiddenFields);
     const addingQuestion = entry.tool === "canvas_create_quiz_item";
     const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
     const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${visibilityDecision(entry.tool) || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;

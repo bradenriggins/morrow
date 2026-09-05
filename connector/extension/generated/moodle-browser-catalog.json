@@ -214,11 +214,65 @@
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/modedit.php#L55-L209"
     },
     {
+      "key": "moodle.form.course.modedit.assign.create.read.v1",
+      "toolName": "moodle_get_assignment_creation_form",
+      "provider": "moodle",
+      "summary": "Prepare a Moodle Assignment creation form",
+      "description": "Read the exact native Moodle Assignment form for one selected course section. The result includes native availability defaults and the digest required to create a hidden Assignment.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/assign/mod_form.php#L48-L114"
+    },
+    {
+      "key": "moodle.form.course.modedit.quiz.create.read.v1",
+      "toolName": "moodle_get_quiz_creation_form",
+      "provider": "moodle",
+      "summary": "Prepare a Moodle Quiz creation form",
+      "description": "Read the exact native Moodle Quiz form for one selected course section. The result includes native open and close date defaults and the digest required to create a hidden Quiz.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/quiz/mod_form.php#L67-L124"
+    },
+    {
       "key": "moodle.form.course.modedit.assign.read.v1",
       "toolName": "moodle_get_assignment",
       "provider": "moodle",
       "summary": "Read a Moodle Assignment",
-      "description": "Read one standard Moodle Assignment activity and create the digest required for a later Assignment edit. The returned due date is a civil time in the Moodle user's configured timezone.",
+      "description": "Read one standard Moodle Assignment and create the digest required for a later Assignment edit. Returned availability, due, cutoff, and grading due dates are civil times in the Moodle user's configured timezone.",
       "readOnly": true,
       "inputSchema": {
         "type": "object",
@@ -272,7 +326,7 @@
       "toolName": "moodle_update_course_summary",
       "provider": "moodle",
       "summary": "Update a Moodle course summary",
-      "description": "Replace only the current course summary after the exact preceding summary read is reviewed.",
+      "description": "Replace only the current course summary after the exact preceding summary read is reviewed. Requires every native file-manager area in the current form to be empty.",
       "readOnly": false,
       "reviewTool": "moodle_get_course_summary",
       "inputSchema": {
@@ -305,7 +359,7 @@
       "toolName": "moodle_update_section",
       "provider": "moodle",
       "summary": "Update a Moodle section",
-      "description": "Update only the name or summary of one standard Moodle course section after review.",
+      "description": "Update only the name or summary of one standard Moodle course section after review. Requires every native file-manager area in the current form to be empty.",
       "readOnly": false,
       "reviewTool": "moodle_get_section",
       "inputSchema": {
@@ -358,7 +412,7 @@
       "toolName": "moodle_update_page",
       "provider": "moodle",
       "summary": "Update a Moodle Page",
-      "description": "Update only the name or Page content of one standard Moodle Page activity after review.",
+      "description": "Update only the name or Page content of one standard Moodle Page activity after review. Requires every native file-manager area in the current form to be empty.",
       "readOnly": false,
       "reviewTool": "moodle_get_page",
       "inputSchema": {
@@ -411,7 +465,7 @@
       "toolName": "moodle_create_page",
       "provider": "moodle",
       "summary": "Create a hidden Moodle Page",
-      "description": "Create one hidden Moodle Page in the selected section from the reviewed native form. It does not notify learners and verifies the saved Page, section, visibility, and form defaults.",
+      "description": "Create one hidden Moodle Page in the selected section from the reviewed native form. It does not notify learners and verifies the saved Page, section, visibility, and form defaults. Requires every native file-manager area in the current form to be empty.",
       "readOnly": false,
       "reviewTool": "moodle_get_page_creation_form",
       "inputSchema": {
@@ -452,11 +506,387 @@
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/modedit.php#L55-L209"
     },
     {
+      "key": "moodle.form.course.modedit.assign.create.write.v1",
+      "toolName": "moodle_create_assignment",
+      "provider": "moodle",
+      "summary": "Create a hidden Moodle Assignment",
+      "description": "Create one hidden Moodle Assignment in the selected section from the reviewed native form. It does not notify learners. Every date is an explicit civil time in the Moodle user's configured timezone or a clear choice. Requires every native file-manager area in the current form to be empty.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_assignment_creation_form",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1333
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 40000
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "available_from": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+              },
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
+              }
+            ]
+          },
+          "due_date": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+              },
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
+              }
+            ]
+          },
+          "cutoff_at": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+              },
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
+              }
+            ]
+          },
+          "grading_due_at": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+              },
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
+              }
+            ]
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id",
+          "name",
+          "instructions",
+          "available_from",
+          "due_date",
+          "cutoff_at",
+          "grading_due_at",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/modedit.php#L55-L209"
+    },
+    {
+      "key": "moodle.form.course.modedit.quiz.create.write.v1",
+      "toolName": "moodle_create_quiz",
+      "provider": "moodle",
+      "summary": "Create a hidden Moodle Quiz",
+      "description": "Create one hidden Moodle Quiz with no questions in the selected section from the reviewed native form. It does not notify learners. Every date is an explicit civil time in the Moodle user's configured timezone or a clear choice. Requires standard Safe Exam Browser mode to be disabled and every native file-manager area in the current form to be empty.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_quiz_creation_form",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1333
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 40000
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "open_at": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+              },
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
+              }
+            ]
+          },
+          "close_at": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+              },
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
+              }
+            ]
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id",
+          "name",
+          "instructions",
+          "open_at",
+          "close_at",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/modedit.php#L55-L209"
+    },
+    {
       "key": "moodle.form.course.modedit.assign.write.v1",
       "toolName": "moodle_update_assignment",
       "provider": "moodle",
       "summary": "Update a Moodle Assignment",
-      "description": "Update only the name, instructions, or due date of one standard Moodle Assignment after review. Due date values are civil times in the Moodle user's configured timezone.",
+      "description": "Update only the name, instructions, or due date of one standard Moodle Assignment after review. Due date values are civil times in the Moodle user's configured timezone. Requires every native file-manager area in the current form to be empty.",
       "readOnly": false,
       "reviewTool": "moodle_get_assignment",
       "inputSchema": {
@@ -479,43 +909,51 @@
             "maxLength": 40000
           },
           "due_date": {
-            "type": "object",
-            "properties": {
-              "year": {
-                "type": "integer",
-                "minimum": 1970,
-                "maximum": 2100
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
               },
-              "month": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 12
-              },
-              "day": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 31
-              },
-              "hour": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 23
-              },
-              "minute": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 59
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
               }
-            },
-            "required": [
-              "year",
-              "month",
-              "day",
-              "hour",
-              "minute"
-            ],
-            "additionalProperties": false,
-            "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+            ]
           },
           "expected_digest": {
             "type": "string",
@@ -553,7 +991,7 @@
       "toolName": "moodle_update_quiz",
       "provider": "moodle",
       "summary": "Update a Moodle Quiz",
-      "description": "Update only the name, instructions, open date, or close date of one standard Moodle Quiz after review. Date values are civil times in the Moodle user's configured timezone.",
+      "description": "Update only the name, instructions, open date, or close date of one standard Moodle Quiz after review. Date values are civil times in the Moodle user's configured timezone. Requires every native file-manager area in the current form to be empty.",
       "readOnly": false,
       "reviewTool": "moodle_get_quiz",
       "inputSchema": {
@@ -576,82 +1014,98 @@
             "maxLength": 40000
           },
           "open_at": {
-            "type": "object",
-            "properties": {
-              "year": {
-                "type": "integer",
-                "minimum": 1970,
-                "maximum": 2100
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
               },
-              "month": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 12
-              },
-              "day": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 31
-              },
-              "hour": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 23
-              },
-              "minute": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 59
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
               }
-            },
-            "required": [
-              "year",
-              "month",
-              "day",
-              "hour",
-              "minute"
-            ],
-            "additionalProperties": false,
-            "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+            ]
           },
           "close_at": {
-            "type": "object",
-            "properties": {
-              "year": {
-                "type": "integer",
-                "minimum": 1970,
-                "maximum": 2100
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false,
+                "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
               },
-              "month": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 12
-              },
-              "day": {
-                "type": "integer",
-                "minimum": 1,
-                "maximum": 31
-              },
-              "hour": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 23
-              },
-              "minute": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 59
+              {
+                "type": "null",
+                "description": "Clear this optional Moodle date."
               }
-            },
-            "required": [
-              "year",
-              "month",
-              "day",
-              "hour",
-              "minute"
-            ],
-            "additionalProperties": false,
-            "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+            ]
           },
           "expected_digest": {
             "type": "string",

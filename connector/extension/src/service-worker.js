@@ -54,7 +54,7 @@ async function courseTabMatches(tab, binding) {
   const url = new URL(tab.url);
   if (binding.provider === "moodle") {
     if (url.origin !== binding.origin) return false;
-    const [probe] = await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage, args: [{ mode: "probe" }] }).catch(() => []);
+    const [probe] = await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage, args: [JSON.stringify({ mode: "probe" })] }).catch(() => []);
     const profile = probe?.result?.profile;
     return probe?.result?.ok === true && profile?.siteUrl === binding.siteUrl && profile.principalId === binding.principalId
       && (!binding.courseId || profile.courseId === binding.courseId);
@@ -223,7 +223,8 @@ async function executeOperation(binding, operation, args, expiresAt) {
     try {
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage,
-        args: [{ mode: "execute", operation, arguments: args, binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt }],
+        // Chrome drops null object fields from scripting arguments unless they are serialized.
+        args: [JSON.stringify({ mode: "execute", operation, arguments: args, binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt })],
       });
       return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "moodle_result_missing" };
     } catch {
@@ -372,7 +373,7 @@ async function connectCourseTab(requestedTabId) {
   if (!tab?.id || !tab.url?.startsWith("https://")) throw new Error("Open the signed-in course that Morrow should use.");
   const origins = await permissionOrigins(tab.id, tab.url);
   if (!await chrome.permissions.contains({ origins })) throw new Error("Morrow needs access to this exact course site.");
-  const [moodle] = await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage, args: [{ mode: "probe" }] });
+  const [moodle] = await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage, args: [JSON.stringify({ mode: "probe" })] });
   let profile = moodle?.result?.ok === true ? moodle.result.profile : null;
   if (!profile) {
     if (/^\/(?:ultra|webapps)(?:\/|$)/.test(new URL(tab.url).pathname)) throw new Error("Blackboard browser access is not yet verified in this preview.");
