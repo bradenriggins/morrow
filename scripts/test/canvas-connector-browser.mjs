@@ -369,6 +369,7 @@ try {
   await operationApprovalPage.getByText("Showing 11–20 of 40 changes", { exact: true }).waitFor();
   await operationApprovalPage.getByLabel("Find a change").fill("question 40");
   assert.equal(await operationApprovalPage.locator(".change-item:visible").count(), 1);
+  await operationApprovalPage.getByText("Showing 1 change", { exact: true }).waitFor();
   await operationApprovalPage.locator(".change-item:visible > summary").click();
   await operationApprovalPage.locator(".change-item:visible").getByRole("button", { name: "Try the question" }).click();
   await operationApprovalPage.locator(".change-item:visible").getByRole("radio", { name: "Help the blood clot." }).check();

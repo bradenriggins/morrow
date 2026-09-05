@@ -77,7 +77,7 @@ if (changeList) {
     const matches = items.filter((item) => item.dataset.search.includes(query));
     const visible = matches.slice(page * 10, (page + 1) * 10);
     items.forEach((item) => { item.hidden = !visible.includes(item); });
-    count.textContent = matches.length ? "Showing " + (page * 10 + 1) + "–" + Math.min((page + 1) * 10, matches.length) + " of " + matches.length + " changes" : "No changes match your search.";
+    count.textContent = matches.length === 1 ? "Showing 1 change" : matches.length ? "Showing " + (page * 10 + 1) + "–" + Math.min((page + 1) * 10, matches.length) + " of " + matches.length + " changes" : "No changes match your search.";
     previous.disabled = page === 0;
     next.disabled = (page + 1) * 10 >= matches.length;
   };
