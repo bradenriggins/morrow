@@ -486,7 +486,7 @@ export async function resolveApprovalReviewContext(
     if (!result || (operation.state === "awaiting_approval" && result.snapshotDigest !== args.expected_digest)) {
       return { targets: [], ...(read.limited ? { limited: true } : {}) };
     }
-    const current = operation.state === "awaiting_approval" && !["moodle_create_page", "moodle_create_assignment", "moodle_create_quiz"].includes(browserMapping.upstreamName)
+    let current = operation.state === "awaiting_approval" && !["moodle_create_page", "moodle_create_assignment", "moodle_create_quiz"].includes(browserMapping.upstreamName)
       ? currentContent(args, result.data, browserMapping.upstreamName) : {};
     const targets = [...result.targets];
     if (/^moodle_(?:show|hide)_(?:section|activity)$/.test(browserMapping.upstreamName)) {
@@ -497,6 +497,25 @@ export async function resolveApprovalReviewContext(
       const target = selected.length === 1 ? object(selected[0]) : null;
       const name = target ? exactText(section ? target.title || target.rawtitle : target.name) : null;
       if (name) targets.push({ field, label: section ? "Section" : "Activity", name });
+    }
+    if (browserMapping.upstreamName === "moodle_move_activity") {
+      const activityId = moodleCourseId(args.module_id);
+      const destinationId = moodleCourseId(args.target_section_id);
+      const activities = Array.isArray(result.data.activities) ? result.data.activities : [];
+      const sections = Array.isArray(result.data.sections) ? result.data.sections : [];
+      const activitiesMatched = activities.filter((entry) => sameId(object(entry)?.id, activityId || ""));
+      const sectionsMatched = sections.filter((entry) => sameId(object(entry)?.id, destinationId || ""));
+      const activity = activitiesMatched.length === 1 ? object(activitiesMatched[0]) : null;
+      const destination = sectionsMatched.length === 1 ? object(sectionsMatched[0]) : null;
+      const sourceId = activity ? moodleCourseId(activity.sectionid) : null;
+      const sourcesMatched = sections.filter((entry) => sameId(object(entry)?.id, sourceId || ""));
+      const source = sourcesMatched.length === 1 ? object(sourcesMatched[0]) : null;
+      const activityName = activity ? exactText(activity.name) : null;
+      const destinationName = destination ? exactText(destination.title || destination.rawtitle) : null;
+      const sourceName = source ? exactText(source.title || source.rawtitle) : null;
+      if (activityName) targets.push({ field: "module_id", label: "Activity", name: activityName });
+      if (destinationName) targets.push({ field: "target_section_id", label: "Destination section", name: destinationName });
+      if (operation.state === "awaiting_approval" && sourceName) current = { ...current, current_section: sourceName };
     }
     return {
       ...(Object.keys(current).length ? { current } : {}),

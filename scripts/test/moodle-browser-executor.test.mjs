@@ -238,6 +238,30 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
   let sectionHasRestrictions = false;
   let leaveHiddenActivityVisibleOnSectionHide = false;
   let quizEditNative = true;
+  let moveFixture = false;
+  let moveActivitySection = 7;
+  let moveUnexpected = false;
+  let moveUnexpectedAfter = false;
+  const moveActions = [];
+  const moveState = () => {
+    const moved = {
+      id: 59, module: "page", sectionid: String(moveActivitySection), sectionnumber: moveActivitySection === 7 ? 4 : 5,
+      name: "Evidence notebook", visible: true, stealth: false, hasdelegatedsection: false,
+      uservisible: true, accessvisible: true, hascmrestrictions: false, allowstealth: true,
+    };
+    const destination = {
+      id: 60, module: "url", sectionid: "8", sectionnumber: 5, name: "Further reading", visible: true,
+      stealth: false, hasdelegatedsection: false, uservisible: true, accessvisible: true, hascmrestrictions: false, allowstealth: true,
+    };
+    return {
+      course: { id: 2, fullname: moveUnexpected ? "Unexpected course name" : "Week 1" },
+      section: [
+        { id: "7", number: 4, title: "Week 4: Evidence", visible: true, hasrestrictions: false, component: "", cmlist: moveActivitySection === 7 ? ["59"] : [] },
+        { id: "8", number: 5, title: "Week 5: Synthesis", visible: true, hasrestrictions: false, component: null, cmlist: moveActivitySection === 7 ? ["60"] : ["60", "59"] },
+      ],
+      cm: moveActivitySection === 7 ? [moved, destination] : [destination, moved],
+    };
+  };
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
     const url = new URL(request.url || "/", "https://127.0.0.1");
     requests.push(`${request.method} ${url.pathname}${url.search}`);
@@ -257,6 +281,14 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
       request.on("end", () => {
         const call = JSON.parse(Buffer.concat(chunks).toString("utf8"))[0];
         if (call?.methodname === "core_courseformat_update_course") {
+          if (call.args.action === "cm_move") {
+            moveActions.push(call.args);
+            moveActivitySection = 8;
+            if (moveUnexpectedAfter) moveUnexpected = true;
+            response.writeHead(200, { "content-type": "application/json" });
+            response.end(JSON.stringify([{ data: null }]));
+            return;
+          }
           visibilityActions.push(call.args.action);
           if (createdPage) {
             if (call.args.action === "section_hide") {
@@ -287,7 +319,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
         structureReads += 1;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify([{
-          data: JSON.stringify({
+          data: JSON.stringify(moveFixture ? moveState() : {
             course: { id: 2, fullname: "Week 1" },
             section: [{ id: 7, number: 4, title: "Week 4: Evidence", visible: sectionVisible, hasrestrictions: sectionHasRestrictions, component: "" }],
             cm: [
@@ -706,6 +738,33 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     }
     assert.ok(requests.includes("GET /course/modedit.php?add=assign&course=2&sectionid=7&return=0"));
     assert.ok(requests.includes("GET /course/modedit.php?update=56&return=0"));
+
+    moveFixture = true;
+    moveActivitySection = 7;
+    moveUnexpected = false;
+    moveUnexpectedAfter = false;
+    const moveActivity = (digest) => run("moodle_move_activity", "moodle.ajax.core_courseformat_update_course.cm_move.v1", {
+      course_id: 2, module_id: 59, target_section_id: 8, expected_digest: digest,
+    });
+    const moveRead = await run("moodle_get_contents", "moodle.ajax.core_courseformat_get_state.v1", { course_id: 2 });
+    const moved = await moveActivity(moveRead.snapshot_digest);
+    assert.equal(moved.ok, true);
+    assert.deepEqual(moved.verification, { schema: "morrow.browser-verification.v1", status: "verified" });
+    assert.deepEqual([moved.data.activities.find((entry) => entry.id === 59).sectionid, moved.data.sections.find((entry) => entry.id === "7").cmlist, moved.data.sections.find((entry) => entry.id === "8").cmlist], ["8", [], ["60", "59"]]);
+    assert.deepEqual(moved.targets, [
+      { field: "course_id", label: "Course", name: "Week 1" },
+      { field: "module_id", label: "Activity", name: "Evidence notebook" },
+      { field: "target_section_id", label: "Destination section", name: "Week 5: Synthesis" },
+    ]);
+    moveActivitySection = 7;
+    moveUnexpected = false;
+    moveUnexpectedAfter = true;
+    const moveMismatch = await moveActivity((await run("moodle_get_contents", "moodle.ajax.core_courseformat_get_state.v1", { course_id: 2 })).snapshot_digest);
+    assert.deepEqual([moveMismatch.ok, moveMismatch.sent, moveMismatch.error], [false, true, "moodle_write_not_verified"]);
+    assert.deepEqual(moveActions.map(({ action, courseid, ids, targetsectionid, targetcmid }) => ({ action, courseid, ids, targetsectionid, targetcmid })), [
+      { action: "cm_move", courseid: 2, ids: [59], targetsectionid: 8, targetcmid: null },
+      { action: "cm_move", courseid: 2, ids: [59], targetsectionid: 8, targetcmid: null },
+    ]);
 
     draftFileCount = 1;
     const nonemptyAssignment = await executeInBrowser(page, {

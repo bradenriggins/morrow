@@ -187,11 +187,14 @@ function readableName(value: string): string {
     moodle_hide_section: "Hide this Moodle section from learners",
     moodle_show_activity: "Show this Moodle activity to learners",
     moodle_hide_activity: "Hide this Moodle activity from learners",
+    moodle_move_activity: "Move this Moodle activity",
     blackboard_update_content: "Update the Blackboard lesson",
     limit: "Maximum courses",
     course_id: "Course ID",
     section_id: "Section ID",
     module_id: "Activity ID",
+    target_section_id: "Destination section",
+    current_section: "Current section",
     summary: "Summary",
     content: "Page content",
     instructions: "Instructions",
@@ -409,6 +412,13 @@ function visibilityDecision(tool: unknown, verified = false): string | null {
   return null;
 }
 
+function moveDecision(tool: unknown, verified = false): string | null {
+  if (tool !== "moodle_move_activity") return null;
+  return verified
+    ? "Moodle confirmed the activity moved to the end of the selected destination section and its visibility and access stayed unchanged."
+    : "This moves the activity to the end of the selected destination section. Morrow checks that its visibility and access stay unchanged.";
+}
+
 function changeTitle(request: JsonObject, context: ApprovalReviewContext | undefined, fallback: string): string {
   const title = ["item_entry_title", "wiki_page_title", "assignment_name", "quiz_title", "module_name", "module_item_title", "rubric_title", "question_question_name", "title", "name"].map((key) => request[key])
     .find((value) => typeof value === "string" && value.trim());
@@ -434,8 +444,11 @@ function namedTargetsMissing(operations: readonly JsonObject[], contexts: Readon
     const plan = object(operation.plan);
     if (!/^(canvas|moodle|blackboard)_/.test(String(plan.tool))) return false;
     const request = object(plan.arguments);
-    const targets = contexts.get(String(operation.operationId))?.targets || [];
-    return targets.some((item) => !item.name.trim()) || ["id", "course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "section_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
+    const context = contexts.get(String(operation.operationId));
+    const targets = context?.targets || [];
+    const source = context?.current?.current_section;
+    return (plan.tool === "moodle_move_activity" && operation.state === "awaiting_approval" && (typeof source !== "string" || !source.trim()))
+      || targets.some((item) => !item.name.trim()) || ["id", "course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "section_id", "target_section_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
       field in request && !targets.some((item) => item.field === field && item.name.trim()));
   });
 }
@@ -561,13 +574,13 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     const request = object(entry.arguments);
     const pageGuard = entry.tool === "canvas_update_create_page_courses" ? object(object(request._morrow).page_guard) : {};
     const name = typeof entry.tool === "string" ? readableName(entry.tool) : "Requested changes";
-    const hiddenFields = ["expected_digest", "expected_connection", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id"] : []), ...targets.map((item) => item.field)];
+    const hiddenFields = ["expected_digest", "expected_connection", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id"] : []), ...targets.map((item) => item.field)];
     const changes = typeof pageGuard.find_text === "string" && typeof pageGuard.replace_text === "string"
       ? `<div><dt>Current text</dt><dd>${escapeHtml(pageGuard.find_text)}</dd></div><div><dt>Replacement</dt><dd>${pageGuard.replace_text === "" ? "Remove this text" : escapeHtml(pageGuard.replace_text)}</dd></div>`
       : requestFields(["moodle_create_page", "moodle_create_assignment", "moodle_create_quiz"].includes(String(entry.tool)) ? { ...request, visible: false } : request, hiddenFields);
     const addingQuestion = entry.tool === "canvas_create_quiz_item";
     const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
-    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${visibilityDecision(entry.tool, operations[index]?.state === "verified") || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;
+    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${visibilityDecision(entry.tool, operations[index]?.state === "verified") || moveDecision(entry.tool, operations[index]?.state === "verified") || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;
     const questionFields = Object.keys(request).filter((key) => key.startsWith("item_") && key !== "item_id");
     const scoreOnlyQuestion = question && questionFields.length === 1 && questionFields[0] === "item_entry_scoring_data";
     const before = scoreOnlyQuestion && context?.question
@@ -576,7 +589,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
         ? '<p class="preview-note">Question details come from the current saved item. The requested changes are shown below.</p>'
       : context?.current && Object.keys(context.current).length
       ? `<details class="current-content"><summary>Current content and values</summary><dl class="request">${requestFields(context.current)}</dl></details><p class="preview-label">Requested changes</p>`
-      : changeKind(entry.tool) === "Edit" && !pageGuard.find_text ? '<p class="preview-note">Requested values are shown below. Earlier values are not available in this review.</p>' : "";
+      : changeKind(entry.tool) === "Edit" && entry.tool !== "moodle_move_activity" && !pageGuard.find_text ? '<p class="preview-note">Requested values are shown below. Earlier values are not available in this review.</p>' : "";
     const preservation = pageGuard.find_text ? '<p>Only this phrase will change. The other page content and settings stay the same.</p><p>Morrow checks for newer edits before sending. Avoid editing this page until the result is checked.</p>' : "";
     const content = `<section class="section change-content">${destination ? `<dl class="destination${addingQuestion ? " question-destination" : ""}">${destination}</dl>` : ""}${before}${preview}${preservation}</section>`;
     if (!batch) return content;
@@ -601,7 +614,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   const next = (limited
     ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Return to your assistant and ask Morrow to split this into smaller groups. This page has not approved any changes.</p>'
     : missingNames
-    ? '<p class="warning">Morrow could not identify the course or activity in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
+    ? '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
     : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
   const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">${approveLabel}</button></form>`;
   return pageShell(title, "Before Morrow makes changes", `<header class="hero"><p class="eyebrow">Ready for your review</p><h1>${escapeHtml(title)}</h1>${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);

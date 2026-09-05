@@ -2,7 +2,7 @@
 
 Move course work forward. Stay in control.
 
-**Development preview:** Use this version only in a permitted test course. Canvas has selected live course checks. Moodle has selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Blackboard is unavailable until its browser connection is verified in an authorized test course. See [current limits](LIMITATIONS.md).
+**Development preview:** Use this version only in a permitted test course. Canvas has selected live course checks. Moodle has selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. File uploads and file edits are not available yet. Blackboard is unavailable until its browser connection is verified in an authorized test course. See [current limits](LIMITATIONS.md).
 
 Morrow helps course teams turn lesson and quiz requests into reviewed changes and checked results. Ask an assistant set up with Morrow for a change, review the exact change in Morrow, and see what the course platform saved. You keep the teaching decisions.
 
@@ -150,7 +150,7 @@ Canvas and Moodle use the same signed-in Chrome connection. Open a course you ca
 | Platform | Current course work | Current evidence |
 | --- | --- | --- |
 | Canvas | Selected lesson and quiz corrections, pages, module links, and publication work. | Selected live test-course changes and one student route were saved and checked. |
-| Moodle | Read course details; create Pages, Assignments, and Quizzes without questions; edit Pages, Assignment instructions, and Quiz instructions; set or clear Assignment due dates and Quiz open/close dates; show or hide selected Pages and sections; read Multiple choice and Essay questions. | Selected test-course changes were saved and checked, including Page and section visibility. Question authoring, random and other question types, and changes to activities with attached files are not supported yet. Other activity types, section cases, and broader settings still need checks. |
+| Moodle | Read course details; create Pages, Assignments, and Quizzes without questions; edit Pages, Assignment instructions, and Quiz instructions; set or clear Assignment due dates and Quiz open/close dates; show or hide selected Pages and sections; move a visible Page between visible sections; read Multiple choice and Essay questions. | Selected test-course changes were saved and checked, including Page and section visibility. Question authoring, random and other question types, file uploads, and file edits are not available yet. Morrow stops content and date changes when it finds attached files. Other activity types, section cases, and broader settings still need checks. |
 | Blackboard | Not available through Morrow. | Browser connection is not yet verified. |
 
 Morrow is working toward the same core features across all three platforms. It does not claim current parity. Blackboard course work remains unavailable until its browser connection is verified.

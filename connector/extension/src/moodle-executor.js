@@ -37,6 +37,7 @@ export async function executeMoodleInPage(input) {
     "moodle.ajax.core_courseformat_update_course.section_hide.v1": { toolName: "moodle_hide_section", readOnly: false, kind: "section-hide" },
     "moodle.ajax.core_courseformat_update_course.cm_show.v1": { toolName: "moodle_show_activity", readOnly: false, kind: "activity-show" },
     "moodle.ajax.core_courseformat_update_course.cm_hide.v1": { toolName: "moodle_hide_activity", readOnly: false, kind: "activity-hide" },
+    "moodle.ajax.core_courseformat_update_course.cm_move.v1": { toolName: "moodle_move_activity", readOnly: false, kind: "activity-move" },
   });
   const creationSpec = Object.freeze({
     page: { module: "page", type: "page-create", body: "page[text]", dataBody: "content", dates: [] },
@@ -178,7 +179,7 @@ export async function executeMoodleInPage(input) {
   const validateArguments = (definition, raw, binding, context) => {
     const value = withoutMorrow(raw);
     if (!value) return { error: "moodle_arguments_invalid" };
-    const courseKinds = new Set(["course", "structure", "assignments", "quizzes", "quiz-questions-read", "quiz-question-read", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read", "course-form-write", "section-form-write", "page-form-write", "page-create-form-write", "assignment-form-write", "quiz-form-write", "assignment-create-form-write", "quiz-create-form-write", "course-show", "course-hide", "section-show", "section-hide", "activity-show", "activity-hide"]);
+    const courseKinds = new Set(["course", "structure", "assignments", "quizzes", "quiz-questions-read", "quiz-question-read", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read", "course-form-write", "section-form-write", "page-form-write", "page-create-form-write", "assignment-form-write", "quiz-form-write", "assignment-create-form-write", "quiz-create-form-write", "course-show", "course-hide", "section-show", "section-hide", "activity-show", "activity-hide", "activity-move"]);
     if (definition.kind === "list-courses") {
       if (!only(value, ["limit"]) || (value.limit !== undefined && (!Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > MAX_ITEMS))) return { error: "moodle_arguments_invalid" };
       return { value: { limit: value.limit || 50 } };
@@ -188,7 +189,7 @@ export async function executeMoodleInPage(input) {
       if (!courseId) return { error: "moodle_course_mismatch" };
       value.course_id = courseId;
     }
-    const moduleKinds = new Set(["quiz-questions-read", "quiz-question-read", "page-form-read", "assignment-form-read", "quiz-form-read", "page-form-write", "assignment-form-write", "quiz-form-write", "activity-show", "activity-hide"]);
+    const moduleKinds = new Set(["quiz-questions-read", "quiz-question-read", "page-form-read", "assignment-form-read", "quiz-form-read", "page-form-write", "assignment-form-write", "quiz-form-write", "activity-show", "activity-hide", "activity-move"]);
     const sectionKinds = new Set(["section-form-read", "section-form-write", "page-create-form-read", "page-create-form-write", "assignment-create-form-read", "assignment-create-form-write", "quiz-create-form-read", "quiz-create-form-write", "section-show", "section-hide"]);
     if (moduleKinds.has(definition.kind)) {
       if (!id(value.module_id)) return { error: "moodle_arguments_invalid" };
@@ -215,6 +216,11 @@ export async function executeMoodleInPage(input) {
     if (visibility.has(definition.kind)) {
       const allowed = definition.kind.startsWith("course") ? ["course_id", "expected_digest"] : definition.kind.startsWith("section") ? ["course_id", "section_id", "expected_digest"] : ["course_id", "module_id", "expected_digest"];
       if (!only(value, allowed) || !validDigest(value.expected_digest)) return { error: "moodle_arguments_invalid" };
+      return { value };
+    }
+    if (definition.kind === "activity-move") {
+      if (!id(value.target_section_id) || !only(value, ["course_id", "module_id", "target_section_id", "expected_digest"]) || !validDigest(value.expected_digest)) return { error: "moodle_arguments_invalid" };
+      value.target_section_id = id(value.target_section_id);
       return { value };
     }
     if (!validDigest(value.expected_digest)) return { error: "moodle_arguments_invalid" };
@@ -909,6 +915,94 @@ export async function executeMoodleInPage(input) {
     }
     return digest(contentData(copy));
   };
+  const oneEntry = (entries, targetId) => {
+    const matches = Array.isArray(entries) ? entries.filter((entry) => id(entry?.id) === targetId) : [];
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const ordinaryVisibleSection = (entry) => Boolean(entry) && (entry.component === null || entry.component === "")
+    && entry.visible === true && entry.hasrestrictions === false && sectionNumber(entry.number) !== "";
+  const cmlistWithOne = (entry, moduleId) => {
+    if (!Array.isArray(entry?.cmlist) || entry.cmlist.some((cmId) => !id(cmId)) || new Set(entry.cmlist.map(id)).size !== entry.cmlist.length) return null;
+    const matches = entry.cmlist.filter((cmId) => id(cmId) === moduleId);
+    return matches.length === 1 ? matches[0] : null;
+  };
+  const sectionMembershipMatches = (data, section) => {
+    if (!Array.isArray(section?.cmlist) || section.cmlist.some((cmId) => !id(cmId)) || new Set(section.cmlist.map(id)).size !== section.cmlist.length) return false;
+    const sectionId = id(section.id);
+    const direct = data.cm.filter((entry) => id(entry?.sectionid) === sectionId).map((entry) => id(entry?.id));
+    return direct.length === section.cmlist.length && direct.every((cmId) => cmId && section.cmlist.some((listed) => id(listed) === cmId));
+  };
+  const canonicalMoveState = (value) => {
+    if (!isObject(value) || !Array.isArray(value.cm)) return null;
+    const seen = new Set();
+    for (const entry of value.cm) {
+      const entryId = id(entry?.id);
+      if (!entryId || seen.has(entryId)) return null;
+      seen.add(entryId);
+    }
+    const copy = JSON.parse(JSON.stringify(value));
+    copy.cm.sort((left, right) => Number(id(left.id)) - Number(id(right.id)));
+    return copy;
+  };
+  const moveContract = (data, moduleId, targetSectionId) => {
+    const activity = oneEntry(data.cm, moduleId);
+    const source = activity ? oneEntry(data.section, id(activity.sectionid)) : null;
+    const destination = oneEntry(data.section, targetSectionId);
+    const movedMember = cmlistWithOne(source, moduleId);
+    if (!activity || !source || !destination || id(source.id) === targetSectionId || !ordinaryVisibleSection(source) || !ordinaryVisibleSection(destination)
+      || !["page", "assign", "quiz"].includes(activity.module) || activity.visible !== true || activity.stealth !== false
+      || activity.hasdelegatedsection !== false || activity.uservisible !== true || activity.accessvisible !== true || activity.hascmrestrictions !== false
+      || movedMember === null || !sectionMembershipMatches(data, source) || !sectionMembershipMatches(data, destination) || destination.cmlist.some((cmId) => id(cmId) === moduleId)) return null;
+    return { activity, source, destination, movedMember };
+  };
+  const expectedMoveState = (data, moduleId, targetSectionId) => {
+    const contract = moveContract(data, moduleId, targetSectionId);
+    if (!contract) return null;
+    const copy = JSON.parse(JSON.stringify(data));
+    const activity = oneEntry(copy.cm, moduleId);
+    const source = oneEntry(copy.section, id(contract.source.id));
+    const destination = oneEntry(copy.section, targetSectionId);
+    if (!activity || !source || !destination) return null;
+    activity.sectionid = contract.destination.id;
+    activity.sectionnumber = contract.destination.number;
+    source.cmlist = source.cmlist.filter((cmId) => id(cmId) !== moduleId);
+    destination.cmlist = [...destination.cmlist, contract.movedMember];
+    return canonicalMoveState(copy);
+  };
+  const runMoveActivity = async (context, inputValue, args) => {
+    const before = await state(context, args.course_id);
+    if (!before.ok) return before;
+    const beforeData = contentData(before.data);
+    if (await digest(beforeData) !== args.expected_digest) return error("moodle_expected_digest_mismatch");
+    const contract = moveContract(before.data, args.module_id, args.target_section_id);
+    const expected = expectedMoveState(before.data, args.module_id, args.target_section_id);
+    if (!contract || !expected) return error("moodle_move_precondition_refused");
+    const rechecked = currentContext();
+    if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
+    const update = await ajax(rechecked, "core_courseformat_update_course", {
+      action: "cm_move", courseid: Number(args.course_id), ids: [Number(args.module_id)], targetsectionid: Number(args.target_section_id), targetcmid: null,
+    }, true);
+    if (!update.ok) return update;
+    const after = await state(rechecked, args.course_id);
+    if (!after.ok) return { ok: false, sent: true, status: update.status, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_readback_unconfirmed" }, error: "moodle_readback_unconfirmed" };
+    const actual = canonicalMoveState(after.data);
+    const matches = Boolean(actual) && stable(expected) === stable(actual);
+    const data = contentData(after.data);
+    return {
+      ok: matches,
+      sent: true,
+      status: after.status,
+      data,
+      targets: [
+        courseTarget(rechecked, after.data.course.fullname || after.data.course.name),
+        { field: "module_id", label: "Activity", name: String(contract.activity.name || args.module_id) },
+        { field: "target_section_id", label: "Destination section", name: String(contract.destination.title || contract.destination.rawtitle || args.target_section_id) },
+      ],
+      snapshot_digest: await digest(data),
+      verification: { schema: "morrow.browser-verification.v1", status: matches ? "verified" : "mismatch", ...(matches ? {} : { reason: "moodle_readback_mismatch" }) },
+      ...(matches ? {} : { error: "moodle_write_not_verified" }),
+    };
+  };
   const runVisibility = async (context, inputValue, definition, args) => {
     if (definition.kind === "course-show" || definition.kind === "course-hide") return runFormWrite(context, inputValue, definition, args);
     const collection = definition.kind.startsWith("section") ? "section" : "cm";
@@ -991,6 +1085,7 @@ export async function executeMoodleInPage(input) {
     }
     if (creationModule(definition.kind) && definition.kind.endsWith("form-write")) return runCreation(context, input, definition, args);
     if (definition.kind.includes("form-write") || definition.kind === "course-show" || definition.kind === "course-hide") return runFormWrite(context, input, definition, args);
+    if (definition.kind === "activity-move") return runMoveActivity(context, input, args);
     return runVisibility(context, input, definition, args);
   } catch {
     return error("moodle_execution_failed");

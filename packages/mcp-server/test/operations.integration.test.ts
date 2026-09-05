@@ -264,6 +264,33 @@ describe("outer provider effects", () => {
     } finally {
       await approval.close();
     }
+
+    let missingMove: JsonObject = {
+      operationId: "moodle-move-missing",
+      state: "awaiting_approval",
+      plan: { tool: "moodle_move_activity", arguments: { course_id: 2, module_id: 8, target_section_id: 4, expected_digest: "e".repeat(64), _morrow: { source_binding_id: "moodle:demo:2" } } },
+    };
+    const missingApproval = new LoopbackApprovalServer({
+      operationGet: () => missingMove,
+      operationList: () => ({}),
+      operationReviewContext: async () => ({ targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Evidence notebook" }, { field: "target_section_id", label: "Destination section", name: "Week 2" }] }),
+      approveOperation: () => missingMove,
+      runApprovedOperation: async () => undefined,
+      cancelOperation: () => missingMove,
+      setApprovalBaseUrl: () => undefined,
+      batchApprovalGet: () => missingMove,
+    });
+    try {
+      const url = await missingApproval.start();
+      const review = await (await fetch(`${url}/operations/moodle-move-missing`)).text();
+      expect(review).toContain("Morrow could not identify the course or a selected item in Moodle.");
+      expect(review).not.toContain('class="approve"');
+      missingMove = { ...missingMove, state: "verified" };
+      const verified = await (await fetch(`${url}/operations/moodle-move-verified`)).text();
+      expect(verified).not.toContain("Earlier values are not available in this review.");
+    } finally {
+      await missingApproval.close();
+    }
   });
 
   it("renders Moodle browser reviews with formatted content, civil dates, and visibility decisions", async () => {
@@ -289,6 +316,13 @@ describe("outer provider effects", () => {
           plan: { tool: "moodle_hide_section", arguments: { course_id: 2, section_id: 3, expected_digest: "c".repeat(64), _morrow: { source_binding_id: "moodle:demo:2" } } },
         },
       },
+      {
+        operation: {
+          operationId: "moodle-move",
+          state: "awaiting_approval",
+          plan: { tool: "moodle_move_activity", arguments: { course_id: 2, module_id: 8, target_section_id: 4, expected_digest: "d".repeat(64), _morrow: { source_binding_id: "moodle:demo:2" } } },
+        },
+      },
     ];
     const snapshot: JsonObject = { batch: { state: "planned" }, children, totalChildren: children.length };
     const contexts: Record<string, ApprovalReviewContext> = {
@@ -303,6 +337,10 @@ describe("outer provider effects", () => {
       "moodle-visibility": {
         targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "section_id", label: "Section", name: "Week 1" }],
         current: { visible: true },
+      },
+      "moodle-move": {
+        targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Evidence notebook" }, { field: "target_section_id", label: "Destination section", name: "Week 2" }],
+        current: { current_section: "Topic 1" },
       },
     };
     const approval = new LoopbackApprovalServer({
@@ -328,6 +366,12 @@ describe("outer provider effects", () => {
       expect(displayed).not.toContain("&quot;year&quot;");
       expect(displayed).toContain("Hide this Moodle section from learners");
       expect(displayed).toContain("This will hide the section and its activities from learners.");
+      expect(displayed).toContain("Evidence notebook · Week 2");
+      expect(displayed).toContain("Evidence notebook");
+      expect(displayed).toContain("Week 2");
+      expect(displayed).toContain("Current section");
+      expect(displayed).toContain("Topic 1");
+      expect(displayed).toContain("This moves the activity to the end of the selected destination section. Morrow checks that its visibility and access stay unchanged.");
       expect(displayed).toContain("Visible to learners");
       expect(displayed).toContain("Keep your assistant and Chrome open while Morrow works.");
     } finally {

@@ -111,7 +111,7 @@ Use these claims now:
 - A separate page creation was saved and checked against the approved content and settings.
 - A selected Codex request reached a separate Morrow review. After approval, one paragraph was added once and checked against the saved page.
 - Morrow is a private development preview. The source-review test used a manually connected assistant.
-- Moodle uses the same Chrome connection as Canvas. Selected test-course proof covers course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; setting or clearing Assignment due dates and Quiz open/close dates. Selected test-course work also covered Page and section visibility and reading Multiple choice and Essay questions. Question authoring, random and other question types, and changes to activities with attached files are not supported yet. Other activity types, section cases, and broader settings still need checks.
+- Moodle uses the same Chrome connection as Canvas. Selected test-course proof covers course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; setting or clearing Assignment due dates and Quiz open/close dates. Selected test-course work also covered Page and section visibility and reading Multiple choice and Essay questions. Question authoring, random and other question types, file uploads, and file edits are not available yet. Other activity types, section cases, and broader settings still need checks.
 - Blackboard browser connection is not yet verified, so Blackboard course work is unavailable.
 
 Do not use these claims now:

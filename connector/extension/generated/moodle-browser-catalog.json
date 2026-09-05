@@ -1259,6 +1259,44 @@
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/edit_form.php#L100-L118"
     },
     {
+      "key": "moodle.ajax.core_courseformat_update_course.cm_move.v1",
+      "toolName": "moodle_move_activity",
+      "provider": "moodle",
+      "summary": "Move a Moodle activity",
+      "description": "Move one visible Moodle Page, Assignment, or Quiz to the end of a selected visible course section. Morrow checks that the activity visibility and access stay unchanged.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_contents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "target_section_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "target_section_id",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/stateactions.php#L53-L117"
+    },
+    {
       "key": "moodle.ajax.core_courseformat_update_course.section_show.v1",
       "toolName": "moodle_show_section",
       "provider": "moodle",
