@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "62bc3d77a7d7365c50ccfda66209acd4773f97c2",
+  "candidateCommit": "24b8477ab4b9fcd01bad989cc22d3f3949d8d417",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -1979,14 +1979,14 @@
     },
     {
       "path": "packages/mcp-server/test/config.test.ts",
-      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "sourceCommit": "24b8477ab4b9fcd01bad989cc22d3f3949d8d417",
       "originalPath": "packages/mcp-server/test/config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "3298f1fcd9c5bc98f1fb4854483ab499e0e855df9e56aed46d5fb46955214eeb",
-      "afterDigest": "90374894511786380bb46c7ffa198e782eabde1074dc08a498670e54e17b23cb"
+      "beforeDigest": "90374894511786380bb46c7ffa198e782eabde1074dc08a498670e54e17b23cb",
+      "afterDigest": "0cf1f7347a5b7dd90e7fdf061ec48bc0c2ff03acd8ad723115311a258c279c9e"
     },
     {
       "path": "packages/mcp-server/test/fixtures/fake-batch-upstream.mjs",
