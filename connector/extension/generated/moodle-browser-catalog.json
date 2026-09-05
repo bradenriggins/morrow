@@ -111,6 +111,65 @@
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/output/local/state/cm.php"
     },
     {
+      "key": "moodle.form.mod.quiz.edit.read.v1",
+      "toolName": "moodle_list_quiz_questions",
+      "provider": "moodle",
+      "summary": "List Moodle Quiz questions",
+      "description": "List up to 100 signed-in native Quiz slots for one exact Quiz activity. Random and unsupported question slots are identified but cannot be inspected.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/quiz/classes/output/edit_renderer.php#L532-L574"
+    },
+    {
+      "key": "moodle.form.question.bank.editquestion.read.v1",
+      "toolName": "moodle_get_quiz_question",
+      "provider": "moodle",
+      "summary": "Read a Moodle Quiz question",
+      "description": "Read one supported Multiple choice or Essay question from one exact signed-in Quiz slot. Moodle may prepare private draft copies for native editor fields; this read never submits or changes a question, course, or version.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "slot_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "slot_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/question/bank/editquestion/question.php#L192-L287"
+    },
+    {
       "key": "moodle.form.course.edit.summary.read.v1",
       "toolName": "moodle_get_course_summary",
       "provider": "moodle",

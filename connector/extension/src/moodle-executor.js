@@ -13,6 +13,8 @@ export async function executeMoodleInPage(input) {
     "moodle.ajax.core_courseformat_get_state.v1": { toolName: "moodle_get_contents", readOnly: true, kind: "structure" },
     "moodle.ajax.core_courseformat_get_state.assignments.v1": { toolName: "moodle_list_assignments", readOnly: true, kind: "assignments" },
     "moodle.ajax.core_courseformat_get_state.quizzes.v1": { toolName: "moodle_list_quizzes", readOnly: true, kind: "quizzes" },
+    "moodle.form.mod.quiz.edit.read.v1": { toolName: "moodle_list_quiz_questions", readOnly: true, kind: "quiz-questions-read" },
+    "moodle.form.question.bank.editquestion.read.v1": { toolName: "moodle_get_quiz_question", readOnly: true, kind: "quiz-question-read" },
     "moodle.form.course.edit.summary.read.v1": { toolName: "moodle_get_course_summary", readOnly: true, kind: "course-form-read" },
     "moodle.form.course.editsection.read.v1": { toolName: "moodle_get_section", readOnly: true, kind: "section-form-read" },
     "moodle.form.course.modedit.page.read.v1": { toolName: "moodle_get_page", readOnly: true, kind: "page-form-read" },
@@ -176,7 +178,7 @@ export async function executeMoodleInPage(input) {
   const validateArguments = (definition, raw, binding, context) => {
     const value = withoutMorrow(raw);
     if (!value) return { error: "moodle_arguments_invalid" };
-    const courseKinds = new Set(["course", "structure", "assignments", "quizzes", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read", "course-form-write", "section-form-write", "page-form-write", "page-create-form-write", "assignment-form-write", "quiz-form-write", "assignment-create-form-write", "quiz-create-form-write", "course-show", "course-hide", "section-show", "section-hide", "activity-show", "activity-hide"]);
+    const courseKinds = new Set(["course", "structure", "assignments", "quizzes", "quiz-questions-read", "quiz-question-read", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read", "course-form-write", "section-form-write", "page-form-write", "page-create-form-write", "assignment-form-write", "quiz-form-write", "assignment-create-form-write", "quiz-create-form-write", "course-show", "course-hide", "section-show", "section-hide", "activity-show", "activity-hide"]);
     if (definition.kind === "list-courses") {
       if (!only(value, ["limit"]) || (value.limit !== undefined && (!Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > MAX_ITEMS))) return { error: "moodle_arguments_invalid" };
       return { value: { limit: value.limit || 50 } };
@@ -186,7 +188,7 @@ export async function executeMoodleInPage(input) {
       if (!courseId) return { error: "moodle_course_mismatch" };
       value.course_id = courseId;
     }
-    const moduleKinds = new Set(["page-form-read", "assignment-form-read", "quiz-form-read", "page-form-write", "assignment-form-write", "quiz-form-write", "activity-show", "activity-hide"]);
+    const moduleKinds = new Set(["quiz-questions-read", "quiz-question-read", "page-form-read", "assignment-form-read", "quiz-form-read", "page-form-write", "assignment-form-write", "quiz-form-write", "activity-show", "activity-hide"]);
     const sectionKinds = new Set(["section-form-read", "section-form-write", "page-create-form-read", "page-create-form-write", "assignment-create-form-read", "assignment-create-form-write", "quiz-create-form-read", "quiz-create-form-write", "section-show", "section-hide"]);
     if (moduleKinds.has(definition.kind)) {
       if (!id(value.module_id)) return { error: "moodle_arguments_invalid" };
@@ -196,7 +198,12 @@ export async function executeMoodleInPage(input) {
       if (!id(value.section_id)) return { error: "moodle_arguments_invalid" };
       value.section_id = id(value.section_id);
     }
-    const reads = new Set(["course", "structure", "assignments", "quizzes", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read"]);
+    if (definition.kind === "quiz-question-read") {
+      if (!id(value.slot_id) || !only(value, ["course_id", "module_id", "slot_id"])) return { error: "moodle_arguments_invalid" };
+      value.slot_id = id(value.slot_id);
+      return { value };
+    }
+    const reads = new Set(["course", "structure", "assignments", "quizzes", "quiz-questions-read", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "assignment-create-form-read", "quiz-create-form-read"]);
     if (reads.has(definition.kind)) {
       const allowed = creationModule(definition.kind) || definition.kind.startsWith("section") ? ["course_id", "section_id"]
         : (definition.kind.startsWith("page") || definition.kind.startsWith("assignment") || definition.kind.startsWith("quiz")) ? ["course_id", "module_id"]
@@ -553,6 +560,204 @@ export async function executeMoodleInPage(input) {
     if (["page", "assign", "quiz"].includes(descriptor.type)) return [course, { field: "module_id", label: "Activity", name: String(data.name || descriptor.moduleId) }];
     return [course];
   };
+  const finalRouteMatches = (actualValue, endpoint, required) => {
+    let actual;
+    let expected;
+    try { actual = new URL(actualValue || endpoint); expected = new URL(endpoint); } catch { return false; }
+    return actual.origin === expected.origin && actual.pathname === expected.pathname
+      && [...actual.searchParams.keys()].length === Object.keys(required).length
+      && Object.entries(required).every(([name, value]) => actual.searchParams.getAll(name).length === 1 && actual.searchParams.get(name) === String(value));
+  };
+  const loadQuizDocument = async (context, path, params, failure) => {
+    const endpoint = urlFor(context, path, params);
+    let response;
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } }); } catch { return error(failure); }
+    let text;
+    try { text = await readText(response); } catch { return { ...error(failure), status: response.status }; }
+    if (!response.ok || typeof DOMParser === "undefined" || !finalRouteMatches(response.url, endpoint, params)) return { ...error(failure), status: response.status };
+    try { return { ok: true, sent: true, status: response.status, document: new DOMParser().parseFromString(text, "text/html") }; } catch { return { ...error(failure), status: response.status }; }
+  };
+  const quizTargets = (context, course, quiz) => [courseTarget(context, course.fullname || course.name), { field: "module_id", label: "Quiz", name: String(quiz.name || quiz.id) }];
+  const quizBinding = async (context, args) => {
+    const current = await state(context, args.course_id);
+    if (!current.ok) return current;
+    const quiz = current.data.cm.find((entry) => id(entry?.id) === args.module_id && entry?.module === "quiz");
+    if (!quiz) return error("moodle_quiz_target_invalid");
+    return { ok: true, sent: true, status: current.status, course: current.data.course, quiz };
+  };
+  const nativeText = (value, maximum = MAX_BYTES) => typeof value === "string" && value.length <= maximum && !value.includes("\u0000") ? value : null;
+  const slotName = (node) => String(node.querySelector(".instancename")?.textContent || "").trim().replace(/\s+/g, " ").slice(0, 1333);
+  const parseQuizSlots = (context, documentValue, moduleId) => {
+    const roots = Array.from(documentValue.querySelectorAll('ul.slots[role="presentation"]'));
+    if (roots.length !== 1) return null;
+    const sections = Array.from(roots[0].children).filter((node) => node.matches?.('li.section.main[id^="section-"]'));
+    if (!sections.length) return null;
+    const slotLists = sections.map((section) => Array.from(section.querySelectorAll("ul.section.img-text")));
+    if (slotLists.some((lists) => lists.length !== 1)) return null;
+    const nodes = slotLists.flatMap((lists) => Array.from(lists[0].querySelectorAll(':scope > li.slot[id^="slot-"]')));
+    const quizEndpoint = urlFor(context, "/mod/quiz/edit.php", { cmid: moduleId });
+    const seen = new Set();
+    const slots = [];
+    for (const node of nodes.slice(0, MAX_ITEMS)) {
+      const slotId = id(String(node.getAttribute("id") || "").slice("slot-".length));
+      const qtypeClass = Array.from(node.classList).find((name) => name.startsWith("qtype_"));
+      const qtype = qtypeClass && /^[a-z][a-z0-9_]*$/.test(qtypeClass.slice("qtype_".length)) ? qtypeClass.slice("qtype_".length) : "";
+      if (!slotId || !qtype || seen.has(slotId)) return null;
+      seen.add(slotId);
+      const random = node.classList.contains("random") || qtype === "random";
+      let version = null;
+      if (!random) {
+        const selects = Array.from(node.querySelectorAll(`select.version-selection[data-slot-id="${slotId}"]`));
+        if (selects.length !== 1) return null;
+        const selected = Array.from(selects[0].querySelectorAll("option[selected]")).filter((option) => id(option.getAttribute("value")) || option.getAttribute("value") === "0");
+        if (selected.length !== 1) return null;
+        const value = selected[0].getAttribute("value");
+        version = value === "0" ? { mode: "latest" } : id(value) ? { mode: "pinned", number: Number(id(value)) } : null;
+        if (!version) return null;
+      }
+      let questionId = "";
+      let malformedLink = false;
+      const questionLinks = [];
+      for (const anchor of node.querySelectorAll("a[href]")) {
+        let href;
+        try { href = new URL(anchor.getAttribute("href"), quizEndpoint); } catch { continue; }
+        const expectedPath = `${context.basePath}/question/bank/editquestion/question.php`;
+        if (href.origin !== context.profile.origin || href.pathname !== expectedPath) continue;
+        const candidateId = id(href.searchParams.get("id"));
+        if (href.searchParams.getAll("id").length !== 1 || href.searchParams.getAll("cmid").length !== 1 || !candidateId || href.searchParams.get("cmid") !== moduleId) questionLinks.push({ invalid: true });
+        else questionLinks.push({ questionId: candidateId });
+      }
+      if (questionLinks.length > 1 || questionLinks.some((entry) => entry.invalid)) malformedLink = true;
+      if (malformedLink) return null;
+      if (questionLinks.length === 1) questionId = questionLinks[0].questionId;
+      const supported = qtype === "multichoice" || qtype === "essay";
+      const reason = random ? "random_slot" : !supported ? "unsupported_type" : !questionId ? "not_editable" : "";
+      slots.push({
+        slot_id: Number(slotId), position: slots.length + 1, qtype, status: "not_exposed", ...(version ? { version } : {}),
+        ...(questionId ? { question_id: Number(questionId) } : {}), ...(slotName(node) ? { name: slotName(node) } : {}), inspectable: !reason, ...(reason ? { reason } : {}), _questionId: questionId,
+      });
+    }
+    return { slots, truncated: nodes.length > MAX_ITEMS };
+  };
+  const listQuizQuestions = async (context, inputValue, args) => {
+    const bound = await quizBinding(context, args);
+    if (!bound.ok) return bound;
+    const rechecked = currentContext();
+    if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
+    const page = await loadQuizDocument(rechecked, "/mod/quiz/edit.php", { cmid: args.module_id }, "moodle_quiz_questions_read_failed");
+    if (!page.ok) return page;
+    const parsed = parseQuizSlots(rechecked, page.document, args.module_id);
+    if (!parsed) return { ...error("moodle_quiz_questions_target_invalid"), status: page.status };
+    const questions = parsed.slots.map(({ _questionId, ...slot }) => slot);
+    const data = sanitize({ course_id: Number(args.course_id), module_id: Number(args.module_id), questions, truncated: parsed.truncated });
+    return { ok: true, sent: true, status: page.status, data, targets: quizTargets(rechecked, bound.course, bound.quiz), snapshot_digest: await digest(data), slots: parsed.slots };
+  };
+  const oneFormValue = (formData, name, maximum = MAX_BYTES) => {
+    const values = formData.getAll(name);
+    const value = values.length === 1 ? nativeText(values[0], maximum) : null;
+    return value === null ? null : value;
+  };
+  const nativeBoolean = (form, formData, name) => {
+    const controls = Array.from(form.querySelectorAll("[name]")).filter((control) => control.getAttribute("name") === name);
+    const checkboxes = controls.filter((control) => String(control.getAttribute("type") || "").toLowerCase() === "checkbox");
+    if (checkboxes.length === 1 && controls.every((control) => control === checkboxes[0] || String(control.getAttribute("type") || "").toLowerCase() === "hidden")) return Boolean(checkboxes[0].checked);
+    if (checkboxes.length > 0) return null;
+    const value = oneFormValue(formData, name, 1);
+    return value === "0" ? false : value === "1" ? true : null;
+  };
+  const hasDraftReference = (context, value) => String(value).includes("draftfile.php/");
+  const richValue = (context, formData, name) => {
+    const value = oneFormValue(formData, name);
+    return value === null || hasDraftReference(context, value) ? null : value;
+  };
+  const questionCommonData = (context, formData) => {
+    const name = oneFormValue(formData, "name", 1333);
+    const questionText = richValue(context, formData, "questiontext[text]");
+    const questionTextFormat = oneFormValue(formData, "questiontext[format]", 32);
+    const status = oneFormValue(formData, "status", 32);
+    const defaultMark = oneFormValue(formData, "defaultmark", 64);
+    const generalFeedback = richValue(context, formData, "generalfeedback[text]");
+    const generalFeedbackFormat = oneFormValue(formData, "generalfeedback[format]", 32);
+    const idNumber = oneFormValue(formData, "idnumber", 255);
+    if ([name, questionText, questionTextFormat, defaultMark, generalFeedback, generalFeedbackFormat, idNumber].some((value) => value === null)
+      || !["ready", "draft", "hidden"].includes(status || "")) return null;
+    return { name, question_text: questionText, question_text_format: questionTextFormat, status, default_mark: defaultMark, general_feedback: generalFeedback, general_feedback_format: generalFeedbackFormat, id_number: idNumber };
+  };
+  const multipleChoiceData = (context, form, formData) => {
+    const single = nativeBoolean(form, formData, "single");
+    const shuffleAnswers = nativeBoolean(form, formData, "shuffleanswers");
+    const answerNumbering = oneFormValue(formData, "answernumbering", 64);
+    const showStandardInstruction = nativeBoolean(form, formData, "showstandardinstruction");
+    if (single === null || shuffleAnswers === null || !answerNumbering || showStandardInstruction === null) return null;
+    const indexes = [...new Set(Array.from(formData.keys()).map((name) => name.match(/^answer\[([0-9]+)\]\[(?:text|format)\]$/)?.[1]).filter(Boolean))]
+      .map(Number).filter(Number.isSafeInteger).sort((left, right) => left - right);
+    if (!indexes.length) return null;
+    const choices = [];
+    for (const index of indexes) {
+      const text = richValue(context, formData, `answer[${index}][text]`);
+      const format = oneFormValue(formData, `answer[${index}][format]`, 32);
+      const fraction = oneFormValue(formData, `fraction[${index}]`, 64);
+      const feedback = richValue(context, formData, `feedback[${index}][text]`);
+      const feedbackFormat = oneFormValue(formData, `feedback[${index}][format]`, 32);
+      if ([text, format, fraction, feedback, feedbackFormat].some((value) => value === null)) return null;
+      if (text === "" && feedback === "" && /^0(?:[.,]0+)?$/.test(fraction)) continue;
+      choices.push({ text, format, fraction, feedback, feedback_format: feedbackFormat });
+    }
+    return { single, shuffle_answers: shuffleAnswers, answer_numbering: answerNumbering, show_standard_instruction: showStandardInstruction, choices: choices.slice(0, MAX_ITEMS), choices_truncated: choices.length > MAX_ITEMS };
+  };
+  const essayData = (context, form, formData) => {
+    const responseFormat = oneFormValue(formData, "responseformat", 64);
+    const responseRequired = nativeBoolean(form, formData, "responserequired");
+    const responseFieldLines = oneFormValue(formData, "responsefieldlines", 32);
+    const wordLimit = (prefix) => {
+      const enabled = formData.getAll(`${prefix}enabled`);
+      if (enabled.length === 0) return "";
+      return enabled.length === 1 && enabled[0] === "1" ? oneFormValue(formData, `${prefix}limit`, 32) : null;
+    };
+    const minWordLimit = wordLimit("minword");
+    const maxWordLimit = wordLimit("maxword");
+    const responseTemplate = richValue(context, formData, "responsetemplate[text]");
+    const responseTemplateFormat = oneFormValue(formData, "responsetemplate[format]", 32);
+    const graderInfo = richValue(context, formData, "graderinfo[text]");
+    const graderInfoFormat = oneFormValue(formData, "graderinfo[format]", 32);
+    if (!responseFormat || responseRequired === null || !responseFieldLines || minWordLimit === null || maxWordLimit === null
+      || responseTemplate === null || !responseTemplateFormat || graderInfo === null || !graderInfoFormat) return null;
+    return { response_format: responseFormat, response_required: responseRequired, response_field_lines: responseFieldLines, min_word_limit: minWordLimit || null, max_word_limit: maxWordLimit || null, response_template: responseTemplate, response_template_format: responseTemplateFormat, grader_info: graderInfo, grader_info_format: graderInfoFormat };
+  };
+  const getQuizQuestion = async (context, inputValue, args) => {
+    const listed = await listQuizQuestions(context, inputValue, args);
+    if (!listed.ok) return listed;
+    const slot = listed.slots.find((entry) => entry.slot_id === Number(args.slot_id));
+    if (!slot) return error(listed.data.truncated ? "moodle_quiz_slot_not_listed" : "moodle_quiz_slot_not_found");
+    if (slot.reason === "random_slot") return error("moodle_quiz_random_slot_uninspectable");
+    if (slot.reason === "unsupported_type") return error("moodle_question_type_unsupported");
+    if (!slot.inspectable || !slot._questionId) return error("moodle_question_not_editable");
+    const rechecked = currentContext();
+    if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
+    const page = await loadQuizDocument(rechecked, "/question/bank/editquestion/question.php", { id: slot._questionId, cmid: args.module_id }, "moodle_question_read_failed");
+    if (!page.ok) return page;
+    const endpoint = urlFor(rechecked, "/question/bank/editquestion/question.php", { id: slot._questionId, cmid: args.module_id });
+    const forms = Array.from(page.document.querySelectorAll("form")).filter((form) => {
+      if (String(form.getAttribute("method") || "get").toLowerCase() !== "post") return false;
+      try {
+        const action = new URL(form.getAttribute("action") || endpoint, endpoint);
+        const data = new FormData(form);
+        return action.origin === rechecked.profile.origin && action.pathname === new URL(endpoint).pathname
+          && oneFormValue(data, "id", 32) === slot._questionId && oneFormValue(data, "cmid", 32) === args.module_id
+          && oneFormValue(data, "courseid", 32) === args.course_id;
+      } catch { return false; }
+    });
+    if (forms.length !== 1) return { ...error("moodle_question_target_invalid"), status: page.status };
+    let formData;
+    try { formData = new FormData(forms[0]); } catch { return { ...error("moodle_question_target_invalid"), status: page.status }; }
+    const qtype = oneFormValue(formData, "qtype", 64);
+    if (qtype !== slot.qtype || !["multichoice", "essay"].includes(qtype || "")) return { ...error("moodle_question_target_invalid"), status: page.status };
+    const common = questionCommonData(rechecked, formData);
+    const details = qtype === "multichoice" ? multipleChoiceData(rechecked, forms[0], formData) : essayData(rechecked, forms[0], formData);
+    if (!common || !details) return { ...error("moodle_question_content_refused"), status: page.status };
+    const data = sanitize({ course_id: Number(args.course_id), module_id: Number(args.module_id), slot_id: Number(args.slot_id), question_id: Number(slot._questionId), version: slot.version, qtype, ...common, details });
+    return { ok: true, sent: true, status: page.status, data, targets: listed.targets, snapshot_digest: await digest(data) };
+  };
   const formChanges = (kind, args, formData) => {
     const names = [];
     if (kind === "course-form-write") { setField(formData, "summary_editor[text]", args.summary); names.push("summary_editor[text]"); }
@@ -767,6 +972,13 @@ export async function executeMoodleInPage(input) {
       return { ok: true, sent: true, status: response.status, data, snapshot_digest: await digest(data) };
     }
     if (definition.kind === "structure" || definition.kind === "assignments" || definition.kind === "quizzes") return stateRead(context, args.course_id, definition.kind === "assignments" ? "assign" : definition.kind === "quizzes" ? "quiz" : "");
+    if (definition.kind === "quiz-questions-read") {
+      const result = await listQuizQuestions(context, input, args);
+      if (!result.ok) return result;
+      const { slots, ...output } = result;
+      return output;
+    }
+    if (definition.kind === "quiz-question-read") return getQuizQuestion(context, input, args);
     if (creationModule(definition.kind) && definition.kind.endsWith("form-read")) {
       const form = await loadCreationForm(context, args, definition.kind);
       if (!form.ok) return form;

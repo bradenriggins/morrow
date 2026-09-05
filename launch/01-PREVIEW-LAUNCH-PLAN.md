@@ -4,7 +4,7 @@
 
 Make Morrow's four commitments visible through one clear story: **review before you approve, know what was saved, keep your sign-in private, and choose how you work**. The website and launch film lead with the shared promise: **Move course work forward. Stay in control.** The case study and evidence record explain the engineering and selected tests.
 
-Canvas supplies the selected live course evidence. Canvas and Moodle use the same signed-in Chrome connection. Moodle has selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Blackboard browser connection is not yet verified and Blackboard course work is unavailable.
+Canvas supplies the selected live course evidence. Canvas and Moodle use the same signed-in Chrome connection. Moodle has selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; setting or clearing Assignment due dates and Quiz open/close dates. Selected test-course work also covered Page and section visibility and reading Multiple choice and Essay questions. Question authoring, random and other question types, and changes to activities with attached files are not supported yet. Blackboard browser connection is not yet verified and Blackboard course work is unavailable.
 
 ## Current evidence position
 
@@ -14,7 +14,7 @@ Canvas supplies the selected live course evidence. Canvas and Moodle use the sam
 | Canvas lesson correction | One approved phrase correction reached verified saved-page readback, with named page settings preserved. | Selected Canvas lesson correction verified. |
 | Older page-version request | A request based on an older page version failed before send; later page body and update time were unchanged. | Older page-version request stopped before send. |
 | New Quiz key, module, publication, learner route | The New Quiz key reached verified readback; two module links and three publication operations reached verified readback. Canvas Student View showed the corrected lesson, all three quiz questions, and a 100% three-point result with all feedback visible. | Selected Canvas sandbox learner route verified. |
-| Moodle | Course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; Assignment due dates and Quiz open/close dates. | Selected Moodle course-content changes were saved and checked in a test course. |
+| Moodle | Course reads; Page, Assignment, and Quiz creation without questions; Page and instruction edits; date changes; Page show/hide; one two-Page section hide/show; Multiple choice and Essay question reads. | Selected Moodle course-content changes were saved and checked in a test course. |
 | Blackboard | Browser connection is not yet verified. | Blackboard course work unavailable. |
 
 ## Readiness gates
@@ -31,7 +31,7 @@ Canvas supplies the selected live course evidence. Canvas and Moodle use the sam
 
 - Publish a capability-and-evidence table with the exact connection and evidence for each platform.
 - Canvas: signed-in Chrome connector; selected sandbox proof only.
-- Moodle: the same signed-in Chrome connector; selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Adding questions to a Quiz, visibility changes, section changes, and other work still need checks.
+- Moodle: the same signed-in Chrome connector; selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; setting or clearing Assignment due dates and Quiz open/close dates. Selected test-course work also covered Page and section visibility and reading Multiple choice and Essay questions. Question authoring, random and other question types, and changes to activities with attached files are not supported yet. Other activity types, section cases, and broader settings still need checks.
 - Blackboard: browser connection not verified; no course work available.
 - State that Morrow is working toward the same core features across all three platforms. Do not claim current parity.
 - Do not add a Moodle evaluator CTA beyond the selected test-course workflows until each named write workflow has live proof. Do not add a Blackboard evaluator CTA until the browser connection is verified.
@@ -83,7 +83,7 @@ The closing frame uses the full Morrow wordmark and the website promise: **Move 
 - Say verified for the selected lesson correction, narrow New Quiz key correction, two module links, three publication operations, unpublished page creation, and selected Codex page update. The Student View learner route has separate observed and API evidence.
 - Say failed before send for the request based on an older page version. Do not call it a completed change.
 - Keep each result bound to the selected sandbox test. These results do not establish whole-release verification.
-- Say Moodle has selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. State that changes to activities with attached files are not supported yet, and that adding Quiz questions, visibility changes, section changes, and other Moodle work still need checks.
+- Say Moodle has selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; setting or clearing Assignment due dates and Quiz open/close dates; showing and hiding a Page, and hiding and restoring one section with two Pages; and reading Multiple choice and Essay questions. State that question authoring, random and other question types, and changes to activities with attached files are not supported yet, and that other activity types, section cases, and broader settings still need checks.
 - Say Blackboard browser connection is not yet verified and Blackboard course work is unavailable.
 - Do not use operation counts as proof, or infer one provider's proof from another provider's tests.
 - Do not imply that every assistant configuration has the selected Codex route's proof, or that course content remains entirely local.

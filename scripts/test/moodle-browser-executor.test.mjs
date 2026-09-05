@@ -71,6 +71,20 @@ const assignmentCreateWriteOperation = {
   readOnly: false,
 };
 
+const quizQuestionsReadOperation = {
+  key: "moodle.form.mod.quiz.edit.read.v1",
+  toolName: "moodle_list_quiz_questions",
+  provider: "moodle",
+  readOnly: true,
+};
+
+const quizQuestionReadOperation = {
+  key: "moodle.form.question.bank.editquestion.read.v1",
+  toolName: "moodle_get_quiz_question",
+  provider: "moodle",
+  readOnly: true,
+};
+
 async function withMoodlePage(callback) {
   const keys = ["location", "M", "document", "fetch"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -141,6 +155,26 @@ function assignmentForm(state, draftId, { moduleId = 8, creation = false } = {})
   </form></body></html>`;
 }
 
+function quizEditPage() {
+  return `<!doctype html><html><body><ul class="slots" role="presentation"><li class="section main clearfix" id="section-1" role="presentation"><div class="content"><ul class="section img-text">
+      <li class="activity multichoice qtype_multichoice slot" id="slot-17"><div class="activityinstance"><a href="/question/bank/editquestion/question.php?id=401&amp;cmid=9&amp;returnurl=%2Fmod%2Fquiz%2Fedit.php%3Fcmid%3D9"><span class="instancename">Evidence check</span></a></div><div class="actions"><select class="form-select version-selection" data-slot-id="17"><option value="0" selected="selected">Always latest</option><option value="1">v1</option></select></div></li>
+      <li class="activity random qtype_random slot" id="slot-18"><div class="activityinstance"><span class="instancename">Random evidence question</span></div></li>
+      <li class="activity truefalse qtype_truefalse slot" id="slot-19"><div class="activityinstance"><a href="/question/bank/editquestion/question.php?id=402&amp;cmid=9"><span class="instancename">Unsupported question</span></a></div><div class="actions"><select class="form-select version-selection" data-slot-id="19"><option value="0">Always latest</option><option value="2" selected="selected">v2</option></select></div></li>
+    </ul></div></li></ul></body></html>`;
+}
+
+function multipleChoiceQuestionForm() {
+  return `<!doctype html><html><body><form method="post" action="/question/bank/editquestion/question.php">
+    <input type="hidden" name="id" value="401"><input type="hidden" name="cmid" value="9"><input type="hidden" name="courseid" value="2"><input type="hidden" name="qtype" value="multichoice">
+    <input name="name" value="Evidence check"><textarea name="questiontext[text]"><p>Which claim has evidence?</p></textarea><input name="questiontext[format]" value="1"><input name="questiontext[itemid]" value="971">
+    <select name="status"><option value="ready" selected="selected">Ready</option><option value="draft">Draft</option></select><input name="defaultmark" value="1.00"><textarea name="generalfeedback[text]"></textarea><input name="generalfeedback[format]" value="1"><input name="generalfeedback[itemid]" value="972"><input name="idnumber" value="evidence-1">
+    <select name="single"><option value="0">Multiple</option><option value="1" selected="selected">One</option></select><input type="hidden" name="shuffleanswers" value="0"><input type="checkbox" name="shuffleanswers" value="1" checked><select name="answernumbering"><option value="abc" selected="selected">a.</option></select><select name="showstandardinstruction"><option value="0">No</option><option value="1" selected="selected">Yes</option></select>
+    <textarea name="answer[0][text]"><p>Use the cited source.</p></textarea><input name="answer[0][format]" value="1"><input name="fraction[0]" value="100"><textarea name="feedback[0][text]"><p>Correct.</p></textarea><input name="feedback[0][format]" value="1"><input name="answer[0][itemid]" value="973"><input name="feedback[0][itemid]" value="974">
+    <textarea name="answer[1][text]"><p>Guess.</p></textarea><input name="answer[1][format]" value="1"><input name="fraction[1]" value="0"><textarea name="feedback[1][text]"></textarea><input name="feedback[1][format]" value="1"><input name="answer[1][itemid]" value="975"><input name="feedback[1][itemid]" value="976">
+    <textarea name="answer[2][text]"></textarea><input name="answer[2][format]" value="1"><input name="fraction[2]" value="0"><textarea name="feedback[2][text]"></textarea><input name="feedback[2][format]" value="1"><input name="answer[2][itemid]" value="977"><input name="feedback[2][itemid]" value="978">
+  </form></body></html>`;
+}
+
 async function executeInBrowser(page, input) {
   return page.evaluate(async ({ source, value }) => {
     const execute = (0, eval)(`(${source})`);
@@ -187,6 +221,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     gradePass: "",
   };
   const hiddenSectionActivity = { visible: false, visibleOld: false, stealth: false };
+  const quizActivity = { visible: true, visibleOld: true };
   const posts = [];
   const assignmentPosts = [];
   const assignmentCreationPosts = [];
@@ -202,6 +237,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
   let sectionVisible = false;
   let sectionHasRestrictions = false;
   let leaveHiddenActivityVisibleOnSectionHide = false;
+  let quizEditNative = true;
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
     const url = new URL(request.url || "/", "https://127.0.0.1");
     requests.push(`${request.method} ${url.pathname}${url.search}`);
@@ -228,11 +264,14 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
               createdPage.visible = false;
               hiddenSectionActivity.visibleOld = hiddenSectionActivity.visible;
               if (!leaveHiddenActivityVisibleOnSectionHide) hiddenSectionActivity.visible = false;
+              quizActivity.visibleOld = quizActivity.visible;
+              quizActivity.visible = false;
               sectionVisible = false;
               sectionHasRestrictions = false;
             } else if (call.args.action === "section_show") {
               createdPage.visible = createdPage.visibleOld;
               hiddenSectionActivity.visible = hiddenSectionActivity.visibleOld;
+              quizActivity.visible = quizActivity.visibleOld;
               sectionVisible = true;
               sectionHasRestrictions = true;
             } else {
@@ -254,6 +293,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
             cm: [
               ...(createdPage ? [{ id: 55, module: "page", sectionid: 7, name: createdPage.name, visible: createdPage.visible, uservisible: true, accessvisible: createdPage.visible, hascmrestrictions: false, stealth: createdPage.visible && !sectionVisible, allowstealth: sectionVisible }] : []),
               { id: 57, module: "url", sectionid: 7, name: "Already hidden resource", visible: hiddenSectionActivity.visible, uservisible: true, accessvisible: hiddenSectionActivity.visible, hascmrestrictions: false, stealth: hiddenSectionActivity.stealth, allowstealth: sectionVisible },
+              { id: 9, module: "quiz", sectionid: 7, name: "Evidence quiz", visible: quizActivity.visible, uservisible: true, accessvisible: quizActivity.visible, hascmrestrictions: false, stealth: quizActivity.visible && !sectionVisible, allowstealth: sectionVisible },
               ...(createdAssignment ? [{ id: 56, module: "assign", sectionid: 7, visible: createdAssignment.visible }] : []),
             ],
           }),
@@ -269,6 +309,16 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify({ filecount: draftFileCount, filesize: draftFileCount, list: draftFileCount ? [{ filename: "existing.pdf" }] : [] }));
       });
+      return;
+    }
+    if (url.pathname === "/mod/quiz/edit.php" && request.method === "GET" && url.searchParams.get("cmid") === "9") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(quizEditNative ? quizEditPage() : "<!doctype html><html><body>Quiz access denied</body></html>");
+      return;
+    }
+    if (url.pathname === "/question/bank/editquestion/question.php" && request.method === "GET" && url.searchParams.get("id") === "401" && url.searchParams.get("cmid") === "9") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(multipleChoiceQuestionForm());
       return;
     }
     if (url.pathname !== "/course/modedit.php") {
@@ -438,6 +488,76 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     assert.equal(creationPost.get("page[format]"), "1");
     assert.equal(creationPost.get("displayoptions[display]"), "1");
     assert.equal(creationPost.get("completionexpected[enabled]"), null);
+
+    const quizQuestions = await executeInBrowser(page, {
+      mode: "execute",
+      operation: quizQuestionsReadOperation,
+      arguments: { course_id: 2, module_id: 9 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(quizQuestions.ok, true);
+    assert.deepEqual(quizQuestions.data.questions, [
+      { slot_id: 17, position: 1, qtype: "multichoice", status: "not_exposed", version: { mode: "latest" }, question_id: 401, name: "Evidence check", inspectable: true },
+      { slot_id: 18, position: 2, qtype: "random", status: "not_exposed", inspectable: false, reason: "random_slot", name: "Random evidence question" },
+      { slot_id: 19, position: 3, qtype: "truefalse", status: "not_exposed", version: { mode: "pinned", number: 2 }, question_id: 402, name: "Unsupported question", inspectable: false, reason: "unsupported_type" },
+    ]);
+    const quizQuestion = await executeInBrowser(page, {
+      mode: "execute",
+      operation: quizQuestionReadOperation,
+      arguments: { course_id: 2, module_id: 9, slot_id: 17 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(quizQuestion.ok, true);
+    assert.deepEqual(quizQuestion.data, {
+      course_id: 2,
+      module_id: 9,
+      slot_id: 17,
+      question_id: 401,
+      version: { mode: "latest" },
+      qtype: "multichoice",
+      name: "Evidence check",
+      question_text: "<p>Which claim has evidence?</p>",
+      question_text_format: "1",
+      status: "ready",
+      default_mark: "1.00",
+      general_feedback: "",
+      general_feedback_format: "1",
+      id_number: "evidence-1",
+      details: {
+        single: true,
+        shuffle_answers: true,
+        answer_numbering: "abc",
+        show_standard_instruction: true,
+        choices: [
+          { text: "<p>Use the cited source.</p>", format: "1", fraction: "100", feedback: "<p>Correct.</p>", feedback_format: "1" },
+          { text: "<p>Guess.</p>", format: "1", fraction: "0", feedback: "", feedback_format: "1" },
+        ],
+        choices_truncated: false,
+      },
+    });
+    assert.ok(requests.includes("GET /mod/quiz/edit.php?cmid=9"));
+    assert.ok(requests.includes("GET /question/bank/editquestion/question.php?id=401&cmid=9"));
+    assert.doesNotMatch(JSON.stringify(quizQuestion.data), /97[1-8]|draftfile\.php/);
+    const questionRequests = requests.filter((request) => request.startsWith("GET /question/bank/editquestion/question.php")).length;
+    assert.deepEqual(await executeInBrowser(page, {
+      mode: "execute",
+      operation: quizQuestionReadOperation,
+      arguments: { course_id: 2, module_id: 9, slot_id: 18 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    }), { ok: false, sent: false, error: "moodle_quiz_random_slot_uninspectable" });
+    assert.equal(requests.filter((request) => request.startsWith("GET /question/bank/editquestion/question.php")).length, questionRequests);
+    quizEditNative = false;
+    assert.deepEqual(await executeInBrowser(page, {
+      mode: "execute",
+      operation: quizQuestionsReadOperation,
+      arguments: { course_id: 2, module_id: 9 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    }), { ok: false, sent: false, status: 200, error: "moodle_quiz_questions_target_invalid" });
+    quizEditNative = true;
 
     const run = (toolName, key, params) => executeInBrowser(page, { mode: "execute", operation: { toolName, key, provider: "moodle", readOnly: toolName === "moodle_get_contents" }, arguments: params, binding, expiresAt: Date.now() + 60_000 });
     const activity = (result) => result.data.activities.find((item) => item.id === 55);

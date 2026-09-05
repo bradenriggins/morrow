@@ -13,7 +13,7 @@ Morrow runs on your computer and connects to an assistant through MCP. Source se
 A user installs only two Morrow components:
 
 1. **Morrow MCP** runs as one local stdio server. The selected chat application starts it when needed.
-2. **Morrow Chrome Connector** is one Manifest V3 Chrome extension. It uses the Canvas or Moodle session already signed in within Chrome.
+2. **Morrow Course Connector** is one Manifest V3 Chrome extension. It uses the Canvas or Moodle session already signed in within Chrome.
 
 No platform access token, developer key, OAuth app, hosted Morrow account, or separate approval application is required.
 
@@ -22,7 +22,7 @@ Node.js is the runtime for the current source release. It is part of the MCP ins
 ## How a user works with Morrow
 
 1. Add Morrow to your chosen assistant using the installation steps below. Open or restart that assistant.
-2. Open the Morrow Chrome Connector extension in Chrome.
+2. Open the Morrow Course Connector extension in Chrome.
 3. Select **Connect Morrow**. On the page that opens, select **Allow connection** if you started this request.
 4. Open the permitted Canvas or Moodle test course you want to use in Chrome and sign in.
 5. Open the extension again and select **Connect course**. Chrome asks for access to that course site. Canvas can also request access to an open New Quizzes site.
@@ -150,7 +150,7 @@ Canvas and Moodle use the same signed-in Chrome connection. Open a course you ca
 | Platform | Current course work | Current evidence |
 | --- | --- | --- |
 | Canvas | Selected lesson and quiz corrections, pages, module links, and publication work. | Selected live test-course changes and one student route were saved and checked. |
-| Moodle | Read course details; create Pages, Assignments, and Quizzes without questions; edit Pages, Assignment instructions, and Quiz instructions; set or clear Assignment due dates and Quiz open/close dates. | Selected test-course changes were saved and checked. Changes to activities with attached files are not supported yet. Adding Quiz questions, visibility changes, section changes, and other work still need checks. |
+| Moodle | Read course details; create Pages, Assignments, and Quizzes without questions; edit Pages, Assignment instructions, and Quiz instructions; set or clear Assignment due dates and Quiz open/close dates; show or hide selected Pages and sections; read Multiple choice and Essay questions. | Selected test-course changes were saved and checked, including Page and section visibility. Question authoring, random and other question types, and changes to activities with attached files are not supported yet. Other activity types, section cases, and broader settings still need checks. |
 | Blackboard | Not available through Morrow. | Browser connection is not yet verified. |
 
 Morrow is working toward the same core features across all three platforms. It does not claim current parity. Blackboard course work remains unavailable until its browser connection is verified.
