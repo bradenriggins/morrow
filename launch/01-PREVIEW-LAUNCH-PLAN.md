@@ -13,25 +13,25 @@ The public-facing story starts with Canvas because it has selected live evidence
 | Canvas source review | Two independent reviews and a separate checker retained planted lesson and quiz-key findings through a manual MCP host adapter. | `Bounded source-review evidence through a manual adapter.` |
 | Canvas lesson correction | One approved phrase correction reached verified saved-page readback, with named page settings preserved. | `Selected Canvas lesson correction verified.` |
 | Stale Canvas request | A later stale proposal failed before send; later page body and update time were unchanged. | `Stale request refused before send.` |
-| New Quiz key, module, publication, learner route | Pending connector reload and fresh verification. | `In progress. Do not show as verified.` |
+| New Quiz key, module, publication, learner route | The New Quiz key reached verified readback; two module links and three publication operations reached verified readback. Canvas Student View showed the corrected lesson, all three quiz questions, and a 100% three-point result with all feedback visible. | `Selected Canvas sandbox learner route verified.` |
 | Moodle and Blackboard | Official API and test validation only. | `Development scope; no live-tenant claim.` |
 
 ## Readiness gates
 
-### Gate 1 — Complete the bounded Canvas proof
+### Gate 1 — Preserve the selected Canvas proof
 
-- Reload the connector through its normal controls and reconnect the exact test context.
-- Correct the saved New Quiz answer key through a new readable review.
-- Read the complete quiz again and compare the preserved question fields, points, order, and settings.
-- Add the lesson and quiz to the module, publish the sandbox sequence, and launch it in Canvas Student View.
-- Record each outcome as verified, unconfirmed, or failed. Do not collapse these states into one success label.
+- Show the corrected published lesson, `Next Module Item`, the three-question quiz, and the submitted Student View result as one selected sandbox sequence.
+- Show the page and quiz readbacks that establish the narrow saved changes and the preserved fields.
+- Keep the stale proposal as a separate `failed before send` counterexample with its unchanged readback.
+- Remove private course data, account data, learner names, grades, connection IDs, secrets, and raw logs.
+- State that this is selected sandbox evidence, not a full Canvas catalog, learner-population, or release claim.
 
 ### Gate 2 — Freeze provider scope
 
 - Publish a capability-and-evidence table with the exact setup difference for each provider.
-- Canvas: signed-in Chrome connector; broad catalog, selected live proof only.
+- Canvas: signed-in Chrome connector; selected sandbox proof only.
 - Moodle: six tools, five reads and one course-summary write; private API connection; official API/test validation only.
-- Blackboard: six tools including nested-content discovery; private API connection; only supported document title/body writes; official API/test validation only.
+- Blackboard: six tools including direct Ultra child discovery; private API connection; only supported document title/body writes; official API/test validation only.
 - Do not add an evaluator CTA for Moodle or Blackboard until a live tenant proves the named workflow.
 
 ### Gate 3 — Build a reviewable private evaluation
@@ -43,8 +43,8 @@ The public-facing story starts with Canvas because it has selected live evidence
 
 ### Gate 4 — Prepare the proof assets
 
-- Build one 60-second proof clip around the actual Canvas record: source conflict, bound target, readable before/after, approval, verified page readback, and stale-request refusal.
-- Add a dated, sanitized evidence panel to the preview. It must name pending New Quiz and learner-path work.
+- Build one 60-second proof clip around the actual Canvas record: source conflict, bound target, readable before/after, approval, verified lesson and quiz readbacks, the selected Student View result, and stale-request refusal.
+- Add a dated, sanitized evidence panel that names the selected sandbox sequence and its provider limits.
 - Label source review as a manual-adapter path. Do not imply native AI-client sampling.
 - Remove private course data, account data, connection IDs, secrets, and raw logs.
 
@@ -67,10 +67,10 @@ Use the website and LinkedIn first. Do not run a broad waitlist, paid campaign, 
 
 The proof clip must make five engineering facts visible:
 
-1. **Bound target:** account, course, and page names without exposing identifiers.
-2. **Readable change:** source quote beside the exact before-and-after sentence.
-3. **Deliberate approval:** one saved request and a human decision.
-4. **Saved result:** the fresh page readback and preserved fields.
+1. **Bound source and target:** the source quote, account, course, and page names without exposing identifiers.
+2. **Readable approval:** the exact before-and-after sentence and one human decision on the saved request.
+3. **Saved correction:** the fresh lesson and New Quiz readbacks, including preserved fields and the narrow quiz-key diff.
+4. **Learner result:** the published lesson, `Next Module Item`, three-question quiz, and submitted 100% three-point Student View result with feedback visible.
 5. **Safe refusal:** a stale proposal ending in `failed before send`, followed by an unchanged page state.
 
 This sequence shows why Morrow is more than a chat prompt and more than a provider response.
@@ -78,8 +78,8 @@ This sequence shows why Morrow is more than a chat prompt and more than a provid
 ## Claim rules
 
 - Say `private evaluation`, `development preview`, `selected Canvas evidence`, and `provider-specific scope`.
-- Say `verified` only for the live lesson correction and its exact preserved-page comparison.
+- Say `verified` for the selected lesson correction, narrow New Quiz key correction, two module links, three publication operations, and one Student View learner route.
 - Say `failed before send` for the stale proposal. Do not call it a completed change.
-- Say `in progress` for the quiz key, module, publication, and learner path.
+- Say `selected sandbox evidence`, not whole-release verification. A separate page-creation test is under investigation and is not launch proof.
 - Say `official API and test validation only` for Moodle and Blackboard until live tenants exist.
 - Do not state a tool count as proof, or infer one provider's proof from another provider's tests.

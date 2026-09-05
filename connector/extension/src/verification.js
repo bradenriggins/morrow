@@ -1,6 +1,6 @@
 const EXACT_READBACKS = Object.freeze({
-  create_page_courses: { read: "show_page_courses", dynamic: { url_or_id: "page_id" }, targetResponse: "page_id", targetField: "page_id", strategy: "created-resource" },
-  create_page_groups: { read: "show_page_groups", dynamic: { url_or_id: "page_id" }, targetResponse: "page_id", targetField: "page_id", strategy: "created-resource" },
+  create_page_courses: { read: "show_page_courses", dynamic: { url_or_id: "url" }, targetResponse: "page_id", targetField: "page_id", strategy: "created-resource" },
+  create_page_groups: { read: "show_page_groups", dynamic: { url_or_id: "url" }, targetResponse: "page_id", targetField: "page_id", strategy: "created-resource" },
   create_new_quiz: { read: "get_new_quiz", dynamic: { assignment_id: "id" }, targetField: "id", strategy: "created-resource" },
   update_single_quiz: { read: "get_new_quiz", strategy: "updated-resource" },
   delete_new_quiz: { read: "get_new_quiz", strategy: "deleted-resource" },

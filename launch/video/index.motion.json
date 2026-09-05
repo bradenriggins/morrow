@@ -2,10 +2,10 @@
   "duration": 25.2,
   "assertions": [
     { "kind": "appearsBy", "selector": "#claim-title", "bySec": 2.0 },
-    { "kind": "before", "a": "#claim-title", "b": "#compare-window" },
-    { "kind": "before", "a": "#compare-window", "b": "#approval-shell" },
+    { "kind": "before", "a": "#claim-title", "b": "#compare-canvas" },
+    { "kind": "before", "a": "#compare-canvas", "b": "#approval-shell" },
     { "kind": "before", "a": "#approval-shell", "b": "#result-shell" },
-    { "kind": "staysInFrame", "selector": "#compare-window" },
+    { "kind": "staysInFrame", "selector": "#compare-canvas" },
     { "kind": "staysInFrame", "selector": "#approval-shell" },
     { "kind": "staysInFrame", "selector": "#result-shell" },
     { "kind": "keepsMoving", "withinSelector": "#root", "maxStaticSec": 3 }

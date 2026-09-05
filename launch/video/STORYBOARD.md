@@ -1,7 +1,7 @@
 ---
 format: 1920x1080
 duration: 25s
-message: "Your AI. Your Canvas work. Review proposed changes, then check the result."
+message: "Your AI. Your course work. Review proposed changes, then check the result."
 arc: "Claim → Compare → Review → Approve → Checked result → Close"
 audience: "Instructional designers, course builders, and experienced instructors"
 mode: autonomous
@@ -10,12 +10,13 @@ music: none
 
 ## Video direction
 
-Use Morrow's warm cream surface and neutral-violet ink with one violet action
-color. Pair the existing Google Sans Flex font with a small monospaced metadata
-face. Use the orbit mark as a persistent object, then use screens as short,
-readable examples. Pace late reveals through each frame. Use smooth `power3`
+Use a crisp white canvas, cool-neutral surfaces, graphite ink, and one violet
+action color. Use Google Sans Flex for both display and labels. Use the original
+Morrow wordmark and orbit mark unchanged. The product views must carry the film:
+show the source, the lesson, the quiz, the two exact diffs, approval, and the
+checked result. Pace late reveals through each frame. Use smooth `power3`
 settles and short crossfades. Do not use looping, bouncing, generic gradients,
-or simulated live Canvas evidence.
+fake UI content, or simulated live Canvas evidence.
 
 ## Frame 1 — Ownership
 
@@ -27,7 +28,8 @@ or simulated live Canvas evidence.
 - asset_candidates: assets/morrow-orbit.png
 - poster: 2.6s
 
-Scene 1 (0.0–1.1s): warm cream field, edge rules, and a violet orbit lockup
+Scene 1 (0.0–1.1s): white field, cool-neutral rules, and the original Morrow
+wordmark and violet orbit lockup
 enter with a sequential rise. Scene 2 (1.1–2.6s): the two-line claim reveals
 word by word. Scene 3 (2.6–4.2s): the control line settles and holds; thin
 orbit tracks give the frame depth without a continuous loop.
@@ -38,16 +40,17 @@ orbit tracks give the frame depth without a continuous loop.
 - src: index.html#scene-compare
 - duration: 4.4s
 - transition_in: crossfade
-- scene: A source statement is compared with a cell lesson and Canvas quiz key.
+- scene: One source exposes a lesson mismatch and a Canvas quiz-key mismatch.
 - asset_candidates: original illustrative UI, assets/morrow-orbit.png
 - poster: 6.8s
 
-Scene 1 (4.2–5.2s): the `Product demonstration — illustrative` label appears
-before the mock UI. Scene 2 (5.2–6.6s): `Ribosomes assemble proteins.` appears
-beside the incorrect lesson statement `Ribosomes produce ATP.` and the quiz
-question `Which structure assembles proteins?`. Scene 3 (6.6–8.6s): markers
-identify the lesson mismatch and the key marked `Mitochondria` rather than
-`Ribosomes`.
+Scene 1 (4.2–5.2s): `One source. Two mismatches.` and the
+`Product demonstration — illustrative` label appear before the review workspace.
+Scene 2 (5.2–6.6s): the source statement
+`Ribosomes assemble proteins.` anchors the left pane. Scene 3 (6.6–8.6s): a
+violet trace connects it to the incorrect lesson statement `Ribosomes produce
+ATP.` and the quiz question `Which structure assembles proteins?`, whose key is
+marked `Mitochondria` rather than `Ribosomes`.
 
 ## Frame 3 — Review two corrections
 
@@ -70,14 +73,16 @@ proteins.`. Scene 3 (11.7–14.0s): the quiz card presents `Mitochondria` →
 - src: index.html#scene-approve
 - duration: 4.6s
 - transition_in: crossfade
-- scene: The selected corrections await an explicit approval.
+- scene: Two full source-linked diffs await an explicit approval.
 - asset_candidates: original illustrative UI
 - poster: 16.8s
 
-Scene 1 (14.0–15.2s): the review summary and two selected rows appear. Scene
-2 (15.2–16.3s): the approval control enters. Scene 3 (16.3–18.6s): an animated
-cursor selects `Approve 2 changes`; the button presses once and resolves to a
-calm confirmation state.
+Scene 1 (14.0–15.2s): the two selected changes enter with their current and
+proposed text side by side. Scene 2 (15.2–16.3s): an adjacent dark approval
+panel shows the selected lesson and quiz-key work while the preserved question
+wording, answer choices, and points remain visible. Scene 3 (16.3–18.6s): an
+animated cursor selects `Approve 2 changes`; the button presses once and
+resolves to an illustrative confirmation state.
 
 ## Frame 5 — Checked result
 
@@ -85,13 +90,13 @@ calm confirmation state.
 - src: index.html#scene-result
 - duration: 3.8s
 - transition_in: crossfade
-- scene: An illustrative checked result preserves the exact proposed changes.
+- scene: An illustrative checked result shows the reviewed request beside its result.
 - asset_candidates: original illustrative UI
 - poster: 20.7s
 
-Scene 1 (18.6–19.5s): result title appears. Scene 2 (19.5–21.0s): the lesson
-wording and proposed quiz key reveal in order. Scene 3 (21.0–22.4s): the
-illustrative-only status resolves beneath them.
+Scene 1 (18.6–19.5s): the reviewed request and result title appear together.
+Scene 2 (19.5–21.0s): the saved lesson wording and quiz key reveal in order.
+Scene 3 (21.0–22.4s): the quiz question stem resolves beneath the checked key.
 
 ## Frame 6 — Close
 

@@ -22,27 +22,27 @@ This is the story that makes the engineering visible. Morrow has an operations l
 
 ### Metadata
 
-**Title:** Morrow — Course operations with a clear record
+**Title:** Morrow — AI for course operations
 
-**Description:** Morrow is a local development preview for course teams who need to review an AI-assisted LMS change, approve the exact request, and inspect the saved result.
+**Description:** Morrow is an AI course-operations development preview for clear review, approval, and checked results.
 
 ### Navigation
 
-`How it works` · `Current evidence` · `Provider scope` · `Preview requirements`
+`Workflow` · `Providers` · `Demonstration` · `Behind the build` · `Preview details`
 
 ### Hero
 
-**Eyebrow:** Course operations development preview
+**Eyebrow:** AI for course operations · Development preview
 
-**Headline:** Make the course change. Keep the record.
+**Headline:** Build the course. Keep the judgment.
 
-**Body:** Morrow turns an AI-assisted request into a course operation you can inspect: the bound account and course, the proposed change, one approval, and a fresh LMS result. When the system cannot establish the result, it says so.
+**Body:** Morrow helps course teams review, approve, and check course changes with the AI app they choose.
 
-**Primary CTA:** Review current evidence
+**Primary CTA:** See the Canvas walkthrough
 
-**Secondary CTA:** Read preview requirements
+**Secondary CTA:** Preview details
 
-**Status line:** Private evaluation only. Public deployment awaits approval.
+**Status line:** AI for course operations · Development preview
 
 ### The problem
 
@@ -70,19 +70,19 @@ Morrow checks the saved result against the frozen condition. A matching readback
 
 ### Current Canvas evidence
 
-The current Canvas test establishes a narrow, real result. An educator-provided source exposed a planted lesson error and a wrong saved New Quiz answer key through two independent review requests and a separate checker. An approved lesson correction then reached verified readback: one phrase changed, while the page title, URL, publication state, front-page state, and editing roles remained unchanged.
+One selected Canvas sandbox sequence now has live learner-path evidence. An educator-provided source exposed a planted lesson error and a wrong saved New Quiz answer key through two independent review requests and a separate checker. The source-review exchange used a manual MCP host adapter. It is evidence for that bounded adapter path, not native AI-client sampling compatibility.
 
-A later stale proposal did not dispatch. The subsequent page read showed the body and update time were unchanged. This is evidence that a stale operation can fail before send without creating a false completion record.
+An approved lesson correction reached verified readback: one phrase changed while the page title, URL, publication state, front-page state, and editing roles remained unchanged. The New Quiz correction reached verified readback with only question one’s saved scoring value and update time changed. Module links and three publication operations each reached verified readback.
 
-The New Quiz key correction, module links, publication, and learner path remain pending a connector reload. The source-review exchange used a manual MCP host adapter. It is evidence for that bounded adapter path, not native AI-client sampling compatibility.
+In Canvas Student View, the published lesson showed the corrected text. `Next Module Item` launched the quiz. `Begin` showed all three questions. The submitted result showed 100%, three of three points, the correct ribosomes answer, and all three feedback messages. A separate stale proposal still failed before send, and a later page read showed no effect. This proves one selected sandbox learner route. It does not prove every Canvas operation, learner flow, or learning outcome.
 
 ### Provider scope
 
 | Provider | Current operation scope | Setup boundary | Evidence boundary |
 | --- | --- | --- | --- |
-| Canvas | Broad catalog. Current live evidence covers a selected lesson correction and stale-request refusal. | Signed-in Canvas session through the local Chrome connector. | Selected test-course evidence only. It does not establish the full catalog, quiz-key correction, or learner path. |
+| Canvas | Selected sandbox evidence covers a lesson correction, quiz-key correction, module links, publication, one Student View learner route, and stale-request refusal. | Signed-in Canvas session through the local Chrome connector. | One selected sandbox sequence only. It does not establish every Canvas operation, learner flow, or learning outcome. |
 | Moodle | Six tools: five reads and one course-summary write. | Private, locally saved API connection. | Official API and test validation only. No live Moodle tenant evidence. |
-| Blackboard | Six tools: five reads, including nested content discovery, and one supported document title/body update. | Private, locally saved API connection. | Official API and test validation only. No live Blackboard tenant evidence. |
+| Blackboard | Six tools: five reads, including direct Ultra child discovery, and one supported document title/body update. | Private, locally saved API connection. | Official API and test validation only. No live Blackboard tenant evidence. |
 
 The operation model is shared. Provider setup, available operations, and evidence remain specific to each provider.
 
@@ -106,13 +106,13 @@ Morrow is a local development preview. Canvas uses a local Chrome connector and 
 
 ### Closing
 
-**Build the course. Keep the judgment. Keep the record.**
+**Build the course. Keep the judgment.**
 
 Morrow is for course teams that want AI assistance without losing the target, the decision, the saved result, or the limits of the evidence.
 
-**Primary CTA:** Review current evidence
+**Primary CTA:** See the Canvas walkthrough
 
-**Secondary CTA:** Read preview requirements
+**Secondary CTA:** Preview details
 
 ## CTA rules
 
@@ -130,14 +130,14 @@ Use these claims now:
 
 - Local course-operations development preview.
 - Exact course and account binding, readable review, one local approval, stale-change refusal, fresh readback, and controlled batch behavior.
-- Selected Canvas test evidence: a lesson correction reached verified readback; a stale proposal failed before send and left the saved page unchanged.
-- Canvas has the broadest current catalog; live proof remains selected and bounded.
+- Selected Canvas sandbox evidence: verified lesson and quiz-key corrections, module links, publication, one Student View route to a three-question result, and stale-request refusal.
+- Canvas proof remains selected and bounded. It is not whole-release verification.
 - Moodle and Blackboard have the stated API/test scopes, with private API setup and no live-tenant claim.
 
 Do not use these claims now:
 
 - Production readiness, institutional approval, customer adoption, performance results, or universal LMS support.
 - Live Moodle or Blackboard operation proof.
-- Completed New Quiz key correction, module linkage, publication, learner-path verification, or educational correctness.
+- A full Canvas catalog, every learner flow, whole-release verification, or educational effectiveness.
 - Native ChatGPT, Codex, Claude, or Gemini source-review compatibility.
 - Public installation, hosted synchronization, or a general evaluation path.

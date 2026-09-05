@@ -1,6 +1,6 @@
 # Morrow private starter package
 
-Updated: 2026-09-04
+Updated: 2026-09-05
 
 ## Target
 
@@ -50,10 +50,11 @@ pnpm package:private-full
 node scripts/package-profile.mjs --profile private-full --scan
 ```
 
-`pnpm check` must run again because its existing pass predates the last approval
-copy fix. Run the two connector package commands after the final extension
-source freeze, even if a prior ZIP exists. They bind the delivered connector ZIP
-and receipt to the final extension source.
+Run `pnpm check` after the last product behavior change. The canonical-URL
+readback source passed all 180 tests and the isolated connector browser campaign.
+The two connector package commands also passed for that source. Repeat these
+checks if extension source changes; later website copy changes do not invalidate
+the connector receipt.
 
 The source-origin step is required. The private packager validates the ledger
 against the candidate source and sets `candidateBuilt` only when the marker scan
@@ -93,10 +94,11 @@ private package. Do not treat the receipt as a public-release claim.
   other local directories because `private-full` otherwise includes every
   tracked path.
 - The normal connector reload and live Canvas test that the user is awaiting.
-- A real selected-client start and configuration check.
+- The independent archive installation and selected-client configuration check.
 
-The last two items block a live product claim. They do not block generation of
-the private local-preview artifacts.
+The installed Codex client has completed a connected read of the exact sandbox
+quiz. The remaining checks above still matter for a delivered-product claim.
+They do not block generation of the private local-preview artifacts.
 
 ## Recipient preview path
 

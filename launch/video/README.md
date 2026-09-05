@@ -1,6 +1,6 @@
 # Morrow launch video preview
 
-This directory contains an editable, local HyperFrames preview for Morrow.
+This directory contains an editable, local HyperFrames preview for Morrow course work.
 
 ## Preview files
 
@@ -20,17 +20,18 @@ cd launch/video
 export HYPERFRAMES_BROWSER_PATH="$(npx --yes hyperframes@0.8.28 browser path)"
 npm run check -- --samples 15 --at 2.6,6.8,11.9,16.8,20.7,24.0
 npm run render -- --quality high --output renders/morrow-launch-preview.mp4
-ffmpeg -y -ss 00:00:20.700 -i renders/morrow-launch-preview.mp4 -frames:v 1 -q:v 2 renders/morrow-launch-poster.jpg
+ffmpeg -y -ss 00:00:21.600 -i renders/morrow-launch-preview.mp4 -frames:v 1 -q:v 2 renders/morrow-launch-poster.jpg
 ```
 
 ## Illustrative content
 
-All UI shown in this video is an illustrative product demonstration. The source
+All UI shown in this video is an illustrative product demonstration. The opening
+and close read `Your AI. Your course work.` The source
 statement, cell-lesson correction, quiz answer-key correction, approval action,
 and checked-result state are original demo content. It uses the concrete
 reviewed wording `Ribosomes assemble proteins.` and contrasts it with the
 illustrative lesson error `Ribosomes produce ATP.` and quiz key `Mitochondria`.
-The video does not show live Canvas data, learner information, customer proof,
-measured product results, or a production verification receipt.
+The Canvas example does not show a live LMS session, learner information,
+customer proof, measured product results, or a production verification receipt.
 
 The video is silent. Its message is carried by on-screen text.
