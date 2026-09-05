@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
+  "candidateCommit": "6d13b15f6f867f63c7e55f1318a6ec7092e0543b",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -522,14 +522,14 @@
     },
     {
       "path": "docs/implementation/THREE-LMS-BRIDGE-PARITY.md",
-      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
+      "sourceCommit": "6d13b15f6f867f63c7e55f1318a6ec7092e0543b",
       "originalPath": "docs/implementation/THREE-LMS-BRIDGE-PARITY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ced225c09f558b6b2fc4fcecbb06d58e13a1a59622568e7c3493ea5ce684c369",
-      "afterDigest": "d5a6c2eb33ff3b5bdbe73708a935ba40336e708b50c43761716087a8f916b2ef"
+      "beforeDigest": "d5a6c2eb33ff3b5bdbe73708a935ba40336e708b50c43761716087a8f916b2ef",
+      "afterDigest": "e2565850dad8a7a25f9ea4c94a587845f45159c61f0dc4faec527e952ee730aa"
     },
     {
       "path": "docs/implementation/EXAMPLE-WORKTREE.md",
@@ -2707,14 +2707,14 @@
     },
     {
       "path": "scripts/lib/release-candidate.mjs",
-      "sourceCommit": "47677eea707118476aba0b0df58a8168e8a52a54",
+      "sourceCommit": "6d13b15f6f867f63c7e55f1318a6ec7092e0543b",
       "originalPath": "scripts/lib/release-candidate.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "6fb5d59d44c7803f37b19baba6eec523bf5da235e3890f9470afd63940674dcf",
-      "afterDigest": "30ad10dd6adeb023f1a6d1beac55b20f01ac1f09775e19162f476580f1a25686"
+      "beforeDigest": "30ad10dd6adeb023f1a6d1beac55b20f01ac1f09775e19162f476580f1a25686",
+      "afterDigest": "26e6ad40f9f5871bb83214def6015f1bba8460525a9a3331300cb29e0811d336"
     },
     {
       "path": "scripts/package-canvas-connector.mjs",
@@ -2850,14 +2850,14 @@
     },
     {
       "path": "scripts/test/release-gates.test.mjs",
-      "sourceCommit": "47677eea707118476aba0b0df58a8168e8a52a54",
+      "sourceCommit": "6d13b15f6f867f63c7e55f1318a6ec7092e0543b",
       "originalPath": "scripts/test/release-gates.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ebe8f68e65f502d4660cb06d8f576fb87f9cde351ad895ddf1bb0060ee4224fd",
-      "afterDigest": "86d8184b1a2a71da96be06f2168de09a9afef2aba30ed644f39beba6de561b35"
+      "beforeDigest": "86d8184b1a2a71da96be06f2168de09a9afef2aba30ed644f39beba6de561b35",
+      "afterDigest": "6ebc2149fc89b4a5b7230ecbee5d86c84524b3634df0c2d4aa10527e917bbf05"
     },
     {
       "path": "scripts/test/source-rights-cli.test.mjs",
