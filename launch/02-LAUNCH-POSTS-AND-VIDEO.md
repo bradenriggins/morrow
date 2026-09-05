@@ -2,137 +2,151 @@
 
 ## LinkedIn post 1 — Founder story
 
-**Visual:** A clean three-panel image: course request, review screen, checked-result screen. Add `Canvas development preview` to the image.
+**Visual:** Follow one course change: bound target → readable before/after → approval → saved result → stale request refused. Mark it `Private development preview`.
 
-AI can draft a course page in seconds.
+I have spent months building Morrow around one question:
 
-That is not the hard part of course work.
+How do we know an AI-assisted course change is actually finished?
 
-The hard part is answering the questions an instructional designer has to answer afterward:
+Course teams need more than a draft. They need the right course, the current content, a decision they can review, and a result they can check.
 
-- Which course item changed?
-- What will students actually see?
-- Did the assessment still match the lesson?
-- Did Canvas save the approved version?
+Morrow brings that work into one flow: request → review → approval → saved result.
 
-I am building Morrow around those questions.
+A recent Canvas test made this concrete. A source review found a wrong lesson statement and a wrong quiz key. I approved the lesson correction. Morrow read Canvas again and confirmed that one phrase changed while the page settings stayed the same.
 
-Morrow is a Canvas development preview. You ask for course work in an AI conversation. Morrow shows the proposed Canvas change on a local review page. You approve the exact request. Then it checks Canvas again and reports either a checked result or an explicit unconfirmed result.
+Then a second request used the old page state. Morrow stopped it before sending. The saved page remained unchanged.
 
-The first proof workflow is deliberately small: a lesson, a New Quiz, a module, a source check, a correction, and a learner-path check in a test course.
+Those details have shaped months of engineering: exact course and account binding, readable changes, controlled batches, fresh readback, and clear outcomes when something cannot be confirmed.
 
-The goal is simple: AI can help build the course. The instructional designer keeps the judgment.
+The wider goal is a useful operations layer for course teams across learning platforms. Canvas has selected live test evidence. The current Moodle and Blackboard adapters have documented API and local test coverage. The full learner path remains a release test.
 
-Preview: `meetmorrow.app`
+I am preparing Morrow for private evaluation, with the workflow and its evidence available for review.
 
-## LinkedIn post 2 — Product demonstration
+## LinkedIn post 2 — Product proof
 
-**Visual:** A 25–40 second screen recording. Show only a test course and the current proof receipt. Add a lower third: `Source review shown through a manual MCP sampling adapter. Native AI-client compatibility is still under test.`
+**Visual:** A 35-second proof clip. Use the five beats below. Keep the status strip visible in every frame: `Canvas test evidence · manual source-review adapter · quiz key and learner path in progress`.
 
-Here is the course-work loop I want AI in education to complete:
+Here is the proof standard I want for AI-assisted course work.
 
-1. Compare a Canvas lesson and New Quiz with the source.
-2. Show the exact conflict with both quotes visible.
-3. Prepare a correction without changing the course yet.
-4. Review the target and proposed change.
-5. Approve once.
-6. Check what Canvas saved.
+Start with the source and the exact course target. Show the conflicting lesson text. Show the proposed replacement before anything is sent.
 
-The important screen is not the chat prompt. It is the review and result.
+Then show the decision: one saved request, reviewed by a person.
 
-Morrow is a Canvas development preview for this workflow. It does not treat a provider response as proof. When it cannot confirm the result, it says so and does not replay the request.
+Then show the LMS record after the request. In the current Canvas test, the approved lesson correction reached fresh readback. One phrase changed. The page title, URL, publication state, front-page state, and editing roles remained the same.
 
-I am testing this with a bounded Canvas test course before making broader claims.
+Then show the counterexample. A later stale proposal failed before send. The next read showed no page-body or update-time change.
 
-See the workflow and limits: `meetmorrow.app`
+That is the operating model: request → review → approval → saved result. It also has a truthful failure state.
+
+The source review in this clip uses a manual MCP host adapter. It is not native AI-client sampling proof. The New Quiz key correction and learner launch are not shown as complete.
+
+Morrow is a private development preview. The public preview will follow only after the current proof and delivery gates close.
 
 ## LinkedIn post 3 — Practical lesson
 
-**Visual:** A simple four-step diagram: source → lesson → assessment → learner path.
+**Visual:** A five-part evidence chain: source → bound target → reviewed change → saved result → learner experience. Use a sixth, smaller branch from review: `stale? stop and re-read`.
 
-When an AI helps revise a course, check more than the page copy.
+When AI helps with a course, ask five questions before you call the work finished:
 
-Use this four-part review:
+1. What source supports the change?
+2. Which account, course, and record will change?
+3. What does the reviewer approve exactly?
+4. What fresh LMS read proves the intended result and preserved settings?
+5. What learner-path check proves the work is usable?
 
-**Source:** What does the supplied material actually say?
+This method applies across learning platforms. The provider changes the setup and available operation. The evidence standard stays the same.
 
-**Lesson:** Does the page teach that idea accurately and clearly?
+For Canvas, Morrow uses a signed-in Chrome connection. Moodle and Blackboard use separate private API connections. Each provider needs its own scope and its own proof.
 
-**Assessment:** Does each question test the stated idea, with a saved answer that fits the question?
+The practical rule is simple: do not turn a generated draft into a completed course change until the evidence chain is complete.
 
-**Learner path:** Can a learner find the lesson, complete the assessment, and understand what to do next?
+Morrow is the development preview I am building around that rule. The framework is useful with or without Morrow.
 
-This is a small discipline, but it changes the quality of AI-assisted course work. A polished paragraph is not enough if a related quiz key is wrong or the learner cannot reach the work.
+## 60-second proof video script
 
-Morrow is the development preview I am building around that review. It is Canvas-only today, and the source-review workflow is still in validation.
+**0–05 seconds — The claim**
 
-The framework is useful with or without Morrow.
+On-screen: A clean request card. `Draft generated` receives a small label: `Not yet a course operation`.
 
-## 60-second launch video script
+Voice: “An AI draft is useful. It is not yet a finished course change.”
 
-**0–05 seconds — Title card**
+**05–13 seconds — Bind the work**
 
-On-screen: `Make AI course changes you can explain.`
+On-screen: Sanitized account, course, provider, and page labels lock into one operation card. No IDs, user names, or secrets.
 
-Voice: “AI can draft a course page. Course builders still need to know what changed and what students will experience.”
+Voice: “Morrow binds the request to the account, course, provider, and exact target before it can change anything.”
 
-**05–14 seconds — Start with the course task**
+**13–22 seconds — Show the evidence**
 
-On-screen: Test-course page and New Quiz. No student data or connection details.
+On-screen: Source quote at left. Conflicting lesson sentence at right. The one-sentence replacement sits between them.
 
-Voice: “Morrow is a Canvas development preview for that work. You start in your AI conversation and name the course task.”
+Voice: “The review keeps the source, the current text, and the proposed correction readable in one place.”
 
-**14–25 seconds — Show source evidence**
+Lower third: `Canvas test evidence · source review uses a manual MCP host adapter`
 
-On-screen: Source quote beside the conflicting page quote. Use the recorded test-course evidence only.
+**22–32 seconds — Make the decision visible**
 
-Voice: “For a source review, Morrow compares the lesson and assessment with the supplied material. It keeps the exact quotes visible.”
+On-screen: Local review with the exact before/after and preserved page fields. A person selects one approval control.
 
-Lower third: `This source-review recording uses a manual MCP sampling adapter. Native AI-client compatibility remains under test.`
+Voice: “A person approves one saved request. The AI does not approve the course change.”
 
-**25–38 seconds — Review before sending**
+**32–43 seconds — Prove the saved result**
 
-On-screen: Local review page with course item, current text, proposed change, and cancel control.
+On-screen: Fresh Canvas page readback. Highlight the changed phrase, then title, URL, publication state, front-page state, and editing roles marked `preserved`.
 
-Voice: “Before Canvas changes, the review names the target and shows the proposed content. The instructional designer decides whether to approve it.”
+Voice: “After approval, Morrow reads Canvas again. In this test, one lesson phrase changed and the required page settings stayed the same.”
 
-**38–50 seconds — Check the result**
+**43–53 seconds — Show the refusal**
 
-On-screen: Approved test request, then the saved Canvas item and status.
+On-screen: A second request receives `stale change` then `failed before send`. Cut to the same page body and update time marked `unchanged`.
 
-Voice: “One approval starts the saved request. Morrow checks Canvas again. A matching readback becomes a checked result. An uncertain result stays visible as uncertain.”
+Voice: “A later stale request did not send. The next read showed no page change. A safe system must make that outcome visible too.”
 
-**50–60 seconds — Close**
+**53–60 seconds — State the scope**
 
-On-screen: `Build the course. Keep the judgment.` followed by `Canvas development preview · meetmorrow.app`
+On-screen: `Canvas: selected live evidence` · `Moodle: API/test scope` · `Blackboard: API/test scope` · `Quiz key and learner path: in progress`.
 
-Voice: “The first proof workflow is small on purpose: a lesson, a New Quiz, a source check, a correction, and a learner-path check. Build the course. Keep the judgment.”
+Voice: “Morrow is building reviewable course operations across providers, with evidence that stays specific to each one.”
 
-## 20-second teaser
+End card: `Morrow · Private development preview`
+
+## 20-second proof teaser
 
 **0–04 seconds**
 
-On-screen: `A plausible draft is not a completed course change.`
+On-screen: `A draft is not yet a course operation.`
 
-Voice: “A plausible AI draft is not a completed course change.”
+Voice: “A course change needs more than generated text.”
 
-**04–12 seconds**
+**04–08 seconds**
 
-On-screen: source quote → page quote → review page.
+On-screen: Source quote → bound course target → exact before/after.
 
-Voice: “Morrow shows the source, the proposed Canvas change, and the approval step.”
+Voice: “Bind the work. Review the exact change.”
 
-**12–20 seconds**
+**08–13 seconds**
 
-On-screen: fresh Canvas result with `checked` or `unconfirmed` status from the actual recording.
+On-screen: One approval, then the fresh page readback with `verified`.
 
-Voice: “Then it checks Canvas again. Morrow is a development preview for course builders who keep the judgment.”
+Voice: “Approve one saved request. Then read the LMS again.”
 
-End card: `meetmorrow.app · Canvas development preview`
+**13–17 seconds**
+
+On-screen: `stale change` → `failed before send` → `page unchanged`.
+
+Voice: “If the request is stale, stop it before send.”
+
+**17–20 seconds**
+
+On-screen: `Course operations with a clear record · Private development preview`.
+
+Voice: “Morrow keeps the record with the course change.”
 
 ## Production rules
 
-- Use only current test-course recordings and verified statuses.
-- Do not show learner names, grades, tokens, URLs with identifiers, secrets, or raw technical logs.
-- Do not edit video to imply native AI-client sampling, automatic correction, or a result that the receipt did not establish.
-- If the proof workflow is still incomplete, label footage `workflow in validation` and remove any completed-result claim.
+- Use only current test-course recordings and statuses established by a receipt.
+- Show the verified lesson correction and stale-request refusal as separate outcomes.
+- Mark the source review as manual-adapter evidence.
+- Keep New Quiz key correction, module, publication, and learner route labeled `in progress` until fresh proof exists.
+- Do not show learner names, grades, identifiers, tokens, secrets, or raw technical logs.
+- Do not imply live Moodle or Blackboard tenant proof, native AI-client sampling, automatic educational correction, or public availability.

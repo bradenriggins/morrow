@@ -260,7 +260,15 @@ async function requestPairing() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ extensionId: chrome.runtime.id, catalogDigest: api.catalogDigest, runtimeRevision: RUNTIME_REVISION }),
   });
-  if (!response.ok) throw new Error("Morrow MCP is not running on this computer.");
+  if (!response.ok) {
+    if (response.status === 403) {
+      const body = await response.json().catch(() => null);
+      if (body?.error === "connector_identity_refused") {
+        throw new Error("Morrow and Morrow Canvas Connector versions do not match. Update or reload Morrow Canvas Connector in Chrome.");
+      }
+    }
+    throw new Error("Morrow MCP is not running on this computer.");
+  }
   const pairing = await response.json();
   await chrome.storage.local.set({ pairing });
   await chrome.alarms.create("morrow-pairing", { periodInMinutes: 0.5 });

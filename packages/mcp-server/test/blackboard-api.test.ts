@@ -9,6 +9,14 @@ function fixture() {
     id: "_34_1", title: "Week 1", body: "<p>Before</p>", parentId: "_33_1",
     contentHandler: { id: "resource/x-bb-document" }, availability: { available: "No" }, modified: "2026-09-01T00:00:00Z",
   };
+  const folder: JsonObject = {
+    id: "_33_1", courseId: course.id, title: "Week 1 materials",
+    contentHandler: { id: "resource/x-bb-folder", isBbPage: true },
+  };
+  const children: JsonObject[] = [{
+    id: "_35_1", courseId: course.id, parentId: folder.id, title: "Study notes", body: "<p>Read before class.</p>",
+    contentHandler: { id: "resource/x-bb-document" },
+  }];
   const calls: { path: string; method: string; body?: JsonObject }[] = [];
   const client: LmsApiClient = {
     baseUrl: "https://learn.example.invalid", principalId: "_7_1", signal: new AbortController().signal,
@@ -17,6 +25,10 @@ function fixture() {
       calls.push({ path, method, ...(body ? { body } : {}) });
       if (path === "/learn/api/public/v3/courses/_12_1?fields=id,courseId,name,ultraStatus,closedComplete") return structuredClone(course);
       if (path === "/learn/api/public/v1/courses/_12_1/contents/_34_1?includeInActivityTracking=false") return structuredClone(content);
+      if (path === "/learn/api/public/v1/courses/_12_1/contents/_33_1?includeInActivityTracking=false") return structuredClone(folder);
+      if (path === "/learn/api/public/v1/courses/_12_1/contents/_33_1/children?recursive=false&skipUltraDocumentBodyAndKnowledgeChecks=false&includeInActivityTracking=false&offset=0&limit=1") {
+        return { results: structuredClone(children), paging: { nextPage: "/next-children" } };
+      }
       if (path === "/learn/api/public/v1/courses/_12_1/contents/_34_1" && method === "PATCH") {
         Object.assign(content, body, { modified: "2026-09-04T00:00:00Z" });
         return structuredClone(content);
@@ -27,7 +39,7 @@ function fixture() {
       throw new Error(`Unexpected Blackboard request: ${method} ${path}`);
     },
   };
-  return { client, calls, course, content };
+  return { client, calls, course, content, children };
 }
 
 function operation(name: string) {
@@ -74,5 +86,38 @@ describe("Blackboard REST operations", () => {
     await expect(update.read(client, { ...args, availability: { available: "Yes" } })).rejects.toThrow("Unexpected Blackboard input");
     await expect(operation("blackboard_list_my_courses").read({ ...client, principalId: "_8_1" }, {})).rejects.toThrow("different or unknown principal");
     expect(calls.some((call) => call.method === "PATCH")).toBe(false);
+  });
+
+  it("reads one direct page of nested Blackboard documents from an exact folder", async () => {
+    const { client, calls } = fixture();
+    const listed = await operation("blackboard_list_content_children").read(client, {
+      course_id: "_12_1", content_id: "_33_1", offset: 0, limit: 1,
+    });
+    expect(listed).toMatchObject({
+      data: {
+        course: { id: "_12_1", name: "Biology" },
+        content: { id: "_33_1", contentHandler: { id: "resource/x-bb-folder", isBbPage: true } },
+        children: { results: [{ id: "_35_1", parentId: "_33_1", contentHandler: { id: "resource/x-bb-document" } }], paging: { nextPage: "/next-children" } },
+        offset: 0,
+        limit: 1,
+      },
+      targets: [
+        { field: "course_id", label: "Course", name: "Biology" },
+        { field: "content_id", label: "Content", name: "Week 1 materials" },
+      ],
+    });
+    expect(calls).toEqual([
+      { path: "/learn/api/public/v3/courses/_12_1?fields=id,courseId,name,ultraStatus,closedComplete", method: "GET" },
+      { path: "/learn/api/public/v1/courses/_12_1/contents/_33_1?includeInActivityTracking=false", method: "GET" },
+      { path: "/learn/api/public/v1/courses/_12_1/contents/_33_1/children?recursive=false&skipUltraDocumentBodyAndKnowledgeChecks=false&includeInActivityTracking=false&offset=0&limit=1", method: "GET" },
+    ]);
+  });
+
+  it("rejects a listed child that names a different parent", async () => {
+    const { client, children } = fixture();
+    children[0]!.parentId = "_99_1";
+    await expect(operation("blackboard_list_content_children").read(client, {
+      course_id: "_12_1", content_id: "_33_1", offset: 0, limit: 1,
+    })).rejects.toThrow("outside the requested content parent or course");
   });
 });

@@ -62,7 +62,7 @@ describe("Moodle and Blackboard controlled changes", () => {
       expect(runtime.gateway.capabilityGet("moodle_get_course").descriptor).toMatchObject({ provider: "moodle", route: { backend: "lms-api" } });
       const moodle = await approve("moodle_update_course_summary", "moodle_get_course", { connection_id: "moodle-test", course_id: 17 }, { summary: "<p>Start with the cell diagram.</p>" }, "Moodle");
       expect(moodle).toMatchObject({ summary: "<p>Start with the cell diagram.</p>", visible: 0, timemodified: 2 });
-      const largeReplacement = "y".repeat(64_100);
+      const largeReplacement = '<!-- {"bbMLEditorVersion":1} --><div><h4>Cell structure</h4>' + "<p><strong>Ribosomes assemble proteins.</strong> Explain how structure relates to function.</p>".repeat(750) + "</div>";
       const blackboard = await approve("blackboard_update_content", "blackboard_get_content", { connection_id: "blackboard-test", course_id: "_12_1", content_id: "_34_1" }, { title: "Cell structure: Start here", body: largeReplacement }, "Blackboard");
       expect(blackboard).toMatchObject({ content: { title: "Cell structure: Start here", body: largeReplacement, availability: { available: "No" }, modified: "2" } });
     } finally { await runtime.close(); }

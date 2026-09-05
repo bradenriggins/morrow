@@ -80,6 +80,8 @@ function showError(cause) {
   const message = String(cause?.message || cause || "").toLowerCase();
   error.textContent = message.includes("signed-in canvas course") || message.includes("signed-in canvas page")
     ? "Open a Canvas course in Chrome and sign in. Then use the Canvas connection button here."
+    : message.includes("morrow and morrow canvas connector versions do not match")
+      ? "Morrow and Morrow Canvas Connector versions do not match. Update or reload Morrow Canvas Connector in Chrome."
     : message.includes("access to this exact canvas site") || message.includes("permission") || message.includes("denied")
       ? "Allow Morrow to access this Canvas site, then try again."
       : "Morrow could not complete that step. Open the AI app where you added Morrow, then try again.";

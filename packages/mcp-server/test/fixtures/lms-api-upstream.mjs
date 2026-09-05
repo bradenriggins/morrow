@@ -6,7 +6,7 @@ import { BLACKBOARD_API_OPERATIONS } from "../../dist/blackboard-api.js";
 
 const moodle = { id: 17, fullname: "Biology · Moodle", summary: "<p>Original introduction</p>", summaryformat: 1, visible: 0, timemodified: 1 };
 const course = { id: "_12_1", courseId: "BIO101", name: "Biology · Blackboard", ultraStatus: "Ultra", closedComplete: false };
-const content = { id: "_34_1", title: "Cell structure", body: "x".repeat(64_001), contentHandler: { id: "resource/x-bb-document" }, availability: { available: "No" }, modified: "1" };
+const content = { id: "_34_1", title: "Cell structure", body: '<!-- {"bbMLEditorVersion":1} --><div><h4>Cell structure</h4>' + "<p>The nucleus contains cellular DNA. Use the diagram to identify each structure.</p>".repeat(900) + "</div>", contentHandler: { id: "resource/x-bb-document" }, availability: { available: "No" }, modified: "1" };
 const connections = [
   { id: "moodle-test", label: "Moodle teaching account", provider: "moodle", baseUrl: "https://moodle.example/learning", token: "synthetic-moodle-token" },
   { id: "blackboard-test", label: "Blackboard teaching account", provider: "blackboard", baseUrl: "https://blackboard.example", token: "synthetic-blackboard-token", userId: "test-user-uuid" },

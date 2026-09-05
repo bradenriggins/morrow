@@ -158,6 +158,28 @@ export const BLACKBOARD_API_OPERATIONS: readonly LmsApiOperation[] = [
     },
   },
   {
+    name: "blackboard_list_content_children", provider: "blackboard", title: "List Blackboard content children",
+    description: "Read one page of direct children for one exact Blackboard content item. Reads the parent first for target context, requests recursive=false, and does not traverse deeper content. Every returned child must belong to the requested course and parent when Blackboard supplies those IDs.",
+    documentation: DOCUMENTATION,
+    inputSchema: schema({ course_id: idSchema, content_id: idSchema, ...pageProperties }, ["course_id", "content_id"]),
+    async read(client, args) {
+      checkKeys(args, ["course_id", "content_id", "offset", "limit"]);
+      const courseId = primaryId(args.course_id);
+      const contentId = primaryId(args.content_id);
+      const { offset, limit } = page(args);
+      const parent = await readContent(client, args);
+      const children = collection(await client.blackboard(`/learn/api/public/v1/courses/${courseId}/contents/${contentId}/children?recursive=false&skipUltraDocumentBodyAndKnowledgeChecks=false&includeInActivityTracking=false&offset=${offset}&limit=${limit}`), limit);
+      for (const child of children.results as JsonObject[]) {
+        primaryId(child.id);
+        if ((child.courseId !== undefined && child.courseId !== courseId)
+          || (child.parentId !== undefined && child.parentId !== contentId)) {
+          throw new Error("Blackboard returned a child outside the requested content parent or course.");
+        }
+      }
+      return { data: { ...object(parent.data), children, offset, limit }, targets: parent.targets };
+    },
+  },
+  {
     name: "blackboard_get_content", provider: "blackboard", title: "Read Blackboard content",
     description: "Read one exact content item with its current course state. Uses documented public REST content access and disables activity tracking for this read. The result can be used to review a document title or body change.",
     documentation: DOCUMENTATION,

@@ -1,63 +1,63 @@
-# What Counts as a Finished AI Course Change?
+# What Counts as a Finished AI Course Operation?
 
 **Status:** Draft. Publish only after author review.
 
-AI can produce course copy fast. That does not make a course change finished.
+An AI-generated draft is one part of a course operation. The work continues through review, approval, and the saved learning experience.
 
-A finished AI course change has separate evidence for five things: the source, the proposed change, permission to make it, the result saved in the LMS, and the learner experience. These are different questions. One successful response cannot answer all five.
+A finished course operation has evidence for six separate facts: the source, the bound target, the proposed change, the approval, the result saved in the LMS, and the learner experience. A generated paragraph, provider response, or green automation log cannot establish all six.
 
-This is practical, not philosophical. A page can contain a correct sentence and still have the wrong title, access setting, or URL. A quiz can ask a sound question and save the wrong answer key. A provider can report success while the LMS record stays unchanged. The point is to make each claim testable.
+## Bind the operation before you write
 
-## 1. Establish the source
+Course work has context. A change belongs to a current account, explicit course, provider, and named record. Those conditions need to travel with the request.
 
-Start with a source that the educator selected. Quote the exact statement that matters. Do not ask a model to prove its own rewrite.
+That protects against a quiet failure: a valid instruction acting on the wrong place because the session, course, tab, or target changed. A responsible system checks its connection and target conditions before dispatch. If the saved operation no longer matches the current context, it stops and requires a fresh review.
 
-In a bounded Canvas test, the source stated that ribosomes are responsible for protein synthesis. The saved lesson instead stated that ribosomes were the main site of ATP production. The distinction is not a style preference. The source identifies ribosomes with protein synthesis and mitochondria with ATP production. [OpenStax Biology 2e, 4.3 Eukaryotic Cells](https://openstax.org/books/biology-2e/pages/4-3-eukaryotic-cells)
+The Canvas Pages API exposes a page URL, title, body, publication state, front-page state, editing roles, update time, and revision history. These fields let a team prove more than a changed sentence. [Canvas Pages API](https://canvas.instructure.com/doc/api/pages.html)
 
-Two independent review steps found the lesson error and a related saved quiz answer error. A final check retained both findings. The evidence exchange used a manual MCP host adapter. That is evidence for this bounded review method. It is not evidence that every native AI client will perform the same review.
+## Make the change readable
 
-The educator still decides whether the selected source is sufficient, current, and appropriate for the course. Agreement between models does not turn a short source excerpt into verified teaching quality.
+The review should name the current value, proposed value, affected record, and conditions that must stay the same. “Fix the biology page” is a request for interpretation. “Replace this sentence in this page while preserving these fields” is a reviewable operation.
 
-## 2. Specify the change
+In a bounded Canvas test, the supplied source stated that ribosomes are responsible for protein synthesis. The saved lesson assigned ATP production to ribosomes. The source distinguishes ribosomes from mitochondria on this point. [OpenStax Biology 2e, 4.3 Eukaryotic Cells](https://openstax.org/books/biology-2e/pages/4-3-eukaryotic-cells)
 
-The proposed edit must name the target, current text, replacement text, and scope. “Fix the biology page” is a request for interpretation. “Replace this sentence in this page” is a change that someone can review.
+Two independent review requests found that lesson conflict and a related wrong saved quiz answer key. A separate checker retained both findings. The exchange used a manual MCP host adapter, so it is evidence for that bounded review route. It does not establish native sampling behavior in every AI client.
 
-In the test, the proposed replacement was one exact phrase: change the inaccurate ribosome statement to “Ribosomes assemble proteins.” The review stated that no change had been sent at that stage. That separation matters. A proposal is not a course edit.
+The proposed lesson correction changed one sentence. Before send, the review made the old text, replacement text, and preserved conditions visible. A model can propose the change. An educator decides whether the source, scope, and learning consequence are sound.
 
-## 3. Record permission
+## Approve a saved operation
 
-Approval must apply to the saved proposal, not to a general intent expressed earlier in a chat. The reviewer needs to see what will change and what will be preserved before permission is used.
+Approval should refer to a frozen request. The reviewer needs to know which account and course are bound, which record is affected, what will change, and what the system will preserve.
 
-For a Canvas page, preservation includes more than body text. Canvas exposes a page’s URL, title, publication state, front-page state, editing roles, body, and update time. It also supports a direct page read and revision history. [Canvas Pages API](https://canvas.instructure.com/doc/api/pages.html)
+This rule matters for a batch. A controlled batch exposes every target before approval, preserves a per-item result, and stops starting new work after uncertainty. A batch is a bounded set of individually accountable operations, not one broad permission slip.
 
-This makes a useful approval question: “Approve this exact text replacement on this exact page while preserving these settings?” It is concrete enough for an instructional designer to assess. It also gives the system a condition to test before it sends anything.
+One approval can then start the saved request. It should not give an AI agent a general ability to approve later work. That separation keeps the course team in control when the request is concrete and when the evidence is incomplete.
 
-## 4. Verify the saved result
+## Read the LMS again
 
-After approval, read the LMS record again. Compare it with the frozen pre-change record. Do not rely on a success message from a connector or provider.
+The saved LMS record is the evidence that matters after approval.
 
-The completed page-correction test showed the intended phrase in the saved page. It also showed that the title, URL, published state, front-page state, and editing roles stayed the same. A direct before-and-after comparison confirmed that the page body differed by the intended phrase only. That is evidence for one page correction. It does not establish that every Canvas change is safe.
+In the Canvas test, an approved lesson correction reached verified fresh readback. The intended phrase changed. The page title, URL, publication state, front-page state, and editing roles remained unchanged. A complete before-and-after comparison showed that the page body differed by the intended phrase only.
 
-The counterexample is as important. A second, stale proposal requested a different replacement. Its dispatch failed before send. The later Canvas read showed that the body and update time were unchanged. The correct result was `failed`, not “completed with a warning.” The system did not create a false record of a change that did not occur.
+This is meaningful but narrow. It supports one verified page correction. It does not prove a whole catalog, every content type, or the quality of every instructional decision.
 
-## 5. Check the learner experience
+The counterexample is equally important. A later proposal used a stale pre-change condition. It failed before send. The later Canvas read showed the same body and update time as before that proposal. The correct record was `failed before send`, not “completed with a warning.” The system did not create a false claim that a change occurred.
 
-The final question is about the learner. Can the learner reach the lesson, complete the assessment, and receive the intended experience?
+If delivery becomes ambiguous, the responsible next action is a frozen readback and a clear state, not an automatic replay that might duplicate a change.
 
-This test is not finished on that point. The review found a wrong saved answer key in a New Quiz item, but the corrected key and learner launch have not yet been verified. Therefore the course workflow is not complete. A correct lesson page does not prove that the assessment or learner path is correct.
+## Keep provider scope specific
 
-This limit should stay visible. The bounded review did not evaluate rubrics, item-bank draws, linked files, media, accessibility, or general student access. The Canvas record can also change between the pre-check and the readback. Each excluded area needs its own evidence.
+The operating model can travel across LMS providers. The proof cannot.
 
-## A practical completion check
+Canvas has the broadest current Morrow catalog and selected live evidence through a signed-in Chrome connection. Moodle has six current tools: five reads and one course-summary write. Blackboard also has six: five reads, including nested content discovery, and one supported document title/body update. Moodle and Blackboard use separate private API connections.
 
-Before calling an AI-assisted course change finished, ask five questions:
+Those Moodle and Blackboard scopes have official API and test validation. They do not have live-tenant evidence. This boundary tells an evaluator what can be reviewed now and what still needs real-provider proof.
 
-1. What selected source supports the change?
-2. What exact LMS record and fields will change?
-3. Who approved that saved proposal?
-4. What fresh read proves the LMS saved the intended result and preserved the required settings?
-5. What learner-path check proves the course still works for its audience?
+Provider-specific scope prevents one provider's evidence from becoming another provider's claim.
 
-If one answer is missing, name the work as planned, unconfirmed, failed, or partially verified. That is not a weakness in the workflow. It is an accurate account of what the evidence supports.
+## Finish at the learner path
 
-AI can be useful in course production. The standard should be clear: a course change is finished when the source, change, permission, saved result, and learner experience each have evidence.
+The final question is about the learner. Can the learner find the lesson, complete the assessment, and receive the intended experience?
+
+The Canvas test is not finished on that point. The wrong saved New Quiz key still needs correction, and the module linkage, publication, and learner launch are pending a connector reload. The lesson correction is verified. The course workflow is still incomplete.
+
+That is the standard worth keeping: source, bound target, readable change, approval, saved result, and learner experience each need evidence. AI can help course teams move faster through the work. A course operation is finished only when the record supports what the team says happened.

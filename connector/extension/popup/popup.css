@@ -1,25 +1,24 @@
 html { width: 360px; }
 body { width: 360px; min-width: 360px; max-height: 600px; overflow-y: auto; }
-main { padding: 20px; }
-header { margin-bottom: 20px; }
-header img { flex-shrink: 0; }
-h1 { margin: 0; font-size: 18px; font-weight: 750; letter-spacing: -.01em; line-height: 1.25; }
-header p { margin: 3px 0 0; color: var(--text-subtle); font-size: 12px; }
+main { padding: 18px; }
+header { margin-bottom: 18px; }
+header .brand-wordmark { flex-basis: 154px; }
+header .brand-subtitle { white-space: nowrap; }
 #pulse { width: 8px; height: 8px; margin-left: auto; flex-shrink: 0; border-radius: 50%; background: var(--text-subtle); }
 #pulse.online { background: var(--success); }
-.connection-status { margin-bottom: 12px; padding: 0 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.connection-status { margin-bottom: 12px; padding: 0 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 1px 2px rgb(23 25 35 / .03); }
 .status { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 12px 0; }
 .status + .status { border-top: 1px solid var(--border); }
 .status span { color: var(--text-subtle); font-size: 12px; }
 .status strong { font-size: 13px; font-weight: 600; text-align: right; }
-.account { margin-bottom: 12px; padding: 12px 14px; background: var(--surface-sunken); border-radius: 10px; }
+.account { margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--border); background: var(--surface-sunken); border-radius: 12px; }
 .account span { display: block; color: var(--text-subtle); font-size: 11px; }
 .account strong { display: block; margin-top: 4px; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .account time { display: block; margin-top: 4px; color: var(--text-secondary); font-size: 11px; }
 button { width: 100%; margin-top: 8px; }
 #detail { margin: 14px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
-#error { padding: 12px; border: 1px solid var(--danger); border-radius: 10px; color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
-#notice { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+#error { padding: 12px; border: 1px solid var(--danger); border-radius: 12px; background: color-mix(in srgb, var(--danger) 6%, var(--surface)); color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
+#notice { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 .help { margin-top: 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .help summary { color: var(--accent); cursor: pointer; font-weight: 600; }
 .help summary:hover { color: var(--accent-hover); }

@@ -1,76 +1,85 @@
-# Morrow preview launch plan
+# Morrow private-preview launch plan
 
 ## Launch objective
 
-Make one bounded course-maintenance workflow credible to instructional designers. The first public artifact is an evidence-led preview of how a proposed Canvas change becomes a reviewed and checked result.
+Make the course-operations layer visible through one credible story: **request → review → approval → saved result**. Show the engineering that protects the work without turning the launch into a tool catalog.
+
+The public-facing story starts with Canvas because it has selected live evidence. Moodle and Blackboard appear as provider-specific development scopes, not as live-product proof.
+
+## Current evidence position
+
+| Evidence | Current result | Public wording |
+| --- | --- | --- |
+| Canvas source review | Two independent reviews and a separate checker retained planted lesson and quiz-key findings through a manual MCP host adapter. | `Bounded source-review evidence through a manual adapter.` |
+| Canvas lesson correction | One approved phrase correction reached verified saved-page readback, with named page settings preserved. | `Selected Canvas lesson correction verified.` |
+| Stale Canvas request | A later stale proposal failed before send; later page body and update time were unchanged. | `Stale request refused before send.` |
+| New Quiz key, module, publication, learner route | Pending connector reload and fresh verification. | `In progress. Do not show as verified.` |
+| Moodle and Blackboard | Official API and test validation only. | `Development scope; no live-tenant claim.` |
 
 ## Readiness gates
 
-### Gate 1 — Finish the proof workflow
+### Gate 1 — Complete the bounded Canvas proof
 
-Required before any public product claim beyond `development preview`:
+- Reload the connector through its normal controls and reconnect the exact test context.
+- Correct the saved New Quiz answer key through a new readable review.
+- Read the complete quiz again and compare the preserved question fields, points, order, and settings.
+- Add the lesson and quiz to the module, publish the sandbox sequence, and launch it in Canvas Student View.
+- Record each outcome as verified, unconfirmed, or failed. Do not collapse these states into one success label.
 
-- Record the authorized Canvas test-course receipt for the lesson, New Quiz, and module.
-- Record the source-review findings for the planted lesson error and wrong answer key.
-- Record the approved correction and fresh Canvas readback.
-- Record the learner-path check for the corrected material.
-- State the exact result for each step: verified, unconfirmed, or failed.
+### Gate 2 — Freeze provider scope
 
-The manual MCP sampling adapter can support a narrow evidence statement. It cannot support a native AI-client compatibility statement.
+- Publish a capability-and-evidence table with the exact setup difference for each provider.
+- Canvas: signed-in Chrome connector; broad catalog, selected live proof only.
+- Moodle: six tools, five reads and one course-summary write; private API connection; official API/test validation only.
+- Blackboard: six tools including nested-content discovery; private API connection; only supported document title/body writes; official API/test validation only.
+- Do not add an evaluator CTA for Moodle or Blackboard until a live tenant proves the named workflow.
 
-### Gate 2 — Make the preview reviewable
+### Gate 3 — Build a reviewable private evaluation
 
-- Build the local meetmorrow.app preview from the approved homepage copy.
-- Add the proof video, a plain-language limits page, and a dated verification note.
-- Check every visual against the current proof receipt.
-- Remove student data, connection IDs, secrets, and unstated results from screenshots and video.
+- Prepare the private source candidate and matching connector archive after the authorized source freeze.
+- Reproduce one selected AI-client path on a clean machine.
+- Supply a test-course-only evaluator guide and issue intake path.
+- Obtain approval for the exact evaluator audience, delivery method, and contact method.
 
-### Gate 3 — Prepare a private evaluation
+### Gate 4 — Prepare the proof assets
 
-- Complete one clean-machine reproduction.
-- Define one supported AI-client path and reproduce the full workflow there.
-- Prepare a test-course-only evaluation guide and an issue intake path.
-- Obtain approval for the exact preview audience and contact method.
+- Build one 60-second proof clip around the actual Canvas record: source conflict, bound target, readable before/after, approval, verified page readback, and stale-request refusal.
+- Add a dated, sanitized evidence panel to the preview. It must name pending New Quiz and learner-path work.
+- Label source review as a manual-adapter path. Do not imply native AI-client sampling.
+- Remove private course data, account data, connection IDs, secrets, and raw logs.
 
-### Gate 4 — Request public preview approval
+### Gate 5 — Request public preview approval
 
-Submit the finished website, proof video, posts, limits page, and current receipts for Braden's approval. Do not publish, post, send, or invite before that approval.
+Submit the website, proof clip, evidence panel, provider-scope table, posts, article, limits, and current receipts for Braden's approval. Do not deploy, publish, post, send, or invite before that approval.
 
-## Sequence after approval
+## Release sequence after approval
 
-1. Publish the preview page and proof video.
-2. Publish the founder story on LinkedIn.
-3. Publish the product demonstration post two business days later.
-4. Publish the practical lesson two business days after that.
-5. Publish the first expert article within the same week.
-6. Review responses and evaluation evidence. Update claims only from current receipts.
+1. Publish the evidence-led preview and proof clip.
+2. Publish the founder story about the course-operation record.
+3. Publish the Canvas proof demonstration two business days later.
+4. Publish the practical review method two business days after that.
+5. Publish the expert article in the same week.
+6. Update provider claims only from current provider-specific evidence.
 
-Use LinkedIn and the website first. Do not plan a Product Hunt launch, paid campaign, or broad waitlist until the proof workflow and clean-machine evaluation are complete.
+Use the website and LinkedIn first. Do not run a broad waitlist, paid campaign, marketplace launch, or general install invitation until private evaluation and clean-machine evidence close.
 
-## Launch rhythm
+## Visual narrative
 
-| Moment | Asset | Job |
-| --- | --- | --- |
-| Preview opening | Website + 60-second video | Show the whole bounded workflow and its limits. |
-| Day 1 | Founder story | Explain the problem from an instructional-design point of view. |
-| Day 3 | Product demonstration | Make the review-to-result sequence concrete. |
-| Day 5 | Practical lesson | Give useful course-design guidance without asking for a sale. |
-| Week 2 | Expert article | Establish a repeatable point of view on reviewable AI course work. |
+The proof clip must make five engineering facts visible:
 
-## Competitive research and implications
+1. **Bound target:** account, course, and page names without exposing identifiers.
+2. **Readable change:** source quote beside the exact before-and-after sentence.
+3. **Deliberate approval:** one saved request and a human decision.
+4. **Saved result:** the fresh page readback and preserved fields.
+5. **Safe refusal:** a stale proposal ending in `failed before send`, followed by an unchanged page state.
 
-| Source | Current offer | Morrow implication |
-| --- | --- | --- |
-| [Instructure: IgniteAI Agent](https://www.instructure.com/resources/blog/using-ai-streamline-course-management-higher-education) | A Canvas-embedded agent that acts through 500+ APIs, presents plans, and requires approval. | Do not claim that Morrow invented conversational Canvas automation or human approval. Lead with a reviewable, source-aware change record and checked result. |
-| [vishalsachdev/canvas-mcp](https://github.com/vishalsachdev/canvas-mcp) | An API-token Canvas MCP server with educator and student tools for many agent clients. | Do not lead with MCP access or tool count. Lead with the course-change outcome. |
-| [bruchris/canvas-lms-mcp](https://github.com/bruchris/canvas-lms-mcp) | A broad Canvas MCP server with many tool families, multiple install modes, confirmation for some writes, and optional pseudonymization. | Do not claim that Morrow is the only local, private, or confirmation-based Canvas MCP option. |
-| [Cidi Labs: TidyUP](https://support.cidilabs.com/hubfs/VPAT2.5WCAG%20TidyUP%20June%202025-1.pdf?hsLang=en) | A Canvas course-cleanup tool for manageability and accessibility. | Do not claim general course quality, cleanup, or accessibility remediation. Keep the first story on source, lesson, assessment, review, and result. |
+This sequence shows why Morrow is more than a chat prompt and more than a provider response.
 
-## Claim limits for every public asset
+## Claim rules
 
-- Say `development preview`, `Canvas test course`, and `current limits`.
-- Describe the manual MCP sampling adapter as a manual adapter.
-- Say `checked result` only when a receipt records fresh matching Canvas readback.
-- Say `unconfirmed` when the system cannot establish that result.
-- Do not show a tool count as workflow proof.
-- Do not compare Morrow against a named product unless the exact task, source version, and outcome are documented.
+- Say `private evaluation`, `development preview`, `selected Canvas evidence`, and `provider-specific scope`.
+- Say `verified` only for the live lesson correction and its exact preserved-page comparison.
+- Say `failed before send` for the stale proposal. Do not call it a completed change.
+- Say `in progress` for the quiz key, module, publication, and learner path.
+- Say `official API and test validation only` for Moodle and Blackboard until live tenants exist.
+- Do not state a tool count as proof, or infer one provider's proof from another provider's tests.

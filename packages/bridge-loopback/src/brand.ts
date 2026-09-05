@@ -5,11 +5,13 @@ const assets: Record<string, string> = {
   "theme.css": "text/css; charset=utf-8",
   "review.css": "text/css; charset=utf-8",
   "morrow.png": "image/png",
+  "morrow-wordmark.png": "image/png",
+  "morrow-wordmark-dark.png": "image/png",
   "GoogleSansFlex-latin.woff2": "font/woff2",
 };
 
 export const brandHead = '<link rel="icon" href="/morrow-brand/morrow.png"><link rel="stylesheet" href="/morrow-brand/theme.css"><link rel="stylesheet" href="/morrow-brand/review.css">';
-export const brandHeader = '<div class="brand"><img src="/morrow-brand/morrow.png" width="38" height="38" alt=""><div><strong>Morrow</strong><span>Your course work, connected</span></div></div>';
+export const brandHeader = '<div class="brand"><picture class="brand-wordmark"><source media="(prefers-color-scheme: dark)" srcset="/morrow-brand/morrow-wordmark-dark.png"><img src="/morrow-brand/morrow-wordmark.png" width="164" height="45" alt="Morrow"></picture><p class="brand-subtitle">Course operations</p></div>';
 
 export function serveBrandAsset(pathname: string, response: ServerResponse): boolean {
   if (!pathname.startsWith("/morrow-brand/")) return false;

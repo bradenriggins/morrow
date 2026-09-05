@@ -48,13 +48,23 @@ The source review used a manual MCP host adapter to connect actual Codex model w
 
 ## Local verification and package
 
-`pnpm check` passed: 157 workspace tests and 21 script tests. The connector browser campaign passed against temporary Chrome for Testing, including pairing, reconnect, account binding, a New Quiz item write, replay refusal, and missing-CSRF refusal. The native popup and the live lesson-result screen were also inspected visually.
+`pnpm check` passed: 159 workspace tests and 21 script tests. The connector browser campaign passed against temporary Chrome for Testing, including pairing, reconnect, account binding, a New Quiz item write, replay refusal, and missing-CSRF refusal. The native popup and the live lesson-result screen were also inspected visually.
+
+The final design pass uses the original light/dark wordmark, Google Sans Flex, white and cool-neutral surfaces, graphite text, and violet actions. The popup was inspected in the installed Chrome window. Pairing, review, confirmed, expired, and narrow screens were inspected from the browser campaign. Muted light-theme labels have at least 5.51:1 contrast on the used surfaces. Known connector-version mismatches now give a reload/update instruction; unrelated failures retain bounded generic messages.
 
 `pnpm package:connector` and `pnpm package:connector:check` passed. The local archive is `artifacts/connector/morrow-canvas-connector-v1.0.1.zip`.
 
-SHA-256: `5de6b1e640c8aa1c2e199fb152b4cc68c8631e53f7ddc53b722ce0c0baa49bd3`.
+SHA-256: `e19408ce73de0f523410ae442badf8bc531f631350f06269930e8105f9ca90b8`.
 
 Catalog digest: `a9b5529753ae663db279dce802586255fe45412482cff72eeade8bd8b574927a`.
+
+## Moodle and Blackboard API validation
+
+Braden has no Moodle or Blackboard test tenant. Their implemented adapters were checked against official Moodle 5.2.2 source and the official Blackboard Learn API specification. This is documented API and local adapter evidence, not live tenant proof.
+
+Both providers have six tools: five reads and one bounded write. Blackboard now includes direct-child discovery so an Ultra document body can be found under its page wrapper. The new tests confirm exact parent/course binding and refuse a child from another parent. The existing large-document gateway test now uses permitted BbML markup and preserves exact readback checks.
+
+The focused provider, connection, and gateway suite passed all 10 tests. An independent public-stdio probe confirmed that forged `outer_grant` fields are rejected, a normal write remains `awaiting_approval`, and unapproved dispatch is refused. The trusted internal adapter is not a separate supported AI-client entrypoint. The [provider checkpoint](MULTI-LMS-AND-LESSON-REVIEW.md) records API sources and setup limits.
 
 ## Next live sequence
 
@@ -71,6 +81,6 @@ Computer Use approval review previously blocked Chrome extension management. The
 
 `website/` is served locally at `http://127.0.0.1:4173`. Its lesson and quiz interactions are explicitly illustrative. Desktop and 390 px mobile layouts were inspected; page width equals viewport width at 390 px, the mobile menu works, and the embedded H.264 video loads without an error.
 
-`launch/` contains positioning, home page copy, a gated launch sequence, three post drafts, video scripts, article outlines, and a finished expert article draft. `launch/video/` contains the editable HyperFrames composition and local MP4 preview.
+`launch/` contains positioning, home page copy, a private-evaluation launch sequence, three post drafts, video scripts, article outlines, and a finished expert article draft. The founder story explains the months of work through concrete operation controls and selected Canvas evidence. `launch/video/` contains the editable HyperFrames composition and local MP4 preview. The comparison, approval, and result compositions were rebuilt after review of the sparse first version.
 
 Cloudflare access was checked with read-only requests. The existing `meetmorrow` Pages project and `meetmorrow.app` zone were found. The apex has no A, AAAA, or CNAME website record in the inspected zone. No Cloudflare, DNS, public website, or promotion changes were made. Public deployment remains pending Braden's preview approval.

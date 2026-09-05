@@ -147,21 +147,122 @@ New Quiz questions. It does not review bank draws, essays, media, accessibility,
 or student access. Automated tests cover the model-request flow; real client and
 model testing is still required.
 
-## Moodle and Blackboard development preview
+## Private Moodle and Blackboard preview
 
-The private/full installation also contains Moodle and Blackboard support.
-There is no extra Morrow app to install.
+Moodle and Blackboard are private, hand-configured API previews. They do not
+use the Chrome Canvas session. They are not OAuth onboarding, and they are not
+ready for general users.
 
-- **Moodle:** Read courses, activities, assignment settings, and quiz settings.
-  Review and apply a course-description change.
-- **Blackboard:** Read courses and content. Review and apply a supported
-  document's title or body change.
+| Provider | Connection and first validation | Private-preview scope | Not included |
+| --- | --- | --- | --- |
+| Moodle | HTTPS REST service token. Each call checks the returned site URL, user ID, and enabled service functions. | Five reads: my courses, one course, contents, assignment settings, and quiz settings. One change: course-summary replacement. Moodle requests use raw stored-text output for comparison. | General activity or question authoring, browser-session transport, and live-tenant compatibility proof. |
+| Blackboard | HTTPS API base URL, delegated bearer token, and the UUID returned for the same delegated user. Each call resolves that UUID and checks one current-user membership. | Five reads: my courses, one course, top-level content, direct content children, and one content item. One change: title and/or body of a verified `resource/x-bb-document`. | OAuth registration, token renewal, recursive inventory, assessment or bank authoring, and live-tenant compatibility proof. |
 
-These connections use private, locally saved API credentials. They do not use
-the Chrome session. Their connection setup is not yet ready for general users.
-Tests currently use simulated platforms. Full quiz and question-bank authoring
-and live school-account tests remain open. See the
+For a Blackboard Ultra document body, first use
+`blackboard_list_content_children` on the page wrapper that Blackboard identifies
+as `resource/x-bb-folder`. It reads that exact parent, returns one direct page
+with `recursive=false`, and explicitly includes the Ultra body. Only a returned
+`resource/x-bb-document` child is eligible for a document update. See the
 [implementation checkpoint](docs/implementation/MULTI-LMS-AND-LESSON-REVIEW.md).
+
+### Connect a private preview
+
+Create the private `~/.morrow/lms-connections.json` file. On macOS or Linux,
+the directory must be owner-only and the file must be mode `0600`:
+
+```bash
+mkdir -p ~/.morrow
+chmod 700 ~/.morrow
+(umask 077; touch ~/.morrow/lms-connections.json)
+chmod 600 ~/.morrow/lms-connections.json
+```
+
+For a new file, open it in a local editor and use the template below. For an
+existing file, add only the needed connection objects to its `connections` array.
+Replace the placeholders with real values in that local file. Remove connections
+you do not use. Do not send this file to an AI client or commit it.
+Moodle may use an HTTPS subpath. Blackboard must use the HTTPS site root, and
+its `userId` is the delegated OAuth user UUID for the same token.
+
+```json
+{
+  "schema": "morrow.lms-connections.v1",
+  "connections": [
+    {
+      "id": "moodle-preview",
+      "label": "Moodle private preview",
+      "provider": "moodle",
+      "baseUrl": "https://moodle.example.edu/moodle",
+      "token": "REPLACE_WITH_MOODLE_SERVICE_TOKEN"
+    },
+    {
+      "id": "blackboard-preview",
+      "label": "Blackboard private preview",
+      "provider": "blackboard",
+      "baseUrl": "https://learn.example.edu",
+      "token": "REPLACE_WITH_DELEGATED_BEARER_TOKEN",
+      "userId": "00000000-0000-0000-0000-000000000000"
+    }
+  ]
+}
+```
+
+The Moodle service must expose `core_webservice_get_site_info` and the functions
+for the chosen operation. `core_enrol_get_users_courses` and
+`core_course_get_courses` support the first reads. Add
+`core_course_get_contents`, `mod_assign_get_assignments`,
+`mod_quiz_get_quizzes_by_courses`, or `core_course_update_courses` only when
+their matching tool is required. Function presence does not grant course
+permission. Moodle sends `moodlewssettingraw=true`, so the course-summary
+readback compares the stored summary exactly.
+
+Restart the selected AI client after saving the file. First call
+`morrow_lms_connections`; it lists only ID, label, provider, and base URL, and
+does not prove access. Then make one exact read:
+
+```json
+{ "connection_id": "moodle-preview", "course_id": 12345 }
+```
+
+Use that object with `moodle_get_course`. For Blackboard, use this object with
+`blackboard_get_course`:
+
+```json
+{ "connection_id": "blackboard-preview", "course_id": "_123_1" }
+```
+
+Fresh `pnpm run setup` writes the `lms-api` source automatically. An existing
+custom `morrow.upstreams.json` is not replaced. Add this object to its
+`upstreams` array, preserving the current entries and absolute paths:
+
+```json
+{
+  "id": "lms-api",
+  "label": "Moodle and Blackboard",
+  "kind": "mcp-stdio",
+  "command": "/absolute/path/to/node",
+  "args": ["/absolute/path/to/morrow/packages/mcp-server/dist/lms-api-entry.js"],
+  "cwd": "/absolute/path/to/morrow",
+  "sourceDisposition": "direct_owned",
+  "priority": 150,
+  "required": true,
+  "outputPrivacyDefault": {
+    "fieldPolicy": "scrub-sensitive",
+    "dataClass": "course",
+    "maxRecords": 10000,
+    "maxBytes": 2000000,
+    "freeText": "allow",
+    "learnerTokens": true,
+    "artifactInspection": "deny"
+  }
+}
+```
+
+The `lms-api` source reads this file when the client starts, unless the launcher
+sets `MORROW_LMS_CONNECTIONS_FILE` to another private path. It has no real token
+exchange, refresh, or OAuth registration flow. The
+[implementation checkpoint](docs/implementation/MULTI-LMS-AND-LESSON-REVIEW.md)
+lists the official API basis, adapter evidence, and remaining limits.
 
 ## Canvas authentication
 
