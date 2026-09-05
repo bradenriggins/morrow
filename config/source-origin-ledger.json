@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "dc816c95feb86d37f0e1fec199e14bcacd56c5cc",
+  "candidateCommit": "0d8c1a9cfe2fa44851aaefefba425d35f5c384fb",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -82,25 +82,25 @@
     },
     {
       "path": "LIMITATIONS.md",
-      "sourceCommit": "015ba8c133b1c6390f80dbd0fcfe599c87017484",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "LIMITATIONS.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5d493817286129379eb5b708cf1a00be9344303d67fc83dfc0b3e2a17ebf41fe",
-      "afterDigest": "32602d385ec97707f699ec0753241ed89d3c2fc3d2e50255755396d7f3d37fd5"
+      "beforeDigest": "fe3c77b1fa22c298c8ed662cc8fe18aea825779c00b17661fd4e0ff5e80321f4",
+      "afterDigest": "3a5fd9d15f8bc6becc77da8c501d1643668de9aeeed9c72f5450ed2497eb69d2"
     },
     {
       "path": "README.md",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d9eb2f8b6a03b43293412ae794a13ba7d278552958d4f774a9abafa6229b3493",
-      "afterDigest": "235238f5e7e49751bdb7e8699beea09d220d178e497f4c9a495f0d760d8f814c"
+      "beforeDigest": "5ab17126f52a2008bde78d20d502c99f8dd4781e29855c4fb67731a616b4f132",
+      "afterDigest": "064d44c4d3e6e29553dafb32520b7c09184d6de1ed20f4ba8d0d25e30d858915"
     },
     {
       "path": "SOURCE-ORIGIN.md",
@@ -115,14 +115,14 @@
     },
     {
       "path": "WEEKEND-HANDOFF.md",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "WEEKEND-HANDOFF.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "dd544b8f5a2d6cb070f599111cb3e8705ef2565a4ff75000a6f6ff94b725cc2b",
-      "afterDigest": "4f9b794575c284b23533bc66f95f675d57911e9d07fead53420307bb941a6ded"
+      "beforeDigest": "4f9b794575c284b23533bc66f95f675d57911e9d07fead53420307bb941a6ded",
+      "afterDigest": "acd42778bacb78ff9c6325c5a408ecbb81f2867a4984c6c3b152fd9f4d676fc2"
     },
     {
       "path": "artifacts/canvas-api/canvas-api-catalog.json",
@@ -258,14 +258,14 @@
     },
     {
       "path": "connector/extension/brand/review.css",
-      "sourceCommit": "4b077508f2ae4d1f953ece9a950535cc4715e088",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "connector/extension/brand/review.css",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2cb0d67c48d7ebc3b81572f106826ae2416406130792367917838ddfe5876c31",
-      "afterDigest": "5a906a651641b6f42f4e6e498051d663e7887772d370f241d658dcaef854746c"
+      "beforeDigest": "5a906a651641b6f42f4e6e498051d663e7887772d370f241d658dcaef854746c",
+      "afterDigest": "21ccd19571061422c8452de83c301d1ea1ece96c2af6f6193d97c3375e20760e"
     },
     {
       "path": "connector/extension/brand/theme.css",
@@ -290,15 +290,26 @@
       "afterDigest": "021d3d2bad0b587f2985dc241a44e7444ba2a6d2af461c1ef30f5242aec340d9"
     },
     {
+      "path": "connector/extension/generated/moodle-browser-catalog.json",
+      "sourceCommit": "20d5c4399227bf4b186c7baa880f3b5cdf278f24",
+      "originalPath": "connector/extension/generated/moodle-browser-catalog.json",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "acb7da1d489cc517517ddcdbb517242c623375315314f5ac3e20432112dee323",
+      "afterDigest": "0ed28c94e1c756d82b554493eb13d4c90dba181d45a2850e945e1fe7bfdab975"
+    },
+    {
       "path": "connector/extension/manifest.json",
-      "sourceCommit": "015ba8c133b1c6390f80dbd0fcfe599c87017484",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "connector/extension/manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "71504970b9775d520178165e1a77d0e200de40320df4ee4cebda4a72bdce6f5b",
-      "afterDigest": "7a902ad6409b9a44314f91a6942a2c016e32c1e5627b37b19887c097a619c0d1"
+      "beforeDigest": "13ddf548a1d1264e2df44a3667559614249f8cf05c63e7dd920ff320dc5861d5",
+      "afterDigest": "cee8e8fc5f1a66cd33f7ebecc0a27f78fab8f924f8f6911b4783534ea5478224"
     },
     {
       "path": "connector/extension/popup/popup.css",
@@ -313,25 +324,25 @@
     },
     {
       "path": "connector/extension/popup/popup.html",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "connector/extension/popup/popup.html",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f406c0929ce16bf52d91f139764c2c74ea5941538028b9aa2de46284a165bd96",
-      "afterDigest": "a29cffb3dc2fc091ac4a9fd81df937425cd79eead68eb85d1ff1bd9b53016bd4"
+      "beforeDigest": "199a689b7f7a93242f5627855066bb1965b8d4680eca74855765d2edff4490bf",
+      "afterDigest": "59bd41e431fb714f42840e8ac198b5ee9e2b3ed6c4e145920018004177139544"
     },
     {
       "path": "connector/extension/popup/popup.js",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "connector/extension/popup/popup.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "79ac97c9b5bae9eb560d6c4159427bb26a2b2ac4721256f0fb5bf84172775f8a",
-      "afterDigest": "1e4bcdf20ffe2616625729c50a29b394ec4fd70abc1b9c9ab0fbd8946ee4995c"
+      "beforeDigest": "77f991afd913f1a04fa58b775d0a970187feb9b277c06c5998962806d9dd196c",
+      "afterDigest": "81ef4a7b804f87eed2c79ca48f3d292537d01b690c37cd24ed48b1a5bbaa6459"
     },
     {
       "path": "connector/extension/src/canvas-content.js",
@@ -356,26 +367,37 @@
       "afterDigest": "33dd003b84ae6b228b97ac9c4a1efa2702ff03d612fe70c50c64c5338880ad61"
     },
     {
+      "path": "connector/extension/src/moodle-executor.js",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
+      "originalPath": "connector/extension/src/moodle-executor.js",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "67a6d4120ba88b4a9bbfb95a9e88ca2ecea2e083762f0a474a651a04f135cb0f",
+      "afterDigest": "5582f88ad781bdb597075447329f71aee9a7976fdcd0b753df314c774e76c47d"
+    },
+    {
       "path": "connector/extension/src/service-worker.js",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
+      "sourceCommit": "20d5c4399227bf4b186c7baa880f3b5cdf278f24",
       "originalPath": "connector/extension/src/service-worker.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "1988a66a49a687585ff9f1e1c1735e87d8f25390a1af62ec758fdba428f5d417",
-      "afterDigest": "79e292d7cfea217ac50f050c7572f8f0647778ba83be266eb947813131753c9f"
+      "beforeDigest": "2b4de465d308dedf5b4672fbdf8fa0eb50c28c135c21081c25e12b160e9dfc34",
+      "afterDigest": "efd23b3ea94c71d10768d20c13ed3f07f8637dbd6f0b2440640fe1c3e940e60a"
     },
     {
       "path": "connector/extension/src/verification.js",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "connector/extension/src/verification.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2343e070f7d87790f468c08df6a540f95915ab9f2f96b6b9616631ee253f55b2",
-      "afterDigest": "d531125a6f82cff8dab0b340434fb368ab06a2e1febdc503b1a3acee84e11575"
+      "beforeDigest": "d531125a6f82cff8dab0b340434fb368ab06a2e1febdc503b1a3acee84e11575",
+      "afterDigest": "8fe7f69773601381de2e04ae22080078c2b001c6f2fcf4e7b87f50338ba59ffa"
     },
     {
       "path": "docs/architecture/ADR-001-federated-convergence.md",
@@ -412,14 +434,14 @@
     },
     {
       "path": "docs/implementation/BT2-LIVE-PROOF.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "docs/implementation/BT2-LIVE-PROOF.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cfd950cda1c4b219f8497cf2037b6ff2f342fa6744341b3070a6b7aa532e6df6",
-      "afterDigest": "3916a504a002dfc164a392b972d60de3a9bd3315a5f3357249a53acd9e4e5935"
+      "beforeDigest": "7663c4cdb035a78aa3bd4fc6e566d3d077c6a4586e912a8e79e98c4a70f37252",
+      "afterDigest": "9e6267230b39ca1df5318ab69a557622e78c3b1ce03c3067803886a2cedcaffa"
     },
     {
       "path": "docs/implementation/CATALOG-BASELINE-EXCEPTIONS.md",
@@ -499,6 +521,17 @@
       "afterDigest": "6fae4410fed1e299b2d3083497bc9fa58ca854aa7d6e8e9e3b1d9196d5276662"
     },
     {
+      "path": "docs/implementation/THREE-LMS-BRIDGE-PARITY.md",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
+      "originalPath": "docs/implementation/THREE-LMS-BRIDGE-PARITY.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "13609d6e12af6c3109f68db42052f8585d25327e4b7e50ad6bdf0c8899bf6fb2",
+      "afterDigest": "53195400b2b79da9bb43efd3cabc3a7e73709995ff2e7815599ccb826696f8b3"
+    },
+    {
       "path": "docs/implementation/EXAMPLE-WORKTREE.md",
       "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
       "originalPath": "docs/implementation/EXAMPLE-WORKTREE.md",
@@ -508,6 +541,17 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "d864ce2c2d71872c1ec98b6c9df7f7912e1276c43f49d1321830c673268d536d",
       "afterDigest": "4730d8798a4e0033266dd4aca95df9913ad4efa28c484eb6d7732a39646d7a97"
+    },
+    {
+      "path": "docs/release/CONNECT-MINDTAP-INCLUSION-REVIEW-2026-09-05.md",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
+      "originalPath": "docs/release/CONNECT-MINDTAP-INCLUSION-REVIEW-2026-09-05.md",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "47776179a1a5e6e207c2a5582ba33285d6164d1ecda9f4c067cb80aaed0d07e6"
     },
     {
       "path": "docs/release/PUBLIC-CANVAS-LIMITATIONS.md",
@@ -588,113 +632,113 @@
     },
     {
       "path": "launch/00-POSITIONING-AND-HOMEPAGE-COPY.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "launch/00-POSITIONING-AND-HOMEPAGE-COPY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9e7a9f3e12170b6b933d93ad69a913b8864f83c5b76bc3e8d68dfa4cf092fb2e",
-      "afterDigest": "7f257837c931ad6679aff781ab85ce9938e55b1ca925d1f36231448e3e7ddb6e"
+      "beforeDigest": "7fb93ed4da8d51ce0f5a581ed9cde222efdca7304081e3020a642aa110fdce1c",
+      "afterDigest": "4de5a92536ae091cb050dee8a29b31e242e2de2761298c47103f355533e4c87c"
     },
     {
       "path": "launch/01-PREVIEW-LAUNCH-PLAN.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "launch/01-PREVIEW-LAUNCH-PLAN.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ce07776fa98e9052c8143f8a261b6f54cf610c581802a7a43c92ef00f32472de",
-      "afterDigest": "bcca65c73df5094a78e653c8d68401f2d18a50a5362ffee7da87e15d7cd71911"
+      "beforeDigest": "2ac33ec80e5de50b8878d6829dcf45aaa058a3bed5d3330d3ac56c8f675c1716",
+      "afterDigest": "dcc54b7530751b8ac506cdb95fc4fe1411ca2e4cca8a1ebaacd85000501b2572"
     },
     {
       "path": "launch/02-LAUNCH-POSTS-AND-VIDEO.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "launch/02-LAUNCH-POSTS-AND-VIDEO.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "73bb32aa97019650d00a447d1436577317672d783248f811a10d9fa0c82be367",
-      "afterDigest": "76edb0503430e30dd9f18f4c16393f78148c997daa5e55f8cf398d67b1205137"
+      "beforeDigest": "e32ad8679c5d58ee37c6cd56338dad64dfc4c87eff1dedac715f1773e486e5d2",
+      "afterDigest": "67cf5083a682258caef914c279a1a52dac1d6cd1c860927b5b75ac34fa75fb5f"
     },
     {
       "path": "launch/03-EXPERT-EDUCATION-ARTICLE-OUTLINES.md",
-      "sourceCommit": "8bc21885bf42912955d859725a8adcb83047b7b7",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "launch/03-EXPERT-EDUCATION-ARTICLE-OUTLINES.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "e4c4504ffad167858ed68a34bd29b58aaffb1a773758761e89dd18d4adeea44d"
+      "beforeDigest": "ae80beca13dbc0ef55f55004baf3bfbcfbbecc46327d455c95a9ea65e687129c",
+      "afterDigest": "ed5b24ebd5af98d6710ceaf09ca22e4cf45d7ae854c17107a3e5e6ea80f50665"
     },
     {
       "path": "launch/04-WHAT-COUNTS-AS-A-FINISHED-AI-COURSE-CHANGE.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "launch/04-WHAT-COUNTS-AS-A-FINISHED-AI-COURSE-CHANGE.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "0c42537b3afb1b3d78978ccb9715ec5f88b854273a831611b8432038263bf87b",
-      "afterDigest": "10dc9f23637abfc0d0b5bd6d19247ca06e477dda6c337b4346fb3880d1238097"
+      "beforeDigest": "cdab5573ac0e2975c1e63bf0666dab46fc757dcc9a80716cb95549a8eca762e3",
+      "afterDigest": "6df5388274f07b7c6ab27347cf1fec54ab02903ce6ef2f31e8b26b134a41fcbc"
     },
     {
       "path": "launch/05-HIRING-CASE-STUDY.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "launch/05-HIRING-CASE-STUDY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "6fad88898af268bb27e8a872ef9c0ce67b49b626538dd91243cb66b8d17cc15f"
+      "beforeDigest": "128a1d0b130d40209026810bb2f319a043d0fe29c3494f110d3f8d9189c6ea33",
+      "afterDigest": "84291a7122325e2124948102bca3514f71361599de7eb18e29b979988aa1f68a"
     },
     {
       "path": "launch/06-TARGET-COMPANIES.md",
-      "sourceCommit": "dc816c95feb86d37f0e1fec199e14bcacd56c5cc",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "launch/06-TARGET-COMPANIES.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "1f1e49530635c7a3016a997ed6aacaa3e6c6e7549ec455ee4855ebd8694401a8",
-      "afterDigest": "b55004d9f3155ba30d173a033e32c3e47622322d4b847e50c322fa2a3b69a223"
+      "beforeDigest": "98a7da4c7a8eed811beb911ddbfc0705bbdc600397f23cee377a0d19d2353305",
+      "afterDigest": "1d05e0b3c344d0f7f987a934a85152ecca321765b2b1b984c27dc46848522154"
     },
     {
       "path": "launch/video/BRIEF.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "launch/video/BRIEF.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "fa4601e9610377dac5757bcfce53a98d0bb2d8e5af9d3e3620a5430919edf983",
-      "afterDigest": "3c13e6565984023ac931c89d3662f245a287d0918af2e8b82319d5c1c819133a"
+      "beforeDigest": "5e5edaff2581491f4fcc455a9dca784857abff00c87ac41e2a88c38ebe16446c",
+      "afterDigest": "8753e876ae5993f64166755a878189b9cb12c8b1809f04f4239ffb20b7284edd"
     },
     {
       "path": "launch/video/README.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "launch/video/README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b5fd2093af2e419982c94a45a765f5669f5e13aecacb3e33b31ae5c4cd628a42",
-      "afterDigest": "77b588be0ffa3cc38dc2340bf42a07f6585903a3ba755222b962d4c512efa73b"
+      "beforeDigest": "d2f65a8aebb743132fef1901e6d23168e3ea03f94fc0e347ff86b892f9e6a435",
+      "afterDigest": "f68196e43333df7dcb84db0952dc13504d9e073966b4e20402f3d282ff9e5ec0"
     },
     {
       "path": "launch/video/STORYBOARD.md",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "launch/video/STORYBOARD.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b43c7b53cdd75bf80fe3ee76ecadd8aeed4c6523b8dbf3c7928b934b72a94511",
-      "afterDigest": "fd41d932752b1daf90013fa3b3140f8a40819d020e59a0a86bb98e01f794be92"
+      "beforeDigest": "0ad31cef6f539eb251301a9f0b3caa5c975950b633ba7cc53497f343bc051f8d",
+      "afterDigest": "90e02afe8fcbbe1425aca3dc45d07c7c58abaa618362c9a096c75f4cca72061f"
     },
     {
       "path": "launch/video/assets/GoogleSansFlex-latin.woff2",
@@ -717,6 +761,17 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "afterDigest": "29ddf50725163cda4d8d77bd995de0dc1cb7b356c09448e90fe4c79763314535"
+    },
+    {
+      "path": "launch/video/assets/morrow-wordmark-dark.png",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
+      "originalPath": "launch/video/assets/morrow-wordmark-dark.png",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "8ca3f312dfbd0c951a14e3e195dd0df464975b4afa5676da24ae1668b5845d64"
     },
     {
       "path": "launch/video/assets/morrow-wordmark.png",
@@ -742,25 +797,25 @@
     },
     {
       "path": "launch/video/index.html",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "launch/video/index.html",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cd40c5fc175b309e9fe6f93cdcc46b37826f4ac25ca0b663489634f8e11016cc",
-      "afterDigest": "377170505b95639ce4a9097b16c7539a13b342d479356dfcecca99e58dfff1e9"
+      "beforeDigest": "251067a05db959e9c4e93c18f826c937109a5191c81c1f7d43a12f4be5cc5ae5",
+      "afterDigest": "e2ddf5efea0b574a0d61ad76a33e9cddffa4a7d68a88794ff14b28844f452121"
     },
     {
       "path": "launch/video/index.motion.json",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "launch/video/index.motion.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cf6c07d0c639b1e86b07b99fc206f36b17473ea7c677dd360ae6d5bda242e3e6",
-      "afterDigest": "153ccb36d8fe2aaaea0264ac5b9116793de211472f94d1ab3dd4ac6373f0fbf7"
+      "beforeDigest": "153ccb36d8fe2aaaea0264ac5b9116793de211472f94d1ab3dd4ac6373f0fbf7",
+      "afterDigest": "6474594d5caf03a8c19836b8af4cc75c4e52aaa285c629395cf0f4c2f001b0ac"
     },
     {
       "path": "launch/video/meta.json",
@@ -775,36 +830,36 @@
     },
     {
       "path": "launch/video/package.json",
-      "sourceCommit": "8bc21885bf42912955d859725a8adcb83047b7b7",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "launch/video/package.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "c3ee834d40524a1241ff655b1834e0a0947dcb0e53956b2c496711da29212b2f"
+      "beforeDigest": "c3ee834d40524a1241ff655b1834e0a0947dcb0e53956b2c496711da29212b2f",
+      "afterDigest": "e2e86331f694e63b4051cd393f522b91ba1d0344cdb2d7775c54c2409c11fe8b"
     },
     {
       "path": "launch/video/renders/morrow-launch-poster.jpg",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "launch/video/renders/morrow-launch-poster.jpg",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "49c3a0883467fe5b3d4d53c286fc521b401e73cfb1e4a08268a354ce07b06ed8",
-      "afterDigest": "b1c643749a28b00496ce5b04fcb1a6f27193cd3f1dddcf0948dddd13e30244c8"
+      "beforeDigest": "b6e7d98a260f351523583bafcf81331923b50b7a98253ad235afd647a09a0629",
+      "afterDigest": "bb0ef3f4f19710eeecde089bfa43716764b8ea899f45d344072543e361a04841"
     },
     {
       "path": "launch/video/renders/morrow-launch-preview.mp4",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "launch/video/renders/morrow-launch-preview.mp4",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2c5bb7f9070c4d7c12659ac7af5dbe200b9a53f1adc9f2ef609f5d4d5a95d4ac",
-      "afterDigest": "0dd523b9c1e828c69d1450ee5f0e5b43b9d21b4a84cf0602f81a0629353dcef5"
+      "beforeDigest": "8e8e50ff79cfeded2ae525d5fcb5113e8ebab9249bb90fcc19748a6c127e43dc",
+      "afterDigest": "716b9dba42ad5ce7c88b22beeb3c9725a35aefa34078f3c5f40d6594f449d351"
     },
     {
       "path": "morrow.upstreams.connector.example.json",
@@ -1081,7 +1136,7 @@
     },
     {
       "path": "packages/bridge-loopback/src/index.ts",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/bridge-loopback/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1089,19 +1144,19 @@
         "packages/bridge-loopback/test/server.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "914b60974c15a296494c9921842b9fbe019c98afcb0c2fdedc50eb98f5d6c1fe",
-      "afterDigest": "b91bb6d68d9aa323d56dd86589f43976f552e671a9f2f0a45f5d77111e93228b"
+      "beforeDigest": "3a786731c993ce2c343c101511470cf9f62245d3b854f966d3c69fd8e0b94333",
+      "afterDigest": "f6ad12b2ccedf658930acc0c9d035a504668515d74b6d41a3a03009d1e30870b"
     },
     {
       "path": "packages/bridge-loopback/test/server.test.ts",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/bridge-loopback/test/server.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "de092d6bb036a5b2813eaa63d963b35e69304b7256172eea9a2f3dc42ff1167a",
-      "afterDigest": "595cfbb40fe9fad67f646272fded3af4a18f9cd5ab051b5d142eac597923f580"
+      "beforeDigest": "595cfbb40fe9fad67f646272fded3af4a18f9cd5ab051b5d142eac597923f580",
+      "afterDigest": "eec5aafe2aac41e2cd9380e5825dcf921483762b93c5ed17404ce6475c2f5d28"
     },
     {
       "path": "packages/bridge-loopback/tsconfig.json",
@@ -1127,7 +1182,7 @@
     },
     {
       "path": "packages/bridge-protocol/src/index.ts",
-      "sourceCommit": "015ba8c133b1c6390f80dbd0fcfe599c87017484",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/bridge-protocol/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1135,19 +1190,19 @@
         "packages/bridge-protocol/test/protocol.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ed52df44733d40af1eb73b37921eb562346b56ddad1dc43e758f8e8d6a9352f3",
-      "afterDigest": "ce1f38d83f77285c7a4828d15ebc72452f03ac35fac7052ba538afb77eff36bf"
+      "beforeDigest": "ce1f38d83f77285c7a4828d15ebc72452f03ac35fac7052ba538afb77eff36bf",
+      "afterDigest": "ab234ef8d538894eeb1169d32f46aee8cd73dd2cacb7e75ad3778486ca4b512a"
     },
     {
       "path": "packages/bridge-protocol/test/protocol.test.ts",
-      "sourceCommit": "d28458bfc3bd95eddce841159c22e6e01c8303c7",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/bridge-protocol/test/protocol.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5f5953fdedc4e316e9d039e3266146c72f4b7d9886f577eb1cd19c1ff6a83a03",
-      "afterDigest": "38b4237f3d134390533c33aa8ccfac463946e566b2ebd4a95e7919ecefb5a2cb"
+      "beforeDigest": "38b4237f3d134390533c33aa8ccfac463946e566b2ebd4a95e7919ecefb5a2cb",
+      "afterDigest": "e9ac036be76f33e80c669496fe345108a2625a64751ced247adf741f4b11aeb3"
     },
     {
       "path": "packages/bridge-protocol/tsconfig.json",
@@ -1218,8 +1273,22 @@
       "afterDigest": "06348e7f4f95d091285b46004a8291dd7489c4f740fef3a4d44155843f6321fa"
     },
     {
+      "path": "packages/canvas-connector-mcp/src/browser-catalog.ts",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
+      "originalPath": "packages/canvas-connector-mcp/src/browser-catalog.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/canvas-connector-mcp/test/runtime.test.ts",
+        "packages/canvas-connector-mcp/test/server.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "72b21764d3fb0bd8c8bd78a299ba4e77fbda122113968df4da52db7287460036"
+    },
+    {
       "path": "packages/canvas-connector-mcp/src/config.ts",
-      "sourceCommit": "015ba8c133b1c6390f80dbd0fcfe599c87017484",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/canvas-connector-mcp/src/config.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1228,8 +1297,8 @@
         "packages/canvas-connector-mcp/test/server.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "7b9a0dfdafe7c1f88e6b785d958f93474e597cbf52a74337192c0e47e0b8c684",
-      "afterDigest": "fdbd8ef53fd59fa3119fa2b8e4f788276cd5b971a6c1b2fcc86fec1f909e5e58"
+      "beforeDigest": "fdbd8ef53fd59fa3119fa2b8e4f788276cd5b971a6c1b2fcc86fec1f909e5e58",
+      "afterDigest": "5e7c06a3c57e045accc3eff738d6a25c4919d9d66bae71585ff70d473b79e86a"
     },
     {
       "path": "packages/canvas-connector-mcp/src/index.ts",
@@ -1247,7 +1316,7 @@
     },
     {
       "path": "packages/canvas-connector-mcp/src/runtime.ts",
-      "sourceCommit": "015ba8c133b1c6390f80dbd0fcfe599c87017484",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/canvas-connector-mcp/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1256,12 +1325,12 @@
         "packages/canvas-connector-mcp/test/server.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5f4e54d861bf3f33997e4fb7947c806a050a121dde1253105ca44988fe5bca71",
-      "afterDigest": "37299fade5e1a16ad4cf7f56b6e6729adbd356845639018fd36587ce08c2dc33"
+      "beforeDigest": "37299fade5e1a16ad4cf7f56b6e6729adbd356845639018fd36587ce08c2dc33",
+      "afterDigest": "6c2329027dd1205bbb872a07bfdc038f0abb33083a4741b9875971ac69221fd5"
     },
     {
       "path": "packages/canvas-connector-mcp/src/server.ts",
-      "sourceCommit": "015ba8c133b1c6390f80dbd0fcfe599c87017484",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/canvas-connector-mcp/src/server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1270,30 +1339,30 @@
         "packages/canvas-connector-mcp/test/server.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "986a544c40e2d3c8e788a3e06654e3866bc3a479b46b1adade7aad8848d69000",
-      "afterDigest": "fc860fb312ab509b5a1483e8c4617d6823ffa1ca9969df39f2d1e533241995da"
+      "beforeDigest": "3e1b055f4daaafd83fd8ec70c0883ee75af1ea99f2dc43df98b29676ac046548",
+      "afterDigest": "70e82e9057c484af7954b1b57ee6cea7fe065a4f672546cc204779d2fdbc6952"
     },
     {
       "path": "packages/canvas-connector-mcp/test/runtime.test.ts",
-      "sourceCommit": "47677eea707118476aba0b0df58a8168e8a52a54",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/canvas-connector-mcp/test/runtime.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "15b3eb1271087b3607e835ccea3041e434ffbff694cd6b02d52fd5d3db658f86",
-      "afterDigest": "72389856b7cb1b708c7e426d92b6cfee9ccdd51e282a0357421cc212c9dbbb85"
+      "beforeDigest": "72389856b7cb1b708c7e426d92b6cfee9ccdd51e282a0357421cc212c9dbbb85",
+      "afterDigest": "cafef2cae3a20b102ae6ea592329bd6581ce693f11fab7f9a1e9b4dda8f40d43"
     },
     {
       "path": "packages/canvas-connector-mcp/test/server.test.ts",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "packages/canvas-connector-mcp/test/server.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "d2472d1426cd3058cd2b6311d59480f7d82566c005e1a7217225c0f7adfb5945"
+      "beforeDigest": "d2472d1426cd3058cd2b6311d59480f7d82566c005e1a7217225c0f7adfb5945",
+      "afterDigest": "ba33868d0183fa75cd3bd6cbcbc6268a2ecb0664c2773228bf392ada58eaa5fe"
     },
     {
       "path": "packages/canvas-connector-mcp/tsconfig.json",
@@ -1319,7 +1388,7 @@
     },
     {
       "path": "packages/client-config/src/cli.ts",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "0d8c1a9cfe2fa44851aaefefba425d35f5c384fb",
       "originalPath": "packages/client-config/src/cli.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1327,12 +1396,12 @@
         "packages/client-config/test/client-config.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d078b5b3a5a3f41fe6848f9ed1bb41b7be6544ff25b6deaada3a99fcae16f387",
-      "afterDigest": "5c123227ee0941eb1ceed5cd202a1e8fc4d2d14b9491184f624b74396d161393"
+      "beforeDigest": "98a5d07e43705799e9fce4b22537c948f6e7e4cca10895f9216bb98b542ce5c0",
+      "afterDigest": "b04da01b0417feb1fde0b306ff1c9953bafee6b18527e4d76d7c9c8d8d8ac419"
     },
     {
       "path": "packages/client-config/src/index.ts",
-      "sourceCommit": "4b077508f2ae4d1f953ece9a950535cc4715e088",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/client-config/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1340,19 +1409,19 @@
         "packages/client-config/test/client-config.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5878a0411491588ff9a920ae190d9f1c96562e84299c03ccca65a90e3ec6dadf",
-      "afterDigest": "4e99b589b2f2223a3ef32e3695b46a472a7f00a2d220da826ec19138bbc9005a"
+      "beforeDigest": "4e99b589b2f2223a3ef32e3695b46a472a7f00a2d220da826ec19138bbc9005a",
+      "afterDigest": "5878a0411491588ff9a920ae190d9f1c96562e84299c03ccca65a90e3ec6dadf"
     },
     {
       "path": "packages/client-config/test/client-config.test.ts",
-      "sourceCommit": "4b077508f2ae4d1f953ece9a950535cc4715e088",
+      "sourceCommit": "0d8c1a9cfe2fa44851aaefefba425d35f5c384fb",
       "originalPath": "packages/client-config/test/client-config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "988a1fc86d3e685c56c401198aaa13afb284f120ab547cecf2ec5ce3c8eb9cad",
-      "afterDigest": "979c48a321c1831d219fc4db2df3587a7fa5da4b49cbf2f2cf811192f8637ddc"
+      "beforeDigest": "9a41162b56ce2ad707bc3db9319be602abc5b1519dce3eecc362620b176b8ae3",
+      "afterDigest": "c95b7272d28466abf3268437c956ad51800023509b86c5f60bf25527af8eec8c"
     },
     {
       "path": "packages/client-config/tsconfig.json",
@@ -1495,7 +1564,7 @@
     },
     {
       "path": "packages/gateway-core/src/result.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "packages/gateway-core/src/result.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1504,8 +1573,8 @@
         "packages/gateway-core/test/native-controls.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9fcd123ebbf689160610ce9120d973dfc8b8b3c19606385dc42d31e66695a174",
-      "afterDigest": "5f5411e3cac608cfecca49aee2ff240b4098cf00d34b8f3e82592234c31c0394"
+      "beforeDigest": "5f5411e3cac608cfecca49aee2ff240b4098cf00d34b8f3e82592234c31c0394",
+      "afterDigest": "7d45c1db223882622bd384486211670f02f90402ad7f160a8926c9cd4fc9ce60"
     },
     {
       "path": "packages/gateway-core/src/source-rights.ts",
@@ -1589,14 +1658,14 @@
     },
     {
       "path": "packages/gateway-core/test/result.test.ts",
-      "sourceCommit": "560d513f514fbe6b05d305c8ee186108ff00a8e2",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "packages/gateway-core/test/result.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "065e55fe35014f2980eea5c6ff0877725035a5d70a5b4c0e4ba7ce28a0360456",
-      "afterDigest": "6e97a745dce86df535ebc57c5f8a51c38f7fe8af0feaf04dc9ff4e17fc70c97f"
+      "beforeDigest": "6e97a745dce86df535ebc57c5f8a51c38f7fe8af0feaf04dc9ff4e17fc70c97f",
+      "afterDigest": "5495865678985782268f57f8531d7f06d3b3296274e3eec21c1225886e937550"
     },
     {
       "path": "packages/gateway-core/test/source-rights.test.ts",
@@ -1718,7 +1787,7 @@
     },
     {
       "path": "packages/mcp-server/src/approval-context.ts",
-      "sourceCommit": "a876e325a52453b5204756bde716018eb9958737",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "packages/mcp-server/src/approval-context.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1727,8 +1796,8 @@
         "packages/mcp-server/test/approval-preview.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "75905a90aebf2b57b9489adc8077fc0aace3b76e8cf00a41d1650c95e78c20ec",
-      "afterDigest": "e56b27fbfe03f871ff7e112f335419dbfaa554f12858d8579737262ab25a6cb1"
+      "beforeDigest": "f26a0b957c29848c34e0f63edc5ce5a6ee7beea2d014c68659f493aa1e850423",
+      "afterDigest": "852f516a3ddb1859cda36b025f075745cd756b175ed72dd06138f1f224345bea"
     },
     {
       "path": "packages/mcp-server/src/approval-entry.ts",
@@ -1760,7 +1829,7 @@
     },
     {
       "path": "packages/mcp-server/src/approval-server.ts",
-      "sourceCommit": "a876e325a52453b5204756bde716018eb9958737",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "packages/mcp-server/src/approval-server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1769,8 +1838,8 @@
         "packages/mcp-server/test/approval-preview.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "53bff8224753e45aad79b3a14f18af8031b1614736c4dd4d11f4c9612077aa0b",
-      "afterDigest": "d9e66d32736fdc90aa31b466cef32154729c0280b9e359e637a9a66cdb77ba63"
+      "beforeDigest": "9762abfbdff74e1e8385a99e8e701a4bd302c7a2d029c9f9529162cad0fa3e6d",
+      "afterDigest": "784b2d231b6e3c7c082a0e11cb6b771b49bf37db1ff5ba00f8698a3677ef3aed"
     },
     {
       "path": "packages/mcp-server/src/batch-recovery.ts",
@@ -1815,20 +1884,6 @@
       "afterDigest": "828bee4c84f9377da64e86d3bdafff484a27713f73cc6f15bf18c099bfd0710b"
     },
     {
-      "path": "packages/mcp-server/src/blackboard-api.ts",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
-      "originalPath": "packages/mcp-server/src/blackboard-api.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [
-        "packages/mcp-server/test/approval-context.test.ts",
-        "packages/mcp-server/test/approval-preview.test.ts"
-      ],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d1de55f424b3d4530e754ddf5bd103f0a4b30106a1b13ed5e393b14e359a9537",
-      "afterDigest": "28e28df3b9a451de635b2dd2c2d40f4818546f3ca338dc19d65678e6a4af6f58"
-    },
-    {
       "path": "packages/mcp-server/src/canvas-read.ts",
       "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
       "originalPath": "packages/mcp-server/src/canvas-read.ts",
@@ -1844,7 +1899,7 @@
     },
     {
       "path": "packages/mcp-server/src/config.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/src/config.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1853,8 +1908,8 @@
         "packages/mcp-server/test/approval-preview.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ccdf75bb38530e302c20250075d26b1566900a882617bee25d57e130c1d093e9",
-      "afterDigest": "bd5921f33af0b1b03cf265dc2a4bff82be312ef423f4fd2571a2df7465a05689"
+      "beforeDigest": "bd5921f33af0b1b03cf265dc2a4bff82be312ef423f4fd2571a2df7465a05689",
+      "afterDigest": "ccdf75bb38530e302c20250075d26b1566900a882617bee25d57e130c1d093e9"
     },
     {
       "path": "packages/mcp-server/src/full-server.ts",
@@ -1899,62 +1954,6 @@
       "afterDigest": "b9200eaf0d8e6078b1b08ce87a8d48f50dbac2b0b2c3b89868b6c04febbcbdee"
     },
     {
-      "path": "packages/mcp-server/src/lms-api-entry.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
-      "originalPath": "packages/mcp-server/src/lms-api-entry.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [
-        "packages/mcp-server/test/approval-context.test.ts",
-        "packages/mcp-server/test/approval-preview.test.ts"
-      ],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "7b3883a4458472b4ccbdc98db3a4d4aa66f36bf8461e7dc15ca3087f132f89d2"
-    },
-    {
-      "path": "packages/mcp-server/src/lms-api-server.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
-      "originalPath": "packages/mcp-server/src/lms-api-server.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [
-        "packages/mcp-server/test/approval-context.test.ts",
-        "packages/mcp-server/test/approval-preview.test.ts"
-      ],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "14d9aafe2f2c7dbe9f5197baef1cd6293264d9ef664d38efc8c51304e64f3001"
-    },
-    {
-      "path": "packages/mcp-server/src/lms-api-types.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
-      "originalPath": "packages/mcp-server/src/lms-api-types.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [
-        "packages/mcp-server/test/approval-context.test.ts",
-        "packages/mcp-server/test/approval-preview.test.ts"
-      ],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "b04ce26e278ea283dcc9fdedcdc6c8780b1d4dfe55e1460075776a292bd3a255"
-    },
-    {
-      "path": "packages/mcp-server/src/lms-api.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
-      "originalPath": "packages/mcp-server/src/lms-api.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [
-        "packages/mcp-server/test/approval-context.test.ts",
-        "packages/mcp-server/test/approval-preview.test.ts"
-      ],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "2050fd1b5a8607150e899ed19297972ccd3febdb9449aafbd38069a209497f0d"
-    },
-    {
       "path": "packages/mcp-server/src/meridian-catalog-truth.ts",
       "sourceCommit": "ef2b347607b5d669ef2223c02ed5fdf20c888d70",
       "originalPath": "packages/mcp-server/src/meridian-catalog-truth.ts",
@@ -1981,20 +1980,6 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "667f85b4d6e130c77e17162c4bee4b02c925f13d12bdc2957c5b602b4c2e2fa3",
       "afterDigest": "fe1e8e9e686230bde2a3cd2d4969f9d34cb1dbd9c46a490e102274d32773ad0a"
-    },
-    {
-      "path": "packages/mcp-server/src/moodle-api.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
-      "originalPath": "packages/mcp-server/src/moodle-api.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [
-        "packages/mcp-server/test/approval-context.test.ts",
-        "packages/mcp-server/test/approval-preview.test.ts"
-      ],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "b7a910baa67d866362266a0c23be07c8b961fcf1888a8713d4b37d5a574bd577"
     },
     {
       "path": "packages/mcp-server/src/morrow-runtime.ts",
@@ -2068,7 +2053,7 @@
     },
     {
       "path": "packages/mcp-server/src/runtime.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -2077,8 +2062,8 @@
         "packages/mcp-server/test/approval-preview.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5ff601ccd71b438a60c01883b1407a73f4ed178e75374e61536281457baa8872",
-      "afterDigest": "6d4ee55b9253a32cf21f7fb512ac97b361d79d8bd257abca69d581adc0c85119"
+      "beforeDigest": "6d4ee55b9253a32cf21f7fb512ac97b361d79d8bd257abca69d581adc0c85119",
+      "afterDigest": "7f95b9ad2ac050ce1d7648397ef071ab9ba9d83d14ffc5dcdbab0906fa229948"
     },
     {
       "path": "packages/mcp-server/src/sandbox-upstream.ts",
@@ -2096,7 +2081,7 @@
     },
     {
       "path": "packages/mcp-server/src/server-instructions.ts",
-      "sourceCommit": "4b077508f2ae4d1f953ece9a950535cc4715e088",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/src/server-instructions.ts",
       "ownership": "new",
       "dependencies": [],
@@ -2105,8 +2090,8 @@
         "packages/mcp-server/test/approval-preview.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "bf72ee65c8d60608bcc2aa2ec8d953bbd611f6c7e8cc47ab91d962c10a236f56",
-      "afterDigest": "7c1bdefd0f9d21ffaf08ac028a52085dabd2b2f6e8f844cdf0416baa3362121d"
+      "beforeDigest": "7c1bdefd0f9d21ffaf08ac028a52085dabd2b2f6e8f844cdf0416baa3362121d",
+      "afterDigest": "5d079a9894f2f5c1b365b8874797cd5bb4e92557aae7a501f6e889c1a6b5f368"
     },
     {
       "path": "packages/mcp-server/src/server.ts",
@@ -2166,14 +2151,14 @@
     },
     {
       "path": "packages/mcp-server/test/approval-context.test.ts",
-      "sourceCommit": "a876e325a52453b5204756bde716018eb9958737",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/test/approval-context.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c7459ab5a8667b3cd1251520d9185f954b9fe2cf03bbc307f45f7b6cca4e720e",
-      "afterDigest": "ad4345961fed61048bf47a64525b2477f789b12d17810c45b88a7cd94780a5b4"
+      "beforeDigest": "ad4345961fed61048bf47a64525b2477f789b12d17810c45b88a7cd94780a5b4",
+      "afterDigest": "ad6fe771cb8f707f03dd28f40d9ac10fcd0168ba013b3ba6c849a5510e62540a"
     },
     {
       "path": "packages/mcp-server/test/approval-preview.test.ts",
@@ -2210,36 +2195,25 @@
     },
     {
       "path": "packages/mcp-server/test/batch.integration.test.ts",
-      "sourceCommit": "015ba8c133b1c6390f80dbd0fcfe599c87017484",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/test/batch.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "0b3f92d25f693bae38a2160c82e6b620bc7d8b6e358c1253c0f82fb431456204",
-      "afterDigest": "4146dd6551cf28a137138b958f802ed1f61e00ac5126b7a7b783e31d5ce21eb8"
-    },
-    {
-      "path": "packages/mcp-server/test/blackboard-api.test.ts",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
-      "originalPath": "packages/mcp-server/test/blackboard-api.test.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "43b1a3831dc56212bfd08d37180119b6a3c8fb326487db2ab41b796b4063c0aa",
-      "afterDigest": "e4e2657617fe948544a965a36b63448a1e4e89c99723f2f71dad61a75c75e939"
+      "beforeDigest": "4146dd6551cf28a137138b958f802ed1f61e00ac5126b7a7b783e31d5ce21eb8",
+      "afterDigest": "d61b392e3720e1466b425632ba2b4ab86642bd762076f4056c1fbe77f9c259de"
     },
     {
       "path": "packages/mcp-server/test/canvas-connector.integration.test.ts",
-      "sourceCommit": "4b077508f2ae4d1f953ece9a950535cc4715e088",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/test/canvas-connector.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9ba2b93c8825cad9c5c1744cb4553e766defc736d79c430f3ed036e5079093e0",
-      "afterDigest": "26b6bc1506cb618469414942c1b07e807f237619ef9968e8d921285850423916"
+      "beforeDigest": "26b6bc1506cb618469414942c1b07e807f237619ef9968e8d921285850423916",
+      "afterDigest": "afb55a0c47da9f535a8c88655097bdbb928d71ffa3346d413f52b8fe7d60ef43"
     },
     {
       "path": "packages/mcp-server/test/config-attestation.test.ts",
@@ -2254,14 +2228,14 @@
     },
     {
       "path": "packages/mcp-server/test/config.test.ts",
-      "sourceCommit": "24b8477ab4b9fcd01bad989cc22d3f3949d8d417",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/test/config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "90374894511786380bb46c7ffa198e782eabde1074dc08a498670e54e17b23cb",
-      "afterDigest": "0cf1f7347a5b7dd90e7fdf061ec48bc0c2ff03acd8ad723115311a258c279c9e"
+      "beforeDigest": "0cf1f7347a5b7dd90e7fdf061ec48bc0c2ff03acd8ad723115311a258c279c9e",
+      "afterDigest": "a608db079e5be2036fb91e795b7dad3d3d3d5bbfe7506e82e191a1e4ba966080"
     },
     {
       "path": "packages/mcp-server/test/fixtures/fake-batch-upstream.mjs",
@@ -2297,17 +2271,6 @@
       "afterDigest": "b9352c63532f992fed99c234f862ca97b9a8e79428bda318c89cad881bd5f668"
     },
     {
-      "path": "packages/mcp-server/test/fixtures/lms-api-upstream.mjs",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
-      "originalPath": "packages/mcp-server/test/fixtures/lms-api-upstream.mjs",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "284529e1e66bddb8577c2b9d42d7a566d12b6630a4dc57e3ed8edd8b15042051",
-      "afterDigest": "619d6f1c72f21c5e5c0b332d9da8e13d93a9c0805719bf169d9a8c811b4e2773"
-    },
-    {
       "path": "packages/mcp-server/test/gateway.integration.test.ts",
       "sourceCommit": "7f6735531e8ec2594c4ec8be851a8a6ba0563cc2",
       "originalPath": "packages/mcp-server/test/gateway.integration.test.ts",
@@ -2341,28 +2304,6 @@
       "afterDigest": "70ae20ac191e2b0935dc4085dfb045514df59f76c9e8dab86afe93a1dd20ccc5"
     },
     {
-      "path": "packages/mcp-server/test/lms-api.integration.test.ts",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
-      "originalPath": "packages/mcp-server/test/lms-api.integration.test.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "895adf50e77c367fa6cb0980603843c89312edcccb74b225b06075ef0f35aced",
-      "afterDigest": "9b12d6e1374797b7694e46f6b0924d9c1385b1670f66c921bbdc0f79c6e391aa"
-    },
-    {
-      "path": "packages/mcp-server/test/lms-connections.test.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
-      "originalPath": "packages/mcp-server/test/lms-connections.test.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "34c332af7d7e60fb57528b5aee5d2b791fe3093c8dd60ee78fc3903cdccd13c2"
-    },
-    {
       "path": "packages/mcp-server/test/meridian-runtime.test.ts",
       "sourceCommit": "ef2b347607b5d669ef2223c02ed5fdf20c888d70",
       "originalPath": "packages/mcp-server/test/meridian-runtime.test.ts",
@@ -2374,26 +2315,15 @@
       "afterDigest": "1bba7aaa72befbafb59f4fa40bd69f4905af1103b37b7a07d1f9e22477b1dd53"
     },
     {
-      "path": "packages/mcp-server/test/moodle-api.test.ts",
-      "sourceCommit": "23b1c48a584638af1f65d79187c5fcc1ea7f815b",
-      "originalPath": "packages/mcp-server/test/moodle-api.test.ts",
-      "ownership": "new",
-      "dependencies": [],
-      "testMapping": [],
-      "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "5850315d9922840a1eb895663b00cad2f203e3dc24b56ae8f86a5d74ee183269"
-    },
-    {
       "path": "packages/mcp-server/test/operations.integration.test.ts",
-      "sourceCommit": "a876e325a52453b5204756bde716018eb9958737",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/test/operations.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "acf0de93bea550ad4cbb26a5fe82c6582a6371c06b6c23f76dbcf275a7e0c38a",
-      "afterDigest": "1e0f903e519828ceea8bd7d8ce72f5c2928ceb504bcf8059e0eda5cdb2ba919b"
+      "beforeDigest": "1e0f903e519828ceea8bd7d8ce72f5c2928ceb504bcf8059e0eda5cdb2ba919b",
+      "afterDigest": "a89710dc97533f178d8a91b5b3d59e7830be4dcc082eca5197aa2770e7a17c57"
     },
     {
       "path": "packages/mcp-server/test/protocol.integration.test.ts",
@@ -2441,14 +2371,14 @@
     },
     {
       "path": "packages/mcp-server/test/server-instructions.test.ts",
-      "sourceCommit": "9c57f18bf6b5702810b36133f5fee9c6ba271a1d",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "packages/mcp-server/test/server-instructions.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "fc45f62b7e0c75d5498fd8216a93833de87a22a9c3ed412cac4ee508aa14d1c8"
+      "beforeDigest": "fc45f62b7e0c75d5498fd8216a93833de87a22a9c3ed412cac4ee508aa14d1c8",
+      "afterDigest": "c3284d62dcf688cd4905a5fe29c488431ea4dcbc89d596f0efbbe066d125fd6b"
     },
     {
       "path": "packages/mcp-server/test/source-attestation.test.ts",
@@ -2843,14 +2773,14 @@
     },
     {
       "path": "scripts/test/canvas-connector-browser.mjs",
-      "sourceCommit": "a876e325a52453b5204756bde716018eb9958737",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "scripts/test/canvas-connector-browser.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "14446be124b87bf39d85185b5a4f4185b9bd6cbfc4bc181db7643e1bd04eda41",
-      "afterDigest": "e0aface743d31d5616833528114f99bb5ace526b7940eb72130adbc492c2d9f9"
+      "beforeDigest": "e0aface743d31d5616833528114f99bb5ace526b7940eb72130adbc492c2d9f9",
+      "afterDigest": "83653a309605cc8f134462e4cc58cf27b1d85b467795f3adcc78e80329f1c91e"
     },
     {
       "path": "scripts/test/canvas-connector-package.test.mjs",
@@ -2876,14 +2806,14 @@
     },
     {
       "path": "scripts/test/canvas-verification.test.mjs",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "scripts/test/canvas-verification.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "87f4619a7936d99c4a9ad75fa0505d298825d02e38fa68b8f23931c69e0d590a",
-      "afterDigest": "9249689ccecbfba9b9706d0a27e4560f8003ca33486928433ad1138d15656741"
+      "beforeDigest": "9249689ccecbfba9b9706d0a27e4560f8003ca33486928433ad1138d15656741",
+      "afterDigest": "3b12ca7dbe9fc8a1421876ee3bbe8d793b147b6e625d01f995bb569b3f13af5d"
     },
     {
       "path": "scripts/test/legacy-bridge-overlay.test.mjs",
@@ -2895,6 +2825,17 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "afterDigest": "6e01299f6540be402af6811ac688f4080595d8d4b7609645f17b13e7682cbdde"
+    },
+    {
+      "path": "scripts/test/moodle-browser-executor.test.mjs",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
+      "originalPath": "scripts/test/moodle-browser-executor.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "23364fddb7004c3999185076314fd8eb2f3c7ae21bfe156c8c51ef49c5690b38",
+      "afterDigest": "0db742aec7c98f5beaf665e2602c7c953df7f6d18326a87852d444103bc80f5c"
     },
     {
       "path": "scripts/test/publication-policy.test.mjs",
@@ -2964,14 +2905,14 @@
     },
     {
       "path": "website/README.md",
-      "sourceCommit": "60af084a6cc482066ec2e896682b5cd0151311a3",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "website/README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "56b0624bf37131216e52eab2c95708ba709497d489970831840befaad7a0c6f8",
-      "afterDigest": "581b7db90268e02ba33fc55d70c3de0328d5e7b1360d9a3a62b2494f2edd89f1"
+      "beforeDigest": "ebae26b6e9c46977e44d61d67de241d5ae79d984bed2a7b4e59d573081278544",
+      "afterDigest": "c7fc1fa23a906f272592f593f5ae4e52281f790a9d0119e4d9643e59dea8b4f5"
     },
     {
       "path": "website/assets/GoogleSansFlex-latin.woff2",
@@ -2986,25 +2927,25 @@
     },
     {
       "path": "website/assets/morrow-launch-poster.jpg",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "website/assets/morrow-launch-poster.jpg",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "49c3a0883467fe5b3d4d53c286fc521b401e73cfb1e4a08268a354ce07b06ed8",
-      "afterDigest": "b1c643749a28b00496ce5b04fcb1a6f27193cd3f1dddcf0948dddd13e30244c8"
+      "beforeDigest": "b6e7d98a260f351523583bafcf81331923b50b7a98253ad235afd647a09a0629",
+      "afterDigest": "bb0ef3f4f19710eeecde089bfa43716764b8ea899f45d344072543e361a04841"
     },
     {
       "path": "website/assets/morrow-launch-preview.mp4",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "26a4df1c5a41e7d395a2aea5299f48027e1326a9",
       "originalPath": "website/assets/morrow-launch-preview.mp4",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2c5bb7f9070c4d7c12659ac7af5dbe200b9a53f1adc9f2ef609f5d4d5a95d4ac",
-      "afterDigest": "0dd523b9c1e828c69d1450ee5f0e5b43b9d21b4a84cf0602f81a0629353dcef5"
+      "beforeDigest": "8e8e50ff79cfeded2ae525d5fcb5113e8ebab9249bb90fcc19748a6c127e43dc",
+      "afterDigest": "716b9dba42ad5ce7c88b22beeb3c9725a35aefa34078f3c5f40d6594f449d351"
     },
     {
       "path": "website/assets/morrow-wordmark-dark.png",
@@ -3041,36 +2982,36 @@
     },
     {
       "path": "website/build.html",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "website/build.html",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "c0226ef155f8f32187d630c0f6c3c73e654870ccd2c9ce5861ead1aa923c1c90"
+      "beforeDigest": "d93fa09e77fb9d7e0bd0ecfd61f57f012f77137af4fb52b9ae4e0c6e4ee41f4e",
+      "afterDigest": "4b60bbb5a7aeeb3d0821a8429034d09d563fc70e4ab9c1588add35cd0a717005"
     },
     {
       "path": "website/favicon.svg",
-      "sourceCommit": "ceec2cda9993ccfbaa27a54a07af50276bf08f3d",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "website/favicon.svg",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c5c02a3eb2e50e2dc5ed877f731c9865d9ca7015a8a5a8013556dae34132405b",
-      "afterDigest": "6f29e088d8fdd21c7f086e385c9d1dfca9bdfbd6fac094ff0f766914bca3acd2"
+      "beforeDigest": "6f29e088d8fdd21c7f086e385c9d1dfca9bdfbd6fac094ff0f766914bca3acd2",
+      "afterDigest": "459603f56532f1433f2945c445867a1ab02af01e044c66e88c3635fdfeda2034"
     },
     {
       "path": "website/index.html",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
       "originalPath": "website/index.html",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "46c3e86082f0ffbf8968abe5c478777d2ab447e80eaf87b6d49709170ba37663",
-      "afterDigest": "a413bed7bcf49e2148b3b27b0d7d4c6688ee2c86725035cb9867b97b54bb0434"
+      "beforeDigest": "1874ad167df5b1a49516f42583110b804dc368008a7609cb60283d4763a34abc",
+      "afterDigest": "dcd7ac3590e6db571f7af555227353b3646bd6e3bd0f8906ee89eae822fa7ca4"
     },
     {
       "path": "website/script.js",
@@ -3085,36 +3026,36 @@
     },
     {
       "path": "website/social-card.png",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "website/social-card.png",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "d4558389324899cf6c235b45f873d455dd822fd889f938b460a152662c7ade37"
+      "beforeDigest": "d4558389324899cf6c235b45f873d455dd822fd889f938b460a152662c7ade37",
+      "afterDigest": "12ede38e927f8d96d784734ed5b89d46630abd65706efb3403a75a99fd85b82e"
     },
     {
       "path": "website/social-card.svg",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "website/social-card.svg",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "1dccf7ffce949272e5d1124a0f3896b114d7ecc191129bc534e6431449322af7",
-      "afterDigest": "23896d880d2f1f3b6e1f0f88e88f9674953a6a7be8358a2d37dcbf93d32a52ed"
+      "beforeDigest": "23896d880d2f1f3b6e1f0f88e88f9674953a6a7be8358a2d37dcbf93d32a52ed",
+      "afterDigest": "25d16621e17743176d507430aec6055dbe037fbc671ed538a84e2fde933ac7e8"
     },
     {
       "path": "website/styles.css",
-      "sourceCommit": "e512023cd66a794cbe7ffea6a12d198c6168ec95",
+      "sourceCommit": "3d8d72c8cea9b5add1792c41d9d1a58a1d4414e1",
       "originalPath": "website/styles.css",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b535e1d8da5be689faf0cfbeaa105bedb54fa88c52a371a74539073a9977af32",
-      "afterDigest": "05cf92b0feb9bac24b4eae008cde881790242f1f6445bcbfddf3a6f66574844b"
+      "beforeDigest": "05cf92b0feb9bac24b4eae008cde881790242f1f6445bcbfddf3a6f66574844b",
+      "afterDigest": "bb43467f97615a718f7a64b8d3a7cc3abcb960015dd0bc63d9fc1b0c2d68f6d8"
     }
   ],
   "notes": [
