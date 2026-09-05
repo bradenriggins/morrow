@@ -327,7 +327,7 @@ describe("outer provider effects", () => {
       expect(displayed).toContain("Moodle user’s configured time zone");
       expect(displayed).not.toContain("&quot;year&quot;");
       expect(displayed).toContain("Hide this Moodle section from learners");
-      expect(displayed).toContain("This will hide the Moodle section from learners.");
+      expect(displayed).toContain("This will hide the section and its activities from learners.");
       expect(displayed).toContain("Visible to learners");
       expect(displayed).toContain("Keep your assistant and Chrome open while Morrow works.");
     } finally {

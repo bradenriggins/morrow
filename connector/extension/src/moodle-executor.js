@@ -687,13 +687,20 @@ export async function executeMoodleInPage(input) {
     const verification = { schema: "morrow.browser-verification.v1", status: matches ? "verified" : "mismatch", ...(matches ? {} : { reason: "moodle_readback_mismatch" }) };
     return { ok: matches, sent: true, status: after.status, data, targets: [courseTarget(rechecked), sectionTarget(before.section)], snapshot_digest: after.snapshot_digest, verification, ...(matches ? {} : { error: "moodle_write_not_verified" }) };
   };
-  const stateProtectedDigest = async (stateValue, collection, targetId) => {
+  const stateProtectedDigest = async (stateValue, collection, targetId, sectionChildIds = []) => {
     const copy = JSON.parse(JSON.stringify(stateValue));
     const target = Array.isArray(copy[collection]) ? copy[collection].find((entry) => id(entry?.id) === targetId) : null;
     if (target) {
       delete target.visible;
       // Moodle derives these activity fields from the visibility changed by this action.
       if (collection === "cm") for (const name of ["accessvisible", "hascmrestrictions", "stealth"]) delete target[name];
+      if (collection === "section") delete target.hasrestrictions;
+    }
+    if (collection === "section") {
+      const childIds = new Set(sectionChildIds);
+      for (const child of copy.cm || []) {
+        if (childIds.has(id(child?.id))) for (const name of ["visible", "accessvisible", "hascmrestrictions", "allowstealth"]) delete child[name];
+      }
     }
     return digest(contentData(copy));
   };
@@ -709,7 +716,10 @@ export async function executeMoodleInPage(input) {
     const target = before.data[collection].find((entry) => id(entry?.id) === targetId);
     if (!target) return error("moodle_target_mismatch");
     if (collection === "cm" && target.hasdelegatedsection) return error("moodle_delegated_visibility_refused");
-    const protectedBefore = await stateProtectedDigest(before.data, collection, targetId);
+    const sectionChildren = collection === "section" ? before.data.cm.filter((entry) => id(entry?.sectionid) === targetId) : [];
+    if (collection === "section" && (target.component || sectionChildren.some((entry) => entry?.hasdelegatedsection))) return error("moodle_delegated_visibility_refused");
+    const sectionChildIds = sectionChildren.map((entry) => id(entry?.id));
+    const protectedBefore = await stateProtectedDigest(before.data, collection, targetId, sectionChildIds);
     const rechecked = currentContext();
     if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
     const action = definition.kind.endsWith("show") ? `${collection === "section" ? "section" : "cm"}_show` : `${collection === "section" ? "section" : "cm"}_hide`;
@@ -720,11 +730,20 @@ export async function executeMoodleInPage(input) {
     const afterTarget = after.data[collection].find((entry) => id(entry?.id) === targetId);
     const expectedVisible = definition.kind.endsWith("show");
     const section = collection === "cm" ? after.data.section.find((entry) => id(entry?.id) === id(afterTarget?.sectionid)) : null;
+    const afterSectionChildren = collection === "section" ? after.data.cm.filter((entry) => id(entry?.sectionid) === targetId) : [];
+    const sectionChildrenMatch = collection !== "section" || (sectionChildren.length === afterSectionChildren.length
+      && sectionChildren.every((entry) => afterSectionChildren.some((afterEntry) => id(afterEntry?.id) === id(entry?.id)))
+      && afterSectionChildren.every((entry) => typeof entry?.visible === "boolean" && typeof entry?.accessvisible === "boolean"
+        && typeof entry?.hascmrestrictions === "boolean" && typeof entry?.allowstealth === "boolean" && typeof entry?.stealth === "boolean"
+        && (expectedVisible || entry.visible === false)
+        && (entry.visible || (!entry.accessvisible && !entry.hascmrestrictions))));
     const derivedMatches = collection !== "cm" || (Boolean(section)
       && typeof afterTarget?.accessvisible === "boolean" && typeof afterTarget?.hascmrestrictions === "boolean"
       && afterTarget?.stealth === (expectedVisible && section.visible === false)
       && (expectedVisible || (afterTarget?.accessvisible === false && afterTarget?.hascmrestrictions === false)));
-    const matches = Boolean(afterTarget) && afterTarget.visible === expectedVisible && derivedMatches && protectedBefore === await stateProtectedDigest(after.data, collection, targetId);
+    const sectionMatches = collection !== "section" || (typeof afterTarget?.hasrestrictions === "boolean" && (expectedVisible || afterTarget.hasrestrictions === false));
+    const matches = Boolean(afterTarget) && afterTarget.visible === expectedVisible && derivedMatches && sectionMatches && sectionChildrenMatch
+      && protectedBefore === await stateProtectedDigest(after.data, collection, targetId, sectionChildIds);
     const data = contentData(after.data);
     return { ok: matches, sent: true, status: after.status, data, targets: [courseTarget(rechecked, after.data.course.fullname || after.data.course.name), { field: collection === "section" ? "section_id" : "module_id", label: collection === "section" ? "Section" : "Activity", name: targetId }], snapshot_digest: await digest(data), verification: { schema: "morrow.browser-verification.v1", status: matches ? "verified" : "mismatch", ...(matches ? {} : { reason: "moodle_readback_mismatch" }) }, ...(matches ? {} : { error: "moodle_write_not_verified" }) };
   };

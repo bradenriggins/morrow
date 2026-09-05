@@ -402,6 +402,8 @@ function visibilityDecision(tool: unknown, verified = false): string | null {
   const name = String(tool);
   const target = name.endsWith("_course") ? "course" : name.endsWith("_section") ? "section" : name.endsWith("_activity") ? "activity" : null;
   if (!target || !name.startsWith("moodle_")) return null;
+  if (!verified && name === "moodle_show_section") return "This will show the section again. Activities hidden before the section was hidden will stay hidden.";
+  if (!verified && name === "moodle_hide_section") return "This will hide the section and its activities from learners.";
   if (name.includes("_show_")) return verified ? `Moodle confirmed that this ${target} is set to visible.` : `This will make the Moodle ${target} visible to learners.`;
   if (name.includes("_hide_")) return verified ? `Moodle confirmed that this ${target} is set to hidden.` : `This will hide the Moodle ${target} from learners.`;
   return null;

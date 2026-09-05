@@ -186,6 +186,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     gradingDueEnabled: false,
     gradePass: "",
   };
+  const hiddenSectionActivity = { visible: false, visibleOld: false, stealth: false };
   const posts = [];
   const assignmentPosts = [];
   const assignmentCreationPosts = [];
@@ -198,6 +199,9 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
   let changeName = false;
   let draftId = 700;
   let draftFileCount = 0;
+  let sectionVisible = false;
+  let sectionHasRestrictions = false;
+  let leaveHiddenActivityVisibleOnSectionHide = false;
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
     const url = new URL(request.url || "/", "https://127.0.0.1");
     requests.push(`${request.method} ${url.pathname}${url.search}`);
@@ -219,7 +223,22 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
         if (call?.methodname === "core_courseformat_update_course") {
           visibilityActions.push(call.args.action);
           if (createdPage) {
-            createdPage.visible = call.args.action === "cm_show";
+            if (call.args.action === "section_hide") {
+              createdPage.visibleOld = createdPage.visible;
+              createdPage.visible = false;
+              hiddenSectionActivity.visibleOld = hiddenSectionActivity.visible;
+              if (!leaveHiddenActivityVisibleOnSectionHide) hiddenSectionActivity.visible = false;
+              sectionVisible = false;
+              sectionHasRestrictions = false;
+            } else if (call.args.action === "section_show") {
+              createdPage.visible = createdPage.visibleOld;
+              hiddenSectionActivity.visible = hiddenSectionActivity.visibleOld;
+              sectionVisible = true;
+              sectionHasRestrictions = true;
+            } else {
+              createdPage.visible = call.args.action === "cm_show";
+              createdPage.visibleOld = createdPage.visible;
+            }
             if (changeName) { createdPage.name = "Unexpected Page name"; changeName = false; }
           }
           response.writeHead(200, { "content-type": "application/json" });
@@ -231,9 +250,10 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
         response.end(JSON.stringify([{
           data: JSON.stringify({
             course: { id: 2, fullname: "Week 1" },
-            section: [{ id: 7, number: 4, title: "Week 4: Evidence", visible: false }],
+            section: [{ id: 7, number: 4, title: "Week 4: Evidence", visible: sectionVisible, hasrestrictions: sectionHasRestrictions, component: "" }],
             cm: [
-              ...(createdPage ? [{ id: 55, module: "page", sectionid: 7, name: createdPage.name, visible: createdPage.visible, accessvisible: createdPage.visible, hascmrestrictions: false, stealth: createdPage.visible }] : []),
+              ...(createdPage ? [{ id: 55, module: "page", sectionid: 7, name: createdPage.name, visible: createdPage.visible, uservisible: true, accessvisible: createdPage.visible, hascmrestrictions: false, stealth: createdPage.visible && !sectionVisible, allowstealth: sectionVisible }] : []),
+              { id: 57, module: "url", sectionid: 7, name: "Already hidden resource", visible: hiddenSectionActivity.visible, uservisible: true, accessvisible: hiddenSectionActivity.visible, hascmrestrictions: false, stealth: hiddenSectionActivity.stealth, allowstealth: sectionVisible },
               ...(createdAssignment ? [{ id: 56, module: "assign", sectionid: 7, visible: createdAssignment.visible }] : []),
             ],
           }),
@@ -299,6 +319,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
           content: values.get("page[text]") || "",
           revision: 1,
           visible: false,
+          visibleOld: false,
           completion: creationDefaults.completion,
         };
         response.writeHead(303, { location: "/mod/page/view.php?id=55" }).end();
@@ -420,6 +441,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
 
     const run = (toolName, key, params) => executeInBrowser(page, { mode: "execute", operation: { toolName, key, provider: "moodle", readOnly: toolName === "moodle_get_contents" }, arguments: params, binding, expiresAt: Date.now() + 60_000 });
     const activity = (result) => result.data.activities.find((item) => item.id === 55);
+    const hiddenActivity = (result) => result.data.activities.find((item) => item.id === 57);
     const setVisible = (show, digest) => run(`moodle_${show ? "show" : "hide"}_activity`, `moodle.ajax.core_courseformat_update_course.cm_${show ? "show" : "hide"}.v1`, { course_id: 2, module_id: 55, expected_digest: digest });
     let visibility = await setVisible(true, (await run("moodle_get_contents", "moodle.ajax.core_courseformat_get_state.v1", { course_id: 2 })).snapshot_digest);
     assert.equal(visibility.ok, true);
@@ -431,6 +453,27 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     const renamed = await setVisible(true, visibility.snapshot_digest);
     assert.deepEqual([renamed.ok, renamed.sent, renamed.error, activity(renamed).name], [false, true, "moodle_write_not_verified", "Unexpected Page name"]);
     assert.deepEqual(visibilityActions, ["cm_show", "cm_hide", "cm_show"]);
+
+    createdPage.name = "Evidence notebook";
+    createdPage.visible = true;
+    createdPage.visibleOld = true;
+    sectionVisible = true;
+    sectionHasRestrictions = true;
+    const setSectionVisible = (show, digest) => run(`moodle_${show ? "show" : "hide"}_section`, `moodle.ajax.core_courseformat_update_course.section_${show ? "show" : "hide"}.v1`, { course_id: 2, section_id: 7, expected_digest: digest });
+    let sectionVisibility = await setSectionVisible(false, (await run("moodle_get_contents", "moodle.ajax.core_courseformat_get_state.v1", { course_id: 2 })).snapshot_digest);
+    assert.equal(sectionVisibility.ok, true);
+    assert.deepEqual([activity(sectionVisibility).visible, hiddenActivity(sectionVisibility).visible], [false, false]);
+    sectionVisibility = await setSectionVisible(true, sectionVisibility.snapshot_digest);
+    assert.equal(sectionVisibility.ok, true);
+    assert.deepEqual([activity(sectionVisibility).visible, hiddenActivity(sectionVisibility).visible], [true, false]);
+    hiddenSectionActivity.visible = true;
+    hiddenSectionActivity.visibleOld = true;
+    hiddenSectionActivity.stealth = true;
+    const criticalDigest = (await run("moodle_get_contents", "moodle.ajax.core_courseformat_get_state.v1", { course_id: 2 })).snapshot_digest;
+    leaveHiddenActivityVisibleOnSectionHide = true;
+    const sectionMismatch = await setSectionVisible(false, criticalDigest);
+    assert.deepEqual([sectionMismatch.ok, sectionMismatch.sent, sectionMismatch.error, hiddenActivity(sectionMismatch).visible], [false, true, "moodle_write_not_verified", true]);
+    assert.deepEqual(visibilityActions.slice(-3), ["section_hide", "section_show", "section_hide"]);
 
     await page.evaluate(() => {
       history.replaceState(null, "", "/mod/assign/view.php?id=8");
