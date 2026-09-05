@@ -18,6 +18,7 @@ export interface ApprovalReviewContext {
   }[];
   readonly limited?: boolean;
   readonly current?: JsonObject;
+  readonly question?: JsonObject;
 }
 
 export type ApprovalReviewReadCache = Map<string, Promise<JsonObject | null>>;
@@ -366,6 +367,20 @@ function currentContent(args: JsonObject, value: JsonObject): JsonObject {
   return Object.fromEntries(Object.entries(fields).flatMap(([field, source]) => field in args && Object.hasOwn(value, source) ? [[field, value[source]!]] : []));
 }
 
+function currentQuestionContent(value: JsonObject): JsonObject {
+  const entry = object(value.entry);
+  if (!entry) return {};
+  const fields: Record<string, string> = {
+    item_entry_title: "title",
+    item_entry_item_body: "item_body",
+    item_entry_interaction_type_slug: "interaction_type_slug",
+    item_entry_interaction_data: "interaction_data",
+    item_entry_scoring_algorithm: "scoring_algorithm",
+    item_entry_scoring_data: "scoring_data",
+  };
+  return Object.fromEntries(Object.entries(fields).flatMap(([field, source]) => Object.hasOwn(entry, source) ? [[field, entry[source]!]] : []));
+}
+
 export async function resolveApprovalReviewContext(
   input: ApprovalReviewContextInput,
 ): Promise<ApprovalReviewContext> {
@@ -445,10 +460,16 @@ export async function resolveApprovalReviewContext(
   }));
   const resourceResult = results.find(([target]) => target === resource);
   const entity = resourceResult?.[1].result ? canvasEntity(resourceResult[1].result) : null;
+  const questionResult = results.find(([target]) => target === question);
+  const questionEntity = questionResult?.[1].result ? canvasEntity(questionResult[1].result) : null;
   const current = resourceResult && entity && resolvedTarget(resourceResult[0], resourceResult[1].result, origin).name
     && operation.state === "awaiting_approval" ? currentContent(args, entity) : {};
+  const questionContent = questionResult && questionEntity && resolvedTarget(questionResult[0], questionResult[1].result, origin).name
+    && operation.state === "awaiting_approval" && mapping.upstreamName === "canvas_update_quiz_item"
+    ? currentQuestionContent(questionEntity) : {};
   return {
     ...(Object.keys(current).length ? { current } : {}),
+    ...(Object.keys(questionContent).length ? { question: questionContent } : {}),
     targets: results.map(([target, response]) => resolvedTarget(target, response.result, origin)),
     ...(results.some(([, response]) => response.limited) ? { limited: true } : {}),
   };

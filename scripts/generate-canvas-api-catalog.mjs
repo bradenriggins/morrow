@@ -141,6 +141,29 @@ function inputSchema(parameters, readOnly = false) {
   };
 }
 
+function createModuleItemInputSchema(parameters) {
+  return {
+    ...inputSchema(parameters),
+    allOf: [
+      {
+        if: { properties: { module_item_type: { const: "Page" } }, required: ["module_item_type"] },
+        then: { required: ["module_item_page_url"] },
+      },
+      {
+        if: { properties: { module_item_type: { enum: ["ExternalUrl", "ExternalTool"] } }, required: ["module_item_type"] },
+        then: { required: ["module_item_external_url"] },
+      },
+      {
+        if: {
+          properties: { module_item_type: { not: { enum: ["ExternalUrl", "Page", "SubHeader"] } } },
+          required: ["module_item_type"],
+        },
+        then: { required: ["module_item_content_id"] },
+      },
+    ],
+  };
+}
+
 function riskFor(method, path, nickname) {
   if (method === "GET") return "read";
   const text = `${path} ${nickname}`.toLowerCase();
@@ -203,7 +226,14 @@ function normalizeOfficialOperation(resource, api, rawOperation) {
   const method = String(rawOperation.method || "").toUpperCase();
   const path = String(api.path || "");
   const nickname = String(rawOperation.nickname || "");
-  const parameters = parameterRecords(rawOperation.parameters);
+  const createModuleItem = method === "POST"
+    && path === "/v1/courses/{course_id}/modules/{module_id}/items"
+    && nickname === "create_module_item";
+  const parameters = parameterRecords(rawOperation.parameters).map((parameter) => (
+    createModuleItem && parameter.wireName === "module_item[content_id]"
+      ? { ...parameter, required: false }
+      : parameter
+  ));
   const risk = riskFor(method, path, nickname);
   return {
     key: `${method} ${path}#${nickname}`,
@@ -221,7 +251,7 @@ function normalizeOfficialOperation(resource, api, rawOperation) {
     risk,
     readOnly: method === "GET",
     parameters,
-    inputSchema: inputSchema(parameters, method === "GET"),
+    inputSchema: createModuleItem ? createModuleItemInputSchema(parameters) : inputSchema(parameters, method === "GET"),
     responseType: cleanText(rawOperation.type || "object", 200),
   };
 }

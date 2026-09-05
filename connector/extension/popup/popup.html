@@ -10,8 +10,10 @@
 <body>
   <main>
     <header class="brand"><img src="../brand/morrow.png" width="38" height="38" alt=""><div><h1>Morrow</h1><p>Canvas access</p></div><span id="pulse" aria-hidden="true"></span></header>
-    <section class="status" aria-live="polite"><span id="status-label">Morrow</span><strong id="status-value">Checking…</strong></section>
-    <section class="status" aria-live="polite"><span>Canvas</span><strong id="canvas-value">Checking…</strong></section>
+    <div class="connection-status">
+      <section class="status" aria-live="polite"><span id="status-label">Morrow</span><strong id="status-value">Checking…</strong></section>
+      <section class="status" aria-live="polite"><span>Canvas</span><strong id="canvas-value">Checking…</strong></section>
+    </div>
     <section id="account" class="account" hidden><span>Saved Canvas connection</span><strong id="account-origin"></strong><time id="account-last-checked"></time></section>
     <button id="primary" type="button" disabled>Connect Morrow</button>
     <button id="canvas-action" class="secondary" type="button" hidden>Check or switch Canvas course</button>

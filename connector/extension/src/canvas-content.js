@@ -166,6 +166,17 @@
   }
 
   function requestParts(operation, args) {
+    if (operation.toolName === "canvas_create_module_item") {
+      const type = args.module_item_type;
+      const required = type === "Page" ? ["module_item_page_url"]
+        : type === "SubHeader" ? []
+        : type === "ExternalUrl" ? ["module_item_external_url"]
+        : type === "ExternalTool" ? ["module_item_content_id", "module_item_external_url"]
+        : ["module_item_content_id"];
+      for (const name of required) {
+        if (args[name] === undefined || args[name] === null || args[name] === "") throw new TypeError(`${name} is required`);
+      }
+    }
     let path = operation.path;
     const query = new URLSearchParams();
     const body = [];
@@ -233,7 +244,8 @@
     const headers = new Headers({ Accept: "application/json+canvas-string-ids" });
     const options = { method: operation.method, credentials: "include", headers, cache: "no-store" };
     if (!isRead) {
-      const csrf = document.querySelector('meta[name="csrf-token"]')?.content || "";
+      const csrfCookie = document.cookie.split(";").map((entry) => entry.trim()).find((entry) => entry.startsWith("_csrf_token="));
+      const csrf = csrfCookie ? decodeURIComponent(csrfCookie.slice("_csrf_token=".length)) : "";
       if (!csrf) throw new Error("canvas_csrf_context_missing");
       headers.set("X-CSRF-Token", csrf);
       headers.set("X-Requested-With", "XMLHttpRequest");

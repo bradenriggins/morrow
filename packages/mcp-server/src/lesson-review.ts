@@ -54,7 +54,7 @@ async function readEvidence(runtime: GatewayRuntime, input: Input, signal: Abort
     requireRead(privacy?.fieldPolicy === "scrub-sensitive" && privacy.freeText === "allow" && privacy.aiClientAdmission === "allow", "The connection's privacy settings do not provide the complete review text.");
     const result = canvasReadResult(runtime, await runtime.callSourceOwned(matches[0]!.publicName, { ...args, _morrow: { source_binding_id: input.source_binding_id } }, { signal }));
     const serialized = JSON.stringify(result.data);
-    requireRead(typeof serialized === "string" && serialized.length <= 120_000 && !/\[(?:filtered|redacted|removed)\]|"learnerToken"/i.test(serialized), "Canvas returned oversized or privacy-filtered review content.");
+    requireRead(typeof serialized === "string" && serialized.length <= 120_000 && !/\[(?:filtered|redacted|removed)\]/i.test(serialized), "Canvas returned oversized or privacy-filtered review content.");
     return result;
   }
   const course = (await read("canvas_get_single_course_courses", { id: input.course_id })).data;

@@ -10,7 +10,7 @@ const lesson = { page_id: "91", url: "cells", title: "Cells", body: "<p>Cells la
 function fixture() {
   const calls: { name: string; arguments: JsonObject }[] = [];
   const snapshots: { [name: string]: unknown } = {
-    canvas_get_single_course_courses: { id: "42", name: "Biology" }, canvas_show_page_courses: lesson,
+    canvas_get_single_course_courses: { id: "42", name: "Biology" }, canvas_show_page_courses: { ...lesson, last_edited_by: { learnerToken: "learner_test" } },
     canvas_get_new_quiz: { id: "77", course_id: "42", title: "Cell quiz", instructions: "Choose an answer." },
     canvas_list_quiz_items: [{ id: "1", entry_type: "Item", entry: { title: "Cell membrane", item_body: "Cells have membranes.", interaction_type_slug: "true-false", interaction_data: { true_choice: "True", false_choice: "False" }, scoring_data: { value: false } } }],
   };
@@ -59,6 +59,7 @@ describe("lesson specialist review", () => {
         expect(calls.map((call) => call.name)).toEqual(expect.arrayContaining(["canvas_get_single_course_courses", "canvas_show_page_courses", "canvas_get_new_quiz", "canvas_list_quiz_items"]));
         const report = result.structuredContent as { evidence: unknown; modelRecords: { requestId: string; result: { model: string } }[]; findings: { checkerVerdict: string }[] };
         expect(report.evidence).toMatchObject({ source: { text: args.source_text }, lesson, quiz: { id: args.quiz_id } });
+        expect(JSON.stringify(report.evidence)).not.toContain("learner_test");
         expect(new Set(report.modelRecords.map((record) => record.requestId)).size).toBe(3);
         expect(report.modelRecords.map((record) => record.result.model)).toEqual(["reported-lesson_alignment", "reported-quiz_alignment", "reported-checker"]);
         expect(report.findings.map((finding) => finding.checkerVerdict)).toEqual(["retain", "dispute"]);

@@ -150,4 +150,59 @@ describe("approval review context", () => {
       ],
     });
   });
+
+  it("keeps the current quiz item details separate from a score-only update", async () => {
+    const update = {
+      ...operation(),
+      publicToolName: "canvas_update_quiz_item",
+      sourceToolName: "canvas_update_quiz_item",
+      plan: {
+        ...operation().plan,
+        tool: "canvas_update_quiz_item",
+        sourceTool: "canvas_update_quiz_item",
+        arguments: {
+          course_id: "42",
+          assignment_id: "77",
+          item_id: "10899365",
+          item_entry_scoring_data: { value: "ribosomes" },
+          _morrow: { source_binding_id: sourceBindingId },
+        },
+      },
+    };
+    const context = await resolveApprovalReviewContext({
+      operation: update,
+      tools: [...tools,
+        tool("canvas_update_quiz_item", "canvas_update_quiz_item", false, "new-quizzes"),
+        tool("canvas_get_quiz_item", "canvas_get_quiz_item", true, "new-quizzes")],
+      read: async (publicName) => {
+        if (publicName === "morrow_canvas_bindings") {
+          return { structuredContent: { schema: "morrow.canvas-bindings.v1", bindings: [{ sourceBindingId, provider: "canvas", runtimeVerified: true, origin: "https://school.instructure.com" }] } };
+        }
+        if (publicName === "canvas_get_single_course_courses") return connector({ id: 42, name: "Intro to Biology" });
+        if (publicName === "canvas_get_new_quiz") return connector({ id: 77, course_id: 42, title: "Cell Structure Check" });
+        if (publicName === "canvas_get_quiz_item") return connector({
+          id: 10899365,
+          entry: {
+            title: "Protein assembly",
+            item_body: "Which structure directly assembles proteins?",
+            interaction_type_slug: "choice",
+            interaction_data: { choices: [{ id: "ribosomes", position: 1, item_body: "Ribosomes" }, { id: "mitochondria", position: 2, item_body: "Mitochondria" }] },
+            scoring_algorithm: "Equivalence",
+            scoring_data: { value: "mitochondria" },
+          },
+        });
+        throw new Error(`unexpected read ${publicName}`);
+      },
+    });
+
+    expect(context.question).toEqual({
+      item_entry_title: "Protein assembly",
+      item_entry_item_body: "Which structure directly assembles proteins?",
+      item_entry_interaction_type_slug: "choice",
+      item_entry_interaction_data: { choices: [{ id: "ribosomes", position: 1, item_body: "Ribosomes" }, { id: "mitochondria", position: 2, item_body: "Mitochondria" }] },
+      item_entry_scoring_algorithm: "Equivalence",
+      item_entry_scoring_data: { value: "mitochondria" },
+    });
+    expect(context.current).toBeUndefined();
+  });
 });

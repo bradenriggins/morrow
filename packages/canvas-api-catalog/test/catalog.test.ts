@@ -21,6 +21,35 @@ describe("Canvas API catalog", () => {
       .toBe("/quiz/v1/courses/9007199254740993/quizzes/9223372036854775807");
   });
 
+  it("accepts a Page module item with its page slug and no content ID", () => {
+    const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_create_module_item");
+    expect(operation).toBeTruthy();
+    expect(operation!.inputSchema.required).not.toContain("module_item_content_id");
+    expect(operation!.inputSchema.allOf).toContainEqual({
+      if: { properties: { module_item_type: { const: "Page" } }, required: ["module_item_type"] },
+      then: { required: ["module_item_page_url"] },
+    });
+    expect(operationArguments(operation!, {
+      course_id: "1",
+      module_id: "2",
+      module_item_type: "Page",
+      module_item_page_url: "cell-structures",
+    }).body).toEqual([
+      ["module_item[page_url]", "cell-structures"],
+      ["module_item[type]", "Page"],
+    ]);
+  });
+
+  it("still requires content ID for non-exempt module items", () => {
+    const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_create_module_item");
+    expect(operation).toBeTruthy();
+    expect(() => operationArguments(operation!, {
+      course_id: "1",
+      module_id: "2",
+      module_item_type: "Assignment",
+    })).toThrow("module_item_content_id is required");
+  });
+
   it("publishes official Canvas and Item Bank operations in the public Canvas profile", () => {
     const tools = canvasCatalogTools(catalog);
     expect(tools).toHaveLength(catalog.counts.totalOperations);

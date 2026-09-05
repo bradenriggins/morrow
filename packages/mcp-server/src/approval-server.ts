@@ -239,9 +239,10 @@ function fieldValue(key: string, value: unknown): string {
   return requestValue(value);
 }
 
-function questionPreview(request: JsonObject, omitted: readonly string[]): string {
-  const title = typeof request.item_entry_title === "string" ? request.item_entry_title : "Quiz question";
-  const type = String(request.item_entry_interaction_type_slug || "");
+function questionPreview(request: JsonObject, omitted: readonly string[], current?: JsonObject): string {
+  const displayValue = (key: string): unknown => Object.hasOwn(request, key) ? request[key] : current?.[key];
+  const title = typeof displayValue("item_entry_title") === "string" ? String(displayValue("item_entry_title")) : "Quiz question";
+  const type = String(displayValue("item_entry_interaction_type_slug") || "");
   const typeNames: Record<string, string> = { choice: "Multiple choice", "multi-answer": "Multiple answer", "true-false": "True or false", essay: "Written response", matching: "Matching", ordering: "Ordering", categorization: "Categorization", "file-upload": "File upload", formula: "Formula", "rich-fill-blank": "Fill in the blank", "hot-spot": "Hot spot", numeric: "Numeric answer" };
   const covered = [...omitted, "item_entry_title", "item_entry_item_body", "item_points_possible"];
   if (typeNames[type]) covered.push("item_entry_interaction_type_slug");
@@ -249,10 +250,13 @@ function questionPreview(request: JsonObject, omitted: readonly string[]): strin
   const points = request.item_points_possible;
   const pointsLabel = typeof points === "number" || typeof points === "string"
     ? `<p class="question-points"><strong>${escapeHtml(points)}</strong> ${Number(points) === 1 ? "point" : "points"}</p>` : "";
-  const body = typeof request.item_entry_item_body === "string" ? formattedTextPreview("Question text", request.item_entry_item_body) : "";
-  const interaction = object(request.item_entry_interaction_data);
-  const scoring = object(request.item_entry_scoring_data);
-  const algorithm = String(request.item_entry_scoring_algorithm || "");
+  const itemBody = displayValue("item_entry_item_body");
+  const body = typeof itemBody === "string" ? formattedTextPreview("Question text", itemBody) : "";
+  const interaction = object(displayValue("item_entry_interaction_data"));
+  const scoring = object(displayValue("item_entry_scoring_data"));
+  const algorithm = String(displayValue("item_entry_scoring_algorithm") || "");
+  const currentScoring = object(current?.item_entry_scoring_data);
+  const currentAlgorithm = String(current?.item_entry_scoring_algorithm || "");
   const feedback = object(request.item_entry_answer_feedback);
   const trueFalse = type === "true-false" && typeof interaction.true_choice === "string" && typeof interaction.false_choice === "string";
   const choices = trueFalse
@@ -269,6 +273,11 @@ function questionPreview(request: JsonObject, omitted: readonly string[]): strin
       : type === "multi-answer" && Array.isArray(scoring.value) ? scoring.value : [scoring.value];
     const validKey = (type === "multi-answer" ? ["AllOrNothing", "PartialScore"].includes(algorithm) : algorithm === "Equivalence")
       && key.length > 0 && key.every((id) => typeof id === "string" && ids.includes(id)) && new Set(key).size === key.length;
+    const currentKey = trueFalse && typeof currentScoring.value === "boolean" ? [String(currentScoring.value)]
+      : type === "multi-answer" && Array.isArray(currentScoring.value) ? currentScoring.value : [currentScoring.value];
+    const validCurrentKey = (type === "multi-answer" ? ["AllOrNothing", "PartialScore"].includes(currentAlgorithm) : currentAlgorithm === "Equivalence")
+      && currentKey.length > 0 && currentKey.every((id) => typeof id === "string" && ids.includes(id)) && new Set(currentKey).size === currentKey.length;
+    const proposedKey = Object.hasOwn(request, "item_entry_scoring_data") && validCurrentKey;
     const ordered = choices.every((choice) => typeof choice.position === "number") ? [...choices].sort((a, b) => Number(a.position) - Number(b.position)) : choices;
     const previewId = randomBytes(8).toString("hex");
     const rows = ordered.map((choice, index) => {
@@ -276,10 +285,14 @@ function questionPreview(request: JsonObject, omitted: readonly string[]): strin
       const explanation = typeof feedback[String(choice.id)] === "string"
         ? `<details class="answer-feedback"><summary>Feedback for this answer</summary>${formattedTextPreview("Answer feedback", String(feedback[String(choice.id)]))}</details>` : "";
       const input = validKey ? `<input class="answer-input" type="${type === "multi-answer" ? "checkbox" : "radio"}" name="answer-${previewId}" aria-labelledby="answer-${previewId}-${index}" data-correct="${correct}">` : "";
-      return `<li class="answer-option${correct ? " answer-correct" : ""}"><span class="answer-letter" aria-hidden="true">${index < 26 ? String.fromCharCode(65 + index) : index + 1}</span>${input}<div class="answer-content"><div id="answer-${previewId}-${index}">${formattedTextPreview("", String(choice.item_body))}</div>${correct ? '<span class="answer-key">Marked correct</span>' : ""}${explanation}</div></li>`;
+      const currentlyCorrect = validCurrentKey && currentKey.includes(String(choice.id));
+      return `<li class="answer-option${correct ? " answer-correct" : ""}"><span class="answer-letter" aria-hidden="true">${index < 26 ? String.fromCharCode(65 + index) : index + 1}</span>${input}<div class="answer-content"><div id="answer-${previewId}-${index}">${formattedTextPreview("", String(choice.item_body))}</div>${currentlyCorrect && !correct ? '<span class="answer-key">Currently marked correct</span>' : ""}${correct ? `<span class="answer-key">${proposedKey ? "Will be marked correct" : "Marked correct"}</span>` : ""}${explanation}</div></li>`;
     }).join("");
     const scoringNote = algorithm === "AllOrNothing" ? "All correct answers are required for credit." : algorithm === "PartialScore" ? "Partial credit is enabled." : "";
-    answers = `<div class="question-answers"><p class="preview-label">${type === "multi-answer" ? "Select all that apply" : "Answer choices"}</p><ol class="answer-options">${rows}</ol><p class="preview-note">${validKey ? "Answer key shown for your review." : "The answer key could not be shown. Check the question settings below."}${scoringNote ? " " + scoringNote : ""}</p></div>`;
+    const answerText = (answerIds: readonly unknown[]) => choices.filter((choice) => answerIds.includes(String(choice.id))).map((choice) => formattedTextPreview("", String(choice.item_body))).join("");
+    const answerChange = proposedKey && validCurrentKey && validKey
+      ? `<div class="answer-key-change"><p class="preview-label">Current correct answer</p>${answerText(currentKey)}<p class="preview-label">Proposed correct answer</p>${answerText(key)}</div>` : "";
+    answers = `<div class="question-answers"><p class="preview-label">${type === "multi-answer" ? "Select all that apply" : "Answer choices"}</p>${answerChange}<ol class="answer-options">${rows}</ol><p class="preview-note">${validKey ? "Answer key shown for your review." : "The answer key could not be shown. Check the question settings below."}${scoringNote ? " " + scoringNote : ""}</p></div>`;
     if (validKey) {
       modes = '<div class="preview-modes" role="group" aria-label="Question preview" hidden><button type="button" data-mode="key" aria-pressed="true">Answer key</button><button type="button" data-mode="student" aria-pressed="false">Try the question</button></div>';
       answers += '<div class="practice-actions" hidden><div class="practice-result" role="status" aria-live="polite" hidden></div><div class="practice-buttons"><button type="button" class="secondary practice-check">Check answer</button><button type="button" class="cancel practice-reset">Reset</button></div><p class="preview-note">Practice only. Nothing is submitted or saved to Canvas.</p></div>';
@@ -356,7 +369,7 @@ function keepOpenInstruction(platform: string): string {
   return platform === "Canvas" ? "Keep your AI app and Chrome open while Morrow works." : "Keep your AI app open while Morrow works.";
 }
 
-function stateContent(state: string, platform = "Canvas"): string {
+function stateContent(state: string, platform = "Canvas", attention: readonly unknown[] = []): string {
   const content: Record<string, [string, string]> = {
     approved: ["Changes have not started", "Your approval was saved, but this request is not running. Ask Morrow in your chat to check this saved request before starting anything else."],
     verified: ["Changes confirmed", "Morrow checked Canvas and confirmed the requested result."],
@@ -374,7 +387,10 @@ function stateContent(state: string, platform = "Canvas"): string {
     failed: ["This request did not finish", "Return to your AI conversation to find out what happened. Check the result before starting a new request."],
     interrupted: ["Work stopped before confirmation", "Morrow is not running this request now. Ask Morrow in your chat to check the saved result before trying again."],
   };
-  const [title, detail] = content[state] || ["Check this request", "The request has changed or can no longer be approved here. Return to your AI conversation and ask Morrow to check its current status."];
+  const noChangeSent = state === "failed" && attention.includes("dispatch_failed_before_send");
+  const [title, detail] = noChangeSent
+    ? ["No change was sent", "Morrow did not send a change to Canvas. Ask Morrow in your AI conversation to read the latest Canvas content and prepare a new review."]
+    : content[state] || ["Check this request", "The request has changed or can no longer be approved here. Return to your AI conversation and ask Morrow to check its current status."];
   return `<section class="outcome"><p class="eyebrow">Request status</p><h1>${title}</h1><p>${detail.replaceAll("Canvas", platform)}</p></section>`;
 }
 
@@ -416,7 +432,8 @@ function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boo
   const confirmed = Number(snapshot.confirmedChildren || children.filter((child) => object(object(child).operation).state === "verified").length);
   const total = Number(snapshot.totalChildren || children.length);
   const platform = snapshotPlatform(snapshot);
-  return stateContent(state, platform) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "");
+  const attention = Array.isArray(snapshot.attention) ? snapshot.attention : [];
+  return stateContent(state, platform, attention) + (total ? `<section class="section"><p>${confirmed} of ${total} changes confirmed in ${platform}.</p></section>` : "");
 }
 
 function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, contexts: ReadonlyMap<string, ApprovalReviewContext>, active: boolean): string {
@@ -475,8 +492,14 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
       : requestFields(request, hiddenFields);
     const addingQuestion = entry.tool === "canvas_create_quiz_item";
     const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
-    const preview = question ? questionPreview(request, hiddenFields) : changes ? `<dl class="request">${changes}</dl>` : `<p>${changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above."}</p>`;
-    const before = context?.current && Object.keys(context.current).length
+    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above."}</p>`;
+    const questionFields = Object.keys(request).filter((key) => key.startsWith("item_") && key !== "item_id");
+    const scoreOnlyQuestion = question && questionFields.length === 1 && questionFields[0] === "item_entry_scoring_data";
+    const before = scoreOnlyQuestion && context?.question
+      ? '<p class="preview-note">Question details come from the current saved item. Only the answer key is in this request. Morrow will not write the question text, choices, or other settings.</p>'
+      : question && context?.question
+        ? '<p class="preview-note">Question details come from the current saved item. The proposed changes are shown below.</p>'
+      : context?.current && Object.keys(context.current).length
       ? `<details class="current-content"><summary>Current content and values</summary><dl class="request">${requestFields(context.current)}</dl></details><p class="preview-label">Proposed changes</p>`
       : changeKind(entry.tool) === "Edit" && !pageGuard.find_text ? '<p class="preview-note">Proposed changes are shown below. Current values are not available in this preview.</p>' : "";
     const preservation = pageGuard.find_text ? '<p>Only this phrase will change. The other page content and settings stay the same.</p><p>Morrow checks for newer edits before sending. Avoid editing this page until the result is checked.</p>' : "";

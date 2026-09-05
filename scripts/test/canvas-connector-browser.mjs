@@ -68,8 +68,8 @@ function startCanvas(directory) {
       response.end(JSON.stringify(value));
     };
     if (url.pathname === "/courses/42") {
-      response.writeHead(200, { "content-type": "text/html", "set-cookie": "canvas_session=synthetic; Path=/; Secure; HttpOnly; SameSite=Lax" });
-      response.end('<!doctype html><html><head><meta name="csrf-token" content="synthetic-csrf"></head><body><h1>Synthetic Canvas Course</h1></body></html>');
+      response.writeHead(200, { "content-type": "text/html", "set-cookie": ["canvas_session=synthetic; Path=/; Secure; HttpOnly; SameSite=Lax", "_csrf_token=synthetic%2Bcsrf%2F%3D; Path=/; Secure; SameSite=Lax"] });
+      response.end('<!doctype html><html><head></head><body><h1>Synthetic Canvas Course</h1></body></html>');
       return;
     }
     if (url.pathname === "/api/v1/users/self/profile") return json(200, { id: "7", name: "Synthetic Instructor" });
@@ -97,7 +97,7 @@ function startCanvas(directory) {
       return quizItem ? json(200, quizItem) : json(404, { error: "not_found" });
     }
     if (url.pathname === "/api/quiz/v1/courses/42/quizzes/77/items" && request.method === "POST") {
-      if (request.headers["x-csrf-token"] !== "synthetic-csrf" || !String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
+      if (request.headers["x-csrf-token"] !== "synthetic+csrf/=" || !String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
         return json(403, { error: "missing browser session" });
       }
       if (!String(request.headers["content-type"] || "").startsWith("application/json")) {
@@ -135,7 +135,7 @@ function startCanvas(directory) {
       return;
     }
     if (url.pathname === "/api/v1/users/self/favorites/courses/42" && request.method === "POST") {
-      if (request.headers["x-csrf-token"] !== "synthetic-csrf" || !String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
+      if (request.headers["x-csrf-token"] !== "synthetic+csrf/=" || !String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
         return json(403, { error: "missing browser session", csrf: request.headers["x-csrf-token"] || null, hasCookie: String(request.headers.cookie || "").includes("canvas_session=synthetic") });
       }
       writes += 1;
@@ -171,12 +171,15 @@ const connectorConfig = {
   statePath: join(temporary, "connector.json"),
   catalogPath: resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json"),
   token: "browser-test-connector-secret-".repeat(3),
-  port: 32147,
+  port: 0,
   runtimeRevision: "1.0.0-rc.1",
   allowedExtensionIds: [],
   approveExtensionId: async () => undefined,
 };
 let runtime = await CanvasConnectorRuntime.start(connectorConfig);
+connectorConfig.port = runtime.bridge.health().port;
+const testWorkerPath = join(extensionCopy, "src/service-worker.js");
+writeFileSync(testWorkerPath, readFileSync(testWorkerPath, "utf8").replace("const PORT = 32147;", `const PORT = ${connectorConfig.port};`));
 
 const approvalSnapshot = {
   schema: "morrow.operation.v1",
@@ -465,7 +468,7 @@ try {
   const approvalPromise = context.waitForEvent("page");
   await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
   const approval = await approvalPromise;
-  await approval.waitForURL(/^http:\/\/127\.0\.0\.1:32147\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/);
+  await approval.waitForURL((url) => url.origin === `http://127.0.0.1:${connectorConfig.port}` && /^\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/.test(url.pathname));
   await approval.getByText("Your Canvas password and sign-in details stay in Chrome", { exact: false }).waitFor();
   await captureThemes(approval, "pairing");
   process.stderr.write("[browser-test] pairing review ready\n");
@@ -597,6 +600,20 @@ try {
     dispatch_attempt: 1,
     gateway_process_id: "gateway:browser-test",
   };
+  await context.clearCookies({ name: "_csrf_token" });
+  const noCsrf = await runtime.call("canvas_add_course_to_favorites", {
+    id: "42",
+    _morrow: {
+      source_binding_id: binding.sourceBindingId,
+      operation_id: "operation:missing-csrf-test",
+      outer_grant: { ...grant, effect_receipt_id: "effect:missing-csrf-test" },
+    },
+  });
+  assert.equal(noCsrf.ok, false);
+  assert.equal(noCsrf.resultState, "not_sent");
+  assert.match(JSON.stringify(noCsrf), /canvas_csrf_context_missing/);
+  assert.equal(canvas.writes(), 0);
+  await canvasPage.reload();
   const pageBefore = canvas.lesson();
   const pageRead = await runtime.call("canvas_show_page_courses", { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: binding.sourceBindingId } });
   assert.equal(pageRead.result.pageBodySha256, createHash("sha256").update(pageBefore.body).digest("hex"));

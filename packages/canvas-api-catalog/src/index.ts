@@ -161,11 +161,33 @@ export function canvasCatalogTools(catalog: CanvasApiCatalog): readonly Upstream
   }));
 }
 
+function validateCreateModuleItemArguments(operation: CanvasApiOperation, input: JsonObject): void {
+  if (operation.toolName !== "canvas_create_module_item") return;
+  const type = input.module_item_type;
+  if (typeof type !== "string" || type === "") return;
+  const required = (name: string) => {
+    const value = input[name];
+    if (value === undefined || value === null || value === "") throw new TypeError(`${name} is required`);
+  };
+  if (type === "Page") {
+    required("module_item_page_url");
+    return;
+  }
+  if (type === "ExternalUrl") {
+    required("module_item_external_url");
+    return;
+  }
+  if (type === "SubHeader") return;
+  required("module_item_content_id");
+  if (type === "ExternalTool") required("module_item_external_url");
+}
+
 export function operationArguments(operation: CanvasApiOperation, input: JsonObject): {
   readonly path: string;
   readonly query: readonly [string, unknown][];
   readonly body: readonly [string, unknown][];
 } {
+  validateCreateModuleItemArguments(operation, input);
   let path = operation.path;
   const query: [string, unknown][] = [];
   const body: [string, unknown][] = [];

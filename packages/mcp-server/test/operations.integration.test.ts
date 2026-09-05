@@ -4,6 +4,7 @@ import { sha256Json, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { GatewayRuntime } from "../src/runtime.js";
+import { LoopbackApprovalServer } from "../src/approval-server.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
@@ -174,4 +175,93 @@ describe("outer provider effects", () => {
       await runtime.close();
     }
   }, 20_000);
+
+  it("shows a confirmed no-send failure without weakening uncertain result guidance", async () => {
+    let snapshot: JsonObject = {
+      operationId: "quiz-item",
+      state: "awaiting_approval",
+      plan: {
+        tool: "canvas_update_quiz_item",
+        arguments: {
+          course_id: "42",
+          assignment_id: "77",
+          item_id: "10899365",
+          item_entry_scoring_data: { value: "ribosomes" },
+          _morrow: { source_binding_id: "canvas:test" },
+        },
+      },
+    };
+    const approval = new LoopbackApprovalServer({
+      operationGet: () => snapshot,
+      operationList: () => ({}),
+      operationReviewContext: async () => ({
+        targets: [
+          { field: "course_id", label: "Course", name: "Intro to Biology" },
+          { field: "assignment_id", label: "Quiz", name: "Cell Structure Check" },
+          { field: "item_id", label: "Question", name: "Protein assembly" },
+        ],
+        question: {
+          item_entry_title: "Protein assembly",
+          item_entry_item_body: "Which structure directly assembles proteins?",
+          item_entry_interaction_type_slug: "choice",
+          item_entry_interaction_data: { choices: [{ id: "ribosomes", position: 1, item_body: "Ribosomes" }, { id: "mitochondria", position: 2, item_body: "Mitochondria" }] },
+          item_entry_scoring_algorithm: "Equivalence",
+          item_entry_scoring_data: { value: "mitochondria" },
+        },
+      }),
+      approveOperation: () => snapshot,
+      runApprovedOperation: async () => undefined,
+      cancelOperation: () => snapshot,
+      setApprovalBaseUrl: () => undefined,
+    });
+    try {
+      const url = await approval.start();
+      const review = await (await fetch(`${url}/operations/quiz-item`)).text();
+      expect(review).toContain("Which structure directly assembles proteins?");
+      expect(review).toContain("Current correct answer");
+      expect(review).toContain("Proposed correct answer");
+      expect(review).toContain("Only the answer key is in this request");
+      expect(review).not.toContain("More question settings");
+
+      snapshot = {
+        operationId: "quiz-item",
+        state: "awaiting_approval",
+        plan: {
+          tool: "canvas_update_quiz_item",
+          arguments: {
+            course_id: "42",
+            assignment_id: "77",
+            item_id: "10899365",
+            item_entry_scoring_data: { value: "ribosomes" },
+            item_points_possible: 2,
+            _morrow: { source_binding_id: "canvas:test" },
+          },
+        },
+      };
+      const mixed = await (await fetch(`${url}/operations/mixed`)).text();
+      expect(mixed).toContain("<strong>2</strong> points");
+      expect(mixed).not.toContain("Only the answer key is in this request");
+
+      snapshot = {
+        state: "failed",
+        attention: ["dispatch_failed_before_send"],
+        plan: { tool: "canvas_update_create_page_courses", arguments: {} },
+      };
+      const noSend = await (await fetch(`${url}/operations/no-send`)).text();
+      expect(noSend).toContain("No change was sent");
+      expect(noSend).toContain("read the latest Canvas content and prepare a new review");
+      expect(noSend).not.toContain("This request did not finish");
+
+      snapshot = {
+        state: "applied_or_unknown",
+        attention: ["provider_effect_may_have_landed"],
+        plan: { tool: "canvas_update_create_page_courses", arguments: {} },
+      };
+      const uncertain = await (await fetch(`${url}/operations/uncertain`)).text();
+      expect(uncertain).toContain("Canvas may have received the changes");
+      expect(uncertain).not.toContain("No change was sent");
+    } finally {
+      await approval.close();
+    }
+  });
 });
