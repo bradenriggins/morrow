@@ -329,12 +329,11 @@ export function scanCandidateEntries(entries, visibility) {
   };
 }
 
-function externalReceiptSet(root, ids) {
+function externalReceiptSet(root, ids, binding = currentEvidenceBinding(root)) {
   const path = process.env.MORROW_EXTERNAL_RECEIPTS_PATH
     ? resolve(process.env.MORROW_EXTERNAL_RECEIPTS_PATH)
     : resolve(root, "artifacts/release/external-receipts.json");
   const supplied = existsSync(path) ? readJson(path) : { receipts: [] };
-  const binding = currentEvidenceBinding(root);
   const byId = new Map((Array.isArray(supplied.receipts) ? supplied.receipts : []).map((entry) => [entry.id, entry]));
   const receipts = ids.map((id) => {
     const entry = byId.get(id);
@@ -358,20 +357,19 @@ function externalReceiptSet(root, ids) {
   return { path: existsSync(path) ? path : null, binding, receipts, passed: receipts.every((entry) => !entry.blocking) };
 }
 
-function externalReceiptState(root) {
-  return externalReceiptSet(root, REQUIRED_EXTERNAL_RECEIPTS);
+function externalReceiptState(root, binding) {
+  return externalReceiptSet(root, REQUIRED_EXTERNAL_RECEIPTS, binding);
 }
 
-function promotionReceiptState(root) {
-  return externalReceiptSet(root, REQUIRED_PROMOTION_RECEIPTS);
+function promotionReceiptState(root, binding) {
+  return externalReceiptSet(root, REQUIRED_PROMOTION_RECEIPTS, binding);
 }
 
-export function zeroToleranceState(root) {
+export function zeroToleranceState(root, binding = currentEvidenceBinding(root)) {
   const path = process.env.MORROW_ZERO_TOLERANCE_RECEIPT_PATH
     ? resolve(process.env.MORROW_ZERO_TOLERANCE_RECEIPT_PATH)
     : resolve(root, "artifacts/release/zero-tolerance-receipt.json");
   const supplied = existsSync(path) ? readJson(path) : { checks: [] };
-  const binding = currentEvidenceBinding(root);
   const bindingMatches = supplied.status === "passed"
     && !git(root, ["status", "--porcelain", "--untracked-files=normal"]).trim()
     && supplied.binding?.tree === git(root, ["rev-parse", "HEAD^{tree}"]).trim()
@@ -397,7 +395,7 @@ export function zeroToleranceState(root) {
   return { path: existsSync(path) ? path : null, binding, bindingMatches, checks, passed: checks.every((entry) => !entry.blocking) };
 }
 
-function currentEvidenceBinding(root) {
+function currentEvidenceBinding(root, { profileName, packageDigest } = {}) {
   const receiptDigest = (profile) => {
     const path = resolve(root, "artifacts/candidates", profile, "receipt.json");
     if (!existsSync(path)) return null;
@@ -411,6 +409,16 @@ function currentEvidenceBinding(root) {
     : existsSync(mergedCatalogPath)
       ? readJson(mergedCatalogPath)
       : {};
+  const candidateDigests = {
+    privateFull: receiptDigest("private-full"),
+    publicCanvas: receiptDigest("public-canvas"),
+  };
+  const digestKey = profileName === "private-full"
+    ? "privateFull"
+    : profileName === "public-canvas"
+      ? "publicCanvas"
+      : null;
+  if (digestKey && validDigest(packageDigest)) candidateDigests[digestKey] = packageDigest;
   return {
     commit: git(root, ["rev-parse", "HEAD"]).trim(),
     catalogDigest: validDigest(catalog.catalogDigest)
@@ -418,10 +426,7 @@ function currentEvidenceBinding(root) {
       : validDigest(catalog.digest)
         ? catalog.digest
         : null,
-    candidateDigests: {
-      privateFull: receiptDigest("private-full"),
-      publicCanvas: receiptDigest("public-canvas"),
-    },
+    candidateDigests,
   };
 }
 
@@ -568,9 +573,6 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
   const files = sourceFiles.map((file) => ({ path: file.path, bytes: file.data.length, sha256: sha256(file.data) }));
   const releaseEvidence = candidateEvidence(root, profile.visibility, profileFiles);
   const markerScan = scanCandidateEntries(sourceFiles, profile.visibility);
-  const externalReceipts = externalReceiptState(root);
-  const promotionReceipts = promotionReceiptState(root);
-  const zeroTolerance = zeroToleranceState(root);
   const stageManifest = {
     schema: "morrow.candidate-stage.v1",
     candidateName: candidateName(profileName),
@@ -641,6 +643,10 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
   writeFileSync(archivePath, archive, { mode: 0o600 });
   const rebuilt = verifyRebuild ? deterministicZip(archiveEntries) : null;
   if (rebuilt && !rebuilt.equals(archive)) throw new Error("Deterministic rebuild proof failed.");
+  const binding = currentEvidenceBinding(root, { profileName, packageDigest: archiveDigest });
+  const externalReceipts = externalReceiptState(root, binding);
+  const promotionReceipts = promotionReceiptState(root, binding);
+  const zeroTolerance = zeroToleranceState(root, binding);
 
   const blockers = [
     ...(markerScan.passed ? [] : ["candidate_marker_scan_failed"]),

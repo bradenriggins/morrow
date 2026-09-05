@@ -10,7 +10,10 @@ import {
   publicPackageManifest,
   scanCandidateEntries,
   sha256,
+  stageCandidate,
   stageCandidateSet,
+  REQUIRED_EXTERNAL_RECEIPTS,
+  REQUIRED_PROMOTION_RECEIPTS,
   validateSourceOriginLedger,
   ZERO_TOLERANCE_TARGETS,
   zeroToleranceState,
@@ -184,6 +187,50 @@ test("candidate set receipts bind the final digest of every profile", () => {
     assert.equal(zeroToleranceState(root).passed, true);
     writeFileSync(log, "changed after verification");
     assert.equal(zeroToleranceState(root).passed, false);
+
+    writeFileSync(log, "passed");
+    const staleDigest = "f".repeat(64);
+    const writeExternalReceipts = (candidateDigests) => writeFileSync(resolve(root, "artifacts/release/external-receipts.json"), JSON.stringify({
+      receipts: [...REQUIRED_EXTERNAL_RECEIPTS, ...REQUIRED_PROMOTION_RECEIPTS].map((id) => ({
+        id,
+        status: "verified",
+        receiptDigest: "d".repeat(64),
+        verifier: "release-test",
+        verifiedAt: "2026-09-05T00:00:00.000Z",
+        commit: binding.commit,
+        catalogDigest: binding.catalogDigest,
+        candidateDigests,
+      })),
+    }));
+    writeExternalReceipts(expected);
+    writeFileSync(resolve(root, "artifacts/candidates/private-full/receipt.json"), JSON.stringify({
+      packageDigest: staleDigest,
+    }));
+    const singleProfile = stageCandidate({ root, profileName: "private-full", verifyRebuild: true });
+    assert.equal(singleProfile.packageDigest, expected.privateFull);
+    assert.deepEqual(singleProfile.externalReceipts.binding.candidateDigests, expected);
+    assert.equal(singleProfile.externalReceipts.passed, true);
+    assert.equal(singleProfile.promotionReceipts.passed, true);
+    assert.equal(singleProfile.zeroTolerance.passed, true);
+
+    const staleBinding = { ...binding, candidateDigests: { ...expected, privateFull: staleDigest } };
+    writeFileSync(resolve(root, "artifacts/release/zero-tolerance-receipt.json"), JSON.stringify({
+      schema: "morrow.zero-tolerance-receipt.v1", status: "passed", binding: staleBinding, evidenceRoot,
+      checks: ZERO_TOLERANCE_TARGETS.map((id) => ({
+        id, status: "passed", count: 0, evidence,
+        receiptDigest: sha256(JSON.stringify({ binding: staleBinding, id, evidenceDigests: evidence })),
+      })),
+    }));
+    assert.equal(zeroToleranceState(root).passed, false);
+
+    writeExternalReceipts(staleBinding.candidateDigests);
+    writeFileSync(resolve(root, "artifacts/candidates/private-full/receipt.json"), JSON.stringify({
+      packageDigest: staleDigest,
+    }));
+    const rejected = stageCandidate({ root, profileName: "private-full", verifyRebuild: true });
+    assert.equal(rejected.externalReceipts.passed, false);
+    assert.equal(rejected.promotionReceipts.passed, false);
+    assert.equal(rejected.zeroTolerance.passed, false);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
