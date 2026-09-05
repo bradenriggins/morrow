@@ -4,7 +4,7 @@
 
 **Morrow helps the people behind a course move work forward while they stay in control.**
 
-Morrow turns a lesson or quiz update into a reviewed change and a checked result. A compatible assistant can help prepare the request. Morrow keeps the course review, human decision, and result clear.
+Morrow turns a lesson or quiz update into a reviewed change and a checked result. An assistant set up with Morrow can help prepare the request. Morrow keeps the course review, human decision, and result clear.
 
 **Current category language:** Course work, under your control.
 
@@ -48,7 +48,7 @@ Morrow turns a lesson or quiz update into a reviewed change and a checked result
 
 **Headline:** Move course work forward. Stay in control.
 
-**Body:** Morrow helps instructional designers, course builders, and educators turn lesson and quiz updates into finished course work. Ask your assistant for a change. Review it in Morrow. See what Canvas saved.
+**Body:** Morrow helps instructional designers, course builders, and educators turn lesson and quiz updates into finished course work. Ask your assistant for a change. Review it in Morrow. See what your course platform saved.
 
 **Primary CTA:** See Morrow in action
 
@@ -64,9 +64,9 @@ Morrow turns a lesson or quiz update into a reviewed change and a checked result
 
 **Know what was saved.** Morrow checks the saved result. If it cannot confirm the change, it tells you what still needs attention.
 
-**Keep your sign-in private.** Your Canvas sign-in stays in Chrome. You do not hand it to your assistant. Course content can still be shared with that service.
+**Keep your sign-in private.** Your Canvas or Moodle sign-in stays in Chrome. You do not hand it to your assistant. Course content can still be shared with that service.
 
-**Choose how you work.** Make requests through a compatible assistant. Morrow keeps the course review and result in one consistent process.
+**Choose how you work.** Make requests through an assistant set up with Morrow. Morrow keeps the course review and result in one consistent process.
 
 ### From request to result
 
@@ -84,7 +84,7 @@ The lesson and quiz walkthrough is illustrative. It does not connect to Canvas o
 
 **Section heading:** See what has been tested.
 
-Canvas has a tested course example through the current Chrome sign-in. Moodle and Blackboard are earlier previews that use separate private connections. Their current scope has documentation and local software tests, not live site tests.
+Canvas and Moodle use the same signed-in Chrome connection. Selected course changes have been saved and checked in both platforms. Their coverage differs. Blackboard is still in development. Work is in progress to give course teams the same core features across all three platforms. Blackboard’s browser connection must be verified first.
 
 ### Practical questions
 
@@ -92,7 +92,7 @@ Canvas has a tested course example through the current Chrome sign-in. Moodle an
 
 The questions cover intended users, assistant routes, course information, uncertain results, and readiness. The selected Codex course update is the tested assistant route. Claude Code, Claude desktop, and Gemini CLI have setup entries but still need complete live checks.
 
-Canvas sign-in stays in Chrome. Morrow filters restricted fields from course results before sharing them with the connected assistant. Course content can still reach that service. The institution's permissions and data rules still apply.
+Your Canvas and Moodle sign-ins stay in Chrome. Morrow filters restricted fields from course results before sharing them with the connected assistant. Course content can still reach that service. The institution's permissions and data rules still apply.
 
 ### Preview details
 
@@ -111,11 +111,12 @@ Use these claims now:
 - A separate page creation was saved and checked against the approved content and settings.
 - A selected Codex request reached a separate Morrow review. After approval, one paragraph was added once and checked against the saved page.
 - Morrow is a private development preview. The source-review test used a manually connected assistant.
-- Moodle and Blackboard have documentation and local software checks only. They need real-site checks before use.
+- Moodle uses the same Chrome connection as Canvas. Six browser reads and one selected Page update have live proof; 21 operations are implemented and other Moodle writes need live checks.
+- Blackboard browser connection is not yet verified, so Blackboard course work is unavailable.
 
 Do not use these claims now:
 
 - General access, public release, institutional approval, customer adoption, time savings, or teaching effectiveness.
 - Support for every course action, platform, or assistant configuration.
 - A claim that all course content stays local or that the assistant service does not receive selected course content.
-- A claim that Moodle or Blackboard has a live site test.
+- A claim that every Moodle write is proven, Blackboard browser connection is available, or Canvas and Moodle have blanket parity.

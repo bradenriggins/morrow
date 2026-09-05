@@ -38,7 +38,7 @@ async function start(): Promise<CanvasConnectorRuntime> {
     token,
     extensionId,
     runtimeRevision: "1.0.0-rc.0",
-    catalogDigest: runtime.catalog.catalogDigest,
+    catalogDigest: runtime.catalogDigest,
     bindings: [{
       sourceBindingId: "canvas:test-account",
       provider: "canvas",

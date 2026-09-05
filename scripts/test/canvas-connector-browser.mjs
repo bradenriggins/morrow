@@ -172,7 +172,7 @@ const connectorConfig = {
   catalogPath: resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json"),
   token: "browser-test-connector-secret-".repeat(3),
   port: 0,
-  runtimeRevision: "1.0.0-rc.1",
+  runtimeRevision: "1.0.0-rc.2",
   allowedExtensionIds: [],
   approveExtensionId: async () => undefined,
 };
@@ -469,7 +469,7 @@ try {
   await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
   const approval = await approvalPromise;
   await approval.waitForURL((url) => url.origin === `http://127.0.0.1:${connectorConfig.port}` && /^\/morrow-bridge\/v1\/pair\/[0-9a-f-]+$/.test(url.pathname));
-  await approval.getByText("Your Canvas password and sign-in details stay in Chrome", { exact: false }).waitFor();
+  await approval.getByText("Your learning-platform password and sign-in details stay in Chrome", { exact: false }).waitFor();
   await captureThemes(approval, "pairing");
   process.stderr.write("[browser-test] pairing review ready\n");
   const pairingApprovedAt = performance.now();
@@ -503,7 +503,7 @@ try {
   }, canvasUrl);
   assert.equal(Number.isInteger(canvasTabId), true);
   const connected = await popup.evaluate(async (tabId) => {
-    return await chrome.runtime.sendMessage({ type: "morrow_connect_canvas", tabId });
+    return await chrome.runtime.sendMessage({ type: "morrow_connect_course", tabId });
   }, canvasTabId);
   assert.equal(connected?.ok, true, connected?.error);
   const binding = await waitFor(() => runtime.bridge.listBindings()[0], "Canvas account did not bind to the connector");
@@ -680,13 +680,13 @@ try {
   await canvasPage.close();
   await waitFor(() => runtime.bridge.listBindings()[0]?.runtimeVerified === false, "closed Canvas tab still advertised as available");
   await popup.locator("#canvas-value").filter({ hasText: /^Course tab needed$/ }).waitFor();
-  await popup.getByRole("button", { name: "Connect Canvas course", exact: true }).waitFor();
+  await popup.getByRole("button", { name: "Connect course", exact: true }).waitFor();
   assert.equal((await runtime.call("canvas_get_new_quiz", { course_id: "42", assignment_id: "77", _morrow: { source_binding_id: binding.sourceBindingId } })).resultState, "not_sent");
   await captureThemes(popup, "popup-course-closed", 360);
   canvasPage = await context.newPage();
   await canvasPage.goto(canvasUrl);
   const newTabId = await replacementWorker.evaluate(async (url) => (await chrome.tabs.query({})).find((tab) => tab.url === url)?.id, canvasUrl);
-  assert.equal((await popup.evaluate(async (tabId) => chrome.runtime.sendMessage({ type: "morrow_connect_canvas", tabId }), newTabId)).ok, true);
+  assert.equal((await popup.evaluate(async (tabId) => chrome.runtime.sendMessage({ type: "morrow_connect_course", tabId }), newTabId)).ok, true);
   const rebound = await waitFor(() => runtime.bridge.listBindings().find((entry) => entry.runtimeVerified && entry.sourceBindingId !== binding.sourceBindingId), "Canvas tab did not reconnect with fresh authority");
   assert.equal(rebound.sessionGeneration, 2);
   await popup.locator("#canvas-value").filter({ hasText: /^Course tab open$/ }).waitFor();

@@ -11,6 +11,6 @@ describe("MORROW_SERVER_INSTRUCTIONS", () => {
     expect(opening).toContain("separate human review");
     expect(MORROW_SERVER_INSTRUCTIONS).toContain("sourceSettlement");
     expect(MORROW_SERVER_INSTRUCTIONS).toContain("Never repeat a write");
-    expect(MORROW_SERVER_INSTRUCTIONS).toContain("Do not ask for Canvas credentials");
+    expect(MORROW_SERVER_INSTRUCTIONS).toContain("Do not ask for credentials, tokens, cookies, or passwords");
   });
 });

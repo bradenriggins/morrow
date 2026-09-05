@@ -16,10 +16,11 @@ style_preset: graphite-violet
 
 Create a silent, caption-led local preview for instructional designers, course
 builders, and experienced instructors. One illustrative course-work packet
-drives the full story: it stops at review, moves after approval, aligns with
-saved work, makes the Canvas sign-in boundary clear, and reaches the selected
-assistant. The choice scene only names a compatible assistant; it does not
-claim that every assistant is supported.
+drives the full story for Canvas and Moodle course work: it stops at review,
+moves after approval, aligns with saved work, makes the course sign-in boundary
+clear, and reaches the selected assistant. The choice scene names an assistant
+set up with Morrow. It does not claim every assistant, platform, or workflow is
+supported.
 
 ## Assets
 
@@ -37,9 +38,9 @@ claim that every assistant is supported.
 
 - This is a local preview only. Do not publish or deploy it.
 - Every product UI scene is labeled `Product demonstration — illustrative`.
-  It does not show a live Canvas session, learner data, customer evidence, or
+  It does not show a live course session, learner data, customer evidence, or
   performance results.
-- The privacy message is specific: Canvas sign-in stays in Chrome. Course
-  content can be shared with the selected compatible assistant. The film does
-  not claim that course work stays local or that every assistant is supported.
+- The privacy message is specific: course sign-in stays in Chrome. Course
+  content can be shared with the selected assistant. The film does not claim
+  that course work stays local or that every assistant is supported.
 - Keep the 1920x1080 layout readable at normal viewing speed.

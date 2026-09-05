@@ -160,9 +160,39 @@ function object(value: unknown): JsonObject {
 
 function readableName(value: string): string {
   const names: Record<string, string> = {
+    moodle_list_my_courses: "List my Moodle courses",
+    moodle_get_course: "View this Moodle course",
+    moodle_get_contents: "View Moodle course content",
+    moodle_list_assignments: "List Moodle assignments",
+    moodle_list_quizzes: "List Moodle quizzes",
+    moodle_get_course_summary: "View this Moodle course description",
+    moodle_get_section: "View this Moodle section",
+    moodle_get_page: "View this Moodle Page",
+    moodle_get_assignment: "View this Moodle Assignment",
+    moodle_get_quiz: "View this Moodle Quiz",
     moodle_update_course_summary: "Update the Moodle course description",
+    moodle_update_section: "Update this Moodle section",
+    moodle_update_page: "Update this Moodle Page",
+    moodle_update_assignment: "Update this Moodle Assignment",
+    moodle_update_quiz: "Update this Moodle Quiz",
+    moodle_show_course: "Show this Moodle course to learners",
+    moodle_hide_course: "Hide this Moodle course from learners",
+    moodle_show_section: "Show this Moodle section to learners",
+    moodle_hide_section: "Hide this Moodle section from learners",
+    moodle_show_activity: "Show this Moodle activity to learners",
+    moodle_hide_activity: "Hide this Moodle activity from learners",
     blackboard_update_content: "Update the Blackboard lesson",
-    summary: "Course description",
+    limit: "Maximum courses",
+    course_id: "Course ID",
+    section_id: "Section ID",
+    module_id: "Activity ID",
+    summary: "Summary",
+    content: "Page content",
+    instructions: "Instructions",
+    due_date: "Due date and time",
+    open_at: "Open date and time",
+    close_at: "Close date and time",
+    visible: "Visible to learners",
     body: "Lesson content",
     canvas_create_page_courses: "Add this page",
     canvas_update_create_page_courses: "Update this page",
@@ -229,12 +259,34 @@ function requestFields(request: JsonObject, omitted: readonly string[] = []): st
 }
 
 function isRichText(key: string, value: unknown): value is string {
-  return typeof value === "string" && /(?:^|_)(?:body|description|instructions|message|summary|question_text|item_body|feedback|feedback_correct|feedback_incorrect|feedback_neutral)$/.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
+  return typeof value === "string" && /(?:^|_)(?:body|content|description|instructions|message|summary|question_text|item_body|feedback|feedback_correct|feedback_incorrect|feedback_neutral)$/.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
+}
+
+function moodleCivilDate(value: unknown): string | null {
+  if (!isJsonObject(value)) return null;
+  const year = value.year;
+  const month = value.month;
+  const day = value.day;
+  const hour = value.hour;
+  const minute = value.minute;
+  if (typeof year !== "number" || typeof month !== "number" || typeof day !== "number" || typeof hour !== "number" || typeof minute !== "number"
+    || ![year, month, day, hour, minute].every(Number.isSafeInteger)
+    || year < 1970 || year > 2100 || month < 1 || month > 12 || day < 1 || day > 31 || hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  const date = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null;
+  const civil = new Intl.DateTimeFormat("en-US", {
+    month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: "UTC",
+  }).format(date);
+  return `<span>${escapeHtml(civil)} <span class="preview-note">Moodle user’s configured time zone</span></span>`;
 }
 
 function fieldValue(key: string, value: unknown): string {
   if (key === "item_entry_answer_feedback" && isJsonObject(value)) return Object.entries(value).map(([id, content]) => `<section><p class="preview-label">Answer reference: ${escapeHtml(id)}</p>${typeof content === "string" ? formattedTextPreview("Answer feedback", content) : requestValue(content)}</section>`).join("");
   if (isRichText(key, value)) return formattedTextPreview(readableName(key), value);
+  if (["due_date", "open_at", "close_at"].includes(key)) {
+    const civil = moodleCivilDate(value);
+    if (civil) return civil;
+  }
   if (typeof value === "string" && /(?:_at|date|Date)$/.test(key) && /^\d{4}-\d\d-\d\dT\d\d:\d\d.*(?:Z|[+-]\d\d:\d\d)$/.test(value) && Number.isFinite(Date.parse(value))) {
     return `<time datetime="${escapeHtml(value)}">${escapeHtml(new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }))}</time>`;
   }
@@ -331,8 +383,19 @@ function changeKind(tool: unknown): string {
   const name = String(tool).replace(/^(canvas|moodle|blackboard)_/, "");
   if (/^(delete|remove|destroy)_/.test(name)) return "Remove";
   if (/^(create|add|copy|duplicate|import)_/.test(name)) return "Add";
+  if (/^show_/.test(name)) return "Show";
+  if (/^hide_/.test(name)) return "Hide";
   if (/^(update|edit|set|reorder|move)_/.test(name)) return "Edit";
   return "Change";
+}
+
+function visibilityDecision(tool: unknown): string | null {
+  const name = String(tool);
+  const target = name.endsWith("_course") ? "course" : name.endsWith("_section") ? "section" : name.endsWith("_activity") ? "activity" : null;
+  if (!target || !name.startsWith("moodle_")) return null;
+  if (name.includes("_show_")) return `This will make the Moodle ${target} visible to learners.`;
+  if (name.includes("_hide_")) return `This will hide the Moodle ${target} from learners.`;
+  return null;
 }
 
 function changeTitle(request: JsonObject, context: ApprovalReviewContext | undefined, fallback: string): string {
@@ -367,8 +430,7 @@ function namedTargetsMissing(operations: readonly JsonObject[], contexts: Readon
 }
 
 function keepOpenInstruction(platform: string): string {
-  if (platform === "your learning platforms") return "Keep your assistant open. If this request uses Canvas, keep Chrome open too.";
-  return platform === "Canvas" ? "Keep your assistant and Chrome open while Morrow works." : "Keep your assistant open while Morrow works.";
+  return "Keep your assistant and Chrome open while Morrow works.";
 }
 
 function stateContent(state: string, platform = "Canvas", attention: readonly unknown[] = []): string {
@@ -494,7 +556,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
       : requestFields(request, hiddenFields);
     const addingQuestion = entry.tool === "canvas_create_quiz_item";
     const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
-    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above."}</p>`;
+    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${visibilityDecision(entry.tool) || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;
     const questionFields = Object.keys(request).filter((key) => key.startsWith("item_") && key !== "item_id");
     const scoreOnlyQuestion = question && questionFields.length === 1 && questionFields[0] === "item_entry_scoring_data";
     const before = scoreOnlyQuestion && context?.question

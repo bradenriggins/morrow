@@ -1,5 +1,6 @@
 import { once } from "node:events";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -28,6 +29,12 @@ function operationId(result: JsonObject): string {
   const value = isJsonObject(result.structuredContent) ? result.structuredContent.operationId : undefined;
   if (typeof value !== "string") throw new Error("operation id missing");
   return value;
+}
+
+function connectorCatalogDigest(canvasCatalog: { readonly catalogDigest: string }, root: string): string {
+  const moodleBytes = readFileSync(resolve(root, "connector/extension/generated/moodle-browser-catalog.json"));
+  const moodleDigest = createHash("sha256").update(moodleBytes).digest("hex");
+  return createHash("sha256").update(`${canvasCatalog.catalogDigest}\n${moodleDigest}`).digest("hex");
 }
 
 function connectorConfig(directory: string, port: number) {
@@ -110,8 +117,8 @@ describe("Canvas connector gateway path", () => {
         protocolVersion: BRIDGE_PROTOCOL_VERSION,
         token: "gateway-connector-secret-".repeat(3),
         extensionId,
-        runtimeRevision: "1.0.0-rc.1",
-        catalogDigest: connectorCatalog.catalogDigest,
+        runtimeRevision: "1.0.0-rc.2",
+        catalogDigest: connectorCatalogDigest(connectorCatalog, root),
         bindings: [{ sourceBindingId, provider: "canvas", origin: "https://school.instructure.com", principalFingerprint: "c".repeat(64), sessionGeneration: 1, runtimeVerified: true }],
         sentAt: Date.now(),
       }));
@@ -308,8 +315,8 @@ describe("Canvas connector gateway path", () => {
         protocolVersion: BRIDGE_PROTOCOL_VERSION,
         token: "gateway-connector-secret-".repeat(3),
         extensionId,
-        runtimeRevision: "1.0.0-rc.1",
-        catalogDigest: connectorCatalog.catalogDigest,
+        runtimeRevision: "1.0.0-rc.2",
+        catalogDigest: connectorCatalogDigest(connectorCatalog, resolve("../..")),
         bindings: [{ sourceBindingId, provider: "canvas", origin: "https://school.instructure.com", principalFingerprint: "c".repeat(64), sessionGeneration: 1, runtimeVerified: true }],
         sentAt: Date.now(),
       }));

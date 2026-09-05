@@ -4,11 +4,11 @@
 
 ## The problem
 
-AI assistance can prepare a lesson, quiz question, or course update. Course teams still need answers to harder questions: Which account and course will change? What exactly did the reviewer approve? What did the LMS save? What should happen when a request becomes stale or its result is uncertain?
+AI assistance can prepare a lesson, quiz question, or course update. Course teams still need to know which course will change, what an educator approved, what the LMS saved, and what happens when the course changed during planning or the result is uncertain.
 
-Morrow is my answer to that problem. It is a local product for course work that uses AI assistance. Its core loop is **request → review → approval → checked result**. The product makes the work inspectable instead of treating a chat response or LMS response as the end of the workflow.
+Morrow turns an assistant request into a reviewed course change and a checked LMS result. It shows the course, current content, and proposed edit before approval. An educator approves one change. Morrow then checks the LMS again and reports what it can confirm. If it cannot confirm the result, it marks the work for attention and does not repeat the change automatically.
 
-The operating model can span providers, while each provider keeps its own setup, available operations, and evidence boundary. Canvas uses a signed-in Chrome connector. Moodle and Blackboard use separate private API connections.
+Canvas and Moodle use the same signed-in Chrome connector. Canvas has selected live sandbox proof. Moodle has six live browser reads, one selected Page update with a confirmed saved result, and 21 implemented operations; other Moodle writes need live checks. Blackboard browser connection is not yet verified and Blackboard course work is unavailable. Each provider keeps its own evidence boundary.
 
 ## My role
 
@@ -18,53 +18,52 @@ This creator-led product build combines product design, AI-assisted engineering,
 
 ## The product thesis
 
-Morrow does not add another chat interface. A compatible assistant supplies the request. Morrow holds the conditions around the LMS change:
+Morrow does not add another chat interface. An assistant set up with Morrow can prepare the request. Morrow keeps the educator's review, approval, and checked result clear.
 
-```text
-Course request from a compatible assistant
-  → bound account, course, provider, and target
-  → readable local review
-  → one human approval of a frozen request
-  → one LMS dispatch attempt
-  → fresh readback and a checked result
-```
+    Assistant prepares one course update
+      → Morrow shows the course, current content, and proposed edit
+      → educator approves one reviewed change
+      → Morrow sends that change once
+      → Morrow checks the saved LMS record
+          → confirmed: reports what the LMS saved
+          → unconfirmed: marks it for attention and does not repeat it automatically
 
-The operating record is the product. It preserves a human decision, the exact requested change, and a truthful result when the system cannot establish an effect.
+The record keeps the educator's decision, the requested change, and an honest result when the system cannot establish an effect.
 
 ## System design
 
-**Bound context.** The Canvas page-correction flow reads the course, page, and latest revision before planning. It checks the body, page settings, revision consistency, and one unique visible-text anchor. A changed target requires a new review.
+**Right course, current content.** Before review, the Canvas page-correction flow checks the account, course, page, and latest content. It checks the page body, settings, revision consistency, and one unique visible-text anchor. A changed target requires a new review.
 
-**Readable review.** The local approval flow shows current and proposed content instead of raw request data alone. It sanitizes executable elements and external media, so the reviewer can assess a concrete change and its preserved conditions.
+**Readable review.** The local approval flow shows current and proposed content instead of raw request data alone. It removes executable elements and external media, so the reviewer can assess a concrete change and the conditions that stay the same.
 
-**Human approval.** The dispatcher sends only a frozen, approved operation. A correction is a new, separately approved operation. It is not a replay of the original request.
+**One educator approval.** Morrow sends a change only after the educator approves the reviewed request. A correction is a new, separately approved request. It is not a repeat of the original request.
 
-**Verification and recovery.** Verification compares a frozen expected result with fresh provider evidence. Reconciliation runs readback without replaying a provider request. Ambiguous delivery remains visible rather than becoming a fabricated success.
+**Checked result and safe uncertainty.** Morrow compares the expected result with a new LMS check. When it cannot establish the effect, the result stays visible as unconfirmed. Morrow checks the named item again without repeating the provider request.
 
-**Controlled batches.** Batch records carry explicit course sets, dependencies, source bindings, and readback requirements. The approved plan sets the order and rate controls. Recovery never retries an uncertain write.
+**Controlled batches.** Each batch names its courses, dependencies, and required checks. The approved plan sets the order and rate controls. Recovery never retries an uncertain change.
 
 **Source-linked review.** For one Canvas lesson and New Quiz, Morrow requests two independent specialist reviews and a separate checker. Findings must cite exact source and target text from captured evidence. The result requires educator review. It does not claim verified teaching quality.
 
-**Specific privacy boundary.** Canvas sign-in stays in Chrome. Credentials stay out of assistant messages and saved records. Morrow blocks credential and learner fields from assistant output. The selected course text and metadata needed for a request can reach the chosen assistant under that assistant's own account settings and data terms.
+**Specific privacy boundary.** Canvas and Moodle sign-in stays in Chrome. Credentials stay out of assistant messages and saved records. Morrow blocks credential and learner fields from assistant output. The selected course text and metadata needed for a request can reach the chosen assistant under that assistant's own account settings and data terms.
 
 ## Hard product decisions
 
 1. Build a clear course-work process around the assistant conversation, so the educator can see the target, approve the proposed change, and check the saved result.
 2. Make review a product surface: exact before-and-after, target, preserved conditions, and result state.
-3. Refuse stale work instead of silently writing against old evidence.
-4. Treat uncertainty as a first-class result. A provider response alone is not proof, and ambiguous writes do not replay automatically.
+3. Stop an outdated request instead of writing against old course content.
+4. Treat uncertainty as a visible result. A provider response alone is not proof, and uncertain changes do not repeat automatically.
 5. Keep platform and assistant claims separate. Canvas evidence does not become Moodle or Blackboard evidence. The selected Codex route does not become proof for every assistant configuration.
 
 ## Evidence at a glance
 
 | Evidence category | Current factual support |
 | --- | --- |
-| Implemented local code | The current local code includes governed operations, local approval, Canvas connection, bounded batches, source-linked review, and provider-specific scopes. Installed-client and live-provider results are recorded separately. |
+| Implemented local code | The current local code includes reviewed operations, local approval, Chrome connections for Canvas and Moodle, controlled batches, source-linked review, and provider-specific scopes. Installed-client and live-provider results are recorded separately. |
 | Full static gate | The final canonical-URL source passed 159 workspace tests and 21 script tests: 180 tests total. |
-| Selected live Canvas proof | A lesson correction, narrow New Quiz key correction, two module-link writes, three publication operations, and one Student View learner route reached verified evidence. A stale page proposal failed before send and later page readback showed no effect. |
-| Selected Codex route | The installed Codex CLI read the published New Quiz. In a separate interactive test, native tool approval staged a page update; Morrow approval led to one verified dispatch. Native and independent later reads confirmed the exact change and unchanged protected fields. This is one selected route only. |
-| Moodle scope | Six tools: five reads and one course-summary write. Official API and test validation only. |
-| Blackboard scope | Six tools: five reads, including direct Ultra child discovery, and one document update. Official API and test validation only. |
+| Selected live Canvas proof | A lesson correction, narrow New Quiz key correction, two module-link writes, three publication operations, and one Student View learner route reached verified evidence. A stale page proposal failed before send and a later page check showed no effect. |
+| Selected Codex route | The installed Codex CLI read the published New Quiz. In a separate interactive test, native tool approval prepared a page update; Morrow approval led to one change attempt that reached verified state. Native and independent later checks confirmed the exact change and unchanged protected fields. This is one selected route only. |
+| Moodle scope | Six live browser reads through the Chrome connection. One selected hidden disposable Page on the official public Moodle 5.2 sandbox saved as &lt;p&gt;This lesson is ready for learners.&lt;/p&gt; in one dispatch; the receipt state was verified, a saved-page check confirmed it, and replay was refused. Twenty-one operations are implemented; other Moodle writes need live checks. |
+| Blackboard scope | Browser connection is not yet verified. Blackboard course work is unavailable. |
 | Illustrative film | The local site and film show workflow and visual direction. They do not establish a live LMS result. |
 
 ## Current Canvas proof
@@ -73,17 +72,17 @@ The Canvas record now shows a connected evidence chain.
 
 An educator-provided source exposed a planted lesson error and a wrong saved New Quiz answer key through two independent specialist requests and a separate checker. The source-review exchange used a manual MCP host adapter.
 
-An approved lesson correction reached verified page readback. One phrase changed while title, URL, publication state, front-page state, and editing roles remained unchanged. A later proposal with a stale pre-change condition failed before send. The following page read showed the same body and update time.
+An approved lesson correction reached a verified saved-page check. One phrase changed while title, URL, publication state, front-page state, and editing roles stayed unchanged. A later proposal with outdated page content failed before send. The following page check showed the same body and update time.
 
-The New Quiz correction then reached `verified` with one dispatch attempt. The before-and-after item comparison showed that only question one’s saved scoring value and update time changed; all other question fields stayed unchanged. Two module-link writes and three publication operations also reached verified state. The later module readback contained both the lesson and quiz.
+The New Quiz correction then reached verified after one change attempt. The before-and-after item comparison showed that only question one's saved scoring value and update time changed; all other question fields stayed unchanged. Two module-link writes and three publication operations also reached verified state. The later module check contained both the lesson and quiz.
 
-In Canvas Student View, the published lesson displayed the corrected text. `Next Module Item` launched the quiz. `Begin` showed all three questions. After correct selections were submitted, the assessment result showed 100%, three of three points, the correct ribosomes answer, and all three feedback messages. This proves one selected sandbox learner route.
+In Canvas Student View, the published lesson displayed the corrected text. Next Module Item launched the quiz. Begin showed all three questions. After correct selections were submitted, the assessment result showed 100%, three of three points, the correct ribosomes answer, and all three feedback messages. This proves one selected sandbox learner route.
 
-A separate unpublished page creation reached automatic verification after one dispatch. An independent read confirmed its exact identity, content, and saved settings. The installed Codex interactive client then prepared a one-paragraph update on another sandbox page. Native tool approval staged the request; Morrow showed its current and proposed content for separate approval. One dispatch reached verified state. Both the native client and a later independent read confirmed the exact append and unchanged protected fields.
+A separate unpublished page creation reached automatic verification after one change attempt. An independent check confirmed its exact identity, content, and saved settings. The installed Codex interactive client then prepared a one-paragraph update on another sandbox page. Native tool approval prepared the request; Morrow showed its current and proposed content for separate approval. One change attempt reached verified state. Both the native client and a later independent check confirmed the exact append and unchanged protected fields.
 
 ## Verification limits
 
-Automatic assistant sampling remains unproven beyond the manual adapter. Independent clean-machine reproduction remains open. Moodle and Blackboard have no live tenant evidence. The selected Canvas sandbox sequence does not establish a full Canvas catalog, every learner flow, learning effectiveness, or whole-release verification. Morrow has no public deployment or institutional-use claim.
+Automatic assistant sampling remains unproven beyond the manual adapter. Independent clean-machine reproduction remains open. Moodle has six live browser reads and one selected Page update with a confirmed saved result. Other Moodle writes need live checks. Blackboard browser connection is not yet verified. The selected Canvas sandbox sequence does not establish a full Canvas catalog, every learner flow, learning effectiveness, or whole-release verification. Morrow has no public deployment or institutional-use claim.
 
 ## Role families this work fits
 
@@ -97,16 +96,16 @@ These are role families, not a claim of eligibility for a specific opening.
 
 ## 90-second interview walkthrough
 
-“I created Morrow because generated course content is not enough for instructional teams. A real course change has a target, permissions, related assessments, and learner consequences. I spent months building a clear process around that work.
+“I created Morrow because generated course content is not enough for instructional teams. A real course change has a destination, permissions, related assessments, and learner consequences. I spent months building a clear process around that work.
 
-“The core loop is request, review, approval, and checked result. Morrow binds a course request from a compatible assistant to the account, course, platform, and exact record. It shows the current and proposed values in a local review. A person approves one saved request. Then Morrow reads the LMS again and reports verified, unconfirmed, or failed.
+“Morrow turns an assistant request into a review that shows the course, current content, and proposed change. A person approves one reviewed change. Morrow sends it once, checks the LMS again, and reports confirmed, unconfirmed, or failed results.
 
-“The key design decision was to make uncertainty a product state. In one live Canvas sandbox sequence, we verified a lesson correction, a narrowly scoped quiz-key correction, module links, publication, and a Student View path through a three-question quiz to a three-point result with feedback. We also tested a stale proposal: it failed before send, and the next read proved the page had not changed. That safe failure is as important as the success cases.
+“The key design decision was to make uncertainty visible. In one live Canvas sandbox sequence, we verified a lesson correction, a narrowly scoped quiz-key correction, module links, publication, and a Student View path through a three-question quiz to a three-point result with feedback. We also tested a stale proposal: it failed before send, and the next check proved the page had not changed. That safe failure is as important as the success cases.
 
-“The work is platform-specific. Canvas has selected sandbox proof through a browser connector. Moodle and Blackboard have narrower API and test scopes, with no live-tenant claim. The selected Codex route is not universal assistant proof. This is not whole-release verification. The value of the work is product judgment: I built a system that makes AI-assisted course changes reviewable before it calls them complete.”
+“The work is platform-specific. Canvas has selected sandbox proof through a browser connector. Moodle uses the same Chrome connection and has six live browser reads plus one selected Page update with a confirmed saved result. Other Moodle writes need live checks. Blackboard browser connection is not yet verified. Morrow is working toward closer Canvas and Moodle task coverage, not blanket parity. The selected Codex route is not universal assistant proof. This is not whole-release verification. The value of the work is product judgment: I built a system that lets course teams review AI-assisted changes before Morrow calls them complete.”
 
 ## Evidence sources
 
 - Morrow product overview: local architecture, assistant boundary, platform scope, and release status.
 - Canvas proof record: recorded operation receipts and proof scope for the selected sandbox.
-- Implementation review: page binding, revision guard, frozen approval, readback-only reconciliation, bounded batches, and educator-review limits.
+- Implementation review: target checks, revision guard, separate approval, checks without automatic repeat, controlled batches, and educator-review limits.

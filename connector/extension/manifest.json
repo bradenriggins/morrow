@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Morrow Canvas Connector",
-  "description": "Connect Canvas to Morrow from your assistant. Your Canvas password and sign-in details stay in Chrome.",
-  "version": "1.0.1",
+  "name": "Morrow Course Connector",
+  "description": "Connect Canvas and Moodle to Morrow from your assistant. Your learning-platform sign-in stays in Chrome.",
+  "version": "1.0.2",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxKPzBjXyxPr9Ldo6wKJCdBhHje1uXWrm+i1YeziYR0bUge+rH27V6+zGDVRyoLWyID2aNOofpCcBjqIVRH9JjhL8s7RxQa7mrIh6eM3aIEJ2xdaJA3HhNQ6/0QPCU22t64s0dvrkm12uqSJtMnYk0TjFbtKi7nLd1/KDMTPnpH3XWXNp8uRomqu+T0SGVugZNsOlFwOUSy2RMWAILdObolRJbncEILELdhxDjnQMEa7cumWbk2jhAA8nRXANNMo6ljZjmTmiDELAghDKX+wvbXmdkGve8Ns/UbLQi7rb9hSX/XrC5ZM0KpWwThukOBn9gcltxe23EFbqWnVHwqM/hwIDAQAB",
   "minimum_chrome_version": "116",
   "icons": { "128": "brand/morrow.png" },
@@ -14,7 +14,7 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Morrow Canvas Connector",
+    "default_title": "Morrow Course Connector",
     "default_icon": "brand/morrow.png",
     "default_popup": "popup/popup.html"
   }

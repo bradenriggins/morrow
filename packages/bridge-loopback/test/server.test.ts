@@ -7,6 +7,7 @@ import {
   parseBridgeJson,
   serializeBridgeMessage,
   type BridgeCommand,
+  type BridgeBinding,
 } from "@morrow/bridge-protocol";
 import { BridgeOutcomeUnknownError, LoopbackBridgeServer } from "../src/index.js";
 
@@ -22,7 +23,17 @@ afterEach(async () => {
   for (const server of servers.splice(0)) await server.close();
 });
 
-async function connect(server: LoopbackBridgeServer): Promise<WebSocket> {
+async function connect(
+  server: LoopbackBridgeServer,
+  bindings: readonly BridgeBinding[] = [{
+    sourceBindingId: "canvas-course-42",
+    provider: "canvas",
+    courseId: "42",
+    courseName: "Course 42",
+    origin: "https://school.instructure.com",
+    runtimeVerified: true,
+  }],
+): Promise<WebSocket> {
   const address = await server.start();
   const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
     origin: `chrome-extension://${extensionId}`,
@@ -36,14 +47,7 @@ async function connect(server: LoopbackBridgeServer): Promise<WebSocket> {
     extensionId,
     runtimeRevision: revision,
     catalogDigest: digest,
-    bindings: [{
-      sourceBindingId: "canvas-course-42",
-      provider: "canvas",
-      courseId: "42",
-      courseName: "Course 42",
-      origin: "https://school.instructure.com",
-      runtimeVerified: true,
-    }],
+    bindings,
     sentAt: Date.now(),
   }));
   await once(socket, "message");
@@ -144,6 +148,24 @@ describe("LoopbackBridgeServer", () => {
     expect(result.result).toEqual({ pages: [{ id: "1" }] });
     expect(calls).toBe(1);
     expect(server.health().bindingCount).toBe(1);
+  });
+
+  it("refuses a Moodle command for a Canvas binding", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    await connect(server);
+    await expect(server.invoke({
+      kind: "invoke_read",
+      toolName: "moodle_get_course",
+      operationKey: "moodle.ajax.core_course_get_courses.v1",
+      sourceBindingId: "canvas-course-42",
+    })).rejects.toThrow("moodle binding");
   });
 
   it("does not resend a timed-out command", async () => {

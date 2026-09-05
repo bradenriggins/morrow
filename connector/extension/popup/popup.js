@@ -28,13 +28,13 @@ function render(status) {
   const binding = status.bindings?.at(-1);
   const courseOpen = binding?.runtimeVerified === true;
   account.hidden = !binding;
-  accountOrigin.textContent = binding ? `${binding.courseName || "Canvas"} · ${binding.origin}${status.bindingCount > 1 ? ` · ${status.bindingCount} saved connections` : ""}` : "";
+  accountOrigin.textContent = binding ? `${binding.courseName || "Course"} · ${binding.siteUrl || binding.origin}${status.bindingCount > 1 ? ` · ${status.bindingCount} saved connections` : ""}` : "";
   setLastChecked(binding?.lastSeenAt);
   canvasValue.textContent = binding ? courseOpen ? "Course tab open" : "Course tab needed" : "Not connected";
   disconnect.hidden = !status.paired;
   primary.hidden = Boolean(status.connected && courseOpen);
   canvasAction.hidden = !(status.connected && courseOpen);
-  primary.textContent = status.pairing ? "Waiting for approval" : !status.paired ? "Connect Morrow" : !status.connected ? "Waiting for your assistant" : "Connect Canvas course";
+  primary.textContent = status.pairing ? "Waiting for approval" : !status.paired ? "Connect Morrow" : !status.connected ? "Waiting for your assistant" : "Connect course";
   detail.textContent = status.pairing
     ? "Confirm this connection on the Morrow page that opens. Then return to this popup."
     : !status.paired
@@ -44,10 +44,10 @@ function render(status) {
         : !status.connected
         ? "Open the assistant where you added Morrow. This popup will reconnect when Morrow is ready."
         : courseOpen
-          ? "Keep this Canvas course open and return to the assistant where you started this request. Morrow checks your sign-in before each request."
+          ? "Keep this course open and return to the assistant where you started this request. Morrow checks your sign-in before each request."
           : binding
-            ? "The saved Canvas course is no longer open. Open a signed-in Canvas course in Chrome, then select Connect Canvas course."
-          : "Morrow is connected. Open a signed-in Canvas course in Chrome, then select Connect Canvas course.";
+            ? "The saved course is no longer open. Open a signed-in Canvas or Moodle course in Chrome, then select Connect course."
+          : "Morrow is connected. Open a signed-in Canvas or Moodle course in Chrome, then select Connect course.";
   updateControls(status);
 }
 
@@ -78,12 +78,14 @@ async function refresh() {
 function showError(cause) {
   error.hidden = false;
   const message = String(cause?.message || cause || "").toLowerCase();
-  error.textContent = message.includes("signed-in canvas course") || message.includes("signed-in canvas page")
-    ? "Open a Canvas course in Chrome and sign in. Then use the Canvas connection button here."
-    : message.includes("morrow and morrow canvas connector versions do not match")
-      ? "Morrow and Morrow Canvas Connector versions do not match. Update or reload Morrow Canvas Connector in Chrome."
-    : message.includes("access to this exact canvas site") || message.includes("permission") || message.includes("denied")
-      ? "Allow Morrow to access this Canvas site, then try again."
+  error.textContent = message.includes("blackboard browser access")
+    ? "Blackboard browser access is not yet verified in this preview."
+    : message.includes("signed-in")
+    ? "Open a Canvas or Moodle course in Chrome and sign in. Then select Connect course."
+    : message.includes("morrow and morrow course connector versions do not match")
+      ? "Morrow and Morrow Course Connector versions do not match. Update or reload Morrow Course Connector in Chrome."
+    : message.includes("access to this exact course site") || message.includes("permission") || message.includes("denied")
+      ? "Allow Morrow to access this course site, then try again."
       : "Morrow could not complete that step. Open the assistant where you added Morrow, then try again.";
 }
 
@@ -109,7 +111,7 @@ function permissionPattern(value) {
 
 async function authorizeActiveCanvasTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id || !tab.url?.startsWith("https://")) throw new Error("Open the signed-in Canvas course that Morrow should use.");
+  if (!tab?.id || !tab.url?.startsWith("https://")) throw new Error("Open the signed-in course that Morrow should use.");
   const origins = new Set([permissionPattern(tab.url)]);
   const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => []);
   for (const frame of frames || []) {
@@ -118,7 +120,7 @@ async function authorizeActiveCanvasTab() {
       if (/^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i.test(url.hostname)) origins.add(permissionPattern(url.href));
     } catch {}
   }
-  if (!await chrome.permissions.request({ origins: [...origins] })) throw new Error("Morrow needs access to this exact Canvas site.");
+  if (!await chrome.permissions.request({ origins: [...origins] })) throw new Error("Morrow needs access to this exact course site.");
   return tab.id;
 }
 
@@ -141,7 +143,7 @@ async function runAction(action, onSuccess = () => {}) {
 
 async function connectCanvasCourse() {
   const tabId = await authorizeActiveCanvasTab();
-  return await message("morrow_connect_canvas", { tabId });
+  return await message("morrow_connect_course", { tabId });
 }
 
 primary.addEventListener("click", async () => {

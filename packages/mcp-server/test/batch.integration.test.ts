@@ -1,4 +1,6 @@
 import { once } from "node:events";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
@@ -13,6 +15,12 @@ import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-batch-upstream.mjs", import.meta.url));
+
+function connectorCatalogDigest(canvasCatalog: { readonly catalogDigest: string }): string {
+  const moodleBytes = readFileSync(resolve("../..", "connector/extension/generated/moodle-browser-catalog.json"));
+  const moodleDigest = createHash("sha256").update(moodleBytes).digest("hex");
+  return createHash("sha256").update(`${canvasCatalog.catalogDigest}\n${moodleDigest}`).digest("hex");
+}
 
 function config() {
   return parseGatewayConfig({
@@ -390,8 +398,8 @@ describe("MorrowRuntime durable batches", () => {
         protocolVersion: BRIDGE_PROTOCOL_VERSION,
         token: "gateway-connector-secret-".repeat(3),
         extensionId: "a".repeat(32),
-        runtimeRevision: "1.0.0-rc.1",
-        catalogDigest: catalog.catalogDigest,
+        runtimeRevision: "1.0.0-rc.2",
+        catalogDigest: connectorCatalogDigest(catalog),
         bindings: [{
           sourceBindingId,
           provider: "canvas",

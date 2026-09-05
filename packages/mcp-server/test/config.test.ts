@@ -87,23 +87,18 @@ describe("gateway configuration", () => {
     }
   });
 
-  it("loads Canvas, Moodle, and Blackboard defaults when no upstream file exists", async () => {
+  it("loads the Canvas browser connector default when no upstream file exists", async () => {
     const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
     const directory = await mkdtemp(join(tmpdir(), "morrow-default-config-"));
     try {
       const config = await loadGatewayConfig({ MORROW_UPSTREAMS_FILE: join(directory, "missing.json") }, repositoryRoot);
       expect(config.profile).toBe("private-full");
-      expect(config.upstreams).toMatchObject([{
+      expect(config.upstreams).toEqual([expect.objectContaining({
         id: "canvas-session",
         kind: "mcp-stdio",
         sourceDisposition: "direct_owned",
         required: true,
-      }, {
-        id: "lms-api",
-        kind: "mcp-stdio",
-        sourceDisposition: "direct_owned",
-        required: true,
-      }]);
+      })]);
       expect(config.maxCatalogTools).toBe(2000);
     } finally {
       await rm(directory, { recursive: true, force: true });

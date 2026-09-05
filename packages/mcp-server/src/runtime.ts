@@ -247,7 +247,7 @@ function isCanvasConnector(mapping: CatalogTool): boolean {
 }
 
 function usesEmbeddedReadback(mapping: CatalogTool): boolean {
-  return isCanvasConnector(mapping) || mapping.capability?.route.backend === "lms-api";
+  return isCanvasConnector(mapping);
 }
 
 function connectorReadback(mapping: CatalogTool, request: JsonObject): FrozenReadbackPlan {
@@ -267,15 +267,8 @@ function connectorReadback(mapping: CatalogTool, request: JsonObject): FrozenRea
 
 function connectorVerification(mapping: CatalogTool, value: JsonObject): JsonObject | null {
   const connector = isJsonObject(value.structuredContent) ? value.structuredContent : null;
-  if (mapping.capability?.route.backend === "lms-api") {
-    const verification = connector && isJsonObject(connector.verification) ? connector.verification : null;
-    return connector?.schema === "morrow.lms-api.result.v1" && connector.ok === true
-      && connector.provider === mapping.capability.provider
-      && verification?.schema === "morrow.lms-verification.v1"
-      && ["verified", "mismatch", "unconfirmed"].includes(String(verification.status))
-      ? structuredClone(verification) : null;
-  }
-  if (!connector || connector.schema !== "morrow.canvas-connector.result.v1" || connector.ok !== true) return null;
+  if (!connector || connector.schema !== "morrow.canvas-connector.result.v1" || connector.ok !== true
+    || connector.provider !== mapping.capability?.provider) return null;
   const browser = isJsonObject(connector.result) ? connector.result : null;
   const verification = browser && isJsonObject(browser.verification) ? browser.verification : null;
   if (!verification || verification.schema !== "morrow.browser-verification.v1") return null;
@@ -948,7 +941,10 @@ export class GatewayRuntime {
     try {
       const supplied = outerOperationControls(args);
       if (isCanvasConnector(mapping) && !legacyRouting(supplied.request).sourceBindingId) {
-        throw new TypeError("Canvas connector writes require one exact source_binding_id from morrow_canvas_bindings");
+        throw new TypeError("Browser connector writes require one exact source_binding_id from morrow_browser_bindings");
+      }
+      if (mapping.capability?.provider === "moodle" && !/^[0-9a-f]{64}$/.test(String(supplied.request.expected_digest || ""))) {
+        throw new TypeError("Moodle browser writes require expected_digest from the exact preceding read");
       }
       const controls: OuterOperationControls = supplied.readback || !usesEmbeddedReadback(mapping)
         ? supplied

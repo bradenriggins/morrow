@@ -12,13 +12,13 @@ Morrow `1.0.0-rc.0` is a local release candidate. It is not yet a stable public 
 
 ## Product limits
 
-- Canvas uses the signed-in Chrome connector. Moodle and Blackboard have separate, private, hand-configured API previews with five reads and one bounded write each. Their official API and local test evidence does not establish live-tenant compatibility. See [provider scope](README.md#private-moodle-and-blackboard-preview).
-- MindTap and Connect are not supported, listed, or callable.
-- The connector can act only with the permissions of the current signed-in Canvas user.
-- The connector needs an open, signed-in Canvas tab. Item Bank operations also need an authenticated New Quizzes frame for the selected tenant and course.
+- Canvas and Moodle use the signed-in Chrome connector. Canvas has selected live test-course proof. Moodle has six live browser reads, one selected Page update with a confirmed saved result, and 21 implemented operations; other Moodle writes still need live checks. Morrow is working toward closer task coverage, not blanket platform parity. Blackboard browser connection is not yet verified and Blackboard course work is unavailable. See [provider scope](README.md#browser-connected-platforms).
+- MindTap and Connect are not supported, listed, or callable. See the [inclusion review](docs/release/CONNECT-MINDTAP-INCLUSION-REVIEW-2026-09-05.md) for evidence reviewed and open decisions.
+- The connector can act only with the permissions of the current signed-in Canvas or Moodle user.
+- The connector needs an open, signed-in Canvas or Moodle tab. Canvas Item Bank operations also need an authenticated New Quizzes frame for the selected tenant and course.
 - Six existing-bank mutation contracts are held pending complete dependency and affected-course evidence. Bank reads and creation remain enabled. A matching request contract does not establish safe cross-course effects.
 - The connector does not reuse authentication from ChatGPT, Claude, or another application's in-app browser.
-- Chrome grants optional site access per Canvas origin. A school that blocks extensions, frame execution, local WebSockets, or Canvas API access can prevent operation.
+- Chrome grants optional site access per platform origin. A school that blocks extensions, frame execution, local WebSockets, or the platform connection can prevent operation.
 - Content Security Policy or a future Canvas UI change can require a connector update. Catalog and browser tests detect known contract drift, but they cannot prevent provider changes.
 - Only exact explicit course sets can create write batches. Morrow does not treat partial discovery as an all-courses target.
 - A write without a safe frozen readback route is refused or remains unconfirmed. It is never reported as verified.

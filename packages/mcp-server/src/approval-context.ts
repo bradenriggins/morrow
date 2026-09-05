@@ -152,6 +152,68 @@ function bindingOrigin(result: JsonObject, sourceBindingId: string): string | nu
   }
 }
 
+function moodleBinding(result: JsonObject, sourceBindingId: string): { readonly courseId: string } | null {
+  if (result.isError === true) return null;
+  const content = object(result.structuredContent);
+  if (!content || content.schema !== "morrow.browser-bindings.v1" || !Array.isArray(content.bindings)) return null;
+  const binding = content.bindings.find((candidate) => {
+    const value = object(candidate);
+    return value?.sourceBindingId === sourceBindingId
+      && value.provider === "moodle"
+      && value.runtimeVerified === true;
+  });
+  const value = object(binding);
+  const origin = exactText(value?.origin);
+  const siteUrl = exactText(value?.siteUrl);
+  const courseId = typeof value?.courseId === "string" && CANVAS_ID.test(value.courseId) ? value.courseId : null;
+  if (!origin || !siteUrl || !courseId) return null;
+  try {
+    const parsedOrigin = new URL(origin);
+    const parsedSiteUrl = new URL(siteUrl);
+    const valid = parsedOrigin.protocol === "https:" && parsedOrigin.origin === origin
+      && parsedSiteUrl.protocol === "https:" && parsedSiteUrl.href === siteUrl
+      && !parsedSiteUrl.username && !parsedSiteUrl.password && !parsedSiteUrl.search && !parsedSiteUrl.hash
+      && parsedSiteUrl.origin === origin;
+    return valid ? { courseId } : null;
+  } catch {
+    return null;
+  }
+}
+
+function moodleCourseId(value: unknown): string | null {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
+  return typeof value === "string" && CANVAS_ID.test(value) ? value : null;
+}
+
+function moodleRead(result: JsonObject): {
+  readonly data: JsonObject;
+  readonly targets: readonly JsonObject[];
+  readonly snapshotDigest: string;
+} | null {
+  if (result.isError === true) return null;
+  const content = object(result.structuredContent);
+  if (!content || content.schema !== "morrow.canvas-connector.result.v1" || content.ok !== true
+    || content.provider !== "moodle" || content.commandKind !== "invoke_read") return null;
+  const browser = object(content.result);
+  const data = object(browser?.data);
+  if (!browser || browser.ok !== true || browser.sent !== true || !data || !Array.isArray(browser.targets)
+    || typeof browser.snapshot_digest !== "string" || !/^[0-9a-f]{64}$/.test(browser.snapshot_digest)) return null;
+  return {
+    data,
+    targets: browser.targets.filter(isJsonObject),
+    snapshotDigest: browser.snapshot_digest,
+  };
+}
+
+function approvalTargets(args: JsonObject, targets: readonly JsonObject[]): ApprovalReviewContext["targets"] {
+  return targets.flatMap((target) => {
+    const field = exactText(target.field);
+    const label = exactText(target.label);
+    const name = exactText(target.name);
+    return field && label && name && field in args ? [{ field, label, name }] : [];
+  });
+}
+
 function readCacheKey(
   input: ApprovalReviewContextInput,
   publicName: string,
@@ -357,14 +419,29 @@ function resolvedTarget(
   };
 }
 
-function currentContent(args: JsonObject, value: JsonObject): JsonObject {
+function moodleCurrentVisibility(toolName: string, args: JsonObject, value: JsonObject): boolean | null {
+  if (!/^moodle_(?:show|hide)_(?:course|section|activity)$/.test(toolName)) return null;
+  if (toolName.endsWith("_course")) return typeof value.visible === "boolean" ? value.visible : null;
+  const section = toolName.endsWith("_section");
+  const field = section ? "section_id" : "module_id";
+  const targetId = moodleCourseId(args[field]);
+  const entries = value[section ? "sections" : "activities"];
+  const target = Array.isArray(entries) ? entries.find((entry) => sameId(object(entry)?.id, targetId || "")) : null;
+  const visible = object(target)?.visible;
+  return typeof visible === "boolean" ? visible : null;
+}
+
+function currentContent(args: JsonObject, value: JsonObject, toolName = ""): JsonObject {
   const fields: Record<string, string> = {
     wiki_page_body: "body", wiki_page_title: "title", wiki_page_published: "published",
     assignment_description: "description", assignment_name: "name", assignment_points_possible: "points_possible",
     assignment_due_at: "due_at", assignment_unlock_at: "unlock_at", assignment_lock_at: "lock_at", assignment_published: "published",
     quiz_instructions: "instructions", quiz_title: "title", body: "body", summary: "summary", title: "title", message: "message", published: "published",
+    name: "name", content: "content", instructions: "instructions", due_date: "due_date", open_at: "open_at", close_at: "close_at", visible: "visible",
   };
-  return Object.fromEntries(Object.entries(fields).flatMap(([field, source]) => field in args && Object.hasOwn(value, source) ? [[field, value[source]!]] : []));
+  const current = Object.fromEntries(Object.entries(fields).flatMap(([field, source]) => field in args && Object.hasOwn(value, source) ? [[field, value[source]!]] : []));
+  const visible = moodleCurrentVisibility(toolName, args, value);
+  return visible === null ? current : { ...current, visible };
 }
 
 function currentQuestionContent(value: JsonObject): JsonObject {
@@ -386,33 +463,35 @@ export async function resolveApprovalReviewContext(
 ): Promise<ApprovalReviewContext> {
   const review = input.cache ? input : { ...input, cache: new Map() };
   const { operation, tools } = input;
-  const lmsMapping = tools.find((tool) => tool.publicName === operation.publicToolName
-    && tool.upstreamId === operation.sourceId && tool.upstreamName === operation.sourceToolName
-    && tool.capability?.route.backend === "lms-api" && tool.annotations?.readOnlyHint !== true);
-  if (lmsMapping) {
-    const plan = object(operation.plan);
-    const args = object(plan?.arguments);
-    const readTool = exactSourceTool(tools, operation.sourceId, lmsMapping.capability?.route.planBackend || "", false);
-    if (!args || !readTool || readTool.capability?.route.backend !== "lms-api"
-      || readTool.capability.provider !== lmsMapping.capability?.provider
-      || plan?.tool !== operation.publicToolName || plan?.source !== operation.sourceId) return { targets: [] };
-    const properties = object(readTool.inputSchema.properties) || {};
-    const readArgs = Object.fromEntries(Object.entries(args).filter(([key]) => key in properties));
-    const read = await boundedRead(review, readTool.publicName, readArgs);
-    const result = object(read.result?.structuredContent);
-    if (read.result?.isError || result?.schema !== "morrow.lms-api.result.v1" || result.ok !== true
-      || result.provider !== lmsMapping.capability?.provider || !Array.isArray(result.targets)
-      || (operation.state === "awaiting_approval" && (result.snapshot_digest !== args.expected_digest || result.connection_digest !== args.expected_connection))) {
+  const browserMapping = operationTool(operation, tools);
+  if (browserMapping?.capability?.provider === "moodle") {
+    if (!operation.sourceBindingId) return { targets: [] };
+    const args = planArguments(operation);
+    const reviewTool = exactSourceTool(tools, operation.sourceId, browserMapping.capability.route.planBackend || "", false);
+    const bindingTool = exactSourceTool(tools, operation.sourceId, "morrow_browser_bindings", false);
+    if (!args || !reviewTool || !bindingTool || reviewTool.capability?.route.backend !== "canvas-connector"
+      || reviewTool.capability.provider !== "moodle") return { targets: [] };
+    const bindingRead = await boundedRead(review, bindingTool.publicName, {});
+    const binding = bindingRead.result ? moodleBinding(bindingRead.result, operation.sourceBindingId) : null;
+    if (!binding || ("course_id" in args && moodleCourseId(args.course_id) !== binding.courseId)) {
+      return { targets: [], ...(bindingRead.limited ? { limited: true } : {}) };
+    }
+    const properties = object(reviewTool.inputSchema.properties) || {};
+    const readArgs = {
+      ...Object.fromEntries(Object.entries(args).filter(([key]) => key in properties)),
+      _morrow: { source_binding_id: operation.sourceBindingId },
+    };
+    const read = await boundedRead(review, reviewTool.publicName, readArgs);
+    const result = read.result ? moodleRead(read.result) : null;
+    if (!result || (operation.state === "awaiting_approval" && result.snapshotDigest !== args.expected_digest)) {
       return { targets: [], ...(read.limited ? { limited: true } : {}) };
     }
-    const data = object(result.data) || {};
-    const current = operation.state === "awaiting_approval" ? currentContent(args, object(data.content) || data) : {};
-    return { ...(Object.keys(current).length ? { current } : {}), targets: result.targets.filter(isJsonObject).flatMap((target) => {
-      const field = exactText(target.field);
-      const label = exactText(target.label);
-      const name = exactText(target.name);
-      return field && label && name && field in args ? [{ field, label, name }] : [];
-    }) };
+    const current = operation.state === "awaiting_approval" ? currentContent(args, result.data, browserMapping.upstreamName) : {};
+    return {
+      ...(Object.keys(current).length ? { current } : {}),
+      targets: approvalTargets(args, result.targets),
+      ...(read.limited ? { limited: true } : {}),
+    };
   }
   if (!operation.sourceBindingId) return { targets: [] };
   const args = planArguments(operation);

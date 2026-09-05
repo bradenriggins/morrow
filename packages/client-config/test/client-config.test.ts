@@ -19,21 +19,15 @@ function fileContent(bundle: ReturnType<typeof buildClientConfigBundle>, path: s
 }
 
 describe("buildClientConfigBundle", () => {
-  it("builds one local configuration for Canvas, Moodle, and Blackboard without credentials", () => {
+  it("builds one local browser-connector configuration without credentials", () => {
     const root = resolve("/tmp/morrow-local");
     const config = buildLocalCanvasConfig(root, "/usr/local/bin/node") as { upstreams: Record<string, unknown>[] };
-    expect(config.upstreams).toMatchObject([{
+    expect(config.upstreams).toEqual([expect.objectContaining({
       id: "canvas-session",
       command: "/usr/local/bin/node",
       cwd: root,
       sourceDisposition: "direct_owned",
-    }, {
-      id: "lms-api",
-      command: "/usr/local/bin/node",
-      args: [resolve(root, "packages/mcp-server/dist/lms-api-entry.js")],
-      cwd: root,
-      sourceDisposition: "direct_owned",
-    }]);
+    })]);
     expect(JSON.stringify(config)).not.toMatch(/(?:canvas_token|cookie|credential)/i);
   });
 
@@ -177,7 +171,6 @@ describe("project installation and hermetic parity", () => {
       await mkdir(join(repositoryRoot, "artifacts", "canvas-api"), { recursive: true });
       await mkdir(join(repositoryRoot, "connector", "extension"), { recursive: true });
       await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
-      await writeFile(join(repositoryRoot, "packages", "mcp-server", "dist", "lms-api-entry.js"), "console.error('fixture');\n", "utf8");
       await writeFile(join(repositoryRoot, "packages", "canvas-connector-mcp", "dist", "index.js"), "console.error('fixture');\n", "utf8");
       await writeFile(join(repositoryRoot, "artifacts", "canvas-api", "canvas-api-catalog.json"), "{}\n", "utf8");
       await writeFile(join(repositoryRoot, "connector", "extension", "manifest.json"), "{}\n", "utf8");

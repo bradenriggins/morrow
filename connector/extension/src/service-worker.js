@@ -1,20 +1,32 @@
 import { executeItemBankInPage } from "./item-bank-executor.js";
 import { evaluateBrowserReadback, planBrowserReadback } from "./verification.js";
+import { executeMoodleInPage } from "./moodle-executor.js";
 
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
 const PROTOCOL_VERSION = 1;
-const RUNTIME_REVISION = "1.0.0-rc.1";
+const RUNTIME_REVISION = "1.0.0-rc.2";
 const state = { socket: null, generation: 0, catalog: null, operations: new Map(), reconnectTimer: null };
+
+async function sha256(value) {
+  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value))), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 async function catalog() {
   if (state.catalog) return state.catalog;
   const response = await fetch(chrome.runtime.getURL("generated/canvas-api-catalog.json"));
   const value = await response.json();
   if (value?.schema !== "morrow.canvas-api-catalog.v1" || !Array.isArray(value.operations)) throw new Error("connector_catalog_invalid");
-  state.catalog = value;
-  state.operations = new Map(value.operations.map((operation) => [operation.toolName, operation]));
-  return value;
+  const moodleResponse = await fetch(chrome.runtime.getURL("generated/moodle-browser-catalog.json"));
+  const moodleText = await moodleResponse.text();
+  const moodle = JSON.parse(moodleText);
+  if (moodle.schema !== "morrow.browser-catalog.v1" || moodle.provider !== "moodle" || !Array.isArray(moodle.operations)
+    || moodle.operations.some((operation) => operation.provider !== "moodle" || !operation.toolName.startsWith("moodle_"))) throw new Error("connector_catalog_invalid");
+  state.catalog = { ...value, catalogDigest: await sha256(`${value.catalogDigest}\n${await sha256(moodleText)}`) };
+  const operations = [...value.operations.map((operation) => ({ ...operation, provider: "canvas" })), ...moodle.operations];
+  state.operations = new Map(operations.map((operation) => [operation.toolName, operation]));
+  if (state.operations.size !== operations.length) throw new Error("connector_catalog_invalid");
+  return state.catalog;
 }
 
 function bridgeUrl() {
@@ -33,13 +45,21 @@ async function publicBindings() {
   const stored = await storage();
   return await Promise.all((stored.bindings || []).map(async ({ principalId: _principalId, tabId, ...binding }) => ({
     ...binding,
-    runtimeVerified: binding.runtimeVerified && canvasTabMatches(await chrome.tabs.get(tabId).catch(() => null), binding),
+    runtimeVerified: binding.runtimeVerified && await courseTabMatches(await chrome.tabs.get(tabId).catch(() => null), { ...binding, principalId: _principalId, tabId }),
   })));
 }
 
-function canvasTabMatches(tab, binding) {
+async function courseTabMatches(tab, binding) {
   if (!tab?.url) return false;
   const url = new URL(tab.url);
+  if (binding.provider === "moodle") {
+    if (url.origin !== binding.origin) return false;
+    const [probe] = await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage, args: [{ mode: "probe" }] }).catch(() => []);
+    const profile = probe?.result?.profile;
+    return probe?.result?.ok === true && profile?.siteUrl === binding.siteUrl && profile.principalId === binding.principalId
+      && (!binding.courseId || profile.courseId === binding.courseId);
+  }
+  if (binding.provider !== "canvas") return false;
   return url.origin === binding.origin && (!binding.courseId || url.pathname.match(/^\/courses\/([1-9][0-9]*)(?:\/|$)/)?.[1] === binding.courseId);
 }
 
@@ -199,6 +219,17 @@ async function executeItemBank(binding, operation, args) {
 }
 
 async function executeOperation(binding, operation, args, expiresAt) {
+  if (operation.provider === "moodle") {
+    try {
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage,
+        args: [{ mode: "execute", operation, arguments: args, binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt }],
+      });
+      return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "moodle_result_missing" };
+    } catch {
+      return { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "moodle_execution_interrupted" };
+    }
+  }
   return operation.service === "item_bank"
     ? await executeItemBank(binding, operation, args)
     : await executeCanvas(binding, operation, args, expiresAt);
@@ -216,20 +247,25 @@ async function handleCommand(command) {
     return sendResult(command, false, null, problem("item_bank_dependency_review_required", "Changes to an existing Item Bank require a complete dependency and affected-course review. This release cannot yet establish that evidence.", false));
   }
   const binding = await bindingFor(command.sourceBindingId);
-  if (!binding?.runtimeVerified) return sendResult(command, false, null, problem("canvas_binding_required", "Select one connected Canvas account.", true));
+  if (!binding?.runtimeVerified || binding.provider !== operation.provider) return sendResult(command, false, null, problem("canvas_binding_required", "Select one current connection for this learning platform.", true));
   const tab = await chrome.tabs.get(binding.tabId).catch(() => null);
-  if (!canvasTabMatches(tab, binding)) return sendResult(command, false, null, problem("canvas_binding_stale", "The connected Canvas course is no longer open. Open the course and connect it again.", true));
+  if (!await courseTabMatches(tab, binding)) return sendResult(command, false, null, problem("canvas_binding_stale", "The connected course or account changed. Open the course and connect it again.", true));
   if (!await reserveReceipt(command)) return sendResult(command, false, null, problem("effect_receipt_refused", "The provider effect receipt is missing or was already used.", false));
   const result = await executeOperation(binding, operation, command.arguments || {}, command.expiresAt);
   if (!result?.ok) {
-    const unknown = result?.outcomeUnknown === true || (result?.sent === true && command.kind === "invoke_write" && !Number.isInteger(result.status));
+    const unknown = result?.outcomeUnknown === true || (result?.sent === true && command.kind === "invoke_write" && (
+      !Number.isInteger(result.status)
+      || (operation.provider === "moodle" && result.verification?.status !== "verified" && result.error !== "moodle_form_validation_failed")
+    ));
     return sendResult(command, false, null, problem(unknown ? "write_outcome_unknown" : result?.sent === false ? "canvas_request_not_sent" : "canvas_request_failed", errorMessage(result?.error || `Canvas returned HTTP ${result?.status || 0}`).slice(0, 900), !unknown));
   }
   let verification;
   if (command.kind === "invoke_write") {
     const guardedPage = command.arguments?.morrow_page_guard;
-    const plan = guardedPage ? null : planBrowserReadback([...state.operations.values()], operation, command.arguments || {}, result.data);
-    if (guardedPage) {
+    const plan = guardedPage || operation.provider !== "canvas" ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
+    if (operation.provider === "moodle") {
+      verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_verification_missing" };
+    } else if (guardedPage) {
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "page_verification_missing" };
     } else if (plan) {
       const readback = await executeOperation(binding, plan.readOperation, plan.arguments);
@@ -238,7 +274,7 @@ async function handleCommand(command) {
       verification = { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "no_safe_readback_route" };
     }
   }
-  return sendResult(command, true, { schema: "morrow.canvas-browser-result.v1", ...result, ...(verification ? { verification } : {}) }, null);
+  return sendResult(command, true, { schema: "morrow.canvas-browser-result.v1", ...result, provider: operation.provider, ...(verification ? { verification } : {}) }, null);
 }
 
 async function handleBridgeMessage(message) {
@@ -264,7 +300,7 @@ async function requestPairing() {
     if (response.status === 403) {
       const body = await response.json().catch(() => null);
       if (body?.error === "connector_identity_refused") {
-        throw new Error("Morrow and Morrow Canvas Connector versions do not match. Update or reload Morrow Canvas Connector in Chrome.");
+        throw new Error("Morrow and Morrow Course Connector versions do not match. Update or reload Morrow Course Connector in Chrome.");
       }
     }
     throw new Error("Morrow MCP is not running on this computer.");
@@ -329,32 +365,38 @@ async function permissionOrigins(tabId, tabUrl) {
   return [...origins];
 }
 
-async function connectCanvasTab(requestedTabId) {
+async function connectCourseTab(requestedTabId) {
   const tab = Number.isInteger(requestedTabId)
     ? await chrome.tabs.get(requestedTabId).catch(() => null)
     : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
-  if (!tab?.id || !tab.url?.startsWith("https://")) throw new Error("Open the signed-in Canvas course that Morrow should use.");
+  if (!tab?.id || !tab.url?.startsWith("https://")) throw new Error("Open the signed-in course that Morrow should use.");
   const origins = await permissionOrigins(tab.id, tab.url);
-  if (!await chrome.permissions.contains({ origins })) throw new Error("Morrow needs access to this exact Canvas site.");
-  await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ["src/canvas-content.js"] });
-  const probe = await chrome.tabs.sendMessage(tab.id, { type: "morrow_canvas_probe" }, { frameId: 0 });
-  if (!probe?.ok) throw new Error("This tab is not a signed-in Canvas page.");
-  const material = new TextEncoder().encode(`${probe.profile.origin}\0${probe.profile.id}`);
-  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", material)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  if (!await chrome.permissions.contains({ origins })) throw new Error("Morrow needs access to this exact course site.");
+  const [moodle] = await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage, args: [{ mode: "probe" }] });
+  let profile = moodle?.result?.ok === true ? moodle.result.profile : null;
+  if (!profile) {
+    if (/^\/(?:ultra|webapps)(?:\/|$)/.test(new URL(tab.url).pathname)) throw new Error("Blackboard browser access is not yet verified in this preview.");
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ["src/canvas-content.js"] });
+    const probe = await chrome.tabs.sendMessage(tab.id, { type: "morrow_canvas_probe" }, { frameId: 0 });
+    if (!probe?.ok) throw new Error("Open a signed-in Canvas or Moodle course.");
+    profile = { ...probe.profile, provider: "canvas", principalId: probe.profile.id };
+  }
+  const digest = await sha256(`${profile.provider}\0${profile.siteUrl || profile.origin}\0${profile.principalId}`);
   const stored = await storage();
-  const previous = (stored.bindings || []).find((binding) => binding.principalFingerprint === digest && binding.origin === probe.profile.origin);
+  const previous = (stored.bindings || []).find((binding) => binding.principalFingerprint === digest && binding.origin === profile.origin);
   const sessionGeneration = (previous?.sessionGeneration || 0) + 1;
   const binding = {
-    sourceBindingId: `canvas:${digest.slice(0, 20)}:g${sessionGeneration}`,
-    provider: "canvas",
-    origin: probe.profile.origin,
+    sourceBindingId: `${profile.provider}:${digest.slice(0, 20)}:g${sessionGeneration}`,
+    provider: profile.provider,
+    origin: profile.origin,
+    ...(profile.siteUrl ? { siteUrl: profile.siteUrl } : {}),
     principalFingerprint: digest,
     sessionGeneration,
     runtimeVerified: true,
     lastSeenAt: Date.now(),
-    ...(probe.profile.courseId ? { courseId: probe.profile.courseId } : {}),
-    ...(probe.profile.courseName ? { courseName: probe.profile.courseName } : {}),
-    principalId: probe.profile.id,
+    ...(profile.courseId ? { courseId: profile.courseId } : {}),
+    ...(profile.courseName ? { courseName: profile.courseName } : {}),
+    principalId: profile.principalId,
     tabId: tab.id,
   };
   const bindings = [...(stored.bindings || []).filter((candidate) => candidate.principalFingerprint !== digest || candidate.origin !== binding.origin), binding];
@@ -374,7 +416,7 @@ async function status() {
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
     connected: state.socket?.readyState === WebSocket.OPEN && state.generation > 0,
     bindingCount: bindings.length,
-    bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, origin: binding.origin, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, lastSeenAt: binding.lastSeenAt })),
+    bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, lastSeenAt: binding.lastSeenAt })),
   };
 }
 
@@ -403,7 +445,7 @@ async function disconnectConnector() {
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   const run = message?.type === "morrow_pair" ? requestPairing
-    : message?.type === "morrow_connect_canvas" ? () => connectCanvasTab(message.tabId)
+    : message?.type === "morrow_connect_course" ? () => connectCourseTab(message.tabId)
       : message?.type === "morrow_status" ? status
         : message?.type === "morrow_disconnect" ? disconnectConnector
         : null;

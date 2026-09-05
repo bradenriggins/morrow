@@ -79,7 +79,9 @@ SHA-256: `c003b82e052ac12c71782b8da84401818c4023956aed421432d24a6d8e3ff1e7`.
 
 Catalog digest: `a9b5529753ae663db279dce802586255fe45412482cff72eeade8bd8b574927a`.
 
-## Moodle and Blackboard API validation
+## Historical Moodle and Blackboard API validation (retired)
+
+The direct-token paths described in this historical section were removed during the later shared-bridge work. They are not current setup or capability instructions. Current browser implementation and live Moodle evidence are in [THREE-LMS-BRIDGE-PARITY.md](THREE-LMS-BRIDGE-PARITY.md).
 
 Braden has no Moodle or Blackboard test tenant. Their implemented adapters were checked against official Moodle 5.2.2 source and the official Blackboard Learn API specification. This is documented API and local adapter evidence, not live tenant proof.
 
@@ -89,7 +91,7 @@ The focused provider, connection, and gateway suite passed all 10 tests. An inde
 
 ## Delivery verification
 
-The private archive is built from committed source. Its exact source revision, checksum, deterministic rebuild, and scan results are recorded in `artifacts/candidates/private-full/receipt.json`. The private preview handoff links the independent install receipt for that exact archive. An install in a fresh directory on this Mac does not establish independent-machine compatibility. Public release requires separate source-rights evidence and Braden's preview approval.
+The shared Canvas/Moodle source has not yet been packaged as a final private candidate. Earlier archive and installation evidence does not verify this changed source. A final archive must identify its exact committed revision, checksum, deterministic rebuild, and scan result. An install in a fresh directory on this Mac does not establish independent-machine compatibility. Public release requires separate source-rights evidence and Braden's preview approval.
 
 After renewed user authorization, Chrome’s normal extension Details page confirmed the active worktree path and returned “Reloaded.” No alternate management route or extension lifecycle script was used.
 

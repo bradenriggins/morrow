@@ -2,7 +2,7 @@
 format: 1920x1080
 duration: 33.1s
 message: "Review before you approve. Know what was saved. Keep your sign-in private. Choose how you work."
-arc: "Course-work purpose → Review gate → Saved-work check → Chrome sign-in boundary → Compatible assistant choice → Product promise"
+arc: "Course-work purpose → Review gate → Saved-work check → Chrome sign-in boundary → Assistant set up with Morrow → Product promise"
 audience: "Instructional designers, course builders, and experienced instructors"
 mode: autonomous
 music: none
@@ -17,7 +17,7 @@ phase, so each step causes the next action. Use one paused GSAP timeline,
 movement along visible rails, gate opening, connector drawing, and a final dark
 field push. Each pillar is a single-line main heading. Scene handoffs preserve
 the packet and show the next stage immediately. Do not use crossfades to an empty background, generic slide layouts,
-fake UI skeletons, live Canvas evidence, provider logos, or a detailed course
+fake UI skeletons, live course evidence, provider logos, or a detailed course
 example.
 
 ## Frame 1 — Purpose
@@ -57,10 +57,10 @@ before the packet crosses its area.
 - transition_in: connected handoff
 - scene: The approved packet aligns with saved work.
 
-The heading states Know what was saved. Its caption states that Morrow checks
-what Canvas saved and that an unconfirmed result needs attention. The reviewed
-request remains readable on the left. A violet connector grows from its edge to
-the saved packet on the right. A check appears on that same center line.
+The heading states Know what was saved. Its caption states Morrow checks the
+saved result and that an unconfirmed result needs attention. The reviewed
+request remains readable on the left. A violet connector grows from its edge
+to the saved packet on the right. A check appears on that same center line.
 Matches the reviewed request appears below the packet, with a smaller visible
 unconfirmed-result path below it. The document rows are illustrative content.
 
@@ -70,15 +70,15 @@ unconfirmed-result path below it. The document rows are illustrative content.
 - src: index.html#phase-private
 - duration: 7.0s
 - transition_in: connected handoff
-- scene: The packet travels from Canvas, through Morrow review, to a compatible assistant.
+- scene: The packet travels from the signed-in course, through Morrow review, to the selected assistant.
 
 Chrome is on the right, Morrow review is in the center, and the chosen
-assistant is on the left. The heading and main caption say Keep
-your sign-in private and Your Canvas sign-in stays in Chrome. The small
-assistant caption says Course content can be shared with your assistant. The
-packet moves right to left along arrows that meet each node edge. The sign-in
-lock stays inside Chrome. The packet pauses at Morrow review before it reaches
-the selected assistant.
+assistant is on the left. The course card is labeled Your course. The heading
+and main caption say Keep your sign-in private and Your course sign-in stays in
+Chrome. The small assistant caption says Course content can be shared with your
+assistant. The packet moves right to left along arrows that meet each node
+edge. The sign-in lock stays inside Chrome. The packet pauses at Morrow review
+before it reaches the selected assistant.
 
 ## Frame 5 — Choose how you work
 
@@ -86,13 +86,13 @@ the selected assistant.
 - src: index.html#phase-choice
 - duration: 5.6s
 - transition_in: connected handoff
-- scene: The compatible-assistant selection moves while Morrow review remains fixed.
+- scene: The assistant selection moves while Morrow review remains fixed.
 
 The selected assistant and Morrow review stay at the same coordinates. An
 illustrative selection changes from Your assistant to Another assistant. The
-scene still calls out compatible-assistant scope. This depicts a choice of
-assistant without a provider endorsement or a claim that every assistant is
-supported.
+caption states Use an assistant set up with Morrow. Review stays in Morrow.
+This depicts a choice of assistant without a provider endorsement or a claim
+that every assistant is supported.
 
 ## Frame 6 — Close
 

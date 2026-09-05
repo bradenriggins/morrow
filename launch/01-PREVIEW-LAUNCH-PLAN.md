@@ -4,17 +4,18 @@
 
 Make Morrow's four commitments visible through one clear story: **review before you approve, know what was saved, keep your sign-in private, and choose how you work**. The website and launch film lead with the shared promise: **Move course work forward. Stay in control.** The case study and evidence record explain the engineering and selected tests.
 
-Canvas supplies the concrete access model and selected live evidence. Moodle and Blackboard appear lower in the provider-scope section with their documented API and test limits.
+Canvas supplies the selected live course evidence. Canvas and Moodle use the same signed-in Chrome connection. Moodle has six live browser reads and one selected Page update with a confirmed saved result. Other Moodle writes need live checks. Blackboard browser connection is not yet verified and Blackboard course work is unavailable.
 
 ## Current evidence position
 
 | Evidence | Current result | Public wording |
 | --- | --- | --- |
-| Canvas source review | Two independent reviews and a separate checker retained planted lesson and quiz-key findings through a manual MCP host adapter. | `Bounded source-review evidence through a manual adapter.` |
-| Canvas lesson correction | One approved phrase correction reached verified saved-page readback, with named page settings preserved. | `Selected Canvas lesson correction verified.` |
-| Stale Canvas request | A later stale proposal failed before send; later page body and update time were unchanged. | `Stale request refused before send.` |
-| New Quiz key, module, publication, learner route | The New Quiz key reached verified readback; two module links and three publication operations reached verified readback. Canvas Student View showed the corrected lesson, all three quiz questions, and a 100% three-point result with all feedback visible. | `Selected Canvas sandbox learner route verified.` |
-| Moodle and Blackboard | Official API and test validation only. | `Development scope; no live-tenant claim.` |
+| Canvas source review | Two independent reviews and a separate checker retained planted lesson and quiz-key findings through a manual MCP host adapter. | Bounded source-review evidence through a manual adapter. |
+| Canvas lesson correction | One approved phrase correction reached verified saved-page readback, with named page settings preserved. | Selected Canvas lesson correction verified. |
+| Stale Canvas request | A later stale proposal failed before send; later page body and update time were unchanged. | Stale request refused before send. |
+| New Quiz key, module, publication, learner route | The New Quiz key reached verified readback; two module links and three publication operations reached verified readback. Canvas Student View showed the corrected lesson, all three quiz questions, and a 100% three-point result with all feedback visible. | Selected Canvas sandbox learner route verified. |
+| Moodle | Six live browser reads and one selected Page update through the Chrome connection. Twenty-one operations are implemented; other Moodle writes need live checks. | Moodle reads and one selected Page update have live proof. |
+| Blackboard | Browser connection is not yet verified. | Blackboard course work unavailable. |
 
 ## Readiness gates
 
@@ -28,11 +29,12 @@ Canvas supplies the concrete access model and selected live evidence. Moodle and
 
 ### Gate 2 — Freeze provider scope
 
-- Publish a capability-and-evidence table with the exact setup difference for each provider.
+- Publish a capability-and-evidence table with the exact connection and evidence for each platform.
 - Canvas: signed-in Chrome connector; selected sandbox proof only.
-- Moodle: six tools, five reads and one course-summary write; private API connection; official API/test validation only.
-- Blackboard: six tools including direct Ultra child discovery; private API connection; only supported document title/body writes; official API/test validation only.
-- Do not add an evaluator CTA for Moodle or Blackboard until a live tenant proves the named workflow.
+- Moodle: the same signed-in Chrome connector; six live browser reads; one selected Page update with a confirmed saved result; 21 operations implemented; other writes need live checks.
+- Blackboard: browser connection not verified; no course work available.
+- State that Morrow is working toward closer Canvas and Moodle task coverage. Do not claim blanket parity.
+- Do not add a Moodle evaluator CTA beyond the selected Page update until each named write workflow has live proof. Do not add a Blackboard evaluator CTA until the browser connection is verified.
 
 ### Gate 3 — Build a reviewable private evaluation
 
@@ -70,17 +72,18 @@ The launch film follows one course-work object through four visible actions:
 
 1. **Control:** the object stops for review and moves only after approval.
 2. **Verification:** the approved request aligns with the saved work.
-3. **Privacy:** Canvas sign-in stays inside Chrome. Credentials stay out of assistant messages and saved records. Morrow blocks credential and learner fields from assistant output. The selected course text needed for the request can reach the chosen assistant under that assistant's own data terms.
+3. **Privacy:** Canvas and Moodle sign-in stays inside Chrome. Credentials stay out of assistant messages and saved records. Morrow blocks credential and learner fields from assistant output. The selected course text needed for the request can reach the chosen assistant under that assistant's own data terms.
 4. **Choice:** the selected tested route uses Codex. Other assistant configurations need their own end-to-end proof.
 
 The closing frame uses the full Morrow wordmark and the website promise: **Move course work forward. Stay in control.** The editable [storyboard](video/STORYBOARD.md) defines the current film. The longer proof scripts are optional follow-up concepts.
 
 ## Claim rules
 
-- Say `private evaluation`, `development preview`, `selected Canvas evidence`, and `provider-specific scope`.
-- Say `verified` for the selected lesson correction, narrow New Quiz key correction, two module links, three publication operations, unpublished page creation, and selected Codex page update. The Student View learner route has separate observed and API evidence.
-- Say `failed before send` for the stale proposal. Do not call it a completed change.
+- Say private evaluation, development preview, selected Canvas evidence, and provider-specific scope.
+- Say verified for the selected lesson correction, narrow New Quiz key correction, two module links, three publication operations, unpublished page creation, and selected Codex page update. The Student View learner route has separate observed and API evidence.
+- Say failed before send for the stale proposal. Do not call it a completed change.
 - Keep each result bound to the selected sandbox test. These results do not establish whole-release verification.
-- Say `official API and test validation only` for Moodle and Blackboard until live tenants exist.
-- Do not state a tool count as proof, or infer one provider's proof from another provider's tests.
+- Say six live browser reads and one selected confirmed Page update for Moodle. State that other Moodle writes still need live checks.
+- Say Blackboard browser connection is not yet verified and Blackboard course work is unavailable.
+- Do not use operation counts as proof, or infer one provider's proof from another provider's tests.
 - Do not imply that every assistant configuration has the selected Codex route's proof, or that course content remains entirely local.

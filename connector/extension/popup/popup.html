@@ -3,20 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Morrow Canvas access</title>
+  <title>Morrow course access</title>
   <link rel="stylesheet" href="../brand/theme.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <main>
-    <header class="brand"><picture class="brand-wordmark"><source media="(prefers-color-scheme: dark)" srcset="../brand/morrow-wordmark-dark.png"><img src="../brand/morrow-wordmark.png" width="164" height="45" alt="Morrow"></picture><p class="brand-subtitle">Canvas access</p><span id="pulse" aria-hidden="true"></span></header>
+    <header class="brand"><picture class="brand-wordmark"><source media="(prefers-color-scheme: dark)" srcset="../brand/morrow-wordmark-dark.png"><img src="../brand/morrow-wordmark.png" width="164" height="45" alt="Morrow"></picture><p class="brand-subtitle">Course access</p><span id="pulse" aria-hidden="true"></span></header>
     <div class="connection-status">
       <section class="status" aria-live="polite"><span id="status-label">Morrow</span><strong id="status-value">Checking…</strong></section>
-      <section class="status" aria-live="polite"><span>Canvas</span><strong id="canvas-value">Checking…</strong></section>
+      <section class="status" aria-live="polite"><span>Course</span><strong id="canvas-value">Checking…</strong></section>
     </div>
-    <section id="account" class="account" hidden><span>Saved Canvas connection</span><strong id="account-origin"></strong><time id="account-last-checked"></time></section>
+    <section id="account" class="account" hidden><span>Saved course connection</span><strong id="account-origin"></strong><time id="account-last-checked"></time></section>
     <button id="primary" type="button" disabled>Connect Morrow</button>
-    <button id="canvas-action" class="secondary" type="button" hidden>Check or switch Canvas course</button>
+    <button id="canvas-action" class="secondary" type="button" hidden>Check or switch course</button>
     <button id="disconnect" class="secondary" type="button" hidden>Disconnect Morrow</button>
     <p id="detail">Checking the connection…</p>
     <p id="error" role="alert" hidden></p>
@@ -25,14 +25,14 @@
       <summary>How to connect</summary>
       <ol>
         <li>Add Morrow to your assistant, then open it. Use Morrow with one assistant at a time.</li>
-        <li>Open a Canvas course in Chrome and sign in.</li>
-        <li>Select Connect Morrow, then Connect Canvas course.</li>
+        <li>Open a Canvas or Moodle course in Chrome and sign in.</li>
+        <li>Select Connect Morrow, then Connect course.</li>
         <li>Ask Morrow for help in the assistant you chose.</li>
       </ol>
-      <p>Chrome will ask for access to the Canvas site you select. If New Quizzes is open, it may also ask for access to that quiz site.</p>
-      <p>Disconnect Morrow stops this connection and removes its Canvas site access. It does not sign you out of Canvas or undo course changes.</p>
+      <p>Chrome will ask for access to the course site you select. If Canvas New Quizzes is open, it may also ask for access to that quiz site.</p>
+      <p>Disconnect Morrow stops this connection and removes its course site access. It does not sign you out or undo course changes.</p>
     </details>
-    <footer>Canvas · New Quizzes · Item Banks<br>Uses the permissions available in your current Canvas role.</footer>
+    <footer>Canvas · Moodle<br>Uses the permissions available in your current course role.</footer>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

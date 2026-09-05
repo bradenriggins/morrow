@@ -2,12 +2,9 @@
 
 Move course work forward. Stay in control.
 
-**Development preview:** Use this version only in a Canvas test course that you
-have permission to change. Browser tests use a simulated Canvas site. Real
-Canvas compatibility and full assistant testing are not yet complete. Some Item
-Bank changes are disabled. See [current limits](LIMITATIONS.md).
+**Development preview:** Use this version only in a permitted test course. Canvas has selected live course checks. Moodle has six live browser reads and one selected Page update with a confirmed saved result. Other Moodle writes still need live checks. Blackboard is not available through the browser connection. See [current limits](LIMITATIONS.md).
 
-Morrow helps course teams turn lesson and quiz requests into reviewed changes and checked results. Make the request through a compatible assistant, review the exact change in Morrow, and see what Canvas saved. You keep the teaching decisions.
+Morrow helps course teams turn lesson and quiz requests into reviewed changes and checked results. Ask an assistant set up with Morrow for a change, review the exact change in Morrow, and see what the course platform saved. You keep the teaching decisions.
 
 Morrow runs on your computer and connects to an assistant through MCP. Source setup includes Codex, Claude Code, Claude desktop, and Gemini CLI. A selected Codex update has passed a live test-course check; each other assistant still needs its own complete live checks. See the [test record](docs/implementation/BT2-LIVE-PROOF.md).
 
@@ -16,24 +13,24 @@ Morrow runs on your computer and connects to an assistant through MCP. Source se
 A user installs only two Morrow components:
 
 1. **Morrow MCP** runs as one local stdio server. The selected chat application starts it when needed.
-2. **Morrow Canvas Connector** is one Manifest V3 Chrome extension. It uses the Canvas session that is already signed in within Chrome.
+2. **Morrow Chrome Connector** is one Manifest V3 Chrome extension. It uses the Canvas or Moodle session already signed in within Chrome.
 
-No Canvas access token, developer key, OAuth app, ExamplePlatform service, legacy Morrow extension, hosted Morrow account, or separate approval application is required.
+No platform access token, developer key, OAuth app, hosted Morrow account, or separate approval application is required.
 
 Node.js is the runtime for the current source release. It is part of the MCP installation path, not a third Morrow service.
 
 ## How a user works with Morrow
 
 1. Add Morrow to your chosen assistant using the installation steps below. Open or restart that assistant.
-2. Open the Morrow Canvas Connector extension in Chrome.
+2. Open the Morrow Chrome Connector extension in Chrome.
 3. Select **Connect Morrow**. On the page that opens, select **Allow connection** if you started this request.
-4. Open the Canvas test course you want to use in Chrome and sign in.
-5. Open the extension again and select **Connect Canvas course**. Chrome asks for access to this Canvas site and, if open, its New Quizzes site.
+4. Open the permitted Canvas or Moodle test course you want to use in Chrome and sign in.
+5. Open the extension again and select **Connect course**. Chrome asks for access to that course site. Canvas can also request access to an open New Quizzes site.
 6. Return to your assistant. Ask it to use Morrow to inspect or change the connected course.
 
-The extension shows two separate states: whether Morrow is connected to your assistant, and whether you have saved a Canvas connection. It shows when Canvas was
+The extension shows two separate states: whether Morrow is connected to your assistant, and whether you have saved a course connection. It shows when the platform was
 last checked. A saved connection is not a promise that you are still signed in.
-Morrow checks Canvas again before each request.
+Morrow checks the platform again before each request.
 
 You continue working in your assistant. Morrow does not add another chat interface.
 For example, ask it to list the modules in your connected test course or show
@@ -85,9 +82,9 @@ of changes. Searching and opening previews do not change that total or exclude
 items from approval. Removal warnings remain visible when a search hides the
 affected item.
 
-The local review starts the existing operation dispatcher after approval. Morrow checks the account, course, catalog, connection generation, target set, profile, approval, and effect receipt again. The connector sends the Canvas request once. It then performs a fresh provider readback. Morrow reports `verified` only when that readback satisfies the frozen postcondition. The result remains on the review page; automatic continuation inside a chat app is a separate, unverified client capability.
+After approval, Morrow checks the current connection, course target, reviewed values, and approval again. The connector sends one platform request. It then reads the platform again. Morrow reports a confirmed result only when that fresh check matches the approved change. The result remains on the review page.
 
-If delivery becomes ambiguous, Morrow records `applied_or_unknown` and refuses automatic replay. A later reconciliation performs only the frozen readback.
+If delivery is uncertain, Morrow marks it for attention and refuses automatic replay. A later check reads the saved item without sending the change again.
 
 ## Use Morrow with your other tools
 
@@ -146,160 +143,38 @@ New Quiz questions. It does not review bank draws, essays, media, accessibility,
 or student access. Automated tests cover the model-request flow; real client and
 model testing is still required.
 
-## Private Moodle and Blackboard preview
+## Browser-connected platforms
 
-Moodle and Blackboard are private, hand-configured API previews. They do not
-use the Chrome Canvas session. They are not OAuth onboarding, and they are not
-ready for general users.
+Canvas and Moodle use the same signed-in Chrome connection. Open a course you can edit in Chrome, then connect that course in Morrow. Platform sign-in stays in Chrome. Morrow keeps review, approval, and result checks together.
 
-| Provider | Connection and first validation | Private-preview scope | Not included |
-| --- | --- | --- | --- |
-| Moodle | HTTPS REST service token. Each call checks the returned site URL, user ID, and enabled service functions. | Five reads: my courses, one course, contents, assignment settings, and quiz settings. One change: course-summary replacement. Moodle requests use raw stored-text output for comparison. | General activity or question authoring, browser-session transport, and live-tenant compatibility proof. |
-| Blackboard | HTTPS API base URL, delegated bearer token, and the UUID returned for the same delegated user. Each call resolves that UUID and checks one current-user membership. | Five reads: my courses, one course, top-level content, direct content children, and one content item. One change: title and/or body of a verified `resource/x-bb-document`. | OAuth registration, token renewal, recursive inventory, assessment or bank authoring, and live-tenant compatibility proof. |
+| Platform | Current course work | Current evidence |
+| --- | --- | --- |
+| Canvas | Selected lesson and quiz corrections, pages, module links, and publication work. | Selected live test-course changes and one student route were saved and checked. |
+| Moodle | Course and structure reads. Page, section, assignment, quiz, date, and visibility work is implemented. | Six browser reads and one selected Page update have live proof. Twenty-one operations are implemented. Other Moodle writes need live checks. |
+| Blackboard | Not available through Morrow. | Browser connection is not yet verified. |
 
-For a Blackboard Ultra document body, first use
-`blackboard_list_content_children` on the page wrapper that Blackboard identifies
-as `resource/x-bb-folder`. It reads that exact parent, returns one direct page
-with `recursive=false`, and explicitly includes the Ultra body. Only a returned
-`resource/x-bb-document` child is eligible for a document update. See the
-[implementation checkpoint](docs/implementation/MULTI-LMS-AND-LESSON-REVIEW.md).
+Morrow is working toward closer task coverage for Canvas and Moodle. It does not claim blanket platform parity. Blackboard needs a verified browser connection before course work can be offered.
 
-### Connect a private preview
+## Chrome sign-in connection
 
-Create the private `~/.morrow/lms-connections.json` file. On macOS or Linux,
-the directory must be owner-only and the file must be mode `0600`:
+Canvas and Moodle sign-in stays inside Chrome.
 
-```bash
-mkdir -p ~/.morrow
-chmod 700 ~/.morrow
-(umask 077; touch ~/.morrow/lms-connections.json)
-chmod 600 ~/.morrow/lms-connections.json
-```
+- The extension requests access to the selected Canvas or Moodle site. Chrome lists the requested sites before access is granted.
+- Canvas requests use the page's signed-in session and Canvas CSRF protection. Canvas New Quizzes Item Bank requests run inside the authenticated New Quizzes frame. Frame tokens remain in the page execution world.
+- The MCP receives bounded connection details. It does not receive cookies, passwords, OAuth tokens, CSRF tokens, or Item Bank bearer tokens.
+- **Disconnect Morrow** clears the saved connection and requests removal of its granted Canvas or Moodle site permissions. It does not sign you out of the platform or undo changes already sent.
 
-For a new file, open it in a local editor and use the template below. For an
-existing file, add only the needed connection objects to its `connections` array.
-Replace the placeholders with real values in that local file. Remove connections
-you do not use. Do not send this file to an AI client or commit it.
-Moodle may use an HTTPS subpath. Blackboard must use the HTTPS site root, and
-its `userId` is the delegated OAuth user UUID for the same token.
+Morrow does not reuse a ChatGPT or Claude in-app browser session. Assistants set up with Morrow use the Chrome connector for available Canvas and Moodle work. The selected Codex workflow has a live Canvas test record; other assistants still need complete live checks.
 
-```json
-{
-  "schema": "morrow.lms-connections.v1",
-  "connections": [
-    {
-      "id": "moodle-preview",
-      "label": "Moodle private preview",
-      "provider": "moodle",
-      "baseUrl": "https://moodle.example.edu/moodle",
-      "token": "REPLACE_WITH_MOODLE_SERVICE_TOKEN"
-    },
-    {
-      "id": "blackboard-preview",
-      "label": "Blackboard private preview",
-      "provider": "blackboard",
-      "baseUrl": "https://learn.example.edu",
-      "token": "REPLACE_WITH_DELEGATED_BEARER_TOKEN",
-      "userId": "00000000-0000-0000-0000-000000000000"
-    }
-  ]
-}
-```
+## Canvas capability surface
 
-The Moodle service must expose `core_webservice_get_site_info` and the functions
-for the chosen operation. `core_enrol_get_users_courses` and
-`core_course_get_courses` support the first reads. Add
-`core_course_get_contents`, `mod_assign_get_assignments`,
-`mod_quiz_get_quizzes_by_courses`, or `core_course_update_courses` only when
-their matching tool is required. Function presence does not grant course
-permission. Moodle sends `moodlewssettingraw=true`, so the course-summary
-readback compares the stored summary exactly.
+Canvas coverage includes course discovery, pages, modules, assignments, discussions, files, Classic Quizzes, New Quizzes, Item Banks, rubrics, outcomes, enrollments, submissions, gradebook work, and other Canvas areas. A listed operation is not proof that it is ready for every course.
 
-Restart the selected AI client after saving the file. First call
-`morrow_lms_connections`; it lists only ID, label, provider, and base URL, and
-does not prove access. Then make one exact read:
+Existing-bank writes remain held until Morrow can identify all affected courses and show a complete review. Bank reads and bank creation remain enabled. Live Item Bank compatibility is not yet verified.
 
-```json
-{ "connection_id": "moodle-preview", "course_id": 12345 }
-```
+Morrow rejects unknown fields, missing required values, cross-site bindings, stale tabs, stale connections, mismatched requests, and expired commands before a provider request.
 
-Use that object with `moodle_get_course`. For Blackboard, use this object with
-`blackboard_get_course`:
-
-```json
-{ "connection_id": "blackboard-preview", "course_id": "_123_1" }
-```
-
-Fresh `pnpm run setup` writes the `lms-api` source automatically. An existing
-custom `morrow.upstreams.json` is not replaced. Add this object to its
-`upstreams` array, preserving the current entries and absolute paths:
-
-```json
-{
-  "id": "lms-api",
-  "label": "Moodle and Blackboard",
-  "kind": "mcp-stdio",
-  "command": "/absolute/path/to/node",
-  "args": ["/absolute/path/to/morrow/packages/mcp-server/dist/lms-api-entry.js"],
-  "cwd": "/absolute/path/to/morrow",
-  "sourceDisposition": "direct_owned",
-  "priority": 150,
-  "required": true,
-  "outputPrivacyDefault": {
-    "fieldPolicy": "scrub-sensitive",
-    "dataClass": "course",
-    "maxRecords": 10000,
-    "maxBytes": 2000000,
-    "freeText": "allow",
-    "learnerTokens": true,
-    "artifactInspection": "deny"
-  }
-}
-```
-
-The `lms-api` source reads this file when the client starts, unless the launcher
-sets `MORROW_LMS_CONNECTIONS_FILE` to another private path. It has no real token
-exchange, refresh, or OAuth registration flow. The
-[implementation checkpoint](docs/implementation/MULTI-LMS-AND-LESSON-REVIEW.md)
-lists the official API basis, adapter evidence, and remaining limits.
-
-## Canvas authentication
-
-Canvas authentication stays inside Chrome.
-
-- The extension requests access to the selected Canvas site and any supported New Quizzes site open inside that tab. Chrome lists the requested sites before access is granted.
-- Normal Canvas API requests use the page's signed-in session and Canvas CSRF protection.
-- New Quizzes Item Bank requests run inside the authenticated New Quizzes frame. Frame tokens remain in the page execution world. The extension never returns them to the MCP or AI client.
-- The MCP receives a bounded account fingerprint and connection generation. It does not receive cookies, passwords, OAuth tokens, CSRF tokens, or Item Bank bearer tokens.
-- **Disconnect Morrow** clears the saved Morrow connection and requests removal of its Canvas site permissions. If Chrome cannot remove those permissions, the extension explains that they still need removal in Chrome settings. Disconnecting does not sign you out of Canvas or undo changes already sent.
-
-Morrow does not reuse a ChatGPT or Claude in-app browser session. Configured assistants use the Chrome connector for Canvas. The selected Codex workflow has a live test record; other assistants still need complete live checks.
-
-## Capability surface
-
-The generated catalog currently describes 1,130 Canvas operations. A catalog entry is not proof of live compatibility:
-
-- 1,118 operations generated from the current official Canvas API definitions;
-- 568 reads and 562 writes;
-- 26 New Quizzes operations;
-- 12 signed-browser New Quizzes Item Bank operations.
-
-The surface includes course and account discovery, pages, modules, assignments, groups, discussions, announcements, files, folders, Classic Quizzes, New Quizzes, Item Banks, rubrics, outcomes, enrollments, submissions, gradebook operations, migrations, Blueprints, reports, webhooks, and other official Canvas families.
-
-The Item Bank bridge implements request contracts for:
-
-- list, get, create, share, and archive banks;
-- list and get entries;
-- create and update items;
-- attach an item to a bank;
-- delete an entry;
-- list bank shares.
-
-Existing-bank writes are currently held: archive, share, attach, create item, update item, and delete entry. These operations can affect other courses and quizzes. They cannot dispatch until Morrow can establish a complete dependency and affected-course review. Bank reads and bank creation remain enabled. Live Item Bank compatibility is not yet verified.
-
-Morrow keeps 64-bit Canvas identifiers as exact decimal strings. It generates tool schemas and routes from provider definitions. It rejects unknown fields, missing required values, cross-origin bindings, stale tabs, stale connection generations, mismatched operation keys, and expired commands before provider dispatch.
-
-MindTap and Connect are absent from the enabled catalog and runtime.
+MindTap and Connect are not available. See the [current inclusion review](docs/release/CONNECT-MINDTAP-INCLUSION-REVIEW-2026-09-05.md). It records evidence reviewed, not a finding that either platform is categorically prohibited.
 
 ## Batches and long-running work
 
@@ -374,7 +249,7 @@ The generated client files are:
 - Claude desktop chat: `claude_desktop_config.json`;
 - Gemini CLI: `.gemini/settings.json`.
 
-Restart the selected client after configuration. The client then starts Morrow over stdio. The Morrow MCP starts its internal Canvas connector runtime. The Chrome extension connects to that runtime at `127.0.0.1:32147`.
+Restart the selected client after configuration. The client then starts Morrow over stdio. The Morrow MCP starts its internal Chrome connector runtime. The Chrome extension connects to that runtime at `127.0.0.1:32147`.
 
 For Codex write requests, use the interactive client so you can answer its tool-approval prompt. **Allow** lets Codex prepare the Morrow request. Review and approve the exact change in Morrow before it is sent to the LMS. With write approval enabled, noninteractive `codex exec` cannot answer that prompt and can cancel the call before it reaches Morrow.
 
@@ -415,7 +290,7 @@ pnpm morrow doctor --json
 pnpm morrow catalog stats --json
 ```
 
-The browser campaign uses Chrome for Testing with a temporary profile and a synthetic Canvas estate. It validates extension pairing, site-scoped permission, account binding, regular Canvas reads and writes, a complete nested New Quiz item request, cookies and CSRF handling, fresh readback, replay refusal, restart, and disconnect revocation.
+The Canvas browser campaign uses Chrome for Testing with a temporary profile and a synthetic Canvas site. It validates extension pairing, site-scoped permission, account binding, Canvas reads and writes, a nested New Quiz request, fresh checks, replay refusal, restart, and disconnect revocation.
 
 See [ARCHITECTURE.md](ARCHITECTURE.md), [WEEKEND-HANDOFF.md](WEEKEND-HANDOFF.md), [LIMITATIONS.md](LIMITATIONS.md), and [SOURCE-ORIGIN.md](SOURCE-ORIGIN.md).
 

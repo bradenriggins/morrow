@@ -14,6 +14,7 @@ import {
   parseBridgeJson,
   serializeBridgeMessage,
   type BridgeBinding,
+  type BridgeProvider,
   type BridgeClientMessage,
   type BridgeCommand,
   type BridgeCommandKind,
@@ -32,6 +33,14 @@ const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_AUTH_TIMEOUT_MS = 5_000;
 const DEFAULT_CALL_TIMEOUT_MS = 45_000;
 const DEFAULT_HEARTBEAT_MS = 20_000;
+
+function providerForToolName(toolName: string | undefined): BridgeProvider | undefined {
+  if (!toolName) return undefined;
+  if (toolName.startsWith("canvas_")) return "canvas";
+  if (toolName.startsWith("moodle_")) return "moodle";
+  if (toolName.startsWith("blackboard_")) return "blackboard";
+  return undefined;
+}
 const EXTENSION_ORIGIN = /^chrome-extension:\/\/([a-p]{32})$/;
 
 export interface LoopbackBridgeOptions {
@@ -105,7 +114,7 @@ interface PairingRequest {
 
 export class BridgeUnavailableError extends Error {
   readonly code = "bridge_unavailable";
-  constructor(message = "The Morrow Canvas connector is not connected.") {
+  constructor(message = "The Morrow course connector is not connected.") {
     super(message);
     this.name = "BridgeUnavailableError";
   }
@@ -301,8 +310,8 @@ export class LoopbackBridgeServer {
     const pending = request.status === "pending";
     const title = pending ? "Connect Morrow to Chrome" : request.status === "approved" ? "Chrome connection approved" : "Connection cancelled";
     const content = pending
-      ? `<p>Allow Morrow in your assistant to work with Canvas through this Chrome extension.</p><p>Your Canvas password and sign-in details stay in Chrome. You choose which Canvas site to connect next.</p><div class="notice">Only continue if you started this from the Morrow extension. Connecting does not approve changes to your courses.</div><details><summary>About this connection</summary><p class="details-help">This connection stays on your computer. You can disconnect in the Morrow extension at any time.</p><p class="details-help">Extension ID: ${extension}</p></details><form class="actions" method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Allow connection</button><button class="secondary" name="decision" value="deny">Cancel connection</button></form>`
-      : `<p>${request.status === "approved" ? "Open a Canvas course in Chrome and sign in. Then open the Morrow extension and select Connect Canvas course." : "Morrow did not connect through this request. You can start again from the Morrow extension when you are ready."}</p>`;
+      ? `<p>Allow Morrow in your assistant to work with Canvas and Moodle through this Chrome extension.</p><p>Your learning-platform password and sign-in details stay in Chrome. You choose which course site to connect next.</p><div class="notice">Only continue if you started this from the Morrow extension. Connecting does not approve changes to your courses.</div><details><summary>About this connection</summary><p class="details-help">This connection stays on your computer. You can disconnect in the Morrow extension at any time.</p><p class="details-help">Extension ID: ${extension}</p></details><form class="actions" method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Allow connection</button><button class="secondary" name="decision" value="deny">Cancel connection</button></form>`
+      : `<p>${request.status === "approved" ? "Open a Canvas or Moodle course in Chrome and sign in. Then open the Morrow extension and select Connect course." : "Morrow did not connect through this request. You can start again from the Morrow extension when you are ready."}</p>`;
     return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><p class="eyebrow">Your browser connection</p><h1>${title}</h1>${content}</section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`;
   }
 
@@ -590,7 +599,11 @@ export class LoopbackBridgeServer {
       ? active.bindings.find((binding) => binding.sourceBindingId === invocation.sourceBindingId)
       : active.bindings.length === 1 ? active.bindings[0] : undefined;
     if (requiresBinding && (!selectedBinding || selectedBinding.runtimeVerified !== true)) {
-      throw new BridgeUnavailableError("The exact Canvas binding is unavailable or changed. Create a fresh plan from a current binding.");
+      throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh plan from a current binding.");
+    }
+    const expectedProvider = providerForToolName(invocation.toolName);
+    if (expectedProvider && selectedBinding && selectedBinding.provider !== expectedProvider) {
+      throw new BridgeUnavailableError(`The exact ${expectedProvider} binding is unavailable or changed. Create a fresh plan from a current binding.`);
     }
     const now = Date.now();
     const timeoutMs = exactTimeout(invocation.timeoutMs, this.callTimeoutMs, "timeoutMs");

@@ -18,6 +18,25 @@ describe("bridge protocol", () => {
     ]).map((binding) => binding.sourceBindingId)).toEqual(["a-binding", "canvas:22"]);
   });
 
+  it("accepts one exact Moodle binding without accepting a cross-site course", () => {
+    expect(normalizeBridgeBindings([{
+      sourceBindingId: "moodle:course:42",
+      provider: "moodle",
+      courseId: "42",
+      origin: "https://school.example",
+      siteUrl: "https://school.example/moodle",
+      runtimeVerified: true,
+    }])).toMatchObject([{ provider: "moodle", courseId: "42", siteUrl: "https://school.example/moodle" }]);
+    expect(() => normalizeBridgeBindings([{
+      sourceBindingId: "moodle:course:42",
+      provider: "moodle",
+      courseId: "42",
+      origin: "https://school.example",
+      siteUrl: "https://other.example/moodle",
+      runtimeVerified: true,
+    }])).toThrow("siteUrl");
+  });
+
   it("validates an authenticated hello", () => {
     const hello = parseBridgeHello({
       schema: BRIDGE_SCHEMAS.hello,

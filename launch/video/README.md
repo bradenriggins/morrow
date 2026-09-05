@@ -30,18 +30,19 @@ ffmpeg -y -ss 00:00:30.500 -i renders/morrow-launch-preview.mp4 -frames:v 1 -q:v
 All UI shown in this video is an illustrative product demonstration. One
 abstract course-work packet stops for review, moves after approval, and aligns
 with abstract course-outline, activity-instruction, and knowledge-check rows.
-It does not show a live Canvas session, learner information, customer proof,
+It does not show a live course session, learner information, customer proof,
 measured product results, or a production verification receipt.
 
 The film states four product pillars: `Review before you approve`, `Know what
 was saved`, `Keep your sign-in private`, and `Choose how you work`. The privacy
-statement is specific: Canvas sign-in stays in Chrome, and course content can
-be shared with a selected compatible assistant. It does not claim that all
-course work stays local or that every assistant is supported.
+statement is specific: course sign-in stays in Chrome, and course content can
+be shared with a selected assistant. The film covers the shared Canvas/Moodle
+browser bridge. It does not claim Blackboard support, complete feature
+parity, that all course work stays local, or that every assistant is supported.
 
 The video is silent. Its message is carried by on-screen text.
 
 ## Verification evidence
 
 Final check output, source geometry, keyframes, and actual MP4 contact sheets
-are stored locally in `renders/inspection/final-continuous-polish/`.
+are stored locally in `renders/inspection/shared-bridge-final/`.

@@ -1,0 +1,809 @@
+{
+  "schema": "morrow.browser-catalog.v1",
+  "provider": "moodle",
+  "operations": [
+    {
+      "key": "moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1",
+      "toolName": "moodle_list_my_courses",
+      "provider": "moodle",
+      "summary": "List my Moodle courses",
+      "description": "List up to 100 courses for the signed-in Moodle user through Moodle's session-bound AJAX service.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/externallib.php#L4004-L4210"
+    },
+    {
+      "key": "moodle.form.course.edit.read.v1",
+      "toolName": "moodle_get_course",
+      "provider": "moodle",
+      "summary": "Get a Moodle course",
+      "description": "Read the exact current course through Moodle's signed-in course settings form.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/edit.php#L145-L197"
+    },
+    {
+      "key": "moodle.ajax.core_courseformat_get_state.v1",
+      "toolName": "moodle_get_contents",
+      "provider": "moodle",
+      "summary": "Get Moodle course structure",
+      "description": "Read the current sections and activities that Moodle exposes to the signed-in browser session.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/external/get_state.php"
+    },
+    {
+      "key": "moodle.ajax.core_courseformat_get_state.assignments.v1",
+      "toolName": "moodle_list_assignments",
+      "provider": "moodle",
+      "summary": "List Moodle assignments",
+      "description": "List Assignment activities in one Moodle course, including their current visibility and module IDs.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/output/local/state/cm.php"
+    },
+    {
+      "key": "moodle.ajax.core_courseformat_get_state.quizzes.v1",
+      "toolName": "moodle_list_quizzes",
+      "provider": "moodle",
+      "summary": "List Moodle quizzes",
+      "description": "List Quiz activities in one Moodle course, including their current visibility and module IDs.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/output/local/state/cm.php"
+    },
+    {
+      "key": "moodle.form.course.edit.summary.read.v1",
+      "toolName": "moodle_get_course_summary",
+      "provider": "moodle",
+      "summary": "Read a Moodle course summary",
+      "description": "Read the current editable course summary and create the digest required for a later summary or visibility change.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/edit_form.php#L28-L454"
+    },
+    {
+      "key": "moodle.form.course.editsection.read.v1",
+      "toolName": "moodle_get_section",
+      "provider": "moodle",
+      "summary": "Read a Moodle section",
+      "description": "Read one standard Moodle course section and create the digest required for a later section edit.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/editsection_form.php#L19-L149"
+    },
+    {
+      "key": "moodle.form.course.modedit.page.read.v1",
+      "toolName": "moodle_get_page",
+      "provider": "moodle",
+      "summary": "Read a Moodle Page",
+      "description": "Read one standard Moodle Page activity and create the digest required for a later Page edit.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/page/mod_form.php#L34-L61"
+    },
+    {
+      "key": "moodle.form.course.modedit.assign.read.v1",
+      "toolName": "moodle_get_assignment",
+      "provider": "moodle",
+      "summary": "Read a Moodle Assignment",
+      "description": "Read one standard Moodle Assignment activity and create the digest required for a later Assignment edit. The returned due date is a civil time in the Moodle user's configured timezone.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/assign/mod_form.php#L48-L105"
+    },
+    {
+      "key": "moodle.form.course.modedit.quiz.read.v1",
+      "toolName": "moodle_get_quiz",
+      "provider": "moodle",
+      "summary": "Read a Moodle Quiz",
+      "description": "Read one standard Moodle Quiz activity and create the digest required for a later Quiz edit. Returned open and close dates are civil times in the Moodle user's configured timezone.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/quiz/mod_form.php#L67-L123"
+    },
+    {
+      "key": "moodle.form.course.edit.summary.write.v1",
+      "toolName": "moodle_update_course_summary",
+      "provider": "moodle",
+      "summary": "Update a Moodle course summary",
+      "description": "Replace only the current course summary after the exact preceding summary read is reviewed.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_course_summary",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 40000
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "summary",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/edit.php#L156-L200"
+    },
+    {
+      "key": "moodle.form.course.editsection.write.v1",
+      "toolName": "moodle_update_section",
+      "provider": "moodle",
+      "summary": "Update a Moodle section",
+      "description": "Update only the name or summary of one standard Moodle course section after review.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_section",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 1333
+          },
+          "summary": {
+            "type": "string",
+            "maxLength": 40000
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id",
+          "expected_digest"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "summary"
+            ]
+          }
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/editsection.php#L145-L170"
+    },
+    {
+      "key": "moodle.form.course.modedit.page.write.v1",
+      "toolName": "moodle_update_page",
+      "provider": "moodle",
+      "summary": "Update a Moodle Page",
+      "description": "Update only the name or Page content of one standard Moodle Page activity after review.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_page",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 1333
+          },
+          "content": {
+            "type": "string",
+            "maxLength": 40000
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "expected_digest"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "content"
+            ]
+          }
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/modedit.php#L154-L189"
+    },
+    {
+      "key": "moodle.form.course.modedit.assign.write.v1",
+      "toolName": "moodle_update_assignment",
+      "provider": "moodle",
+      "summary": "Update a Moodle Assignment",
+      "description": "Update only the name, instructions, or due date of one standard Moodle Assignment after review. Due date values are civil times in the Moodle user's configured timezone.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_assignment",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 1333
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 40000
+          },
+          "due_date": {
+            "type": "object",
+            "properties": {
+              "year": {
+                "type": "integer",
+                "minimum": 1970,
+                "maximum": 2100
+              },
+              "month": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12
+              },
+              "day": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31
+              },
+              "hour": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 23
+              },
+              "minute": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 59
+              }
+            },
+            "required": [
+              "year",
+              "month",
+              "day",
+              "hour",
+              "minute"
+            ],
+            "additionalProperties": false,
+            "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "expected_digest"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "instructions"
+            ]
+          },
+          {
+            "required": [
+              "due_date"
+            ]
+          }
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/assign/mod_form.php#L48-L105"
+    },
+    {
+      "key": "moodle.form.course.modedit.quiz.write.v1",
+      "toolName": "moodle_update_quiz",
+      "provider": "moodle",
+      "summary": "Update a Moodle Quiz",
+      "description": "Update only the name, instructions, open date, or close date of one standard Moodle Quiz after review. Date values are civil times in the Moodle user's configured timezone.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_quiz",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "maxLength": 1333
+          },
+          "instructions": {
+            "type": "string",
+            "maxLength": 40000
+          },
+          "open_at": {
+            "type": "object",
+            "properties": {
+              "year": {
+                "type": "integer",
+                "minimum": 1970,
+                "maximum": 2100
+              },
+              "month": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12
+              },
+              "day": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31
+              },
+              "hour": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 23
+              },
+              "minute": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 59
+              }
+            },
+            "required": [
+              "year",
+              "month",
+              "day",
+              "hour",
+              "minute"
+            ],
+            "additionalProperties": false,
+            "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+          },
+          "close_at": {
+            "type": "object",
+            "properties": {
+              "year": {
+                "type": "integer",
+                "minimum": 1970,
+                "maximum": 2100
+              },
+              "month": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12
+              },
+              "day": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31
+              },
+              "hour": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 23
+              },
+              "minute": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 59
+              }
+            },
+            "required": [
+              "year",
+              "month",
+              "day",
+              "hour",
+              "minute"
+            ],
+            "additionalProperties": false,
+            "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "expected_digest"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "instructions"
+            ]
+          },
+          {
+            "required": [
+              "open_at"
+            ]
+          },
+          {
+            "required": [
+              "close_at"
+            ]
+          }
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/quiz/mod_form.php#L67-L123"
+    },
+    {
+      "key": "moodle.form.course.edit.visibility.write.v1",
+      "toolName": "moodle_show_course",
+      "provider": "moodle",
+      "summary": "Show a Moodle course",
+      "description": "Make one Moodle course visible after review.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_course_summary",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/edit_form.php#L100-L118"
+    },
+    {
+      "key": "moodle.form.course.edit.visibility.hide.v1",
+      "toolName": "moodle_hide_course",
+      "provider": "moodle",
+      "summary": "Hide a Moodle course",
+      "description": "Make one Moodle course unavailable to learners after review.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_course_summary",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/edit_form.php#L100-L118"
+    },
+    {
+      "key": "moodle.ajax.core_courseformat_update_course.section_show.v1",
+      "toolName": "moodle_show_section",
+      "provider": "moodle",
+      "summary": "Show a Moodle section",
+      "description": "Make one Moodle course section visible and read back the current state.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_contents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/external/update_course.php"
+    },
+    {
+      "key": "moodle.ajax.core_courseformat_update_course.section_hide.v1",
+      "toolName": "moodle_hide_section",
+      "provider": "moodle",
+      "summary": "Hide a Moodle section",
+      "description": "Make one Moodle course section unavailable to learners and read back the current state.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_contents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/stateactions.php#L393-L429"
+    },
+    {
+      "key": "moodle.ajax.core_courseformat_update_course.cm_show.v1",
+      "toolName": "moodle_show_activity",
+      "provider": "moodle",
+      "summary": "Show a Moodle activity",
+      "description": "Make one Moodle activity visible and read back the current state.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_contents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/stateactions.php#L477-L530"
+    },
+    {
+      "key": "moodle.ajax.core_courseformat_update_course.cm_hide.v1",
+      "toolName": "moodle_hide_activity",
+      "provider": "moodle",
+      "summary": "Hide a Moodle activity",
+      "description": "Make one Moodle activity unavailable to learners and read back the current state.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_contents",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/stateactions.php#L477-L530"
+    }
+  ]
+}

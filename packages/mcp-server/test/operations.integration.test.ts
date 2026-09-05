@@ -5,6 +5,7 @@ import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { GatewayRuntime } from "../src/runtime.js";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
+import type { ApprovalReviewContext } from "../src/approval-context.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
@@ -260,6 +261,75 @@ describe("outer provider effects", () => {
       const uncertain = await (await fetch(`${url}/operations/uncertain`)).text();
       expect(uncertain).toContain("Canvas may have received the changes");
       expect(uncertain).not.toContain("No change was sent");
+    } finally {
+      await approval.close();
+    }
+  });
+
+  it("renders Moodle browser reviews with formatted content, civil dates, and visibility decisions", async () => {
+    const children = [
+      {
+        operation: {
+          operationId: "moodle-page",
+          state: "awaiting_approval",
+          plan: { tool: "moodle_update_page", arguments: { course_id: 2, module_id: 6, content: "<h2>Week 1 reading</h2><script>ignored()</script>", expected_digest: "a".repeat(64), _morrow: { source_binding_id: "moodle:demo:2" } } },
+        },
+      },
+      {
+        operation: {
+          operationId: "moodle-assignment",
+          state: "awaiting_approval",
+          plan: { tool: "moodle_update_assignment", arguments: { course_id: 2, module_id: 7, due_date: { year: 2027, month: 5, day: 14, hour: 15, minute: 45 }, expected_digest: "b".repeat(64), _morrow: { source_binding_id: "moodle:demo:2" } } },
+        },
+      },
+      {
+        operation: {
+          operationId: "moodle-visibility",
+          state: "awaiting_approval",
+          plan: { tool: "moodle_hide_section", arguments: { course_id: 2, section_id: 3, expected_digest: "c".repeat(64), _morrow: { source_binding_id: "moodle:demo:2" } } },
+        },
+      },
+    ];
+    const snapshot: JsonObject = { batch: { state: "planned" }, children, totalChildren: children.length };
+    const contexts: Record<string, ApprovalReviewContext> = {
+      "moodle-page": {
+        targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Week 1 page" }],
+        current: { content: "<p>Old reading</p>" },
+      },
+      "moodle-assignment": {
+        targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Course reflection" }],
+        current: { due_date: { year: 2027, month: 5, day: 7, hour: 9, minute: 0 } },
+      },
+      "moodle-visibility": {
+        targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "section_id", label: "Section", name: "Week 1" }],
+        current: { visible: true },
+      },
+    };
+    const approval = new LoopbackApprovalServer({
+      operationGet: () => snapshot,
+      operationList: () => ({}),
+      operationReviewContext: async (operationId) => contexts[operationId] || { targets: [] },
+      approveOperation: () => snapshot,
+      runApprovedOperation: async () => undefined,
+      cancelOperation: () => snapshot,
+      setApprovalBaseUrl: () => undefined,
+      batchApprovalGet: () => snapshot,
+    });
+    try {
+      const url = await approval.start();
+      const review = await (await fetch(`${url}/batches/moodle-review`)).text();
+      const displayed = review.slice(0, review.lastIndexOf("<details><summary>Technical details"));
+      expect(displayed).toContain("Update this Moodle Page");
+      expect(displayed).toContain('aria-label="Page content preview"');
+      expect(displayed).toContain("Week 1 reading");
+      expect(displayed).not.toContain("ignored()");
+      expect(displayed).toContain("May 14, 2027, 3:45 PM");
+      expect(displayed).toContain("Moodle user’s configured time zone");
+      expect(displayed).not.toContain("&quot;year&quot;");
+      expect(displayed).toContain("Hide this Moodle section from learners");
+      expect(displayed).toContain("This will hide the Moodle section from learners.");
+      expect(displayed).toContain("Visible to learners");
+      expect(displayed).toContain("Keep your assistant and Chrome open while Morrow works.");
     } finally {
       await approval.close();
     }

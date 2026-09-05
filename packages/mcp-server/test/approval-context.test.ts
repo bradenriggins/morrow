@@ -43,6 +43,40 @@ function tool(
   } as CatalogTool;
 }
 
+function moodleTool(
+  publicName: string,
+  upstreamName: string,
+  readOnly: boolean,
+  inputSchema: JsonObject,
+  planBackend?: string,
+): CatalogTool {
+  return {
+    publicName,
+    upstreamId: sourceId,
+    upstreamLabel: "Moodle",
+    upstreamName,
+    inputSchema,
+    annotations: { readOnlyHint: readOnly },
+    capability: {
+      family: "moodle",
+      provider: "moodle",
+      sourcePath: "catalog",
+      sourceExport: upstreamName,
+      sourceDigest: "b".repeat(64),
+      behavior: { readOnly, mutating: !readOnly, destructive: false, irreversible: false, supportsDryRun: false, supportsReadback: true, supportsUndo: false, supportsBatch: true, requiresBrowser: true, requiresLiveCanvas: true },
+      authority: { scopeClass: "course", approvalClass: readOnly ? "none" : "standard", dataClass: "course" },
+      route: { backend: "canvas-connector", ...(planBackend ? { planBackend } : {}) },
+      profiles: {
+        "private-full": { state: "supported" },
+        "public-canvas": { state: "limited" },
+        sandbox: { state: "supported" },
+        "read-only": { state: "supported" },
+      },
+      evidence: {},
+    },
+  } as CatalogTool;
+}
+
 const tools = [
   tool("canvas_create_quiz_item", "canvas_create_quiz_item", false, "new-quizzes"),
   tool("morrow_canvas_bindings", "morrow_canvas_bindings", true),
@@ -204,5 +238,62 @@ describe("approval review context", () => {
       item_entry_scoring_data: { value: "mitochondria" },
     });
     expect(context.current).toBeUndefined();
+  });
+
+  it("reads the exact Moodle assignment before showing its current changed fields", async () => {
+    const moodleBindingId = "moodle:demo:2";
+    const dueDate = { year: 2027, month: 5, day: 14, hour: 15, minute: 45 };
+    const update: ApprovalReviewOperation = {
+      state: "awaiting_approval",
+      publicToolName: "moodle_update_assignment",
+      sourceId,
+      sourceToolName: "moodle_update_assignment",
+      sourceBindingId: moodleBindingId,
+      plan: {
+        schema: "morrow.plan.v1",
+        tool: "moodle_update_assignment",
+        source: sourceId,
+        sourceTool: "moodle_update_assignment",
+        sourceBindingId: moodleBindingId,
+        arguments: {
+          course_id: 2,
+          module_id: 6,
+          name: "Course reflection",
+          instructions: "<p>Submit a short reflection.</p>",
+          due_date: dueDate,
+          expected_digest: "c".repeat(64),
+          _morrow: { source_binding_id: moodleBindingId },
+        },
+      },
+    };
+    const context = await resolveApprovalReviewContext({
+      operation: update,
+      tools: [
+        moodleTool("moodle_update_assignment", "moodle_update_assignment", false, { type: "object" }, "moodle_get_assignment"),
+        moodleTool("moodle_get_assignment", "moodle_get_assignment", true, { type: "object", properties: { course_id: {}, module_id: {} } }),
+        moodleTool("morrow_browser_bindings", "morrow_browser_bindings", true, { type: "object" }),
+      ],
+      read: async (publicName, args) => {
+        if (publicName === "morrow_browser_bindings") {
+          expect(args).toEqual({});
+          return { structuredContent: { schema: "morrow.browser-bindings.v1", bindings: [{ sourceBindingId: moodleBindingId, provider: "moodle", runtimeVerified: true, origin: "https://school.example", siteUrl: "https://school.example/moodle", courseId: "2" }] } };
+        }
+        expect(publicName).toBe("moodle_get_assignment");
+        expect(args).toEqual({ course_id: 2, module_id: 6, _morrow: { source_binding_id: moodleBindingId } });
+        return { structuredContent: {
+          schema: "morrow.canvas-connector.result.v1", ok: true, provider: "moodle", commandKind: "invoke_read",
+          result: {
+            ok: true, sent: true,
+            data: { name: "Old reflection", instructions: "<p>Review the unit.</p>", due_date: dueDate },
+            targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Course reflection" }],
+            snapshot_digest: "c".repeat(64),
+          },
+        } };
+      },
+    });
+    expect(context).toEqual({
+      targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Course reflection" }],
+      current: { name: "Old reflection", instructions: "<p>Review the unit.</p>", due_date: dueDate },
+    });
   });
 });

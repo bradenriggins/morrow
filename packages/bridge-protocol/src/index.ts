@@ -31,12 +31,15 @@ export type BridgeCommandKind =
   | "task_get"
   | "bindings_get";
 
+export type BridgeProvider = "canvas" | "moodle" | "blackboard";
+
 export interface BridgeBinding {
   readonly sourceBindingId: string;
-  readonly provider: "canvas";
+  readonly provider: BridgeProvider;
   readonly courseId?: string;
   readonly courseName?: string;
   readonly origin?: string;
+  readonly siteUrl?: string;
   readonly principalFingerprint?: string;
   readonly sessionGeneration?: number;
   readonly runtimeVerified: boolean;
@@ -209,15 +212,42 @@ function parseBinding(value: unknown): BridgeBinding {
   if (!TOOL_OR_SOURCE.test(sourceBindingId)) {
     throw new TypeError("sourceBindingId has an invalid format");
   }
-  if (value.provider !== "canvas") throw new TypeError("bridge binding provider must be canvas");
+  const provider = value.provider;
+  if (provider !== "canvas" && provider !== "moodle" && provider !== "blackboard") {
+    throw new TypeError("bridge binding provider is invalid");
+  }
   const courseId = optionalString(value.courseId, "courseId", 24);
-  if (courseId && !DECIMAL_ID.test(courseId)) throw new TypeError("courseId must be an exact positive decimal string");
+  if (provider === "canvas" && courseId && !DECIMAL_ID.test(courseId)) {
+    throw new TypeError("Canvas courseId must be an exact positive decimal string");
+  }
+  if (provider === "moodle" && (!courseId || !DECIMAL_ID.test(courseId))) {
+    throw new TypeError("Moodle courseId must be an exact positive decimal string");
+  }
+  if (provider === "blackboard" && courseId && !/^_[0-9]+_[0-9]+$/.test(courseId)) {
+    throw new TypeError("Blackboard courseId must be an exact _digits_digits string");
+  }
   const origin = optionalString(value.origin, "origin", 500);
   if (origin) {
     const parsed = new URL(origin);
     if (parsed.protocol !== "https:" || parsed.origin !== origin) {
       throw new TypeError("origin must be one canonical HTTPS origin");
     }
+  }
+  const siteUrl = optionalString(value.siteUrl, "siteUrl", 500);
+  if (siteUrl) {
+    let parsed: URL;
+    try {
+      parsed = new URL(siteUrl);
+    } catch {
+      throw new TypeError("siteUrl must be one canonical HTTPS URL");
+    }
+    if (parsed.protocol !== "https:" || parsed.href !== siteUrl || parsed.username || parsed.password || parsed.search || parsed.hash) {
+      throw new TypeError("siteUrl must be one canonical HTTPS URL");
+    }
+  }
+  if (provider === "moodle") {
+    if (!origin || !siteUrl) throw new TypeError("Moodle binding requires origin and siteUrl");
+    if (new URL(siteUrl).origin !== origin) throw new TypeError("Moodle siteUrl must match binding origin");
   }
   const principalFingerprint = optionalString(value.principalFingerprint, "principalFingerprint", 64);
   if (principalFingerprint && !HEX_SHA256.test(principalFingerprint)) {
@@ -234,12 +264,13 @@ function parseBinding(value: unknown): BridgeBinding {
     : requiredInteger(value.lastSeenAt, "lastSeenAt");
   return {
     sourceBindingId,
-    provider: "canvas",
+    provider,
     ...(courseId ? { courseId } : {}),
     ...(typeof value.courseName === "string" && value.courseName.trim()
       ? { courseName: value.courseName.trim().slice(0, 300) }
       : {}),
     ...(origin ? { origin } : {}),
+    ...(siteUrl ? { siteUrl } : {}),
     ...(principalFingerprint ? { principalFingerprint } : {}),
     ...(sessionGeneration !== undefined ? { sessionGeneration } : {}),
     runtimeVerified: value.runtimeVerified,
