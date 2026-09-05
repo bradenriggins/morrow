@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "22cdfdc199d3002f55d071861089559e012db6c9",
+  "candidateCommit": "62bc3d77a7d7365c50ccfda66209acd4773f97c2",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -192,14 +192,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "22cdfdc199d3002f55d071861089559e012db6c9",
+      "sourceCommit": "62bc3d77a7d7365c50ccfda66209acd4773f97c2",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e252f386e3c217421be4a6faf8032a9e231a93f4b95249d32ef0000deb25f965",
-      "afterDigest": "6104e1214961ced902230df790417a3626d53557efd7621ce907b2bcaf6af819"
+      "beforeDigest": "6104e1214961ced902230df790417a3626d53557efd7621ce907b2bcaf6af819",
+      "afterDigest": "bfae41f07cb6e852ca701bf95328acc5a786aa05fb4bd25ebee511bcf839b68d"
     },
     {
       "path": "connector/extension/brand/FONT-LICENSE.txt",
@@ -1485,7 +1485,7 @@
     },
     {
       "path": "packages/mcp-server/src/approval-server.ts",
-      "sourceCommit": "4b077508f2ae4d1f953ece9a950535cc4715e088",
+      "sourceCommit": "7a3342cabf612eae3730a08f39938ba4b3ed1594",
       "originalPath": "packages/mcp-server/src/approval-server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1494,8 +1494,8 @@
         "packages/mcp-server/test/approval-preview.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c9349d4058c3195015bb87fcceeccef5f9ffbb531147725ba7ff9dbb4b754d0e",
-      "afterDigest": "351a2c12290061bfaf38c95941b179218c4b172ea5ebfdce6ef46a0d627ea873"
+      "beforeDigest": "351a2c12290061bfaf38c95941b179218c4b172ea5ebfdce6ef46a0d627ea873",
+      "afterDigest": "53bff8224753e45aad79b3a14f18af8031b1614736c4dd4d11f4c9612077aa0b"
     },
     {
       "path": "packages/mcp-server/src/batch-recovery.ts",
@@ -2568,14 +2568,14 @@
     },
     {
       "path": "scripts/test/canvas-connector-browser.mjs",
-      "sourceCommit": "4b077508f2ae4d1f953ece9a950535cc4715e088",
+      "sourceCommit": "7a3342cabf612eae3730a08f39938ba4b3ed1594",
       "originalPath": "scripts/test/canvas-connector-browser.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "24a17d1e17b293f5732b26a4a56f82d18140682703baa00a55fcb370f85d39c0",
-      "afterDigest": "02509df6dc35e9f725036b599b10a45b17f41687b0711486ba8ca26902d93545"
+      "beforeDigest": "02509df6dc35e9f725036b599b10a45b17f41687b0711486ba8ca26902d93545",
+      "afterDigest": "14446be124b87bf39d85185b5a4f4185b9bd6cbfc4bc181db7643e1bd04eda41"
     },
     {
       "path": "scripts/test/canvas-connector-package.test.mjs",
