@@ -54,6 +54,14 @@ A second full bridge workflow created a hidden Page on 5 September. Operation `o
 
 Fresh course structure showed one new Page in database section `4`, with `visible: false`. Fresh Page settings and the actual Page both showed `<p>This lesson is ready for learners.</p>`. Repeating the approved operation was refused. Root inspected the review, result, and saved Moodle Page screenshots. Independent source review found no actionable defect in the creation path. Receipt: `output/live-moodle/bridge-create-receipt.json`, captured 5 September at 17:16 UTC. The public demo later resets; this is dated test evidence.
 
+## Native file settings and Assignment and Quiz edit proof
+
+The live Assignment check found a second unstable snapshot input. Moodle creates a new temporary file-area ID each time it opens an Assignment form. The executor now identifies native file managers from Moodle's form markup and checks them through Moodle's signed-in draft-area list action. It replaces each temporary ID in the snapshot with a stable empty, nonempty, or unverified state. The native form still submits the current ID. A form write stops before send if a file area has files, folders, or an unverified result. This layer does not edit attached files. Source: [Moodle native file manager](https://github.com/moodle/moodle/blob/v5.2.2/public/lib/form/filemanager.php) and [draft-area list contract](https://github.com/moodle/moodle/blob/v5.2.2/public/repository/draftfiles_ajax.php).
+
+Two consecutive live Assignment reads then produced the same digest. A reviewed instruction edit on a new hidden test Assignment completed once under operation `op:5efff7e6-a0df-4797-93ed-c87f0c997d97`. The fresh form and actual Assignment both showed the exact requested content. Existing dates and other settings stayed unchanged. Repeating the approved operation was refused. Root inspected the review, result, and saved Assignment screenshots. Receipt: `output/live-moodle/bridge-assignment-write-receipt.json`, test module `12`, 5 September at 17:36 UTC. An earlier test also saved correctly, but its final display assertion used the wrong Moodle page region; that harness error is retained in `output/live-moodle/assignment-first-view-selector-error.json`.
+
+A separate hidden Quiz instruction edit also completed once, under operation `op:54bd4cef-0799-41b4-9067-a5e6a8c58ff8`. Fresh Quiz settings and the actual Quiz both showed the exact requested instructions. Its open and close dates remained unset. Repeating the operation was refused. Root inspected the review and saved Quiz screenshots. Receipt: `output/live-moodle/bridge-quiz-write-receipt.json`, test module `13`, 5 September at 17:39 UTC. These tests confirm selected edits on empty-file activities; they do not establish question authoring or all settings operations.
+
 ## Remaining practical parity work
 
 | Educator task | Moodle current layer | Remaining work |
@@ -61,7 +69,7 @@ Fresh course structure showed one new Page in database section `4`, with `visibl
 | Find courses and content | Six selected live reads confirmed. | Broader tenant and role checks. |
 | Create or edit a lesson | Standard hidden Page creation and one Page update confirmed through full review and readback. | Broader content and tenant checks. |
 | Build course structure | Read structure; place a new hidden Page in a selected section; edit section text; show or hide sections and activities. | Create other standard activities; reorder structure; live-check other supported writes. |
-| Assignment and quiz settings | Name, instructions, selected dates, and visibility implemented. | Live settings and date checks; date clearing. |
+| Assignment and quiz settings | Name, instructions, selected dates, and visibility implemented. Hidden Assignment and Quiz instruction edits confirmed live. | Live date changes and visibility checks; date clearing. Form writes require empty file areas. |
 | Quiz questions | No browser operations yet. | Add course-local question inspection. Resolve complete effect scope before shared question-bank writes. |
 | Files and learner results | No Moodle operations yet. | Verified file lifecycle and scoped learner-data controls. |
 | Blackboard | Browser transport remains unverified and unavailable. | An authorized signed-in test course is required to establish the actual session contract. |

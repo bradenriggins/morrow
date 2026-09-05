@@ -43,6 +43,20 @@ const pageCreateWriteOperation = {
   readOnly: false,
 };
 
+const assignmentReadOperation = {
+  key: "moodle.form.course.modedit.assign.read.v1",
+  toolName: "moodle_get_assignment",
+  provider: "moodle",
+  readOnly: true,
+};
+
+const assignmentWriteOperation = {
+  key: "moodle.form.course.modedit.assign.write.v1",
+  toolName: "moodle_update_assignment",
+  provider: "moodle",
+  readOnly: false,
+};
+
 async function withMoodlePage(callback) {
   const keys = ["location", "M", "document", "fetch"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -94,6 +108,16 @@ function pageCreationForm(state) {
   </form></body></html>`;
 }
 
+function assignmentForm(state, draftId) {
+  return `<!doctype html><html><body><form method="post" action="/course/modedit.php?update=8&amp;return=0">
+    <input name="update" value="8"><input name="course" value="2"><input name="modulename" value="assign">
+    <input name="name" value="${state.name}"><textarea name="introeditor[text]">${state.instructions}</textarea><input name="introeditor[format]" value="1">
+    <div data-fieldtype="filemanager"><input type="hidden" name="introattachments" value="${draftId}"></div>
+    <input type="checkbox" name="duedate[enabled]" value="1"><input name="duedate[year]" value="2026"><input name="duedate[month]" value="9"><input name="duedate[day]" value="5"><input name="duedate[hour]" value="9"><input name="duedate[minute]" value="30">
+    <input type="submit" name="submitbutton" value="Save and return to course">
+  </form></body></html>`;
+}
+
 async function executeInBrowser(page, input) {
   return page.evaluate(async ({ source, value }) => {
     const execute = (0, eval)(`(${source})`);
@@ -119,10 +143,15 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     visible: true,
     completion: { year: 2026, month: 9, day: 5, hour: 9, minute: 30 },
   };
+  const assignment = { name: "Evidence analysis", instructions: "<p>Original brief</p>" };
   const posts = [];
+  const assignmentPosts = [];
+  const draftListIds = [];
   const requests = [];
   let structureReads = 0;
   let createdPage = null;
+  let draftId = 700;
+  let draftFileCount = 0;
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
     const url = new URL(request.url || "/", "https://127.0.0.1");
     requests.push(`${request.method} ${url.pathname}${url.search}`);
@@ -152,6 +181,16 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
       });
       return;
     }
+    if (url.pathname === "/repository/draftfiles_ajax.php") {
+      const chunks = [];
+      request.on("data", (chunk) => chunks.push(chunk));
+      request.on("end", () => {
+        draftListIds.push(new URLSearchParams(Buffer.concat(chunks).toString("utf8")).get("itemid"));
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ filecount: draftFileCount, filesize: draftFileCount, list: draftFileCount ? [{ filename: "existing.pdf" }] : [] }));
+      });
+      return;
+    }
     if (url.pathname !== "/course/modedit.php") {
       response.writeHead(404).end();
       return;
@@ -161,6 +200,7 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
       if (url.searchParams.get("add") === "page") response.end(pageCreationForm(creationDefaults));
       else if (url.searchParams.get("update") === "6") response.end(pageForm(state, 6));
       else if (url.searchParams.get("update") === "55" && createdPage) response.end(pageForm(createdPage, 55));
+      else if (url.searchParams.get("update") === "8") response.end(assignmentForm(assignment, ++draftId));
       else response.writeHead(404).end();
       return;
     }
@@ -169,6 +209,12 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     request.on("end", () => {
       const values = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
       posts.push(values);
+      if (values.get("update") === "8") {
+        assignmentPosts.push(values);
+        assignment.instructions = values.get("introeditor[text]") || "";
+        response.writeHead(303, { location: "/course/view.php" }).end();
+        return;
+      }
       if (values.get("add") === "page") {
         createdPage = {
           name: values.get("name") || "",
@@ -293,6 +339,55 @@ test("Moodle executor updates and creates hidden Pages from native forms in Chro
     assert.equal(creationPost.get("page[format]"), "1");
     assert.equal(creationPost.get("displayoptions[display]"), "1");
     assert.equal(creationPost.get("completionexpected[enabled]"), null);
+
+    const assignmentRead = await executeInBrowser(page, {
+      mode: "execute",
+      operation: assignmentReadOperation,
+      arguments: { course_id: 2, module_id: 8 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    const assignmentReadAgain = await executeInBrowser(page, {
+      mode: "execute",
+      operation: assignmentReadOperation,
+      arguments: { course_id: 2, module_id: 8 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(assignmentRead.ok, true);
+    assert.equal(assignmentReadAgain.ok, true);
+    assert.equal(assignmentRead.snapshot_digest, assignmentReadAgain.snapshot_digest);
+    assert.notEqual(draftListIds[0], draftListIds[1]);
+
+    const assignmentWrite = await executeInBrowser(page, {
+      mode: "execute",
+      operation: assignmentWriteOperation,
+      arguments: { course_id: 2, module_id: 8, instructions: "<p>Approved brief</p>", expected_digest: assignmentRead.snapshot_digest },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(assignmentWrite.ok, true);
+    assert.deepEqual(assignmentWrite.verification, { schema: "morrow.browser-verification.v1", status: "verified" });
+    assert.equal(assignmentPosts.length, 1);
+    assert.equal(assignmentPosts[0].get("introeditor[text]"), "<p>Approved brief</p>");
+
+    draftFileCount = 1;
+    const nonemptyAssignment = await executeInBrowser(page, {
+      mode: "execute",
+      operation: assignmentReadOperation,
+      arguments: { course_id: 2, module_id: 8 },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(nonemptyAssignment.ok, true);
+    assert.deepEqual(await executeInBrowser(page, {
+      mode: "execute",
+      operation: assignmentWriteOperation,
+      arguments: { course_id: 2, module_id: 8, instructions: "<p>Blocked brief</p>", expected_digest: nonemptyAssignment.snapshot_digest },
+      binding,
+      expiresAt: Date.now() + 60_000,
+    }), { ok: false, sent: false, error: "moodle_filemanager_nonempty" });
+    assert.equal(assignmentPosts.length, 1);
   } finally {
     await context?.close();
     await browser?.close();

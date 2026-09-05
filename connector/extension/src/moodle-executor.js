@@ -241,6 +241,40 @@ export async function executeMoodleInPage(input) {
     }
     return new TextDecoder().decode(bytes);
   };
+  const draftItemId = (value) => typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)) ? value : "";
+  const listDraftFiles = async (context, itemId) => {
+    let response;
+    try {
+      response = await fetch(urlFor(context, "/repository/draftfiles_ajax.php", { action: "list" }), {
+        method: "POST",
+        credentials: "include",
+        cache: "no-store",
+        headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: new URLSearchParams({ sesskey: context.sesskey, itemid: itemId, filepath: "/" }),
+      });
+    } catch {
+      return "unverified";
+    }
+    let text;
+    try { text = await readText(response); } catch { return "unverified"; }
+    if (!response.ok) return "unverified";
+    let payload;
+    try { payload = JSON.parse(text); } catch { return "unverified"; }
+    if (!isObject(payload) || !Number.isSafeInteger(payload.filecount) || payload.filecount < 0 || !Array.isArray(payload.list)) return "unverified";
+    return payload.filecount === 0 && payload.list.length === 0 ? "empty" : "nonempty";
+  };
+  const inspectFileManagers = async (context, form, formData) => {
+    const managers = [];
+    const seen = new Set();
+    for (const input of form.querySelectorAll('[data-fieldtype="filemanager"] input[type="hidden"][name]')) {
+      const name = String(input.getAttribute("name") || "");
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      const itemId = draftItemId(formData.get(name));
+      managers.push({ name, state: itemId ? await listDraftFiles(context, itemId) : "unverified" });
+    }
+    return managers;
+  };
   const ajax = async (context, methodName, args, write = false) => {
     let response;
     try {
@@ -306,9 +340,15 @@ export async function executeMoodleInPage(input) {
       type: module, expectedPath: "/course/modedit.php", endpoint: urlFor(context, "/course/modedit.php", { update: args.module_id, return: 0 }), expected: { update: args.module_id, course: courseId, modulename: module }, required, courseId, moduleId: args.module_id,
     };
   };
-  const valuesFromForm = (formData, form) => {
+  const valuesFromForm = (formData, form, fileManagers = []) => {
+    const fileManagerStates = new Map(fileManagers.map(({ name, state }) => [name, state]));
     const values = {};
     for (const [name, value] of formData.entries()) {
+      const fileManagerState = fileManagerStates.get(name);
+      if (fileManagerState) {
+        if (values[name] === undefined) values[name] = { filemanager: { state: fileManagerState } };
+        continue;
+      }
       if (transientField(name)) continue;
       if (typeof File !== "undefined" && value instanceof File) {
         if (value.size > 0) throw new Error("file edit refused");
@@ -369,9 +409,14 @@ export async function executeMoodleInPage(input) {
     const submitControl = Array.from(form.querySelectorAll('input[type="submit"]')).find((control) => control.name === submitName && !control.disabled && typeof control.value === "string" && control.value);
     let formData;
     let values;
-    try { formData = new FormData(form); values = valuesFromForm(formData, form); } catch { return { ok: false, sent: false, status: response.status, error: "moodle_form_read_failed" }; }
+    let fileManagers;
+    try {
+      formData = new FormData(form);
+      fileManagers = await inspectFileManagers(context, form, formData);
+      values = valuesFromForm(formData, form, fileManagers);
+    } catch { return { ok: false, sent: false, status: response.status, error: "moodle_form_read_failed" }; }
     if (descriptor.required.some((name) => !Object.hasOwn(values, name))) return { ok: false, sent: false, status: response.status, error: "moodle_form_target_invalid" };
-    return { ok: true, sent: true, status: response.status, action: action.toString(), formData, values, submit: submitControl ? { name: submitName, value: submitControl.value } : null, data: formDataFor(descriptor, values), snapshot_digest: await digest(values), descriptor };
+    return { ok: true, sent: true, status: response.status, action: action.toString(), formData, values, fileManagers, submit: submitControl ? { name: submitName, value: submitControl.value } : null, data: formDataFor(descriptor, values), snapshot_digest: await digest(values), descriptor };
   };
   const protectedDigest = (values, names) => {
     const copy = { ...values };
@@ -400,6 +445,8 @@ export async function executeMoodleInPage(input) {
   };
   const postForm = async (form) => {
     if (!form.submit) return { ok: false, sent: false, error: "moodle_form_submit_missing" };
+    if (form.fileManagers.some(({ state }) => state === "nonempty")) return { ok: false, sent: false, error: "moodle_filemanager_nonempty" };
+    if (form.fileManagers.some(({ state }) => state !== "empty")) return { ok: false, sent: false, error: "moodle_filemanager_unverified" };
     const params = new URLSearchParams();
     try {
       for (const [name, value] of form.formData.entries()) {
