@@ -690,7 +690,11 @@ export async function executeMoodleInPage(input) {
   const stateProtectedDigest = async (stateValue, collection, targetId) => {
     const copy = JSON.parse(JSON.stringify(stateValue));
     const target = Array.isArray(copy[collection]) ? copy[collection].find((entry) => id(entry?.id) === targetId) : null;
-    if (target) delete target.visible;
+    if (target) {
+      delete target.visible;
+      // Moodle derives these activity fields from the visibility changed by this action.
+      if (collection === "cm") for (const name of ["accessvisible", "hascmrestrictions", "stealth"]) delete target[name];
+    }
     return digest(contentData(copy));
   };
   const runVisibility = async (context, inputValue, definition, args) => {
@@ -704,6 +708,7 @@ export async function executeMoodleInPage(input) {
     if (beforeDigest !== args.expected_digest) return error("moodle_expected_digest_mismatch");
     const target = before.data[collection].find((entry) => id(entry?.id) === targetId);
     if (!target) return error("moodle_target_mismatch");
+    if (collection === "cm" && target.hasdelegatedsection) return error("moodle_delegated_visibility_refused");
     const protectedBefore = await stateProtectedDigest(before.data, collection, targetId);
     const rechecked = currentContext();
     if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
@@ -714,7 +719,12 @@ export async function executeMoodleInPage(input) {
     if (!after.ok) return { ok: false, sent: true, status: update.status, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_readback_unconfirmed" }, error: "moodle_readback_unconfirmed" };
     const afterTarget = after.data[collection].find((entry) => id(entry?.id) === targetId);
     const expectedVisible = definition.kind.endsWith("show");
-    const matches = Boolean(afterTarget) && Boolean(afterTarget.visible) === expectedVisible && protectedBefore === await stateProtectedDigest(after.data, collection, targetId);
+    const section = collection === "cm" ? after.data.section.find((entry) => id(entry?.id) === id(afterTarget?.sectionid)) : null;
+    const derivedMatches = collection !== "cm" || (Boolean(section)
+      && typeof afterTarget?.accessvisible === "boolean" && typeof afterTarget?.hascmrestrictions === "boolean"
+      && afterTarget?.stealth === (expectedVisible && section.visible === false)
+      && (expectedVisible || (afterTarget?.accessvisible === false && afterTarget?.hascmrestrictions === false)));
+    const matches = Boolean(afterTarget) && afterTarget.visible === expectedVisible && derivedMatches && protectedBefore === await stateProtectedDigest(after.data, collection, targetId);
     const data = contentData(after.data);
     return { ok: matches, sent: true, status: after.status, data, targets: [courseTarget(rechecked, after.data.course.fullname || after.data.course.name), { field: collection === "section" ? "section_id" : "module_id", label: collection === "section" ? "Section" : "Activity", name: targetId }], snapshot_digest: await digest(data), verification: { schema: "morrow.browser-verification.v1", status: matches ? "verified" : "mismatch", ...(matches ? {} : { reason: "moodle_readback_mismatch" }) }, ...(matches ? {} : { error: "moodle_write_not_verified" }) };
   };

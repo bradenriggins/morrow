@@ -50,9 +50,9 @@ This is a specific boundary, not a claim that all course data stays local. A cou
 
 The review-and-check model can travel across LMS providers. The proof cannot.
 
-Canvas has selected live sandbox evidence through a signed-in Chrome connection. Moodle uses the same connection. It has six live browser reads, and its page, section, assignment, quiz, date, and visibility operations are implemented. One selected Moodle Page update has a confirmed saved result. Other Moodle writes need live checks. Blackboard browser connection is not yet verified, so Blackboard course work is unavailable.
+Canvas has selected live sandbox evidence through a signed-in Chrome connection. Moodle uses the same connection. In a test course, Morrow completed course and structure reads; created hidden Pages, Assignments, and Quizzes without questions; edited a Page, Assignment instructions, and Quiz instructions; and set or cleared Assignment due dates and Quiz open/close dates. Each result was saved and checked. Changes to activities with attached files are not supported yet. Adding questions to a Quiz, visibility changes, section changes, and other Moodle work still need checks. Blackboard browser connection is not yet verified, so Blackboard course work is unavailable.
 
-Morrow is working toward closer Canvas and Moodle task coverage. It does not claim blanket platform parity. Provider-specific scope prevents one provider's evidence from becoming another provider's claim.
+Morrow is working toward the same core features across all three platforms. It does not claim current parity. Blackboard course work remains unavailable until its browser connection is verified. Provider-specific scope prevents one provider's evidence from becoming another provider's claim.
 
 ## Finish at the learner path
 

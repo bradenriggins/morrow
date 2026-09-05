@@ -2,7 +2,7 @@
 
 Move course work forward. Stay in control.
 
-**Development preview:** Use this version only in a permitted test course. Canvas has selected live course checks. Moodle has six live browser reads and one selected Page update with a confirmed saved result. Other Moodle writes still need live checks. Blackboard is not available through the browser connection. See [current limits](LIMITATIONS.md).
+**Development preview:** Use this version only in a permitted test course. Canvas has selected live course checks. Moodle has selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Blackboard is unavailable until its browser connection is verified in an authorized test course. See [current limits](LIMITATIONS.md).
 
 Morrow helps course teams turn lesson and quiz requests into reviewed changes and checked results. Ask an assistant set up with Morrow for a change, review the exact change in Morrow, and see what the course platform saved. You keep the teaching decisions.
 
@@ -150,10 +150,10 @@ Canvas and Moodle use the same signed-in Chrome connection. Open a course you ca
 | Platform | Current course work | Current evidence |
 | --- | --- | --- |
 | Canvas | Selected lesson and quiz corrections, pages, module links, and publication work. | Selected live test-course changes and one student route were saved and checked. |
-| Moodle | Course and structure reads. Page, section, assignment, quiz, date, and visibility work is implemented. | Six browser reads and one selected Page update have live proof. Twenty-one operations are implemented. Other Moodle writes need live checks. |
+| Moodle | Read course details; create Pages, Assignments, and Quizzes without questions; edit Pages, Assignment instructions, and Quiz instructions; set or clear Assignment due dates and Quiz open/close dates. | Selected test-course changes were saved and checked. Changes to activities with attached files are not supported yet. Adding Quiz questions, visibility changes, section changes, and other work still need checks. |
 | Blackboard | Not available through Morrow. | Browser connection is not yet verified. |
 
-Morrow is working toward closer task coverage for Canvas and Moodle. It does not claim blanket platform parity. Blackboard needs a verified browser connection before course work can be offered.
+Morrow is working toward the same core features across all three platforms. It does not claim current parity. Blackboard course work remains unavailable until its browser connection is verified.
 
 ## Chrome sign-in connection
 

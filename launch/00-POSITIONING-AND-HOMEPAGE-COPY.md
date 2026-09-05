@@ -84,7 +84,7 @@ The lesson and quiz walkthrough is illustrative. It does not connect to Canvas o
 
 **Section heading:** See what has been tested.
 
-Canvas and Moodle use the same signed-in Chrome connection. Selected course changes have been saved and checked in both platforms. Their coverage differs. Blackboard is still in development. Work is in progress to give course teams the same core features across all three platforms. Blackboard’s browser connection must be verified first.
+Canvas and Moodle use the same signed-in Chrome connection. Selected course changes have been saved and checked in both platforms. Their coverage differs. Work is in progress to give course teams the same core features across all three platforms. Blackboard course work is unavailable until its browser connection is verified in an authorized test course.
 
 ### Practical questions
 
@@ -111,7 +111,7 @@ Use these claims now:
 - A separate page creation was saved and checked against the approved content and settings.
 - A selected Codex request reached a separate Morrow review. After approval, one paragraph was added once and checked against the saved page.
 - Morrow is a private development preview. The source-review test used a manually connected assistant.
-- Moodle uses the same Chrome connection as Canvas. Six browser reads and one selected Page update have live proof; 21 operations are implemented and other Moodle writes need live checks.
+- Moodle uses the same Chrome connection as Canvas. Selected test-course proof covers course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Adding questions to a Quiz, visibility changes, section changes, and other work still need checks.
 - Blackboard browser connection is not yet verified, so Blackboard course work is unavailable.
 
 Do not use these claims now:

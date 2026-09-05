@@ -8,7 +8,7 @@ AI assistance can prepare a lesson, quiz question, or course update. Course team
 
 Morrow turns an assistant request into a reviewed course change and a checked LMS result. It shows the course, current content, and proposed edit before approval. An educator approves one change. Morrow then checks the LMS again and reports what it can confirm. If it cannot confirm the result, it marks the work for attention and does not repeat the change automatically.
 
-Canvas and Moodle use the same signed-in Chrome connector. Canvas has selected live sandbox proof. Moodle has six live browser reads, one selected Page update with a confirmed saved result, and 21 implemented operations; other Moodle writes need live checks. Blackboard browser connection is not yet verified and Blackboard course work is unavailable. Each provider keeps its own evidence boundary.
+Canvas and Moodle use the same signed-in Chrome connector. Canvas has selected live sandbox proof. Moodle test-course proof covers course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Adding Quiz questions, visibility changes, section changes, and other Moodle work still need checks. Blackboard browser connection is not yet verified and Blackboard course work is unavailable. Each provider keeps its own evidence boundary.
 
 ## My role
 
@@ -59,10 +59,10 @@ The record keeps the educator's decision, the requested change, and an honest re
 | Evidence category | Current factual support |
 | --- | --- |
 | Implemented local code | The current local code includes reviewed operations, local approval, Chrome connections for Canvas and Moodle, controlled batches, source-linked review, and provider-specific scopes. Installed-client and live-provider results are recorded separately. |
-| Full static gate | The final canonical-URL source passed 159 workspace tests and 21 script tests: 180 tests total. |
-| Selected live Canvas proof | A lesson correction, narrow New Quiz key correction, two module-link writes, three publication operations, and one Student View learner route reached verified evidence. A stale page proposal failed before send and a later page check showed no effect. |
+| Full static gate | The final canonical-URL source passed the relevant workspace and script test gates. |
+| Selected live Canvas proof | A lesson correction, narrow New Quiz key correction, two module-link writes, three publication operations, and one Student View learner route reached verified evidence. A request based on an older page version failed before send and a later page check showed no effect. |
 | Selected Codex route | The installed Codex CLI read the published New Quiz. In a separate interactive test, native tool approval prepared a page update; Morrow approval led to one change attempt that reached verified state. Native and independent later checks confirmed the exact change and unchanged protected fields. This is one selected route only. |
-| Moodle scope | Six live browser reads through the Chrome connection. One selected hidden disposable Page on the official public Moodle 5.2 sandbox saved as &lt;p&gt;This lesson is ready for learners.&lt;/p&gt; in one dispatch; the receipt state was verified, a saved-page check confirmed it, and replay was refused. Twenty-one operations are implemented; other Moodle writes need live checks. |
+| Moodle scope | Course and structure reads; hidden Page, Assignment, and Quiz creation without questions; Page, Assignment instruction, and Quiz instruction edits; and setting or clearing Assignment due dates and Quiz open/close dates were saved and checked through the Chrome connection in a Moodle test course. Every reviewed approval can be used only once. Changes to activities with attached files are not supported yet. Adding questions to a Quiz, visibility changes, section changes, and other Moodle work still need checks. |
 | Blackboard scope | Browser connection is not yet verified. Blackboard course work is unavailable. |
 | Illustrative film | The local site and film show workflow and visual direction. They do not establish a live LMS result. |
 
@@ -82,7 +82,7 @@ A separate unpublished page creation reached automatic verification after one ch
 
 ## Verification limits
 
-Automatic assistant sampling remains unproven beyond the manual adapter. Independent clean-machine reproduction remains open. Moodle has six live browser reads and one selected Page update with a confirmed saved result. Other Moodle writes need live checks. Blackboard browser connection is not yet verified. The selected Canvas sandbox sequence does not establish a full Canvas catalog, every learner flow, learning effectiveness, or whole-release verification. Morrow has no public deployment or institutional-use claim.
+Automatic assistant sampling remains unproven beyond the manual adapter. Independent clean-machine reproduction remains open. Moodle test-course proof covers course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Adding questions to a Quiz, visibility changes, section changes, and other Moodle work still need checks. Blackboard browser connection is not yet verified. The selected Canvas sandbox sequence does not establish a full Canvas catalog, every learner flow, learning effectiveness, or whole-release verification. Morrow has no public deployment or institutional-use claim.
 
 ## Role families this work fits
 
@@ -100,9 +100,9 @@ These are role families, not a claim of eligibility for a specific opening.
 
 “Morrow turns an assistant request into a review that shows the course, current content, and proposed change. A person approves one reviewed change. Morrow sends it once, checks the LMS again, and reports confirmed, unconfirmed, or failed results.
 
-“The key design decision was to make uncertainty visible. In one live Canvas sandbox sequence, we verified a lesson correction, a narrowly scoped quiz-key correction, module links, publication, and a Student View path through a three-question quiz to a three-point result with feedback. We also tested a stale proposal: it failed before send, and the next check proved the page had not changed. That safe failure is as important as the success cases.
+“The key design decision was to make uncertainty visible. In one live Canvas sandbox sequence, we verified a lesson correction, a narrowly scoped quiz-key correction, module links, publication, and a Student View path through a three-question quiz to a three-point result with feedback. We also tested a request based on an older page version: it failed before send, and the next check proved the page had not changed. That safe failure is as important as the success cases.
 
-“The work is platform-specific. Canvas has selected sandbox proof through a browser connector. Moodle uses the same Chrome connection and has six live browser reads plus one selected Page update with a confirmed saved result. Other Moodle writes need live checks. Blackboard browser connection is not yet verified. Morrow is working toward closer Canvas and Moodle task coverage, not blanket parity. The selected Codex route is not universal assistant proof. This is not whole-release verification. The value of the work is product judgment: I built a system that lets course teams review AI-assisted changes before Morrow calls them complete.”
+“The work is platform-specific. Canvas has selected sandbox proof through a browser connector. Moodle uses the same Chrome connection and has selected test-course proof for course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Adding questions to a Quiz, visibility changes, section changes, and other Moodle work still need checks. Blackboard browser connection is not yet verified. Morrow is working toward the same core features across all three platforms, without claiming current parity. The selected Codex route is not universal assistant proof. This is not whole-release verification. The value of the work is product judgment: I built a system that lets course teams review AI-assisted changes before Morrow calls them complete.”
 
 ## Evidence sources
 

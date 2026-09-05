@@ -189,11 +189,13 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
   const posts = [];
   const assignmentPosts = [];
   const assignmentCreationPosts = [];
+  const visibilityActions = [];
   const draftListIds = [];
   const requests = [];
   let structureReads = 0;
   let createdPage = null;
   let createdAssignment = null;
+  let changeName = false;
   let draftId = 700;
   let draftFileCount = 0;
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
@@ -213,14 +215,25 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
       const chunks = [];
       request.on("data", (chunk) => chunks.push(chunk));
       request.on("end", () => {
+        const call = JSON.parse(Buffer.concat(chunks).toString("utf8"))[0];
+        if (call?.methodname === "core_courseformat_update_course") {
+          visibilityActions.push(call.args.action);
+          if (createdPage) {
+            createdPage.visible = call.args.action === "cm_show";
+            if (changeName) { createdPage.name = "Unexpected Page name"; changeName = false; }
+          }
+          response.writeHead(200, { "content-type": "application/json" });
+          response.end(JSON.stringify([{ data: null }]));
+          return;
+        }
         structureReads += 1;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify([{
           data: JSON.stringify({
             course: { id: 2, fullname: "Week 1" },
-            section: [{ id: 7, number: 4, title: "Week 4: Evidence" }],
+            section: [{ id: 7, number: 4, title: "Week 4: Evidence", visible: false }],
             cm: [
-              ...(createdPage ? [{ id: 55, module: "page", sectionid: 7, visible: false }] : []),
+              ...(createdPage ? [{ id: 55, module: "page", sectionid: 7, name: createdPage.name, visible: createdPage.visible, accessvisible: createdPage.visible, hascmrestrictions: false, stealth: createdPage.visible }] : []),
               ...(createdAssignment ? [{ id: 56, module: "assign", sectionid: 7, visible: createdAssignment.visible }] : []),
             ],
           }),
@@ -404,6 +417,20 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     assert.equal(creationPost.get("page[format]"), "1");
     assert.equal(creationPost.get("displayoptions[display]"), "1");
     assert.equal(creationPost.get("completionexpected[enabled]"), null);
+
+    const run = (toolName, key, params) => executeInBrowser(page, { mode: "execute", operation: { toolName, key, provider: "moodle", readOnly: toolName === "moodle_get_contents" }, arguments: params, binding, expiresAt: Date.now() + 60_000 });
+    const activity = (result) => result.data.activities.find((item) => item.id === 55);
+    const setVisible = (show, digest) => run(`moodle_${show ? "show" : "hide"}_activity`, `moodle.ajax.core_courseformat_update_course.cm_${show ? "show" : "hide"}.v1`, { course_id: 2, module_id: 55, expected_digest: digest });
+    let visibility = await setVisible(true, (await run("moodle_get_contents", "moodle.ajax.core_courseformat_get_state.v1", { course_id: 2 })).snapshot_digest);
+    assert.equal(visibility.ok, true);
+    assert.deepEqual([activity(visibility).name, activity(visibility).visible, activity(visibility).accessvisible, activity(visibility).hascmrestrictions, activity(visibility).stealth], ["Evidence notebook", true, true, false, true]);
+    visibility = await setVisible(false, visibility.snapshot_digest);
+    assert.equal(visibility.ok, true);
+    assert.deepEqual([activity(visibility).name, activity(visibility).visible, activity(visibility).accessvisible, activity(visibility).hascmrestrictions, activity(visibility).stealth], ["Evidence notebook", false, false, false, false]);
+    changeName = true;
+    const renamed = await setVisible(true, visibility.snapshot_digest);
+    assert.deepEqual([renamed.ok, renamed.sent, renamed.error, activity(renamed).name], [false, true, "moodle_write_not_verified", "Unexpected Page name"]);
+    assert.deepEqual(visibilityActions, ["cm_show", "cm_hide", "cm_show"]);
 
     await page.evaluate(() => {
       history.replaceState(null, "", "/mod/assign/view.php?id=8");

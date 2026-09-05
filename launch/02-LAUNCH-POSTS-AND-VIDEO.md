@@ -12,11 +12,11 @@ I have spent months building Morrow around one promise for course teams:
 
 Morrow turns a request from an assistant set up with Morrow into a reviewed course change and a checked LMS result. The team sees the exact destination and proposed change before approval. Then Morrow checks what the platform saved where a check is available and reports what it can confirm.
 
-The work is designed for the details that make course changes hard: a similar course name, a page that changed during planning, an action that may have reached the LMS, or a recommendation that still needs teaching judgment. Morrow stops a stale request before send. It does not repeat an uncertain action automatically. It gives the team a visible result instead of a guessed success.
+The work is designed for the details that make course changes hard: a similar course name, a page that changed during planning, an action that may have reached the LMS, or a recommendation that still needs teaching judgment. Morrow stops a request based on an older version of the page before send. It does not repeat an uncertain action automatically. It gives the team a visible result instead of a guessed success.
 
 For Canvas and Moodle, the sign-in stays in Chrome. Credentials stay out of assistant messages and saved records. Morrow's output rules block credential and learner fields from assistant output. The selected course text and metadata needed for a request can still reach the assistant that the team chooses, under that assistant's own account settings and data terms.
 
-A selected Canvas sandbox made the standard concrete. A lesson correction was saved and checked. An outdated request stopped before changing the page. Student View reached the published quiz and returned 3/3 with feedback. Canvas Grades and a separate check confirmed that test result. A separate page creation also matched the approved content and settings after one change.
+A selected Canvas sandbox made the standard concrete. A lesson correction was saved and checked. A request based on an older version of the page stopped before changing it. Student View reached the published quiz and returned 3/3 with feedback. The gradebook matched that result. A separate page creation also matched the approved content and settings after one change.
 
 The installed interactive Codex route also completed one separately reviewed page update. It is a selected tested route, not proof for every Codex or other assistant configuration.
 
@@ -30,7 +30,7 @@ Here is the product standard I want for AI-assisted course work.
 
 **Review before you approve.** See the exact course, item, current content, and proposed change. A person approves the saved request before it reaches the LMS.
 
-**Know what was saved.** Fresh LMS evidence decides whether a result is verified, unconfirmed, or failed. In one Canvas sandbox, a lesson correction verified. A stale request failed before send. Student View returned 3/3 with feedback, and Grades plus an API read confirmed the result.
+**Know what was saved.** Fresh LMS evidence decides whether a result is verified, unconfirmed, or failed. In one Canvas sandbox, a lesson correction verified. A request based on an older version of the page stopped before send. Student View returned 3/3 with feedback, and the gradebook matched the result.
 
 **Keep your sign-in private.** Canvas and Moodle sign-in stays in Chrome. Credentials stay out of assistant messages and saved records. Morrow blocks credential and learner fields from assistant output. Course content needed for the chosen request can still reach the selected assistant under its own account settings and data terms.
 
@@ -42,7 +42,7 @@ Morrow is a private development preview. The public preview can follow only afte
 
 ## LinkedIn post 3 — Practical lesson
 
-**Visual:** Four questions on a clear card. Add a small fifth badge: `stale? stop and read again`.
+**Visual:** Four questions on a clear card. Add a small fifth badge: `Page changed? Review again.`
 
 When AI assistance helps with a course, ask four questions before you call the work finished:
 
@@ -53,9 +53,9 @@ When AI assistance helps with a course, ask four questions before you call the w
 
 In Morrow, those questions become four commitments: review before you approve, know what was saved, keep your sign-in private, and choose how you work.
 
-The platform still matters. Canvas and Moodle use the same signed-in Chrome connection. Moodle has six live browser reads and one selected Page update with a confirmed saved result. Other Moodle writes need live checks. Blackboard browser connection is not yet verified and Blackboard course work is unavailable. Each platform and assistant route needs its own evidence.
+The platform still matters. Canvas and Moodle use the same signed-in Chrome connection. Moodle test-course proof covers course reads; Page, Assignment, and Quiz creation without questions; editing Pages, Assignment instructions, and Quiz instructions; and setting or clearing Assignment due dates and Quiz open/close dates. Changes to activities with attached files are not supported yet. Adding Quiz questions, visibility changes, section changes, and other Moodle work still need checks. Blackboard browser connection is not yet verified and Blackboard course work is unavailable. Each platform and assistant route needs its own evidence.
 
-One selected Canvas sandbox showed a corrected lesson, a stopped stale request, and a 3/3 Student View result confirmed by Grades and API. That is useful proof. It is not a claim that every LMS or course workflow is verified.
+One selected Canvas sandbox showed a corrected lesson, a request based on an older page version that stopped before send, and a 3/3 Student View result that the gradebook matched. That is useful proof. It is not a claim that every LMS or course workflow is verified.
 
 The practical rule is simple: do not call a generated draft a completed course change until the team can control it and check the saved result.
 
@@ -77,7 +77,7 @@ Voice: “Review the exact course change before it takes effect.”
 
 On-screen: The same card returns from Canvas as `saved and checked`. A second card ends `stopped before change` with `saved page unchanged`.
 
-Voice: “Morrow checks what the LMS saved. A stale request can stop before it changes anything.”
+Voice: “Morrow checks what the LMS saved. A request based on an older page version can stop before it changes anything.”
 
 **32–43 seconds — Keep your sign-in private**
 
@@ -93,7 +93,7 @@ Voice: “Choose the assistant that fits the task. Morrow keeps the review and c
 
 **52–60 seconds — Selected proof**
 
-On-screen: `Selected Canvas sandbox: correction verified · stale request stopped · Student View 3/3 confirmed by Grades + API`.
+On-screen: `Selected Canvas test: correction verified · outdated request stopped · Student View 3/3, gradebook matched`.
 
 Voice: “This is selected Canvas evidence. Each platform and assistant route needs its own proof.”
 
@@ -127,9 +127,9 @@ Voice: “One Canvas sandbox correction was saved and checked.”
 
 **17–20 seconds**
 
-On-screen: `Stale request stopped · Student View 3/3 confirmed`.
+On-screen: `Outdated request stopped · Student View 3/3, gradebook matched`.
 
-Voice: “The stale request stopped, and Student View reached 3/3.”
+Voice: “The request based on an older page version stopped. Student View reached 3/3, and the gradebook matched the result.”
 
 ## Production rules
 
@@ -138,4 +138,4 @@ Voice: “The stale request stopped, and Student View reached 3/3.”
 - State that the source review used a manual adapter.
 - State that the selected sandbox sequence does not establish a full Canvas catalog, every learner flow, whole-release verification, or learning effectiveness.
 - Do not show real learner names, grades, identifiers, tokens, secrets, or raw logs. Label the selected sandbox score as test evidence.
-- Do not imply live Moodle or Blackboard tenant proof, all course content stays local, zero risk, automatic assistant sampling, support for every assistant configuration, automatic teaching judgment, or public availability.
+- Do not imply proof for every Moodle workflow, Blackboard browser availability, all course content stays local, zero risk, automatic assistant sampling, support for every assistant configuration, automatic teaching judgment, or public availability.

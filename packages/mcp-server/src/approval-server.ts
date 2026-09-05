@@ -398,12 +398,12 @@ function changeKind(tool: unknown): string {
   return "Change";
 }
 
-function visibilityDecision(tool: unknown): string | null {
+function visibilityDecision(tool: unknown, verified = false): string | null {
   const name = String(tool);
   const target = name.endsWith("_course") ? "course" : name.endsWith("_section") ? "section" : name.endsWith("_activity") ? "activity" : null;
   if (!target || !name.startsWith("moodle_")) return null;
-  if (name.includes("_show_")) return `This will make the Moodle ${target} visible to learners.`;
-  if (name.includes("_hide_")) return `This will hide the Moodle ${target} from learners.`;
+  if (name.includes("_show_")) return verified ? `Moodle confirmed that this ${target} is set to visible.` : `This will make the Moodle ${target} visible to learners.`;
+  if (name.includes("_hide_")) return verified ? `Moodle confirmed that this ${target} is set to hidden.` : `This will hide the Moodle ${target} from learners.`;
   return null;
 }
 
@@ -433,7 +433,7 @@ function namedTargetsMissing(operations: readonly JsonObject[], contexts: Readon
     if (!/^(canvas|moodle|blackboard)_/.test(String(plan.tool))) return false;
     const request = object(plan.arguments);
     const targets = contexts.get(String(operation.operationId))?.targets || [];
-    return targets.some((item) => !item.name.trim()) || ["id", "course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
+    return targets.some((item) => !item.name.trim()) || ["id", "course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "section_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
       field in request && !targets.some((item) => item.field === field && item.name.trim()));
   });
 }
@@ -565,7 +565,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
       : requestFields(["moodle_create_page", "moodle_create_assignment", "moodle_create_quiz"].includes(String(entry.tool)) ? { ...request, visible: false } : request, hiddenFields);
     const addingQuestion = entry.tool === "canvas_create_quiz_item";
     const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
-    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${visibilityDecision(entry.tool) || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;
+    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${visibilityDecision(entry.tool, operations[index]?.state === "verified") || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;
     const questionFields = Object.keys(request).filter((key) => key.startsWith("item_") && key !== "item_id");
     const scoreOnlyQuestion = question && questionFields.length === 1 && questionFields[0] === "item_entry_scoring_data";
     const before = scoreOnlyQuestion && context?.question

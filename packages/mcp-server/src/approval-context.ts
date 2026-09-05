@@ -488,9 +488,19 @@ export async function resolveApprovalReviewContext(
     }
     const current = operation.state === "awaiting_approval" && !["moodle_create_page", "moodle_create_assignment", "moodle_create_quiz"].includes(browserMapping.upstreamName)
       ? currentContent(args, result.data, browserMapping.upstreamName) : {};
+    const targets = [...result.targets];
+    if (/^moodle_(?:show|hide)_(?:section|activity)$/.test(browserMapping.upstreamName)) {
+      const section = browserMapping.upstreamName.endsWith("_section");
+      const field = section ? "section_id" : "module_id";
+      const entries = result.data[section ? "sections" : "activities"];
+      const selected = Array.isArray(entries) ? entries.filter((entry) => sameId(object(entry)?.id, moodleCourseId(args[field]) || "")) : [];
+      const target = selected.length === 1 ? object(selected[0]) : null;
+      const name = target ? exactText(section ? target.title || target.rawtitle : target.name) : null;
+      if (name) targets.push({ field, label: section ? "Section" : "Activity", name });
+    }
     return {
       ...(Object.keys(current).length ? { current } : {}),
-      targets: approvalTargets(args, result.targets),
+      targets: approvalTargets(args, targets),
       ...(read.limited ? { limited: true } : {}),
     };
   }

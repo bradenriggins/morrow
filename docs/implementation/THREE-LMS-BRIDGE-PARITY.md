@@ -78,6 +78,24 @@ The first Quiz creation was retained as unconfirmed because Moodle collapsed two
 
 After these changes, `pnpm test` passed. The existing Canvas browser campaign also passed pairing, extension restart, exact course binding, governed writes, repeat refusal, and disconnect in Chrome for Testing. Root inspected the current popup and narrow approval screen.
 
+## Activity visibility proof
+
+A new hidden Page was created in the public test course under `op:4ff0ec60-090e-4b7d-aee0-1a42b0d01e48`. A separate approval showed that Page under `op:dcbf4585-8910-41dc-93f9-34630b0e6427`. Another approval hid it again under `op:3155b752-c5ad-4e8d-9ce1-50791cd5b2b7`. Each operation dispatched once, reached `verified`, and refused repetition. Fresh course state matched the selected visibility while the other course data stayed unchanged. Root inspected the exact review, result, course home, and Page screens. Moodle's course home showed the Page normally after show, then displayed “Hidden from students” after hide. Receipt: `output/live-moodle/bridge-page-visibility-receipt.json`, captured 5 September at 19:06 UTC. The disposable Page was module `5`; the demo resets hourly.
+
+Source review found that Moodle derives `accessvisible`, `hascmrestrictions`, and `stealth` from activity visibility. The saved-state comparison now permits only those target fields to change with `visible`. It still requires their expected types and hidden-state values, and verifies stealth against the parent section. Other fields stay exact. Activities that control a delegated subsection stop before send because their visibility affects a wider set of items. Sources: [Moodle activity state](https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/output/local/state/cm.php), [native visibility action](https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/stateactions.php), and [delegated section effects](https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/local/cmactions.php). The existing browser regression checks show and hide, plus rejection of an unrelated activity-name change.
+
+The review previously received only the course name from a contents read. Visibility reviews now resolve exactly one section or activity from the fresh, digest-matching course state. Missing, duplicate, or nameless targets cannot approve. Section IDs now have the same required-name check as activity IDs. Independent source review accepted these changes. The live Page reviews displayed the exact course and activity names.
+
+Root also corrected a result-screen sentence that still used future tense after verification. The current screen says that Moodle confirmed the item is set to visible or hidden. A local read-only replay of the verified receipts passed at 390 and 1280 px. Root inspected the resulting screenshots in `output/live-moodle/visibility-result-copy/`. This copy check made no provider calls and is separate from the live visibility proof.
+
+Section visibility remains a separate work item. Moodle also changes child activity visibility when it hides a section, then restores native prior visibility when it shows the section. The current section comparison still treats those child fields as fixed. It needs a scoped child-state check and live proof before a section-visibility support claim. Source: [native section visibility transfer](https://github.com/moodle/moodle/blob/v5.2.2/public/course/format/classes/local/sectionactions.php).
+
+## Current website confirmation
+
+The final audience copy passed both pages at 320, 390, 768, 1280, and 1440 px on 5 September at 18:56 UTC. Menu navigation, lesson and quiz examples, keyboard tabs, exact setup clipboard content, and actual film playback passed. A shorter build-limits paragraph passed again at 320, 390, and 1280 px. An independent reviewer accepted the copy and layouts, then found one Canvas-only setup instruction. That instruction now names Canvas or Moodle. Its final setup card passed targeted checks at 320, 390, and 1280 px, and root inspected the mobile and desktop screenshots. Reports are in `output/playwright/final-polish-website/{audience-final,final,setup-final}/`.
+
+The Moodle provider cell now uses plain, compact wording. Detailed evidence names hidden creation and Quizzes without questions. Attached-file limits are explicitly scoped to Moodle. Active marketing contains no “AI app.” Root reconfirmed that the film and poster in the website are byte-identical to the inspected exports. The film did not change during this copy pass.
+
 ## Remaining practical parity work
 
 | Educator task | Moodle current layer | Remaining work |
@@ -85,7 +103,7 @@ After these changes, `pnpm test` passed. The existing Canvas browser campaign al
 | Find courses and content | Six selected live reads confirmed. | Broader tenant and role checks. |
 | Create or edit a lesson | Standard hidden Page creation and one Page update confirmed through full review and readback. | Broader content and tenant checks. |
 | Build course structure | Read structure; place a new hidden Page, Assignment, or Quiz in a selected section; edit section text; show or hide sections and activities. | Reorder structure; live-check other supported writes. |
-| Assignment and quiz settings | Hidden Assignment and questionless Quiz creation, instruction edits, Assignment due-date set and clear, and Quiz open/close date set and clear confirmed live. | Visibility checks and broader settings and tenant checks. Form writes require empty file areas. |
+| Assignment and quiz settings | Hidden Assignment and questionless Quiz creation, instruction edits, Assignment due-date set and clear, and Quiz open/close date set and clear confirmed live. | One Page show/hide workflow is confirmed. Broader activity types, settings, and tenant checks remain. Form writes require empty file areas. |
 | Quiz questions | No browser operations yet. | Add course-local question inspection. Resolve complete effect scope before shared question-bank writes. |
 | Files and learner results | No Moodle operations yet. Native Resource creation and upload form contract checked read-only in the public demo. | Verified file admission, upload and saved-byte checks; scoped learner-data controls. |
 | Blackboard | Browser transport remains unverified and unavailable. | An authorized signed-in test course is required to establish the actual session contract. |
