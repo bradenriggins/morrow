@@ -41,40 +41,45 @@ the full evidence boundary.
 
 ## Outreach drafts
 
-Each draft is below 120 words. Replace every bracketed field. Use a current role
-link before sending.
+Each draft is below 120 words.
 
-### 1. LMS platform or product team
+### 1. Instructure platform team
 
-> Hi [Name], I built Morrow's Canvas operation path: a live lesson correction and
-> quiz-key correction were verified, independent readback confirmed all other quiz
-> fields stayed unchanged, and a stale request was refused before send. I am
-> reaching out because [Company]'s work on [specific Canvas or platform workflow]
-> makes that evidence boundary useful. How does [team] decide when an AI-assisted
-> course action is ready to move from a reviewed request into a durable product
-> workflow? I would value a short conversation and can send the concise case study
-> and walkthrough first.
+> Hello Instructure Platform Team,
+>
+> I created Morrow to make AI-assisted Canvas changes reviewable and verifiable.
+> In a live sandbox, it corrected a lesson and quiz key, refused a stale request,
+> and completed a Student View route to 3/3, confirmed through Grades and the API.
+> Each change binds the course and target, requires human approval, and checks the
+> saved result. Canvas Career's configurable delivery workflows make this a close
+> product fit. I am exploring platform and applied AI roles where this implementation
+> experience and product judgment matter. May I share a short case study and walkthrough?
 
-### 2. Applied AI, solutions, or forward-deployed team
+### 2. OpenAI education team
 
-> Hi [Name], I built Morrow to make AI-assisted course changes operational: bind the
-> LMS target, freeze an approved request, and require fresh provider readback rather
-> than treating dispatch as success. The Canvas path has verified lesson and quiz-key
-> corrections, preserved-field readback, stale-request refusal, and verified module
-> links. I am interested in [role] because [Company] works directly with education
-> customers on AI workflows. I would value 15 minutes to learn how your team turns a
-> working field prototype into a safe, repeatable deployment pattern.
+> Hello OpenAI Education Team,
+>
+> I spent months building Morrow, an operations layer that connects AI requests to
+> reviewed, approved, and verified LMS changes. Its selected Canvas sandbox test
+> covered lesson and quiz corrections, stale-request refusal, and a 3/3 learner
+> result confirmed through Grades and the API. The installed Codex client also read
+> the exact published quiz through Morrow. Your Applied AI Architect - EDU role's
+> focus on integrations, governance, and evaluation matches the problem I have been
+> working on. I am seeking a role applying this work to education workflows.
+> May I share the case study and discuss where this experience could fit?
 
-### 3. Responsible-AI education product team
+### 3. D2L product team
 
-> Hi [Name], I built Morrow around one design question: where does educator control
-> belong once AI moves from draft generation to a real course action? The workflow
-> binds the target, shows the proposed change, requires approval, and reports fresh
-> readback or uncertainty. Live Canvas work verified lesson and quiz-key corrections
-> and refused a stale request before send. I am reaching out because [Company]'s
-> work on [responsible AI, privacy, or educator workflow] addresses the same product
-> boundary. Could I share a short case study and ask how your team makes that
-> boundary legible to educators?
+> Hello D2L Product Team,
+>
+> I am exploring product roles at the intersection of learning platforms and AI.
+> I created Morrow around a concrete product decision: one human approval permits
+> one change attempt, followed by a check of the saved result. Uncertain writes do
+> not repeat automatically. In a selected Canvas sandbox, lesson and quiz corrections
+> passed, a stale request was refused, and Grades plus the API confirmed a 3/3
+> learner result. Your Createspace posting's focus on supported workflows, constraints,
+> and release candidates connects directly to this work. I can share a case study
+> that shows the design, implementation, and evidence.
 
 ## Before any contact
 
