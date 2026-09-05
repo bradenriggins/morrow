@@ -4,6 +4,7 @@ export async function executeMoodleInPage(input) {
   const PROVIDER = "moodle";
   const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   const id = (value) => Number.isSafeInteger(value) && value > 0 ? String(value) : /^[1-9][0-9]*$/.test(String(value || "")) ? String(value) : "";
+  const sectionNumber = (value) => Number.isSafeInteger(value) && value >= 0 ? String(value) : "";
   const error = (code, extra = {}) => ({ ok: false, sent: false, error: code, ...extra });
   const definitions = Object.freeze({
     "moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1": { toolName: "moodle_list_my_courses", readOnly: true, kind: "list-courses" },
@@ -14,11 +15,13 @@ export async function executeMoodleInPage(input) {
     "moodle.form.course.edit.summary.read.v1": { toolName: "moodle_get_course_summary", readOnly: true, kind: "course-form-read" },
     "moodle.form.course.editsection.read.v1": { toolName: "moodle_get_section", readOnly: true, kind: "section-form-read" },
     "moodle.form.course.modedit.page.read.v1": { toolName: "moodle_get_page", readOnly: true, kind: "page-form-read" },
+    "moodle.form.course.modedit.page.create.read.v1": { toolName: "moodle_get_page_creation_form", readOnly: true, kind: "page-create-form-read" },
     "moodle.form.course.modedit.assign.read.v1": { toolName: "moodle_get_assignment", readOnly: true, kind: "assignment-form-read" },
     "moodle.form.course.modedit.quiz.read.v1": { toolName: "moodle_get_quiz", readOnly: true, kind: "quiz-form-read" },
     "moodle.form.course.edit.summary.write.v1": { toolName: "moodle_update_course_summary", readOnly: false, kind: "course-form-write" },
     "moodle.form.course.editsection.write.v1": { toolName: "moodle_update_section", readOnly: false, kind: "section-form-write" },
     "moodle.form.course.modedit.page.write.v1": { toolName: "moodle_update_page", readOnly: false, kind: "page-form-write" },
+    "moodle.form.course.modedit.page.create.write.v1": { toolName: "moodle_create_page", readOnly: false, kind: "page-create-form-write" },
     "moodle.form.course.modedit.assign.write.v1": { toolName: "moodle_update_assignment", readOnly: false, kind: "assignment-form-write" },
     "moodle.form.course.modedit.quiz.write.v1": { toolName: "moodle_update_quiz", readOnly: false, kind: "quiz-form-write" },
     "moodle.form.course.edit.visibility.write.v1": { toolName: "moodle_show_course", readOnly: false, kind: "course-show" },
@@ -133,7 +136,7 @@ export async function executeMoodleInPage(input) {
   const validateArguments = (definition, raw, binding, context) => {
     const value = withoutMorrow(raw);
     if (!value) return { error: "moodle_arguments_invalid" };
-    const courseKinds = new Set(["course", "structure", "assignments", "quizzes", "course-form-read", "section-form-read", "page-form-read", "assignment-form-read", "quiz-form-read", "course-form-write", "section-form-write", "page-form-write", "assignment-form-write", "quiz-form-write", "course-show", "course-hide", "section-show", "section-hide", "activity-show", "activity-hide"]);
+    const courseKinds = new Set(["course", "structure", "assignments", "quizzes", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read", "course-form-write", "section-form-write", "page-form-write", "page-create-form-write", "assignment-form-write", "quiz-form-write", "course-show", "course-hide", "section-show", "section-hide", "activity-show", "activity-hide"]);
     if (definition.kind === "list-courses") {
       if (!only(value, ["limit"]) || (value.limit !== undefined && (!Number.isSafeInteger(value.limit) || value.limit < 1 || value.limit > MAX_ITEMS))) return { error: "moodle_arguments_invalid" };
       return { value: { limit: value.limit || 50 } };
@@ -144,7 +147,7 @@ export async function executeMoodleInPage(input) {
       value.course_id = courseId;
     }
     const moduleKinds = new Set(["page-form-read", "assignment-form-read", "quiz-form-read", "page-form-write", "assignment-form-write", "quiz-form-write", "activity-show", "activity-hide"]);
-    const sectionKinds = new Set(["section-form-read", "section-form-write", "section-show", "section-hide"]);
+    const sectionKinds = new Set(["section-form-read", "section-form-write", "page-create-form-read", "page-create-form-write", "section-show", "section-hide"]);
     if (moduleKinds.has(definition.kind)) {
       if (!id(value.module_id)) return { error: "moodle_arguments_invalid" };
       value.module_id = id(value.module_id);
@@ -153,9 +156,9 @@ export async function executeMoodleInPage(input) {
       if (!id(value.section_id)) return { error: "moodle_arguments_invalid" };
       value.section_id = id(value.section_id);
     }
-    const reads = new Set(["course", "structure", "assignments", "quizzes", "course-form-read", "section-form-read", "page-form-read", "assignment-form-read", "quiz-form-read"]);
+    const reads = new Set(["course", "structure", "assignments", "quizzes", "course-form-read", "section-form-read", "page-form-read", "page-create-form-read", "assignment-form-read", "quiz-form-read"]);
     if (reads.has(definition.kind)) {
-      const allowed = definition.kind.startsWith("section") ? ["course_id", "section_id"]
+      const allowed = definition.kind === "page-create-form-read" || definition.kind.startsWith("section") ? ["course_id", "section_id"]
         : (definition.kind.startsWith("page") || definition.kind.startsWith("assignment") || definition.kind.startsWith("quiz")) ? ["course_id", "module_id"]
           : ["course_id"];
       if (!only(value, allowed)) return { error: "moodle_arguments_invalid" };
@@ -182,6 +185,11 @@ export async function executeMoodleInPage(input) {
       if (!only(value, ["course_id", "module_id", "name", "content", "expected_digest"])
         || (value.name === undefined && value.content === undefined)
         || (value.name !== undefined && !validString(value.name, 1333)) || (value.content !== undefined && !validString(value.content, 40000))) return { error: "moodle_arguments_invalid" };
+      return { value };
+    }
+    if (definition.kind === "page-create-form-write") {
+      if (!only(value, ["course_id", "section_id", "name", "content", "expected_digest"])
+        || !validString(value.name, 1333) || !value.name || !validString(value.content, 40000) || !value.content) return { error: "moodle_arguments_invalid" };
       return { value };
     }
     if (definition.kind === "assignment-form-write") {
@@ -274,6 +282,13 @@ export async function executeMoodleInPage(input) {
     if (filter) data = { course: data.course, activities: data.activities.filter((entry) => entry.module === filter) };
     return { ...result, data, snapshot_digest: await digest(data), targets: [courseTarget(context, result.data.course.fullname || result.data.course.name)] };
   };
+  const selectedSection = async (context, courseId, sectionId) => {
+    const current = await state(context, courseId);
+    if (!current.ok) return current;
+    const section = current.data.section.find((entry) => id(entry?.id) === sectionId);
+    if (!section || !sectionNumber(section.number)) return { ok: false, sent: false, status: current.status, error: "moodle_section_target_invalid" };
+    return { ok: true, sent: true, status: current.status, section };
+  };
   const formDescriptor = (context, kind, args) => {
     const courseId = args.course_id;
     if (kind.startsWith("course")) return {
@@ -281,6 +296,9 @@ export async function executeMoodleInPage(input) {
     };
     if (kind.startsWith("section")) return {
       type: "section", expectedPath: "/course/editsection.php", endpoint: urlFor(context, "/course/editsection.php", { id: args.section_id }), expected: { id: args.section_id, course: courseId }, required: ["name", "summary_editor[text]"], courseId, sectionId: args.section_id,
+    };
+    if (kind === "page-create-form-read" || kind === "page-create-form-write") return {
+      type: "page-create", expectedPath: "/course/modedit.php", endpoint: urlFor(context, "/course/modedit.php", { add: "page", course: courseId, sectionid: args.section_id, return: 0 }), expected: { course: courseId, add: "page", modulename: "page", section: args.section_number, return: "0" }, required: ["course", "add", "modulename", "section", "return", "name", "page[text]", "visible"], courseId, sectionId: args.section_id, sectionNumber: args.section_number, sectionName: args.section_name,
     };
     const module = kind.startsWith("page") ? "page" : kind.startsWith("assignment") ? "assign" : "quiz";
     const required = module === "page" ? ["name", "page[text]"] : module === "assign" ? ["name", "introeditor[text]", "duedate[enabled]"] : ["name", "introeditor[text]", "timeopen[enabled]", "timeclose[enabled]"];
@@ -321,6 +339,7 @@ export async function executeMoodleInPage(input) {
   const formDataFor = (descriptor, values) => {
     if (descriptor.type === "course") return { course_id: Number(descriptor.courseId), fullname: one(values, "fullname"), shortname: one(values, "shortname"), summary: one(values, "summary_editor[text]"), summary_format: Number(one(values, "summary_editor[format]")), visible: one(values, "visible") === "1" };
     if (descriptor.type === "section") return { course_id: Number(descriptor.courseId), section_id: Number(descriptor.sectionId), name: one(values, "name"), summary: one(values, "summary_editor[text]"), summary_format: Number(one(values, "summary_editor[format]")) };
+    if (descriptor.type === "page-create") return { course_id: Number(descriptor.courseId), section_id: Number(descriptor.sectionId), name: one(values, "name"), content: one(values, "page[text]"), content_format: Number(one(values, "page[format]")), visible: one(values, "visible") === "1" };
     if (descriptor.type === "page") return { course_id: Number(descriptor.courseId), module_id: Number(descriptor.moduleId), name: one(values, "name"), content: one(values, "page[text]"), content_format: Number(one(values, "page[format]")) };
     if (descriptor.type === "assign") return { course_id: Number(descriptor.courseId), module_id: Number(descriptor.moduleId), name: one(values, "name"), instructions: one(values, "introeditor[text]"), instructions_format: Number(one(values, "introeditor[format]")), due_date: dateFromForm(values, "duedate") };
     return { course_id: Number(descriptor.courseId), module_id: Number(descriptor.moduleId), name: one(values, "name"), instructions: one(values, "introeditor[text]"), instructions_format: Number(one(values, "introeditor[format]")), open_at: dateFromForm(values, "timeopen"), close_at: dateFromForm(values, "timeclose") };
@@ -412,12 +431,14 @@ export async function executeMoodleInPage(input) {
     if (finalUrl.origin !== actionUrl.origin || finalUrl.pathname === actionUrl.pathname) {
       return { ok: false, sent: true, status: response.status, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_form_redirect_refused" }, error: "moodle_form_redirect_refused" };
     }
-    return { ok: true, sent: true, status: response.status };
+    return { ok: true, sent: true, status: response.status, redirectUrl: finalUrl.toString() };
   };
   const courseTarget = (context, name = "") => ({ field: "course_id", label: "Course", name: String(name || context.profile.courseName || "Moodle course") });
+  const sectionTarget = (section) => ({ field: "section_id", label: "Section", name: String(section?.title || section?.rawtitle || "Selected course section") });
   const formTargets = (context, descriptor, data) => {
     const course = courseTarget(context, data.fullname);
     if (descriptor.type === "section") return [course, { field: "section_id", label: "Section", name: String(data.name || descriptor.sectionId) }];
+    if (descriptor.type === "page-create") return [course, { field: "section_id", label: "Section", name: String(descriptor.sectionName || "Selected course section") }];
     if (["page", "assign", "quiz"].includes(descriptor.type)) return [course, { field: "module_id", label: "Activity", name: String(data.name || descriptor.moduleId) }];
     return [course];
   };
@@ -431,6 +452,13 @@ export async function executeMoodleInPage(input) {
     if (kind === "page-form-write") {
       if (args.name !== undefined) { setField(formData, "name", args.name); names.push("name"); }
       if (args.content !== undefined) { setField(formData, "page[text]", args.content); names.push("page[text]"); }
+    }
+    if (kind === "page-create-form-write") {
+      setField(formData, "name", args.name);
+      setField(formData, "page[text]", args.content);
+      setField(formData, "visible", 0);
+      formData.delete("coursecontentnotification");
+      names.push("name", "page[text]", "visible");
     }
     if (kind === "assignment-form-write") {
       if (args.name !== undefined) { setField(formData, "name", args.name); names.push("name"); }
@@ -474,6 +502,58 @@ export async function executeMoodleInPage(input) {
     const matches = revisionMatches && expectedFormData(definition.kind, args, after.data) && beforeProtected === await protectedDigest(after.values, protectedNames);
     const verification = { schema: "morrow.browser-verification.v1", status: matches ? "verified" : "mismatch", ...(matches ? {} : { reason: "moodle_readback_mismatch" }) };
     return { ok: matches, sent: true, status: after.status, data: after.data, targets: formTargets(context, descriptor, after.data), snapshot_digest: after.snapshot_digest, verification, ...(matches ? {} : { error: "moodle_write_not_verified" }) };
+  };
+  const loadPageCreationForm = async (context, args) => {
+    const selected = await selectedSection(context, args.course_id, args.section_id);
+    if (!selected.ok) return selected;
+    const descriptor = formDescriptor(context, "page-create-form-read", {
+      ...args,
+      section_number: sectionNumber(selected.section.number),
+      section_name: sectionTarget(selected.section).name,
+    });
+    const form = await loadForm(context, descriptor);
+    return form.ok ? { ...form, section: selected.section } : form;
+  };
+  const createdPageModuleId = (context, redirectUrl) => {
+    try {
+      const redirect = new URL(redirectUrl);
+      const expected = new URL(urlFor(context, "/mod/page/view.php"));
+      return redirect.origin === expected.origin && redirect.pathname === expected.pathname ? id(redirect.searchParams.get("id")) : "";
+    } catch {
+      return "";
+    }
+  };
+  const pageCreationDefaultsMatch = (beforeValues, afterValues) => {
+    const ignored = new Set(["name", "page[text]", "visible", "coursecontentnotification", "add", "update", "coursemodule", "instance", "revision", "return", "sr", "beforemod", "showonly"]);
+    return Object.entries(beforeValues).every(([name, value]) => ignored.has(name) || (Object.hasOwn(afterValues, name) && stable(value) === stable(afterValues[name])));
+  };
+  const unconfirmedPageCreate = (status, reason) => ({ ok: false, sent: true, status, outcomeUnknown: true, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason }, error: reason });
+  const runPageCreate = async (context, inputValue, definition, args) => {
+    const before = await loadPageCreationForm(context, args);
+    if (!before.ok) return before;
+    if (before.snapshot_digest !== args.expected_digest) return error("moodle_expected_digest_mismatch");
+    const names = formChanges(definition.kind, args, before.formData);
+    if (!names.length) return error("moodle_arguments_invalid");
+    const rechecked = currentContext();
+    if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
+    const currentSection = await selectedSection(rechecked, args.course_id, args.section_id);
+    if (!currentSection.ok || sectionNumber(currentSection.section.number) !== before.descriptor.sectionNumber) return error("moodle_section_target_invalid");
+    const posted = await postForm(before);
+    if (!posted.ok) return posted;
+    const moduleId = createdPageModuleId(rechecked, posted.redirectUrl);
+    if (!moduleId) return unconfirmedPageCreate(posted.status, "moodle_page_create_redirect_unconfirmed");
+    const after = await loadForm(rechecked, formDescriptor(rechecked, "page-form-read", { course_id: args.course_id, module_id: moduleId }));
+    if (!after.ok) return unconfirmedPageCreate(posted.status, "moodle_readback_unconfirmed");
+    const afterState = await state(rechecked, args.course_id);
+    if (!afterState.ok) return unconfirmedPageCreate(posted.status, "moodle_readback_unconfirmed");
+    const activity = afterState.data.cm.find((entry) => id(entry?.id) === moduleId);
+    const data = { ...after.data, section_id: Number(args.section_id), visible: one(after.values, "visible") === "1" };
+    const matches = data.name === args.name && data.content === args.content && data.visible === false
+      && one(after.values, "section") === one(before.values, "section")
+      && pageCreationDefaultsMatch(before.values, after.values)
+      && isObject(activity) && activity.module === "page" && id(activity.sectionid) === args.section_id && activity.visible === false;
+    const verification = { schema: "morrow.browser-verification.v1", status: matches ? "verified" : "mismatch", ...(matches ? {} : { reason: "moodle_readback_mismatch" }) };
+    return { ok: matches, sent: true, status: after.status, data, targets: [courseTarget(rechecked), sectionTarget(before.section)], snapshot_digest: after.snapshot_digest, verification, ...(matches ? {} : { error: "moodle_write_not_verified" }) };
   };
   const stateProtectedDigest = async (stateValue, collection, targetId) => {
     const copy = JSON.parse(JSON.stringify(stateValue));
@@ -526,11 +606,17 @@ export async function executeMoodleInPage(input) {
       return { ok: true, sent: true, status: response.status, data, snapshot_digest: await digest(data) };
     }
     if (definition.kind === "structure" || definition.kind === "assignments" || definition.kind === "quizzes") return stateRead(context, args.course_id, definition.kind === "assignments" ? "assign" : definition.kind === "quizzes" ? "quiz" : "");
+    if (definition.kind === "page-create-form-read") {
+      const form = await loadPageCreationForm(context, args);
+      if (!form.ok) return form;
+      return { ok: true, sent: true, status: form.status, data: form.data, targets: formTargets(context, form.descriptor, form.data), snapshot_digest: form.snapshot_digest };
+    }
     if (definition.kind.endsWith("form-read")) {
       const form = await loadForm(context, formDescriptor(context, definition.kind, args));
       if (!form.ok) return form;
       return { ok: true, sent: true, status: form.status, data: form.data, targets: formTargets(context, form.descriptor, form.data), snapshot_digest: form.snapshot_digest };
     }
+    if (definition.kind === "page-create-form-write") return runPageCreate(context, input, definition, args);
     if (definition.kind.includes("form-write") || definition.kind === "course-show" || definition.kind === "course-hide") return runFormWrite(context, input, definition, args);
     return runVisibility(context, input, definition, args);
   } catch {

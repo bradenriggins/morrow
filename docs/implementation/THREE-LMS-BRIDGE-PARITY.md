@@ -40,7 +40,7 @@ These results cover the audience revision. They do not establish the requested t
 
 Canvas and Moodle now use the same extension pairing, authenticated local connection, approval flow, and single-use effect receipt. Moodle binds the exact HTTPS site, including its installation subpath, signed-in account, and open course. The previous direct-token Moodle and Blackboard implementation and startup route were removed. Blackboard has no executable browser fallback.
 
-The Moodle catalog has 21 operations: ten reads and eleven writes. It covers course discovery and settings, course structure, standard Page content, section text, Assignment and Quiz settings, dates, and visibility. Operation counts describe implementation breadth. They do not prove parity or live support for every operation.
+The Moodle catalog now has 23 operations: eleven reads and twelve writes. It covers course discovery and settings, course structure, standard Page creation and content, section text, Assignment and Quiz settings, dates, and visibility. Operation counts describe implementation breadth. They do not prove parity or live support for every operation.
 
 On 5 September, the real Moodle 5.2 public sandbox completed six reads through the Morrow gateway, connector process, extension, and signed-in page. A hidden disposable Page then completed a separately reviewed update. Operation `op:8fb1abba-d941-4392-ba34-aab46754aeb2` dispatched once and reached `verified`. A fresh form read and the actual Moodle Page both showed the exact requested content. Repeating that operation was refused. Root inspected the actual review, result, and Moodle screenshots.
 
@@ -48,13 +48,19 @@ The local receipt is `output/live-moodle/bridge-write-receipt.json`. The Page ha
 
 The live test exposed inactive date controls that changed with the clock, even while disabled. Their irrelevant tuple values are now excluded from the snapshot, while the native POST controls remain intact. Page revision stays in the pre-send snapshot; readback requires the exact next revision and unchanged protected fields. Independent review accepted both corrections. A focused Chrome for Testing regression covers the real DOM form behavior.
 
+## Hidden Page creation proof
+
+A second full bridge workflow created a hidden Page on 5 September. Operation `op:bfca261a-6838-4c4d-a562-4fbbd7cfdd9d` dispatched once and reached `verified`. The review named “My first course” and the actual selected section, showed the exact Page title and content, and stated that it was not visible to learners. The native Moodle create form received the reviewed values, preserved its other defaults, and omitted the course-content notification checkbox.
+
+Fresh course structure showed one new Page in database section `4`, with `visible: false`. Fresh Page settings and the actual Page both showed `<p>This lesson is ready for learners.</p>`. Repeating the approved operation was refused. Root inspected the review, result, and saved Moodle Page screenshots. Independent source review found no actionable defect in the creation path. Receipt: `output/live-moodle/bridge-create-receipt.json`, captured 5 September at 17:16 UTC. The public demo later resets; this is dated test evidence.
+
 ## Remaining practical parity work
 
 | Educator task | Moodle current layer | Remaining work |
 |---|---|---|
 | Find courses and content | Six selected live reads confirmed. | Broader tenant and role checks. |
-| Edit a lesson | One standard Page update confirmed through full review and readback. | Other supported form writes need their own live checks. |
-| Build course structure | Read structure; edit section text; show or hide sections and activities. | Create and place activities; reorder structure. |
+| Create or edit a lesson | Standard hidden Page creation and one Page update confirmed through full review and readback. | Broader content and tenant checks. |
+| Build course structure | Read structure; place a new hidden Page in a selected section; edit section text; show or hide sections and activities. | Create other standard activities; reorder structure; live-check other supported writes. |
 | Assignment and quiz settings | Name, instructions, selected dates, and visibility implemented. | Live settings and date checks; date clearing. |
 | Quiz questions | No browser operations yet. | Add course-local question inspection. Resolve complete effect scope before shared question-bank writes. |
 | Files and learner results | No Moodle operations yet. | Verified file lifecycle and scoped learner-data controls. |

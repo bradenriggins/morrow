@@ -160,6 +160,8 @@ function object(value: unknown): JsonObject {
 
 function readableName(value: string): string {
   const names: Record<string, string> = {
+    moodle_get_page_creation_form: "Prepare a Moodle lesson page",
+    moodle_create_page: "Add this Moodle Page",
     moodle_list_my_courses: "List my Moodle courses",
     moodle_get_course: "View this Moodle course",
     moodle_get_contents: "View Moodle course content",
@@ -553,7 +555,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     const hiddenFields = ["expected_digest", "expected_connection", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id"] : []), ...targets.map((item) => item.field)];
     const changes = typeof pageGuard.find_text === "string" && typeof pageGuard.replace_text === "string"
       ? `<div><dt>Current text</dt><dd>${escapeHtml(pageGuard.find_text)}</dd></div><div><dt>Replacement</dt><dd>${pageGuard.replace_text === "" ? "Remove this text" : escapeHtml(pageGuard.replace_text)}</dd></div>`
-      : requestFields(request, hiddenFields);
+      : requestFields(entry.tool === "moodle_create_page" ? { ...request, visible: false } : request, hiddenFields);
     const addingQuestion = entry.tool === "canvas_create_quiz_item";
     const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
     const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${visibilityDecision(entry.tool) || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;

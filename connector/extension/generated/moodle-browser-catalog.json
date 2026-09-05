@@ -187,6 +187,33 @@
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/page/mod_form.php#L34-L61"
     },
     {
+      "key": "moodle.form.course.modedit.page.create.read.v1",
+      "toolName": "moodle_get_page_creation_form",
+      "provider": "moodle",
+      "summary": "Prepare a Moodle Page creation form",
+      "description": "Read the exact native Moodle Page form for one selected course section and create the digest required to add a hidden Page.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/modedit.php#L55-L209"
+    },
+    {
       "key": "moodle.form.course.modedit.assign.read.v1",
       "toolName": "moodle_get_assignment",
       "provider": "moodle",
@@ -378,6 +405,51 @@
         "additionalProperties": false
       },
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/modedit.php#L154-L189"
+    },
+    {
+      "key": "moodle.form.course.modedit.page.create.write.v1",
+      "toolName": "moodle_create_page",
+      "provider": "moodle",
+      "summary": "Create a hidden Moodle Page",
+      "description": "Create one hidden Moodle Page in the selected section from the reviewed native form. It does not notify learners and verifies the saved Page, section, visibility, and form defaults.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_page_creation_form",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "section_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1333
+          },
+          "content": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40000
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "section_id",
+          "name",
+          "content",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/course/modedit.php#L55-L209"
     },
     {
       "key": "moodle.form.course.modedit.assign.write.v1",
