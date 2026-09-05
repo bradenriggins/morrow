@@ -159,7 +159,7 @@ describe("project installation and hermetic parity", () => {
     }
   });
 
-  it("explains local setup, one-app installation, and Canvas connection state while preserving JSON diagnostics", async () => {
+  it("explains local setup, one-app installation, and course connection state while preserving JSON diagnostics", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-client-cli-"));
     const repositoryRoot = join(directory, "repo");
     const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
@@ -179,7 +179,7 @@ describe("project installation and hermetic parity", () => {
       ], { encoding: "utf8" });
       expect(setup.status).toBe(0);
       expect(setup.stdout).toContain("Morrow's local settings are ready.");
-      expect(setup.stdout).toContain("This step does not connect Canvas.");
+      expect(setup.stdout).toContain("This step does not connect a course.");
       expect(setup.stdout).toContain("one assistant at a time");
       expect(setup.stdout).toContain("chrome://extensions");
       expect(setup.stdout).toContain("Open or restart that assistant before you use the extension.");
@@ -209,7 +209,7 @@ describe("project installation and hermetic parity", () => {
       expect(doctorText.status).toBe(0);
       expect(doctorText.stdout).toContain("Morrow troubleshooting check.");
       expect(doctorText.stdout).toContain("Morrow service: did not become ready.");
-      expect(doctorText.stdout).toContain("Canvas connection:");
+      expect(doctorText.stdout).toContain("Course connection:");
       expect(doctorText.stdout).not.toContain('"schema"');
 
       const doctor = spawnSync(process.execPath, [

@@ -67,7 +67,7 @@ function setupMessage(configured: {
   return [
     configured.changed ? "Morrow's local settings are ready." : "Morrow's local settings are already ready.",
     `Local Morrow settings: ${configured.path}`,
-    "This step does not connect Canvas.",
+    "This step does not connect a course.",
     "",
     "Next steps:",
     "1. In Chrome, open chrome://extensions. Turn on Developer mode. Select Load unpacked, then choose:",
@@ -78,7 +78,7 @@ function setupMessage(configured: {
     "   For Claude Desktop: pnpm morrow mcp install claude-desktop --scope user",
     "   For Gemini CLI: pnpm morrow mcp install gemini",
     "3. Open or restart that assistant before you use the extension.",
-    "4. In Chrome, open one signed-in Canvas course. Use Morrow Canvas Connector to connect it.",
+    "4. In Chrome, open one signed-in Canvas or Moodle course. Use Morrow Course Connector to connect it.",
     "",
     ONE_APP_NOTE,
     "",
@@ -99,11 +99,11 @@ function installMessage(installed: {
   return [
     installed.changed ? `Morrow configuration was installed for ${label}.` : `Morrow configuration for ${label} is already current.`,
     `Configuration file: ${installed.path}`,
-    "This did not open or test the assistant. This step does not connect Canvas.",
+    "This did not open or test the assistant. This step does not connect a course.",
     "",
     "Next steps:",
     `1. Close any other assistant using Morrow. Open or restart ${label}.`,
-    "2. Then in Chrome, open one signed-in Canvas course and use Morrow Canvas Connector to connect it.",
+    "2. Then in Chrome, open one signed-in Canvas or Moodle course and use Morrow Course Connector to connect it.",
     "",
     ONE_APP_NOTE,
     "",
@@ -123,8 +123,8 @@ function doctorMessage(value: Record<string, unknown>): string {
   const service = runtime.attempted !== true
     ? "could not start for this check"
     : runtime.ready === true ? "started and is ready for this check" : "did not become ready";
-  const canvas = bridge.connected === true
-    ? "the extension is connected. This does not confirm a usable Canvas course connection"
+  const connection = bridge.connected === true
+    ? "the extension is connected. This does not confirm a usable course connection"
     : "the extension is not connected";
   const repositoryRoot = typeof value.repositoryRoot === "string" ? value.repositoryRoot : "<Morrow-repository>";
   const upstreamConfigPath = typeof value.upstreamConfigPath === "string" ? value.upstreamConfigPath : "<morrow.upstreams.json>";
@@ -133,7 +133,7 @@ function doctorMessage(value: Record<string, unknown>): string {
     `Morrow program: ${value.serverEntryExists === true ? "found" : "not found"}.`,
     `Local Morrow settings: ${value.upstreamConfigExists === true ? "found" : "not found"}.`,
     `Morrow service: ${service}.`,
-    `Canvas connection: ${canvas}.`,
+    `Course connection: ${connection}.`,
     "",
     "This optional check starts a temporary Morrow process. Close assistants using Morrow before you run it.",
     `Settings used: ${upstreamConfigPath}`,
@@ -440,7 +440,7 @@ async function run(): Promise<void> {
       schema: "morrow.setup.v1",
       ...configured,
       serverEntryPath: resolve(options.repositoryRoot, "packages/mcp-server/dist/index.js"),
-      installs: ["Morrow MCP", "Morrow Canvas Connector extension"],
+      installs: ["Morrow MCP", "Morrow Course Connector extension"],
       credentialsCopied: false,
     };
     if (json) emit(result, true);
