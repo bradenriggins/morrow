@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+  "candidateCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -82,25 +82,25 @@
     },
     {
       "path": "LIMITATIONS.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "LIMITATIONS.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "3a5fd9d15f8bc6becc77da8c501d1643668de9aeeed9c72f5450ed2497eb69d2",
-      "afterDigest": "bc43bd6c6bb194e667f26ab32f0f251d2a777754b169aef1255f860c89179622"
+      "beforeDigest": "bc43bd6c6bb194e667f26ab32f0f251d2a777754b169aef1255f860c89179622",
+      "afterDigest": "4ea3a5dd344801eea5c9ea60de0dbe43282027553d45019462236026e3495eb4"
     },
     {
       "path": "README.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "064d44c4d3e6e29553dafb32520b7c09184d6de1ed20f4ba8d0d25e30d858915",
-      "afterDigest": "6f144f0a6f2fb756f0b1442f6295e64dad263efb859e88031c54cff3905f878b"
+      "beforeDigest": "6f144f0a6f2fb756f0b1442f6295e64dad263efb859e88031c54cff3905f878b",
+      "afterDigest": "c0d99598c3ba3768d581b1f29abecfafc6813927579beac774cf67713498e09d"
     },
     {
       "path": "SOURCE-ORIGIN.md",
@@ -291,14 +291,14 @@
     },
     {
       "path": "connector/extension/generated/moodle-browser-catalog.json",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "connector/extension/generated/moodle-browser-catalog.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "0ed28c94e1c756d82b554493eb13d4c90dba181d45a2850e945e1fe7bfdab975",
-      "afterDigest": "0cbe444e1db18dbdb914b255a467eb7b78ee26dc937994b21e7133cd98235650"
+      "beforeDigest": "0cbe444e1db18dbdb914b255a467eb7b78ee26dc937994b21e7133cd98235650",
+      "afterDigest": "f2f65c0a92fd4b961ea3d3f38a16b4dbfc150d2b22321f2a3d1468a38350a3b8"
     },
     {
       "path": "connector/extension/manifest.json",
@@ -368,14 +368,14 @@
     },
     {
       "path": "connector/extension/src/moodle-executor.js",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "connector/extension/src/moodle-executor.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "674ce021f35f5380354192fbfb9623e317551fc33a39f8cac5cbbe9997ce4bde",
-      "afterDigest": "65346d88991e3355a5c51dbac3b1d71cd4ebdf175e0fcb67fb68f4b9cd5d8eab"
+      "beforeDigest": "65346d88991e3355a5c51dbac3b1d71cd4ebdf175e0fcb67fb68f4b9cd5d8eab",
+      "afterDigest": "f3544bd5c75d91f0e041dc435b7c9a5ebc11738d344abd2b3ec7188a151e9b95"
     },
     {
       "path": "connector/extension/src/service-worker.js",
@@ -522,14 +522,14 @@
     },
     {
       "path": "docs/implementation/THREE-LMS-BRIDGE-PARITY.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "docs/implementation/THREE-LMS-BRIDGE-PARITY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9fef94dc4e000510873ae1af11eb8d7406e01841151da9680ec5f0219c8ea4c0",
-      "afterDigest": "ced225c09f558b6b2fc4fcecbb06d58e13a1a59622568e7c3493ea5ce684c369"
+      "beforeDigest": "ced225c09f558b6b2fc4fcecbb06d58e13a1a59622568e7c3493ea5ce684c369",
+      "afterDigest": "d5a6c2eb33ff3b5bdbe73708a935ba40336e708b50c43761716087a8f916b2ef"
     },
     {
       "path": "docs/implementation/EXAMPLE-WORKTREE.md",
@@ -632,36 +632,36 @@
     },
     {
       "path": "launch/00-POSITIONING-AND-HOMEPAGE-COPY.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "launch/00-POSITIONING-AND-HOMEPAGE-COPY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "4de5a92536ae091cb050dee8a29b31e242e2de2761298c47103f355533e4c87c",
-      "afterDigest": "5c8d84c3d8021c0aa595f31796606bcc20de6be25d21a6207cc305201c019a48"
+      "beforeDigest": "5c8d84c3d8021c0aa595f31796606bcc20de6be25d21a6207cc305201c019a48",
+      "afterDigest": "5f32c95b36e19bbf84737731ae6994e7a2c582b761e5558d0735d8506171c9fa"
     },
     {
       "path": "launch/01-PREVIEW-LAUNCH-PLAN.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "launch/01-PREVIEW-LAUNCH-PLAN.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "dcc54b7530751b8ac506cdb95fc4fe1411ca2e4cca8a1ebaacd85000501b2572",
-      "afterDigest": "5767cb04da5ddee847b783427f5a4ccef639c3482223c8b90a7b8fcd2ac3cbf4"
+      "beforeDigest": "5767cb04da5ddee847b783427f5a4ccef639c3482223c8b90a7b8fcd2ac3cbf4",
+      "afterDigest": "1a8697b85a93eed6b26967d17ba2dd1b8930e056411a08f4c89f2e1bb4e0eb60"
     },
     {
       "path": "launch/02-LAUNCH-POSTS-AND-VIDEO.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "launch/02-LAUNCH-POSTS-AND-VIDEO.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "67cf5083a682258caef914c279a1a52dac1d6cd1c860927b5b75ac34fa75fb5f",
-      "afterDigest": "af6d65d3df8f0852dcb74fb726d07c45ad89db67d696e0ff9b01a0302ae9a34e"
+      "beforeDigest": "af6d65d3df8f0852dcb74fb726d07c45ad89db67d696e0ff9b01a0302ae9a34e",
+      "afterDigest": "36f8296bcef4012ced633e3be7f90092d0990ca8c9ca150f73b9e7f1bf57faff"
     },
     {
       "path": "launch/03-EXPERT-EDUCATION-ARTICLE-OUTLINES.md",
@@ -676,36 +676,36 @@
     },
     {
       "path": "launch/04-WHAT-COUNTS-AS-A-FINISHED-AI-COURSE-CHANGE.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "launch/04-WHAT-COUNTS-AS-A-FINISHED-AI-COURSE-CHANGE.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "6df5388274f07b7c6ab27347cf1fec54ab02903ce6ef2f31e8b26b134a41fcbc",
-      "afterDigest": "c457dbbb863c61c6838ac80df0f749482bfa5f5de422a6aa3da1ef1972ffcd7c"
+      "beforeDigest": "c457dbbb863c61c6838ac80df0f749482bfa5f5de422a6aa3da1ef1972ffcd7c",
+      "afterDigest": "4181802c43a2e5c7bcadef4a7a89a6a8a84414a3739e492304ba0bbcb7e5722e"
     },
     {
       "path": "launch/05-HIRING-CASE-STUDY.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "launch/05-HIRING-CASE-STUDY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "84291a7122325e2124948102bca3514f71361599de7eb18e29b979988aa1f68a",
-      "afterDigest": "3be1617f0ae48fccdc45d3ef985e0ec7d01c31e8ded3b9f43fafe90a9aa0ded0"
+      "beforeDigest": "3be1617f0ae48fccdc45d3ef985e0ec7d01c31e8ded3b9f43fafe90a9aa0ded0",
+      "afterDigest": "6fa4ae633df22b8344ce1fcebed245aec1e2824e4d64dda59f86fefabf88df3a"
     },
     {
       "path": "launch/06-TARGET-COMPANIES.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "launch/06-TARGET-COMPANIES.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "1d05e0b3c344d0f7f987a934a85152ecca321765b2b1b984c27dc46848522154",
-      "afterDigest": "4719a2def65dc02b41999bc94743e540ab59cee982dc8d3e0e9f3add4fcde592"
+      "beforeDigest": "4719a2def65dc02b41999bc94743e540ab59cee982dc8d3e0e9f3add4fcde592",
+      "afterDigest": "021ecdf800d16fedf59f94804af9d887be4802c5d718acaa3f991f7e81302bdb"
     },
     {
       "path": "launch/video/BRIEF.md",
@@ -1787,7 +1787,7 @@
     },
     {
       "path": "packages/mcp-server/src/approval-context.ts",
-      "sourceCommit": "c3ce64e3876d69be7caadce70c22b615512dc24a",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "packages/mcp-server/src/approval-context.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1796,8 +1796,8 @@
         "packages/mcp-server/test/approval-preview.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f26a0b957c29848c34e0f63edc5ce5a6ee7beea2d014c68659f493aa1e850423",
-      "afterDigest": "852f516a3ddb1859cda36b025f075745cd756b175ed72dd06138f1f224345bea"
+      "beforeDigest": "852f516a3ddb1859cda36b025f075745cd756b175ed72dd06138f1f224345bea",
+      "afterDigest": "f4a381f43c201138bb402933fc8294c70c4d758ff2bd978c80721cb4acd42ea1"
     },
     {
       "path": "packages/mcp-server/src/approval-entry.ts",
@@ -1829,7 +1829,7 @@
     },
     {
       "path": "packages/mcp-server/src/approval-server.ts",
-      "sourceCommit": "eaff85b1081dc50882e6e76ba28e73a0efba1666",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "packages/mcp-server/src/approval-server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -1838,8 +1838,8 @@
         "packages/mcp-server/test/approval-preview.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "784b2d231b6e3c7c082a0e11cb6b771b49bf37db1ff5ba00f8698a3677ef3aed",
-      "afterDigest": "a2b01efe4f3d3b3983cb37f53c1795478e398ab87940dc06cbcc4e611fbabc50"
+      "beforeDigest": "a2b01efe4f3d3b3983cb37f53c1795478e398ab87940dc06cbcc4e611fbabc50",
+      "afterDigest": "c2381c240ded9894a108699df2648e440d3ba0ed9da3b5843c4a55bd8f6a0aeb"
     },
     {
       "path": "packages/mcp-server/src/batch-recovery.ts",
@@ -2316,14 +2316,14 @@
     },
     {
       "path": "packages/mcp-server/test/operations.integration.test.ts",
-      "sourceCommit": "eaff85b1081dc50882e6e76ba28e73a0efba1666",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "packages/mcp-server/test/operations.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "a89710dc97533f178d8a91b5b3d59e7830be4dcc082eca5197aa2770e7a17c57",
-      "afterDigest": "3e52a350e14888644ee4697e66f21aeb763be83d80be1eed60dd117aa28c468c"
+      "beforeDigest": "3e52a350e14888644ee4697e66f21aeb763be83d80be1eed60dd117aa28c468c",
+      "afterDigest": "fc648965def58e171b63416a5c17f5c3ac9c7596809732464fb448fdce534cbb"
     },
     {
       "path": "packages/mcp-server/test/protocol.integration.test.ts",
@@ -2828,14 +2828,14 @@
     },
     {
       "path": "scripts/test/moodle-browser-executor.test.mjs",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "scripts/test/moodle-browser-executor.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d986a10aa47465329a024799b8705f9c48b934ac7256d93aab1ef367b092b831",
-      "afterDigest": "df552669d758d8bafae04fbe64821254ef11163c153114f651c887f91690e3b7"
+      "beforeDigest": "df552669d758d8bafae04fbe64821254ef11163c153114f651c887f91690e3b7",
+      "afterDigest": "26ce5fbdda5e7eb13b4b08a9d6eabafd7b7b4551d29f5d912bb92c3ab9eb8d6b"
     },
     {
       "path": "scripts/test/publication-policy.test.mjs",
@@ -2905,14 +2905,14 @@
     },
     {
       "path": "website/README.md",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "website/README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c7fc1fa23a906f272592f593f5ae4e52281f790a9d0119e4d9643e59dea8b4f5",
-      "afterDigest": "64e4fc47dae9d2b1d618b0c1cdec738023450773bde18812732d9f8fdc58e218"
+      "beforeDigest": "64e4fc47dae9d2b1d618b0c1cdec738023450773bde18812732d9f8fdc58e218",
+      "afterDigest": "cae826ee92050c97b817186c9ff4cd463acc08d6fa3f152b7d75dd812b60a8e1"
     },
     {
       "path": "website/assets/GoogleSansFlex-latin.woff2",
@@ -2982,14 +2982,14 @@
     },
     {
       "path": "website/build.html",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "website/build.html",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "4b60bbb5a7aeeb3d0821a8429034d09d563fc70e4ab9c1588add35cd0a717005",
-      "afterDigest": "27084a760cdc60bdeaad5929088faeb633a35e453b9c3f983bcc7e348dde7b1b"
+      "beforeDigest": "27084a760cdc60bdeaad5929088faeb633a35e453b9c3f983bcc7e348dde7b1b",
+      "afterDigest": "5ec5dfb145cdbae9236cb9e5f8e10042d549b4f65cd13d437de12e443c80e8c9"
     },
     {
       "path": "website/favicon.svg",
@@ -3004,14 +3004,14 @@
     },
     {
       "path": "website/index.html",
-      "sourceCommit": "45653d1f2ffcc85761e66be37ac79e1266ab557f",
+      "sourceCommit": "20065093a9cd03f1ade83c9934b67866524767c4",
       "originalPath": "website/index.html",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "dcd7ac3590e6db571f7af555227353b3646bd6e3bd0f8906ee89eae822fa7ca4",
-      "afterDigest": "97e3b5ec1458aabb27913fffc5987812added7d59cb408d0ea8e27254f0069e2"
+      "beforeDigest": "97e3b5ec1458aabb27913fffc5987812added7d59cb408d0ea8e27254f0069e2",
+      "afterDigest": "c67de820d9b98f8a7c58fc6cec2d46399d9224e016c83dea918c0c5f5614b410"
     },
     {
       "path": "website/script.js",
