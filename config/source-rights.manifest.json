@@ -469,7 +469,7 @@
     },
     {
       "path": "packages/mcp-server/src/approval-server.ts",
-      "sha256": "351a2c12290061bfaf38c95941b179218c4b172ea5ebfdce6ef46a0d627ea873",
+      "sha256": "53bff8224753e45aad79b3a14f18af8031b1614736c4dd4d11f4c9612077aa0b",
       "disposition": "adapted_owned",
       "review": "User requested the new Morrow implementation and original Morrow branding; local candidate only; no publication authorization; reviewer=Codex technical source review; source=HEAD"
     },
