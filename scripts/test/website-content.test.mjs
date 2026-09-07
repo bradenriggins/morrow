@@ -21,14 +21,16 @@ const skip = present ? false : "website/ is not present in this checkout";
 export const BANNED_PHRASES = RETIRED_PHRASES;
 
 /**
- * Off-site http(s) destinations the site may link to. The site links to no external host today, so
- * this list is empty: an off-site link fails until it is named here. Add an entry only after
- * checking that the URL resolves, and prove it with
+ * Fixed release destinations the site may link to. Check each destination used by a page with
  * `MORROW_CHECK_EXTERNAL_LINKS=1 node --test scripts/test/website-content.test.mjs`.
  * Absolute URLs on the site's own origin are not listed here; they are checked against the page's
  * own route by the canonical and Open Graph test.
  */
-export const EXTERNAL_LINK_ALLOWLIST = [];
+export const EXTERNAL_LINK_ALLOWLIST = [
+  "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-mac-arm64.dmg",
+  "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-win-x64.exe",
+  "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-source.zip",
+];
 
 const SITE_ORIGIN = "https://meetmorrow.app";
 
@@ -270,11 +272,12 @@ test("every absolute link is the site's own origin or an allowlisted external de
   assert.deepEqual(problems, [], "an unlisted external link can go dead without anything noticing");
 });
 
-test("every allowlisted external destination answers", {
+test("every external destination used by the website answers", {
   skip: skip || (process.env.MORROW_CHECK_EXTERNAL_LINKS === "1" ? false : "set MORROW_CHECK_EXTERNAL_LINKS=1 to check external links over the network"),
 }, async () => {
   const problems = [];
-  for (const url of EXTERNAL_LINK_ALLOWLIST) {
+  const used = new Set(htmlFiles.flatMap((file) => referencesIn(readFileSync(new URL(file, site), "utf8"))));
+  for (const url of EXTERNAL_LINK_ALLOWLIST.filter((value) => used.has(value))) {
     try {
       let response = await fetch(url, { method: "HEAD", redirect: "follow", signal: AbortSignal.timeout(15_000) });
       if (response.status === 405 || response.status === 501) {

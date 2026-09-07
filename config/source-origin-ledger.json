@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+  "candidateCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -1413,14 +1413,14 @@
     },
     {
       "path": "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "6394232be05c35b1cf86ecdbdd437a6fae471e73ec9bd1fd8a399e7a81056555",
-      "afterDigest": "cfc097a92ee7bdad25b00d34ca8577d5ac91915ddc4603faf916b8bcec4e7a0a"
+      "beforeDigest": "cfc097a92ee7bdad25b00d34ca8577d5ac91915ddc4603faf916b8bcec4e7a0a",
+      "afterDigest": "ec0e6c5793db12184dd88a6884f9c158af2fe4b55e22ea64e7915b6dc3175fcb"
     },
     {
       "path": "docs/implementation/ITEM-BANK-LIVE-PROOF-PLAN.md",
@@ -1809,14 +1809,14 @@
     },
     {
       "path": "installer/main.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "installer/main.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "a0e024ab643fc97e40f991302157f19d8101c0b851068fe672952208bb7a6965"
+      "beforeDigest": "a0e024ab643fc97e40f991302157f19d8101c0b851068fe672952208bb7a6965",
+      "afterDigest": "0c13a48626e19b42f5e470d1d3d47464d7ec880b77d1641e6b92ffb36ec9be50"
     },
     {
       "path": "installer/package.json",
@@ -1842,14 +1842,14 @@
     },
     {
       "path": "installer/preload.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "installer/preload.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "6edfa6fc777085df8ef929a5dc2a8d100184cce296f86374d4408aaad650c983"
+      "beforeDigest": "6edfa6fc777085df8ef929a5dc2a8d100184cce296f86374d4408aaad650c983",
+      "afterDigest": "ee5867bf6c1b864690826d075a3ba6d86ab1083a4d56126ef458bf733ebf0aac"
     },
     {
       "path": "installer/renderer/index.html",
@@ -1864,14 +1864,14 @@
     },
     {
       "path": "installer/renderer/renderer.js",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "installer/renderer/renderer.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "a8675dcf7b88d3e5d0268681af47e0b275b2e174184ff33f436e7265f76a5a11"
+      "beforeDigest": "a8675dcf7b88d3e5d0268681af47e0b275b2e174184ff33f436e7265f76a5a11",
+      "afterDigest": "d0c443d19a5b706a2b97277a9955f8dcf90318693f9299cc7d78ae1a0de1672b"
     },
     {
       "path": "installer/renderer/styles.css",
@@ -1963,14 +1963,14 @@
     },
     {
       "path": "installer/shared/installer-controller.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "installer/shared/installer-controller.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "3e82a21a753f2b60d820646b07f263a6190bb1c69e73880e7c182971fb966910"
+      "beforeDigest": "3e82a21a753f2b60d820646b07f263a6190bb1c69e73880e7c182971fb966910",
+      "afterDigest": "64912e12c7f68f0d8fc2d967d6ff4c92288373791f591e70396620196de65924"
     },
     {
       "path": "installer/shared/runtime-monitor.mjs",
@@ -1996,14 +1996,14 @@
     },
     {
       "path": "installer/shared/setup-view.mjs",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "installer/shared/setup-view.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "bc6491654d0c1255f3173ce8fdcf2a03df04df33bcd98927d0a1d2949ad7bb7a",
-      "afterDigest": "33503766422abd6dc6cb272322dc6bec6ddd0138f94371d67a0f1139307f4d78"
+      "beforeDigest": "33503766422abd6dc6cb272322dc6bec6ddd0138f94371d67a0f1139307f4d78",
+      "afterDigest": "d52246bec47d2249ff6fc804af5e088927ea444e75f9a903d0db5b332fc686fd"
     },
     {
       "path": "installer/shared/state-policy.cjs",
@@ -2117,25 +2117,25 @@
     },
     {
       "path": "installer/test/claude-desktop.test.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "installer/test/claude-desktop.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "3907ab400e028dec1f3d6ee447b53a89adffcdecadb29aeb8db9cf7bb9651f41"
+      "beforeDigest": "3907ab400e028dec1f3d6ee447b53a89adffcdecadb29aeb8db9cf7bb9651f41",
+      "afterDigest": "0a6c674146fe484f6da0edcda13b3311f5d8d8c21dd54331e2a14ddacf5f2665"
     },
     {
       "path": "installer/test/contract.test.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "installer/test/contract.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "75de226360b38c0cf493fbdbad872884d11edc06412e29fff9d83edf31977761"
+      "beforeDigest": "75de226360b38c0cf493fbdbad872884d11edc06412e29fff9d83edf31977761",
+      "afterDigest": "f49f0b88c3042d43b87d4e389e481cff251cfccdbec537cbc01c83abbdffba33"
     },
     {
       "path": "installer/test/electron-builder-config.test.cjs",
@@ -2249,14 +2249,14 @@
     },
     {
       "path": "installer/test/setup-view.test.mjs",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "installer/test/setup-view.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c6d095db95389d174d4f8c19783369078b862656b355dceb90d6ee9a3b750e00",
-      "afterDigest": "b4c8252ed64479066197c45ff435210293e4e0a022d8d8d992db42ea5ab35286"
+      "beforeDigest": "b4c8252ed64479066197c45ff435210293e4e0a022d8d8d992db42ea5ab35286",
+      "afterDigest": "550082876b3ecb3dfab5c580fef1e0261926627f6ee0f55d833a81343880f492"
     },
     {
       "path": "installer/test/state-policy.test.cjs",
@@ -6152,14 +6152,14 @@
     },
     {
       "path": "scripts/create-zero-tolerance-receipt.mjs",
-      "sourceCommit": "47677eea707118476aba0b0df58a8168e8a52a54",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "scripts/create-zero-tolerance-receipt.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "7e79d21965fdde6ca43ef448db362618df4d32aa5927fbefe0a50e3be943a131",
-      "afterDigest": "f57248488a5c3bffebaa18da9ecc0a2b7fdf2e84f8f1acdadc999bc7d9f3ad1f"
+      "beforeDigest": "f57248488a5c3bffebaa18da9ecc0a2b7fdf2e84f8f1acdadc999bc7d9f3ad1f",
+      "afterDigest": "555097cdbc93f9211c8491ea8ff09686a7e9159e9e38dd898d6e3d516b4d5f96"
     },
     {
       "path": "scripts/export-example-legacy-catalog.mjs",
@@ -7571,14 +7571,25 @@
     },
     {
       "path": "scripts/test/website-content.test.mjs",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
       "originalPath": "scripts/test/website-content.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "497abadc99a418165798a497aa347c2e8c0ef1916bd7ba227150a24b01241ea2",
-      "afterDigest": "8cfd179625c302852b4ab2c144b79d11f844a0f4fef9d7ec9693268830b35793"
+      "beforeDigest": "dcbb117b81730b739fe5a29c4a047197297c520866505e786a0f0d84a98cd7f9",
+      "afterDigest": "7eb717ed265e676cc94b1dfe58cae53feb4bb512ccebc295c3884339336131c2"
+    },
+    {
+      "path": "scripts/test/zero-tolerance-receipt.test.mjs",
+      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "originalPath": "scripts/test/zero-tolerance-receipt.test.mjs",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "2b262f928cdeae07c3f63d5d7246a04d21fb2d767b030fa7ba3568184b7f486d"
     },
     {
       "path": "scripts/validate-source-rights.mjs",
