@@ -31,6 +31,25 @@ importers:
         specifier: workspace:*
         version: link:../operation-journal
 
+  packages/blackboard-learn-api:
+    dependencies:
+      '@modelcontextprotocol/server':
+        specifier: 2.0.0
+        version: 2.0.0
+      '@morrow/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@morrow/gateway-core':
+        specifier: workspace:*
+        version: link:../gateway-core
+      zod:
+        specifier: ^4.2.0
+        version: 4.5.4
+    devDependencies:
+      '@modelcontextprotocol/client':
+        specifier: 2.0.0
+        version: 2.0.0
+
   packages/bridge-loopback:
     dependencies:
       '@morrow/bridge-protocol':
@@ -89,6 +108,9 @@ importers:
 
   packages/client-config:
     dependencies:
+      '@iarna/toml':
+        specifier: 2.2.5
+        version: 2.2.5
       '@modelcontextprotocol/client':
         specifier: 2.0.0
         version: 2.0.0
@@ -134,15 +156,24 @@ importers:
 
   packages/mcp-server:
     dependencies:
+      '@modelcontextprotocol/client':
+        specifier: 2.0.0
+        version: 2.0.0
       '@modelcontextprotocol/server':
         specifier: 2.0.0
         version: 2.0.0
       '@morrow/batch-engine':
         specifier: workspace:*
         version: link:../batch-engine
+      '@morrow/blackboard-learn-api':
+        specifier: workspace:*
+        version: link:../blackboard-learn-api
       '@morrow/bridge-loopback':
         specifier: workspace:*
         version: link:../bridge-loopback
+      '@morrow/canvas-api-catalog':
+        specifier: workspace:*
+        version: link:../canvas-api-catalog
       '@morrow/contracts':
         specifier: workspace:*
         version: link:../contracts
@@ -155,6 +186,9 @@ importers:
       '@morrow/upstream-mcp':
         specifier: workspace:*
         version: link:../upstream-mcp
+      htmlparser2:
+        specifier: 12.0.0
+        version: 12.0.0
       sanitize-html:
         specifier: 2.17.7
         version: 2.17.7
@@ -162,15 +196,9 @@ importers:
         specifier: ^4.2.0
         version: 4.5.4
     devDependencies:
-      '@modelcontextprotocol/client':
-        specifier: 2.0.0
-        version: 2.0.0
       '@morrow/bridge-protocol':
         specifier: workspace:*
         version: link:../bridge-protocol
-      '@morrow/canvas-api-catalog':
-        specifier: workspace:*
-        version: link:../canvas-api-catalog
       '@types/sanitize-html':
         specifier: 2.16.1
         version: 2.16.1
@@ -353,6 +381,9 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@iarna/toml@2.2.5':
+    resolution: {integrity: sha512-trnsAYxU3xnS1gPHPyU961coFyLkh4gAD/0zQ5mymY4yOZ+CYvsPqUbOFSw0aDM4y0tV7tiFxL/1XfXPNC6IPg==}
 
   '@jridgewell/sourcemap-codec@1.6.0':
     resolution: {integrity: sha512-T7jf+5zgsZHwNJ4lvQ7/aezbyk0nNX+zJVWpmHA7VYsEx7a7qr5Rg5IbtJFqkgze5Y2sruq1RUY8Q837Od7iFw==}
@@ -990,6 +1021,8 @@ snapshots:
 
   '@esbuild/win32-x64@0.28.2':
     optional: true
+
+  '@iarna/toml@2.2.5': {}
 
   '@jridgewell/sourcemap-codec@1.6.0': {}
 

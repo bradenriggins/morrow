@@ -48,6 +48,6 @@
   }],
   "filters": { "excludePrefixes": ["mindtap_", "connect_"], "excludeNames": [] },
   "operationJournal": { "path": "${MORROW_SANDBOX_STATE_PATH:-.morrow/sandbox.sqlite3}" },
-  "batchScheduler": { "maxConcurrentWindows": 1 },
+  "batchScheduler": { "maxConcurrentReadWindows": 2 },
   "maxCatalogTools": 1000
 }

@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -45,6 +46,7 @@ describe("gateway configuration", () => {
     }, { SERVER: "/tmp/server.py", STATE_ROOT: "/tmp/morrow-state" });
 
     expect(parsed.upstreams).toHaveLength(1);
+    expect(parsed.toolSurface).toBe("compact");
     expect(parsed.filters.excludePrefixes).toEqual(["mindtap_", "connect_"]);
     expect(parsed.operationJournal.path).toBe("/tmp/morrow-state/morrow.sqlite3");
   });
@@ -87,6 +89,67 @@ describe("gateway configuration", () => {
     }
   });
 
+  it("registers the private Blackboard API source only when a private Blackboard setup file exists", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-source-"));
+    const setup = join(directory, "blackboard-learn.json");
+    const upstreams = join(directory, "morrow.upstreams.json");
+    try {
+      await writeFile(setup, "{}\n", { mode: 0o600 });
+      await writeFile(upstreams, JSON.stringify({
+        schema: "morrow.upstreams.v1", profile: "private-full",
+        upstreams: [{ id: "fixture", label: "Fixture", kind: "mcp-stdio", command: "node" }],
+        operationJournal: { path: ":memory:" },
+      }));
+      const config = await loadGatewayConfig({ MORROW_UPSTREAMS_FILE: upstreams, MORROW_BLACKBOARD_CONFIG: setup }, fileURLToPath(new URL("../../..", import.meta.url)));
+      expect(config.upstreams.find((source) => source.id === "blackboard-rest")).toMatchObject({
+        required: true,
+        env: { MORROW_BLACKBOARD_CONFIG: setup },
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps Morrow starting from a workspace directory when Blackboard is configured", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-workspace-"));
+    const workspace = await mkdtemp(join(tmpdir(), "morrow-blackboard-cwd-"));
+    const setup = join(directory, "blackboard-learn.json");
+    const upstreams = join(directory, "morrow.upstreams.json");
+    try {
+      await writeFile(setup, "{}\n", { mode: 0o600 });
+      await writeFile(upstreams, JSON.stringify({
+        schema: "morrow.upstreams.v1", profile: "private-full",
+        upstreams: [{ id: "fixture", label: "Fixture", kind: "mcp-stdio", command: "node" }],
+        operationJournal: { path: ":memory:" },
+      }));
+      const config = await loadGatewayConfig(
+        { MORROW_UPSTREAMS_FILE: upstreams, MORROW_BLACKBOARD_CONFIG: setup },
+        workspace,
+      );
+      const source = config.upstreams.find((candidate) => candidate.id === "blackboard-rest");
+      if (source) {
+        expect(source).toMatchObject({
+          kind: "mcp-stdio",
+          priority: 175,
+          required: true,
+          sourceDisposition: "direct_owned",
+          env: { MORROW_BLACKBOARD_CONFIG: setup },
+        });
+        expect(existsSync((source as { args: string[] }).args[0])).toBe(true);
+        expect(config.runtimeLimitations ?? []).toEqual([]);
+      } else {
+        expect(config.runtimeLimitations).toEqual([expect.objectContaining({
+          code: "blackboard_runtime_unavailable",
+          setupFilePath: setup,
+        })]);
+      }
+      expect(config.upstreams.some((candidate) => candidate.id === "fixture")).toBe(true);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+
   it("loads the Canvas browser connector default when no upstream file exists", async () => {
     const repositoryRoot = fileURLToPath(new URL("../../..", import.meta.url));
     const directory = await mkdtemp(join(tmpdir(), "morrow-default-config-"));
@@ -100,6 +163,7 @@ describe("gateway configuration", () => {
         required: true,
       })]);
       expect(config.maxCatalogTools).toBe(2000);
+      expect(config.toolSurface).toBe("compact");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

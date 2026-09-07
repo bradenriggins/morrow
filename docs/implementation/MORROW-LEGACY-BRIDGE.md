@@ -1,5 +1,14 @@
 # Morrow legacy extension bridge
 
+Status: development-only. This is the development adaptation path for the donor Morrow browser extension. It is not part of the Morrow 1.0 product.
+
+- No public release profile contains it. `config/release-profiles.json` leaves `packages/legacy-bridge-mcp/` out of `public-canvas`, and `scripts/test/publication-policy.test.mjs` fails if a public profile ever selects it.
+- No shipped Morrow configuration starts it. The only gateway configuration that names the `example-legacy` upstream is `morrow.upstreams.with-legacy-bridge.example.json`, which is a development example and says so.
+- It cannot run without an external `example-legacy` donor checkout at revision `7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4`. A released copy does not have that checkout.
+- The `private-full` source projection and the private desktop payload still carry the built package, because both copy every workspace package. Neither one starts it.
+
+Everything below is development setup in this repository. No instructor step depends on it.
+
 Checkpoint C connects the new MCP gateway to the existing Morrow browser runtime without copying or replacing its Canvas implementation.
 
 ## What this checkpoint does
@@ -29,7 +38,8 @@ If a bridge response is lost after a command was sent, the server records the re
 The overlay binds itself to one exact donor revision and one exact source-catalog digest.
 
 ```bash
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm catalog:legacy
+pnpm build
+MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy node scripts/export-example-legacy-catalog.mjs
 ```
 
 The expected artifact is:
@@ -56,7 +66,7 @@ The token is carried only in the first WebSocket message. It is not placed in th
 export MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy
 export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
 export MORROW_LEGACY_BRIDGE_TOKEN
-pnpm bridge:legacy:install
+node scripts/install-example-legacy-bridge.mjs
 ```
 
 The installer:
@@ -72,7 +82,7 @@ The installer:
 The tracked `background.js` patch is intentional and reversible. Remove it with:
 
 ```bash
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm bridge:legacy:remove
+MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy node scripts/remove-example-legacy-bridge.mjs
 ```
 
 ## Start the internal bridge MCP
@@ -81,7 +91,7 @@ MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy pnpm bridge:legacy:remove
 export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
 export MORROW_LEGACY_EXPECTED_REVISION=7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4
 export MORROW_LEGACY_BRIDGE_TOKEN
-pnpm bridge:legacy:start
+pnpm --filter @morrow/legacy-bridge-mcp start
 ```
 
 It listens on:

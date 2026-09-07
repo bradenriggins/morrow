@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Morrow render check</title>
+</head>
+<body>
+<!--
+This page is declared under manifest sandbox.pages, so it runs in an opaque
+origin with no extension APIs. Its content security policy is default-src
+'none' with script-src 'self', which forbids every network load, image and
+media load this page could make. It receives one saved HTML field by
+postMessage, parses it into a detached document, and answers with a signal
+record that carries no course text, no URLs and no screenshot.
+-->
+<script type="module" src="./render-check.js"></script>
+</body>
+</html>

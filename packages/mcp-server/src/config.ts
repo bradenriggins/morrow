@@ -1,7 +1,11 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as z from "zod/v4";
+import type { GatewayRuntimeLimitation } from "@morrow/contracts";
 import { SOURCE_DISPOSITIONS } from "@morrow/gateway-core";
 
 const EnvironmentName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
@@ -164,6 +168,7 @@ const UpstreamSchema = z.discriminatedUnion("kind", [
 const GatewayConfigSchema = z.object({
   schema: z.literal("morrow.upstreams.v1"),
   profile: z.enum(["private-full", "public-canvas", "sandbox", "read-only"]).default("private-full"),
+  toolSurface: z.enum(["compact", "full"]).default("compact"),
   upstreams: z.array(UpstreamSchema).min(1),
   sourcePolicy: z.object({
     requireAttestation: z.boolean().default(false),
@@ -183,8 +188,8 @@ const GatewayConfigSchema = z.object({
     path: z.string().min(1).default(".morrow/morrow.sqlite3"),
   }).default({ path: ".morrow/morrow.sqlite3" }),
   batchScheduler: z.object({
-    maxConcurrentWindows: z.number().int().min(1).max(16).default(1),
-  }).default({ maxConcurrentWindows: 1 }),
+    maxConcurrentReadWindows: z.number().int().min(1).max(8).default(2),
+  }).default({ maxConcurrentReadWindows: 2 }),
   privacy: z.object({
     canvasOrigin: z.string().min(1).max(500).default("local"),
     account: z.string().min(1).max(500).default("local-account"),
@@ -199,7 +204,9 @@ const GatewayConfigSchema = z.object({
   maxCatalogTools: z.number().int().positive().max(5000).default(2000),
 });
 
-export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
+export type GatewayConfig = z.infer<typeof GatewayConfigSchema> & {
+  readonly runtimeLimitations?: readonly GatewayRuntimeLimitation[];
+};
 export type UpstreamConfig = z.infer<typeof UpstreamSchema>;
 export type StdioUpstreamConfig = Extract<UpstreamConfig, { kind: "mcp-stdio" }>;
 export type ExamplePlatformSshUpstreamConfig = Extract<UpstreamConfig, { kind: "meridian-ssh" }>;
@@ -207,6 +214,73 @@ export type LocalGitAttestationConfig = z.infer<typeof LocalGitAttestationSchema
 export type RemoteGitSshAttestationConfig = z.infer<typeof RemoteGitSshAttestationSchema>;
 
 const TEMPLATE = /\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}/g;
+
+/**
+ * Every shipped launch runs the gateway with its working directory set to the
+ * materials workspace, not to the installed payload, so the payload layout has
+ * to be found from this module rather than from the working directory.
+ */
+function resolveBlackboardRuntimeEntry(workingDirectory: string): string | undefined {
+  const packaged = resolve(dirname(fileURLToPath(import.meta.url)), "../../blackboard-learn-api/dist/index.js");
+  if (existsSync(packaged)) return packaged;
+  try {
+    const installed = createRequire(import.meta.url).resolve("@morrow/blackboard-learn-api");
+    if (existsSync(installed)) return installed;
+  } catch {
+    // The package is not resolvable from this layout. Fall through to the working directory.
+  }
+  const local = resolve(workingDirectory, "packages/blackboard-learn-api/dist/index.js");
+  return existsSync(local) ? local : undefined;
+}
+
+function appendConfiguredBlackboardSource(
+  config: GatewayConfig,
+  environment: Readonly<Record<string, string | undefined>>,
+  workingDirectory: string,
+): GatewayConfig {
+  if (config.profile !== "private-full" || config.upstreams.some((source) => source.id === "blackboard-rest")) return config;
+  const blackboardConfigPath = resolve(environment.MORROW_BLACKBOARD_CONFIG || `${homedir()}/.morrow/blackboard-learn.json`);
+  if (!existsSync(blackboardConfigPath)) return config;
+  const entry = resolveBlackboardRuntimeEntry(workingDirectory);
+  if (!entry) {
+    return {
+      ...config,
+      runtimeLimitations: [...(config.runtimeLimitations ?? []), {
+        code: "blackboard_runtime_unavailable",
+        setupFilePath: blackboardConfigPath,
+        detail: "Blackboard Learn is set up in this file, but this Morrow build does not include the Blackboard runtime, so Blackboard tools are not available. Canvas and Moodle are not affected.",
+      }],
+    };
+  }
+  return {
+    ...config,
+    upstreams: [...config.upstreams, {
+      id: "blackboard-rest",
+      label: "Blackboard Learn REST",
+      kind: "mcp-stdio",
+      command: process.execPath,
+      args: [entry],
+      cwd: workingDirectory,
+      env: { MORROW_BLACKBOARD_CONFIG: blackboardConfigPath },
+      sourceDisposition: "direct_owned",
+      priority: 175,
+      required: true,
+      enabled: true,
+      outputPrivacy: {},
+      outputPrivacyDefault: {
+        allowedFields: [],
+        fieldPolicy: "scrub-sensitive",
+        dataClass: "learner",
+        maxRecords: 10_000,
+        maxBytes: 2_000_000,
+        freeText: "allow",
+        learnerTokens: true,
+        artifactInspection: "deny",
+        aiClientAdmission: "allow",
+      },
+    }],
+  };
+}
 
 export function expandEnvironmentTemplate(
   value: string,
@@ -465,7 +539,7 @@ export async function loadGatewayConfig(
     if (config.upstreams.some((upstream) => upstream.id.toLowerCase() === "meridian" && upstream.kind !== "meridian-ssh")) {
       throw new Error("ExamplePlatform must run through a meridian-ssh upstream.");
     }
-    return config;
+    return appendConfiguredBlackboardSource(config, environment, workingDirectory);
   }
 
   if (environment.MORROW_MERIDIAN_SERVER_PATH?.trim()) {
@@ -477,12 +551,12 @@ export async function loadGatewayConfig(
   const connectorEntry = resolve(workingDirectory, "packages/canvas-connector-mcp/dist/index.js");
   const catalogPath = resolve(workingDirectory, "artifacts/canvas-api/canvas-api-catalog.json");
   if (existsSync(connectorEntry) && existsSync(catalogPath)) {
-    return parseGatewayConfig({
+    return appendConfiguredBlackboardSource(parseGatewayConfig({
       schema: "morrow.upstreams.v1",
       profile: "private-full",
       upstreams: [{
         id: "canvas-session",
-        label: "Morrow Canvas Connector",
+        label: "Morrow Bridge",
         kind: "mcp-stdio",
         command: process.execPath,
         args: [connectorEntry],
@@ -509,7 +583,7 @@ export async function loadGatewayConfig(
       publicationPolicy: { requiredForPublicProfile: false },
       filters: { excludePrefixes: ["mindtap_", "connect_"], excludeNames: [] },
       operationJournal: { path: resolve(workingDirectory, ".morrow/morrow.sqlite3") },
-      batchScheduler: { maxConcurrentWindows: 1 },
+      batchScheduler: { maxConcurrentReadWindows: 2 },
       privacy: {
         canvasOrigin: "browser-session",
         account: "local-browser-account",
@@ -517,7 +591,7 @@ export async function loadGatewayConfig(
         learnerVaultPath: resolve(workingDirectory, ".morrow/learner-vault.json"),
       },
       maxCatalogTools: 2_000,
-    }, environment);
+    }, environment), environment, workingDirectory);
   }
 
   throw new Error(

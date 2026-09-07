@@ -1,6 +1,7 @@
 {
   "schema": "morrow.upstreams.v1",
   "profile": "private-full",
+  "disposition": "Development-only example. The example-legacy bridge is a development adaptation path for the donor Morrow extension. It is not part of the Morrow 1.0 product, no public release profile in config/release-profiles.json contains packages/legacy-bridge-mcp/, and it needs an external example-legacy donor checkout at revision 7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4. See docs/implementation/MORROW-LEGACY-BRIDGE.md.",
   "sourcePolicy": {
     "requireAttestation": true
   },
@@ -73,7 +74,7 @@
     "path": "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}"
   },
   "batchScheduler": {
-    "maxConcurrentWindows": 1
+    "maxConcurrentReadWindows": 2
   },
   "maxCatalogTools": 1000
 }

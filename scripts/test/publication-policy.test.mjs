@@ -9,6 +9,7 @@ import {
   buildSourceCatalog,
 } from "../../packages/gateway-core/dist/index.js";
 import { upstreamCatalogDigest } from "../../packages/contracts/dist/index.js";
+import { loadReleaseProfiles, profileIncludes } from "../lib/release-candidate.mjs";
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const scriptPath = join(repositoryRoot, "scripts", "create-publication-policy.mjs");
@@ -87,4 +88,47 @@ test("publication policy CLI writes only explicit reviewed selections", async ()
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+const LEGACY_BRIDGE_PREFIX = "packages/legacy-bridge-mcp/";
+
+function trackedPaths() {
+  return execFileSync("git", ["-C", repositoryRoot, "ls-files"], { encoding: "utf8" })
+    .split("\n")
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+test("no public release profile selects the legacy bridge package", () => {
+  const tracked = trackedPaths();
+  assert.ok(
+    tracked.some((path) => path.startsWith(LEGACY_BRIDGE_PREFIX)),
+    "The legacy bridge package is not in this tree, so this check would pass without proving anything.",
+  );
+
+  const profiles = loadReleaseProfiles(repositoryRoot).profiles;
+  const publicProfiles = Object.entries(profiles).filter(([, profile]) => profile.visibility === "public");
+  assert.ok(publicProfiles.length > 0, "No public release profile exists, so this check would prove nothing.");
+
+  for (const [name, profile] of publicProfiles) {
+    const selected = tracked.filter((path) => profileIncludes(path, profile));
+    assert.ok(selected.length > 0, `Profile ${name} selected no file, so this check would prove nothing.`);
+    assert.deepEqual(
+      selected.filter((path) => path.startsWith(LEGACY_BRIDGE_PREFIX)),
+      [],
+      `Profile ${name} publishes the development-only legacy bridge package.`,
+    );
+  }
+});
+
+test("the legacy bridge document and example configuration state the development-only disposition", async () => {
+  const example = JSON.parse(await readFile(join(repositoryRoot, "morrow.upstreams.with-legacy-bridge.example.json"), "utf8"));
+  assert.match(example.disposition ?? "", /development-only/i);
+  assert.match(example.disposition ?? "", /not part of the Morrow 1\.0 product/i);
+  assert.match(example.disposition ?? "", /docs\/implementation\/MORROW-LEGACY-BRIDGE\.md/);
+
+  const document = await readFile(join(repositoryRoot, "docs/implementation/MORROW-LEGACY-BRIDGE.md"), "utf8");
+  const status = document.split("\n").find((line) => line.startsWith("Status:")) ?? "";
+  assert.match(status, /development-only/i);
+  assert.match(status, /not part of the Morrow 1\.0 product/i);
 });

@@ -219,7 +219,7 @@ export class StdioMcpUpstream {
     this.nextRetryAt = undefined;
     const client = new Client({
       name: `morrow-upstream-${this.id}`,
-      version: "1.0.0-rc.0",
+      version: "1.0.0",
     });
     let protocolError: Error | undefined;
     client.onerror = (error) => {

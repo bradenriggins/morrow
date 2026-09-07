@@ -1,7 +1,15 @@
 import { readFileSync } from "node:fs";
 import { isJsonObject, sha256Json, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
+import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
 
-export type CanvasApiService = "canvas" | "item_bank";
+export { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
+export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasReadbackAssessment, CanvasWriteAdmission } from "./operation-admission.js";
+export { evaluateBrowserReadback, matchesReadbackAssertions, planBrowserReadback, planCanvasRecoveryDescriptor, readbackFieldValue } from "./readback-plan.js";
+export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
+export { CANVAS_MULTI_CONTEXT_REFUSAL, CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS, canvasContextCodeCourseId, canvasCourseContextCode, canvasLearnerScopeObjectRoute, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "./semantic-target.js";
+export type { CanvasSemanticContextInputState, CanvasSemanticCourseCollectionState, CanvasSemanticCourseTarget, CanvasSemanticObjectContext, CanvasSemanticOperation, CanvasSemanticResolutionExpectation, CanvasSemanticResolutionProof, CanvasSemanticResolutionRefusal, CanvasSemanticVersionState } from "./semantic-target.js";
+
+export type CanvasApiService = "canvas" | "item_bank" | "course_file_content";
 export type CanvasApiRisk = "read" | "write" | "sensitive_write" | "destructive";
 export type CanvasParameterLocation = "path" | "query" | "form";
 
@@ -50,6 +58,7 @@ export interface CanvasApiCatalog {
     readonly totalOperations: number;
     readonly newQuizzesOperations: number;
     readonly itemBankOperations: number;
+    readonly courseFileContentOperations: number;
     readonly reads: number;
     readonly writes: number;
   };
@@ -96,15 +105,21 @@ export function canvasOperationMap(catalog: CanvasApiCatalog): ReadonlyMap<strin
   return new Map(catalog.operations.map((operation) => [operation.toolName, operation]));
 }
 
-function capability(operation: CanvasApiOperation): SourceCapabilityMetadata {
+function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): SourceCapabilityMetadata {
   const destructive = operation.risk === "destructive";
-  const profile = operation.service === "item_bank" && !operation.readOnly && operation.nickname !== "create_bank"
-    ? { state: "profile_limited" as const, reason: "Existing Item Bank mutations require complete dependency and affected-course evidence that is not yet available." }
+  const admission = canvasOperationAdmission(operation);
+  const readback = canvasReadbackAssessment(catalog.operations, operation, admission);
+  const profile = admission.write.state === "held"
+    ? { state: "profile_limited" as const, reason: canvasAdmissionReason(admission.write) }
     : { state: "supported" as const };
   return {
     family: operation.family,
     provider: "canvas",
-    sourcePath: operation.source === "canvas-official-swagger-1.2" ? operation.path : "connector/extension/src/item-bank-executor.js",
+    sourcePath: operation.source === "canvas-official-swagger-1.2"
+      ? operation.path
+      : operation.service === "course_file_content"
+        ? "connector/extension/src/canvas-file-content.js"
+        : "connector/extension/src/item-bank-executor.js",
     sourceExport: operation.key,
     sourceDigest: sha256Json({ key: operation.key, method: operation.method, path: operation.path, parameters: operation.parameters }),
     behavior: {
@@ -113,14 +128,16 @@ function capability(operation: CanvasApiOperation): SourceCapabilityMetadata {
       destructive,
       irreversible: destructive,
       supportsDryRun: !operation.readOnly,
-      supportsReadback: true,
+      supportsReadback: readback.state === "structurally_exact",
       supportsUndo: false,
       supportsBatch: true,
       requiresBrowser: true,
       requiresLiveCanvas: true,
     },
-    authority: {
-      scopeClass: operation.path.includes("{account_id}") ? "account" : operation.path.includes("{course_id}") ? "course" : "canvas-session",
+      authority: {
+      scopeClass: canvasAccountAuthorityRoute(operation)
+        ? "account"
+        : ["course_path", "semantic_course_object"].includes(admission.courseTarget.kind) ? "course" : "canvas-session",
       approvalClass: operation.readOnly ? "none" : destructive ? "destructive" : /(?:grade|score|submission)/i.test(operation.key) ? "grade" : "standard",
       dataClass: /(?:user|student|enrollment|submission|grade)/i.test(operation.key) ? "learner" : "course",
     },
@@ -128,7 +145,7 @@ function capability(operation: CanvasApiOperation): SourceCapabilityMetadata {
       backend: "canvas-connector",
       dispatchBackend: "chrome-session-connector",
       readbackBackend: "chrome-session-connector",
-      comparator: "frozen-json-digest",
+      comparator: operation.service === "course_file_content" ? "exact-file-version-and-byte-digest" : "frozen-json-digest",
     },
     profiles: {
       "private-full": profile,
@@ -141,6 +158,18 @@ function capability(operation: CanvasApiOperation): SourceCapabilityMetadata {
     evidence: {
       transport: { state: "known" },
       credentialBoundary: { state: "known" },
+      admission: admission.write.state === "held"
+        ? { state: "blocked", reason: canvasAdmissionReason(admission.write) }
+        : { state: "known" },
+      readback: readback.state === "structurally_exact"
+        ? { state: "known", reason: "A structural readback plan can compare a target or requested postcondition; live provider readback remains required." }
+        : readback.state === "not_applicable"
+          ? { state: "blocked", reason: readback.reason === "read_only" ? "This operation does not mutate provider state." : "This provider write remains held before dispatch." }
+        : readback.state === "unavailable"
+          ? { state: "blocked", reason: "No safe generic readback route is available." }
+          : readback.state === "blocked"
+            ? { state: "blocked", reason: `No safe exact post-write reader is available: ${readback.reason}.` }
+          : { state: "unknown", reason: "The generic readback plan has no exact target or requested postcondition." },
     },
   };
 }
@@ -157,7 +186,7 @@ export function canvasCatalogTools(catalog: CanvasApiCatalog): readonly Upstream
       idempotentHint: operation.method === "GET" || ["PUT", "PATCH", "DELETE"].includes(operation.method),
       openWorldHint: true,
     },
-    capability: capability(operation),
+    capability: capability(catalog, operation),
   }));
 }
 
@@ -182,6 +211,29 @@ function validateCreateModuleItemArguments(operation: CanvasApiOperation, input:
   if (type === "ExternalTool") required("module_item_external_url");
 }
 
+const CLASSIC_QUIZ_ANSWER_FIELDS = [
+  "id",
+  "answer_text",
+  "answer_weight",
+  "answer_comments",
+  "answer_html",
+  "text_after_answers",
+] as const;
+
+// Canvas takes the typed Classic Quiz answer array as indexed form fields, so one
+// answer becomes question[answers][0][answer_text] and its siblings. The extension
+// applies the same rule to the request it sends in connector/extension/src/canvas-content.js.
+function classicQuizAnswerEntries(parameter: CanvasApiParameter, value: unknown): [string, unknown][] | null {
+  if (parameter.location !== "form" || parameter.wireName !== "question[answers]") return null;
+  if (!Array.isArray(value)) throw new TypeError(`${parameter.inputName} must be an array of answers`);
+  return value.flatMap((answer, index) => {
+    if (!isJsonObject(answer)) throw new TypeError(`${parameter.inputName} must contain answer objects`);
+    return CLASSIC_QUIZ_ANSWER_FIELDS
+      .filter((field) => answer[field] !== undefined)
+      .map((field): [string, unknown] => [`question[answers][${index}][${field}]`, answer[field]]);
+  });
+}
+
 export function operationArguments(operation: CanvasApiOperation, input: JsonObject): {
   readonly path: string;
   readonly query: readonly [string, unknown][];
@@ -202,7 +254,9 @@ export function operationArguments(operation: CanvasApiOperation, input: JsonObj
     } else if (parameter.location === "query") {
       query.push([parameter.wireName, value]);
     } else {
-      body.push([parameter.wireName, value]);
+      const answers = classicQuizAnswerEntries(parameter, value);
+      if (answers) body.push(...answers);
+      else body.push([parameter.wireName, value]);
     }
   }
   if (/\{[^}]+\}/.test(path)) throw new TypeError("Canvas path has unresolved parameters");

@@ -14,7 +14,7 @@ Each public-candidate file needs one exact digest record before publication. A r
 
 `scripts/generate-canvas-api-catalog.mjs` retrieves the current public Canvas API definition index and its resource definitions. It converts them into normalized Morrow operation rows. The generated artifact records the upstream URLs, source digest, last-modified value, operation counts, and final catalog digest.
 
-The generator adds twelve explicit New Quizzes Item Bank contracts for the signed-browser connector. These rows are maintained as Morrow source and tested against exact request behavior.
+The generator adds thirteen explicit New Quizzes Item Bank contracts for the signed-browser connector. These rows are maintained as Morrow source and tested against exact request behavior.
 
 Generated metadata does not by itself grant publication rights. The public package gate must record the intended use and reviewed rights basis.
 

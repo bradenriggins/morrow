@@ -1,0 +1,163 @@
+name: desktop installer QA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    name: Windows x64 unsigned installer and installed-app smoke
+    runs-on: windows-2022
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.6.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install installer dependencies
+        run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
+
+      - name: Test installer contracts
+        run: pnpm --dir installer --ignore-workspace test
+
+      - name: Build Morrow packages
+        run: pnpm build
+
+      - name: Prepare isolated Windows payload and private artifact directory
+        shell: pwsh
+        run: |
+          $runId = [guid]::NewGuid().ToString("N")
+          $payload = Join-Path $env:RUNNER_TEMP "morrow-desktop-payload-$runId"
+          $installerOutput = Join-Path $env:RUNNER_TEMP "morrow-installer-output-$runId"
+          $artifactRoot = Join-Path $PWD "artifacts\desktop-windows-private-qa"
+          if (Test-Path -LiteralPath $artifactRoot) { throw "Private QA artifact directory already exists: $artifactRoot" }
+          New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
+          node scripts/package-mcp-bundle.mjs --target win32-x64 --prepare-desktop-payload $payload
+          "MORROW_DESKTOP_PAYLOAD=$payload" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MORROW_INSTALLER_OUTPUT=$installerOutput" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MORROW_WINDOWS_ARTIFACT_ROOT=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Package unsigned Windows NSIS installer
+        shell: pwsh
+        run: |
+          $env:MORROW_INSTALLER_PAYLOAD = $env:MORROW_DESKTOP_PAYLOAD
+          $env:MORROW_SIGNED_RELEASE = "0"
+          $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
+          Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
+          Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+          Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
+          Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
+          Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+          Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+          pnpm --dir installer --ignore-workspace package:win
+          $installers = @(Get-ChildItem $env:MORROW_INSTALLER_OUTPUT -File | Where-Object { $_.Name -match '^Morrow-.+-win-x64\.exe$' })
+          if ($installers.Count -ne 1) { throw "Expected exactly one Windows NSIS installer; found $($installers.Count)." }
+          $artifactInstaller = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT $installers[0].Name
+          if (Test-Path -LiteralPath $artifactInstaller) { throw "Private QA installer already exists: $artifactInstaller" }
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $artifactInstaller
+          "MORROW_WINDOWS_INSTALLER=$($installers[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install, start, damage and repair the sealed payload, uninstall, and check retained data
+        shell: pwsh
+        run: |
+          $runId = [guid]::NewGuid().ToString("N")
+          $installDir = Join-Path $env:RUNNER_TEMP "morrow-install-$runId"
+          $receipt = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT "receipt.json"
+          node scripts/test/desktop-windows-smoke.mjs --installer $env:MORROW_WINDOWS_INSTALLER --install-dir $installDir --receipt $receipt
+
+      - name: Upload private QA installer and sanitized smoke receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: morrow-windows-desktop-${{ github.run_id }}
+          path: artifacts/desktop-windows-private-qa
+          if-no-files-found: warn
+          retention-days: 14
+
+  macos-installer:
+    name: macOS Apple silicon unsigned disk image and installed-app smoke
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1
+        with:
+          version: 10.6.1
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install installer dependencies
+        run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
+
+      - name: Test installer contracts
+        run: pnpm --dir installer --ignore-workspace test
+
+      - name: Build Morrow packages
+        run: pnpm build
+
+      - name: Package the unsigned Apple silicon payload, disk image, and archive
+        shell: bash
+        env:
+          MORROW_SIGNED_RELEASE: "0"
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          unset CSC_LINK CSC_KEY_PASSWORD CSC_NAME CSC_INSTALLER_LINK CSC_INSTALLER_KEY_PASSWORD
+          unset APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_ISSUER
+          unset GH_TOKEN GITHUB_TOKEN
+          artifactRoot="$PWD/artifacts/desktop-macos-private-qa"
+          if [ -e "$artifactRoot" ]; then
+            echo "Private QA artifact directory already exists: $artifactRoot" >&2
+            exit 1
+          fi
+          mkdir -p "$artifactRoot"
+          packageOutput="$RUNNER_TEMP/morrow-desktop-package-$(uuidgen)"
+          node scripts/package-mcp-bundle.mjs --target darwin-arm64 --unsigned-qa --output "$packageOutput"
+          images=("$packageOutput"/Morrow-*-mac-arm64.dmg)
+          archives=("$packageOutput"/Morrow-*-mac-arm64.zip)
+          if [ "${#images[@]}" -ne 1 ] || [ "${#archives[@]}" -ne 1 ]; then
+            echo "Expected exactly one Morrow macOS disk image and one archive; found ${#images[@]} and ${#archives[@]}." >&2
+            exit 1
+          fi
+          cp "$packageOutput/receipt.json" "$artifactRoot/package-receipt.json"
+          cp "${images[0]}" "$artifactRoot/$(basename "${images[0]}")"
+          echo "MORROW_MAC_ARCHIVE=${archives[0]}" >> "$GITHUB_ENV"
+          echo "MORROW_MAC_ARTIFACT_ROOT=$artifactRoot" >> "$GITHUB_ENV"
+
+      - name: Start the built application and record one contained run
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundleRoot="$RUNNER_TEMP/morrow-desktop-app-$(uuidgen)"
+          mkdir -p "$bundleRoot"
+          ditto -x -k "$MORROW_MAC_ARCHIVE" "$bundleRoot"
+          node scripts/test/desktop-mac-smoke.mjs --app "$bundleRoot/Morrow.app" --receipt "$MORROW_MAC_ARTIFACT_ROOT/receipt.json"
+
+      - name: Upload private QA disk image and sanitized smoke receipts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: morrow-macos-desktop-${{ github.run_id }}
+          path: artifacts/desktop-macos-private-qa
+          if-no-files-found: warn
+          retention-days: 14

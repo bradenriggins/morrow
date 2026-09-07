@@ -18,10 +18,26 @@ import { DatabaseSync, type StatementSync } from "node:sqlite";
 import {
   canonicalJson,
   isJsonObject,
+  normalizeRequestedBy,
   sha256Json,
   sha256Text,
   type JsonObject,
+  type RequestedByIdentity,
 } from "@morrow/contracts";
+import {
+  bindCanvasResultArguments,
+  normalizeCanvasResultBinding,
+  validateCanvasResultBinding,
+  type CanvasBindingChild,
+  type CanvasResultBinding,
+} from "./canvas-result-binding.js";
+
+export {
+  CANVAS_RESULT_BINDING_KINDS,
+  CANVAS_RESULT_BINDING_SCHEMA,
+  type CanvasResultBindingKind,
+  type CanvasResultBinding,
+} from "./canvas-result-binding.js";
 
 export const BATCH_MODES = Object.freeze(["read_only", "stage_writes"] as const);
 export type BatchMode = typeof BATCH_MODES[number];
@@ -51,6 +67,7 @@ export type BatchChildState = typeof BATCH_CHILD_STATES[number];
 export const MAX_BATCH_CHILDREN = 10_000;
 export const MAX_BATCH_ARGUMENT_BYTES = 64 * 1024;
 export const MAX_BATCH_MANIFEST_BYTES = 8 * 1024 * 1024;
+export const MAX_BATCH_RESULT_BYTES = 1_000_000;
 export const MAX_READ_BATCH_CONCURRENCY = 8;
 export const MAX_WRITE_BATCH_CONCURRENCY = 4;
 
@@ -94,6 +111,8 @@ export interface BatchRatePolicyInput {
 export interface FrozenBatchManifest {
   readonly schema: "morrow.batch-manifest.v2";
   readonly batchId: string;
+  /** The assistant that asked for this group, as that assistant reported itself. */
+  readonly requestedBy?: RequestedByIdentity;
   readonly operationFamily: string;
   readonly catalogDigest: string;
   readonly profileDigest: string;
@@ -117,6 +136,7 @@ export interface FrozenBatchManifest {
     readonly readbackSpecDigest: string;
     readonly correctionFactsDigest: string;
     readonly dependencyChildIds: readonly string[];
+    readonly resultBinding?: CanvasResultBinding;
   }[];
 }
 
@@ -134,9 +154,11 @@ export interface CreateBatchChildInput {
   readonly sourceObservationDigest?: string;
   readonly readbackSpecDigest?: string;
   readonly correctionFactsDigest?: string;
+  readonly resultBinding?: CanvasResultBinding;
 }
 
 export interface CreateBatchInput {
+  readonly batchId?: string;
   readonly name: string;
   readonly mode: BatchMode;
   readonly catalogDigest: string;
@@ -152,6 +174,8 @@ export interface CreateBatchInput {
   readonly correctionFactsDigest?: string;
   readonly expiresAt?: string;
   readonly ratePolicy?: BatchRatePolicyInput;
+  /** The assistant that asked for this group, as that assistant reported itself. */
+  readonly requestedBy?: RequestedByIdentity;
 }
 
 export interface BatchRecord {
@@ -175,6 +199,8 @@ export interface BatchRecord {
   readonly startedAt: string | null;
   readonly terminalAt: string | null;
   readonly revision: number;
+  /** The assistant that asked for this group, as that assistant reported itself. */
+  readonly requestedBy?: RequestedByIdentity;
 }
 
 export interface BatchChildRecord {
@@ -187,6 +213,8 @@ export interface BatchChildRecord {
   readonly sourceToolName: string;
   readonly readOnly: boolean;
   readonly requestDigest: string;
+  readonly boundRequestDigest: string | null;
+  readonly hasBoundRequest: boolean;
   readonly idempotencyKey: string;
   readonly sourceOperationId: string | null;
   readonly state: BatchChildState;
@@ -196,6 +224,7 @@ export interface BatchChildRecord {
   readonly sourceResultState: string | null;
   readonly sourceTaskId: string | null;
   readonly resultDigest: string | null;
+  readonly hasStoredResult: boolean;
   readonly errorDigest: string | null;
   readonly createdAt: string;
   readonly updatedAt: string;
@@ -213,6 +242,7 @@ export interface BatchDetail {
 export interface BatchExecutionResult {
   readonly state: "succeeded" | "failed" | "unknown";
   readonly resultDigest: string;
+  readonly resultPayload?: JsonObject;
   readonly ratePolicy?: BatchRatePolicyInput;
   readonly gatewayOperationId?: string;
   readonly gatewayOperationState?: string;
@@ -277,6 +307,7 @@ interface BatchRow {
   started_at: string | null;
   terminal_at: string | null;
   revision: number;
+  requested_by_json: string | null;
 }
 
 interface ChildRow {
@@ -291,6 +322,10 @@ interface ChildRow {
   request_ciphertext: string;
   request_iv: string;
   request_tag: string;
+  bound_request_digest: string | null;
+  bound_request_ciphertext: string | null;
+  bound_request_iv: string | null;
+  bound_request_tag: string | null;
   idempotency_key: string;
   source_operation_id: string | null;
   state: BatchChildState;
@@ -300,6 +335,9 @@ interface ChildRow {
   source_result_state: string | null;
   source_task_id: string | null;
   result_digest: string | null;
+  result_ciphertext: string | null;
+  result_iv: string | null;
+  result_tag: string | null;
   error_digest: string | null;
   created_at: string;
   updated_at: string;
@@ -449,7 +487,17 @@ function childId(value: string | undefined, ordinal: number): string {
   return resolved;
 }
 
+function parsedRequestedBy(value: string | null): RequestedByIdentity | undefined {
+  if (!value) return undefined;
+  try {
+    return normalizeRequestedBy(JSON.parse(value) as unknown);
+  } catch {
+    return undefined;
+  }
+}
+
 function batchRecord(row: BatchRow): BatchRecord {
+  const requestedBy = parsedRequestedBy(row.requested_by_json);
   return {
     schema: "morrow.batch.v1",
     batchId: row.batch_id,
@@ -471,6 +519,7 @@ function batchRecord(row: BatchRow): BatchRecord {
     startedAt: row.started_at,
     terminalAt: row.terminal_at,
     revision: row.revision,
+    ...(requestedBy ? { requestedBy } : {}),
   };
 }
 
@@ -485,6 +534,8 @@ function childRecord(row: ChildRow): BatchChildRecord {
     sourceToolName: row.source_tool_name,
     readOnly: row.read_only === 1,
     requestDigest: row.request_digest,
+    boundRequestDigest: row.bound_request_digest,
+    hasBoundRequest: hasBoundRequest(row),
     idempotencyKey: row.idempotency_key,
     sourceOperationId: row.source_operation_id,
     state: row.state,
@@ -494,6 +545,7 @@ function childRecord(row: ChildRow): BatchChildRecord {
     sourceResultState: row.source_result_state,
     sourceTaskId: row.source_task_id,
     resultDigest: row.result_digest,
+    hasStoredResult: hasStoredResult(row),
     errorDigest: row.error_digest,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -537,6 +589,111 @@ function decryptedRequest(key: Buffer, row: ChildRow): JsonObject {
   const parsed = JSON.parse(plaintext) as unknown;
   if (!isJsonObject(parsed) || sha256Json(parsed) !== row.request_digest) {
     throw new Error("batch child request failed authenticated readback");
+  }
+  return parsed;
+}
+
+function hasBoundRequest(row: ChildRow): boolean {
+  const values = [
+    row.bound_request_digest,
+    row.bound_request_ciphertext,
+    row.bound_request_iv,
+    row.bound_request_tag,
+  ];
+  if (values.every((value) => value === null)) return false;
+  if (values.every((value) => typeof value === "string" && value.length > 0)) return true;
+  throw new Error("batch child bound request is incomplete");
+}
+
+function encryptedBoundRequest(
+  key: Buffer,
+  batchId: string,
+  childIdValue: string,
+  requestDigest: string,
+  value: JsonObject,
+): { ciphertext: string; iv: string; tag: string } {
+  const plaintext = Buffer.from(canonicalJson(value), "utf8");
+  if (plaintext.length > MAX_BATCH_ARGUMENT_BYTES) {
+    throw new RangeError(`batch child bound request exceeds ${MAX_BATCH_ARGUMENT_BYTES} bytes`);
+  }
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`${batchId}\0${childIdValue}\0bound-request\0${requestDigest}`, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return {
+    ciphertext: ciphertext.toString("base64url"),
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+  };
+}
+
+function decryptedBoundRequest(key: Buffer, row: ChildRow): JsonObject | null {
+  if (!hasBoundRequest(row)) return null;
+  const digest = row.bound_request_digest!;
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(row.bound_request_iv!, "base64url"),
+  );
+  decipher.setAAD(Buffer.from(`${row.batch_id}\0${row.child_id}\0bound-request\0${digest}`, "utf8"));
+  decipher.setAuthTag(Buffer.from(row.bound_request_tag!, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(row.bound_request_ciphertext!, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+  const parsed = JSON.parse(plaintext) as unknown;
+  if (!isJsonObject(parsed) || sha256Json(parsed) !== digest) {
+    throw new Error("batch child bound request failed authenticated readback");
+  }
+  return parsed;
+}
+
+function hasStoredResult(row: ChildRow): boolean {
+  const values = [row.result_ciphertext, row.result_iv, row.result_tag];
+  if (values.every((value) => value === null)) return false;
+  if (values.every((value) => typeof value === "string" && value.length > 0)) return true;
+  throw new Error("batch child result payload is incomplete");
+}
+
+function encryptedResult(
+  key: Buffer,
+  batchId: string,
+  childIdValue: string,
+  resultDigest: string,
+  value: JsonObject,
+): { ciphertext: string; iv: string; tag: string } {
+  const plaintext = Buffer.from(canonicalJson(value), "utf8");
+  if (plaintext.length > MAX_BATCH_RESULT_BYTES) {
+    throw new RangeError(`batch child result exceeds ${MAX_BATCH_RESULT_BYTES} bytes`);
+  }
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`${batchId}\0${childIdValue}\0result\0${resultDigest}`, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return {
+    ciphertext: ciphertext.toString("base64url"),
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+  };
+}
+
+function decryptedResult(key: Buffer, row: ChildRow): JsonObject | null {
+  if (!hasStoredResult(row)) return null;
+  if (!row.result_digest) throw new Error("batch child result payload has no digest");
+  const decipher = createDecipheriv(
+    "aes-256-gcm",
+    key,
+    Buffer.from(row.result_iv!, "base64url"),
+  );
+  decipher.setAAD(Buffer.from(`${row.batch_id}\0${row.child_id}\0result\0${row.result_digest}`, "utf8"));
+  decipher.setAuthTag(Buffer.from(row.result_tag!, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(row.result_ciphertext!, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+  const parsed = JSON.parse(plaintext) as unknown;
+  if (!isJsonObject(parsed) || sha256Json(parsed) !== row.result_digest) {
+    throw new Error("batch child result failed authenticated readback");
   }
   return parsed;
 }
@@ -646,7 +803,8 @@ export class DurableBatchStore {
         updated_at TEXT NOT NULL,
         started_at TEXT,
         terminal_at TEXT,
-        revision INTEGER NOT NULL CHECK(revision >= 1)
+        revision INTEGER NOT NULL CHECK(revision >= 1),
+        requested_by_json TEXT
       ) STRICT;
       CREATE TABLE IF NOT EXISTS gateway_batch_children (
         batch_id TEXT NOT NULL REFERENCES gateway_batches(batch_id) ON DELETE CASCADE,
@@ -660,6 +818,10 @@ export class DurableBatchStore {
         request_ciphertext TEXT NOT NULL,
         request_iv TEXT NOT NULL,
         request_tag TEXT NOT NULL,
+        bound_request_digest TEXT,
+        bound_request_ciphertext TEXT,
+        bound_request_iv TEXT,
+        bound_request_tag TEXT,
         idempotency_key TEXT NOT NULL,
         source_operation_id TEXT,
         state TEXT NOT NULL CHECK(state IN ('pending','running','succeeded','failed','unknown','cancelled')),
@@ -669,6 +831,9 @@ export class DurableBatchStore {
         source_result_state TEXT,
         source_task_id TEXT,
         result_digest TEXT,
+        result_ciphertext TEXT,
+        result_iv TEXT,
+        result_tag TEXT,
         error_digest TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -689,6 +854,24 @@ export class DurableBatchStore {
         manifest_tag TEXT NOT NULL
       ) STRICT;
     `);
+    const batchColumns = new Set((this.database.prepare("PRAGMA table_info(gateway_batches)").all() as { name: string }[]).map((column) => column.name));
+    if (!batchColumns.has("requested_by_json")) {
+      this.database.exec("ALTER TABLE gateway_batches ADD COLUMN requested_by_json TEXT");
+    }
+    const childColumns = new Set((this.database.prepare("PRAGMA table_info(gateway_batch_children)").all() as { name: string }[]).map((column) => column.name));
+    for (const column of [
+      "result_ciphertext",
+      "result_iv",
+      "result_tag",
+      "bound_request_digest",
+      "bound_request_ciphertext",
+      "bound_request_iv",
+      "bound_request_tag",
+    ]) {
+      if (!childColumns.has(column)) {
+        this.database.exec(`ALTER TABLE gateway_batch_children ADD COLUMN ${column} TEXT`);
+      }
+    }
     this.selectBatch = this.database.prepare("SELECT * FROM gateway_batches WHERE batch_id=?");
     this.selectChild = this.database.prepare(
       "SELECT * FROM gateway_batch_children WHERE batch_id=? AND child_id=?",
@@ -794,7 +977,9 @@ export class DurableBatchStore {
     if (!Array.isArray(input.children) || input.children.length < 1 || input.children.length > MAX_BATCH_CHILDREN) {
       throw new TypeError(`batch must contain 1 through ${MAX_BATCH_CHILDREN} children`);
     }
-    const batchId = `bat:${randomUUID()}`;
+    const batchId = input.batchId
+      ? exactName(input.batchId, "batch id")
+      : `bat:${randomUUID()}`;
     const normalized = input.children.map((child, index) => {
       if (!isJsonObject(child.arguments)) throw new TypeError(`child ${index + 1} arguments must be an object`);
       const argumentsClone = structuredClone(child.arguments);
@@ -834,12 +1019,14 @@ export class DurableBatchStore {
             ? `operation:${sha256Text(`${batchId}\0${id}\0source`).slice(0, 48)}`
             : null),
         dependencyChildIds,
+        ...(child.resultBinding ? { resultBinding: normalizeCanvasResultBinding(child.resultBinding) } : {}),
         targetDigest: sha256Json({
           courseId,
           publicToolName: child.publicToolName,
           sourceId: child.sourceId,
           sourceToolName: child.sourceToolName,
           requestDigest,
+          ...(child.resultBinding ? { resultBinding: normalizeCanvasResultBinding(child.resultBinding) } : {}),
         }),
         sourceObservationDigest: child.sourceObservationDigest
           ? exactDigest(child.sourceObservationDigest, "source observation digest")
@@ -864,6 +1051,12 @@ export class DurableBatchStore {
       if (child.dependencyChildIds.includes(child.childId) || child.dependencyChildIds.some((id: string) => !knownChildIds.has(id))) {
         throw new TypeError(`child ${child.childId} has an invalid dependency`);
       }
+    }
+    for (const child of normalized) {
+      if (!child.resultBinding) continue;
+      const source = normalized.find((candidate) => candidate.childId === child.resultBinding!.sourceChildId);
+      if (!source) throw new TypeError(`child ${child.childId} result binding source does not exist`);
+      validateCanvasResultBinding(child.resultBinding, source as CanvasBindingChild, child as CanvasBindingChild);
     }
     const dependencyState = new Map<string, "visiting" | "visited">();
     const visit = (childIdValue: string): void => {
@@ -927,16 +1120,18 @@ export class DurableBatchStore {
       : new Date(this.now().getTime() + 60 * 60 * 1000).toISOString();
     if (Date.parse(expiresAt) <= Date.parse(now)) throw new Error("batch expiry must be in the future");
     const ratePolicy = exactRatePolicy(input.ratePolicy);
+    const requestedBy = normalizeRequestedBy(input.requestedBy);
     const manifest: FrozenBatchManifest = {
       schema: "morrow.batch-manifest.v2",
       batchId,
+      ...(requestedBy ? { requestedBy } : {}),
       operationFamily: exactName(input.operationFamily || "batch", "operation family"),
       catalogDigest,
       profileDigest,
       planDigest,
       courseSet,
       approvalPreviewDigest,
-      approvalCoverageChildCount: normalized.length,
+      approvalCoverageChildCount: normalized.filter((child) => !child.resultBinding).length,
       requestEstimate,
       byteEstimate: totalBytes,
       readbackSpecDigest,
@@ -953,6 +1148,7 @@ export class DurableBatchStore {
         readbackSpecDigest: child.readbackSpecDigest,
         correctionFactsDigest: child.correctionFactsDigest,
         dependencyChildIds: child.dependencyChildIds,
+        ...(child.resultBinding ? { resultBinding: child.resultBinding } : {}),
       })),
     };
     const manifestDigest = sha256Json(manifest);
@@ -964,8 +1160,9 @@ export class DurableBatchStore {
         INSERT INTO gateway_batches(
           batch_id, name, mode, catalog_digest, manifest_digest, state, concurrency,
           total_children, pending_children, running_children, succeeded_children,
-          failed_children, unknown_children, cancelled_children, created_at, updated_at, revision
-        ) VALUES (?, ?, ?, ?, ?, 'planned', ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, 1)
+          failed_children, unknown_children, cancelled_children, created_at, updated_at, revision,
+          requested_by_json
+        ) VALUES (?, ?, ?, ?, ?, 'planned', ?, ?, ?, 0, 0, 0, 0, 0, ?, ?, 1, ?)
       `).run(
         batchId,
         name,
@@ -977,6 +1174,7 @@ export class DurableBatchStore {
         normalized.length,
         now,
         now,
+        requestedBy ? JSON.stringify(requestedBy) : null,
       );
       const encryptedManifestValue = encryptedManifest(this.key, batchId, manifestDigest, manifest);
       this.database.prepare(`
@@ -1178,6 +1376,15 @@ export class DurableBatchStore {
     };
   }
 
+  hasActiveBatches(): boolean {
+    this.assertOpen();
+    const row = this.database.prepare(`
+      SELECT 1 FROM gateway_batches
+      WHERE state='running' LIMIT 1
+    `).get();
+    return row !== undefined;
+  }
+
   pause(batchIdValue: string): BatchRecord {
     const batchId = exactName(batchIdValue, "batch id");
     return this.transaction(() => {
@@ -1293,6 +1500,7 @@ export class DurableBatchStore {
       const dependenciesByChild = new Map(
         manifest.children.map((child) => [child.childId, child.dependencyChildIds]),
       );
+      const manifestChildren = new Map(manifest.children.map((child) => [child.childId, child]));
       const rows = this.database.prepare(`
         SELECT * FROM gateway_batch_children
         WHERE batch_id=? AND state='pending'
@@ -1310,6 +1518,8 @@ export class DurableBatchStore {
         if (claimed.length >= limit) break;
         const dependencies = dependenciesByChild.get(row.child_id) || [];
         if (dependencies.some((dependency) => dependencyStates.get(dependency) !== "succeeded")) continue;
+        const manifestChild = manifestChildren.get(row.child_id);
+        if (manifestChild?.resultBinding && (!hasBoundRequest(row) || !row.gateway_operation_id)) continue;
         const result = update.run(now, now, batchId, row.child_id);
         if (Number(result.changes) === 1) {
           claimed.push(childRecord(this.selectChild.get(batchId, row.child_id) as ChildRow));
@@ -1326,7 +1536,113 @@ export class DurableBatchStore {
     const childIdResolved = exactName(childIdValue, "child id");
     const row = this.selectChild.get(batchId, childIdResolved) as ChildRow | undefined;
     if (!row) throw new Error("batch child does not exist");
-    return decryptedRequest(this.key, row);
+    return decryptedBoundRequest(this.key, row) || decryptedRequest(this.key, row);
+  }
+
+  readResult(batchIdValue: string, childIdValue: string): JsonObject | null {
+    this.assertOpen();
+    const batchId = exactName(batchIdValue, "batch id");
+    const childIdResolved = exactName(childIdValue, "child id");
+    const row = this.selectChild.get(batchId, childIdResolved) as ChildRow | undefined;
+    if (!row) throw new Error("batch child does not exist");
+    return decryptedResult(this.key, row);
+  }
+
+  /**
+   * A result-bound child remains inert until its source has an authenticated
+   * verified result. This runs in the same SQLite transaction that persists
+   * the source settlement, so a restart cannot expose an unbound dependent.
+   */
+  private settleResultBindings(
+    batchId: string,
+    sourceRow: ChildRow,
+    result: BatchExecutionResult,
+    now: string,
+  ): void {
+    const manifest = this.getManifest(batchId);
+    const sourceManifest = manifest.children.find((child) => child.childId === sourceRow.child_id);
+    if (!sourceManifest) throw new Error("batch source child is absent from its manifest");
+    const dependents = manifest.children.filter((child) => child.resultBinding?.sourceChildId === sourceRow.child_id);
+    if (dependents.length === 0) return;
+    const sourceArguments = decryptedBoundRequest(this.key, sourceRow) || decryptedRequest(this.key, sourceRow);
+    const source: CanvasBindingChild = {
+      childId: sourceRow.child_id,
+      courseId: sourceManifest.courseId,
+      publicToolName: sourceRow.public_tool_name,
+      sourceId: sourceRow.source_id,
+      sourceToolName: sourceRow.source_tool_name,
+      arguments: sourceArguments,
+      dependencyChildIds: sourceManifest.dependencyChildIds,
+    };
+    const markUnavailable = this.database.prepare(`
+      UPDATE gateway_batch_children
+      SET state='unknown', gateway_operation_state='dependency_unverified', error_digest=?,
+          updated_at=?, terminal_at=?, revision=revision+1
+      WHERE batch_id=? AND child_id=? AND state='pending'
+    `);
+    const saveBound = this.database.prepare(`
+      UPDATE gateway_batch_children
+      SET bound_request_digest=?, bound_request_ciphertext=?, bound_request_iv=?, bound_request_tag=?,
+          updated_at=?, revision=revision+1
+      WHERE batch_id=? AND child_id=? AND state='pending'
+        AND bound_request_digest IS NULL AND bound_request_ciphertext IS NULL
+        AND bound_request_iv IS NULL AND bound_request_tag IS NULL
+    `);
+    const canBind = result.state === "succeeded"
+      && result.gatewayOperationState === "verified"
+      && result.resultPayload !== undefined;
+    for (const dependentManifest of dependents) {
+      const dependentRow = this.selectChild.get(batchId, dependentManifest.childId) as ChildRow | undefined;
+      if (!dependentRow) throw new Error("batch result-bound child is absent from storage");
+      if (dependentRow.state !== "pending") continue;
+      if (!canBind) {
+        markUnavailable.run(
+          sha256Text("result_binding_source_not_verified"),
+          now,
+          now,
+          batchId,
+          dependentRow.child_id,
+        );
+        continue;
+      }
+      try {
+        const dependent: CanvasBindingChild = {
+          childId: dependentRow.child_id,
+          courseId: dependentManifest.courseId,
+          publicToolName: dependentRow.public_tool_name,
+          sourceId: dependentRow.source_id,
+          sourceToolName: dependentRow.source_tool_name,
+          arguments: decryptedRequest(this.key, dependentRow),
+          dependencyChildIds: dependentManifest.dependencyChildIds,
+        };
+        const bound = bindCanvasResultArguments(
+          dependentManifest.resultBinding!,
+          source,
+          dependent,
+          result.resultPayload!,
+        );
+        const digest = sha256Json(bound);
+        const encrypted = encryptedBoundRequest(this.key, batchId, dependent.childId, digest, bound);
+        const saved = saveBound.run(
+          digest,
+          encrypted.ciphertext,
+          encrypted.iv,
+          encrypted.tag,
+          now,
+          batchId,
+          dependent.childId,
+        );
+        if (Number(saved.changes) !== 1) throw new Error("batch bound request changed before persistence");
+      } catch {
+        markUnavailable.run(
+          sha256Text("result_binding_artifact_unavailable"),
+          now,
+          now,
+          batchId,
+          dependentRow.child_id,
+        );
+      }
+    }
   }
 
   settleChild(
@@ -1355,15 +1671,23 @@ export class DurableBatchStore {
     const errorDigest = result.errorDigest
       ? exactDigest(result.errorDigest, "error digest")
       : null;
+    const resultPayload = result.resultPayload;
+    if (resultPayload !== undefined) {
+      if (result.state !== "succeeded") throw new TypeError("only successful batch children may retain a result payload");
+      if (sha256Json(resultPayload) !== resultDigest) throw new Error("batch child result payload does not match its digest");
+    }
     const now = this.instant();
     return this.transaction(() => {
       const row = this.selectChild.get(batchId, childIdResolved) as ChildRow | undefined;
       if (!row) throw new Error("batch child does not exist");
       if (row.state !== "running") throw new Error(`cannot settle child from ${row.state}`);
+      const encryptedPayload = resultPayload === undefined
+        ? null
+        : encryptedResult(this.key, batchId, childIdResolved, resultDigest, resultPayload);
       this.database.prepare(`
         UPDATE gateway_batch_children
         SET state=?, gateway_operation_id=?, gateway_operation_state=?, source_result_state=?,
-            source_task_id=?, result_digest=?, error_digest=?, updated_at=?, terminal_at=?, revision=revision+1
+            source_task_id=?, result_digest=?, result_ciphertext=?, result_iv=?, result_tag=?, error_digest=?, updated_at=?, terminal_at=?, revision=revision+1
         WHERE batch_id=? AND child_id=? AND state='running'
       `).run(
         result.state,
@@ -1372,12 +1696,16 @@ export class DurableBatchStore {
         sourceResultState,
         sourceTaskId,
         resultDigest,
+        encryptedPayload?.ciphertext || null,
+        encryptedPayload?.iv || null,
+        encryptedPayload?.tag || null,
         errorDigest,
         now,
         now,
         batchId,
         childIdResolved,
       );
+      this.settleResultBindings(batchId, row, result, now);
       this.refreshCounts(batchId);
       return childRecord(this.selectChild.get(batchId, childIdResolved) as ChildRow);
     });

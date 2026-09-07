@@ -4,8 +4,11 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   ArtifactGenerationRegistry,
+  LearnerRoster,
   LearnerVault,
+  redactLearnerEgress,
   normalizeUpstreamResult,
+  redactKnownLearnerText,
   resolveLearnerTokens,
   type OutputPrivacyContext,
 } from "../src/index.js";
@@ -43,6 +46,12 @@ function normalize(value: unknown, privacy: OutputPrivacyContext) {
   });
 }
 
+function learnerPrivacy(vault = new LearnerVault(":memory:"), identities = [{ id: "17", name: "Ada Lovelace", email: "ada@example.test" }]): OutputPrivacyContext {
+  const learnerRoster = new LearnerRoster();
+  learnerRoster.register(scope, identities);
+  return { descriptor: learnerDescriptor, learnerVault: vault, learnerRoster, learnerScope: scope };
+}
+
 describe("privacy output boundary", () => {
   it("PRIV-01 sanitizes upstream MCP error content", () => {
     const result = normalize({
@@ -61,7 +70,7 @@ describe("privacy output boundary", () => {
       structuredContent: {
         learner: { id: "17", name: "Ada Lovelace", email: "ada@example.test", grade: "A" },
       },
-    }, { descriptor: learnerDescriptor, learnerVault: vault, learnerScope: scope });
+    }, learnerPrivacy(vault));
 
     expect(result.structuredContent).toMatchObject({
       learner: { learnerToken: expect.stringMatching(/^learner_/), grade: "A" },
@@ -73,9 +82,7 @@ describe("privacy output boundary", () => {
   it("PRIV-03 refuses hidden HTML when free text is not explicitly allowed", () => {
     const result = normalize({
       structuredContent: { html: '<span style="display:none">Ada Lovelace</span>' },
-    }, {
-      descriptor: { ...learnerDescriptor, allowedFields: ["html"], learnerTokens: false },
-    });
+    }, { ...learnerPrivacy(), descriptor: { ...learnerDescriptor, allowedFields: ["html"], learnerTokens: false } });
 
     expect(result.structuredContent).toMatchObject({ code: "privacy_output_denied" });
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
@@ -84,10 +91,10 @@ describe("privacy output boundary", () => {
   it("refuses sensitive values after free-text fields are selected", () => {
     const textResult = normalize({
       content: [{ type: "text", text: "Bearer top-secret" }],
-    }, { descriptor: { ...learnerDescriptor, freeText: "allow" } });
+    }, { ...learnerPrivacy(), descriptor: { ...learnerDescriptor, freeText: "allow" } });
     const fieldResult = normalize({
       structuredContent: { status: "student@example.test" },
-    }, { descriptor: { ...learnerDescriptor, allowedFields: ["status"], freeText: "allow" } });
+    }, { ...learnerPrivacy(), descriptor: { ...learnerDescriptor, allowedFields: ["status"], freeText: "allow" } });
 
     expect(textResult.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
     expect(fieldResult.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
@@ -122,12 +129,12 @@ describe("privacy output boundary", () => {
 
   it("enforces output record and byte limits", () => {
     const recordLimit = normalize({ structuredContent: { status: ["one", "two"] } }, {
-      descriptor: { ...learnerDescriptor, allowedFields: ["status"], learnerTokens: false, maxRecords: 1 },
+      ...learnerPrivacy(), descriptor: { ...learnerDescriptor, allowedFields: ["status"], learnerTokens: false, maxRecords: 1 },
     });
     expect(recordLimit.structuredContent).toMatchObject({ code: "privacy_record_limit_exceeded" });
 
     const byteLimit = normalize({ content: [{ type: "text", text: "too long" }] }, {
-      descriptor: { ...learnerDescriptor, allowedFields: [], learnerTokens: false, freeText: "allow", maxBytes: 1 },
+      ...learnerPrivacy(), descriptor: { ...learnerDescriptor, allowedFields: [], learnerTokens: false, freeText: "allow", maxBytes: 1 },
     });
     expect(byteLimit.structuredContent).toMatchObject({ code: "privacy_byte_limit_exceeded" });
   });
@@ -151,6 +158,262 @@ describe("privacy output boundary", () => {
     }
   });
 
+  it("requires a complete exact-scope roster before learner output can leave the gateway", () => {
+    const result = normalize({ structuredContent: { status: "ready" } }, {
+      descriptor: learnerDescriptor,
+      learnerVault: new LearnerVault(":memory:"),
+      learnerScope: scope,
+    });
+
+    expect(result.structuredContent).toMatchObject({ code: "learner_roster_scope_unavailable" });
+  });
+
+  it("redacts known roster aliases in Unicode and HTML text while preserving course IDs", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [
+      { id: "17", name: "Ada Lovelace", email: "ada@example.test" },
+      { id: "21", name: "Élodie Durand", email: "elodie@example.test" },
+    ]);
+    const adaToken = vault.tokenize(scope, { id: "17", name: "Ada Lovelace", email: "ada@example.test" });
+    const elodieToken = vault.tokenize(scope, { id: "21", name: "Élodie Durand", email: "elodie@example.test" });
+    const text = redactKnownLearnerText(
+      '<p>Student ID: 17, Ada&nbsp;Lovelace, Ada%20Lovelace, ada&#64;example.test, and Élodie Durand. Course 42 remains. <a data-user-id="17">record</a></p>',
+      { learnerRoster, learnerVault: vault, learnerScope: scope },
+    );
+
+    expect(text).toContain(adaToken);
+    expect(text).toContain(elodieToken);
+    expect(text).toContain("Course 42 remains");
+    expect(text).not.toContain("Ada");
+    expect(text).not.toContain("Ada%20Lovelace");
+    expect(text).not.toContain("ada@example.test");
+    expect(text).not.toContain("Élodie");
+    expect(text).not.toContain("Student ID: 17");
+    expect(text).not.toContain('data-user-id="17"');
+  });
+
+  it("preserves unmatched approval URL bytes while replacing encoded roster aliases and IDs", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "17", name: "Ada Lovelace", email: "ada@example.test" }]);
+    const token = vault.tokenize(scope, { id: "17", name: "Ada Lovelace", email: "ada@example.test" });
+    const approvalUrl = "http://127.0.0.1:4317/operations/op%3Aaa%2Fbb?next=%2Foperations%2Fop%3Acc&amp;state=ready";
+    const source = `${approvalUrl}&learner=Ada%20Lovelace&amp;email=ada&#64;example.test <a data-user-id=\"17\" href=\"/users/17?return=op%3Aaa%2Fbb&amp;safe=%26amp%3B\">Ada&nbsp;Lovelace</a>`;
+    const redacted = redactKnownLearnerText(source, { learnerRoster, learnerVault: vault, learnerScope: scope });
+
+    expect(redactKnownLearnerText(approvalUrl, { learnerRoster, learnerVault: vault, learnerScope: scope })).toBe(approvalUrl);
+    expect(redacted).toBe(`${approvalUrl}&learner=${token}&amp;email=${token} <a data-user-id=\"${token}\" href=\"/users/${token}?return=op%3Aaa%2Fbb&amp;safe=%26amp%3B\">${token}</a>`);
+    expect(redactKnownLearnerText("🧪 Ada%20Lovelace", { learnerRoster, learnerVault: vault, learnerScope: scope })).toBe(`🧪 ${token}`);
+  });
+
+  it("keeps percent escapes outside a matching alias byte-exact", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "18", name: "Jane Doe" }]);
+    const token = vault.tokenize(scope, { id: "18", name: "Jane Doe" });
+    const source = "value=%4A%61%6E%65%20%44%6F%65%20%61%62%63";
+
+    expect(redactKnownLearnerText(source, { learnerRoster, learnerVault: vault, learnerScope: scope }))
+      .toBe(`value=${token}%20%61%62%63`);
+  });
+
+  it("matches full NFKC learner aliases across grapheme starter boundaries", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "19", name: "가 Doe" }]);
+    const token = vault.tokenize(scope, { id: "19", name: "가 Doe" });
+    const context = { learnerRoster, learnerVault: vault, learnerScope: scope };
+
+    expect(redactKnownLearnerText("가 Doe", context)).toBe(token);
+    expect(redactKnownLearnerText("%E1%84%80%E1%85%A1%20Doe", context)).toBe(token);
+  });
+
+  it("refuses encoded credentials and unrostered email after exact-scope alias redaction", () => {
+    const context = learnerPrivacy();
+    const descriptor = { ...learnerDescriptor, allowedFields: ["status"], freeText: "allow" as const };
+    const credential = normalize({ structuredContent: { status: "Bearer%20secret-value" } }, { ...context, descriptor });
+    const unrostered = normalize({ structuredContent: { status: "outside&#64;example.test" } }, { ...context, descriptor });
+
+    expect(credential.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
+    expect(unrostered.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
+  });
+
+  it("uses a generic marker for a known alias shared by multiple learners", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [
+      { id: "17", name: "Jordan Lee", email: "jordan.one@example.test" },
+      { id: "18", name: "Jordan Lee", email: "jordan.two@example.test" },
+    ]);
+
+    const text = redactKnownLearnerText("Jordan Lee submitted the assignment.", { learnerRoster, learnerVault: vault, learnerScope: scope });
+
+    expect(text).toBe("[learner] submitted the assignment.");
+    expect(redactKnownLearnerText("Jordan%20Lee submitted the assignment.", { learnerRoster, learnerVault: vault, learnerScope: scope }))
+      .toBe("[learner] submitted the assignment.");
+  });
+
+  it("refuses opaque resource bytes before a learner envelope can leave the gateway", () => {
+    const context = learnerPrivacy();
+
+    expect(() => redactLearnerEgress(
+      { resource: { blob: Buffer.from("Jane Doe").toString("base64") } },
+      {
+        learnerRoster: context.learnerRoster!,
+        learnerVault: context.learnerVault!,
+        learnerScope: context.learnerScope!,
+      },
+    )).toThrow("privacy_resource_blob_refused");
+  });
+
+  it("removes private attachment handles and encoded bytes from arbitrary learner egress", () => {
+    const context = learnerPrivacy();
+    const output = redactLearnerEgress(
+      {
+        status: "ready",
+        privateAttachment: { handle: "stage:secret", bytes_base64: Buffer.from("Jane Doe").toString("base64") },
+      },
+      {
+        learnerRoster: context.learnerRoster!,
+        learnerVault: context.learnerVault!,
+        learnerScope: context.learnerScope!,
+      },
+    );
+
+    expect(output).toEqual({ status: "ready" });
+  });
+
+  it("does not use aliases or tokens from another exact learner scope", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    const otherScope = { ...scope, course: "43", principal: "instructor:8" };
+    learnerRoster.register(scope, [{ id: "17", name: "Ada Lovelace", email: "ada@example.test" }]);
+    learnerRoster.register(otherScope, [{ id: "88", name: "Rowan Clarke", email: "rowan@example.test" }]);
+
+    const first = redactKnownLearnerText("Ada Lovelace and Rowan Clarke", { learnerRoster, learnerVault: vault, learnerScope: scope });
+    const second = redactKnownLearnerText("Ada Lovelace and Rowan Clarke", { learnerRoster, learnerVault: vault, learnerScope: otherScope });
+
+    expect(first).toMatch(/^learner_/);
+    expect(first).toContain("Rowan Clarke");
+    expect(second).toContain("Ada Lovelace");
+    expect(second).toMatch(/learner_[\w-]+$/);
+    expect(vault.tokenize(scope, { id: "17" })).not.toBe(vault.tokenize(otherScope, { id: "17" }));
+  });
+
+  it("applies roster aliases at the content boundary before learner free text is returned", () => {
+    const vault = new LearnerVault(":memory:");
+    const result = normalize({
+      content: [{ type: "text", text: "Feedback for Ada Lovelace is ready." }],
+    }, {
+      ...learnerPrivacy(vault),
+      descriptor: { ...learnerDescriptor, freeText: "allow", maxBytes: 2_000 },
+    });
+
+    expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
+    expect(result.content[0]).toMatchObject({ text: expect.stringMatching(/learner_[\w-]+/) });
+  });
+
+  it("redacts a native envelope without dropping its schema or instructional context", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [
+      { id: "17", name: "Jane Doe", email: "jane@example.test" },
+      { id: "18", name: "C. Zarate", email: "zarate@example.test" },
+      { id: "19", name: "D. Quintero", email: "quintero@example.test" },
+    ]);
+    const result = redactLearnerEgress({
+      schema: "morrow.native-review.v1",
+      content: [{ type: "text", text: "Multiple Choice. True/False. A. Stratum corneum. Options: A. Probe, B. Mirror, C. Cotton pliers, D. Explorer." }],
+      structuredContent: {
+        schema: "morrow.lesson-evidence.v1",
+        course: { id: "42", title: "Anatomy" },
+        summary: "Student Jane Doe scored 88. Gradebook rows: C. Zarate and D. Quintero.",
+        learner: { id: "17", name: "Jane Doe", email: "jane@example.test", score: 88 },
+        accessToken: "never-return-this",
+      },
+    }, { learnerRoster, learnerVault: vault, learnerScope: scope }) as Record<string, unknown>;
+    const serialized = JSON.stringify(result);
+
+    expect((result as { schema: string }).schema).toBe("morrow.native-review.v1");
+    expect(serialized).toContain("morrow.lesson-evidence.v1");
+    expect(serialized).toContain('"id":"42"');
+    expect(serialized).toContain("Multiple Choice");
+    expect(serialized).toContain("True/False");
+    expect(serialized).toContain("A. Stratum corneum");
+    expect(serialized).toContain("Options: A. Probe, B. Mirror, C. Cotton pliers, D. Explorer");
+    expect(serialized).toMatch(/learner_[\w-]+/);
+    expect(serialized).not.toContain("Jane Doe");
+    expect(serialized).not.toContain("C. Zarate");
+    expect(serialized).not.toContain("D. Quintero");
+    expect(serialized).not.toContain("never-return-this");
+  });
+
+  it("refuses an identity record that conflicts with the authoritative exact-scope roster", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "17", name: "Ada Lovelace", email: "ada@example.test" }]);
+
+    expect(() => redactLearnerEgress({ learner: { id: "17", name: "Different Name", grade: "A" } }, {
+      learnerRoster, learnerVault: vault, learnerScope: scope,
+    })).toThrow("learner_roster_identity_conflict");
+  });
+
+  it("tokenizes generic learner, enrollment, submission, and grade records recursively", () => {
+    const vault = new LearnerVault(":memory:");
+    const result = normalize({
+      structuredContent: {
+        course: { id: "42", name: "Biology" },
+        learner: { id: "17", name: "Ada Lovelace", email: "ada@example.test", grade: "A" },
+        enrollments: [{ user_id: "17", user: { id: "17", name: "Ada Lovelace" }, role: "StudentEnrollment" }],
+        submissions: [{ id: "submission-1", user_id: "17", score: 9, comment: "Ada Lovelace submitted work." }],
+        grades: [{ id: "17", current_grade: "A" }],
+      },
+    }, {
+      ...learnerPrivacy(vault),
+      descriptor: { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive", freeText: "allow" },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      course: { id: "42", name: "Biology" },
+      learner: { learnerToken: expect.stringMatching(/^learner_/), grade: "A" },
+      enrollments: [{ learnerToken: expect.stringMatching(/^learner_/), role: "StudentEnrollment" }],
+      submissions: [{ learnerToken: expect.stringMatching(/^learner_/), score: 9, comment: expect.stringMatching(/^learner_/) }],
+      grades: [{ learnerToken: expect.stringMatching(/^learner_/), current_grade: "A" }],
+    });
+    expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
+    expect(JSON.stringify(result)).not.toContain("ada@example.test");
+  });
+
+  it("normalizes identity field spellings before tokenizing a generic learner record", () => {
+    const result = normalize({
+      structuredContent: {
+        learners: [{ "USER-ID": "17", "DISPLAY-NAME": "Ada Lovelace", Primary_Email: "ada@example.test", grade: "A" }],
+      },
+    }, {
+      ...learnerPrivacy(),
+      descriptor: { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" },
+    });
+
+    expect(result.structuredContent).toMatchObject({
+      learners: [{ learnerToken: expect.stringMatching(/^learner_/), grade: "A" }],
+    });
+    expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
+    expect(JSON.stringify(result)).not.toContain("ada@example.test");
+  });
+
+  it("fails closed when an identity-bearing record has no resolvable learner identity", () => {
+    const result = normalize({
+      structuredContent: { enrollments: [{ role: "StudentEnrollment", current_grade: "A" }] },
+    }, {
+      ...learnerPrivacy(),
+      descriptor: { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" },
+    });
+
+    expect(result.structuredContent).toMatchObject({ code: "privacy_identity_record_unresolved" });
+    expect(JSON.stringify(result)).not.toContain("StudentEnrollment");
+  });
+
   it("scrubs learner and credential fields while retaining complete course objects", () => {
     const vault = new LearnerVault(":memory:");
     const result = normalize({
@@ -160,9 +423,8 @@ describe("privacy output boundary", () => {
         access_token: "never-return-this",
       },
     }, {
+      ...learnerPrivacy(vault),
       descriptor: { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive", freeText: "allow" },
-      learnerVault: vault,
-      learnerScope: scope,
     });
     expect(result.structuredContent).toMatchObject({
       course: { id: "42", name: "Biology", workflow_state: "available" },
@@ -170,5 +432,34 @@ describe("privacy output boundary", () => {
     });
     expect(JSON.stringify(result)).not.toContain("never-return-this");
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
+  });
+
+  it("redacts roster aliases and removes unknown learner-shaped fields in course data", () => {
+    const vault = new LearnerVault(":memory:");
+    const result = normalize({
+      structuredContent: {
+        audit: {
+          student_name: "Ada Lovelace",
+          custom_learner_id: "17",
+          narrative: "Ada Lovelace submitted work.",
+        },
+      },
+    }, {
+      ...learnerPrivacy(vault),
+      descriptor: {
+        ...learnerDescriptor,
+        allowedFields: [],
+        fieldPolicy: "scrub-sensitive",
+        dataClass: "course",
+        freeText: "allow",
+        learnerTokens: false,
+      },
+    });
+    const serialized = JSON.stringify(result);
+
+    expect(serialized).not.toContain("Ada Lovelace");
+    expect(serialized).not.toContain("custom_learner_id");
+    expect(serialized).not.toContain('"17"');
+    expect(serialized).toMatch(/learner_[\w-]+ submitted work/);
   });
 });

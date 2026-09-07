@@ -1,0 +1,33 @@
+# Canvas post-write readback blockers
+
+This list covers the admitted Canvas writes that do not have a safe exact post-write reader, and the self-scoped writes Morrow holds before dispatch. The readback planner returns no plan for these operations. The connector therefore does not make a fallback read that could disclose unrelated learner data or create another provider-side effect.
+
+## Self-scoped user preference writes are held
+
+`canvas_create_bookmark`, `canvas_update_bookmark`, `canvas_delete_bookmark`, `canvas_set_course_nickname`, `canvas_remove_course_nickname`, and `canvas_clear_course_nicknames` change the signed-in user's own bookmarks and course nicknames on `/v1/users/self/...`. They are held before dispatch with reason `self_scope_not_supported` (`packages/canvas-api-catalog/src/operation-admission.ts`), so their published capability is `profile_limited` with `supportsReadback: false` and this text: "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course."
+
+All three enforcement layers already refused these six writes before dispatch (`packages/canvas-connector-mcp/src/runtime.ts`, `connector/extension/src/service-worker.js`, `connector/extension/src/canvas-content.js`). Holding them at admission removes a capability claim the product never met. Admitting them end to end would need a self-scope exception in each of those three layers and in the Edit-category derivation: four new bypasses of the course-binding rule for a personal preference with no instructor value.
+
+The read `canvas_get_course_nickname` names one course in its route (`/v1/users/self/course_nicknames/{course_id}`). It stays bound to the selected course through the `course_id` argument on its self-scoped target, so it cannot read another course's nickname.
+
+## Writes with a named blocker
+
+| Operations | Blocker |
+| --- | --- |
+| `canvas_bulk_select_provisional_grades`, `canvas_clear_unread_status_for_all_submissions_courses`, `canvas_delete_single_rubric_assessment`, `canvas_delete_submission_comment`, `canvas_mark_submission_as_read_courses`, `canvas_mark_submission_as_unread_courses`, `canvas_mark_submission_item_as_read_courses`, `canvas_reset_what_if_scores_for_current_user_for_entire_course_and_recalculate_grades`, `canvas_select_provisional_grade` | The available status or submission readers expose learner grades, submissions, comments, rubric assessments, or per-student moderation state. Canvas moderated-grading status identifies a student and selected provisional grade. |
+| `canvas_delete_entry_courses`, `canvas_delete_feedback_on_conversation_message`, `canvas_mark_all_topic_as_read_courses`, `canvas_mark_topic_as_read_courses`, `canvas_mark_topic_as_unread_courses`, `canvas_subscribe_to_topic_courses`, `canvas_unsubscribe_from_topic_courses` | The available discussion or conversation readers return authored messages or author information. Canvas discussion-topic serialization includes the topic message and author while also exposing the caller's read and subscription state. |
+| `canvas_add_course_to_favorites`, `canvas_remove_course_from_favorites` | Canvas returns an effective favorite-course list. When no explicit favorites exist, Canvas returns an automatically selected enrollment list, so presence or absence cannot prove the stored favorite preference. |
+| `canvas_disable_summary_courses` | The write response only says success. The topic reader has `summary_enabled`, but it also returns the topic message and author. There is no dedicated summary-state endpoint. |
+| `canvas_mark_module_item_as_done_not_done` | Canvas `GET show_module_item` calls `context_module_action(..., :read)` before serializing the caller's completion state. It is not a read-only verifier. |
+| `canvas_re_lock_module_progressions` | The re-lock effect is per-student progression state. The module reader has no non-student, exact postcondition for the recalculation. |
+| `canvas_edit_external_tool_courses`, `canvas_update_content_migration_courses` | The current generated catalog exposes only path identifiers for these writes. It has no source-backed changed field that a fresh reader can compare. |
+
+## Writes whose only available read is a different resource
+
+A generic readback plan may read only the written resource itself, the child route the write creates, or the collection that holds the written item (`packages/canvas-api-catalog/src/readback-plan.ts`). Any other read route reports the state of a different object, so the planner returns no plan, the assessment is `unavailable` with reason `no_safe_readback_route`, and the published capability carries `supportsReadback: false`. `connector/extension/src/service-worker.js` returns `unconfirmed` with the same reason. A read path parameter must come from the write arguments, a declared response mapping, or a response field with that name; it is never taken from an unrelated `id`.
+
+63 admitted writes report this state. Examples: `canvas_reset_course`, which returns a new course, so reading a course proves nothing about the reset; `canvas_grade_or_comment_on_multiple_submissions_courses_submissions`, which returns a Progress object; `canvas_create_score`, whose only sibling read is the parent line item; and `canvas_delete_rubricassociation`, whose only sibling read is the parent rubric. The Canvas file upload pre-flights are no longer in this group: they are held before dispatch with the reason `multi_step_upload_requires_reviewed_transfer`, because the first step of an upload creates no file and the reviewed course-file transfer is the only path that runs all three steps.
+
+The hand-reviewed `EXACT_READBACKS` routes and the two named Canvas readbacks keep their own reviewed read route and evaluator. `scripts/test/canvas-readback-scope.test.mjs` walks the whole catalog and fails if any generic plan reads a different resource. This is a contract-level rule proved by that test; no live Canvas readback was executed for it, so it stays live-unverified.
+
+Sources: [Canvas discussion-topic serializer](https://github.com/instructure/canvas-lms/blob/master/lib/api/v1/discussion_topics.rb), [module-item controller](https://github.com/instructure/canvas-lms/blob/master/app/controllers/context_module_items_api_controller.rb), [Moderated Grading API](https://developerdocs.instructure.com/services/canvas/resources/moderated_grading), [Submissions API](https://developerdocs.instructure.com/services/canvas/resources/submissions), and [Content Migrations API](https://developerdocs.instructure.com/services/canvas/resources/content_migrations).

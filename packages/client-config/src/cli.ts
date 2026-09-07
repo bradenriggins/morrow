@@ -9,6 +9,7 @@ import {
   buildClientConfigBundle,
   buildClientParityReport,
   installMorrowClient,
+  morrowClientConfigNotes,
   MORROW_CLIENT_SCOPES,
   SUPPORTED_MORROW_CLIENTS,
   writeLocalCanvasConfig,
@@ -20,6 +21,8 @@ import {
 
 interface SharedOptions extends ClientConfigBundleOptions {
   readonly outputDirectory?: string;
+  readonly clientProject?: string;
+  readonly stateDirectory?: string;
   readonly force: boolean;
 }
 
@@ -27,7 +30,7 @@ function usage(): string {
   return [
     "Usage:",
     "  pnpm run setup -- [--repository <path>] [--force] [--json]",
-    "  pnpm morrow mcp install <codex|claude|claude-desktop|gemini> [--scope project|user] [--json] [options]",
+    "  pnpm morrow mcp install <codex|claude|claude-desktop|gemini|cursor|vscode> [--scope project|user] [--json] [options]",
     "  pnpm morrow doctor [--json] [--upstreams <absolute-path>] [--repository <path>]",
     "  pnpm morrow profile show [--json] [--upstreams <absolute-path>]",
     "  pnpm morrow catalog stats [--json] [--repository <path>]",
@@ -43,9 +46,14 @@ function usage(): string {
     "  --repository <path>       Morrow repository root. Defaults to the current directory.",
     "  --upstreams <path>        Absolute path to local morrow.upstreams.json.",
     "  --scope <project|user>    Configuration scope. Defaults to project.",
+    "                            Claude Desktop uses user scope only, on macOS or Windows.",
+    "                            VS Code supports project scope only.",
     "  --output <path>           Bundle output directory. Defaults to <repository>/.morrow/client-configs.",
     "  --server-entry <path>     Absolute compiled server entry path.",
     "  --node <command>          Node executable. Defaults to the current Node executable.",
+    "  --client-project <path>   Project directory for a project-scope client configuration.",
+    "  --workspace-root <path>   Existing canonical directory used as the MCP working directory.",
+    "  --state-directory <path>  Existing canonical directory for durable local Morrow state.",
     "  --name <name>             MCP server name. Defaults to morrow.",
     "  --startup-timeout <sec>   Codex startup timeout. Defaults to 60.",
     "  --tool-timeout <sec>      Codex tool timeout. Defaults to 900.",
@@ -57,7 +65,7 @@ function usage(): string {
   ].join("\n");
 }
 
-const ONE_APP_NOTE = "Use Morrow with one assistant at a time. Your assistant starts Morrow in the background. You do not open a separate Morrow application.";
+const ONE_APP_NOTE = "Assistants that use this Morrow installation share one local course connection. Your assistant starts Morrow when needed. You do not open a separate Morrow application.";
 
 function setupMessage(configured: {
   readonly path: string;
@@ -73,12 +81,14 @@ function setupMessage(configured: {
     "1. In Chrome, open chrome://extensions. Turn on Developer mode. Select Load unpacked, then choose:",
     `   ${configured.extensionPath}`,
     "2. From this Morrow repository, configure one assistant:",
-    "   For Codex: pnpm morrow mcp install codex",
+    "   For ChatGPT or Codex: pnpm morrow mcp install codex --scope user",
     "   For Claude Code: pnpm morrow mcp install claude",
     "   For Claude Desktop: pnpm morrow mcp install claude-desktop --scope user",
     "   For Gemini CLI: pnpm morrow mcp install gemini",
+    "   For Cursor: pnpm morrow mcp install cursor",
+    "   For VS Code: pnpm morrow mcp install vscode",
     "3. Open or restart that assistant before you use the extension.",
-    "4. In Chrome, open one signed-in Canvas or Moodle course. Use Morrow Course Connector to connect it.",
+    "4. In Chrome, open one signed-in Canvas or Moodle course. Use Morrow Bridge to connect it.",
     "",
     ONE_APP_NOTE,
     "",
@@ -87,23 +97,27 @@ function setupMessage(configured: {
 
 function installMessage(installed: {
   readonly client: SupportedMorrowClient;
+  readonly scope: MorrowClientScope;
   readonly path: string;
   readonly changed: boolean;
 }): string {
   const label = {
-    codex: "Codex",
+    codex: "ChatGPT or Codex",
     "claude-code": "Claude Code",
     "claude-desktop": "Claude Desktop",
     "gemini-cli": "Gemini CLI",
+    cursor: "Cursor",
+    vscode: "VS Code",
   }[installed.client];
   return [
     installed.changed ? `Morrow configuration was installed for ${label}.` : `Morrow configuration for ${label} is already current.`,
     `Configuration file: ${installed.path}`,
+    ...morrowClientConfigNotes({ client: installed.client, scope: installed.scope }),
     "This did not open or test the assistant. This step does not connect a course.",
     "",
     "Next steps:",
-    `1. Close any other assistant using Morrow. Open or restart ${label}.`,
-    "2. Then in Chrome, open one signed-in Canvas or Moodle course and use Morrow Course Connector to connect it.",
+    `1. Open or restart ${label}.`,
+    "2. Then in Chrome, open one signed-in Canvas or Moodle course and use Morrow Bridge to connect it.",
     "",
     ONE_APP_NOTE,
     "",
@@ -135,7 +149,7 @@ function doctorMessage(value: Record<string, unknown>): string {
     `Morrow service: ${service}.`,
     `Course connection: ${connection}.`,
     "",
-    "This optional check starts a temporary Morrow process. Close assistants using Morrow before you run it.",
+    "This optional check opens and closes a temporary Morrow client session. It can use the shared local owner.",
     `Settings used: ${upstreamConfigPath}`,
     `For technical details, run pnpm morrow doctor --json from: ${repositoryRoot}`,
     "",
@@ -192,6 +206,9 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
   let outputDirectory: string | undefined;
   let serverName: string | undefined;
   let nodeCommand: string | undefined;
+  let clientProject: string | undefined;
+  let workspaceRoot: string | undefined;
+  let stateDirectory: string | undefined;
   let serverEntryPath: string | undefined;
   let startupTimeoutSeconds: number | undefined;
   let toolTimeoutSeconds: number | undefined;
@@ -221,6 +238,9 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
       case "--output": outputDirectory = resolve(value); break;
       case "--server-entry": serverEntryPath = resolve(value); break;
       case "--node": nodeCommand = value; break;
+      case "--client-project": clientProject = resolve(value); break;
+      case "--workspace-root": workspaceRoot = value; break;
+      case "--state-directory": stateDirectory = value; break;
       case "--name": serverName = value; break;
       case "--startup-timeout": startupTimeoutSeconds = positiveInteger(value, flag); break;
       case "--tool-timeout": toolTimeoutSeconds = positiveInteger(value, flag); break;
@@ -236,6 +256,9 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
       ...(outputDirectory ? { outputDirectory } : {}),
       ...(serverName ? { serverName } : {}),
       ...(nodeCommand ? { nodeCommand } : {}),
+      ...(clientProject ? { clientProject } : {}),
+      ...(workspaceRoot ? { workspaceRoot } : {}),
+      ...(stateDirectory ? { stateDirectory } : {}),
       ...(serverEntryPath ? { serverEntryPath } : {}),
       ...(startupTimeoutSeconds !== undefined ? { startupTimeoutSeconds } : {}),
       ...(toolTimeoutSeconds !== undefined ? { toolTimeoutSeconds } : {}),
@@ -251,14 +274,20 @@ function requireUpstreams(options: SharedOptions): ClientConfigBundleOptions {
     || (process.env.MORROW_UPSTREAMS_FILE ? resolve(process.env.MORROW_UPSTREAMS_FILE) : "")
     || (existsSync(resolve(options.repositoryRoot, "morrow.upstreams.json")) ? resolve(options.repositoryRoot, "morrow.upstreams.json") : "");
   if (!upstreamConfigPath) throw new Error("--upstreams is required when MORROW_UPSTREAMS_FILE is not set");
-  const { outputDirectory: _outputDirectory, force: _force, ...bundle } = options;
+  const {
+    outputDirectory: _outputDirectory,
+    force: _force,
+    clientProject: _clientProject,
+    stateDirectory: _stateDirectory,
+    ...bundle
+  } = options;
   return { ...bundle, upstreamConfigPath };
 }
 
 function exactClient(value: string | undefined): SupportedMorrowClient {
   const normalized = value === "claude" ? "claude-code" : value === "gemini" ? "gemini-cli" : value;
   if (!(SUPPORTED_MORROW_CLIENTS as readonly string[]).includes(String(normalized))) {
-    throw new Error("client must be codex, claude, claude-desktop, or gemini");
+    throw new Error("client must be codex, claude, claude-desktop, gemini, cursor, or vscode");
   }
   return normalized as SupportedMorrowClient;
 }
@@ -394,7 +423,7 @@ async function callMorrowTool(
 ): Promise<unknown> {
   const bundle = requireUpstreams(options);
   const serverEntryPath = bundle.serverEntryPath || resolve(bundle.repositoryRoot, "packages/mcp-server/dist/index.js");
-  const client = new Client({ name: "morrow-cli", version: "1.0.0-rc.0" });
+  const client = new Client({ name: "morrow-cli", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: bundle.nodeCommand || process.execPath,
     args: [serverEntryPath],
@@ -433,14 +462,16 @@ async function run(): Promise<void> {
     const { options, json } = parseSharedOptions(rest);
     const configured = writeLocalCanvasConfig({
       repositoryRoot: options.repositoryRoot,
+      ...(options.upstreamConfigPath ? { path: options.upstreamConfigPath } : {}),
       ...(options.nodeCommand ? { nodeCommand: options.nodeCommand } : {}),
+      ...(options.stateDirectory ? { stateDirectory: options.stateDirectory } : {}),
       force: options.force,
     });
     const result = {
       schema: "morrow.setup.v1",
       ...configured,
       serverEntryPath: resolve(options.repositoryRoot, "packages/mcp-server/dist/index.js"),
-      installs: ["Morrow MCP", "Morrow Course Connector extension"],
+      installs: ["Morrow MCP", "Morrow Bridge extension"],
       credentialsCopied: false,
     };
     if (json) emit(result, true);
@@ -452,7 +483,12 @@ async function run(): Promise<void> {
     const client = exactClient(rest[1]);
     const { scope, rest: optionArgs } = parseScope(rest.slice(2));
     const { options, json } = parseSharedOptions(optionArgs);
-    const installed = installMorrowClient({ ...requireUpstreams(options), client, scope });
+    const installed = installMorrowClient({
+      ...requireUpstreams(options),
+      ...(options.clientProject ? { projectRoot: options.clientProject } : {}),
+      client,
+      scope,
+    });
     if (json) process.stdout.write(`${JSON.stringify(installed)}\n`);
     else process.stdout.write(installMessage(installed));
     return;

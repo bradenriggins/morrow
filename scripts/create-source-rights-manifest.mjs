@@ -55,20 +55,20 @@ const adaptedPrefixes = [
 ];
 
 const thirdPartyFiles = new Map([
-  ["connector/extension/brand/GoogleSansFlex-latin.woff2", {
-    assetSha256: "843339f4e027cee857331299135de9f3be36fe2e23782c8f785262104ec5ad11",
-    copyright: "Copyright 2015 Google LLC. All Rights Reserved.",
+  ["connector/extension/brand/Manrope-variable.ttf", {
+    assetSha256: "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
+    copyright: "Copyright 2018 The Manrope Project Authors (https://github.com/sharanda/manrope)",
     license: "SIL-OFL-1.1",
-    licensePath: "connector/extension/brand/FONT-LICENSE.txt",
-    licenseSha256: "2ad6cadc54969a39d46fa01e37e5e78c54b9c06e4f0b15235a4105993a149126",
-    sourceUrl: "https://fonts.google.com/specimen/Google+Sans+Flex",
+    licensePath: "connector/extension/brand/Manrope-OFL.txt",
+    licenseSha256: "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
+    sourceUrl: "https://github.com/google/fonts/tree/main/ofl/manrope",
   }],
-  ["connector/extension/brand/FONT-LICENSE.txt", {
-    assetSha256: "2ad6cadc54969a39d46fa01e37e5e78c54b9c06e4f0b15235a4105993a149126",
-    copyright: "Copyright 2015 Google LLC. All Rights Reserved.",
+  ["connector/extension/brand/Manrope-OFL.txt", {
+    assetSha256: "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
+    copyright: "Copyright 2018 The Manrope Project Authors (https://github.com/sharanda/manrope)",
     license: "SIL-OFL-1.1",
-    licensePath: "connector/extension/brand/FONT-LICENSE.txt",
-    licenseSha256: "2ad6cadc54969a39d46fa01e37e5e78c54b9c06e4f0b15235a4105993a149126",
+    licensePath: "connector/extension/brand/Manrope-OFL.txt",
+    licenseSha256: "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
     sourceUrl: "https://openfontlicense.org",
   }],
 ]);

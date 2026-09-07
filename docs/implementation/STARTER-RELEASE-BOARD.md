@@ -1,6 +1,16 @@
 # Morrow private starter package
 
-Updated: 2026-09-05
+Updated: 2026-09-07
+
+**This document describes an internal private source candidate. It is not the
+consumer installation.** A person installing Morrow installs the Morrow desktop
+app (macOS Apple silicon disk image, Windows x64 installer) plus the Morrow
+Bridge Chrome extension; `README.md` describes that route under "The Morrow
+desktop app". Everything here — the source ZIP, `pnpm install`, `pnpm run
+setup`, and the `pnpm morrow mcp install` commands — is engineering evidence for
+maintainers. Braden explicitly rejected this command-based route as the customer
+installation, and the "Recipient preview path" below is kept only as the record
+of what that route was.
 
 ## Target
 
@@ -11,7 +21,7 @@ Chrome Web Store release.
 Use the existing `private-full` profile. Do not create another packager. It
 stages only committed `HEAD` files, writes a stage manifest, checksums, SBOM,
 receipt, and deterministic ZIP under `artifacts/candidates/private-full/`.
-`scripts/lib/release-candidate.mjs:555-679` defines this path.
+`scripts/lib/release-candidate.mjs:637-767` defines this path.
 The profile includes every tracked path except package tests, script tests, and
 `config/source-origin-ledger.json` (`config/release-profiles.json`).
 
@@ -114,4 +124,8 @@ pnpm morrow mcp install codex --scope project --upstreams "$PWD/morrow.upstreams
 The recipient restarts the selected client, then completes the normal Chrome
 connector connection and Canvas-course connection. `pnpm run setup` creates the
 local `morrow.upstreams.json`; it must never be part of the delivered payload.
-See `README.md:224-277` for the supported client variants and connection flow.
+See "Install from source for development", under "Development and engineering
+evidence" in `README.md`, for the supported client variants and connection flow.
+
+This path is a maintainer route only. Do not send it to a customer and do not
+present it as how Morrow is installed.

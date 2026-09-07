@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Morrow render check host</title>
+</head>
+<body>
+<!--
+The offscreen document a service worker uses to reach the sandbox. A service
+worker has no document, so it cannot hold the sandboxed frame itself. This page
+holds it, relays one request in and one record out, and does nothing else. It is
+never shown to anyone.
+-->
+<iframe id="render-check-sandbox" src="/render-check/render-check.html" title="Morrow render check sandbox" hidden></iframe>
+<script type="module" src="./render-check-host.js"></script>
+</body>
+</html>

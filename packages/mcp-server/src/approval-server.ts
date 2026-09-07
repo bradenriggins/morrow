@@ -5,6 +5,7 @@ import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { brandHead, brandHeader, serveBrandAsset } from "@morrow/bridge-loopback";
 import type { ApprovalReviewContext, ApprovalReviewReadCache } from "./approval-context.js";
 import { escapeHtml, formattedTextPreview } from "./approval-preview.js";
+import { BLACKBOARD_CONTENT_PATCH_APPLY_TOOL } from "./blackboard-content-patch.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
 
@@ -60,8 +61,10 @@ function sendHtml(response: ServerResponse, status: number, body: string, cookie
   response.end(body);
 }
 
-function pageShell(title: string, eyebrow: string, body: string, polling = false): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title>${brandHead}<script src="/review-status.js" defer></script></head><body${polling ? ' data-polling="true"' : ""}><main class="wrap">${brandHeader}<article class="card" aria-label="${escapeHtml(eyebrow)}">${body}</article><p class="foot">This review stays on your computer.</p></main></body></html>`;
+// The card holds the whole page and the <h1> inside it names that page, so the
+// card carries no label of its own. A second name here would conflict with it.
+function pageShell(title: string, body: string, polling = false): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} · Morrow</title>${brandHead}<script src="/review-status.js" defer></script></head><body${polling ? ' data-polling="true"' : ""}><main class="wrap">${brandHeader}<article class="card">${body}</article><p class="foot">This review stays on your computer.</p></main></body></html>`;
 }
 
 const STATUS_SCRIPT = `const changeList = document.querySelector(".change-list");
@@ -158,45 +161,143 @@ function object(value: unknown): JsonObject {
   return value && typeof value === "object" && !Array.isArray(value) ? value as JsonObject : {};
 }
 
+const EFFECT_STATES = new Set([
+  "awaiting_approval", "approved", "dispatching", "awaiting_inner_approval", "awaiting_verification",
+  "verified", "failed", "applied_or_unknown", "cancelled", "closed_by_person",
+]);
+const VERIFICATION_STATES = new Set(["not_requested", "unconfirmed", "verified"]);
+const DIGEST_FIELDS = [
+  "catalogDigest", "targetIdentityDigest", "requestDigest", "forwardedRequestDigest", "planDigest",
+  "approvalGrantDigest", "upstreamResultDigest", "readbackDigest",
+] as const;
+const DIGEST = /^[a-f0-9]{64}$/;
+const OPERATION_ID = /^[A-Za-z0-9_.:@-]{1,160}$/;
+const EFFECT_RECEIPT_ID = /^effect:[a-f0-9-]{36}$/;
+
+function technicalOperation(operation: JsonObject): JsonObject {
+  const status: JsonObject = {};
+  if (typeof operation.state === "string" && EFFECT_STATES.has(operation.state)) {
+    status.state = operation.state;
+  }
+  if (typeof operation.verificationStatus === "string" && VERIFICATION_STATES.has(operation.verificationStatus)) {
+    status.verification = operation.verificationStatus;
+  }
+  const receipt: JsonObject = {};
+  if (typeof operation.effectReceiptId === "string" && EFFECT_RECEIPT_ID.test(operation.effectReceiptId)) {
+    receipt.effectReceiptId = operation.effectReceiptId;
+  }
+  if (Number.isSafeInteger(operation.dispatchAttempt) && Number(operation.dispatchAttempt) >= 0) {
+    receipt.dispatchAttempt = Number(operation.dispatchAttempt);
+  }
+  const digests: JsonObject = {};
+  for (const field of DIGEST_FIELDS) {
+    const value = operation[field];
+    if (typeof value === "string" && DIGEST.test(value)) digests[field] = value;
+  }
+  return {
+    ...(typeof operation.operationId === "string" && OPERATION_ID.test(operation.operationId)
+      ? { operationId: operation.operationId } : {}),
+    ...(Object.keys(status).length ? { status } : {}),
+    ...(Object.keys(receipt).length ? { receipt } : {}),
+    ...(Object.keys(digests).length ? { digests } : {}),
+  };
+}
+
+function technicalDetails(target: ApprovalTarget, snapshot: JsonObject): JsonObject {
+  const operations = target.kind === "batches" && Array.isArray(snapshot.children)
+    ? snapshot.children.map((child) => object(object(child).operation)) : [snapshot];
+  return {
+    schema: "morrow.approval-technical-details.v1",
+    status: reviewState(target, snapshot),
+    operations: operations.map(technicalOperation),
+  };
+}
+
+function operationsList(snapshot: JsonObject): JsonObject {
+  const operations = Array.isArray(snapshot.operations) ? snapshot.operations.map(object) : [];
+  return {
+    schema: "morrow.approval-operations.list.v1",
+    returned: operations.length,
+    operations: operations.map(technicalOperation),
+  };
+}
+
 function readableName(value: string): string {
   const names: Record<string, string> = {
-    moodle_get_assignment_creation_form: "Prepare a Moodle assignment",
-    moodle_create_assignment: "Add this Moodle Assignment",
-    moodle_get_quiz_creation_form: "Prepare a Moodle quiz",
-    moodle_create_quiz: "Add this Moodle Quiz",
-    moodle_get_page_creation_form: "Prepare a Moodle lesson page",
-    moodle_create_page: "Add this Moodle Page",
-    moodle_list_my_courses: "List my Moodle courses",
-    moodle_get_course: "View this Moodle course",
-    moodle_get_contents: "View Moodle course content",
-    moodle_list_assignments: "List Moodle assignments",
-    moodle_list_quizzes: "List Moodle quizzes",
-    moodle_get_course_summary: "View this Moodle course description",
-    moodle_get_section: "View this Moodle section",
-    moodle_get_page: "View this Moodle Page",
-    moodle_get_assignment: "View this Moodle Assignment",
-    moodle_get_quiz: "View this Moodle Quiz",
-    moodle_update_course_summary: "Update the Moodle course description",
-    moodle_update_section: "Update this Moodle section",
-    moodle_update_page: "Update this Moodle Page",
-    moodle_update_assignment: "Update this Moodle Assignment",
-    moodle_update_quiz: "Update this Moodle Quiz",
-    moodle_show_course: "Show this Moodle course to learners",
-    moodle_hide_course: "Hide this Moodle course from learners",
-    moodle_show_section: "Show this Moodle section to learners",
-    moodle_hide_section: "Hide this Moodle section from learners",
-    moodle_show_activity: "Show this Moodle activity to learners",
-    moodle_hide_activity: "Hide this Moodle activity from learners",
-    moodle_move_activity: "Move this Moodle activity",
-    blackboard_update_content: "Update the Blackboard lesson",
+    moodle_get_assignment_creation_form: "Prepare assignment",
+    moodle_create_assignment: "Add assignment",
+    moodle_get_quiz_creation_form: "Prepare quiz",
+    moodle_create_quiz: "Add quiz",
+    moodle_get_page_creation_form: "Prepare Page",
+    moodle_create_page: "Add Page",
+    moodle_get_label_creation_form: "Prepare text area",
+    moodle_create_label: "Add text area",
+    moodle_get_url_creation_form: "Prepare link",
+    moodle_create_url: "Add link",
+    moodle_get_resource_file_creation_form: "Prepare course file",
+    moodle_create_resource_file: "Add course file",
+    moodle_get_folder_file_creation_form: "Prepare Folder file",
+    moodle_create_folder_file: "Add Folder file",
+    moodle_get_imscp_package_creation_form: "Prepare IMS content package",
+    moodle_create_imscp_package: "Add IMS content package",
+    moodle_get_scorm_package_creation_form: "Prepare SCORM package",
+    moodle_create_scorm_package: "Add SCORM package",
+    moodle_get_forum_creation_form: "Prepare forum",
+    moodle_create_forum: "Add forum",
+    moodle_get_choice_creation_form: "Prepare choice",
+    moodle_create_choice: "Add choice",
+    moodle_list_my_courses: "List courses",
+    moodle_get_course: "View course",
+    moodle_get_contents: "View course content",
+    moodle_list_assignments: "List assignments",
+    moodle_list_quizzes: "List quizzes",
+    moodle_get_course_summary: "View course description",
+    moodle_get_section: "View section",
+    moodle_get_page: "View Page",
+    moodle_get_label: "View text area",
+    moodle_get_url: "View link",
+    moodle_get_assignment: "View assignment",
+    moodle_get_quiz: "View quiz",
+    moodle_update_course_summary: "Edit description",
+    moodle_update_section: "Edit section",
+    moodle_update_page: "Edit Page",
+    moodle_update_label: "Edit text area",
+    moodle_update_url: "Edit link",
+    moodle_update_assignment: "Edit assignment",
+    moodle_update_quiz: "Edit quiz",
+    moodle_update_grade_category: "Rename category",
+    moodle_update_grade_item: "Rename grade item",
+    moodle_update_grade_category_settings: "Change category settings",
+    moodle_update_grade_item_settings: "Change grade item settings",
+    rescale_existing_grades: "Effect on existing grades",
+    moodle_delete_book_chapter: "Delete Book chapter",
+    moodle_show_course: "Show course",
+    moodle_hide_course: "Hide course",
+    moodle_show_section: "Show section",
+    moodle_hide_section: "Hide section",
+    moodle_show_activity: "Show activity",
+    moodle_hide_activity: "Hide activity",
+    moodle_move_activity: "Move activity",
+    blackboard_apply_reviewed_content_patch: "Edit item",
     limit: "Maximum courses",
     course_id: "Course ID",
     section_id: "Section ID",
     module_id: "Activity ID",
+    chapter_id: "Chapter ID",
     target_section_id: "Destination section",
+    category_id: "Grade category ID",
+    grade_item_id: "Manual grade item ID",
+    fullname: "New name",
+    item_name: "New name",
     current_section: "Current section",
+    hidden: "Currently hidden",
+    affected_chapters: "Chapters affected",
     summary: "Summary",
-    content: "Page content",
+    content: "Content",
+    filename: "File name",
+    size_bytes: "File size in bytes",
+    sha256: "File fingerprint (SHA-256)",
+    external_url: "Web address",
     instructions: "Instructions",
     available_from: "Submissions open",
     due_date: "Due date and time",
@@ -204,21 +305,27 @@ function readableName(value: string): string {
     grading_due_at: "Grading due",
     open_at: "Open date and time",
     close_at: "Close date and time",
+    question_text: "Question text",
+    default_mark: "Default mark",
+    answers: "Answers",
+    answer_text: "Answer text",
+    correct_answer: "Correct answer",
+    feedback: "Answer feedback",
     visible: "Visible to learners",
     body: "Lesson content",
-    canvas_create_page_courses: "Add this page",
-    canvas_update_create_page_courses: "Update this page",
-    canvas_update_create_front_page_courses: "Update the course home page",
-    canvas_create_assignment: "Add this assignment",
-    canvas_edit_assignment: "Update this assignment",
-    canvas_create_new_discussion_topic_courses: "Add this discussion",
-    canvas_update_topic_courses: "Update this discussion",
-    canvas_create_new_quiz: "Add this quiz",
-    canvas_update_single_quiz: "Update this quiz",
-    canvas_delete_file: "Remove this file",
-    canvas_update_file: "Update this file",
-    canvas_delete_single: "Remove this rubric",
-    canvas_update_single_rubric: "Update this rubric",
+    canvas_create_page_courses: "Add Page",
+    canvas_update_create_page_courses: "Edit Page",
+    canvas_update_create_front_page_courses: "Edit home page",
+    canvas_create_assignment: "Add assignment",
+    canvas_edit_assignment: "Edit assignment",
+    canvas_create_new_discussion_topic_courses: "Add discussion",
+    canvas_update_topic_courses: "Edit discussion",
+    canvas_create_new_quiz: "Add quiz",
+    canvas_update_single_quiz: "Edit quiz",
+    canvas_delete_file: "Remove file",
+    canvas_update_file: "Edit file",
+    canvas_delete_single: "Remove rubric",
+    canvas_update_single_rubric: "Edit rubric",
     wiki_page_body: "Page content",
     wiki_page_title: "Page title",
     assignment_description: "Assignment instructions",
@@ -243,9 +350,9 @@ function readableName(value: string): string {
     quiz_instructions: "Quiz instructions",
     quiz_description: "Quiz description",
     message: "Content preview",
-    canvas_create_quiz_item: "Add a quiz question",
-    canvas_update_quiz_item: "Update a quiz question",
-    canvas_delete_quiz_item: "Delete a quiz question",
+    canvas_create_quiz_item: "Add quiz question",
+    canvas_update_quiz_item: "Edit quiz question",
+    canvas_delete_quiz_item: "Delete question",
     item_entry_title: "Question title",
     item_entry_item_body: "Question text",
     item_points_possible: "Points",
@@ -271,7 +378,7 @@ function requestFields(request: JsonObject, omitted: readonly string[] = []): st
 }
 
 function isRichText(key: string, value: unknown): value is string {
-  return typeof value === "string" && /(?:^|_)(?:body|content|description|instructions|message|summary|question_text|item_body|feedback|feedback_correct|feedback_incorrect|feedback_neutral)$/.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
+  return typeof value === "string" && /(?:^|_)(?:body|content|description|instructions|message|summary|question_text|answer_text|item_body|feedback|feedback_correct|feedback_incorrect|feedback_neutral)$/.test(key.replace(/([a-z])([A-Z])/g, "$1_$2").toLowerCase());
 }
 
 function moodleCivilDate(value: unknown): string | null {
@@ -303,6 +410,24 @@ function fieldValue(key: string, value: unknown): string {
     return `<time datetime="${escapeHtml(value)}">${escapeHtml(new Date(value).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZoneName: "short" }))}</time>`;
   }
   return requestValue(value);
+}
+
+/**
+ * The three Blackboard content fields a reviewed patch can change. The current
+ * values and the requested values pass through the same labels in the same
+ * order, so the reviewer reads one before-and-after instead of a nested patch
+ * object.
+ */
+function blackboardContentFields(content: JsonObject): string {
+  const availability = object(content.availability);
+  const rows: readonly (readonly [string, string, unknown])[] = [
+    ["title", "Title", content.title],
+    ["description", "Description", content.description],
+    ["visible", "Visible to students", availability.available],
+  ];
+  return rows.filter(([, , value]) => value !== undefined).map(([key, label, value]) => (
+    `<div${isRichText(key, value) ? ' class="rich-text"' : ""}><dt>${label}</dt><dd>${fieldValue(key, value)}</dd></div>`
+  )).join("");
 }
 
 function questionPreview(request: JsonObject, omitted: readonly string[], current?: JsonObject): string {
@@ -397,12 +522,18 @@ function changeKind(tool: unknown): string {
   if (/^(create|add|copy|duplicate|import)_/.test(name)) return "Add";
   if (/^show_/.test(name)) return "Show";
   if (/^hide_/.test(name)) return "Hide";
-  if (/^(update|edit|set|reorder|move)_/.test(name)) return "Edit";
+  if (/^(update|edit|set|reorder|move)_/.test(name) || name === "apply_reviewed_content_patch") return "Edit";
   return "Change";
 }
 
 function visibilityDecision(tool: unknown, verified = false): string | null {
   const name = String(tool);
+  if (name === "moodle_show_book_chapter") return verified
+    ? "Moodle confirmed the Book chapter is visible."
+    : "This will show the selected Moodle Book chapter and its direct subchapters, if any.";
+  if (name === "moodle_hide_book_chapter") return verified
+    ? "Moodle confirmed the Book chapter is hidden."
+    : "This will hide the selected Moodle Book chapter and its direct subchapters, if any.";
   const target = name.endsWith("_course") ? "course" : name.endsWith("_section") ? "section" : name.endsWith("_activity") ? "activity" : null;
   if (!target || !name.startsWith("moodle_")) return null;
   if (!verified && name === "moodle_show_section") return "This will show the section again. Activities hidden before the section was hidden will stay hidden.";
@@ -448,42 +579,56 @@ function namedTargetsMissing(operations: readonly JsonObject[], contexts: Readon
     const targets = context?.targets || [];
     const source = context?.current?.current_section;
     return (plan.tool === "moodle_move_activity" && operation.state === "awaiting_approval" && (typeof source !== "string" || !source.trim()))
-      || targets.some((item) => !item.name.trim()) || ["id", "course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "section_id", "target_section_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
+      || targets.some((item) => !item.name.trim()) || ["id", "course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "section_id", "target_section_id", "category_id", "grade_item_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
       field in request && !targets.some((item) => item.field === field && item.name.trim()));
   });
 }
 
 function keepOpenInstruction(platform: string): string {
-  return "Keep your assistant and Chrome open while Morrow works.";
+  // Blackboard runs through this computer's own REST connection, so that review
+  // needs no browser. Canvas, Moodle, and a mixed group still go through Chrome.
+  return platform === "Blackboard"
+    ? "Keep your assistant open while Morrow works."
+    : "Keep your assistant and Chrome open while Morrow works.";
 }
 
 function stateContent(state: string, platform = "Canvas", attention: readonly unknown[] = []): string {
   const content: Record<string, [string, string]> = {
-    approved: ["Changes have not started", "Your approval was saved, but this request is not running. Return to your assistant and ask Morrow to check this saved request before starting anything else."],
+    approved: ["Changes not started", "Your approval was saved, but this request is not running. Return to your assistant and ask Morrow to check this saved request before starting anything else."],
     verified: ["Changes confirmed", "Morrow checked Canvas and confirmed the requested result."],
     cancelled: ["Request cancelled", "Morrow will not start more changes for this request. Changes already sent may still finish. Return to the assistant where you started this request to check the result."],
-    expired: ["This review has expired", "Return to the assistant where you started this request and ask Morrow for a new review. Check the new request before approving it."],
+    expired: ["Review expired", "Return to the assistant where you started this request and ask Morrow for a new review. Check the new request before approving it."],
     dispatching: ["Applying your changes", `Morrow will check the saved result in Canvas. This page updates automatically. ${keepOpenInstruction(platform)}`],
     running: ["Applying your changes", `Morrow will check the saved result in Canvas. This page updates automatically. ${keepOpenInstruction(platform)}`],
-    awaiting_verification: ["The result needs checking", "Morrow could not confirm the saved result in Canvas. Return to your assistant and ask Morrow to check this saved request. Do not repeat the change."],
-    awaiting_inner_approval: ["Another review is needed", "This request needs another approval before it can finish. Return to the assistant where you started this request for the next review step."],
-    applied_or_unknown: ["The result is not yet confirmed", "Canvas may have received the changes. Return to the assistant where you started this request and ask Morrow to check the result before trying again."],
-    inspection_required: ["Some results need checking", "Canvas may have received some changes. Return to the assistant where you started this request and ask Morrow to check each result. Do not repeat the group of changes."],
-    partial: ["Some requests did not finish", "Return to the assistant where you started this request to see which changes finished and which still need attention. Do not repeat the whole group."],
+    awaiting_verification: ["Check the result", "Morrow could not confirm the saved result in Canvas. Return to your assistant and ask Morrow to check this saved request. Do not repeat the change."],
+    awaiting_inner_approval: ["Review needed", "This request needs another approval before it can finish. Return to the assistant where you started this request for the next review step."],
+    applied_or_unknown: ["Result unconfirmed", "Canvas may have received the changes. Return to your assistant and ask Morrow to check this saved request. If Morrow cannot check it, open the item in Canvas and confirm it yourself. Do not repeat the change."],
+    closed_by_person: ["Closed after your check", "Morrow did not check this change itself. It is closed because you read the item and confirmed the saved state. Morrow will not send this change again."],
+    inspection_required: ["Check results", "Canvas may have received some changes. Return to the assistant where you started this request and ask Morrow to check each result. Do not repeat the group of changes."],
+    partial: ["Changes stopped", "Return to the assistant where you started this request to see which changes finished and which still need attention. Do not repeat the whole group."],
     paused: ["Work is paused", "Morrow is not starting more changes. Work already sent may still finish. Return to the assistant where you started this request to check the result or continue."],
-    completed: ["Some results need checking", "The work has stopped, but not every requested change has a confirmed result. Return to your assistant and ask Morrow to check the saved results. Do not repeat the group."],
-    failed: ["This request did not finish", "Return to the assistant where you started this request to find out what happened. Check the result before starting a new request."],
-    interrupted: ["Work stopped before confirmation", "Morrow is not running this request now. Return to your assistant and ask Morrow to check the saved result before trying again."],
+    completed: ["Check results", "The work has stopped, but not every requested change has a confirmed result. Return to your assistant and ask Morrow to check the saved results. Do not repeat the group."],
+    failed: ["Request stopped", "Return to the assistant where you started this request to find out what happened. Check the result before starting a new request."],
+    interrupted: ["Work stopped", "Morrow is not running this request now. Return to your assistant and ask Morrow to check the saved result before trying again."],
   };
   const noChangeSent = state === "failed" && attention.includes("dispatch_failed_before_send");
-  const [title, detail] = noChangeSent
-    ? ["No change was sent", "Morrow did not send a change to Canvas. Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review."]
+  const sameTargetBlocked = state === "approved" && attention.includes("provider_effect_target_conflict");
+  const historicalTargetScopeBlocked = state === "approved" && attention.includes("provider_effect_target_scope_unknown");
+  const [title, detail] = historicalTargetScopeBlocked
+    ? ["Check earlier change", "An earlier change from an older Morrow version is still unresolved, so Morrow has not sent this change. That earlier change has no saved check. Open the item it changed in Canvas, confirm it yourself, then ask Morrow for a new review."]
+    : sameTargetBlocked
+    ? ["Check earlier change", "Morrow has not sent this change. An earlier change to the same target is still unresolved. Return to your assistant and ask Morrow to check that earlier request. If Morrow cannot check it, open that item in Canvas and confirm it yourself."]
+    : noChangeSent
+    // This ending now covers two cases: a change Morrow never dispatched, and a
+    // change Canvas refused with a status that saved nothing. The wording must
+    // stay true for both.
+    ? ["No change was sent", "Morrow did not change anything in Canvas. Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review."]
     : content[state] || ["Check this request", "The request has changed or can no longer be approved here. Return to your assistant and ask Morrow to check its current status."];
-  return `<section class="outcome"><p class="eyebrow">Request status</p><h1>${title}</h1><p>${detail.replaceAll("Canvas", platform)}</p></section>`;
+  return `<section class="outcome"><h1>${title}</h1><p>${detail.replaceAll("Canvas", platform)}</p></section>`;
 }
 
-function statePage(state: string): string {
-  return pageShell("Request status", "Request status", stateContent(state));
+function statePage(state: string, platform?: string): string {
+  return pageShell("Request status", stateContent(state, platform));
 }
 
 export function operationStatus(state: string, platform = "Canvas"): string {
@@ -491,6 +636,7 @@ export function operationStatus(state: string, platform = "Canvas"): string {
     awaiting_approval: "Not started", approved: "Not started", dispatching: "In progress",
     awaiting_verification: "Needs checking", applied_or_unknown: "Needs checking",
     awaiting_inner_approval: "Another review is needed", verified: "Confirmed in Canvas",
+    closed_by_person: "Closed after your check",
     cancelled: "Cancelled", failed: "Did not finish",
   };
   return (names[state] || "Needs checking").replaceAll("Canvas", platform);
@@ -503,6 +649,25 @@ function platformName(tool: unknown): string {
 export function reviewPlatform(tools: readonly unknown[]): string {
   const names = [...new Set(tools.map(platformName))];
   return names.length > 1 ? "your learning platforms" : names[0] || "Canvas";
+}
+
+/**
+ * The assistant that asked for this review, as it reported itself at connect
+ * time. A batch carries it on the saved group; a single change carries it on the
+ * frozen plan. Morrow shows the project by name, never as a path.
+ */
+function requestedByLine(snapshot: JsonObject, plans: readonly JsonObject[]): string {
+  const candidates = [object(object(snapshot.batch).requestedBy), ...plans.map((plan) => object(plan.requestedBy))];
+  const requestedBy = candidates.find((candidate) => typeof candidate.clientName === "string" && candidate.clientName);
+  if (!requestedBy) return "";
+  const version = typeof requestedBy.clientVersion === "string" && requestedBy.clientVersion !== "unstated"
+    ? ` ${requestedBy.clientVersion}`
+    : "";
+  const project = typeof requestedBy.workspaceName === "string" && requestedBy.workspaceName
+    ? `, working in ${escapeHtml(requestedBy.workspaceName)}`
+    : "";
+  return `<p class="preview-note">Asked for by ${escapeHtml(String(requestedBy.clientName) + version)}${project}. `
+    + "This is the name that assistant reported, not proof of identity.</p>";
 }
 
 function snapshotPlatform(snapshot: JsonObject): string {
@@ -525,7 +690,7 @@ function statusContent(target: ApprovalTarget, snapshot: JsonObject, active: boo
 }
 
 function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, contexts: ReadonlyMap<string, ApprovalReviewContext>, active: boolean): string {
-  const summary = escapeHtml(JSON.stringify(snapshot, null, 2));
+  const summary = escapeHtml(JSON.stringify(technicalDetails(target, snapshot), null, 2));
   const escapedId = escapeHtml(encodeURIComponent(target.id));
   const batch = target.kind === "batches";
   const plan = object(snapshot.plan);
@@ -533,7 +698,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   const expiry = String(snapshot.approvalExpiresAt || snapshot.expiresAt || "");
   const expired = Number.isFinite(Date.parse(expiry)) && Date.parse(expiry) <= Date.now();
   const state = reviewState(target, snapshot);
-  if (state === "awaiting_approval" && expired) return statePage("expired");
+  if (state === "awaiting_approval" && expired) return statePage("expired", platform);
   const expiresAt = Number.isFinite(Date.parse(expiry))
     ? new Date(expiry).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
     : "15 minutes after you opened this page";
@@ -572,26 +737,57 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
       return `<div><dt>${escapeHtml(item.label)}</dt><dd>${linkedName}</dd></div>`;
     }).join("");
     const request = object(entry.arguments);
-    const pageGuard = entry.tool === "canvas_update_create_page_courses" ? object(object(request._morrow).page_guard) : {};
+    const routing = object(request._morrow);
+    const canvasContentGuard = object(routing.canvas_content_guard);
+    const pageGuard = Object.keys(canvasContentGuard).length ? canvasContentGuard : object(routing.page_guard);
+    const currentSection = typeof context?.current?.current_section === "string" ? context.current.current_section.trim() : "";
+    const moveOrigin = entry.tool === "moodle_move_activity" && currentSection
+      ? `<dl class="destination move-origin"><div><dt>From section</dt><dd>${escapeHtml(currentSection)}</dd></div></dl>` : "";
+    const gradebookRename = ["moodle_update_grade_category", "moodle_update_grade_item"].includes(String(entry.tool));
+    const gradebookCurrent = typeof context?.current?.gradebook_current_name === "string" ? context.current.gradebook_current_name.trim() : "";
+    const gradebookProposed = typeof request[entry.tool === "moodle_update_grade_category" ? "fullname" : "item_name"] === "string"
+      ? String(request[entry.tool === "moodle_update_grade_category" ? "fullname" : "item_name"]).trim() : "";
     const name = typeof entry.tool === "string" ? readableName(entry.tool) : "Requested changes";
-    const hiddenFields = ["expected_digest", "expected_connection", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id"] : []), ...targets.map((item) => item.field)];
-    const changes = typeof pageGuard.find_text === "string" && typeof pageGuard.replace_text === "string"
+    const blackboardEdit = entry.tool === BLACKBOARD_CONTENT_PATCH_APPLY_TOOL;
+    const blackboardPatch = blackboardEdit ? blackboardContentFields(object(request.patch)) : "";
+    const hiddenFields = ["expected_digest", "expected_connection", "tenant_id", "source_binding_id", "expected_plan_digest", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id"] : []), ...targets.map((item) => item.field)];
+    const guardedImageAlt = ["image_alt", "page_image_alt", "assignment_image_alt", "discussion_image_alt"].includes(String(pageGuard.kind));
+    const guardedText = ["text", "page_text"].includes(String(pageGuard.kind));
+    const changes = blackboardPatch
+      ? blackboardPatch
+      : gradebookRename && gradebookCurrent && gradebookProposed
+      ? `<div><dt>Current name</dt><dd>${escapeHtml(gradebookCurrent)}</dd></div><div><dt>New name</dt><dd>${escapeHtml(gradebookProposed)}</dd></div>`
+      : guardedImageAlt && Number.isSafeInteger(pageGuard.image_index) && typeof pageGuard.alt_text === "string" && typeof pageGuard.decorative === "boolean"
+      ? `<div><dt>Image</dt><dd>Image ${pageGuard.image_index}</dd></div><div><dt>Alternative text</dt><dd>${pageGuard.decorative ? "Decorative image (empty alternative text)" : escapeHtml(pageGuard.alt_text)}</dd></div>`
+      : guardedText && typeof pageGuard.find_text === "string" && typeof pageGuard.replace_text === "string"
       ? `<div><dt>Current text</dt><dd>${escapeHtml(pageGuard.find_text)}</dd></div><div><dt>Replacement</dt><dd>${pageGuard.replace_text === "" ? "Remove this text" : escapeHtml(pageGuard.replace_text)}</dd></div>`
-      : requestFields(["moodle_create_page", "moodle_create_assignment", "moodle_create_quiz"].includes(String(entry.tool)) ? { ...request, visible: false } : request, hiddenFields);
+      : requestFields(["moodle_create_page", "moodle_create_label", "moodle_create_url", "moodle_create_resource_file", "moodle_create_folder_file", "moodle_create_imscp_package", "moodle_create_scorm_package", "moodle_create_assignment", "moodle_create_quiz", "moodle_create_forum", "moodle_create_choice"].includes(String(entry.tool)) ? { ...request, visible: false } : request, hiddenFields);
     const addingQuestion = entry.tool === "canvas_create_quiz_item";
     const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
-    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes ? `<dl class="request">${changes}</dl>` : `<p>${visibilityDecision(entry.tool, operations[index]?.state === "verified") || moveDecision(entry.tool, operations[index]?.state === "verified") || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;
+    const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes
+      ? `<dl class="request">${changes}</dl>`
+      : `<p>${visibilityDecision(entry.tool, operations[index]?.state === "verified") || moveDecision(entry.tool, operations[index]?.state === "verified") || (changeKind(entry.tool) === "Remove" ? "This item will be removed." : "This action applies to the item shown above.")}</p>`;
+    const currentFields = !context?.current ? ""
+      : blackboardEdit ? blackboardContentFields(context.current)
+      : requestFields(context.current);
     const questionFields = Object.keys(request).filter((key) => key.startsWith("item_") && key !== "item_id");
     const scoreOnlyQuestion = question && questionFields.length === 1 && questionFields[0] === "item_entry_scoring_data";
-    const before = scoreOnlyQuestion && context?.question
+    const before = entry.tool === "moodle_move_activity" || gradebookRename ? ""
+      : scoreOnlyQuestion && context?.question
       ? '<p class="preview-note">Question details come from the current saved item. Only the answer key is in this request. Morrow will not write the question text, choices, or other settings.</p>'
       : question && context?.question
         ? '<p class="preview-note">Question details come from the current saved item. The requested changes are shown below.</p>'
-      : context?.current && Object.keys(context.current).length
-      ? `<details class="current-content"><summary>Current content and values</summary><dl class="request">${requestFields(context.current)}</dl></details><p class="preview-label">Requested changes</p>`
-      : changeKind(entry.tool) === "Edit" && entry.tool !== "moodle_move_activity" && !pageGuard.find_text ? '<p class="preview-note">Requested values are shown below. Earlier values are not available in this review.</p>' : "";
-    const preservation = pageGuard.find_text ? '<p>Only this phrase will change. The other page content and settings stay the same.</p><p>Morrow checks for newer edits before sending. Avoid editing this page until the result is checked.</p>' : "";
-    const content = `<section class="section change-content">${destination ? `<dl class="destination${addingQuestion ? " question-destination" : ""}">${destination}</dl>` : ""}${before}${preview}${preservation}</section>`;
+      : currentFields
+      ? `<details class="current-content"><summary>Current content and values</summary><dl class="request">${currentFields}</dl></details><p class="preview-label">Requested changes</p>`
+      : changeKind(entry.tool) === "Edit" && entry.tool !== "moodle_move_activity" && !guardedText && !guardedImageAlt ? '<p class="preview-note">Requested values are shown below. Earlier values are not available in this review.</p>' : "";
+    const contentName = pageGuard.kind === "assignment_image_alt" ? "Assignment description"
+      : pageGuard.kind === "discussion_image_alt" ? "Discussion message" : "Page";
+    const preservation = ["blackboard_apply_reviewed_course_announcement", "blackboard_apply_reviewed_course_announcement_patch"].includes(String(entry.tool))
+      ? '<p>Blackboard can notify enrolled learners when an announcement is posted. Morrow cannot recall a notification that has already been sent.</p>'
+      : gradebookRename ? '<p>Morrow changes only this name. It preserves the other gradebook settings and does not read or change learner grades or grade values.</p>'
+      : guardedText ? '<p>Only this phrase will change. The other Page content and settings stay the same.</p><p>Morrow checks for newer edits before sending. Avoid editing this Page until the result is checked.</p>'
+      : guardedImageAlt ? `<p>Only the selected image's alternative text will change. The other ${contentName} content and settings stay the same.</p><p>Morrow checks for newer edits before sending. Avoid editing this ${contentName} until the result is checked.</p>` : "";
+    const content = `<section class="section change-content">${destination ? `<dl class="destination${addingQuestion ? " question-destination" : ""}">${destination}</dl>` : ""}${moveOrigin}${before}${preview}${preservation}</section>`;
     if (!batch) return content;
     const title = changeTitle(request, context, name);
     const kind = changeKind(entry.tool);
@@ -605,19 +801,24 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   const reviewContent = batch ? `<section class="batch-review"><div class="change-list-controls" hidden><label for="change-search">Find a change</label><input id="change-search" type="search" placeholder="Search titles or courses" autocomplete="off"></div><div class="change-list">${changed}</div><nav class="change-pagination" aria-label="Review pages" hidden><p id="changes-count" role="status" aria-live="polite"></p><div><button id="changes-previous" type="button" class="secondary">Previous</button><button id="changes-next" type="button" class="secondary">Next</button></div></nav></section>` : changed;
   if (state !== "awaiting_approval") {
     const stop = batch && active ? `<div class="actions" id="stop-work"><form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Stop remaining changes</button></form></div>` : "";
-    return pageShell("Your result", "Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
+    return pageShell("Your result", `<div id="work-status" role="status" aria-live="polite" aria-atomic="true">${statusContent(target, snapshot, active)}</div>${commonTargets.length ? `<section class="section">${batchSummary}</section>` : ""}${reviewContent}${stop}<section class="section result-details"><details><summary>Technical details</summary><pre>${summary}</pre></details></section>`, active);
   }
   const addingQuestion = !batch && plan.tool === "canvas_create_quiz_item";
-  const changingPageText = !batch && plan.tool === "canvas_update_create_page_courses" && isJsonObject(object(object(plan.arguments)._morrow).page_guard);
-  const title = batch ? `Check these ${plans.length} changes` : addingQuestion ? "Add this quiz question?" : changingPageText ? "Change this page text?" : `${readableName(String(plan.tool || "Review this change"))}?`;
-  const approveLabel = batch ? `Apply all ${plans.length} changes` : addingQuestion ? "Add this question" : changingPageText ? "Change this text" : "Apply this change";
+  const planRouting = object(object(plan.arguments)._morrow);
+  const canvasContentGuard = object(planRouting.canvas_content_guard);
+  const pageGuard = Object.keys(canvasContentGuard).length ? canvasContentGuard : object(planRouting.page_guard);
+  const changingPageText = !batch && isJsonObject(pageGuard) && ["text", "page_text"].includes(String(pageGuard.kind));
+  const changingImageAlt = !batch && isJsonObject(pageGuard) && ["image_alt", "page_image_alt", "assignment_image_alt", "discussion_image_alt"].includes(String(pageGuard.kind));
+  const markingImageDecorative = changingImageAlt && pageGuard.decorative === true;
+  const title = batch ? `Review ${plans.length} changes` : addingQuestion ? "Add question?" : changingPageText ? "Edit Page text?" : changingImageAlt ? markingImageDecorative ? "Mark decorative?" : "Add image alt text?" : `${readableName(String(plan.tool || "Review change"))}?`;
+  const approveLabel = batch ? `Apply all ${plans.length} changes` : addingQuestion ? "Add this question" : changingPageText ? "Change this text" : changingImageAlt ? markingImageDecorative ? "Mark as decorative" : "Add alternative text" : "Apply this change";
   const next = (limited
     ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Return to your assistant and ask Morrow to split this into smaller groups. This page has not approved any changes.</p>'
     : missingNames
     ? '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
     : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
   const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">${approveLabel}</button></form>`;
-  return pageShell(title, "Before Morrow makes changes", `<header class="hero"><p class="eyebrow">Ready for your review</p><h1>${escapeHtml(title)}</h1>${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
+  return pageShell(title, `<header class="hero"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);
 }
 
 function cookieValue(request: IncomingMessage, name: string): string | null {
@@ -656,6 +857,8 @@ export class LoopbackApprovalServer {
   private readonly work = new Map<string, Promise<unknown>>();
   private readonly stopping = new AbortController();
   private port: number | null = null;
+  private approvalAdmissionOpen = true;
+  private approvalPosts = 0;
 
   constructor(private readonly controller: ApprovalOperationController) {
     this.server = createServer((request, response) => {
@@ -665,6 +868,18 @@ export class LoopbackApprovalServer {
 
   get baseUrl(): string | null {
     return this.port === null ? null : `http://${LOOPBACK_HOST}:${this.port}`;
+  }
+
+  /**
+   * The shared local owner closes admission before its synchronous maintenance
+   * snapshot. Existing approval posts remain counted until they settle.
+   */
+  setMaintenanceAdmission(open: boolean): void {
+    this.approvalAdmissionOpen = open;
+  }
+
+  maintenanceQuiescent(): boolean {
+    return !this.approvalAdmissionOpen && this.approvalPosts === 0 && this.work.size === 0;
   }
 
   async start(): Promise<string> {
@@ -700,7 +915,7 @@ export class LoopbackApprovalServer {
         return;
       }
       if (method === "GET" && url.pathname === "/operations") {
-        sendJson(response, 200, this.controller.operationList());
+        sendJson(response, 200, operationsList(this.controller.operationList()));
         return;
       }
       const target = approvalPath(url.pathname);
@@ -752,6 +967,12 @@ export class LoopbackApprovalServer {
         return;
       }
       if (method === "POST" && (target.action === "approve" || target.action === "cancel")) {
+        if (!this.approvalAdmissionOpen) {
+          sendJson(response, 409, { schema: "morrow.problem.v1", code: "approval_maintenance_held" });
+          return;
+        }
+        this.approvalPosts += 1;
+        try {
         const nonceKey = `${target.kind}:${target.id}`;
         const expected = this.nonces.get(nonceKey);
         const requestOrigin = String(request.headers.origin || "");
@@ -789,7 +1010,7 @@ export class LoopbackApprovalServer {
         const approved = target.action === "approve" && resultState === "approved";
         const cookie = `morrow_approval=; HttpOnly; SameSite=Strict; Path=/${target.kind}/${encodeURIComponent(target.id)}; Max-Age=0`;
         if (target.action === "approve" && !approved) {
-          sendHtml(response, 409, statePage(resultState), cookie);
+          sendHtml(response, 409, statePage(resultState, snapshotPlatform(result)), cookie);
           return;
         }
         if (approved) {
@@ -805,12 +1026,15 @@ export class LoopbackApprovalServer {
         });
         response.end();
         return;
+        } finally {
+          this.approvalPosts -= 1;
+        }
       }
       sendJson(response, 405, { schema: "morrow.problem.v1", code: "method_not_allowed" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "approval action failed";
       if (String(request.headers.accept || "").includes("text/html")) {
-        sendHtml(response, 409, pageShell("Review could not be completed", "Check this request", '<section class="outcome"><p class="eyebrow">Check this request</p><h1>Review could not be completed</h1><p>This review may have expired or the request may have changed. Return to your assistant and ask Morrow to check its current status.</p><p>Do not repeat the change until Morrow checks the result in Canvas.</p></section>'));
+        sendHtml(response, 409, pageShell("Review unavailable", '<section class="outcome"><h1>Review unavailable</h1><p>This review may have expired or the request may have changed. Return to your assistant and ask Morrow to check its current status.</p><p>Do not repeat the change until Morrow checks the saved result.</p></section>'));
       } else sendJson(response, 409, { schema: "morrow.problem.v1", code: "approval_action_refused", message });
     }
   }

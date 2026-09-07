@@ -40,7 +40,7 @@ describe("source attestation and batch scheduler configuration", () => {
       })],
     }, { DONOR_ROOT: "/tmp/donor" });
 
-    expect(parsed.batchScheduler).toEqual({ maxConcurrentWindows: 1 });
+    expect(parsed.batchScheduler).toEqual({ maxConcurrentReadWindows: 2 });
     expect(parsed.upstreams[0]?.attestation).toMatchObject({
       root: "/tmp/donor",
       expectedRevision: revision,
@@ -63,12 +63,12 @@ describe("source attestation and batch scheduler configuration", () => {
     })).toThrow(/declares revision/);
   });
 
-  it("accepts an explicit bounded active-window count", () => {
+  it("accepts an explicit bounded read-window count", () => {
     const parsed = parseGatewayConfig({
       schema: "morrow.upstreams.v1",
       upstreams: [upstream()],
-      batchScheduler: { maxConcurrentWindows: 4 },
+      batchScheduler: { maxConcurrentReadWindows: 4 },
     });
-    expect(parsed.batchScheduler.maxConcurrentWindows).toBe(4);
+    expect(parsed.batchScheduler.maxConcurrentReadWindows).toBe(4);
   });
 });

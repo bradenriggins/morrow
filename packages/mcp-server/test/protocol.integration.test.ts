@@ -68,13 +68,19 @@ async function waitFor(predicate: () => Promise<boolean>, detail: string): Promi
   throw new Error(`Timed out waiting for ${detail}`);
 }
 
-async function publicConfig(directory: string, environment: Record<string, string> = {}): Promise<string> {
+async function publicConfig(
+  directory: string,
+  environment: Record<string, string> = {},
+  toolSurface: "compact" | "full" = "full",
+): Promise<string> {
   const path = join(directory, "morrow.upstreams.json");
+  const sourceId = environment.FAKE_SOURCE === "example-legacy" ? "example-legacy" : "fixture";
   await writeFile(path, JSON.stringify({
     schema: "morrow.upstreams.v1",
     profile: "private-full",
+    toolSurface,
     upstreams: [{
-      id: "fixture",
+      id: sourceId,
       label: "Fixture",
       kind: "mcp-stdio",
       command: process.execPath,
@@ -172,6 +178,115 @@ describe("Morrow public stdio protocol", () => {
         phase: "rejected",
         data: { code: "operation_unavailable" },
       });
+    } finally {
+      await client.close();
+    }
+  }, 20_000);
+
+  it("discovers, reads, and plans through the compact capability surface", async () => {
+    const directory = await temporaryDirectory();
+    const callLog = join(directory, "calls.log");
+    const path = await publicConfig(
+      directory,
+      { FAKE_SOURCE: "example-legacy", FAKE_CALL_LOG: callLog },
+      "compact",
+    );
+    const client = await connectPublic(path);
+    try {
+      const tools = (await client.listTools()).tools;
+      const names = tools.map((tool) => tool.name);
+      expect(names).toEqual(expect.arrayContaining([
+        "morrow_catalog_search",
+        "morrow_capability_get",
+        "morrow_capability_read",
+        "morrow_capability_change",
+      ]));
+      expect(names).not.toContain("canvas_page_get");
+      expect(tools.find((tool) => tool.name === "morrow_capability_read")?.annotations?.readOnlyHint).toBe(true);
+      expect(tools.find((tool) => tool.name === "morrow_capability_change")?.annotations?.readOnlyHint).toBe(false);
+
+      const catalog = await client.callTool({
+        name: "morrow_catalog_search",
+        arguments: { query: "canvas_page_get" },
+      });
+      expect(catalog.structuredContent).toMatchObject({
+        schema: "morrow.catalog.search.v1",
+        totalMatches: 1,
+        tools: [{ publicName: "canvas_page_get" }],
+      });
+      const capability = await client.callTool({
+        name: "morrow_capability_get",
+        arguments: { name: "canvas_page_get" },
+      });
+      expect(capability.structuredContent).toMatchObject({
+        schema: "morrow.capability-get.v1",
+        descriptor: {
+          canonicalName: "canvas_page_get",
+          inputSchema: {
+            properties: {
+              _morrow: {
+                properties: {
+                  readback: { required: ["tool", "arguments", "expected_digest"] },
+                  approval_ttl_ms: { minimum: 60_000 },
+                },
+              },
+            },
+          },
+        },
+      });
+      const read = await client.callTool({
+        name: "morrow_capability_read",
+        arguments: { name: "canvas_page_get", arguments: { course_id: "101" } },
+      });
+      expect(read.structuredContent).toMatchObject({
+        schema: "morrow.result.v1",
+        data: { source: "example-legacy", course_id: "101" },
+      });
+      const wrongMode = await client.callTool({
+        name: "morrow_capability_read",
+        arguments: { name: "morrow_legacy_only", arguments: {} },
+      });
+      expect(wrongMode.structuredContent).toMatchObject({ code: "capability_mode_mismatch" });
+      const planned = await client.callTool({
+        name: "morrow_capability_change",
+        arguments: {
+          name: "morrow_legacy_only",
+          arguments: {
+            value: "compact-plan",
+            _morrow: {
+              readback: {
+                tool: "canvas_page_get",
+                arguments: { course_id: "101" },
+                expected_digest: "a".repeat(64),
+              },
+            },
+          },
+        },
+      });
+      expect(planned.structuredContent).toMatchObject({
+        schema: "morrow.result.v1",
+        phase: "planned",
+        effectState: "awaiting_approval",
+      });
+      expect((await readLog(callLog)).trim().split("\n")).toEqual(["canvas_page_get"]);
+    } finally {
+      await client.close();
+    }
+  }, 20_000);
+
+  it("rejects invalid compact capability input before the backend", async () => {
+    const directory = await temporaryDirectory();
+    const callLog = join(directory, "calls.log");
+    const path = await publicConfig(directory, { FAKE_CALL_LOG: callLog }, "compact");
+    const client = await connectPublic(path);
+    try {
+      const invalid = await client.callTool({
+        name: "morrow_capability_read",
+        arguments: { name: "canvas_page_get", arguments: { course_id: 101 } },
+      });
+      expect(invalid.isError).toBe(true);
+      expect(invalid.structuredContent).toMatchObject({ code: "capability_input_invalid" });
+      expect(await readLog(callLog)).toBe("");
     } finally {
       await client.close();
     }

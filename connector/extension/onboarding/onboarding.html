@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Morrow setup</title>
+  <link rel="stylesheet" href="../brand/theme.css">
+  <link rel="stylesheet" href="onboarding.css">
+</head>
+<body>
+  <main>
+    <header class="setup-header">
+      <span class="brand-wordmark"><img class="brand-mark" src="../brand/morrow-knot.svg" alt=""><span>morrow</span></span>
+      <h1>Morrow setup</h1>
+      <p>Use Morrow to connect an assistant and a permitted course. You can close this guide and return at any time.</p>
+    </header>
+
+    <div class="mode-switch" role="group" aria-label="Setup guide mode">
+      <button id="guide-mode" class="mode-button" type="button" aria-pressed="true">Guide me</button>
+      <button id="quick-mode" class="mode-button" type="button" aria-pressed="false">All steps</button>
+    </div>
+
+    <p id="error" role="alert" hidden></p>
+
+    <section class="readiness" aria-labelledby="readiness-title">
+      <div class="section-heading"><span class="status-dot" id="status-dot" aria-hidden="true"></span><h2 id="readiness-title">Checking setup</h2></div>
+      <p id="readiness-detail" aria-live="polite">Morrow is checking this connection.</p>
+      <ul class="checklist" aria-label="Setup checks">
+        <li id="assistant-check">Assistant approval is not checked</li>
+        <li id="connection-check">Morrow Bridge connection is not checked</li>
+        <li id="runtime-check">Morrow version is not checked</li>
+        <li id="course-check">Course connection is not checked</li>
+        <li id="read-check">First read is not checked</li>
+      </ul>
+    </section>
+
+    <section id="guide-panel" class="guide-panel" aria-labelledby="next-title">
+      <h2 id="next-title">Open Morrow</h2>
+      <p id="next-detail">Open Morrow, choose your assistant, then return to Morrow Bridge.</p>
+      <div id="guide-assistant" class="guide-assistant">
+        <p>Open the Morrow app and choose your assistant. Then return to Morrow Bridge and select <strong>Connect Morrow</strong>.</p>
+      </div>
+      <button id="open-settings" class="secondary" type="button" hidden>Open Plan and Edit settings</button>
+    </section>
+
+    <section id="quick-panel" class="quick-panel" hidden aria-labelledby="quick-title">
+      <h2 id="quick-title">All setup steps</h2>
+      <ol class="setup-steps">
+        <li>
+          <strong>Open Morrow</strong>
+          <p>Open the Morrow app and choose your assistant.</p>
+          <p>Chrome works with one Morrow at a time. A second Morrow reports that another Morrow is already using this connection, and it starts without its course tools. Close the other Morrow, or use one Morrow for all your assistants.</p>
+        </li>
+        <li>
+          <strong>Connect Morrow Bridge</strong>
+          <p>Return to Morrow Bridge and select <b>Connect Morrow</b>. In the Morrow page that opens, select <b>Allow connection</b> only if you started it.</p>
+        </li>
+        <li>
+          <strong>Connect a course site</strong>
+          <p>Open a permitted Canvas or Moodle course in Chrome and sign in. In Morrow Bridge, select <b>Connect course site</b>, then allow Chrome access to that exact course site.</p>
+        </li>
+        <li>
+          <strong>Select a course in Plan</strong>
+          <p>Open Plan and Edit settings. Select <b>Find available courses</b>, choose a course, then select <b>Connect selected courses in Plan</b>.</p>
+        </li>
+        <li>
+          <strong>Try a first read</strong>
+          <p>Return to your assistant and ask: <q>Use Morrow to list the modules in my selected course.</q></p>
+        </li>
+      </ol>
+      <button id="quick-open-settings" class="secondary" type="button">Open Plan and Edit settings</button>
+    </section>
+
+    <section class="keep-control" aria-labelledby="keep-control-title">
+      <h2 id="keep-control-title">Plan keeps changes in review</h2>
+      <p>Connecting a course selects it in Plan. A change in Plan waits for your review. You choose if and when to grant Edit access later in Plan and Edit settings.</p>
+    </section>
+  </main>
+  <script type="module" src="onboarding.js"></script>
+</body>
+</html>

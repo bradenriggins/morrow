@@ -72,6 +72,8 @@ export interface LearnerIdentity {
   readonly id: string;
   readonly name?: string;
   readonly email?: string;
+  readonly loginId?: string;
+  readonly sisUserId?: string;
 }
 
 interface VaultEntry {
@@ -115,11 +117,21 @@ function exactIdentity(value: LearnerIdentity): LearnerIdentity {
     if (!normalized || normalized.length > 500) throw new TypeError(`learner ${label} is invalid`);
     return normalized;
   };
+  const name = optional(value.name, "name");
+  const email = optional(value.email, "email");
+  const loginId = optional(value.loginId, "login id");
+  const sisUserId = optional(value.sisUserId, "SIS user id");
   return {
     id,
-    ...(optional(value.name, "name") ? { name: optional(value.name, "name") } : {}),
-    ...(optional(value.email, "email") ? { email: optional(value.email, "email") } : {}),
+    ...(name ? { name } : {}),
+    ...(email ? { email } : {}),
+    ...(loginId ? { loginId } : {}),
+    ...(sisUserId ? { sisUserId } : {}),
   };
+}
+
+export function normalizeLearnerIdentity(value: LearnerIdentity): LearnerIdentity {
+  return exactIdentity(value);
 }
 
 function keyPathFor(path: string): string {
@@ -238,6 +250,341 @@ export class LearnerVault {
   }
 }
 
+/**
+ * Local, exact-scope roster index used only before learner text crosses the
+ * gateway boundary. A roster registration replaces that scope atomically; it
+ * cannot contribute aliases to another course or principal.
+ */
+export class LearnerRoster {
+  private readonly entriesByScope = new Map<string, ReadonlyMap<string, LearnerIdentity>>();
+
+  register(scopeValue: LearnerScope, identities: readonly LearnerIdentity[]): void {
+    const scope = exactScope(scopeValue);
+    if (!Array.isArray(identities)) throw new TypeError("learner roster is invalid");
+    const entries = new Map<string, LearnerIdentity>();
+    for (const value of identities) {
+      const identity = exactIdentity(value);
+      const existing = entries.get(identity.id);
+      if (existing && canonicalJson(existing) !== canonicalJson(identity)) {
+        throw new TypeError("learner roster contains conflicting identities");
+      }
+      entries.set(identity.id, identity);
+    }
+    this.entriesByScope.set(scopeKey(scope), entries);
+  }
+
+  isReady(scopeValue: LearnerScope): boolean {
+    return this.entriesByScope.has(scopeKey(exactScope(scopeValue)));
+  }
+
+  identities(scopeValue: LearnerScope): readonly LearnerIdentity[] {
+    const entries = this.entriesByScope.get(scopeKey(exactScope(scopeValue)));
+    return entries ? [...entries.values()].map((identity) => ({ ...identity })) : [];
+  }
+
+  observe(scopeValue: LearnerScope, identities: readonly LearnerIdentity[]): void {
+    const scope = exactScope(scopeValue);
+    const key = scopeKey(scope);
+    const existing = this.entriesByScope.get(key);
+    if (!existing) throw new Error("learner_roster_scope_unavailable");
+    const next = new Map(existing);
+    for (const value of identities) {
+      const identity = exactIdentity(value);
+      const prior = next.get(identity.id);
+      if (!prior) throw new Error("learner_roster_identity_unavailable");
+      next.set(identity.id, mergeLearnerIdentity(prior, identity));
+    }
+    this.entriesByScope.set(key, next);
+  }
+}
+
+export interface LearnerTextRedactionContext {
+  readonly learnerRoster: LearnerRoster;
+  readonly learnerVault: LearnerVault;
+  readonly learnerScope: LearnerScope;
+}
+
+interface LearnerAlias {
+  readonly token: string | null;
+}
+
+function mergeLearnerIdentity(left: LearnerIdentity, right: LearnerIdentity): LearnerIdentity {
+  if (left.id !== right.id) throw new TypeError("learner identity does not match");
+  for (const field of ["name", "email", "loginId", "sisUserId"] as const) {
+    if (left[field] && right[field] && left[field] !== right[field]) {
+      throw new Error("learner_roster_identity_conflict");
+    }
+  }
+  return {
+    id: left.id,
+    ...(left.name ?? right.name ? { name: left.name ?? right.name } : {}),
+    ...(left.email ?? right.email ? { email: left.email ?? right.email } : {}),
+    ...(left.loginId ?? right.loginId ? { loginId: left.loginId ?? right.loginId } : {}),
+    ...(left.sisUserId ?? right.sisUserId ? { sisUserId: left.sisUserId ?? right.sisUserId } : {}),
+  };
+}
+
+function normalizeAlias(value: string): string {
+  return value.normalize("NFKC").trim().replace(/\s+/gu, " ").toLocaleLowerCase("en-US");
+}
+
+function learnerNameAliases(identity: LearnerIdentity): readonly string[] {
+  if (!identity.name) return [];
+  const name = normalizeAlias(identity.name);
+  if (!name || name.length > 500) return [];
+  const aliases = new Set([name]);
+  const comma = /^([^,]+),\s*(.+)$/u.exec(name);
+  if (comma) aliases.add(`${comma[2]} ${comma[1]}`);
+  else {
+    const parts = name.split(" ");
+    if (parts.length === 2) aliases.add(`${parts[1]} ${parts[0]}`);
+  }
+  return [...aliases].filter((candidate) => candidate.includes(" "));
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface SourceSpan {
+  readonly start: number;
+  readonly end: number;
+}
+
+interface NormalizedTextView {
+  readonly text: string;
+  readonly spans: readonly SourceSpan[];
+}
+
+interface SourceAtom extends SourceSpan {
+  readonly text: string;
+}
+
+interface SourceReplacement extends SourceSpan {
+  readonly replacement: string;
+}
+
+const IDENTITY_NAMED_ENTITIES = new Map<string, string>([
+  ["nbsp", " "],
+  ["amp", "&"],
+  ["quot", "\""],
+  ["apos", "'"],
+]);
+
+function appendCodePoints(atoms: SourceAtom[], text: string, start: number, end: number): void {
+  for (const point of text) atoms.push({ text: point, start, end });
+}
+
+function percentTripletAt(value: string, offset: number): number | null {
+  if (!/^%[0-9a-f]{2}/iu.test(value.slice(offset, offset + 3))) return null;
+  return Number.parseInt(value.slice(offset + 1, offset + 3), 16);
+}
+
+function utf8ScalarByteLength(first: number): number | null {
+  if (first <= 0x7f) return 1;
+  if (first >= 0xc2 && first <= 0xdf) return 2;
+  if (first >= 0xe0 && first <= 0xef) return 3;
+  if (first >= 0xf0 && first <= 0xf4) return 4;
+  return null;
+}
+
+/** Decode each valid percent-encoded UTF-8 scalar with only its own source span. */
+function appendPercentEscapes(atoms: SourceAtom[], value: string, start: number, end: number): void {
+  let cursor = start;
+  while (cursor < end) {
+    const first = percentTripletAt(value, cursor);
+    if (first === null) throw new Error("percent escape run is invalid");
+    const width = utf8ScalarByteLength(first);
+    const scalarEnd = width === null ? cursor : cursor + width * 3;
+    const validContinuation = width !== null && scalarEnd <= end
+      && Array.from({ length: width - 1 }, (_, index) => percentTripletAt(value, cursor + (index + 1) * 3))
+        .every((byte) => byte !== null && byte >= 0x80 && byte <= 0xbf);
+    if (validContinuation) {
+      try {
+        const source = value.slice(cursor, scalarEnd);
+        const decoded = decodeURIComponent(source);
+        if ([...decoded].length === 1) {
+          appendCodePoints(atoms, decoded, cursor, scalarEnd);
+          cursor = scalarEnd;
+          continue;
+        }
+      } catch {
+        // Preserve malformed UTF-8 escapes as literal source text below.
+      }
+    }
+    appendCodePoints(atoms, value.slice(cursor, cursor + 3), cursor, cursor + 3);
+    cursor += 3;
+  }
+}
+
+const GRAPHEME_SEGMENTER = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+
+/**
+ * Produces a match-only representation of text. Every character in that
+ * representation retains the exact source range from which it came. This
+ * lets learner redaction recognize copied HTML and percent escapes without
+ * reserializing unrelated URL or HTML bytes.
+ */
+function normalizedIdentityTextView(value: string): NormalizedTextView {
+  const atoms: SourceAtom[] = [];
+  let cursor = 0;
+  while (cursor < value.length) {
+    const entity = /^&#(?:x([0-9a-f]+)|([0-9]+));/iu.exec(value.slice(cursor));
+    if (entity) {
+      const point = Number.parseInt(entity[1] || entity[2] || "", entity[1] ? 16 : 10);
+      if (Number.isInteger(point) && point >= 0 && point <= 0x10ffff) {
+        try {
+          appendCodePoints(atoms, String.fromCodePoint(point), cursor, cursor + entity[0].length);
+          cursor += entity[0].length;
+          continue;
+        } catch {
+          // Preserve the exact source text when a malformed scalar slips through.
+        }
+      }
+    }
+    const named = /^&([a-z]+);/iu.exec(value.slice(cursor));
+    if (named) {
+      const decoded = IDENTITY_NAMED_ENTITIES.get(named[1]!.toLocaleLowerCase("en-US"));
+      if (decoded) {
+        appendCodePoints(atoms, decoded, cursor, cursor + named[0].length);
+        cursor += named[0].length;
+        continue;
+      }
+    }
+    if (/^%[0-9a-f]{2}/iu.test(value.slice(cursor))) {
+      let end = cursor;
+      while (/^%[0-9a-f]{2}/iu.test(value.slice(end))) end += 3;
+      appendPercentEscapes(atoms, value, cursor, end);
+      cursor = end;
+      continue;
+    }
+    const point = value.codePointAt(cursor)!;
+    const end = cursor + (point > 0xffff ? 2 : 1);
+    atoms.push({ text: value.slice(cursor, end), start: cursor, end });
+    cursor = end;
+  }
+
+  const sourceText = atoms.map((atom) => atom.text).join("");
+  const sourceSpans = atoms.flatMap(({ text, start, end }) => (
+    Array.from({ length: text.length }, () => ({ start, end }))
+  ));
+  const normalized: SourceAtom[] = [];
+  for (const segment of GRAPHEME_SEGMENTER.segment(sourceText)) {
+    const spans = sourceSpans.slice(segment.index, segment.index + segment.segment.length);
+    if (spans.length === 0) continue;
+    const start = Math.min(...spans.map((span) => span.start));
+    const end = Math.max(...spans.map((span) => span.end));
+    appendCodePoints(normalized, segment.segment.normalize("NFKC"), start, end);
+  }
+
+  return {
+    text: normalized.map((atom) => atom.text).join(""),
+    // RegExp offsets are UTF-16 indexes. Repeat a scalar's source span for
+    // both surrogate code units so an earlier non-BMP character cannot shift
+    // a later replacement range.
+    spans: normalized.flatMap(({ text, start, end }) => (
+      Array.from({ length: text.length }, () => ({ start, end }))
+    )),
+  };
+}
+
+function sourceRangeForView(view: NormalizedTextView, start: number, end: number): SourceSpan | null {
+  const spans = view.spans.slice(start, end);
+  if (spans.length === 0) return null;
+  return {
+    start: Math.min(...spans.map((span) => span.start)),
+    end: Math.max(...spans.map((span) => span.end)),
+  };
+}
+
+function applySourceReplacements(value: string, replacements: readonly SourceReplacement[]): string {
+  const ordered = [...replacements].sort((left, right) => left.start - right.start || right.end - left.end);
+  let cursor = 0;
+  let output = "";
+  for (const replacement of ordered) {
+    if (replacement.start < cursor || replacement.end < replacement.start) continue;
+    output += value.slice(cursor, replacement.start);
+    output += replacement.replacement;
+    cursor = replacement.end;
+  }
+  return output + value.slice(cursor);
+}
+
+function addAlias(aliases: Map<string, LearnerAlias>, alias: string, token: string): void {
+  const key = normalizeAlias(alias);
+  if (!key) return;
+  const existing = aliases.get(key);
+  aliases.set(key, existing && existing.token !== token ? { token: null } : { token });
+}
+
+function replaceKnownAliases(value: string, aliases: ReadonlyMap<string, LearnerAlias>): string {
+  const candidates = [...aliases.keys()].sort((left, right) => right.length - left.length);
+  if (candidates.length === 0) return value;
+  const expression = candidates.map((candidate) => escapeRegExp(candidate).replace(/ /gu, "\\s+")).join("|");
+  const matcher = new RegExp(`(?<![\\p{L}\\p{N}])(?:${expression})(?![\\p{L}\\p{N}])`, "giu");
+  const view = normalizedIdentityTextView(value);
+  const replacements: SourceReplacement[] = [];
+  for (const match of view.text.matchAll(matcher)) {
+    const source = sourceRangeForView(view, match.index!, match.index! + match[0].length);
+    if (!source) continue;
+    replacements.push({
+      ...source,
+      replacement: aliases.get(normalizeAlias(match[0]))?.token ?? "[learner]",
+    });
+  }
+  return applySourceReplacements(value, replacements);
+}
+
+function replaceKnownIdentityReferences(value: string, identities: ReadonlyMap<string, LearnerAlias>): string {
+  const lookup = (id: string): string | null => identities.get(String(id).trim())?.token ?? null;
+  const patterns = [
+    /((?:["']?(?:learner|student|user|recipient|enrollment|submission)[_-]?id["']?)\s*[:=]\s*["']?)([0-9]{1,500})/giu,
+    /((?:\b(?:learner|student|user|recipient|enrollment|submission|grade)\b\s*(?:id\b\s*)?[#:=]\s*))([0-9]{1,500})\b/giu,
+    /(\/(?:users|learners|students)\/)([0-9]{1,500})\b/giu,
+  ];
+  let output = value;
+  for (const matcher of patterns) {
+    const view = normalizedIdentityTextView(output);
+    const replacements: SourceReplacement[] = [];
+    for (const match of view.text.matchAll(matcher)) {
+      const token = lookup(match[2]!);
+      if (!token) continue;
+      const start = match.index! + match[1]!.length;
+      const source = sourceRangeForView(view, start, start + match[2]!.length);
+      if (source) replacements.push({ ...source, replacement: token });
+    }
+    output = applySourceReplacements(output, replacements);
+  }
+  return output;
+}
+
+function exactLearnerTextContext(context: LearnerTextRedactionContext): LearnerTextRedactionContext {
+  const scope = exactScope(context.learnerScope);
+  if (!context.learnerRoster.isReady(scope)) throw new Error("learner_roster_scope_unavailable");
+  return { learnerRoster: context.learnerRoster, learnerVault: context.learnerVault, learnerScope: scope };
+}
+
+/**
+ * Replaces only identities registered for this exact roster scope. It does not
+ * try to infer arbitrary names. Callers must register the complete roster for
+ * the current course and principal before forwarding learner text.
+ */
+export function redactKnownLearnerText(value: string, context: LearnerTextRedactionContext): string {
+  if (typeof value !== "string") throw new TypeError("learner text is invalid");
+  const exactContext = exactLearnerTextContext(context);
+  const scope = exactContext.learnerScope;
+  const aliases = new Map<string, LearnerAlias>();
+  const identities = new Map<string, LearnerAlias>();
+  for (const identity of exactContext.learnerRoster.identities(scope)) {
+    const token = exactContext.learnerVault.tokenize(scope, identity);
+    identities.set(identity.id, { token });
+    for (const alias of learnerNameAliases(identity)) addAlias(aliases, alias, token);
+    if (identity.email) addAlias(aliases, identity.email, token);
+    if (identity.loginId) addAlias(aliases, identity.loginId, token);
+  }
+  return replaceKnownIdentityReferences(replaceKnownAliases(value, aliases), identities);
+}
+
 export class ArtifactGenerationRegistry {
   private readonly digests = new Set<string>();
 
@@ -255,8 +602,19 @@ export class ArtifactGenerationRegistry {
 export interface OutputPrivacyContext {
   readonly descriptor?: OutputPrivacyDescriptor;
   readonly learnerVault?: LearnerVault;
+  readonly learnerRoster?: LearnerRoster;
   readonly learnerScope?: LearnerScope;
   readonly artifacts?: ArtifactGenerationRegistry;
+  /**
+   * Which boundary removed learner identity from this value. `gateway`, the
+   * default, means Morrow holds the course roster for this scope and redacts
+   * here. `source` means the source holds the roster inside its own process and
+   * returns learner tokens instead of identities: Morrow holds no roster for
+   * such a source, so requiring one would refuse every result rather than
+   * protect one. A `source` value that still carries a learner identity is
+   * refused, and every other projection here still applies.
+   */
+  readonly learnerBoundary?: "gateway" | "source";
 }
 
 export interface ProjectedOutput {
@@ -264,12 +622,30 @@ export interface ProjectedOutput {
   readonly structuredContent?: JsonObject;
 }
 
-const LEARNER_FIELDS = new Set([
-  "id", "user_id", "userId", "student_id", "studentId", "sis_user_id", "sisUserId",
-  "name", "display_name", "email", "login_id", "loginId", "sortable_name", "short_name",
-  "accommodations", "submission", "submissions",
+type IdentityRecordKind = "learner" | "student" | "user" | "enrollment" | "submission" | "grade" | "recipient" | "member";
+
+const IDENTITY_VALUE_FIELDS = new Set([
+  "userid", "learnerid", "studentid", "canvasuserid", "sisuserid", "sispersonid", "pseudonymid",
+  "displayname", "studentname",
+  "email", "primaryemail", "loginid", "sisloginid", "firstname", "lastname", "pronouns", "avatarimageurl",
+  "accommodations",
+]);
+const IDENTITY_RECORD_VALUE_FIELDS = new Set([
+  "id", "name", "fullname", "username", "sortablename", "shortname",
+]);
+const IDENTITY_CONTAINER_KEYS = new Map<string, IdentityRecordKind>([
+  ["learner", "learner"], ["learners", "learner"], ["student", "student"], ["students", "student"],
+  ["user", "user"], ["users", "user"], ["person", "user"], ["people", "user"],
+  ["enrollment", "enrollment"], ["enrollments", "enrollment"],
+  ["submission", "submission"], ["submissions", "submission"],
+  ["grade", "grade"], ["grades", "grade"], ["gradebook", "grade"],
+  ["recipient", "recipient"], ["recipients", "recipient"], ["member", "member"], ["members", "member"],
 ]);
 const SECRET_FIELD = /(?:^|_)(?:authorization|bearer|access_token|refresh_token|csrf|cookie|secret|credential|jwt)(?:$|_)/i;
+const SECRET_FIELD_NORMALIZED = new Set([
+  "authorization", "bearer", "accesstoken", "refreshtoken", "csrf", "cookie", "secret", "credential", "jwt",
+  "privateattachment", "bytesbase64",
+]);
 
 function privacyError(code: string): JsonObject {
   return {
@@ -296,51 +672,180 @@ function exactDescriptor(value: OutputPrivacyDescriptor | undefined): OutputPriv
   return { ...descriptor, aiClientAdmission, fieldPolicy };
 }
 
-function learnerIdentity(value: JsonObject): LearnerIdentity | null {
-  const keys = new Set(Object.keys(value));
-  const hasLearnerSignal = [
-    "user_id", "userId", "student_id", "studentId", "sis_user_id", "sisUserId",
-    "email", "login_id", "loginId", "sortable_name",
-  ].some((key) => keys.has(key))
-    || ((keys.has("avatar_image_url") || keys.has("pronouns")) && (keys.has("name") || keys.has("display_name")));
-  if (!hasLearnerSignal) return null;
-  const id = value.id ?? value.user_id ?? value.userId ?? value.student_id ?? value.studentId;
-  if (typeof id !== "string" && typeof id !== "number") return null;
-  return {
-    id: String(id),
-    ...(typeof value.name === "string" ? { name: value.name } : {}),
-    ...(typeof value.email === "string" ? { email: value.email } : {}),
-  };
+function normalizePrivacyKey(key: string): string {
+  return key.normalize("NFKC").replace(/[\s_-]/gu, "").toLocaleLowerCase("en-US");
 }
 
-function projectValue(value: unknown, descriptor: OutputPrivacyDescriptor, context: OutputPrivacyContext, depth = 0): unknown {
+function isSecretField(key: string): boolean {
+  return SECRET_FIELD.test(key) || SECRET_FIELD_NORMALIZED.has(normalizePrivacyKey(key));
+}
+
+function isIdentityValueField(key: string, recordIdentity = false): boolean {
+  const normalized = normalizePrivacyKey(key);
+  if ((recordIdentity && IDENTITY_RECORD_VALUE_FIELDS.has(normalized)) || IDENTITY_VALUE_FIELDS.has(normalized)) return true;
+  return /(?:learner|student|user|person|recipient|enrollment|submission)(?:id|name|email|login|sis|identifier|uuid|guid)$/u.test(normalized);
+}
+
+function identityRecordKind(key: string): IdentityRecordKind | undefined {
+  return IDENTITY_CONTAINER_KEYS.get(normalizePrivacyKey(key));
+}
+
+function normalizedIdentityFields(value: JsonObject): ReadonlyMap<string, unknown> {
+  return new Map(Object.entries(value).map(([key, candidate]) => [normalizePrivacyKey(key), candidate]));
+}
+
+function identityValue(fields: ReadonlyMap<string, unknown>, keys: readonly string[]): string | undefined {
+  for (const key of keys) {
+    const candidate = fields.get(normalizePrivacyKey(key));
+    if (typeof candidate === "string" || typeof candidate === "number") {
+      const normalized = String(candidate).trim();
+      if (normalized) return normalized;
+    }
+  }
+  return undefined;
+}
+
+function learnerIdentity(value: JsonObject, kind?: IdentityRecordKind): LearnerIdentity | null {
+  const fields = normalizedIdentityFields(value);
+  const normalizedKeys = new Set(fields.keys());
+  const hasGenericSignal = ["userid", "learnerid", "studentid", "canvasuserid", "sisuserid", "email", "loginid", "sortablename"]
+    .some((key) => normalizedKeys.has(key))
+    || ((normalizedKeys.has("avatarimageurl") || normalizedKeys.has("pronouns")) && (normalizedKeys.has("name") || normalizedKeys.has("displayname")));
+  if (!kind && !hasGenericSignal) return null;
+  const directId = identityValue(fields, ["user_id", "userId", "learner_id", "learnerId", "student_id", "studentId", "canvas_user_id", "canvasUserId", "sis_user_id", "sisUserId"]);
+  const fallbackId = kind && kind !== "submission" && kind !== "enrollment"
+    ? identityValue(fields, ["id"])
+    : undefined;
+  const id = directId || fallbackId;
+  if (!id) return null;
+  const name = identityValue(fields, ["name", "display_name", "displayName", "full_name", "fullName", "student_name", "studentName"]);
+  const email = identityValue(fields, ["email", "primary_email", "primaryEmail"]);
+  const loginId = identityValue(fields, ["login_id", "loginId"]);
+  const sisUserId = identityValue(fields, ["sis_user_id", "sisUserId"]);
+  return normalizeLearnerIdentity({
+    id,
+    ...(name ? { name } : {}),
+    ...(email ? { email } : {}),
+    ...(loginId ? { loginId } : {}),
+    ...(sisUserId ? { sisUserId } : {}),
+  });
+}
+
+function learnerTextContext(context: OutputPrivacyContext): LearnerTextRedactionContext {
+  if (!context.learnerRoster || !context.learnerVault || !context.learnerScope) {
+    throw new Error("learner_roster_scope_unavailable");
+  }
+  const scope = exactScope(context.learnerScope);
+  if (!context.learnerRoster.isReady(scope)) throw new Error("learner_roster_scope_unavailable");
+  return { learnerRoster: context.learnerRoster, learnerVault: context.learnerVault, learnerScope: scope };
+}
+
+function projectText(
+  value: string,
+  descriptor: OutputPrivacyDescriptor,
+  context: OutputPrivacyContext,
+  requiresLearnerRedaction: boolean,
+): string {
+  const output = requiresLearnerRedaction ? redactKnownLearnerText(value, learnerTextContext(context)) : value;
+  if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
+  return output;
+}
+
+function projectValue(
+  value: unknown,
+  descriptor: OutputPrivacyDescriptor,
+  context: OutputPrivacyContext,
+  depth = 0,
+  kind?: IdentityRecordKind,
+  inheritedLearnerPrivacy = false,
+): unknown {
   if (depth > 12) throw new Error("privacy_output_depth_exceeded");
+  const sourceRedacted = context.learnerBoundary === "source";
+  const requiresLearnerRedaction = !sourceRedacted
+    && (descriptor.dataClass === "learner"
+      || kind !== undefined
+      || inheritedLearnerPrivacy
+      || Boolean(context.learnerRoster && context.learnerVault && context.learnerScope));
+  if (typeof value === "string") return projectText(value, descriptor, context, requiresLearnerRedaction);
   if (Array.isArray(value)) {
     if (value.length > descriptor.maxRecords) throw new Error("privacy_record_limit_exceeded");
-    return value.map((item) => projectValue(item, descriptor, context, depth + 1));
+    return value.map((item) => projectValue(item, descriptor, context, depth + 1, kind, inheritedLearnerPrivacy));
   }
   if (!isJsonObject(value)) return value;
-  const learner = learnerIdentity(value);
+  const learner = learnerIdentity(value, kind);
+  // A source that states it returns learner tokens and no learner identity is
+  // held to that. A record shaped like a learner identity is a boundary
+  // failure there, not a record to tokenize here; a record that carries only a
+  // token is already resolved and is not an unresolved identity.
+  if (sourceRedacted && learner) throw new Error("privacy_source_learner_identity_refused");
+  if (!sourceRedacted && kind && !learner) throw new Error("privacy_identity_record_unresolved");
+  const needsTextRedaction = requiresLearnerRedaction || learner !== null;
+  let textContext: LearnerTextRedactionContext | undefined;
+  if (needsTextRedaction) {
+    textContext = learnerTextContext(context);
+    if (learner) textContext.learnerRoster.observe(textContext.learnerScope, [learner]);
+  }
   const output: JsonObject = {};
   if (learner && descriptor.learnerTokens) {
-    if (!context.learnerVault || !context.learnerScope) throw new Error("learner_vault_unavailable");
-    output.learnerToken = context.learnerVault.tokenize(context.learnerScope, learner);
+    output.learnerToken = textContext!.learnerVault.tokenize(textContext!.learnerScope, learner);
   }
   for (const [key, child] of Object.entries(value)) {
+    const normalizedKey = normalizePrivacyKey(key);
     const allowField = descriptor.fieldPolicy === "scrub-sensitive" || descriptor.allowedFields.includes(key);
-    if (!allowField || SECRET_FIELD.test(key) || (learner && LEARNER_FIELDS.has(key))) continue;
-    if (typeof child === "string") {
-      if (descriptor.freeText === "deny" && (key === "html" || key === "body" || key === "content")) continue;
-      if (containsSensitiveText(child)) throw new Error("privacy_sensitive_text_refused");
-    }
-    const projected = projectValue(child, descriptor, context, depth + 1);
+    if (!allowField || isSecretField(key) || isIdentityValueField(key, learner !== null)) continue;
+    if (descriptor.freeText === "deny" && (normalizedKey === "html" || normalizedKey === "body" || normalizedKey === "content")) continue;
+    const childKind = identityRecordKind(key);
+    const projected = projectValue(child, descriptor, context, depth + 1, childKind, needsTextRedaction);
     if (projected !== undefined) output[key] = projected;
   }
   return output;
 }
 
 function containsSensitiveText(value: string): boolean {
-  return /(?:bearer\s+|cookie=|csrf|token=|(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|<[^>]+(?:hidden|display\s*:\s*none))/i.test(value);
+  // Redaction preserves non-learner source bytes, including HTML entities and
+  // URL escapes. Inspect the same canonical match view so encoded credentials
+  // and unrostered emails remain refused without rewriting a safe URL.
+  return /(?:bearer\s+|cookie=|csrf|token=|(?<![\w.+-])[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}|<[^>]+(?:hidden|display\s*:\s*none))/i
+    .test(normalizedIdentityTextView(value).text);
+}
+
+/**
+ * Sanitizes an arbitrary native-tool or sampling envelope without applying an
+ * output allowlist. It preserves envelope shape and non-identity course data,
+ * while routing every string and nested learner-shaped record through the
+ * exact-scope roster and vault boundary.
+ */
+export function redactLearnerEgress(value: unknown, context: LearnerTextRedactionContext): unknown {
+  const exactContext = exactLearnerTextContext(context);
+  const walk = (candidate: unknown, depth = 0, kind?: IdentityRecordKind, inheritedLearnerPrivacy = false): unknown => {
+    if (depth > 12) throw new Error("privacy_output_depth_exceeded");
+    if (typeof candidate === "string") {
+      const output = redactKnownLearnerText(candidate, exactContext);
+      if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
+      return output;
+    }
+    if (Array.isArray(candidate)) return candidate.map((entry) => walk(entry, depth + 1, kind, inheritedLearnerPrivacy));
+    if (!isJsonObject(candidate)) return candidate;
+    const learner = learnerIdentity(candidate, kind);
+    if (kind && !learner) throw new Error("privacy_identity_record_unresolved");
+    const needsLearnerPrivacy = inheritedLearnerPrivacy || kind !== undefined || learner !== null;
+    if (learner) exactContext.learnerRoster.observe(exactContext.learnerScope, [learner]);
+    const output: JsonObject = {};
+    if (learner) output.learnerToken = exactContext.learnerVault.tokenize(exactContext.learnerScope, learner);
+    for (const [key, child] of Object.entries(candidate)) {
+      const normalizedKey = normalizePrivacyKey(key);
+      if (isSecretField(key) || isIdentityValueField(key, learner !== null)) continue;
+      // A binary MCP resource has no safe text projection at this boundary.
+      // Returning its encoded bytes could expose learner identities without a
+      // chance to apply the exact-scope roster aliases.
+      if (normalizedKey === "blob" && typeof child === "string") {
+        throw new Error("privacy_resource_blob_refused");
+      }
+      output[key] = walk(child, depth + 1, identityRecordKind(key), needsLearnerPrivacy);
+    }
+    return output;
+  };
+  return walk(value);
 }
 
 function projectContent(
@@ -349,6 +854,9 @@ function projectContent(
   context: OutputPrivacyContext,
 ): readonly JsonObject[] {
   if (!Array.isArray(value)) return [];
+  const requiresLearnerRedaction = context.learnerBoundary !== "source"
+    && (descriptor.dataClass === "learner"
+      || Boolean(context.learnerRoster && context.learnerVault && context.learnerScope));
   const output: JsonObject[] = [];
   for (const block of value) {
     if (!isJsonObject(block) || typeof block.type !== "string") throw new Error("privacy_content_block_invalid");
@@ -359,19 +867,26 @@ function projectContent(
       if (descriptor.freeText !== "allow") {
         continue;
       }
-      if (containsSensitiveText(block.text)) throw new Error("privacy_sensitive_text_refused");
-      if (Buffer.byteLength(block.text, "utf8") > descriptor.maxBytes) {
+      const text = projectText(block.text, descriptor, context, requiresLearnerRedaction);
+      if (Buffer.byteLength(text, "utf8") > descriptor.maxBytes) {
         throw new Error("privacy_byte_limit_exceeded");
       }
-      output.push({ type: "text", text: block.text });
+      output.push({ type: "text", text });
       continue;
     }
     const resource = isJsonObject(block.resource) ? block.resource : block;
     if (typeof resource.text === "string") {
-      if (descriptor.artifactInspection !== "text" || containsSensitiveText(resource.text)) {
+      if (descriptor.artifactInspection !== "text") {
         throw new Error("privacy_text_artifact_refused");
       }
-      output.push(structuredClone(block));
+      const text = projectText(resource.text, descriptor, context, requiresLearnerRedaction);
+      const projected = structuredClone(block);
+      if (isJsonObject(projected.resource) && typeof projected.resource.text === "string") {
+        projected.resource.text = text;
+      } else if (typeof projected.text === "string") {
+        projected.text = text;
+      }
+      output.push(projected);
       continue;
     }
     const encoded = typeof resource.blob === "string"

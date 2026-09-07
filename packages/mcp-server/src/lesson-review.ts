@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { CLIENT_CAPABILITIES_META_KEY, inputRequired, inputResponse, type CallToolResult, type CreateMessageRequestParams, type InputRequiredResult, type McpServer, type RequestStateCodec, type ServerContext } from "@modelcontextprotocol/server";
+import { CLIENT_CAPABILITIES_META_KEY, inputRequired, inputResponse, type CallToolResult, type CreateMessageRequestParams, type InputRequiredResult, type McpServer, type ServerContext } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
 import { canvasReadResult } from "./canvas-read.js";
@@ -52,7 +52,14 @@ async function readEvidence(runtime: GatewayRuntime, input: Input, signal: Abort
     const connection = runtime.config.upstreams.find((candidate) => candidate.id === source);
     const privacy = connection?.outputPrivacy[name] ?? connection?.outputPrivacyDefault;
     requireRead(privacy?.fieldPolicy === "scrub-sensitive" && privacy.freeText === "allow" && privacy.aiClientAdmission === "allow", "The connection's privacy settings do not provide the complete review text.");
-    const result = canvasReadResult(runtime, await runtime.callSourceOwned(matches[0]!.publicName, { ...args, _morrow: { source_binding_id: input.source_binding_id } }, { signal }));
+    const request = { ...args, _morrow: { source_binding_id: input.source_binding_id } };
+    // Sampling and client-held continuation state are output boundaries too.
+    // Project the fresh Canvas response before it becomes review evidence.
+    const result = canvasReadResult(runtime, await runtime.redactMcpEgress(
+      await runtime.callSourceOwned(matches[0]!.publicName, request, { signal }),
+      request,
+      { signal, bound: false, toolName: matches[0]!.publicName },
+    ));
     const serialized = JSON.stringify(result.data);
     requireRead(typeof serialized === "string" && serialized.length <= 120_000 && !/\[(?:filtered|redacted|removed)\]/i.test(serialized), "Canvas returned oversized or privacy-filtered review content.");
     return result;
@@ -129,7 +136,23 @@ function containsQuote(value: unknown, quote: string): boolean {
   return isJsonObject(value) && Object.values(value).some((item) => containsQuote(item, quote));
 }
 
-export function registerLessonReviewTool(server: McpServer, runtime: GatewayRuntime, codec: RequestStateCodec<LessonReviewState>): void {
+async function stateSafeEvidence(
+  runtime: GatewayRuntime,
+  input: Input,
+  evidence: Evidence,
+  signal: AbortSignal,
+): Promise<Evidence> {
+  const redact = (runtime as unknown as {
+    redactMcpEgress?: (value: JsonObject, request: Readonly<{ [key: string]: unknown }>, options: { readonly signal?: AbortSignal; readonly bound?: boolean }) => Promise<JsonObject>;
+  }).redactMcpEgress;
+  // Small test doubles do not own persistence or an MCP response boundary.
+  if (!redact) return evidence;
+  const result = await redact({ structuredContent: evidence }, input, { signal, bound: false });
+  requireRead(result.isError !== true && isJsonObject(result.structuredContent), "The learner privacy boundary could not preserve this review evidence.");
+  return result.structuredContent as unknown as Evidence;
+}
+
+export function registerLessonReviewTool(server: McpServer, runtime: GatewayRuntime, codec: { mint(payload: LessonReviewState, context: ServerContext): Promise<string> }): void {
   server.registerTool("morrow_review_lesson", {
     title: "Review a lesson and quiz against source text",
     description: "Use two independent client model requests and a separate checker to compare one Canvas lesson and New Quiz with educator-provided text. Requires client sampling. Supports up to 40 directly saved choice, multi-answer, or true/false questions with complete answer settings. Returns quoted evidence and proposed corrections for educator review. No Canvas writes. Does not verify teaching quality, rubrics, bank contents, media, accessibility, or student access.",
@@ -143,7 +166,9 @@ export function registerLessonReviewTool(server: McpServer, runtime: GatewayRunt
       let state = context.mcpReq.requestState<LessonReviewState>();
       if (!state) {
         requireRead(!Object.keys(context.mcpReq.inputResponses ?? {}).length && !context.mcpReq.droppedInputResponseKeys?.length, "Model results arrived without the original review state. Start a new review.");
-        state = { workflow: "morrow.lesson-review.v1", requestId: randomUUID(), inputDigest: sha256Json(input), evidence: await readEvidence(runtime, input, signal), stage: "specialists", records: [], findings: [], limits: [] };
+        const rawEvidence = await readEvidence(runtime, input, signal);
+        const evidence = await stateSafeEvidence(runtime, input, rawEvidence, signal);
+        state = { workflow: "morrow.lesson-review.v1", requestId: randomUUID(), inputDigest: sha256Json(input), evidence, stage: "specialists", records: [], findings: [], limits: [] };
         return inputRequired({ inputRequests: { lesson_alignment: inputRequired.createMessage(request(state, "lesson_alignment")), quiz_alignment: inputRequired.createMessage(request(state, "quiz_alignment")) }, requestState: await codec.mint(state, context) });
       }
       requireRead(state.workflow === "morrow.lesson-review.v1" && state.inputDigest === sha256Json(input), "The selected source or Canvas target changed between review requests. Start a new review.");

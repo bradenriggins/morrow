@@ -58,17 +58,18 @@ test("all Item Bank operations use exact routes, methods, queries, and bodies", 
     ["get_bank", { bank_id: "91" }, "GET", "/api/banks/91", undefined],
     ["list_entries", { bank_id: "91", page: 3, per_page: 20, morrow_max_pages: 1 }, "GET", "/api/banks/91/bank_entries?page=3&per_page=20", undefined],
     ["get_entry", { bank_id: "91", bank_entry_id: "401" }, "GET", "/api/banks/91/bank_entries/401", undefined],
-    ["list_shares", { bank_id: "91" }, "GET", "/api/banks/91/shared_banks", undefined],
+    ["list_shares", { bank_id: "91", page: 2, per_page: 50 }, "GET", "/api/banks/91/shared_banks?page=2&per_page=50", undefined],
     ["create_bank", { title: "Question bank" }, "POST", "/api/banks", { bank: { title: "Question bank", language: "en" } }],
     ["archive_bank", { bank_id: "91" }, "DELETE", "/api/banks/91", undefined],
     ["attach_item", { bank_id: "91", item_id: "501" }, "POST", "/api/banks/91/bank_entries", { bank_entry: { bank_id: "91", entry_type: "Item", entry_id: "501" } }],
     ["create_item", { bank_id: "91", item: { title: "Reusable question", interaction_type_slug: "essay" } }, "POST", "/api/banks/91/items", { item: { title: "Reusable question", interaction_type_slug: "essay" } }],
+    ["get_item", { bank_id: "91", item_id: "501" }, "GET", "/api/banks/91/items/501", undefined],
     ["update_item", { bank_id: "91", item_id: "501", item: { title: "Revised question" } }, "PATCH", "/api/banks/91/items/501", { item: { title: "Revised question" } }],
     ["delete_entry", { bank_id: "91", bank_entry_id: "401" }, "DELETE", "/api/banks/91/bank_entries/401", undefined],
-    ["share_bank", { bank_id: "91", entity_type: "Course", entity_id: "42" }, "POST", "/api/banks/91/shared_banks", { shared_bank: { entity_id: "42", entityType: "Course", bank_id: "91", permission: "read" } }],
+    ["share_bank", { bank_id: "91", entity_type: "course", entity_id: "42" }, "POST", "/api/banks/91/shared_banks", { shared_bank: { entity_id: "42", entityType: "course", bank_id: "91", permission: "read" } }],
   ];
-  assert.equal(cases.length, 12);
-  assert.equal(operations.size, 12);
+  assert.equal(cases.length, 13);
+  assert.equal(operations.size, 13);
 
   await withPageContext(async (token) => {
     for (const [nickname, argumentsValue, method, path, body] of cases) {
@@ -127,6 +128,62 @@ test("Item Bank transport loss marks writes unknown and reads safe to repeat", a
     assert.deepEqual(write, { matched: true, ok: false, sent: true, outcomeUnknown: true, error: "item_bank_request_failed" });
     const read = await executeItemBankInPage(input("list_banks", {}));
     assert.deepEqual(read, { matched: true, ok: false, sent: false, outcomeUnknown: false, error: "item_bank_request_failed" });
+  });
+});
+
+test("Item Bank writes stay uncertain on 408, 429, and 5xx while reads never claim uncertainty", async () => {
+  const cases = [
+    [400, false], [403, false], [404, false], [408, true], [409, false], [429, true], [500, true], [502, true], [503, true],
+  ];
+  await withPageContext(async () => {
+    for (const [status, outcomeUnknown] of cases) {
+      let calls = 0;
+      globalThis.fetch = async () => {
+        calls += 1;
+        return new Response(JSON.stringify({ errors: [{ message: "Item Bank refused" }] }), { status, headers: { "content-type": "application/json" } });
+      };
+      const write = await executeItemBankInPage(input("update_item", { bank_id: "91", item_id: "501", item: { title: "Revised question" } }));
+      assert.deepEqual(
+        { ok: write.ok, sent: write.sent, status: write.status, outcomeUnknown: write.outcomeUnknown },
+        { ok: false, sent: true, status, outcomeUnknown },
+        `write ${status}`,
+      );
+      assert.equal(calls, 1, `write ${status}`);
+
+      calls = 0;
+      const read = await executeItemBankInPage(input("list_entries", { bank_id: "91" }));
+      assert.deepEqual(
+        { ok: read.ok, sent: read.sent, status: read.status, outcomeUnknown: read.outcomeUnknown },
+        { ok: false, sent: true, status, outcomeUnknown: false },
+        `read ${status}`,
+      );
+      assert.equal(calls, 1, `read ${status}`);
+    }
+  });
+});
+
+test("An oversize Item Bank response classifies the write by the same status rule", async () => {
+  await withPageContext(async () => {
+    const oversize = JSON.stringify({ note: "a".repeat(2 * 1024 * 1024) });
+    for (const [status, outcomeUnknown] of [[200, true], [400, false], [503, true]]) {
+      globalThis.fetch = async () => new Response(oversize, { status, headers: { "content-type": "application/json" } });
+      const write = await executeItemBankInPage(input("update_item", { bank_id: "91", item_id: "501", item: { title: "Revised question" } }));
+      assert.deepEqual(write, { matched: true, ok: false, sent: true, status, outcomeUnknown, error: "item_bank_response_too_large" }, `write ${status}`);
+      const read = await executeItemBankInPage(input("get_entry", { bank_id: "91", bank_entry_id: "401" }));
+      assert.deepEqual(read, { matched: true, ok: false, sent: true, status, outcomeUnknown: false, error: "item_bank_response_too_large" }, `read ${status}`);
+    }
+  });
+});
+
+test("Item Bank sharing refuses every scope except an exact course before any request", async () => {
+  await withPageContext(async () => {
+    for (const entityType of ["account", "Course", "COURSE", "user"]) {
+      let calls = 0;
+      globalThis.fetch = async () => { calls += 1; return new Response("{}"); };
+      const result = await executeItemBankInPage(input("share_bank", { bank_id: "91", entity_type: entityType, entity_id: "42" }));
+      assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "item_bank_share_scope_unsupported" }, entityType);
+      assert.equal(calls, 0, entityType);
+    }
   });
 });
 

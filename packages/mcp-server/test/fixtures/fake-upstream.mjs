@@ -125,6 +125,22 @@ function createServer() {
     );
   }
 
+  const internalNames = ["morrow_browser_edit_policy_set"];
+  if (process.env.FAKE_INTERNAL_BRIDGE_MAINTENANCE === "1") {
+    internalNames.push("morrow_bridge_maintenance");
+  }
+  for (const internalName of internalNames) {
+    server.registerTool(
+      internalName,
+      {
+        description: "An internal Morrow browser control that must not reach the public catalog.",
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      async () => ({ content: [{ type: "text", text: "not reachable" }] }),
+    );
+  }
+
   return server;
 }
 

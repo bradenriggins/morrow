@@ -1,0 +1,71 @@
+name: private Windows ChatGPT inventory
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inventory:
+    name: Read-only AppX and configuration inventory
+    runs-on: windows-2022
+    timeout-minutes: 5
+    steps:
+      - name: Inspect compatible desktop identities without launching an app
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $pattern = 'openai|chatgpt|codex'
+          $packages = @(Get-AppxPackage | Where-Object {
+            $_.Name -match $pattern -or $_.PackageFamilyName -match $pattern -or $_.PackageFullName -match $pattern
+          })
+          $identities = foreach ($package in $packages) {
+            $applications = @()
+            try {
+              $manifest = Get-AppxPackageManifest -Package $package.PackageFullName
+              $applications = @($manifest.Package.Applications.Application | ForEach-Object {
+                [ordered]@{
+                  id = [string]$_.Id
+                  executable = [string]$_.Executable
+                  entryPoint = [string]$_.EntryPoint
+                }
+              })
+            } catch {
+              $applications = @([ordered]@{ manifestRead = 'refused_or_unavailable' })
+            }
+            [ordered]@{
+              name = [string]$package.Name
+              packageFullName = [string]$package.PackageFullName
+              packageFamilyName = [string]$package.PackageFamilyName
+              installLocation = [string]$package.InstallLocation
+              architecture = [string]$package.Architecture
+              version = [string]$package.Version
+              applications = $applications
+            }
+          }
+          $appPaths = foreach ($scope in @(
+            'HKCU:\Software\Microsoft\Windows\CurrentVersion\App Paths',
+            'HKLM:\Software\Microsoft\Windows\CurrentVersion\App Paths'
+          )) {
+            if (-not (Test-Path -LiteralPath $scope)) { continue }
+            Get-ChildItem -LiteralPath $scope -ErrorAction SilentlyContinue | Where-Object {
+              $_.PSChildName -match $pattern
+            } | ForEach-Object {
+              $defaultValue = (Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue).'(default)'
+              [ordered]@{ executableName = [string]$_.PSChildName; registeredPath = [string]$defaultValue }
+            }
+          }
+          $commands = foreach ($name in @('ChatGPT.exe', 'ChatGPT', 'Codex.exe', 'codex')) {
+            $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -ne $command) {
+              [ordered]@{ requestedName = $name; commandType = [string]$command.CommandType; source = [string]$command.Source }
+            }
+          }
+          [ordered]@{
+            schema = 'morrow.windows-compatible-assistant-inventory.v1'
+            appxPackages = @($identities)
+            registeredAppPaths = @($appPaths)
+            pathCommands = @($commands)
+            codexConfig = [ordered]@{ present = (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.codex\config.toml')) }
+          } | ConvertTo-Json -Depth 7

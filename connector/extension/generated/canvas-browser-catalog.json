@@ -1,0 +1,97 @@
+{
+  "schema": "morrow.browser-catalog.v1",
+  "provider": "canvas",
+  "operations": [
+    {
+      "key": "canvas.api.v1.course.quiz.submissions.aggregate.read.v1",
+      "toolName": "canvas_get_classic_quiz_submission_summary",
+      "provider": "canvas",
+      "summary": "Get Canvas Classic Quiz submission summary",
+      "description": "Read a complete aggregate-only summary of Classic Quiz submissions for one exact selected Canvas course and quiz. The Bridge verifies the current signed-in user, course, and Classic Quiz, follows only bounded same-origin pagination links for that exact submission route, and returns counts only. It never returns learner rows, identities, submission IDs, scores, answers, comments, tokens, or provider objects. Pending review is reported as its own provider workflow state; the Classic QuizSubmission contract does not prove a needs-grading count.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": { "type": "integer", "minimum": 1 },
+          "quiz_id": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["course_id", "quiz_id"],
+        "additionalProperties": false
+      },
+      "documentation": "https://canvas.instructure.com/doc/api/quiz_submissions.html"
+    },
+    {
+      "key": "canvas.api.v1.course.assignment.submissions.aggregate.read.v1",
+      "toolName": "canvas_get_assignment_submission_summary",
+      "provider": "canvas",
+      "summary": "Get Canvas Assignment submission summary",
+      "description": "Read a complete aggregate-only summary of Canvas Assignment submissions for one exact selected course and assignment. The Bridge verifies the current signed-in user, course, and assignment, follows only bounded same-origin pagination links for that exact submission route, counts every row inside the Canvas page, and returns counts only. It never returns learner rows, identities, submission IDs, scores, comments, attachment names, tokens, or provider objects. The needs-grading count is taken from the Canvas Assignment record; when the current role cannot see it, the summary reports it as unavailable instead of inferring one. A read that reaches a byte or page bound returns an explicit incomplete state, never a partial count.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": { "type": "integer", "minimum": 1 },
+          "assignment_id": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["course_id", "assignment_id"],
+        "additionalProperties": false
+      },
+      "documentation": "https://canvas.instructure.com/doc/api/submissions.html"
+    },
+    {
+      "key": "canvas.api.v1.course.gradebook.aggregate.read.v1",
+      "toolName": "canvas_get_course_gradebook_summary",
+      "provider": "canvas",
+      "summary": "Get Canvas course gradebook summary",
+      "description": "Read an aggregate-only gradebook summary for one exact selected Canvas course: per-assignment submitted, graded, and ungraded counts and a bucketed score distribution. The Bridge verifies the current signed-in user and course, follows only bounded same-origin pagination links for the course assignment list and the course submission list, counts every row inside the Canvas page, and returns counts only. It never returns a per-learner row, a learner identity, an individual score, a comment, an attachment name, a token, or a provider object. A score distribution is published only when the assignment has at least 5 scored submissions and every band that holds any score holds at least 5, so no individual score can be inferred; otherwise the whole distribution for that assignment is dropped. Ungraded counts submitted and pending-review rows. Scores are bucketed as a percentage of the assignment points possible. A read that reaches a byte or page bound returns an explicit incomplete state, never a partial count.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": { "type": "integer", "minimum": 1 }
+        },
+        "required": ["course_id"],
+        "additionalProperties": false
+      },
+      "documentation": "https://canvas.instructure.com/doc/api/submissions.html"
+    },
+    {
+      "key": "canvas.api.v1.course.activity.aggregate.read.v1",
+      "toolName": "canvas_get_course_activity_summary",
+      "provider": "canvas",
+      "summary": "Get Canvas course activity summary",
+      "description": "Read an aggregate-only count of recently changed items in one exact selected Canvas course by kind: pages, assignments, discussions, quizzes, and modules. The Bridge verifies the current signed-in user and course, reads only course-scoped list routes over bounded same-origin pagination, compares each row's updated_at against the requested window inside the Canvas page, and returns counts only. It never returns item titles, bodies, URLs, learner identities, scores, comments, attachment names, tokens, or provider objects. A kind whose rows do not carry updated_at is reported as unavailable rather than counted as unchanged. A read that reaches a byte or page bound returns an explicit incomplete state, never a partial count.",
+      "readOnly": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": { "type": "integer", "minimum": 1 },
+          "days": { "type": "integer", "minimum": 1, "maximum": 365 }
+        },
+        "required": ["course_id", "days"],
+        "additionalProperties": false
+      },
+      "documentation": "https://canvas.instructure.com/doc/api/courses.html"
+    },
+    {
+      "key": "canvas.api.v1.course.file.structure.read.v1",
+      "toolName": "canvas_read_course_file_signals",
+      "provider": "canvas",
+      "summary": "Read structural signals from one Canvas course document",
+      "description": "Read structural signals from the bytes of one exact selected Canvas course file that is a PDF, a Word document, a PowerPoint presentation, or an Excel workbook. It uses the same bounds as the course-file text read: the user's separate file-access permission, fresh course-scoped file metadata, a 1 MiB cap, a credential-free fetch of the canonical Canvas download URL, a byte-length and SHA-256 check, and a second fresh metadata read that must return the same file version. It never returns file bytes, document text, alternative-text values, or the signed download URL. A PDF reports its version, page count, marked-content flag, structure tree, document language presence with the length of that value, and whether any page shows text. An Office file reports part presence, drawing and picture counts with and without a description, heading style levels, and slide or sheet counts. An encrypted PDF and a structure this reader cannot parse are refused, never guessed. These signals do not establish document accessibility, tagging quality, reading order, or WCAG conformance.",
+      "readOnly": true,
+      "dataClass": "course",
+      "family": "files",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": { "type": "string", "pattern": "^[1-9][0-9]*$" },
+          "file_id": { "type": "string", "pattern": "^[1-9][0-9]*$" }
+        },
+        "required": ["course_id", "file_id"],
+        "additionalProperties": false
+      },
+      "documentation": "https://canvas.instructure.com/doc/api/files.html"
+    }
+  ]
+}

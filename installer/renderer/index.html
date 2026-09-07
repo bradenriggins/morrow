@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; form-action 'none'; base-uri 'none'">
+  <title>Morrow setup</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="app-header">
+      <span class="brand-wordmark"><img class="brand-mark" src="../assets/morrow-knot.svg" width="36" height="36" alt=""><span>morrow</span></span>
+      <p id="header-status" class="sr-only" aria-live="polite">Checking setup</p>
+      <button id="refresh" class="quiet-button" type="button">Check status</button>
+    </header>
+
+    <main id="setup" class="setup" tabindex="-1">
+      <section class="intro" aria-labelledby="setup-title">
+        <h1 id="setup-title">Set up Morrow on this computer</h1>
+        <p class="intro-copy">Connect your assistant to Canvas and Moodle. Build, review, and update courses through conversation.</p>
+        <p id="windows-note" class="managed-device-note" data-platform="win32" hidden>On Windows, Morrow installs for your user account and does not ask for administrator approval. If managed-device policy blocks it, ask your IT team to deploy Morrow.</p>
+        <p id="macos-note" class="managed-device-note" data-platform="darwin" hidden>On a Mac, Morrow sets up inside your user account and does not ask for an administrator password. If managed-device policy blocks it, ask your IT team to deploy Morrow.</p>
+      </section>
+
+      <nav class="progress-panel" aria-label="Setup steps">
+        <ol id="progress-list" class="progress-list"></ol>
+      </nav>
+
+      <section class="action-panel" aria-labelledby="action-title">
+        <div id="loading" class="loading" role="status">Checking Morrow setup…</div>
+        <div id="action-content" hidden>
+          <h2 id="action-title"></h2>
+          <p id="action-copy" class="action-copy"></p>
+          <div id="action-body" class="action-body"></div>
+        </div>
+        <div id="problem" class="problem" role="alert" hidden></div>
+      </section>
+
+      <section id="updates-panel" class="updates-panel" aria-labelledby="updates-title" hidden>
+        <div>
+          <h2 id="updates-title">Updates</h2>
+          <p id="updates-copy"></p>
+        </div>
+        <div id="updates-actions" class="inline-actions"></div>
+      </section>
+
+      <details id="blackboard-panel" class="blackboard-panel" hidden>
+        <summary class="blackboard-summary">
+          <h2>Connect a Blackboard Learn site (optional)</h2>
+          <span class="blackboard-summary-detail">Most people do not need this. Canvas and Moodle connect through the steps above. Open this only if a Blackboard administrator gave you an application key for Morrow.</span>
+        </summary>
+        <div class="blackboard-body">
+          <p id="blackboard-copy" class="blackboard-status" role="status" aria-live="polite" aria-atomic="true"></p>
+          <p id="blackboard-admin-note" class="blackboard-note">A Blackboard administrator must first install Morrow's REST application on your Blackboard site and turn on the entitlements it asks for. Ask them for the application key and secret.</p>
+          <div id="blackboard-tenant" hidden></div>
+          <p id="blackboard-saved-note" class="blackboard-note" hidden>These are the web address and Blackboard account Morrow verified when it saved this connection. Morrow keeps one Blackboard connection here, so saving a different web address replaces this one. To change the secret, paste it again and save.</p>
+          <p id="blackboard-replace-note" class="blackboard-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+          <form id="blackboard-form" class="blackboard-form" novalidate>
+            <div class="field">
+              <label for="blackboard-base-url">Your Blackboard web address</label>
+              <input id="blackboard-base-url" name="baseUrl" type="url" autocomplete="url" inputmode="url" placeholder="https://learn.example.edu" aria-describedby="blackboard-base-url-error blackboard-base-url-hint" required>
+              <span id="blackboard-base-url-error" class="field-error"></span>
+              <span id="blackboard-base-url-hint" class="field-hint">The address you use to open Blackboard, starting with https://. Morrow names this connection after it.</span>
+            </div>
+            <div class="field">
+              <label for="blackboard-application-key">Application key from your Blackboard administrator</label>
+              <input id="blackboard-application-key" name="applicationKey" autocomplete="off" aria-describedby="blackboard-application-key-error blackboard-application-key-hint" required>
+              <span id="blackboard-application-key-error" class="field-error"></span>
+              <span id="blackboard-application-key-hint" class="field-hint">Your administrator gets this when they install Morrow's REST application. Paste it exactly as they sent it.</span>
+            </div>
+            <div class="field">
+              <label for="blackboard-application-secret">Application secret</label>
+              <input id="blackboard-application-secret" name="applicationSecret" type="password" autocomplete="new-password" aria-describedby="blackboard-application-secret-error blackboard-application-secret-hint" required>
+              <span id="blackboard-application-secret-error" class="field-error"></span>
+              <span id="blackboard-application-secret-hint" class="field-hint">Your administrator gets this with the key. Morrow saves it in a file only your user account can open, inside the .morrow folder in your home folder, and never shows it again.</span>
+            </div>
+            <div class="inline-actions"><button id="blackboard-submit" class="primary-button" type="submit">Save Blackboard connection</button></div>
+          </form>
+
+          <div id="blackboard-courses" class="blackboard-courses" hidden>
+            <h3>Courses Morrow can open</h3>
+            <p id="blackboard-courses-copy" role="status" aria-live="polite" aria-atomic="true"></p>
+            <ul id="blackboard-course-list" class="blackboard-course-list"></ul>
+          </div>
+        </div>
+      </details>
+
+      <details id="retention-panel" class="retention-panel" hidden>
+        <summary class="retention-summary">
+          <h2 id="retention-title">What stays on this computer</h2>
+          <span id="retention-copy" class="retention-summary-detail"></span>
+        </summary>
+        <div id="retention-body" class="retention-body"></div>
+      </details>
+      <p id="removal-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></p>
+
+      <footer id="support" class="support" hidden></footer>
+    </main>
+  </div>
+  <script type="module" src="renderer.js"></script>
+</body>
+</html>

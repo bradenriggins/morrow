@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { sha256Json } from "@morrow/contracts";
 import {
@@ -89,6 +90,51 @@ describe("BAT durable batch requirements", () => {
 
       const reopened = new DurableBatchStore({ path, encryptionKey: key });
       expect(reopened.getManifest(created.batch.batchId).operationFamily).toBe("private-manifest-marker");
+      reopened.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("encrypts a retained child result and rejects a tampered authenticated readback", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-retained-result-"));
+    const path = join(directory, "morrow.sqlite3");
+    const key = randomBytes(32);
+    try {
+      const store = new DurableBatchStore({ path, encryptionKey: key });
+      const created = readBatch(store, 1);
+      store.beginRun(created.batch.batchId, catalogDigest, {
+        courseSetDigest: created.manifest.courseSet.digest,
+        profileDigest,
+      });
+      const [child] = store.claimPending(created.batch.batchId, 1);
+      expect(child).toBeDefined();
+      const resultPayload = {
+        schema: "morrow.course-audit.v1",
+        status: "evidence_incomplete",
+        retained_text: "private-retained-result-marker",
+      };
+      store.settleChild(created.batch.batchId, child!.childId, {
+        state: "succeeded",
+        resultDigest: sha256Json(resultPayload),
+        resultPayload,
+      });
+      expect(store.readResult(created.batch.batchId, child!.childId)).toEqual(resultPayload);
+      store.close();
+
+      expect(readFileSync(path).includes(Buffer.from("private-retained-result-marker"))).toBe(false);
+      const database = new DatabaseSync(path);
+      const row = database.prepare(`
+        SELECT result_tag FROM gateway_batch_children WHERE batch_id=? AND child_id=?
+      `).get(created.batch.batchId, child!.childId) as { result_tag: string };
+      const replacementTag = `${row.result_tag.startsWith("A") ? "B" : "A"}${row.result_tag.slice(1)}`;
+      database.prepare(`
+        UPDATE gateway_batch_children SET result_tag=? WHERE batch_id=? AND child_id=?
+      `).run(replacementTag, created.batch.batchId, child!.childId);
+      database.close();
+
+      const reopened = new DurableBatchStore({ path, encryptionKey: key });
+      expect(() => reopened.readResult(created.batch.batchId, child!.childId)).toThrow();
       reopened.close();
     } finally {
       rmSync(directory, { recursive: true, force: true });

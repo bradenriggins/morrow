@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -9,6 +9,9 @@ import {
   buildClientParityReport,
   buildLocalCanvasConfig,
   installMorrowClient,
+  MorrowClientConfigRefusal,
+  morrowClientConfigNotes,
+  morrowClientConfigPath,
   writeClientConfigBundle,
 } from "../src/index.js";
 
@@ -18,25 +21,60 @@ function fileContent(bundle: ReturnType<typeof buildClientConfigBundle>, path: s
   return entry.content;
 }
 
+function refusalOf(attempt: () => unknown): MorrowClientConfigRefusal {
+  try {
+    attempt();
+  } catch (error) {
+    if (error instanceof MorrowClientConfigRefusal) return error;
+    throw error;
+  }
+  throw new Error("expected a Morrow client configuration refusal");
+}
+
 describe("buildClientConfigBundle", () => {
   it("builds one local browser-connector configuration without credentials", () => {
     const root = resolve("/tmp/morrow-local");
-    const config = buildLocalCanvasConfig(root, "/usr/local/bin/node") as { upstreams: Record<string, unknown>[] };
+    const config = buildLocalCanvasConfig(root, "/usr/local/bin/node") as {
+      toolSurface: string;
+      upstreams: Record<string, unknown>[];
+    };
+    expect(config.toolSurface).toBe("compact");
     expect(config.upstreams).toEqual([expect.objectContaining({
       id: "canvas-session",
       command: "/usr/local/bin/node",
       cwd: root,
       sourceDisposition: "direct_owned",
+      env: {
+        MORROW_CANVAS_CATALOG_PATH: resolve(root, "artifacts/canvas-api/canvas-api-catalog.json"),
+        MORROW_CANVAS_CONNECTOR_STATE: resolve(root, ".morrow/canvas-connector.json"),
+      },
     })]);
     expect(JSON.stringify(config)).not.toMatch(/(?:canvas_token|cookie|credential)/i);
   });
 
-  it("generates deterministic ChatGPT/Codex, Claude, and Gemini configurations", () => {
+  it("binds consumer connector state to an explicit durable directory", () => {
+    const repositoryRoot = resolve("/tmp/morrow-local");
+    const stateDirectory = resolve("/tmp/morrow-consumer-state");
+    const config = buildLocalCanvasConfig(repositoryRoot, "/usr/local/bin/node", stateDirectory) as {
+      upstreams: { env: Record<string, string> }[];
+      operationJournal: { path: string };
+      privacy: { learnerVaultPath: string };
+    };
+
+    expect(config.upstreams[0]!.env.MORROW_CANVAS_CONNECTOR_STATE)
+      .toBe(join(stateDirectory, "canvas-connector.json"));
+    expect(config.operationJournal.path).toBe(join(stateDirectory, "morrow.sqlite3"));
+    expect(config.privacy.learnerVaultPath).toBe(join(stateDirectory, "learner-vault.json"));
+  });
+
+  it("generates deterministic ChatGPT/Codex, Claude, Gemini, Cursor, and VS Code configurations", () => {
     const repositoryRoot = resolve("/tmp/Morrow local repo");
+    const workspaceRoot = resolve("/tmp/Morrow course workspace");
     const upstreamConfigPath = resolve("/tmp/Morrow local repo/.morrow/upstreams.json");
     const serverEntryPath = resolve(repositoryRoot, "packages/mcp-server/dist/index.js");
     const options = {
       repositoryRoot,
+      workspaceRoot,
       upstreamConfigPath,
       serverEntryPath,
       nodeCommand: "/usr/local/bin/node",
@@ -55,7 +93,7 @@ describe("buildClientConfigBundle", () => {
       transport: "stdio",
       command: "/usr/local/bin/node",
       args: [serverEntryPath],
-      cwd: repositoryRoot,
+      cwd: workspaceRoot,
       environmentNames: ["MORROW_UPSTREAMS_FILE"],
     });
 
@@ -65,6 +103,7 @@ describe("buildClientConfigBundle", () => {
     expect(codex).toContain("required = true");
     expect(codex).toContain("startup_timeout_sec = 75");
     expect(codex).toContain("tool_timeout_sec = 1200");
+    expect(codex).toContain(`cwd = ${JSON.stringify(workspaceRoot)}`);
     expect(codex).toContain(JSON.stringify(upstreamConfigPath));
 
     const claude = JSON.parse(fileContent(first, "claude.mcp.json")) as Record<string, unknown>;
@@ -74,7 +113,7 @@ describe("buildClientConfigBundle", () => {
           type: "stdio",
           command: "/usr/local/bin/node",
           args: [serverEntryPath],
-          cwd: repositoryRoot,
+          cwd: workspaceRoot,
           env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
         },
       },
@@ -87,7 +126,7 @@ describe("buildClientConfigBundle", () => {
         morrow: {
           command: "/usr/local/bin/node",
           args: [serverEntryPath],
-          cwd: repositoryRoot,
+          cwd: workspaceRoot,
           env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
           timeout: 1_200_000,
           trust: false,
@@ -95,10 +134,37 @@ describe("buildClientConfigBundle", () => {
       },
     });
 
+    const cursor = JSON.parse(fileContent(first, "cursor.mcp.json")) as Record<string, unknown>;
+    expect(cursor).toEqual({
+      mcpServers: {
+        morrow: {
+          type: "stdio",
+          command: "/usr/local/bin/node",
+          args: [serverEntryPath],
+          env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+        },
+      },
+    });
+
+    const vscode = JSON.parse(fileContent(first, "vscode.mcp.json")) as Record<string, unknown>;
+    expect(vscode).toEqual({
+      servers: {
+        morrow: {
+          type: "stdio",
+          command: "/usr/local/bin/node",
+          args: [serverEntryPath],
+          cwd: workspaceRoot,
+          env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+        },
+      },
+    });
+
     const manifest = JSON.parse(fileContent(first, "manifest.json")) as {
+      cwd: string;
       files: { path: string; sha256: string }[];
     };
-    expect(manifest.files).toHaveLength(8);
+    expect(manifest.cwd).toBe(workspaceRoot);
+    expect(manifest.files).toHaveLength(10);
     expect(manifest.files.every((entry) => /^[0-9a-f]{64}$/.test(entry.sha256))).toBe(true);
     expect(manifest.files.some((entry) => entry.path === "manifest.json")).toBe(false);
     expect(JSON.stringify(first)).not.toContain("CANVAS_TOKEN");
@@ -150,11 +216,467 @@ describe("project installation and hermetic parity", () => {
         proofLevel: "hermetic_config_only",
         realClientExecution: "not_run",
       });
-      expect(report.clients).toHaveLength(4);
+      expect(report.clients).toHaveLength(6);
       expect(report.clients.every((client) => client.equivalent)).toBe(true);
-      expect(() => installMorrowClient({ ...options, client: "claude-desktop" }))
-        .toThrow(/only --scope user/);
+      expect(report.clients.find((client) => client.client === "cursor"))
+        .toMatchObject({ workingDirectory: "client_default" });
+      expect(report.clients.find((client) => client.client === "cursor")).not.toHaveProperty("cwd");
+      expect(report.clients.find((client) => client.client === "vscode"))
+        .toMatchObject({ workingDirectory: "pinned", cwd: repositoryRoot });
+      const desktopProjectScope = refusalOf(() => installMorrowClient({ ...options, client: "claude-desktop" }));
+      expect(desktopProjectScope.code).toBe("client_scope_unsupported");
+      expect(desktopProjectScope.nextAction).toContain("--scope user");
+
+      const projectRoot = join(directory, "course-workspace");
+      await mkdir(projectRoot, { recursive: true });
+      const canonicalProjectRoot = await realpath(projectRoot);
+      const separateCodex = installMorrowClient({ ...options, client: "codex", projectRoot });
+      const separateClaude = installMorrowClient({ ...options, client: "claude-code", projectRoot });
+      const separateGemini = installMorrowClient({ ...options, client: "gemini-cli", projectRoot });
+      expect(separateCodex.path).toBe(join(canonicalProjectRoot, ".codex", "config.toml"));
+      expect(await readFile(separateCodex.path, "utf8")).toContain(`cwd = ${JSON.stringify(canonicalProjectRoot)}`);
+      expect(JSON.parse(await readFile(separateClaude.path, "utf8")))
+        .toMatchObject({ mcpServers: { morrow: { cwd: canonicalProjectRoot, args: [serverEntryPath], env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath } } } });
+      expect(JSON.parse(await readFile(separateGemini.path, "utf8")))
+        .toMatchObject({ mcpServers: { morrow: { cwd: canonicalProjectRoot, args: [serverEntryPath], env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath } } } });
+      expect(() => installMorrowClient({
+        ...options,
+        client: "codex",
+        projectRoot: join(directory, "missing-course-workspace"),
+      })).toThrow(/projectRoot does not exist as a directory/);
+      expect(() => installMorrowClient({
+        ...options,
+        client: "claude-desktop",
+        scope: "user",
+        projectRoot,
+      })).toThrow(/projectRoot is supported only for project-scoped/);
+      expect(() => installMorrowClient({
+        ...options,
+        client: "codex",
+        workspaceRoot: join(directory, "missing-materials"),
+      })).toThrow(/workspaceRoot does not exist as a directory/);
     } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps a user-scope Codex target separate from the canonical materials workspace", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-user-install-"));
+    const repositoryRoot = join(directory, "runtime", "app");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const home = join(directory, "home");
+    const materials = join(directory, "Morrow Materials");
+    const originalHome = process.env.HOME;
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await mkdir(home, { recursive: true });
+      await mkdir(materials, { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      process.env.HOME = home;
+      const canonicalMaterials = await realpath(materials);
+
+      const installed = installMorrowClient({
+        repositoryRoot,
+        upstreamConfigPath,
+        serverEntryPath,
+        nodeCommand: process.execPath,
+        client: "codex",
+        scope: "user",
+        workspaceRoot: materials,
+      });
+
+      expect(installed).toMatchObject({
+        scope: "user",
+        path: join(home, ".codex", "config.toml"),
+        changed: true,
+      });
+      expect(await readFile(installed.path, "utf8"))
+        .toContain(`cwd = ${JSON.stringify(canonicalMaterials)}`);
+      await expect(stat(join(materials, ".codex", "config.toml"))).rejects.toThrow();
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("parses Codex TOML before preserving unrelated settings or refusing conflicts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-codex-toml-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const codexPath = join(repositoryRoot, ".codex", "config.toml");
+    const options = {
+      repositoryRoot,
+      upstreamConfigPath,
+      serverEntryPath,
+      nodeCommand: process.execPath,
+      client: "codex" as const,
+    };
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await mkdir(dirname(codexPath), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+
+      const canonicalRepositoryRoot = await realpath(repositoryRoot);
+      const generated = fileContent(buildClientConfigBundle({ ...options, workspaceRoot: canonicalRepositoryRoot }), "codex.config.toml")
+        .replace("[mcp_servers.morrow]", "[mcp_servers.\"morrow\"]");
+      const equivalentQuoted = `model = "gpt-6"\n\n${generated}`;
+      await writeFile(codexPath, equivalentQuoted, "utf8");
+      expect(installMorrowClient(options)).toMatchObject({ changed: false });
+      expect(await readFile(codexPath, "utf8")).toBe(equivalentQuoted);
+
+      const unrelated = "model = \"gpt-6\"\n";
+      await writeFile(codexPath, unrelated, "utf8");
+      expect(installMorrowClient(options)).toMatchObject({ changed: true });
+      expect(await readFile(codexPath, "utf8")).toBe(`${unrelated.trimEnd()}\n\n${fileContent(buildClientConfigBundle({ ...options, workspaceRoot: canonicalRepositoryRoot }), "codex.config.toml")}`);
+
+      const conflictingInline = "mcp_servers = { morrow = { command = \"other\" } }\n";
+      await writeFile(codexPath, conflictingInline, "utf8");
+      expect(() => installMorrowClient(options)).toThrow(/existing Morrow server/);
+      expect(await readFile(codexPath, "utf8")).toBe(conflictingInline);
+
+      const unrelatedInline = "mcp_servers = { other = { command = \"other\" } }\n";
+      await writeFile(codexPath, unrelatedInline, "utf8");
+      expect(() => installMorrowClient(options)).toThrow(/without rewriting existing TOML/);
+      expect(await readFile(codexPath, "utf8")).toBe(unrelatedInline);
+
+      const malformed = "[mcp_servers\n";
+      await writeFile(codexPath, malformed, "utf8");
+      expect(() => installMorrowClient(options)).toThrow(/not valid TOML/);
+      expect(await readFile(codexPath, "utf8")).toBe(malformed);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("installs Cursor and VS Code entries, preserves unrelated settings, and refuses conflicts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-editor-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const options = {
+      repositoryRoot,
+      upstreamConfigPath,
+      serverEntryPath,
+      nodeCommand: process.execPath,
+    };
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      const canonicalRepositoryRoot = await realpath(repositoryRoot);
+      const cursorPath = join(canonicalRepositoryRoot, ".cursor", "mcp.json");
+      const vscodePath = join(canonicalRepositoryRoot, ".vscode", "mcp.json");
+
+      const cursor = installMorrowClient({ ...options, client: "cursor" });
+      const vscode = installMorrowClient({ ...options, client: "vscode" });
+      expect(cursor).toMatchObject({ scope: "project", path: cursorPath, changed: true });
+      expect(vscode).toMatchObject({ scope: "project", path: vscodePath, changed: true });
+
+      // Cursor documents type, command, args, env and envFile for stdio servers. It documents no
+      // cwd field, so Morrow must not write one.
+      expect(JSON.parse(await readFile(cursorPath, "utf8"))).toEqual({
+        mcpServers: {
+          morrow: {
+            type: "stdio",
+            command: process.execPath,
+            args: [serverEntryPath],
+            env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+          },
+        },
+      });
+      expect(JSON.parse(await readFile(vscodePath, "utf8"))).toEqual({
+        servers: {
+          morrow: {
+            type: "stdio",
+            command: process.execPath,
+            args: [serverEntryPath],
+            cwd: canonicalRepositoryRoot,
+            env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+          },
+        },
+      });
+
+      expect(installMorrowClient({ ...options, client: "cursor" })).toMatchObject({ changed: false });
+      expect(installMorrowClient({ ...options, client: "vscode" })).toMatchObject({ changed: false });
+
+      if (process.platform !== "win32") {
+        expect((await stat(cursorPath)).mode & 0o777).toBe(0o600);
+        expect((await stat(vscodePath)).mode & 0o777).toBe(0o600);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("merges into existing Cursor and VS Code files and refuses malformed or conflicting entries", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-editor-merge-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const cursorPath = join(repositoryRoot, ".cursor", "mcp.json");
+    const vscodePath = join(repositoryRoot, ".vscode", "mcp.json");
+    const options = {
+      repositoryRoot,
+      upstreamConfigPath,
+      serverEntryPath,
+      nodeCommand: process.execPath,
+    };
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await mkdir(dirname(cursorPath), { recursive: true });
+      await mkdir(dirname(vscodePath), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+
+      await writeFile(cursorPath, `${JSON.stringify({
+        mcpServers: { other: { command: "other", args: ["--serve"] } },
+      }, null, 2)}\n`, "utf8");
+      await writeFile(vscodePath, `${JSON.stringify({
+        inputs: [{ type: "promptString", id: "api-key", description: "API key" }],
+        servers: { other: { type: "stdio", command: "other" } },
+      }, null, 2)}\n`, "utf8");
+
+      expect(installMorrowClient({ ...options, client: "cursor" })).toMatchObject({ changed: true });
+      expect(installMorrowClient({ ...options, client: "vscode" })).toMatchObject({ changed: true });
+
+      const mergedCursor = JSON.parse(await readFile(cursorPath, "utf8")) as Record<string, Record<string, unknown>>;
+      expect(mergedCursor.mcpServers!.other).toEqual({ command: "other", args: ["--serve"] });
+      expect(mergedCursor.mcpServers!.morrow).toMatchObject({ type: "stdio", command: process.execPath });
+
+      const mergedVscode = JSON.parse(await readFile(vscodePath, "utf8")) as Record<string, unknown>;
+      expect(mergedVscode.inputs).toEqual([{ type: "promptString", id: "api-key", description: "API key" }]);
+      expect((mergedVscode.servers as Record<string, unknown>).other).toEqual({ type: "stdio", command: "other" });
+      expect((mergedVscode.servers as Record<string, unknown>).morrow)
+        .toMatchObject({ cwd: await realpath(repositoryRoot) });
+
+      const conflictingCursor = `${JSON.stringify({
+        mcpServers: { morrow: { command: "someone-elses-morrow" } },
+      }, null, 2)}\n`;
+      await writeFile(cursorPath, conflictingCursor, "utf8");
+      expect(() => installMorrowClient({ ...options, client: "cursor" }))
+        .toThrow(/Refusing to replace existing Morrow server morrow/);
+      expect(await readFile(cursorPath, "utf8")).toBe(conflictingCursor);
+
+      const conflictingVscode = `${JSON.stringify({
+        servers: { morrow: { type: "stdio", command: "someone-elses-morrow" } },
+      }, null, 2)}\n`;
+      await writeFile(vscodePath, conflictingVscode, "utf8");
+      expect(() => installMorrowClient({ ...options, client: "vscode" }))
+        .toThrow(/Refusing to replace existing Morrow server morrow/);
+      expect(await readFile(vscodePath, "utf8")).toBe(conflictingVscode);
+
+      const malformed = "{ \"mcpServers\": { \n";
+      await writeFile(cursorPath, malformed, "utf8");
+      expect(() => installMorrowClient({ ...options, client: "cursor" }))
+        .toThrow(/is not valid JSON/);
+      expect(await readFile(cursorPath, "utf8")).toBe(malformed);
+
+      const notAnObject = "[]\n";
+      await writeFile(vscodePath, notAnObject, "utf8");
+      expect(() => installMorrowClient({ ...options, client: "vscode" }))
+        .toThrow(/must contain a JSON object/);
+      expect(await readFile(vscodePath, "utf8")).toBe(notAnObject);
+
+      const wrongContainerType = `${JSON.stringify({ servers: [] }, null, 2)}\n`;
+      await writeFile(vscodePath, wrongContainerType, "utf8");
+      expect(() => installMorrowClient({ ...options, client: "vscode" }))
+        .toThrow(/must contain a JSON object/);
+      expect(await readFile(vscodePath, "utf8")).toBe(wrongContainerType);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("names the documented Claude Desktop file on macOS and Windows and refuses every pair it cannot serve", () => {
+    const home = resolve("/tmp/morrow-instructor-home");
+    expect(morrowClientConfigPath({
+      client: "claude-desktop",
+      scope: "user",
+      homeDirectory: home,
+      platform: "darwin",
+    })).toBe(join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json"));
+
+    // Live-unverified: the documented Windows location, not a write proven on a Windows computer.
+    expect(morrowClientConfigPath({
+      client: "claude-desktop",
+      scope: "user",
+      platform: "win32",
+      applicationDataDirectory: "C:\\Users\\instructor\\AppData\\Roaming",
+    })).toBe("C:\\Users\\instructor\\AppData\\Roaming\\Claude\\claude_desktop_config.json");
+
+    const unknownWindowsFolder = refusalOf(() => morrowClientConfigPath({
+      client: "claude-desktop",
+      scope: "user",
+      platform: "win32",
+      applicationDataDirectory: "",
+    }));
+    expect(unknownWindowsFolder.code).toBe("client_configuration_location_unknown");
+    expect(unknownWindowsFolder.nextAction).toContain("Edit Config");
+    expect(unknownWindowsFolder.message).toContain(unknownWindowsFolder.reason);
+
+    const unsupportedPlatform = refusalOf(() => morrowClientConfigPath({
+      client: "claude-desktop",
+      scope: "user",
+      homeDirectory: home,
+      platform: "linux",
+    }));
+    expect(unsupportedPlatform.code).toBe("client_platform_unsupported");
+    expect(unsupportedPlatform.reason).toContain("linux");
+    expect(unsupportedPlatform.nextAction).toContain("Claude Code");
+
+    const projectScope = refusalOf(() => morrowClientConfigPath({
+      client: "claude-desktop",
+      scope: "project",
+      projectRoot: resolve("/tmp/morrow-course-project"),
+      platform: "darwin",
+    }));
+    expect(projectScope.code).toBe("client_scope_unsupported");
+    expect(projectScope.nextAction).toContain("--scope user");
+  });
+
+  it("installs Claude Desktop where this computer documents it, or refuses with a next action", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-claude-desktop-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const home = join(directory, "home");
+    const originalHome = process.env.HOME;
+    const options = {
+      repositoryRoot,
+      upstreamConfigPath,
+      serverEntryPath,
+      nodeCommand: process.execPath,
+      client: "claude-desktop" as const,
+      scope: "user" as const,
+    };
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await mkdir(home, { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      process.env.HOME = home;
+
+      if (process.platform === "win32") {
+        // A real install here would write the signed-in person's own Claude Desktop file, so this
+        // checks only the location. The Windows write stays live-unverified.
+        expect(morrowClientConfigPath({ client: "claude-desktop", scope: "user" }))
+          .toBe(join(String(process.env.APPDATA), "Claude", "claude_desktop_config.json"));
+        return;
+      }
+      if (process.platform !== "darwin") {
+        const refused = refusalOf(() => installMorrowClient(options));
+        expect(refused.code).toBe("client_platform_unsupported");
+        expect(refused.nextAction).not.toBe("");
+        await expect(stat(join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")))
+          .rejects.toThrow();
+        return;
+      }
+
+      const configurationPath = join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+      const installed = installMorrowClient(options);
+      expect(installed).toMatchObject({ scope: "user", path: configurationPath, changed: true });
+      expect(JSON.parse(await readFile(configurationPath, "utf8"))).toEqual({
+        mcpServers: {
+          morrow: {
+            type: "stdio",
+            command: process.execPath,
+            args: [serverEntryPath],
+            cwd: repositoryRoot,
+            env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+          },
+        },
+      });
+      expect((await stat(configurationPath)).mode & 0o777).toBe(0o600);
+      expect(installMorrowClient(options)).toMatchObject({ changed: false });
+
+      const conflicting = `${JSON.stringify({
+        mcpServers: { morrow: { command: "someone-elses-morrow" } },
+      }, null, 2)}\n`;
+      await writeFile(configurationPath, conflicting, "utf8");
+      expect(() => installMorrowClient(options)).toThrow(/Refusing to replace existing Morrow server morrow/);
+      expect(await readFile(configurationPath, "utf8")).toBe(conflicting);
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("writes the recorded Codex scope decision and Claude Desktop locations into the generated files", () => {
+    const repositoryRoot = resolve("/tmp/morrow-scope-copy");
+    const bundle = buildClientConfigBundle({
+      repositoryRoot,
+      upstreamConfigPath: join(repositoryRoot, "morrow.upstreams.json"),
+      serverEntryPath: join(repositoryRoot, "packages", "mcp-server", "dist", "index.js"),
+      nodeCommand: "/usr/local/bin/node",
+    });
+
+    for (const name of ["install.posix.sh", "install.powershell.ps1"]) {
+      const script = fileContent(bundle, name);
+      expect(script).toContain("read ~/.codex/config.toml");
+      expect(script).toContain("morrow mcp install codex --scope user");
+      expect(script).toContain("A project .codex/config.toml loads only in a project you have marked trusted.");
+    }
+
+    const readmeText = fileContent(bundle, "README.txt");
+    expect(readmeText).toContain("merge into ~/.codex/config.toml");
+    expect(readmeText).toContain("marked trusted");
+    expect(readmeText).toContain("Library/Application Support/Claude on macOS");
+    expect(readmeText).toContain("%APPDATA%\\Claude on Windows");
+  });
+
+  it("tells the person what each written location still needs, and says nothing when it needs nothing", () => {
+    expect(morrowClientConfigNotes({ client: "codex", scope: "project", platform: "darwin" }))
+      .toEqual([expect.stringContaining("marked trusted")]);
+    expect(morrowClientConfigNotes({ client: "codex", scope: "project", platform: "darwin" })[0])
+      .toContain("--scope user");
+    expect(morrowClientConfigNotes({ client: "codex", scope: "user", platform: "darwin" })).toEqual([]);
+
+    const windowsDesktop = morrowClientConfigNotes({ client: "claude-desktop", scope: "user", platform: "win32" });
+    expect(windowsDesktop).toHaveLength(1);
+    expect(windowsDesktop[0]).toContain("has not confirmed a write here on a Windows computer");
+    expect(windowsDesktop[0]).toContain("Edit Config");
+    expect(morrowClientConfigNotes({ client: "claude-desktop", scope: "user", platform: "darwin" })).toEqual([]);
+    expect(morrowClientConfigNotes({ client: "claude-code", scope: "project", platform: "win32" })).toEqual([]);
+  });
+
+  it("writes a user-scope Cursor file and refuses an undocumented VS Code user-profile path", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-editor-user-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const home = join(directory, "home");
+    const originalHome = process.env.HOME;
+    const options = {
+      repositoryRoot,
+      upstreamConfigPath,
+      serverEntryPath,
+      nodeCommand: process.execPath,
+      scope: "user" as const,
+    };
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await mkdir(home, { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      process.env.HOME = home;
+
+      const cursor = installMorrowClient({ ...options, client: "cursor" });
+      expect(cursor).toMatchObject({ scope: "user", path: join(home, ".cursor", "mcp.json"), changed: true });
+      expect(JSON.parse(await readFile(cursor.path, "utf8")))
+        .toMatchObject({ mcpServers: { morrow: { args: [serverEntryPath] } } });
+
+      expect(() => installMorrowClient({ ...options, client: "vscode" }))
+        .toThrow(/MCP: Open User Configuration/);
+      await expect(stat(join(home, ".vscode", "mcp.json"))).rejects.toThrow();
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -180,7 +702,7 @@ describe("project installation and hermetic parity", () => {
       expect(setup.status).toBe(0);
       expect(setup.stdout).toContain("Morrow's local settings are ready.");
       expect(setup.stdout).toContain("This step does not connect a course.");
-      expect(setup.stdout).toContain("one assistant at a time");
+      expect(setup.stdout).toContain("share one local course connection");
       expect(setup.stdout).toContain("chrome://extensions");
       expect(setup.stdout).toContain("Open or restart that assistant before you use the extension.");
       expect(setup.stdout).not.toContain('"schema"');
@@ -194,6 +716,32 @@ describe("project installation and hermetic parity", () => {
         path: upstreamConfigPath,
         credentialsCopied: false,
       });
+
+      const stateDirectory = join(directory, "Morrow State");
+      await mkdir(stateDirectory, { recursive: true });
+      const consumerUpstreamsPath = join(stateDirectory, "morrow.upstreams.json");
+      const consumerSetup = spawnSync(process.execPath, [
+        cliPath, "setup", "--json", "--force", "--repository", repositoryRoot,
+        "--upstreams", consumerUpstreamsPath, "--state-directory", stateDirectory,
+      ], { encoding: "utf8" });
+      expect(consumerSetup.status).toBe(0);
+      const canonicalStateDirectory = await realpath(stateDirectory);
+      expect(JSON.parse(consumerSetup.stdout)).toMatchObject({
+        path: consumerUpstreamsPath,
+        stateDirectory: canonicalStateDirectory,
+      });
+      expect(JSON.parse(await readFile(consumerUpstreamsPath, "utf8"))).toMatchObject({
+        upstreams: [{ env: { MORROW_CANVAS_CONNECTOR_STATE: join(canonicalStateDirectory, "canvas-connector.json") } }],
+        operationJournal: { path: join(canonicalStateDirectory, "morrow.sqlite3") },
+        privacy: { learnerVaultPath: join(canonicalStateDirectory, "learner-vault.json") },
+      });
+
+      const invalidState = spawnSync(process.execPath, [
+        cliPath, "setup", "--repository", repositoryRoot, "--state-directory", "relative-state",
+      ], { encoding: "utf8" });
+      expect(invalidState.status).toBe(1);
+      expect(invalidState.stderr).toContain("stateDirectory must be an absolute path");
+
       const install = spawnSync(process.execPath, [
         cliPath, "mcp", "install", "gemini", "--repository", repositoryRoot,
       ], { encoding: "utf8" });
@@ -202,6 +750,93 @@ describe("project installation and hermetic parity", () => {
       expect(install.stdout).toContain("did not open or test the assistant");
       expect(install.stdout).toContain("You do not open a separate Morrow application");
       expect(install.stdout).not.toContain("scope=project");
+
+      const codexProjectInstall = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "codex", "--repository", repositoryRoot,
+      ], { encoding: "utf8" });
+      expect(codexProjectInstall.status).toBe(0);
+      expect(codexProjectInstall.stdout).toContain("Morrow configuration was installed for ChatGPT or Codex.");
+      expect(codexProjectInstall.stdout).toContain("only in a project you have marked trusted");
+      expect(codexProjectInstall.stdout).toContain("--scope user");
+
+      const desktopRefusal = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "claude-desktop", "--repository", repositoryRoot,
+      ], { encoding: "utf8" });
+      expect(desktopRefusal.status).toBe(1);
+      expect(desktopRefusal.stderr).toContain("Claude Desktop reads one configuration file");
+      expect(desktopRefusal.stderr).toContain("Run the same command with --scope user.");
+      expect(desktopRefusal.stderr).not.toContain("TypeError");
+
+      const clientProject = join(directory, "assistant-project");
+      await mkdir(clientProject, { recursive: true });
+      const projectInstall = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "claude", "--repository", repositoryRoot,
+        "--client-project", clientProject,
+      ], { encoding: "utf8" });
+      expect(projectInstall.status).toBe(0);
+      expect(JSON.parse(await readFile(join(clientProject, ".mcp.json"), "utf8")))
+        .toMatchObject({
+          mcpServers: {
+            morrow: {
+              cwd: await realpath(clientProject),
+              args: [serverEntryPath],
+              env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+            },
+          },
+        });
+
+      const editorProject = join(directory, "editor-project");
+      await mkdir(editorProject, { recursive: true });
+      const cursorInstall = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "cursor", "--repository", repositoryRoot,
+        "--client-project", editorProject,
+      ], { encoding: "utf8" });
+      expect(cursorInstall.status).toBe(0);
+      expect(cursorInstall.stdout).toContain("Morrow configuration was installed for Cursor.");
+      expect(JSON.parse(await readFile(join(editorProject, ".cursor", "mcp.json"), "utf8")))
+        .toMatchObject({
+          mcpServers: {
+            morrow: { type: "stdio", args: [serverEntryPath], env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath } },
+          },
+        });
+
+      const vscodeInstall = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "vscode", "--repository", repositoryRoot,
+        "--client-project", editorProject,
+      ], { encoding: "utf8" });
+      expect(vscodeInstall.status).toBe(0);
+      expect(vscodeInstall.stdout).toContain("Morrow configuration was installed for VS Code.");
+      expect(JSON.parse(await readFile(join(editorProject, ".vscode", "mcp.json"), "utf8")))
+        .toMatchObject({
+          servers: {
+            morrow: { type: "stdio", cwd: await realpath(editorProject), args: [serverEntryPath] },
+          },
+        });
+
+      const vscodeUserInstall = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "vscode", "--scope", "user", "--repository", repositoryRoot,
+      ], { encoding: "utf8" });
+      expect(vscodeUserInstall.status).toBe(1);
+      expect(vscodeUserInstall.stderr).toContain("MCP: Open User Configuration");
+
+      const consumerHome = join(directory, "consumer-home");
+      const materials = join(directory, "Morrow Materials");
+      await mkdir(consumerHome, { recursive: true });
+      await mkdir(materials, { recursive: true });
+      const userInstall = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "codex", "--scope", "user", "--repository", repositoryRoot,
+        "--workspace-root", materials,
+      ], { encoding: "utf8", env: { ...process.env, HOME: consumerHome } });
+      expect(userInstall.status).toBe(0);
+      expect(await readFile(join(consumerHome, ".codex", "config.toml"), "utf8"))
+        .toContain(`cwd = ${JSON.stringify(await realpath(materials))}`);
+
+      const invalidWorkspace = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "codex", "--scope", "user", "--repository", repositoryRoot,
+        "--workspace-root", "relative-materials",
+      ], { encoding: "utf8", env: { ...process.env, HOME: join(directory, "relative-home") } });
+      expect(invalidWorkspace.status).toBe(1);
+      expect(invalidWorkspace.stderr).toContain("workspaceRoot must be an absolute path");
 
       const doctorText = spawnSync(process.execPath, [
         cliPath, "doctor", "--repository", repositoryRoot, "--upstreams", upstreamConfigPath,
@@ -310,7 +945,7 @@ describe("writeClientConfigBundle", () => {
         serverEntryPath,
         nodeCommand: process.execPath,
       });
-      expect(bundle.files).toHaveLength(9);
+      expect(bundle.files).toHaveLength(11);
       const manifest = await readFile(join(outputDirectory, "manifest.json"), "utf8");
       expect(JSON.parse(manifest)).toMatchObject({
         schema: "morrow.client-config-manifest.v1",

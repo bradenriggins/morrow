@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { basename } from "node:path";
 import {
   McpServer,
   createRequestStateCodec,
@@ -9,11 +10,24 @@ import {
 } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import * as z from "zod/v4";
-import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
+import {
+  isJsonObject,
+  normalizeRequestedBy,
+  sha256Text,
+  type JsonObject,
+  type RequestedByIdentity,
+} from "@morrow/contracts";
 import { GATEWAY_OPERATION_STATES } from "@morrow/operation-journal";
-import type { GatewayRuntime } from "./runtime.js";
+import { isPrivateSourceTool, type GatewayRuntime } from "./runtime.js";
+import { registerActivityTool, type ActivityGroups } from "./activity-tools.js";
 import { MORROW_SERVER_INSTRUCTIONS } from "./server-instructions.js";
 import { registerLessonReviewTool, type LessonReviewState } from "./lesson-review.js";
+import { registerEditAccessTool, type EditAccessRequestState } from "./edit-access.js";
+import { registerCourseAuditResource, registerCourseAuditTool } from "./course-audit.js";
+import { registerCourseInventoryTool } from "./course-inventory.js";
+import { registerProgramLedgerResource, registerProgramLedgerTool } from "./program-ledger.js";
+import { registerMoodleResourceFileTool } from "./moodle-resource-file.js";
+import { registerCanvasCourseFileUploadTool } from "./canvas-file-transfer.js";
 
 function textAndStructured(summary: string, structuredContent: JsonObject): CallToolResult {
   return {
@@ -74,6 +88,136 @@ function publicToolInputSchema(schema: JsonObject): JsonObject {
   };
 }
 
+type PublicInputValidator = {
+  readonly "~standard": {
+    readonly validate: (value: unknown) => unknown | Promise<unknown>;
+  };
+};
+
+function publicCapabilityDescriptor(runtime: GatewayRuntime, name: string): JsonObject {
+  const result = runtime.capabilityGet(name);
+  const mapping = runtime.catalog.tools.find((tool) => tool.publicName === name.trim() && !isPrivateSourceTool(tool));
+  if (!mapping || !isJsonObject(result.descriptor)) return result;
+  return {
+    ...result,
+    descriptor: {
+      ...result.descriptor,
+      inputSchema: publicToolInputSchema(mapping.inputSchema),
+    },
+  };
+}
+
+function safeCapabilityInvocationFailure(code: "capability_not_found" | "capability_input_invalid" | "capability_mode_mismatch"): CallToolResult {
+  return {
+    content: [{ type: "text", text: "Morrow could not invoke the selected capability." }],
+    isError: true,
+    structuredContent: {
+      schema: "morrow.problem.v1",
+      code,
+    },
+  };
+}
+
+async function validatePublicCapabilityInput(
+  validator: PublicInputValidator,
+  value: unknown,
+): Promise<Record<string, unknown> | undefined> {
+  const result = await validator["~standard"].validate(value);
+  if (!isJsonObject(result) || !isJsonObject(result.value)) return undefined;
+  return result.value as Record<string, unknown>;
+}
+
+type PublicToolHandler = (input: unknown, context: ServerContext) => Promise<CallToolResult> | CallToolResult;
+type ToolRegistrar = {
+  registerTool: (name: string, config: unknown, handler: PublicToolHandler) => unknown;
+};
+
+function egressInput(name: string, input: unknown): Record<string, unknown> {
+  if (!isJsonObject(input)) return {};
+  if (["morrow_capability_read", "morrow_capability_change"].includes(name)
+    && isJsonObject(input.arguments)) {
+    return input.arguments;
+  }
+  return input;
+}
+
+/** What Morrow knows about the assistant on the other end of one connection. */
+export interface MorrowServerContext {
+  /** The admitted project directory for this connection. Never sent to an assistant. */
+  readonly workspaceRoot?: string;
+  /** The stdio process this connection arrived through. */
+  readonly proxyPid?: number;
+}
+
+/**
+ * Names the assistant that sent this call. The name and version are what the
+ * client reported at initialize; Morrow does not verify them. The workspace is
+ * named and digested here so no absolute path can reach an assistant.
+ */
+function requestedByIdentity(
+  server: McpServer,
+  sessionId: string,
+  serverContext: MorrowServerContext,
+): RequestedByIdentity | undefined {
+  const workspaceRoot = serverContext.workspaceRoot;
+  const reported = server.server.getClientVersion();
+  const clientName = typeof reported?.name === "string" ? reported.name.trim() : "";
+  if (!workspaceRoot || !clientName) return undefined;
+  const clientVersion = typeof reported?.version === "string" && reported.version.trim()
+    ? reported.version.trim()
+    : "unstated";
+  return normalizeRequestedBy({
+    schema: "morrow.requested-by.v1",
+    clientName,
+    clientVersion,
+    proxyPid: serverContext.proxyPid ?? process.pid,
+    workspaceName: basename(workspaceRoot) || workspaceRoot,
+    workspaceDigest: sha256Text(workspaceRoot),
+    sessionId,
+  });
+}
+
+function sessionIdOf(context: ServerContext): string {
+  return typeof context.sessionId === "string" && context.sessionId ? context.sessionId : "stdio-single-client";
+}
+
+function artifactAudience(context: ServerContext): string {
+  const session = typeof context.sessionId === "string" && context.sessionId ? context.sessionId : "stdio-single-client";
+  const client = typeof context.http?.authInfo?.clientId === "string" && context.http.authInfo.clientId
+    ? context.http.authInfo.clientId
+    : "local";
+  return session + "\0" + client;
+}
+
+/** Install one last response boundary before any native or catalog tool registers. */
+function installMcpEgressBoundary(
+  server: McpServer,
+  runtime: GatewayRuntime,
+  requestedBy: (context: ServerContext) => RequestedByIdentity | undefined,
+): void {
+  const registrar = server as unknown as ToolRegistrar;
+  const original = registrar.registerTool.bind(server);
+  registrar.registerTool = (name, config, handler) => original(name, config, async (input, context) => {
+    const boundaryRuntime = runtime as unknown as {
+      redactMcpEgress?: (value: JsonObject, request: Readonly<Record<string, unknown>>, options: { readonly signal?: AbortSignal; readonly bound?: boolean; readonly toolName?: string }) => Promise<JsonObject>;
+      bindResultArtifactAudience?: (value: JsonObject, audience: string) => JsonObject;
+      runAsRequester?: (identity: RequestedByIdentity | undefined, body: () => Promise<CallToolResult>) => Promise<CallToolResult>;
+    };
+    const call = () => handler(input, context) as Promise<CallToolResult>;
+    const result = boundaryRuntime.runAsRequester
+      ? await boundaryRuntime.runAsRequester(requestedBy(context), call)
+      : await call();
+    if (!boundaryRuntime.redactMcpEgress || !isJsonObject(result)) return result;
+    const projected = await boundaryRuntime.redactMcpEgress(result, egressInput(name, input), {
+      signal: context.mcpReq.signal,
+      toolName: name,
+    });
+    return (boundaryRuntime.bindResultArtifactAudience
+      ? boundaryRuntime.bindResultArtifactAudience(projected, artifactAudience(context))
+      : projected) as unknown as CallToolResult;
+  });
+}
+
 function safeResultArtifactFailure(error: unknown): CallToolResult {
   const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
   return {
@@ -90,22 +234,38 @@ function safeResultArtifactFailure(error: unknown): CallToolResult {
 export function createMorrowServer(
   runtime: GatewayRuntime,
   healthProvider: () => JsonObject | Promise<JsonObject> = () => runtime.health() as unknown as JsonObject,
+  serverContext: MorrowServerContext = {},
+  groups?: ActivityGroups,
 ): McpServer {
-  const reviewState = createRequestStateCodec<LessonReviewState>({
+  const workspaceRoot = serverContext.workspaceRoot;
+  const reviewState = createRequestStateCodec<LessonReviewState | EditAccessRequestState>({
     key: randomBytes(32), ttlSeconds: 600,
     bind: (context) => `${context.mcpReq.method}\0${context.sessionId ?? ""}\0${context.http?.authInfo?.clientId ?? ""}`,
   });
   const server = new McpServer(
     {
       name: "morrow",
-      version: "1.0.0-rc.0",
+      version: "1.0.0",
     },
     {
       instructions: MORROW_SERVER_INSTRUCTIONS,
       requestState: { verify: reviewState.verify },
     },
   );
+  installMcpEgressBoundary(server, runtime, (context) => requestedByIdentity(server, sessionIdOf(context), serverContext));
+  registerActivityTool(server, runtime, healthProvider, {
+    identityFor: (sessionId) => requestedByIdentity(server, sessionId, serverContext),
+    ...(groups ? { groups } : {}),
+  });
   registerLessonReviewTool(server, runtime, reviewState);
+  registerEditAccessTool(server, runtime, reviewState);
+  registerCourseAuditResource(server);
+  registerCourseAuditTool(server, runtime);
+  registerCourseInventoryTool(server, runtime);
+  registerProgramLedgerResource(server);
+  registerProgramLedgerTool(server, runtime);
+  registerMoodleResourceFileTool(server, runtime, workspaceRoot);
+  registerCanvasCourseFileUploadTool(server, runtime, workspaceRoot);
 
   server.registerTool(
     "morrow_health",
@@ -122,10 +282,15 @@ export function createMorrowServer(
     },
     async () => {
       const health = await healthProvider() as unknown as ReturnType<GatewayRuntime["health"]>;
+      // A runtime that is not ready for a named reason states that reason here,
+      // because this line is what the person reads first.
+      const detail = (health as unknown as JsonObject).readyDetail;
       return textAndStructured(
         health.ready
           ? `Morrow is ready with ${health.publicToolCount} public tools.`
-          : "Morrow is not ready. Review the source status.",
+          : typeof detail === "string" && detail.trim().length > 0
+            ? detail
+            : "Morrow is not ready. Review the source status.",
         health as unknown as JsonObject,
       );
     },
@@ -148,9 +313,9 @@ export function createMorrowServer(
         openWorldHint: false,
       },
     },
-    async ({ handle, offset, limit }) => {
+    async ({ handle, offset, limit }, context) => {
       try {
-        const page = runtime.resultPage(handle, offset, limit);
+        const page = runtime.resultPage(handle, offset, limit, artifactAudience(context));
         return textAndStructured(
           `Read ${page.returned} characters from saved local result ${handle}.`,
           page,
@@ -220,9 +385,49 @@ export function createMorrowServer(
     },
     async ({ name }) => textAndStructured(
       `Here is the tool ${name}.`,
-      runtime.capabilityGet(name),
+      publicCapabilityDescriptor(runtime, name),
     ),
   );
+
+  const publicInputValidators = new Map(
+    runtime.catalog.tools.filter((tool) => !isPrivateSourceTool(tool)).map((tool) => [
+      tool.publicName,
+      fromJsonSchema(publicToolInputSchema(tool.inputSchema)) as unknown as PublicInputValidator,
+    ]),
+  );
+  const registerCapabilityInvocation = (
+    name: "morrow_capability_read" | "morrow_capability_change",
+    readOnly: boolean,
+  ) => {
+    server.registerTool(
+      name,
+      {
+        title: readOnly ? "Read a Morrow capability" : "Change with a Morrow capability",
+        description: readOnly
+          ? "Call one catalog capability that is marked read-only after validating its public input schema."
+          : "Plan or carry out one catalog capability that is not marked read-only after validating its public input schema.",
+        inputSchema: z.object({
+          name: z.string().min(1).max(128),
+          arguments: z.record(z.string(), z.unknown()),
+        }),
+        annotations: { readOnlyHint: readOnly },
+      },
+      async ({ name: publicName, arguments: argumentsValue }, context: ServerContext): Promise<CallToolResult> => {
+        const mapping = runtime.catalog.tools.find((tool) => tool.publicName === publicName && !isPrivateSourceTool(tool));
+        const validator = publicInputValidators.get(publicName);
+        if (!mapping || !validator) return safeCapabilityInvocationFailure("capability_not_found");
+        if ((mapping.annotations?.readOnlyHint === true) !== readOnly) {
+          return safeCapabilityInvocationFailure("capability_mode_mismatch");
+        }
+        const input = await validatePublicCapabilityInput(validator, argumentsValue);
+        if (!input) return safeCapabilityInvocationFailure("capability_input_invalid");
+        const result = await runtime.call(publicName, input, { signal: context.mcpReq.signal });
+        return result as unknown as CallToolResult;
+      },
+    );
+  };
+  registerCapabilityInvocation("morrow_capability_read", true);
+  registerCapabilityInvocation("morrow_capability_change", false);
 
   server.registerTool(
     "morrow_profile_status",
@@ -287,31 +492,34 @@ export function createMorrowServer(
     },
   );
 
-  for (const tool of runtime.catalog.tools) {
-    server.registerTool(
-      tool.publicName,
-      {
-        ...(tool.title ? { title: tool.title } : {}),
-        ...(tool.description ? { description: tool.description } : {}),
-        inputSchema: fromJsonSchema(publicToolInputSchema(tool.inputSchema)),
-        ...(tool.annotations
-          ? { annotations: tool.annotations as McpToolAnnotations }
-          : {}),
-        _meta: {
-          "io.morrow/source": {
-            upstreamId: tool.upstreamId,
-            upstreamToolName: tool.upstreamName,
-            catalogDigest: runtime.catalog.digest,
+  if (runtime.config.toolSurface === "full") {
+    for (const tool of runtime.catalog.tools) {
+      if (isPrivateSourceTool(tool)) continue;
+      server.registerTool(
+        tool.publicName,
+        {
+          ...(tool.title ? { title: tool.title } : {}),
+          ...(tool.description ? { description: tool.description } : {}),
+          inputSchema: fromJsonSchema(publicToolInputSchema(tool.inputSchema)),
+          ...(tool.annotations
+            ? { annotations: tool.annotations as McpToolAnnotations }
+            : {}),
+          _meta: {
+            "io.morrow/source": {
+              upstreamId: tool.upstreamId,
+              upstreamToolName: tool.upstreamName,
+              catalogDigest: runtime.catalog.digest,
+            },
           },
         },
-      },
-      async (input, context: ServerContext): Promise<CallToolResult> => {
-        const result = await runtime.call(tool.publicName, input as Record<string, unknown>, {
-          signal: context.mcpReq.signal,
-        });
-        return result as unknown as CallToolResult;
-      },
-    );
+        async (input, context: ServerContext): Promise<CallToolResult> => {
+          const result = await runtime.call(tool.publicName, input as Record<string, unknown>, {
+            signal: context.mcpReq.signal,
+          });
+          return result as unknown as CallToolResult;
+        },
+      );
+    }
   }
 
   return server;

@@ -25,4 +25,13 @@ describe("rich approval content", () => {
     expect(result).not.toContain('class="approve"');
     expect(result).not.toContain('fetch("/approve")');
   });
+
+  it("shows no image address from an item bank question body", () => {
+    const result = formattedTextPreview("Question text", '<p>Which structure captures light?</p><img src="https://school.instructure.com/courses/42/files/9/preview" alt=""><img src="/courses/42/files/9/preview">');
+    expect(result).toContain("Which structure captures light?");
+    expect(result).toContain("External images and media are not loaded");
+    expect(result).not.toContain("school.instructure.com");
+    expect(result).not.toContain("/courses/42/files/9/preview");
+    expect(result).not.toMatch(/\ssrc=/);
+  });
 });

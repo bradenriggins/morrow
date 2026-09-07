@@ -1,0 +1,22 @@
+{
+  "name": "morrow-installer",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Morrow graphical setup for macOS and Windows",
+  "main": "main.cjs",
+  "scripts": {
+    "test": "node test/require-dependencies.cjs && node --test --test-concurrency=2 test/*.test.cjs test/*.test.mjs",
+    "test:layout": "node test/renderer-layout.browser.mjs",
+    "package:dir": "electron-builder --config electron-builder.config.cjs --dir --publish never",
+    "package:mac": "electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
+    "package:win": "electron-builder --config electron-builder.config.cjs --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "dependencies": {
+    "@anthropic-ai/mcpb": "2.1.2",
+    "electron-updater": "6.8.9"
+  }
+}

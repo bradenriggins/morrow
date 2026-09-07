@@ -141,6 +141,85 @@ function inputSchema(parameters, readOnly = false) {
   };
 }
 
+function bulkAssignmentDatesParameter() {
+  return {
+    inputName: "assignment_dates",
+    wireName: "assignment_dates",
+    location: "form",
+    required: true,
+    deprecated: false,
+    schema: {
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      description: "The exact AssignmentDate updates. Morrow sends this value as the documented raw JSON request array, then verifies every requested assignment and date.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "all_dates"],
+        properties: {
+          id: { type: "string", pattern: "^[1-9][0-9]*$" },
+          all_dates: {
+            type: "array",
+            minItems: 1,
+            maxItems: 200,
+            items: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                id: { type: "string", pattern: "^[1-9][0-9]*$" },
+                base: { type: "boolean" },
+                due_at: { type: ["string", "null"] },
+                unlock_at: { type: ["string", "null"] },
+                lock_at: { type: ["string", "null"] },
+              },
+              oneOf: [
+                { required: ["base"], properties: { base: { const: true } } },
+                { required: ["id"] },
+              ],
+              anyOf: [
+                { required: ["due_at"] },
+                { required: ["unlock_at"] },
+                { required: ["lock_at"] },
+              ],
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+// The Canvas specification types question[answers] as [Answer], which the generic
+// mapper flattens to an array of strings. No question payload can be rebuilt from
+// that shape. The fields are the documented Answer model, plus answer_html, which
+// the Canvas multiple-choice and multiple-answers answer parsers read as the HTML
+// answer body. docs/implementation/CATALOG-RECONCILIATION.md records each source.
+function classicQuizAnswersParameter(parameter) {
+  return {
+    ...parameter,
+    schema: {
+      type: "array",
+      minItems: 1,
+      maxItems: 100,
+      description: "The exact answers for this Classic Quiz question. Morrow sends each answer as indexed question[answers][n][field] form fields, starting at 0. Supported question types: multiple_choice_question, true_false_question, multiple_answers_question, short_answer_question, essay_question.",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["answer_text", "answer_weight"],
+        properties: {
+          id: { type: "string", pattern: "^[1-9][0-9]*$" },
+          answer_text: { type: "string", maxLength: 16_384 },
+          answer_weight: { type: "integer", minimum: 0, maximum: 100 },
+          answer_comments: { type: "string", maxLength: 16_384 },
+          answer_html: { type: "string", maxLength: 16_384 },
+          text_after_answers: { type: "string", maxLength: 16_384 },
+        },
+      },
+    },
+  };
+}
+
 function createModuleItemInputSchema(parameters) {
   return {
     ...inputSchema(parameters),
@@ -229,11 +308,18 @@ function normalizeOfficialOperation(resource, api, rawOperation) {
   const createModuleItem = method === "POST"
     && path === "/v1/courses/{course_id}/modules/{module_id}/items"
     && nickname === "create_module_item";
+  const bulkAssignmentDates = method === "PUT"
+    && path === "/v1/courses/{course_id}/assignments/bulk_update"
+    && nickname === "bulk_update_assignment_dates";
   const parameters = parameterRecords(rawOperation.parameters).map((parameter) => (
     createModuleItem && parameter.wireName === "module_item[content_id]"
       ? { ...parameter, required: false }
       : parameter
   ));
+  const inputParameters = [
+    ...parameters,
+    ...(bulkAssignmentDates ? [bulkAssignmentDatesParameter()] : []),
+  ].sort((left, right) => ascii(left.inputName, right.inputName));
   const risk = riskFor(method, path, nickname);
   return {
     key: `${method} ${path}#${nickname}`,
@@ -251,13 +337,23 @@ function normalizeOfficialOperation(resource, api, rawOperation) {
     risk,
     readOnly: method === "GET",
     parameters,
-    inputSchema: createModuleItem ? createModuleItemInputSchema(parameters) : inputSchema(parameters, method === "GET"),
+    inputSchema: createModuleItem ? createModuleItemInputSchema(parameters) : inputSchema(inputParameters, method === "GET"),
     responseType: cleanText(rawOperation.type || "object", 200),
   };
 }
 
-function itemBankOperation({ name, method, path, summary, parameters, destructive = false }) {
-  const normalized = parameterRecords(parameters);
+function itemBankOperation({ name, method, path, summary, parameters, destructive = false, note = "" }) {
+  // Declared values stay here rather than in schemaType: the official Canvas
+  // specification carries its own enum lists, and honouring those in the shared
+  // mapper would change every official operation schema.
+  const allowedValues = new Map((parameters || [])
+    .filter((parameter) => Array.isArray(parameter.enum) && parameter.enum.length > 0)
+    .map((parameter) => [String(parameter.name), parameter.enum]));
+  const normalized = parameterRecords(parameters).map((parameter) => (
+    allowedValues.has(parameter.wireName)
+      ? { ...parameter, schema: { ...parameter.schema, enum: [...allowedValues.get(parameter.wireName)] } }
+      : parameter
+  ));
   return {
     key: `ITEM_BANK ${method} ${path}`,
     toolName: `canvas_item_bank_${name}`,
@@ -269,7 +365,7 @@ function itemBankOperation({ name, method, path, summary, parameters, destructiv
     method,
     path,
     summary,
-    description: `${summary} Uses the signed-in New Quizzes Item Banks browser session. Credentials remain inside the browser page.`,
+    description: `${summary} Uses the signed-in New Quizzes Item Banks browser session. Credentials remain inside the browser page.${note ? ` ${note}` : ""}`,
     deprecated: false,
     risk: method === "GET" ? "read" : destructive ? "destructive" : "sensitive_write",
     readOnly: method === "GET",
@@ -281,6 +377,7 @@ function itemBankOperation({ name, method, path, summary, parameters, destructiv
 
 const id = (name, required = true) => ({ paramType: "path", name, type: "string", format: "int64", required });
 const form = (name, type = "string", required = false) => ({ paramType: "form", name, type, required });
+const enumForm = (name, values, required = false) => ({ paramType: "form", name, type: "string", enum: values, required });
 
 function itemBankOperations() {
   return [
@@ -288,15 +385,115 @@ function itemBankOperations() {
     itemBankOperation({ name: "get_bank", method: "GET", path: "/api/banks/{bank_id}", summary: "Get one New Quizzes item bank.", parameters: [id("bank_id")] }),
     itemBankOperation({ name: "list_entries", method: "GET", path: "/api/banks/{bank_id}/bank_entries", summary: "List entries in one New Quizzes item bank.", parameters: [id("bank_id"), form("page", "integer"), form("per_page", "integer")] }),
     itemBankOperation({ name: "get_entry", method: "GET", path: "/api/banks/{bank_id}/bank_entries/{bank_entry_id}", summary: "Get one New Quizzes item-bank entry.", parameters: [id("bank_id"), id("bank_entry_id")] }),
-    itemBankOperation({ name: "list_shares", method: "GET", path: "/api/banks/{bank_id}/shared_banks", summary: "List the contexts that can use one New Quizzes item bank.", parameters: [id("bank_id")] }),
+    itemBankOperation({ name: "list_shares", method: "GET", path: "/api/banks/{bank_id}/shared_banks", summary: "List the contexts that can use one New Quizzes item bank.", parameters: [id("bank_id"), form("page", "integer"), form("per_page", "integer")] }),
     itemBankOperation({ name: "create_bank", method: "POST", path: "/api/banks", summary: "Create a New Quizzes item bank.", parameters: [form("title", "string", true)] }),
-    itemBankOperation({ name: "archive_bank", method: "DELETE", path: "/api/banks/{bank_id}", summary: "Archive a New Quizzes item bank.", parameters: [id("bank_id")], destructive: true }),
+    itemBankOperation({ name: "archive_bank", method: "DELETE", path: "/api/banks/{bank_id}", summary: "Archive a New Quizzes item bank.", parameters: [id("bank_id")], destructive: true, note: "Morrow does not send this. An archive needs administrator authority and fresh counts showing zero bank entries and zero uses, and Morrow can establish none of that, so this operation stays held in every configuration. Archive a bank in Canvas instead." }),
     itemBankOperation({ name: "attach_item", method: "POST", path: "/api/banks/{bank_id}/bank_entries", summary: "Attach an existing New Quizzes item to an item bank.", parameters: [id("bank_id"), form("item_id", "string", true)] }),
-    itemBankOperation({ name: "create_item", method: "POST", path: "/api/banks/{bank_id}/items", summary: "Create a New Quizzes item inside an item bank.", parameters: [id("bank_id"), form("item", "object", true)] }),
+    itemBankOperation({ name: "create_item", method: "POST", path: "/api/banks/{bank_id}/items", summary: "Create a New Quizzes item inside an item bank.", parameters: [id("bank_id"), form("item", "object", true)], note: "This creates a standalone item. The item is not in the bank until attach_item names it, so a bank-entry list read straight after this create cannot confirm it and its absence there is not evidence that nothing was created." }),
+    itemBankOperation({ name: "get_item", method: "GET", path: "/api/banks/{bank_id}/items/{item_id}", summary: "Get one New Quizzes item-bank item.", parameters: [id("bank_id"), id("item_id")] }),
     itemBankOperation({ name: "update_item", method: "PATCH", path: "/api/banks/{bank_id}/items/{item_id}", summary: "Update a New Quizzes item-bank item.", parameters: [id("bank_id"), id("item_id"), form("item", "object", true)] }),
-    itemBankOperation({ name: "delete_entry", method: "DELETE", path: "/api/banks/{bank_id}/bank_entries/{bank_entry_id}", summary: "Delete an entry from a New Quizzes item bank.", parameters: [id("bank_id"), id("bank_entry_id")], destructive: true }),
-    itemBankOperation({ name: "share_bank", method: "POST", path: "/api/banks/{bank_id}/shared_banks", summary: "Share a New Quizzes item bank with one exact Canvas context.", parameters: [id("bank_id"), form("entity_type", "string", true), form("entity_id", "string", true)] }),
+    itemBankOperation({ name: "delete_entry", method: "DELETE", path: "/api/banks/{bank_id}/bank_entries/{bank_entry_id}", summary: "Delete an entry from a New Quizzes item bank.", parameters: [id("bank_id"), id("bank_entry_id")], destructive: true, note: "This removes the entry's association with the bank. It does not delete the item and it does not delete the bank." }),
+    itemBankOperation({ name: "share_bank", method: "POST", path: "/api/banks/{bank_id}/shared_banks", summary: "Share a New Quizzes item bank with one exact Canvas context.", parameters: [id("bank_id"), enumForm("entity_type", ["course"], true), form("entity_id", "string", true), enumForm("permission", ["read"])], note: "Only the course entity type and the read permission are verified. Morrow refuses any other share scope before it sends the request." }),
   ];
+}
+
+function courseFileTextOperation() {
+  const parameters = parameterRecords([id("course_id"), id("file_id")]);
+  return {
+    key: "CANVAS_COURSE_FILE_TEXT GET /v1/courses/{course_id}/files/{file_id}/text",
+    toolName: "canvas_read_course_file_text",
+    source: "morrow-privileged-canvas-file-content-contract",
+    service: "course_file_content",
+    resource: "Canvas Course Files",
+    family: "files",
+    nickname: "read_course_file_text",
+    method: "GET",
+    path: "/v1/courses/{course_id}/files/{file_id}/text",
+    summary: "Read one confirmed text course file.",
+    description: "Read one UTF-8 text, HTML, or XHTML Canvas course file after a fresh course-scoped file check. This requires the user's separate HTTPS file-reading permission and never sends browser credentials to the file storage host.",
+    deprecated: false,
+    risk: "read",
+    readOnly: true,
+    parameters,
+    inputSchema: inputSchema(parameters),
+    responseType: "CanvasCourseFileText",
+  };
+}
+
+function applyCustomGradebookColumnUpdateParameters(operations) {
+  const create = operations.find((operation) => (
+    operation.method === "POST"
+    && operation.path === "/v1/courses/{course_id}/custom_gradebook_columns"
+    && operation.nickname === "create_custom_gradebook_column"
+  ));
+  const update = operations.find((operation) => (
+    operation.method === "PUT"
+    && operation.path === "/v1/courses/{course_id}/custom_gradebook_columns/{id}"
+    && operation.nickname === "update_custom_gradebook_column"
+  ));
+  if (!create || !update) throw new Error("Canvas custom Gradebook Column create/update operations are required.");
+
+  const inherited = create.parameters
+    .filter((parameter) => parameter.location === "form" && parameter.wireName.startsWith("column["))
+    .map((parameter) => ({ ...parameter, required: false }));
+  const expectedWireNames = ["column[title]", "column[position]", "column[hidden]", "column[teacher_notes]", "column[read_only]"];
+  if (inherited.length !== expectedWireNames.length || expectedWireNames.some((wireName) => !inherited.some((parameter) => parameter.wireName === wireName))) {
+    throw new Error("Canvas custom Gradebook Column creation parameters no longer match the documented update contract.");
+  }
+
+  const byWireName = new Map(update.parameters.map((parameter) => [parameter.wireName, parameter]));
+  for (const parameter of inherited) byWireName.set(parameter.wireName, parameter);
+  update.parameters = [...byWireName.values()].sort((left, right) => ascii(left.inputName, right.inputName));
+  update.inputSchema = inputSchema(update.parameters);
+}
+
+function applyClassicQuizDescriptionUpdateParameter(operations) {
+  const create = operations.find((operation) => (
+    operation.method === "POST"
+    && operation.path === "/v1/courses/{course_id}/quizzes"
+    && operation.nickname === "create_quiz"
+  ));
+  const update = operations.find((operation) => (
+    operation.method === "PUT"
+    && operation.path === "/v1/courses/{course_id}/quizzes/{id}"
+    && operation.nickname === "edit_quiz"
+  ));
+  if (!create || !update) throw new Error("Canvas Classic Quiz create/update operations are required.");
+
+  const description = create.parameters.find((parameter) => (
+    parameter.location === "form" && parameter.inputName === "quiz_description" && parameter.wireName === "quiz[description]"
+  ));
+  if (!description || create.parameters.filter((parameter) => parameter.wireName === "quiz[description]").length !== 1) {
+    throw new Error("Canvas Classic Quiz creation description parameter no longer matches the documented update contract.");
+  }
+
+  const byWireName = new Map(update.parameters.map((parameter) => [parameter.wireName, parameter]));
+  byWireName.set(description.wireName, { ...description, required: false });
+  update.parameters = [...byWireName.values()].sort((left, right) => ascii(left.inputName, right.inputName));
+  update.inputSchema = inputSchema(update.parameters);
+}
+
+function applyClassicQuizAnswerParameters(operations) {
+  const routes = [
+    { method: "POST", path: "/v1/courses/{course_id}/quizzes/{quiz_id}/questions", nickname: "create_single_quiz_question" },
+    { method: "PUT", path: "/v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}", nickname: "update_existing_quiz_question" },
+  ];
+  for (const route of routes) {
+    const operation = operations.find((candidate) => (
+      candidate.method === route.method && candidate.path === route.path && candidate.nickname === route.nickname
+    ));
+    if (!operation) throw new Error(`Canvas Classic Quiz question operation ${route.nickname} is required.`);
+    const answers = operation.parameters.filter((parameter) => (
+      parameter.location === "form" && parameter.wireName === "question[answers]"
+    ));
+    if (answers.length !== 1 || answers[0].schema.type !== "array") {
+      throw new Error(`Canvas Classic Quiz question operation ${route.nickname} no longer documents one question[answers] array.`);
+    }
+    operation.parameters = operation.parameters.map((parameter) => (
+      parameter === answers[0] ? classicQuizAnswersParameter(parameter) : parameter
+    ));
+    operation.inputSchema = inputSchema(operation.parameters);
+  }
 }
 
 async function buildCatalog() {
@@ -316,7 +513,12 @@ async function buildCatalog() {
     }
   }
   assignToolNames(official);
-  const browser = itemBankOperations();
+  applyCustomGradebookColumnUpdateParameters(official);
+  applyClassicQuizDescriptionUpdateParameter(official);
+  applyClassicQuizAnswerParameters(official);
+  const itemBank = itemBankOperations();
+  const courseFileContent = [courseFileTextOperation()];
+  const browser = [...itemBank, ...courseFileContent];
   const operations = [...official, ...browser].sort((left, right) => ascii(left.toolName, right.toolName));
   const sourceDigest = sha256(canonicalJson({
     index: indexResult.value,
@@ -337,7 +539,8 @@ async function buildCatalog() {
       browserSessionOperations: browser.length,
       totalOperations: operations.length,
       newQuizzesOperations: operations.filter((operation) => operation.family.startsWith("new-quizzes")).length,
-      itemBankOperations: browser.length,
+      itemBankOperations: itemBank.length,
+      courseFileContentOperations: courseFileContent.length,
       reads: operations.filter((operation) => operation.readOnly).length,
       writes: operations.filter((operation) => !operation.readOnly).length,
     },

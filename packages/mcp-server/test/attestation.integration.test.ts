@@ -35,7 +35,7 @@ async function committedRepository(): Promise<{
 function attestedConfig(
   root: string,
   expectedRevision: string,
-  expectedToolCount = 4,
+  expectedToolCount = 5,
 ) {
   return parseGatewayConfig({
     schema: "morrow.upstreams.v1",
@@ -78,8 +78,8 @@ describe("GatewayRuntime source attestations", () => {
       expect(source).toMatchObject({
         id: "meridian",
         connected: true,
-        toolCount: 4,
-        expectedToolCount: 4,
+        toolCount: 5,
+        expectedToolCount: 5,
         catalogAttested: true,
         sourceAttestation: {
           schema: "morrow.source-attestation.v1",
@@ -102,7 +102,7 @@ describe("GatewayRuntime source attestations", () => {
     const fixture = await committedRepository();
     try {
       await expect(GatewayRuntime.connect(
-        attestedConfig(fixture.root, fixture.revision, 5),
+        attestedConfig(fixture.root, fixture.revision, 6),
         { journalPath: ":memory:" },
       )).rejects.toThrow(/Required upstream meridian failed to connect/);
     } finally {

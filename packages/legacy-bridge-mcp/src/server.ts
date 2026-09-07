@@ -33,7 +33,7 @@ function toolMeta(runtime: LegacyBridgeRuntime, sourceToolName: string): Record<
 }
 
 export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime): McpServer {
-  const server = new McpServer({ name: "example-legacy-bridge", version: "1.0.0-rc.0" });
+  const server = new McpServer({ name: "example-legacy-bridge", version: "1.0.0" });
 
   server.registerTool(
     "morrow_legacy_bridge_health",

@@ -1,4 +1,7 @@
 import { fileURLToPath } from "node:url";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { sha256Json, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
@@ -9,7 +12,7 @@ import type { ApprovalReviewContext } from "../src/approval-context.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
-function config() {
+function config(options: { readonly delayMs?: number } = {}) {
   return parseGatewayConfig({
     schema: "morrow.upstreams.v1",
     profile: "private-full",
@@ -20,7 +23,10 @@ function config() {
         kind: "mcp-stdio",
         command: process.execPath,
         args: [fixturePath],
-        env: { FAKE_SOURCE: "example-legacy" },
+        env: {
+          FAKE_SOURCE: "example-legacy",
+          ...(options.delayMs ? { FAKE_DELAY_MS: String(options.delayMs) } : {}),
+        },
         priority: 50,
         required: true,
         enabled: true,
@@ -56,6 +62,14 @@ function operationId(result: JsonObject): string {
   const structured = result.structuredContent as { operationId?: unknown };
   if (typeof structured?.operationId !== "string") throw new Error("operation id missing");
   return structured.operationId;
+}
+
+async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("operation did not reach its expected state");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 describe("outer provider effects", () => {
@@ -109,6 +123,65 @@ describe("outer provider effects", () => {
     }
   }, 20_000);
 
+  it("blocks an overlapping target across gateway instances while independent courses dispatch", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-effect-target-runtime-"));
+    const journalPath = join(directory, "gateway.sqlite3");
+    let first: GatewayRuntime | undefined;
+    let second: GatewayRuntime | undefined;
+    const plan = (runtime: GatewayRuntime, value: string, courseId: string, pageId: string) => runtime.planOperation("morrow_legacy_only", {
+      value,
+      course_id: courseId,
+      page_id: pageId,
+      _morrow: {
+        readback: {
+          tool: "canvas_page_get",
+          arguments: { course_id: courseId },
+          expected_digest: sha256Json({ source: "example-legacy", course_id: courseId }),
+        },
+      },
+    });
+    try {
+      first = await GatewayRuntime.connect(config({ delayMs: 150 }), { journalPath });
+      second = await GatewayRuntime.connect(config({ delayMs: 150 }), { journalPath });
+      const firstId = operationId(plan(first, "first request value", "101", "88"));
+      const sameTargetId = operationId(plan(second, "different request value", "101", "88"));
+      const distinctTargetId = operationId(plan(second, "same course different page", "101", "89"));
+      const differentCourseId = operationId(plan(second, "other course value", "102", "88"));
+      expect(first.operationGet(firstId).targetIdentityDigest).toBe(second.operationGet(sameTargetId).targetIdentityDigest);
+      expect(first.operationGet(firstId).targetIdentityDigest).not.toBe(second.operationGet(distinctTargetId).targetIdentityDigest);
+      expect(first.operationGet(firstId).targetIdentityDigest).not.toBe(second.operationGet(differentCourseId).targetIdentityDigest);
+      first.approveOperation(firstId);
+      second.approveOperation(sameTargetId);
+      second.approveOperation(distinctTargetId);
+      second.approveOperation(differentCourseId);
+
+      const firstDispatch = first.dispatchOperation(firstId);
+      await waitUntil(() => first!.operationGet(firstId).state === "dispatching");
+      const overlapping = await second.dispatchOperation(sameTargetId);
+      expect(overlapping).toMatchObject({ isError: true });
+      expect(second.operationGet(sameTargetId)).toMatchObject({ state: "approved" });
+
+      const sameCourseDispatch = second.dispatchOperation(distinctTargetId);
+      const independentDispatch = second.dispatchOperation(differentCourseId);
+      await waitUntil(() => second!.operationGet(distinctTargetId).state === "dispatching");
+      await waitUntil(() => second!.operationGet(differentCourseId).state === "dispatching");
+      const [firstResult, sameCourseResult, independentResult] = await Promise.all([
+        firstDispatch,
+        sameCourseDispatch,
+        independentDispatch,
+      ]);
+      expect(firstResult.isError).not.toBe(true);
+      expect(sameCourseResult.isError).not.toBe(true);
+      expect(independentResult.isError).not.toBe(true);
+
+      expect((await second.dispatchOperation(sameTargetId)).isError).not.toBe(true);
+    } finally {
+      await second?.close();
+      await first?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   it("uses an isolated loopback approval service that is outside the MCP tool surface", async () => {
     const runtime = await MorrowRuntime.connect(config(), { statePath: ":memory:" });
     try {
@@ -128,8 +201,8 @@ describe("outer provider effects", () => {
       expect(typeof url).toBe("string");
       const view = await fetch(url as string);
       const body = await view.text();
-      expect(body).toContain("Before Morrow makes changes");
-      expect(body).toContain("Ready for your review");
+      expect(body).toContain('<article class="card">');
+      expect(body).toContain('<header class="hero"><h1>');
       expect(body).toContain("Technical details");
       const nonce = /name="nonce" value="([^"]+)"/.exec(body)?.[1];
       const cookie = view.headers.get("set-cookie")?.split(";", 1)[0];
@@ -170,12 +243,92 @@ describe("outer provider effects", () => {
       });
       expect(stale.status).toBe(409);
       const staleBody = await stale.text();
-      expect(staleBody).toContain("Review could not be completed");
+      expect(staleBody).toContain("Review unavailable");
       expect(staleBody).not.toContain("nonce");
     } finally {
       await runtime.close();
     }
   }, 20_000);
+
+  it("keeps raw provider data out of loopback collections and technical details", async () => {
+    const learnerMarker = "learner-private-marker-734a961d";
+    const ordinaryChange = "Publish the course overview for Week 2.";
+    const digest = "a".repeat(64);
+    const snapshot: JsonObject = {
+      schema: "morrow.operation.v1",
+      operationId: "op:privacy-safe-1234",
+      state: "awaiting_approval",
+      verificationStatus: "unconfirmed",
+      dispatchAttempt: 1,
+      effectReceiptId: "effect:123e4567-e89b-12d3-a456-426614174000",
+      requestDigest: digest,
+      planDigest: "b".repeat(64),
+      plan: {
+        tool: "moodle_update_page",
+        hiddenLearnerMarker: learnerMarker,
+        arguments: {
+          course_id: 2,
+          module_id: 6,
+          content: ordinaryChange,
+          _morrow: { learnerMarker },
+        },
+        readback: {
+          tool: "moodle_get_page",
+          arguments: { learnerMarker },
+          expectedDigest: "c".repeat(64),
+        },
+      },
+      readback: {
+        tool: "moodle_get_page",
+        arguments: { learnerMarker },
+        expectedDigest: "c".repeat(64),
+      },
+      forwardedRequest: { learnerMarker },
+    };
+    const approval = new LoopbackApprovalServer({
+      operationGet: () => snapshot,
+      operationList: () => ({ schema: "morrow.operations.list.v1", returned: 1, operations: [snapshot] }),
+      operationReviewContext: async () => ({
+        targets: [
+          { field: "course_id", label: "Course", name: "Biology" },
+          { field: "module_id", label: "Activity", name: "Week 2 overview" },
+        ],
+      }),
+      approveOperation: () => snapshot,
+      runApprovedOperation: async () => undefined,
+      cancelOperation: () => snapshot,
+      setApprovalBaseUrl: () => undefined,
+    });
+    try {
+      const url = await approval.start();
+      const collection = await (await fetch(`${url}/operations`)).json() as JsonObject;
+      const entry = (collection.operations as JsonObject[])[0]!;
+      expect(collection).toMatchObject({
+        schema: "morrow.approval-operations.list.v1",
+        returned: 1,
+        operations: [{
+          operationId: "op:privacy-safe-1234",
+          status: { state: "awaiting_approval", verification: "unconfirmed" },
+          receipt: { dispatchAttempt: 1, effectReceiptId: "effect:123e4567-e89b-12d3-a456-426614174000" },
+          digests: { requestDigest: digest, planDigest: "b".repeat(64) },
+        }],
+      });
+      expect(entry).not.toHaveProperty("plan");
+      expect(entry).not.toHaveProperty("readback");
+      expect(entry).not.toHaveProperty("forwardedRequest");
+      expect(JSON.stringify(collection)).not.toContain(learnerMarker);
+
+      const review = await (await fetch(`${url}/operations/op%3Aprivacy-safe-1234`)).text();
+      const technical = review.slice(review.lastIndexOf("<details><summary>Technical details</summary>"));
+      expect(review).toContain(ordinaryChange);
+      expect(technical).not.toContain(learnerMarker);
+      expect(technical).not.toContain('"plan"');
+      expect(technical).not.toContain('"arguments"');
+      expect(technical).not.toContain('"forwardedRequest"');
+    } finally {
+      await approval.close();
+    }
+  });
 
   it("shows a confirmed no-send failure without weakening uncertain result guidance", async () => {
     let snapshot: JsonObject = {
@@ -261,6 +414,28 @@ describe("outer provider effects", () => {
       const uncertain = await (await fetch(`${url}/operations/uncertain`)).text();
       expect(uncertain).toContain("Canvas may have received the changes");
       expect(uncertain).not.toContain("No change was sent");
+
+      snapshot = {
+        state: "approved",
+        attention: ["provider_effect_target_conflict"],
+        plan: { tool: "moodle_create_resource_file", arguments: {} },
+      };
+      const blocked = await (await fetch(`${url}/operations/blocked-target`)).text();
+      expect(blocked).toContain("Check earlier change");
+      expect(blocked).toContain("Morrow has not sent this change");
+      expect(blocked).toContain("same target");
+      expect(blocked).not.toContain("Your approval was saved, but this request is not running");
+
+      snapshot = {
+        state: "approved",
+        attention: ["provider_effect_target_scope_unknown"],
+        plan: { tool: "canvas_update_create_page_courses", arguments: {} },
+      };
+      const historicalScopeBlocked = await (await fetch(`${url}/operations/blocked-historical-scope`)).text();
+      expect(historicalScopeBlocked).toContain("Check earlier change");
+      expect(historicalScopeBlocked).toContain("An earlier change from an older Morrow version is still unresolved");
+      expect(historicalScopeBlocked).toContain("Morrow has not sent this change");
+      expect(historicalScopeBlocked).not.toContain("same target");
     } finally {
       await approval.close();
     }
@@ -323,6 +498,7 @@ describe("outer provider effects", () => {
           plan: { tool: "moodle_move_activity", arguments: { course_id: 2, module_id: 8, target_section_id: 4, expected_digest: "d".repeat(64), _morrow: { source_binding_id: "moodle:demo:2" } } },
         },
       },
+
     ];
     const snapshot: JsonObject = { batch: { state: "planned" }, children, totalChildren: children.length };
     const contexts: Record<string, ApprovalReviewContext> = {
@@ -339,9 +515,10 @@ describe("outer provider effects", () => {
         current: { visible: true },
       },
       "moodle-move": {
-        targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Evidence notebook" }, { field: "target_section_id", label: "Destination section", name: "Week 2" }],
-        current: { current_section: "Topic 1" },
+        targets: [{ field: "course_id", label: "Course", name: "Biology" }, { field: "module_id", label: "Activity", name: "Evidence notebook" }, { field: "target_section_id", label: "Destination section", name: "Section 2: New section" }],
+        current: { current_section: "Section 1: New section" },
       },
+
     };
     const approval = new LoopbackApprovalServer({
       operationGet: () => snapshot,
@@ -357,23 +534,60 @@ describe("outer provider effects", () => {
       const url = await approval.start();
       const review = await (await fetch(`${url}/batches/moodle-review`)).text();
       const displayed = review.slice(0, review.lastIndexOf("<details><summary>Technical details"));
-      expect(displayed).toContain("Update this Moodle Page");
-      expect(displayed).toContain('aria-label="Page content preview"');
+      expect(displayed).toContain("Edit Page");
+      expect(displayed).toContain('aria-label="Content preview"');
       expect(displayed).toContain("Week 1 reading");
       expect(displayed).not.toContain("ignored()");
       expect(displayed).toContain("May 14, 2027, 3:45 PM");
       expect(displayed).toContain("Moodle user’s configured time zone");
       expect(displayed).not.toContain("&quot;year&quot;");
-      expect(displayed).toContain("Hide this Moodle section from learners");
+      expect(displayed).toContain("Hide section");
       expect(displayed).toContain("This will hide the section and its activities from learners.");
-      expect(displayed).toContain("Evidence notebook · Week 2");
+      expect(displayed).toContain("Evidence notebook · Section 2: New section");
       expect(displayed).toContain("Evidence notebook");
-      expect(displayed).toContain("Week 2");
-      expect(displayed).toContain("Current section");
-      expect(displayed).toContain("Topic 1");
+      expect(displayed).toContain("Section 2: New section");
+      expect(displayed).toContain("<dt>From section</dt><dd>Section 1: New section</dd>");
       expect(displayed).toContain("This moves the activity to the end of the selected destination section. Morrow checks that its visibility and access stay unchanged.");
       expect(displayed).toContain("Visible to learners");
       expect(displayed).toContain("Keep your assistant and Chrome open while Morrow works.");
+    } finally {
+      await approval.close();
+    }
+  });
+
+  it("renders gradebook rename details and withholds Apply when fresh targets are missing", async () => {
+    const snapshot: JsonObject = {
+      operationId: "moodle-grade-item", state: "awaiting_approval",
+      plan: { tool: "moodle_update_grade_item", arguments: { course_id: 5, grade_item_id: 4, item_name: "Morrow gradebook check renamed", expected_digest: "a".repeat(64), _morrow: { source_binding_id: "moodle:demo:5" } } },
+    };
+    let context: ApprovalReviewContext = {
+      targets: [{ field: "course_id", label: "Course", name: "Moodle Biology" }, { field: "grade_item_id", label: "Manual grade item", name: "Morrow gradebook check" }],
+      current: { gradebook_current_name: "Morrow gradebook check" },
+    };
+    const approval = new LoopbackApprovalServer({
+      operationGet: () => snapshot,
+      operationList: () => ({}),
+      operationReviewContext: async () => context,
+      approveOperation: () => snapshot,
+      runApprovedOperation: async () => undefined,
+      cancelOperation: () => snapshot,
+      setApprovalBaseUrl: () => undefined,
+    });
+    try {
+      const url = await approval.start();
+      const review = await (await fetch(`${url}/operations/moodle-grade-item`)).text();
+      expect(review).toContain("Rename grade item?");
+      expect(review).toContain("Moodle Biology");
+      expect(review).toContain("Morrow gradebook check");
+      expect(review).toContain("<dt>Current name</dt><dd>Morrow gradebook check</dd>");
+      expect(review).toContain("<dt>New name</dt><dd>Morrow gradebook check renamed</dd>");
+      expect(review).toContain("does not read or change learner grades or grade values");
+      expect(review).toContain('class="approve"');
+
+      context = { targets: [] };
+      const blocked = await (await fetch(`${url}/operations/moodle-grade-item`)).text();
+      expect(blocked).toContain("Morrow could not identify the course or a selected item in Moodle.");
+      expect(blocked).not.toContain('class="approve"');
     } finally {
       await approval.close();
     }

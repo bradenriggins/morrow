@@ -1,6 +1,6 @@
 {
   "name": "@morrow-lms/cli",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -23,6 +23,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@iarna/toml": "2.2.5",
     "@modelcontextprotocol/client": "2.0.0",
     "@morrow/contracts": "workspace:*"
   }

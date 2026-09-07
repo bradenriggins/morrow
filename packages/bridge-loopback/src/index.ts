@@ -8,7 +8,14 @@ import {
   MAX_BRIDGE_MESSAGE_BYTES,
   MIN_BRIDGE_TOKEN_LENGTH,
   createBridgeProblem,
+  matchesBridgeEditPermission,
+  normalizeBridgeEditPolicySet,
+  normalizeBridgeEditOptionsResult,
   normalizeBridgeBindings,
+  normalizeBridgeMaintenanceControl,
+  normalizeBridgePrivateAttachment,
+  normalizeBridgePrivateAttachments,
+  normalizeBridgePrivateConversation,
   parseBridgeClientMessage,
   parseBridgeHello,
   parseBridgeJson,
@@ -18,7 +25,11 @@ import {
   type BridgeClientMessage,
   type BridgeCommand,
   type BridgeCommandKind,
+  type BridgeEditPolicySet,
+  type BridgeMaintenanceControl,
   type BridgeOuterGrant,
+  type BridgePrivateAttachment,
+  type BridgePrivateConversation,
   type BridgeHello,
   type BridgePing,
   type BridgeReady,
@@ -33,6 +44,33 @@ const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_AUTH_TIMEOUT_MS = 5_000;
 const DEFAULT_CALL_TIMEOUT_MS = 45_000;
 const DEFAULT_HEARTBEAT_MS = 20_000;
+/**
+ * How many sent effect receipts one bridge process remembers. The record never
+ * drops a receipt, so this is also the point at which the bridge refuses a new
+ * change instead of forgetting an earlier one. It is far above a working day of
+ * course changes, and it holds the record to a few megabytes.
+ */
+const DEFAULT_WRITE_RECEIPT_CAPACITY = 20_000;
+const PRIVATE_MOODLE_RESOURCE_FILE_TOOL = "moodle_create_resource_file";
+const PRIVATE_MOODLE_RESOURCE_FILE_OPERATION = "moodle.form.course.modedit.resource.file.create.write.v1";
+const PRIVATE_MOODLE_FOLDER_FILE_TOOL = "moodle_create_folder_file";
+const PRIVATE_MOODLE_FOLDER_FILE_OPERATION = "moodle.form.course.modedit.folder.file.create.write.v1";
+const PRIVATE_MOODLE_IMSCP_PACKAGE_TOOL = "moodle_create_imscp_package";
+const PRIVATE_MOODLE_IMSCP_PACKAGE_OPERATION = "moodle.form.course.modedit.imscp.package.create.write.v1";
+const PRIVATE_MOODLE_SCORM_PACKAGE_TOOL = "moodle_create_scorm_package";
+const PRIVATE_MOODLE_SCORM_PACKAGE_OPERATION = "moodle.form.course.modedit.scorm.package.create.write.v1";
+const PRIVATE_MOODLE_H5P_ACTIVITY_TOOL = "moodle_create_h5pactivity";
+const PRIVATE_MOODLE_H5P_ACTIVITY_OPERATION = "moodle.form.course.modedit.h5pactivity.create.write.v1";
+const PRIVATE_MOODLE_RESOURCE_REPLACE_TOOL = "moodle_replace_resource_file";
+const PRIVATE_MOODLE_RESOURCE_REPLACE_OPERATION = "moodle.form.course.modedit.resource.file.replace.write.v1";
+const PRIVATE_MOODLE_SCORM_REPLACE_TOOL = "moodle_replace_scorm_package";
+const PRIVATE_MOODLE_SCORM_REPLACE_OPERATION = "moodle.form.course.modedit.scorm.package.replace.write.v1";
+const PRIVATE_MOODLE_FOLDER_ADD_TOOL = "moodle_add_folder_files";
+const PRIVATE_MOODLE_FOLDER_ADD_OPERATION = "moodle.form.course.modedit.folder.files.add.write.v1";
+const PRIVATE_CANVAS_COURSE_FILE_TOOL = "canvas_transfer_course_file";
+const PRIVATE_CANVAS_COURSE_FILE_OPERATION = "canvas.private.course_file.transfer.v1";
+const PRIVATE_CANVAS_CONVERSATION_TOOL = "canvas_send_private_conversation";
+const PRIVATE_CANVAS_CONVERSATION_OPERATION = "canvas.private.conversation.send.v1";
 
 function providerForToolName(toolName: string | undefined): BridgeProvider | undefined {
   if (!toolName) return undefined;
@@ -53,6 +91,8 @@ export interface LoopbackBridgeOptions {
   readonly callTimeoutMs?: number;
   readonly heartbeatMs?: number;
   readonly allowMissingOriginForTests?: boolean;
+  /** How many sent effect receipts this bridge remembers. Default 20000. */
+  readonly writeReceiptCapacity?: number;
   readonly pairingEnabled?: boolean;
   readonly onPairApproved?: (extensionId: string) => void | Promise<void>;
 }
@@ -62,16 +102,33 @@ export interface BridgeInvocation {
   readonly toolName?: string;
   readonly operationKey?: string;
   readonly arguments?: JsonObject;
+  readonly privateAttachment?: BridgePrivateAttachment;
+  readonly privateAttachments?: readonly BridgePrivateAttachment[];
+  readonly privateConversation?: BridgePrivateConversation;
   readonly sourceBindingId?: string;
   readonly taskId?: string;
+  readonly editPolicySet?: BridgeEditPolicySet;
+  readonly maintenance?: BridgeMaintenanceControl;
   readonly operationId?: string;
   readonly outerGrant?: BridgeOuterGrant;
   readonly timeoutMs?: number;
 }
 
+/**
+ * A named reason the bridge has no listening port. Only one Morrow can hold the
+ * Bridge port on a computer, so a second Morrow reports this instead of failing
+ * to start.
+ */
+export interface LoopbackBridgeProblem {
+  readonly code: "bridge_port_in_use";
+  readonly port: number;
+  readonly message: string;
+}
+
 export interface LoopbackBridgeHealth {
   readonly schema: "morrow.bridge.health.v1";
   readonly listening: boolean;
+  readonly problem?: LoopbackBridgeProblem;
   readonly host: typeof LOOPBACK_HOST;
   readonly port: number | null;
   readonly path: typeof BRIDGE_PATH;
@@ -113,10 +170,52 @@ interface PairingRequest {
 }
 
 export class BridgeUnavailableError extends Error {
-  readonly code = "bridge_unavailable";
-  constructor(message = "The Morrow course connector is not connected.") {
-    super(message);
+  readonly code: string = "bridge_unavailable";
+  constructor(message = "Morrow Bridge is not connected.", options?: ErrorOptions) {
+    super(message, options);
     this.name = "BridgeUnavailableError";
+  }
+}
+
+export function bridgePortInUseMessage(port: number): string {
+  return `Another Morrow is already connected to Morrow Bridge on port ${port}. Close the other Morrow, or use one Morrow for all your assistants.`;
+}
+
+/**
+ * The Bridge port is already held, so this Morrow has no Chrome connection. It
+ * is a `BridgeUnavailableError` because nothing was sent to the extension.
+ */
+export class BridgePortInUseError extends BridgeUnavailableError {
+  override readonly code = "bridge_port_in_use";
+  readonly port: number;
+
+  constructor(port: number, options?: ErrorOptions) {
+    super(bridgePortInUseMessage(port), options);
+    this.name = "BridgePortInUseError";
+    this.port = port;
+  }
+}
+
+export function bridgeWriteRecordFullMessage(capacity: number): string {
+  return `Morrow has recorded the ${capacity} changes it sent since it started, and it cannot record another without forgetting one. It did not send this change. Restart Morrow, then ask for a fresh plan.`;
+}
+
+/**
+ * Morrow keeps every gateway effect receipt it has sent so it can refuse a
+ * second send of the same change. That record holds a fixed number of receipts.
+ * When it is full Morrow refuses the new change rather than forget an earlier
+ * receipt, because a forgotten receipt would be accepted a second time. Nothing
+ * was sent. The gateway's own durable dispatch record stays the authority
+ * across a restart, so a restarted Morrow still refuses a receipt it used.
+ */
+export class BridgeWriteRecordFullError extends BridgeUnavailableError {
+  override readonly code = "bridge_write_record_full";
+  readonly capacity: number;
+
+  constructor(capacity: number) {
+    super(bridgeWriteRecordFullMessage(capacity));
+    this.name = "BridgeWriteRecordFullError";
+    this.capacity = capacity;
   }
 }
 
@@ -143,6 +242,14 @@ function exactPort(value: number | undefined): number {
     throw new TypeError("bridge port must be a whole number from 0 through 65535");
   }
   return value;
+}
+
+function exactCapacity(value: number | undefined): number {
+  const resolved = value === undefined ? DEFAULT_WRITE_RECEIPT_CAPACITY : value;
+  if (!Number.isInteger(resolved) || resolved < 1 || resolved > 1_000_000) {
+    throw new TypeError("writeReceiptCapacity must be a whole number from 1 through 1000000");
+  }
+  return resolved;
 }
 
 function exactTimeout(value: number | undefined, fallback: number, label: string): number {
@@ -198,7 +305,13 @@ export class LoopbackBridgeServer {
   private readonly onPairApproved: ((extensionId: string) => void | Promise<void>) | undefined;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly pairingRequests = new Map<string, PairingRequest>();
+  /**
+   * Every effect receipt this process has sent, held to `writeReceiptCapacity`
+   * entries. Nothing is ever removed: a forgotten receipt would be accepted a
+   * second time, so a full record refuses the new change instead.
+   */
   private readonly usedOuterEffectReceipts = new Set<string>();
+  private readonly writeReceiptCapacity: number;
   private readonly httpServer: HttpServer;
   private readonly webSocketServer: WebSocketServer;
   private active: ActiveClient | null = null;
@@ -206,6 +319,7 @@ export class LoopbackBridgeServer {
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private listeningPort: number | null = null;
   private started = false;
+  private portInUse = false;
 
   constructor(options: LoopbackBridgeOptions) {
     this.expectedToken = tokenBytes(options.token);
@@ -224,6 +338,7 @@ export class LoopbackBridgeServer {
     this.authTimeoutMs = exactTimeout(options.authTimeoutMs, DEFAULT_AUTH_TIMEOUT_MS, "authTimeoutMs");
     this.callTimeoutMs = exactTimeout(options.callTimeoutMs, DEFAULT_CALL_TIMEOUT_MS, "callTimeoutMs");
     this.heartbeatMs = exactTimeout(options.heartbeatMs, DEFAULT_HEARTBEAT_MS, "heartbeatMs");
+    this.writeReceiptCapacity = exactCapacity(options.writeReceiptCapacity);
     this.allowMissingOriginForTests = options.allowMissingOriginForTests === true;
     this.pairingEnabled = options.pairingEnabled === true;
     this.onPairApproved = options.onPairApproved;
@@ -312,12 +427,12 @@ export class LoopbackBridgeServer {
     const content = pending
       ? `<p>Allow Morrow in your assistant to work with Canvas and Moodle through this Chrome extension.</p><p>Your learning-platform password and sign-in details stay in Chrome. You choose which course site to connect next.</p><div class="notice">Only continue if you started this from the Morrow extension. Connecting does not approve changes to your courses.</div><details><summary>About this connection</summary><p class="details-help">This connection stays on your computer. You can disconnect in the Morrow extension at any time.</p><p class="details-help">Extension ID: ${extension}</p></details><form class="actions" method="post" action="${BRIDGE_PATH}/pair/${request.pairingId}/decision"><button name="decision" value="approve">Allow connection</button><button class="secondary" name="decision" value="deny">Cancel connection</button></form>`
       : `<p>${request.status === "approved" ? "Open a Canvas or Moodle course in Chrome and sign in. Then open the Morrow extension and select Connect course." : "Morrow did not connect through this request. You can start again from the Morrow extension when you are ready."}</p>`;
-    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><p class="eyebrow">Your browser connection</p><h1>${title}</h1>${content}</section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`;
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><h1>${title}</h1>${content}</section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`;
   }
 
   private pairingUnavailable(response: ServerResponse, status: number): void {
     response.writeHead(status, this.responseHeaders("text/html; charset=utf-8"));
-    response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Start a new connection · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><p class="eyebrow">Connection not completed</p><h1>Start a new connection</h1><p>This connection request has expired or is no longer available. Open the Morrow extension and select Connect Morrow to try again.</p></section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`);
+    response.end(`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Start a new connection · Morrow</title>${brandHead}</head><body><main class="wrap pairing">${brandHeader}<article class="card"><section class="outcome"><h1>Start a new connection</h1><p>This connection request has expired or is no longer available. Open the Morrow extension and select Connect Morrow to try again.</p></section></article><p class="foot">This page opens only on your computer.</p></main></body></html>`);
   }
 
   private async handleHttp(request: IncomingMessage, response: ServerResponse): Promise<void> {
@@ -432,14 +547,22 @@ export class LoopbackBridgeServer {
       return { host: LOOPBACK_HOST, port: this.listeningPort, path: BRIDGE_PATH };
     }
     this.started = true;
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => reject(error);
-      this.httpServer.once("error", onError);
-      this.httpServer.listen(this.requestedPort, LOOPBACK_HOST, () => {
-        this.httpServer.off("error", onError);
-        resolve();
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const onError = (error: Error) => reject(error);
+        this.httpServer.once("error", onError);
+        this.httpServer.listen(this.requestedPort, LOOPBACK_HOST, () => {
+          this.httpServer.off("error", onError);
+          resolve();
+        });
       });
-    });
+    } catch (error) {
+      this.started = false;
+      if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+      this.portInUse = true;
+      throw new BridgePortInUseError(this.requestedPort, { cause: error });
+    }
+    this.portInUse = false;
     const address = this.httpServer.address();
     if (!address || typeof address === "string") throw new Error("bridge did not bind a TCP address");
     this.listeningPort = (address as AddressInfo).port;
@@ -593,17 +716,103 @@ export class LoopbackBridgeServer {
 
   async invoke(invocation: BridgeInvocation): Promise<BridgeResult> {
     const active = this.active;
-    if (!active || active.socket.readyState !== WebSocket.OPEN) throw new BridgeUnavailableError();
-    const requiresBinding = ["invoke_read", "invoke_write"].includes(invocation.kind);
+    if (!active || active.socket.readyState !== WebSocket.OPEN) throw this.unavailable();
+    if (invocation.arguments && (Object.hasOwn(invocation.arguments, "privateAttachment") || Object.hasOwn(invocation.arguments, "privateAttachments") || Object.hasOwn(invocation.arguments, "privateConversation"))) {
+      throw new TypeError("private bridge payload must be outside public bridge arguments");
+    }
+    const editPolicySet = invocation.kind === "edit_policy_set"
+      ? normalizeBridgeEditPolicySet(invocation.editPolicySet)
+      : undefined;
+    const maintenance = invocation.kind === "bridge_maintenance"
+      ? normalizeBridgeMaintenanceControl(invocation.maintenance)
+      : undefined;
+    const requiresKnownBinding = ["invoke_read", "invoke_write", "edit_policy_options_get"].includes(invocation.kind);
+    const requiresCurrentBinding = ["invoke_read", "invoke_write"].includes(invocation.kind);
     const selectedBinding = invocation.sourceBindingId
       ? active.bindings.find((binding) => binding.sourceBindingId === invocation.sourceBindingId)
       : active.bindings.length === 1 ? active.bindings[0] : undefined;
-    if (requiresBinding && (!selectedBinding || selectedBinding.runtimeVerified !== true)) {
+    if (requiresKnownBinding && !selectedBinding) {
       throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh plan from a current binding.");
+    }
+    if (requiresCurrentBinding && selectedBinding?.runtimeVerified !== true) {
+      throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh plan from a current binding.");
+    }
+    if (editPolicySet) {
+      const bindings = new Map(active.bindings.map((binding) => [binding.sourceBindingId, binding]));
+      for (const selection of editPolicySet.selections) {
+        const binding = bindings.get(selection.sourceBindingId);
+        if (!binding || (editPolicySet.mode === "edit" && binding.runtimeVerified !== true)) {
+          throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh request from current bindings.");
+        }
+      }
     }
     const expectedProvider = providerForToolName(invocation.toolName);
     if (expectedProvider && selectedBinding && selectedBinding.provider !== expectedProvider) {
       throw new BridgeUnavailableError(`The exact ${expectedProvider} binding is unavailable or changed. Create a fresh plan from a current binding.`);
+    }
+    const privateAttachment = invocation.privateAttachment === undefined
+      ? undefined
+      : normalizeBridgePrivateAttachment(invocation.privateAttachment);
+    const privateAttachments = invocation.privateAttachments === undefined
+      ? undefined
+      : normalizeBridgePrivateAttachments(invocation.privateAttachments);
+    const privateConversation = invocation.privateConversation === undefined
+      ? undefined
+      : normalizeBridgePrivateConversation(invocation.privateConversation);
+    const privateAttachmentAllowed = invocation.kind === "invoke_write" && ((
+      selectedBinding?.provider === "moodle" && (
+        (invocation.toolName === PRIVATE_MOODLE_RESOURCE_FILE_TOOL
+          && invocation.operationKey === PRIVATE_MOODLE_RESOURCE_FILE_OPERATION)
+        || (invocation.toolName === PRIVATE_MOODLE_FOLDER_FILE_TOOL
+          && invocation.operationKey === PRIVATE_MOODLE_FOLDER_FILE_OPERATION)
+        || (invocation.toolName === PRIVATE_MOODLE_IMSCP_PACKAGE_TOOL
+          && invocation.operationKey === PRIVATE_MOODLE_IMSCP_PACKAGE_OPERATION)
+        || (invocation.toolName === PRIVATE_MOODLE_SCORM_PACKAGE_TOOL
+          && invocation.operationKey === PRIVATE_MOODLE_SCORM_PACKAGE_OPERATION)
+        || (invocation.toolName === PRIVATE_MOODLE_H5P_ACTIVITY_TOOL
+          && invocation.operationKey === PRIVATE_MOODLE_H5P_ACTIVITY_OPERATION)
+        || (invocation.toolName === PRIVATE_MOODLE_RESOURCE_REPLACE_TOOL
+          && invocation.operationKey === PRIVATE_MOODLE_RESOURCE_REPLACE_OPERATION)
+        || (invocation.toolName === PRIVATE_MOODLE_SCORM_REPLACE_TOOL
+          && invocation.operationKey === PRIVATE_MOODLE_SCORM_REPLACE_OPERATION)
+      )
+    ) || (
+      invocation.toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL
+        && invocation.operationKey === PRIVATE_CANVAS_COURSE_FILE_OPERATION
+        && selectedBinding?.provider === "canvas"
+    ));
+    if (privateAttachment && !privateAttachmentAllowed) {
+      throw new BridgeUnavailableError("A private file attachment is only available for one exact reviewed course-file change.");
+    }
+    if (privateAttachmentAllowed && !privateAttachment) {
+      throw new BridgeUnavailableError("This reviewed course-file change needs its staged private file attachment.");
+    }
+    if (privateAttachmentAllowed && invocation.toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL && !privateAttachment?.content_type) {
+      throw new BridgeUnavailableError("This Canvas course-file change needs the staged content type.");
+    }
+    const privateAttachmentsAllowed = invocation.kind === "invoke_write"
+      && selectedBinding?.provider === "moodle"
+      && invocation.toolName === PRIVATE_MOODLE_FOLDER_ADD_TOOL
+      && invocation.operationKey === PRIVATE_MOODLE_FOLDER_ADD_OPERATION;
+    if (privateAttachments && (!privateAttachmentsAllowed || privateAttachment)) {
+      throw new BridgeUnavailableError("Private file attachments are only available for one exact reviewed Moodle Folder change.");
+    }
+    if (privateAttachmentsAllowed && !privateAttachments) {
+      throw new BridgeUnavailableError("This reviewed Moodle Folder change needs its staged private files.");
+    }
+    const privateConversationAllowed = invocation.kind === "invoke_write" && selectedBinding?.provider === "canvas"
+      && privateAttachment === undefined
+      && invocation.toolName === PRIVATE_CANVAS_CONVERSATION_TOOL
+      && invocation.operationKey === PRIVATE_CANVAS_CONVERSATION_OPERATION
+      && privateConversation !== undefined;
+    const privateConversationRoute = invocation.kind === "invoke_write"
+      && invocation.toolName === PRIVATE_CANVAS_CONVERSATION_TOOL
+      && invocation.operationKey === PRIVATE_CANVAS_CONVERSATION_OPERATION;
+    if (privateConversationRoute && !privateConversation) {
+      throw new BridgeUnavailableError("This private Canvas Inbox command needs its sealed reviewed payload.");
+    }
+    if (privateConversation && (!privateConversationAllowed || privateConversation.courseId !== selectedBinding?.courseId)) {
+      throw new BridgeUnavailableError("A private Canvas Inbox payload is available only for its exact current course command.");
     }
     const now = Date.now();
     const timeoutMs = exactTimeout(invocation.timeoutMs, this.callTimeoutMs, "timeoutMs");
@@ -621,8 +830,54 @@ export class LoopbackBridgeServer {
     if (invocation.kind === "task_get" && !invocation.taskId) {
       throw new TypeError("task_get requires taskId");
     }
+    if (invocation.kind === "edit_policy_set" && !editPolicySet) {
+      throw new TypeError("edit_policy_set requires an exact policy set");
+    }
+    if (invocation.kind === "bridge_maintenance" && !maintenance) {
+      throw new TypeError("bridge_maintenance requires one exact maintenance control");
+    }
+    if (invocation.kind === "edit_policy_options_get" && !invocation.sourceBindingId) {
+      throw new TypeError("edit_policy_options_get requires one exact sourceBindingId");
+    }
     if (invocation.kind === "invoke_write" && !invocation.outerGrant) {
       throw new TypeError("invoke_write requires a gateway outer grant");
+    }
+    if (invocation.kind === "invoke_write" && invocation.outerGrant!.authorization?.kind === "edit_scope") {
+      const authorization = invocation.outerGrant!.authorization;
+      const permission = selectedBinding?.editPermission;
+      if (authorization?.kind !== "edit_scope" || !expectedProvider || !selectedBinding || !permission
+        || authorization.policyDigest !== permission.scopeDigest
+        || authorization.policyRevision !== permission.revision) {
+        throw new BridgeUnavailableError("The current edit permission no longer authorizes this change. Create a fresh plan from the current binding.");
+      }
+      const detailResponse = await this.invoke({
+        kind: "edit_policy_options_get",
+        sourceBindingId: selectedBinding.sourceBindingId,
+        operationId: `edit-options:${randomUUID()}`,
+      });
+      if (!detailResponse.ok || !detailResponse.result) {
+        throw new BridgeUnavailableError("Morrow could not read the current Edit permission for this course. Create a fresh plan from the current binding.");
+      }
+      let details;
+      try {
+        details = normalizeBridgeEditOptionsResult(detailResponse.result, selectedBinding.sourceBindingId);
+      } catch {
+        throw new BridgeUnavailableError("Morrow received an invalid current Edit permission for this course. Create a fresh plan from the current binding.");
+      }
+      const detailedPermission = details.editPermission;
+      if (!details.runtimeVerified || details.provider !== selectedBinding.provider || details.catalogDigest !== active.catalogDigest
+        || !detailedPermission || detailedPermission.sourceBindingId !== selectedBinding.sourceBindingId
+        || detailedPermission.scopeDigest !== permission.scopeDigest || detailedPermission.revision !== permission.revision
+        || detailedPermission.catalogDigest !== permission.catalogDigest || detailedPermission.expiresAt !== permission.expiresAt
+        || !matchesBridgeEditPermission({ ...selectedBinding, editPermission: detailedPermission }, {
+          provider: expectedProvider,
+          catalogDigest: active.catalogDigest,
+          operationKey: invocation.operationKey!,
+          toolName: invocation.toolName!,
+          arguments: invocation.arguments || {},
+        })) {
+        throw new BridgeUnavailableError("The current edit permission no longer authorizes this change. Create a fresh plan from the current binding.");
+      }
     }
     if (["invoke_write", "stage_write"].includes(invocation.kind) && invocation.outerGrant) {
       if (this.usedOuterEffectReceipts.has(invocation.outerGrant.effectReceiptId)) {
@@ -637,6 +892,9 @@ export class LoopbackBridgeServer {
           expiresAt: now + timeoutMs,
         }, "The gateway effect receipt was already used. Morrow will not resend this write.", false);
       }
+      if (this.usedOuterEffectReceipts.size >= this.writeReceiptCapacity) {
+        throw new BridgeWriteRecordFullError(this.writeReceiptCapacity);
+      }
       this.usedOuterEffectReceipts.add(invocation.outerGrant.effectReceiptId);
     }
     const command: BridgeCommand = {
@@ -648,8 +906,13 @@ export class LoopbackBridgeServer {
       ...(invocation.toolName ? { toolName: invocation.toolName } : {}),
       ...(invocation.operationKey ? { operationKey: invocation.operationKey } : {}),
       ...(invocation.arguments ? { arguments: structuredClone(invocation.arguments) } : {}),
+      ...(privateAttachment ? { privateAttachment } : {}),
+      ...(privateAttachments ? { privateAttachments } : {}),
+      ...(privateConversation ? { privateConversation } : {}),
       ...(selectedBinding ? { sourceBindingId: selectedBinding.sourceBindingId } : invocation.sourceBindingId ? { sourceBindingId: invocation.sourceBindingId } : {}),
       ...(invocation.taskId ? { taskId: invocation.taskId } : {}),
+      ...(editPolicySet ? { editPolicySet } : {}),
+      ...(maintenance ? { maintenance } : {}),
       ...(invocation.outerGrant ? { outerGrant: structuredClone(invocation.outerGrant) } : {}),
       generation: active.generation,
       createdAt: now,
@@ -679,11 +942,19 @@ export class LoopbackBridgeServer {
     return this.active ? structuredClone(this.active.bindings) : [];
   }
 
+  /** The reason a command cannot be sent, named when the Bridge port is held. */
+  private unavailable(): BridgeUnavailableError {
+    return this.portInUse ? new BridgePortInUseError(this.requestedPort) : new BridgeUnavailableError();
+  }
+
   health(): LoopbackBridgeHealth {
     const active = this.active;
     return {
       schema: "morrow.bridge.health.v1",
       listening: this.started && this.listeningPort !== null,
+      ...(this.portInUse
+        ? { problem: { code: "bridge_port_in_use", port: this.requestedPort, message: bridgePortInUseMessage(this.requestedPort) } as const }
+        : {}),
       host: LOOPBACK_HOST,
       port: this.listeningPort,
       path: BRIDGE_PATH,

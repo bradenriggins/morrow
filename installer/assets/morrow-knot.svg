@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1254 1254" fill="none">
+  <defs>
+    <clipPath id="over"><path d="M0 0H627V620H0ZM627 620H1254V1254H627Z"/></clipPath>
+  </defs>
+  <ellipse cx="627" cy="620" rx="210" ry="450" transform="rotate(-8 627 620)" stroke="#CBDC74" stroke-width="110"/>
+  <ellipse cx="627" cy="620" rx="480" ry="207" transform="rotate(-13 627 620)" stroke="#6884FF" stroke-width="110"/>
+  <g clip-path="url(#over)"><ellipse cx="627" cy="620" rx="210" ry="450" transform="rotate(-8 627 620)" stroke="#CBDC74" stroke-width="110"/></g>
+</svg>

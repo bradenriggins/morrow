@@ -101,6 +101,10 @@ export class DurableBatchStore {
     return this.inner.listNonterminal(offset, limit);
   }
 
+  hasActiveBatches(): boolean {
+    return this.inner.hasActiveBatches();
+  }
+
   pause(batchId: string): BatchRecord {
     return this.inner.pause(batchId);
   }
@@ -143,6 +147,10 @@ export class DurableBatchStore {
 
   readArguments(batchId: string, childId: string): JsonObject {
     return this.inner.readArguments(batchId, childId);
+  }
+
+  readResult(batchId: string, childId: string): JsonObject | null {
+    return this.inner.readResult(batchId, childId);
   }
 
   settleChild(

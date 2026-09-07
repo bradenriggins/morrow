@@ -24,7 +24,7 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
     "morrow_operation_list",
     {
       title: "Review saved requests",
-      description: "List outer Morrow operations. This only reads the local durable operation record.",
+      description: "List outer Morrow operations. Each record names the assistant that asked for it, as that assistant reported itself at connect time, and names its project without giving its path. This only reads the local durable operation record.",
       inputSchema: z.object({ limit: z.number().int().min(1).max(200).default(50) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
@@ -95,7 +95,7 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
   server.registerTool(
     "morrow_operation_verify",
     {
-      title: "Check a change in Canvas",
+      title: "Check a saved change",
       description: "Run only the frozen readback plan for an operation and compare fresh evidence to its frozen expected digest. It never infers verification from dispatch success.",
       inputSchema: z.object({ operation_id: z.string().min(8).max(160) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
@@ -105,6 +105,31 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
         return await runtime.verifyOperation(operation_id) as unknown as CallToolResult;
       } catch (error) {
         return failure(operation_id, "confirm", error);
+      }
+    },
+  );
+
+  server.registerTool(
+    "morrow_operation_close_unresolved",
+    {
+      title: "Close a request you checked yourself",
+      description: "Close one unresolved change after a person has read the item and confirmed its saved state. It requires the exact result digest of a fresh Morrow read of that item and an explicit person confirmation. Morrow does not check the change itself here and never sends anything.",
+      inputSchema: z.object({
+        operation_id: z.string().min(8).max(160),
+        observed_state: z.string().regex(/^[0-9a-f]{64}$/, "observed_state must be the SHA-256 digest a fresh Morrow read returned"),
+        confirmed_by_person: z.literal(true),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    },
+    async ({ operation_id, observed_state, confirmed_by_person }) => {
+      try {
+        return runtime.closeUnresolvedOperation(
+          operation_id,
+          observed_state,
+          confirmed_by_person,
+        ) as unknown as CallToolResult;
+      } catch (error) {
+        return failure(operation_id, "close", error);
       }
     },
   );

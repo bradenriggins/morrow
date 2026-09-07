@@ -19,6 +19,7 @@ function fixture() {
     config: { upstreams: [{ id: "canvas", outputPrivacy: {}, outputPrivacyDefault: { fieldPolicy: "scrub-sensitive", freeText: "allow", aiClientAdmission: "allow" } }] },
     searchCatalog: ({ query }: { query: string }) => ({ tools: [{ publicName: query, upstreamName: query, upstreamId: "canvas", annotations: { readOnlyHint: true } }] }),
     capabilityGet: () => ({ descriptor: { route: { backend: "canvas-connector" } } }),
+    redactMcpEgress: async (value: JsonObject) => value,
     callSourceOwned: async (name: string, arguments_: JsonObject) => {
       expect(Object.hasOwn(snapshots, name)).toBe(true);
       calls.push({ name, arguments: arguments_ });
@@ -65,6 +66,56 @@ describe("lesson specialist review", () => {
         expect(report.findings.map((finding) => finding.checkerVerdict)).toEqual(["retain", "dispute"]);
         expect(JSON.stringify(result.content)).toContain("Educator review is required");
       } finally { await client.close(); await server.close(); }
+    }
+  });
+
+  it("redacts Canvas learner identities before they enter sampling or client-held review state", async () => {
+    const { runtime, snapshots } = fixture();
+    snapshots.canvas_show_page_courses = {
+      ...lesson,
+      title: "Cells for Jane Doe",
+      last_edited_by: { id: "17", name: "Jane Doe", email: "jane.doe@example.edu" },
+    };
+    const redactionInputs: string[] = [];
+    Object.assign(runtime, {
+      redactMcpEgress: async (value: JsonObject) => {
+        const serialized = JSON.stringify(value);
+        redactionInputs.push(serialized);
+        return JSON.parse(serialized
+          .replaceAll("Jane Doe", "learner_fixture")
+          .replaceAll("jane.doe@example.edu", "learner_email_fixture")) as JsonObject;
+      },
+    });
+    const client = new Client(
+      { name: "lesson-privacy-test", version: "1" },
+      { capabilities: { sampling: {} }, versionNegotiation: { mode: { pin: "2026-07-28" } } },
+    );
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      const result = await client.callTool(
+        { name: "morrow_review_lesson", arguments: args },
+        { allowInputRequired: true },
+      ) as unknown as {
+        isError?: boolean;
+        requestState: string;
+        inputRequests: { lesson_alignment: { params: { messages: { content: { text: string } }[] } } };
+      };
+      const sent = JSON.stringify(result);
+
+      expect(result.isError, sent).not.toBe(true);
+      expect(redactionInputs.some((value) => value.includes("Jane Doe"))).toBe(true);
+      expect(sent).not.toContain("Jane Doe");
+      expect(sent).not.toContain("jane.doe@example.edu");
+      expect(sent).toContain("learner_fixture");
+      expect(result.inputRequests.lesson_alignment.params.messages[0]!.content.text).toContain("learner_fixture");
+      for (const segment of result.requestState.split(".")) {
+        expect(Buffer.from(segment, "base64url").toString("utf8")).not.toContain("Jane Doe");
+      }
+    } finally {
+      await client.close();
+      await server.close();
     }
   });
 

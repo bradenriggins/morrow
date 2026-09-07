@@ -43,6 +43,6 @@
   }],
   "filters": { "excludePrefixes": ["mindtap_", "connect_"], "excludeNames": [] },
   "operationJournal": { "path": "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}" },
-  "batchScheduler": { "maxConcurrentWindows": 1 },
+  "batchScheduler": { "maxConcurrentReadWindows": 2 },
   "maxCatalogTools": 1000
 }

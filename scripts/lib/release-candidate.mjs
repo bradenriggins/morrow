@@ -14,7 +14,7 @@ import { deterministicZip, stableJson } from "./deterministic-archive.mjs";
 
 export { deterministicZip, stableJson } from "./deterministic-archive.mjs";
 
-export const RELEASE_VERSION = "1.0.0-rc.0";
+export const RELEASE_VERSION = "1.0.0";
 export const REQUIRED_EXTERNAL_RECEIPTS = Object.freeze([
   "authorized_live_canvas",
   "client_parity",
@@ -23,6 +23,36 @@ export const REQUIRED_PROMOTION_RECEIPTS = Object.freeze([
   "independent_clean_machine",
   "publication_authorization",
 ]);
+/**
+ * The browser and permission gate. `pnpm scripts:test` globs `scripts/test/*.test.mjs`, so the
+ * harnesses that drive a real Chromium, ask a person for a Chrome permission, or install the Windows
+ * app are outside `pnpm check`. `pnpm test:browser` (`scripts/run-browser-harnesses.mjs`) runs them
+ * and writes the receipt read here, so a candidate cannot be promoted with no recorded browser
+ * result. A harness that did not run is recorded as not run; only `passed` counts as a pass.
+ */
+export const BROWSER_HARNESS_SCHEMA = "morrow.browser-harness-receipt.v1";
+export const BROWSER_HARNESS_RECEIPT_PATH = "output/browser-harness/receipt.json";
+export const BROWSER_HARNESS_IDS = Object.freeze([
+  "canvas_connector_browser",
+  "bridge_maintenance_cft",
+  "canvas_file_optional_permission",
+  "desktop_windows_smoke",
+]);
+/**
+ * The harnesses a release candidate cannot be promoted without. `desktop_windows_smoke` is not one
+ * of them: it runs on native Windows through the `windows-2022` job in
+ * `.github/workflows/desktop-release.yml`, and this receipt only has to record what happened to it
+ * here. It still blocks if it is recorded as run and did not pass.
+ */
+export const REQUIRED_BROWSER_HARNESS_PASSES = Object.freeze([
+  "canvas_connector_browser",
+  "bridge_maintenance_cft",
+  "canvas_file_optional_permission",
+]);
+/** A harness that ran keeps its log; a harness that did not run keeps a reason. */
+export const BROWSER_HARNESS_RAN_STATUSES = Object.freeze(["passed", "failed", "timed-out"]);
+export const BROWSER_HARNESS_NOT_RUN_STATUSES = Object.freeze(["not-run-on-this-host", "not-run-unattended"]);
+
 export const ZERO_TOLERANCE_TARGETS = Object.freeze([
   "unapproved_provider_writes",
   "out_of_scope_targets_accepted",
@@ -84,7 +114,8 @@ function profileRuleMatches(path, rule) {
   return rule === path || (rule.endsWith("/") && path.startsWith(rule));
 }
 
-function profileIncludes(path, profile) {
+/** True when a release profile selects one tracked path. Exported so a test can check a profile's selection. */
+export function profileIncludes(path, profile) {
   return profile.include.some((rule) => profileRuleMatches(path, rule))
     && !(profile.exclude || []).some((rule) => profileRuleMatches(path, rule));
 }
@@ -395,6 +426,52 @@ export function zeroToleranceState(root, binding = currentEvidenceBinding(root))
   return { path: existsSync(path) ? path : null, binding, bindingMatches, checks, passed: checks.every((entry) => !entry.blocking) };
 }
 
+/**
+ * One recorded browser-harness result, or false when the receipt does not carry a usable one. A
+ * harness that ran is believed only while its log is still the log that was hashed, so an edited
+ * receipt cannot claim a pass. A harness that did not run has to say why.
+ */
+function recordedHarnessResult(receiptDirectory, entry) {
+  if (!entry || typeof entry.status !== "string") return false;
+  if (BROWSER_HARNESS_NOT_RUN_STATUSES.includes(entry.status)) {
+    return typeof entry.reason === "string" && entry.reason.trim().length > 0;
+  }
+  if (!BROWSER_HARNESS_RAN_STATUSES.includes(entry.status)) return false;
+  if (!/^[a-z0-9_-]+\.log$/.test(entry.log || "") || !validDigest(entry.logSha256)) return false;
+  const logPath = resolve(receiptDirectory, entry.log);
+  return existsSync(logPath) && sha256(readFileSync(logPath)) === entry.logSha256;
+}
+
+export function browserHarnessState(root, binding = currentEvidenceBinding(root)) {
+  const path = process.env.MORROW_BROWSER_HARNESS_RECEIPT_PATH
+    ? resolve(process.env.MORROW_BROWSER_HARNESS_RECEIPT_PATH)
+    : resolve(root, BROWSER_HARNESS_RECEIPT_PATH);
+  const supplied = existsSync(path) ? readJson(path) : {};
+  const boundToHead = supplied.schema === BROWSER_HARNESS_SCHEMA
+    && supplied.workingTreeClean === true
+    && !git(root, ["status", "--porcelain", "--untracked-files=normal"]).trim()
+    && supplied.commit === binding.commit
+    && supplied.tree === git(root, ["rev-parse", "HEAD^{tree}"]).trim();
+  const byId = new Map((Array.isArray(supplied.harnesses) ? supplied.harnesses : []).map((entry) => [entry.id, entry]));
+  const harnesses = BROWSER_HARNESS_IDS.map((id) => {
+    const entry = byId.get(id);
+    const recorded = boundToHead && recordedHarnessResult(dirname(path), entry);
+    const status = recorded ? entry.status : "missing";
+    const required = REQUIRED_BROWSER_HARNESS_PASSES.includes(id);
+    const blocking = required
+      ? status !== "passed"
+      : !recorded || (BROWSER_HARNESS_RAN_STATUSES.includes(status) && status !== "passed");
+    return { id, status, required, blocking };
+  });
+  return {
+    path: existsSync(path) ? path : null,
+    binding,
+    boundToHead,
+    harnesses,
+    passed: harnesses.every((entry) => !entry.blocking),
+  };
+}
+
 function currentEvidenceBinding(root, { profileName, packageDigest } = {}) {
   const receiptDigest = (profile) => {
     const path = resolve(root, "artifacts/candidates", profile, "receipt.json");
@@ -647,6 +724,7 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
   const externalReceipts = externalReceiptState(root, binding);
   const promotionReceipts = promotionReceiptState(root, binding);
   const zeroTolerance = zeroToleranceState(root, binding);
+  const browserHarness = browserHarnessState(root, binding);
 
   const blockers = [
     ...(markerScan.passed ? [] : ["candidate_marker_scan_failed"]),
@@ -654,6 +732,8 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
     ...(sourceRights.passed ? [] : ["source_rights_manifest_incomplete"]),
     ...externalReceipts.receipts.filter((entry) => entry.blocking).map((entry) => `external_receipt_missing:${entry.id}`),
     ...zeroTolerance.checks.filter((entry) => entry.blocking).map((entry) => `zero_tolerance_evidence_missing:${entry.id}`),
+    ...browserHarness.harnesses.filter((entry) => entry.blocking)
+      .map((entry) => `${entry.status === "missing" ? "browser_harness_result_missing" : "browser_harness_not_passed"}:${entry.id}`),
   ].sort();
   const receipt = {
     schema: "morrow.release-receipt.v1",
@@ -675,6 +755,7 @@ export function stageCandidate({ root = DEFAULT_ROOT, profileName = "private-ful
     externalReceipts,
     promotionReceipts,
     zeroTolerance,
+    browserHarness,
     localEvidenceOnly: true,
     candidateBuilt: markerScan.passed && sourceOrigin.passed,
     promotable: blockers.length === 0,
@@ -805,9 +886,11 @@ export function conformanceReport({ root = DEFAULT_ROOT, profileName = "private-
     { id: "source_rights", passed: receipt?.sourceRights?.passed === true },
     { id: "external_live_receipts", passed: receipt?.externalReceipts?.passed === true },
     { id: "zero_tolerance_receipt", passed: receipt?.zeroTolerance?.passed === true },
+    { id: "browser_harness_receipt", passed: receipt?.browserHarness?.passed === true },
     { id: "candidate_promotable", passed: receipt?.promotable === true },
     { id: "promotion_receipts", passed: promotionReceiptState(root).passed },
     { id: "current_zero_tolerance_evidence", passed: zeroToleranceState(root).passed },
+    { id: "current_browser_harness_evidence", passed: browserHarnessState(root).passed },
     { id: "stable_promotion_ready", passed: receipt?.stablePromotionReady === true },
   ];
   const report = {

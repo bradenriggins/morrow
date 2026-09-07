@@ -1,6 +1,6 @@
 {
   "schema": "morrow.release-profiles.v1",
-  "candidateVersion": "1.0.0-rc.0",
+  "candidateVersion": "1.0.0",
   "profiles": {
     "private-full": {
       "visibility": "private",
@@ -27,6 +27,7 @@
         "packages/operation-journal/",
         "packages/upstream-mcp/",
         "packages/batch-engine/",
+        "packages/blackboard-learn-api/",
         "packages/bridge-protocol/",
         "packages/bridge-loopback/",
         "packages/canvas-api-catalog/",

@@ -81,7 +81,7 @@ function publicConfig(input: {
         root: input.root,
         expectedRevision: input.revision,
         requireTrackedClean: true,
-        expectedToolCount: 4,
+        expectedToolCount: 5,
       },
       priority: 100,
       required: true,
@@ -183,7 +183,7 @@ describe("public-canvas runtime profile", () => {
         profile: "public-canvas",
         publicToolCount: 1,
         collisionCount: 0,
-        excludedToolCount: 3,
+        excludedToolCount: 4,
         publicationPolicy: {
           applied: true,
           profile: "public-canvas",
@@ -194,8 +194,8 @@ describe("public-canvas runtime profile", () => {
         sources: [{
           id: "meridian",
           connected: true,
-          toolCount: 4,
-          expectedToolCount: 4,
+          toolCount: 5,
+          expectedToolCount: 5,
           catalogAttested: true,
           sourceAttestation: {
             verified: true,

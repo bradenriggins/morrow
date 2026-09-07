@@ -271,6 +271,18 @@ export interface PublicationPolicyHealth {
   readonly omittedToolCount: number;
 }
 
+export interface McpRuntimeHealth {
+  readonly schema: "morrow.mcp-runtime.health.v1";
+  readonly packageVersion: string;
+  readonly manifestSha256: string;
+}
+
+export interface GatewayRuntimeLimitation {
+  readonly code: "blackboard_runtime_unavailable";
+  readonly setupFilePath: string;
+  readonly detail: string;
+}
+
 export interface GatewayHealth {
   readonly schema: "morrow.health.v1";
   readonly version: string;
@@ -282,7 +294,9 @@ export interface GatewayHealth {
   readonly excludedToolCount: number;
   readonly sources: readonly GatewaySourceHealth[];
   readonly operationJournal: GatewayOperationJournalHealth;
+  readonly mcpRuntime?: McpRuntimeHealth;
   readonly publicationPolicy?: PublicationPolicyHealth;
+  readonly limitations?: readonly GatewayRuntimeLimitation[];
 }
 
 export interface GatewayCallMeta {
@@ -299,6 +313,56 @@ export interface GatewayCallMeta {
   readonly sourceTaskId?: string;
   readonly profile?: RuntimeProfile;
   readonly authorityDigest?: string;
+}
+
+/**
+ * Names the assistant that asked for one saved request.
+ *
+ * `clientName` and `clientVersion` are the values that assistant reported over
+ * MCP during initialize. Morrow does not verify them, so they identify the
+ * client only as far as the client is honest. The admitted workspace is named
+ * and digested, never written out as an absolute path.
+ */
+export interface RequestedByIdentity {
+  readonly schema: "morrow.requested-by.v1";
+  readonly clientName: string;
+  readonly clientVersion: string;
+  readonly proxyPid: number;
+  readonly workspaceName: string;
+  readonly workspaceDigest: string;
+  readonly sessionId: string;
+}
+
+const REQUESTED_BY_TEXT = /^[^\u0000-\u001f\u007f]{1,160}$/;
+
+/** Accepts one requesting-assistant identity, or nothing when any field is unusable. */
+export function normalizeRequestedBy(value: unknown): RequestedByIdentity | undefined {
+  if (!isJsonObject(value) || value.schema !== "morrow.requested-by.v1") return undefined;
+  const text = (field: unknown): string | undefined => (
+    typeof field === "string" && REQUESTED_BY_TEXT.test(field.trim()) ? field.trim() : undefined
+  );
+  const clientName = text(value.clientName);
+  const clientVersion = text(value.clientVersion);
+  const workspaceName = text(value.workspaceName);
+  const sessionId = text(value.sessionId);
+  const workspaceDigest = typeof value.workspaceDigest === "string" && /^[0-9a-f]{64}$/.test(value.workspaceDigest)
+    ? value.workspaceDigest
+    : undefined;
+  const proxyPid = Number.isSafeInteger(value.proxyPid) && Number(value.proxyPid) > 0
+    ? Number(value.proxyPid)
+    : undefined;
+  if (!clientName || !clientVersion || !workspaceName || !workspaceDigest || !sessionId || proxyPid === undefined) {
+    return undefined;
+  }
+  return {
+    schema: "morrow.requested-by.v1",
+    clientName,
+    clientVersion,
+    proxyPid,
+    workspaceName,
+    workspaceDigest,
+    sessionId,
+  };
 }
 
 export function isJsonObject(value: unknown): value is JsonObject {

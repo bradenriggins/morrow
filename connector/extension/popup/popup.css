@@ -1,12 +1,11 @@
-html { width: 360px; }
-body { width: 360px; min-width: 360px; max-height: 600px; overflow-y: auto; }
+html { width: 360px; max-width: 100%; }
+body { width: 360px; min-width: 320px; max-width: 100%; max-height: 600px; overflow-y: auto; }
 main { padding: 18px; }
 header { margin-bottom: 18px; }
-header .brand-wordmark { flex-basis: 154px; }
-header .brand-subtitle { white-space: nowrap; }
+header .brand-wordmark { flex-basis: auto; }
 #pulse { width: 8px; height: 8px; margin-left: auto; flex-shrink: 0; border-radius: 50%; background: var(--text-subtle); }
 #pulse.online { background: var(--success); }
-.connection-status { margin-bottom: 12px; padding: 0 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 1px 2px rgb(23 25 35 / .03); }
+.connection-status { margin-bottom: 12px; padding: 0 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: 0 1px 2px rgb(23 33 60 / .05), 0 8px 18px rgb(23 33 60 / .06); }
 .status { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; padding: 12px 0; }
 .status + .status { border-top: 1px solid var(--border); }
 .status span { color: var(--text-subtle); font-size: 12px; }
@@ -19,9 +18,17 @@ button { width: 100%; margin-top: 8px; }
 #detail { margin: 14px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
 #error { padding: 12px; border: 1px solid var(--danger); border-radius: 12px; background: color-mix(in srgb, var(--danger) 6%, var(--surface)); color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }
 #notice { margin: 0; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-sunken); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
-.help { margin-top: 14px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+.help-link { width: auto; min-height: 44px; margin-top: 6px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--accent); font-size: 12px; font-weight: 650; text-align: left; }
+.help-link:hover { background: transparent; color: var(--accent-hover); text-decoration: underline; }
+.help { margin-top: 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
 .help summary { color: var(--accent); cursor: pointer; font-weight: 600; }
 .help summary:hover { color: var(--accent-hover); }
 .help ol { margin: 8px 0 0; padding-left: 20px; }
 .help li + li { margin-top: 4px; }
 footer { margin-top: 16px; border-top: 1px solid var(--border); padding-top: 14px; color: var(--text-subtle); font-size: 11px; line-height: 1.55; }
+.edit-access { margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-sunken); }
+.edit-access h2 { margin: 0; font-size: 13px; font-weight: 700; line-height: 1.4; }
+.edit-access p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; line-height: 1.45; }
+.edit-access p strong { color: var(--text); font-weight: 700; }
+.edit-access button { margin-top: 10px; min-height: 44px; padding: 10px 14px; }
+@media (max-width: 340px) { main { padding: 14px; } .connection-status, .account, .edit-access { padding-left: 12px; padding-right: 12px; } }

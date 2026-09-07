@@ -20,7 +20,7 @@ The extension uses the Canvas session that the user already opened in Chrome. It
 6. The user selects **Connect Canvas course**.
 7. Chrome asks for access to that Canvas site and any supported New Quizzes site open within the tab.
 
-The extension popup shows the Morrow connection separately from the saved Canvas connection and its last check time. **Disconnect Morrow** removes pairing state, bindings, and receipt replay state. It requests removal of optional HTTPS permissions and warns if Chrome cannot remove them.
+The extension popup shows the Morrow connection separately from the saved Canvas connection and its last check time. **Disconnect Morrow** removes pairing state, bindings, the course file access opt-in, and receipt replay state. It requests removal of optional HTTPS permissions and warns if Chrome cannot remove them.
 
 ## Authentication and binding
 
@@ -34,6 +34,8 @@ The loopback server:
 - assigns a new generation after each authenticated connection;
 - rejects stale, expired, mismatched, or cross-generation commands;
 - binds every request to one runtime-verified Canvas account and origin.
+
+One verification is a probe of the connected tab, which asks the page for its signed-in account. A change always probes again immediately before it is sent. A read may use a probe from the last two seconds, and one probe answers every read that arrives while it runs, so a batch of reads against one course site does not send one probe each. The extension drops what it kept as soon as that tab closes, moves to another address, or finishes a change.
 
 The public binding contains a one-way principal fingerprint, Canvas origin, optional course ID, connection generation, and freshness time. It does not contain a cookie, token, password, email address, or Canvas user ID.
 

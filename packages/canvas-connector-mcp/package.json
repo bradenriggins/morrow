@@ -1,6 +1,6 @@
 {
   "name": "@morrow/canvas-connector-mcp",
-  "version": "1.0.0-rc.0",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",

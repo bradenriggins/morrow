@@ -16,3 +16,14 @@ artifacts/release/
 output/
 .DS_Store
 Thumbs.db
+launch/
+website/
+.agents/
+.codex/
+.gemini/
+.playwright-cli/
+artifacts/desktop-runtime-cache/
+artifacts/privateMcpBundle/
+artifacts/previews/
+docs/implementation/MORROW-WEBSITE-BRIEF.md
+docs/research/MORROW-MESSAGING-AND-RESPONSIVE-TYPE-2026-09-06.md

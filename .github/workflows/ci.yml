@@ -21,4 +21,8 @@ jobs:
         with:
           node-version: 22
       - run: pnpm install --frozen-lockfile
+      - name: Install desktop installer dependencies
+        run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
       - run: pnpm check
+      - name: Desktop installer suites
+        run: pnpm test:desktop

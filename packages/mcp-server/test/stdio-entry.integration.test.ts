@@ -14,6 +14,7 @@ describe("Morrow stdio entry", () => {
     await writeFile(configPath, `${JSON.stringify({
       schema: "morrow.upstreams.v1",
       profile: "private-full",
+      toolSurface: "full",
       sourcePolicy: { requireAttestation: false },
       upstreams: [{
         id: "example-legacy",
@@ -24,7 +25,7 @@ describe("Morrow stdio entry", () => {
         priority: 1,
         required: true,
         enabled: true,
-        env: { FAKE_SOURCE: "example-legacy" },
+        env: { FAKE_SOURCE: "example-legacy", FAKE_INTERNAL_BRIDGE_MAINTENANCE: "1" },
         outputPrivacy: {
           canvas_page_get: {
             allowedFields: ["source", "course_id"],
@@ -39,7 +40,7 @@ describe("Morrow stdio entry", () => {
       }],
       filters: { excludePrefixes: ["mindtap_", "connect_"], excludeNames: [] },
       operationJournal: { path: ":memory:" },
-      batchScheduler: { maxConcurrentWindows: 1 },
+      batchScheduler: { maxConcurrentReadWindows: 2 },
       maxCatalogTools: 1000,
     }, null, 2)}\n`, "utf8");
 
@@ -56,10 +57,12 @@ describe("Morrow stdio entry", () => {
 
     try {
       await client.connect(transport);
-      expect(client.getInstructions()).toContain("existing document, PDF, contacts, email, and storage tools/skills");
+      expect(client.getInstructions()).toContain("document, PDF, contacts, email, and storage tools");
       expect(client.getInstructions()).toContain("Morrow approval does not approve email");
       const listed = await client.listTools();
       expect(listed.tools.some((tool) => tool.name === "canvas_page_get")).toBe(true);
+      expect(listed.tools.some((tool) => tool.name === "morrow_browser_edit_policy_set")).toBe(false);
+      expect(listed.tools.some((tool) => tool.name === "morrow_bridge_maintenance")).toBe(false);
       expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
         "morrow_catalog_search",
         "morrow_capability_get",

@@ -4,7 +4,7 @@
   "upstreams": [
     {
       "id": "canvas-session",
-      "label": "Morrow Canvas Connector",
+      "label": "Morrow Bridge",
       "kind": "mcp-stdio",
       "command": "node",
       "args": ["packages/canvas-connector-mcp/dist/index.js"],
@@ -34,7 +34,7 @@
   "publicationPolicy": { "requiredForPublicProfile": true },
   "filters": { "excludePrefixes": ["mindtap_", "connect_"], "excludeNames": [] },
   "operationJournal": { "path": ".morrow/morrow.sqlite3" },
-  "batchScheduler": { "maxConcurrentWindows": 1 },
+  "batchScheduler": { "maxConcurrentReadWindows": 2 },
   "privacy": {
     "canvasOrigin": "browser-session",
     "account": "local-browser-account",

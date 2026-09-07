@@ -89,7 +89,7 @@ const CourseId = z.string().regex(/^90[0-9]{3}$/);
 const PageSlug = z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/);
 
 function createSandboxServer(): McpServer {
-  const server = new McpServer({ name: "morrow-sandbox", version: "1.0.0-rc.0" });
+  const server = new McpServer({ name: "morrow-sandbox", version: "1.0.0" });
 
   server.registerTool(
     "canvas_courses_list",

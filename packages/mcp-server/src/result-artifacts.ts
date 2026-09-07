@@ -10,6 +10,8 @@ interface ResultArtifact {
   readonly handle: string;
   readonly text: string;
   readonly sha256: string;
+  readonly project?: (value: JsonObject) => JsonObject;
+  audience?: string;
 }
 
 export interface ResultArtifactPage {
@@ -67,11 +69,12 @@ function exactLimit(value: number | undefined): number {
 export class ResultArtifactStore {
   private readonly artifacts = new Map<string, ResultArtifact>();
 
-  bound(result: JsonObject): JsonObject {
-    const text = JSON.stringify(result);
-    if (text.length <= MAX_INLINE_RESULT_CHARACTERS) return result;
+  bound(result: JsonObject, project?: (value: JsonObject) => JsonObject): JsonObject {
+    const projected = project ? project(structuredClone(result)) : result;
+    const text = JSON.stringify(projected);
+    if (text.length <= MAX_INLINE_RESULT_CHARACTERS) return projected;
 
-    const gatewayMeta = result._meta;
+    const gatewayMeta = projected._meta;
     if (text.length > MAX_RESULT_ARTIFACT_CHARACTERS) {
       return {
         content: [{
@@ -95,6 +98,7 @@ export class ResultArtifactStore {
       handle,
       text,
       sha256: sha256Text(text),
+      ...(project ? { project } : {}),
     };
     this.artifacts.set(handle, artifact);
     while (this.artifacts.size > MAX_RESULT_ARTIFACTS) {
@@ -108,7 +112,7 @@ export class ResultArtifactStore {
         type: "text",
         text: "Morrow stored the large result as a bounded local artifact. Use morrow_result_page with this handle.",
       }],
-      ...(result.isError === true ? { isError: true } : {}),
+      ...(projected.isError === true ? { isError: true } : {}),
       structuredContent: {
         schema: "morrow.result-artifact.v1",
         handle,
@@ -120,21 +124,50 @@ export class ResultArtifactStore {
     };
   }
 
-  page(handle: string, offset?: number, limit?: number): ResultArtifactPage {
+  bindAudience(value: JsonObject, audience: string): void {
+    if (!audience || audience.length > 1_000) throw new TypeError("result artifact audience is invalid");
+    const visit = (candidate: unknown): void => {
+      if (Array.isArray(candidate)) {
+        candidate.forEach(visit);
+        return;
+      }
+      if (!isJsonObject(candidate)) return;
+      if (candidate.schema === "morrow.result-artifact.v1" && typeof candidate.handle === "string") {
+        const artifact = this.artifacts.get(candidate.handle);
+        if (!artifact || (artifact.audience && artifact.audience !== audience)) {
+          throw new Error("Morrow could not authorize the requested result artifact");
+        }
+        artifact.audience = audience;
+      }
+      Object.values(candidate).forEach(visit);
+    };
+    visit(value);
+  }
+
+  page(handle: string, offset?: number, limit?: number, audience?: string): ResultArtifactPage {
     const artifact = this.artifacts.get(handle);
     if (!artifact) throw new Error("Morrow could not find the requested result artifact");
+    if (artifact.audience && audience !== artifact.audience) {
+      throw new Error("Morrow could not authorize the requested result artifact");
+    }
+    let serialized = artifact.text;
+    if (artifact.project) {
+      const parsed: unknown = JSON.parse(serialized);
+      if (!isJsonObject(parsed)) throw new Error("Morrow could not read the requested result artifact");
+      serialized = JSON.stringify(artifact.project(parsed));
+    }
     const start = exactOffset(offset);
     const maximum = exactLimit(limit);
-    const text = artifact.text.slice(start, start + maximum);
-    const nextOffset = start + text.length < artifact.text.length ? start + text.length : null;
+    const text = serialized.slice(start, start + maximum);
+    const nextOffset = start + text.length < serialized.length ? start + text.length : null;
     return {
       schema: "morrow.result-page.v1",
       handle: artifact.handle,
       offset: start,
       returned: text.length,
       nextOffset,
-      totalCharacters: artifact.text.length,
-      sha256: artifact.sha256,
+      totalCharacters: serialized.length,
+      sha256: sha256Text(serialized),
       text,
     };
   }

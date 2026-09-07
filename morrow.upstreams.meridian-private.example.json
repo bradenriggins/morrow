@@ -57,7 +57,7 @@
     "path": "${MORROW_OPERATION_DB_PATH:-.morrow/morrow.sqlite3}"
   },
   "batchScheduler": {
-    "maxConcurrentWindows": 1
+    "maxConcurrentReadWindows": 2
   },
   "maxCatalogTools": 1000
 }

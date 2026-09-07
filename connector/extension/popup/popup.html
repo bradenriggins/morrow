@@ -3,34 +3,38 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Morrow course access</title>
+  <title>Morrow Bridge</title>
   <link rel="stylesheet" href="../brand/theme.css">
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
   <main>
-    <header class="brand"><picture class="brand-wordmark"><source media="(prefers-color-scheme: dark)" srcset="../brand/morrow-wordmark-dark.png"><img src="../brand/morrow-wordmark.png" width="164" height="45" alt="Morrow"></picture><p class="brand-subtitle">Course access</p><span id="pulse" aria-hidden="true"></span></header>
+    <header class="brand"><span class="brand-wordmark" aria-label="Morrow Bridge"><img class="brand-mark" src="../brand/morrow-knot.svg" alt=""><span>morrow</span></span><span id="pulse" aria-hidden="true"></span></header>
     <div class="connection-status">
-      <section class="status" aria-live="polite"><span id="status-label">Morrow</span><strong id="status-value">Checking…</strong></section>
-      <section class="status" aria-live="polite"><span>Course</span><strong id="canvas-value">Checking…</strong></section>
+      <section class="status"><span id="status-label">Morrow</span><strong id="status-value">Checking…</strong></section>
+      <section class="status"><span id="course-label">Course</span><strong id="canvas-value">Checking…</strong></section>
     </div>
-    <section id="account" class="account" hidden><span>Saved course connection</span><strong id="account-origin"></strong><time id="account-last-checked"></time></section>
+    <section id="account" class="account" hidden><span id="account-label">Selected course</span><strong id="account-origin"></strong><time id="account-last-checked"></time></section>
     <button id="primary" type="button" disabled>Connect Morrow</button>
     <button id="canvas-action" class="secondary" type="button" hidden>Check or switch course</button>
     <button id="disconnect" class="secondary" type="button" hidden>Disconnect Morrow</button>
     <p id="detail">Checking the connection…</p>
+    <section class="edit-access" aria-labelledby="edit-access-title"><h2 id="edit-access-title">Plan and Edit</h2><p><strong>Plan keeps changes ready for your review.</strong> Choose courses and the changes Morrow can make. You can return any course to Plan at once.</p><button id="editing-settings" class="secondary" type="button">Open Plan and Edit settings</button></section>
     <p id="error" role="alert" hidden></p>
     <p id="notice" role="status" aria-live="polite" hidden></p>
+    <button id="setup-guide" class="help-link" type="button">Open setup guide</button>
     <details class="help">
       <summary>How to connect</summary>
       <ol>
-        <li>Add Morrow to your assistant, then open it. Use Morrow with one assistant at a time.</li>
+        <li>Add Morrow to your assistant, then open it.</li>
         <li>Open a Canvas or Moodle course in Chrome and sign in.</li>
-        <li>Select Connect Morrow, then Connect course.</li>
+        <li>Select Connect Morrow, then connect a signed-in course site.</li>
+        <li>Choose courses and access in Plan and Edit settings.</li>
         <li>Ask Morrow for help in the assistant you chose.</li>
       </ol>
       <p>Chrome will ask for access to the course site you select. If Canvas New Quizzes is open, it may also ask for access to that quiz site.</p>
       <p>Disconnect Morrow stops this connection and removes its course site access. It does not sign you out or undo course changes.</p>
+      <p>Chrome works with one Morrow at a time. A second Morrow reports that another Morrow is already using this connection, and it starts without its course tools. Close the other Morrow, or use one Morrow for all your assistants.</p>
     </details>
     <footer>Canvas · Moodle<br>Uses the permissions available in your current course role.</footer>
   </main>
