@@ -153,6 +153,32 @@ test("a closed Claude Desktop stays configured in the installer state", async (t
   assert.notEqual(state.lifecycle, "assistant_pending");
 });
 
+test("Windows Claude setup opens the registered app and reveals only its own extension file", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-claude-desktop-open-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const installer = controller(root);
+  installer.platform = "win32";
+  const bundle = path.join(installer.paths.state, "ClaudeDesktop", "setup-fixture", "Morrow.mcpb");
+  await fs.mkdir(path.dirname(bundle), { recursive: true });
+  await fs.writeFile(bundle, "extension fixture");
+  const calls = [];
+  installer.shell = {
+    openExternal: async (value) => calls.push(["application", value]),
+    openPath: async () => assert.fail("Windows must not depend on a .mcpb file association"),
+    showItemInFolder: (value) => calls.push(["file", value])
+  };
+  await installer.writeRecord({ ...freshRecord(), configured: { "claude-desktop": { bundlePath: bundle } } });
+  await installer.openClaudeDesktop();
+  await installer.revealClaudeDesktopBundle();
+  assert.deepEqual(calls, [["application", "claude://"], ["file", bundle]]);
+
+  const outside = path.join(root, "Morrow.mcpb");
+  await fs.writeFile(outside, "unrelated file");
+  await installer.writeRecord({ ...freshRecord(), configured: { "claude-desktop": { bundlePath: outside } } });
+  await assert.rejects(installer.revealClaudeDesktopBundle(), { code: "setup_failed" });
+  assert.equal(calls.length, 2);
+});
+
 test("a mismatched or oversized connection receipt cannot mark Claude configured", async (t) => {
   const { setup } = await fixture(t);
   await fs.writeFile(setup.receiptPath, JSON.stringify({ schema: "morrow.claude-desktop-connection.v1",

@@ -1333,7 +1333,8 @@ test("every _redirects rule sends the reader to a public route without shadowing
   for (const [from, to, status] of rules) {
     if (!PUBLIC_ROUTES.includes(to)) problems.push(`${from} -> ${to} is not a public route`);
     if (SERVED_ROUTES.includes(from)) problems.push(`${from} shadows a page the site serves`);
-    if (existsSync(new URL(from.slice(1), site))) problems.push(`${from} shadows a file in website/`);
+    // The deployment excludes the internal website README.
+    if (from !== "/README.md" && existsSync(new URL(from.slice(1), site))) problems.push(`${from} shadows a file in website/`);
     if (!["301", "302"].includes(status)) problems.push(`${from} uses status ${status}; use 301 or 302`);
   }
   assert.deepEqual(problems, [], "an old URL must land on a page that exists");

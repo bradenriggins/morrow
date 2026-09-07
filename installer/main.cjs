@@ -611,6 +611,16 @@ async function startMorrow() {
       return envelope(await installer.state(), error?.code ? error : errorDetails("setup_failed"));
     }
   });
+  ipcMain.handle("installer:reveal-claude-extension", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+      await installer.revealClaudeDesktopBundle();
+      return respond();
+    } catch (error) {
+      return envelope(await installer.state(), error?.code ? error : errorDetails("setup_failed"));
+    }
+  });
   ipcMain.handle("installer:repair", async (event, ...input) => {
     trusted(event);
     try {

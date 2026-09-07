@@ -186,6 +186,7 @@ function assistantRow(assistant) {
   const actions = [];
   if (assistant.pending === true) {
     actions.push('<button class="secondary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button>');
+    actions.push('<button class="secondary-button" type="button" data-action="reveal-claude-extension">Show Morrow extension</button>');
     actions.push('<button class="secondary-button" type="button" data-action="check-claude-desktop">Check setup</button>');
   }
   if (assistant.configured === true || assistant.pending === true) {
@@ -245,8 +246,8 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
   if (pending?.id === "claude-desktop" && !assistant) {
     return {
       title: "Finish setting up Claude Desktop.",
-      copy: "Morrow opened Claude Desktop with its local extension. Approve it there, then return here to check the connection.",
-      body: '<div class="inline-actions"><button class="primary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button><button class="secondary-button" type="button" data-action="check-claude-desktop">Check setup</button></div>',
+      copy: "Morrow prepared its extension for Claude Desktop. Install it there, then return here to check the connection.",
+      body: '<ol class="instructions"><li>Open Claude Desktop and select <strong>Settings</strong>, then <strong>Extensions</strong>.</li><li>Open <strong>Advanced settings</strong> and select <strong>Install Extension</strong>.</li><li>Select <strong>Show Morrow extension</strong> below to find <strong>Morrow.mcpb</strong>. Choose that file in Claude Desktop and approve the installation.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="open-claude-desktop">Open Claude Desktop</button><button class="secondary-button" type="button" data-action="reveal-claude-extension">Show Morrow extension</button><button class="secondary-button" type="button" data-action="check-claude-desktop">Check setup</button></div>',
     };
   }
   if (!assistant) {

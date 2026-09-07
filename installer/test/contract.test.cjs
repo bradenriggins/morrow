@@ -381,7 +381,7 @@ test("preload and main expose the fixed update and first-read actions used by th
   const preload = fs.readFileSync(path.join(installerRoot, "preload.cjs"), "utf8");
   const main = fs.readFileSync(path.join(installerRoot, "main.cjs"), "utf8");
   const renderer = fs.readFileSync(path.join(installerRoot, "renderer", "renderer.js"), "utf8");
-  for (const channel of ["installer:reconcile-bridge", "installer:check-for-updates", "installer:install-update", "installer:run-first-read", "installer:open-claude-desktop"]) {
+  for (const channel of ["installer:reconcile-bridge", "installer:check-for-updates", "installer:install-update", "installer:run-first-read", "installer:open-claude-desktop", "installer:reveal-claude-extension"]) {
     assert.match(preload, new RegExp(`"${channel}"`));
     assert.match(main, new RegExp(`ipcMain\\.handle\\("${channel}"`));
     assert.match(renderer, new RegExp(`invoke\\("${channel}"`));

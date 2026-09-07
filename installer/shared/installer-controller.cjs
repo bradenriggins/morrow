@@ -912,8 +912,12 @@ class InstallerController {
           version: this.productVersion,
           platform: this.platform
         });
-        const openError = await this.shell.openPath(setup.bundlePath);
-        if (openError) throw new Error("Claude Desktop did not open the Morrow bundle");
+        if (this.platform === "win32") {
+          await this.shell.openExternal("claude://");
+        } else {
+          const openError = await this.shell.openPath(setup.bundlePath);
+          if (openError) throw new Error("Claude Desktop did not open the Morrow bundle");
+        }
         const updated = await this.record();
         await this.writeRecord({
           ...updated,
@@ -1436,8 +1440,27 @@ class InstallerController {
     const record = await this.record();
     const setup = record.configured?.["claude-desktop"];
     if (!setup || typeof setup.bundlePath !== "string" || !path.isAbsolute(setup.bundlePath)) throw errorDetails("setup_failed");
-    const openError = await this.shell.openPath(setup.bundlePath);
-    if (openError) throw errorDetails("setup_failed");
+    if (this.platform === "win32") {
+      await this.shell.openExternal("claude://");
+    } else {
+      const openError = await this.shell.openPath(setup.bundlePath);
+      if (openError) throw errorDetails("setup_failed");
+    }
+  }
+
+  async revealClaudeDesktopBundle() {
+    const record = await this.record();
+    const bundle = record.configured?.["claude-desktop"]?.bundlePath;
+    if (typeof bundle !== "string" || !path.isAbsolute(bundle)
+      || !insideDirectory(path.join(this.paths.state, "ClaudeDesktop"), bundle)
+      || path.basename(bundle) !== "Morrow.mcpb") throw errorDetails("setup_failed");
+    const info = await fs.lstat(bundle).catch(() => null);
+    if (!info?.isFile() || info.isSymbolicLink()) throw errorDetails("setup_failed");
+    const [realSetupRoot, realBundle] = await Promise.all([
+      fs.realpath(path.join(this.paths.state, "ClaudeDesktop")), fs.realpath(bundle)
+    ]);
+    if (!insideDirectory(realSetupRoot, realBundle)) throw errorDetails("setup_failed");
+    this.shell.showItemInFolder(bundle);
   }
 
   async acquireRestartLease() {

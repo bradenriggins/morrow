@@ -507,6 +507,12 @@ async function handleAction(event) {
     else render(state);
     return;
   }
+  if (action === "reveal-claude-extension") {
+    const next = await invoke("installer:reveal-claude-extension");
+    if (next) render(next);
+    else render(state);
+    return;
+  }
   if (action === "repair") {
     const next = await invoke("installer:repair");
     if (next) render(next);

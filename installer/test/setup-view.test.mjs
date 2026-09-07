@@ -75,6 +75,10 @@ test("Claude Desktop is waiting for approval", () => {
   const view = actionView(current, { chosenAssistantId: "claude-desktop" });
   assert.equal(view.title, "Finish setting up Claude Desktop.");
   assert.match(view.body, /data-action="open-claude-desktop"/);
+  assert.match(view.body, /data-action="reveal-claude-extension"/);
+  assert.match(view.body, /Advanced settings/);
+  assert.match(view.body, /Morrow\.mcpb/);
+  assert.doesNotMatch(view.copy, /opened Claude Desktop/);
   assert.match(view.body, /data-action="check-claude-desktop"/);
   assert.equal(statusSummary(current), "Finish setting up Claude Desktop");
   assert.equal(step(current, "Assistant").detail, "Finish approval in Claude Desktop");
@@ -435,7 +439,7 @@ test("a second assistant waiting for approval keeps the first assistant's steps"
   assert.equal(step(current, "Assistant").detail, "ChatGPT");
   // The approval that is still waiting stays reachable, in the row it belongs to.
   assert.match(view.body, /<h3>Claude Desktop<\/h3><p>Waiting for your approval in Claude Desktop\.<\/p>/);
-  assert.deepEqual(actions(view.body), ["run-first-read", "choose-workspace", "remove-assistant", "open-claude-desktop", "check-claude-desktop", "remove-assistant"]);
+  assert.deepEqual(actions(view.body), ["run-first-read", "choose-workspace", "remove-assistant", "open-claude-desktop", "reveal-claude-extension", "check-claude-desktop", "remove-assistant"]);
 });
 
 test("removing Claude Desktop names the step that is left inside Claude Desktop", () => {

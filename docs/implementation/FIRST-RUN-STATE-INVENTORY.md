@@ -72,21 +72,21 @@ Two facts apply to every row, so they are stated once:
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
 | `first-paint` | "Checking Morrow setup…" alone; the action panel is hidden; the rail shows five steps, each "Not checked yet"; the header live region says "Checking setup"; **Check status** is disabled | None. The read answers and replaces this state. `respond()` catches its own failures and always answers (`installer/main.cjs:411`), so this state ends unless the main process never settles `installer:get-state` | `installer/renderer/index.html:31`, `installer/renderer/renderer.js:299-302`, `installer/shared/setup-view.mjs:100` |
-| `setup-unavailable` | "Morrow could not read its setup state." / "Morrow could not read the setup record it keeps on this computer, so it cannot show which steps are complete. No setup step ran." and "No setup state was returned" | **Check again** in the panel | `installer/shared/setup-view.mjs:410-415`, reached at `installer/renderer/renderer.js:299` after `installer/renderer/renderer.js:350` |
-| `repair` | "Repair Morrow before you connect a course." / "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state." | **Repair Morrow**, or **Check again** | `installer/shared/setup-view.mjs:235-239` |
-| `claude-pending` | "Finish setting up Claude Desktop." / "Morrow opened Claude Desktop with its local extension. Approve it there, then return here to check the connection." | **Open Claude Desktop**, then **Check setup** | `installer/shared/setup-view.mjs:246-250` |
-| `no-assistant` | "Choose your assistant." / "Morrow configures only the assistant you choose. Your course sign-in remains separate in Chrome." with one card per assistant and the materials folder row. When this computer has none, the card area reads "No supported assistant was found" / "Install a supported assistant, then check status again." | Select a card, then **Set up ChatGPT** (the button names the chosen assistant). It reads "Choose an assistant" and stays disabled until a detected, supported card is selected. With no assistant found, the only working control is the header **Check status** | `installer/shared/setup-view.mjs:255-259`, cards `installer/shared/setup-view.mjs:126`, folder `installer/shared/setup-view.mjs:156` |
-| `runtime-not-ready` | "Morrow is getting ready." / "Morrow will show the next Bridge step when its local runtime is ready. It will not open Chrome setup before then." and "Local setup is still in progress" | **Check status** in the header. The panel has no control; its text says "Keep Morrow open, then check status again." | `installer/shared/setup-view.mjs:262-266` |
-| `delivery-blocked` | "Morrow Bridge is not available yet." / "Your assistant can be ready while the Chrome connection is still unavailable. Morrow will not suggest an unverified installation route." and "Chrome delivery is not ready" | **Check status** in the header. The panel has no control; the Bridge step shows status `blocked` | `installer/shared/setup-view.mjs:269-273`, rail `installer/shared/setup-view.mjs:117` |
-| `reload-required` | "Reload Morrow Bridge." / "Morrow staged a verified Bridge update. Chrome must reload Morrow Bridge before Morrow can check the update." and three numbered Chrome steps | Reload the extension in Chrome, then **Check Bridge** | `installer/shared/setup-view.mjs:276-280` |
-| `folder-not-ready` | "Morrow Bridge is not ready to open." / "Morrow could not verify its Bridge folder. Repair Morrow to restore the folder from the copy included with the app." | **Repair Morrow**, or **Check again**, in the panel | `installer/shared/setup-view.mjs:283-287` |
-| `dev-temporary` | "Add Morrow Bridge." / "Use this temporary Chrome method until Morrow Bridge is available in the Chrome Web Store." and five numbered steps ending in "Connect Morrow" | **Show Bridge folder**, then the Chrome steps, then **Check Bridge** | `installer/shared/setup-view.mjs:290-294` |
-| `store-available` | "Install Morrow Bridge." / "Morrow Bridge uses the course site where you are already signed in. It asks Chrome for access only to the exact course site you choose." and three Chrome Web Store steps | Add it from the store, then **Check Bridge** | `installer/shared/setup-view.mjs:297-301` |
-| `not-paired` | "Connect Morrow Bridge." / "<assistant> is configured. Open Morrow Bridge in Chrome to complete the connection you start." and four numbered steps | Open the popup and select **Connect Morrow**, allow it on the Chrome connection page, then **Check Bridge** | `installer/shared/setup-view.mjs:305-309` |
-| `no-course` | "Connect your course." / "Connect a Canvas or Moodle course that you can access before Morrow reads course information." and three numbered steps | All three steps are on other surfaces: Chrome, the popup, then Plan and Edit settings. The panel has no control; the header **Check status** re-reads | `installer/shared/setup-view.mjs:312-316` |
-| `preview-ready` | "Check your course connection." / "Morrow will read <course> to confirm the connection. This check does not change the course." | **Check connection** | `installer/shared/setup-view.mjs:327-331` |
-| `preview-preparing` | "Your selected course is connected." / "<course> is connected. Morrow will show when its first read is available." and "First read is still preparing" | **Check status** in the header. The panel has no control | `installer/shared/setup-view.mjs:333-337` |
-| `preview-completed` | "Your course is connected." / "Morrow read <course> successfully. Continue in <assistant> and ask what you want to do, for example:" and one suggested request | The assistant. This is the end of setup; the panel carries no control by design | `installer/shared/setup-view.mjs:320-324` |
+| `setup-unavailable` | "Morrow could not read its setup state." / "Morrow could not read the setup record it keeps on this computer, so it cannot show which steps are complete. No setup step ran." and "No setup state was returned" | **Check again** in the panel | `installer/shared/setup-view.mjs:411-416`, reached at `installer/renderer/renderer.js:299` after `installer/renderer/renderer.js:350` |
+| `repair` | "Repair Morrow before you connect a course." / "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state." | **Repair Morrow**, or **Check again** | `installer/shared/setup-view.mjs:236-240` |
+| `claude-pending` | "Finish setting up Claude Desktop." / "Morrow prepared its extension for Claude Desktop. Install it there, then return here to check the connection." | **Open Claude Desktop**, install **Morrow.mcpb** through **Settings > Extensions > Advanced settings > Install Extension**, then **Check setup**. **Show Morrow extension** opens its folder. | `installer/shared/setup-view.mjs:247-251` |
+| `no-assistant` | "Choose your assistant." / "Morrow configures only the assistant you choose. Your course sign-in remains separate in Chrome." with one card per assistant and the materials folder row. When this computer has none, the card area reads "No supported assistant was found" / "Install a supported assistant, then check status again." | Select a card, then **Set up ChatGPT** (the button names the chosen assistant). It reads "Choose an assistant" and stays disabled until a detected, supported card is selected. With no assistant found, the only working control is the header **Check status** | `installer/shared/setup-view.mjs:256-260`, cards `installer/shared/setup-view.mjs:126`, folder `installer/shared/setup-view.mjs:156` |
+| `runtime-not-ready` | "Morrow is getting ready." / "Morrow will show the next Bridge step when its local runtime is ready. It will not open Chrome setup before then." and "Local setup is still in progress" | **Check status** in the header. The panel has no control; its text says "Keep Morrow open, then check status again." | `installer/shared/setup-view.mjs:263-267` |
+| `delivery-blocked` | "Morrow Bridge is not available yet." / "Your assistant can be ready while the Chrome connection is still unavailable. Morrow will not suggest an unverified installation route." and "Chrome delivery is not ready" | **Check status** in the header. The panel has no control; the Bridge step shows status `blocked` | `installer/shared/setup-view.mjs:270-274`, rail `installer/shared/setup-view.mjs:117` |
+| `reload-required` | "Reload Morrow Bridge." / "Morrow staged a verified Bridge update. Chrome must reload Morrow Bridge before Morrow can check the update." and three numbered Chrome steps | Reload the extension in Chrome, then **Check Bridge** | `installer/shared/setup-view.mjs:277-281` |
+| `folder-not-ready` | "Morrow Bridge is not ready to open." / "Morrow could not verify its Bridge folder. Repair Morrow to restore the folder from the copy included with the app." | **Repair Morrow**, or **Check again**, in the panel | `installer/shared/setup-view.mjs:284-288` |
+| `dev-temporary` | "Add Morrow Bridge." / "Use this temporary Chrome method until Morrow Bridge is available in the Chrome Web Store." and five numbered steps ending in "Connect Morrow" | **Show Bridge folder**, then the Chrome steps, then **Check Bridge** | `installer/shared/setup-view.mjs:291-295` |
+| `store-available` | "Install Morrow Bridge." / "Morrow Bridge uses the course site where you are already signed in. It asks Chrome for access only to the exact course site you choose." and three Chrome Web Store steps | Add it from the store, then **Check Bridge** | `installer/shared/setup-view.mjs:298-302` |
+| `not-paired` | "Connect Morrow Bridge." / "<assistant> is configured. Open Morrow Bridge in Chrome to complete the connection you start." and four numbered steps | Open the popup and select **Connect Morrow**, allow it on the Chrome connection page, then **Check Bridge** | `installer/shared/setup-view.mjs:306-310` |
+| `no-course` | "Connect your course." / "Connect a Canvas or Moodle course that you can access before Morrow reads course information." and three numbered steps | All three steps are on other surfaces: Chrome, the popup, then Plan and Edit settings. The panel has no control; the header **Check status** re-reads | `installer/shared/setup-view.mjs:313-317` |
+| `preview-ready` | "Check your course connection." / "Morrow will read <course> to confirm the connection. This check does not change the course." | **Check connection** | `installer/shared/setup-view.mjs:328-332` |
+| `preview-preparing` | "Your selected course is connected." / "<course> is connected. Morrow will show when its first read is available." and "First read is still preparing" | **Check status** in the header. The panel has no control | `installer/shared/setup-view.mjs:334-338` |
+| `preview-completed` | "Your course is connected." / "Morrow read <course> successfully. Continue in <assistant> and ask what you want to do, for example:" and one suggested request | The assistant. This is the end of setup; the panel carries no control by design | `installer/shared/setup-view.mjs:321-325` |
 
 The progress rail runs Assistant, Bridge, Connect, Course, First read
 (`installer/shared/setup-view.mjs:97`) and marks one step current
@@ -96,17 +96,17 @@ the panel.
 
 Beside the action panel. "Setup you can change" is appended inside the panel in every state once an
 assistant is configured or waiting for approval, and never in `repair`
-(`installer/shared/setup-view.mjs:214-218`), so neither the folder nor the assistant list is reachable
+(`installer/shared/setup-view.mjs:215-219`), so neither the folder nor the assistant list is reachable
 only from the first screen. The Blackboard and retention panels are disclosures reachable through
 their `<summary>`.
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `manage-setup` | "Setup you can change", the materials folder, and one row per assistant on this computer | Change the folder, add another assistant, or remove one | `installer/shared/setup-view.mjs:202-207` |
+| `manage-setup` | "Setup you can change", the materials folder, and one row per assistant on this computer | Change the folder, add another assistant, or remove one | `installer/shared/setup-view.mjs:203-208` |
 | `folder-unset` | "Materials folder" / "Optional. Choose a folder for Morrow materials. If you continue, Morrow creates its own Materials folder." | **Choose folder** | `installer/shared/setup-view.mjs:155-157` |
 | `folder-set` | The folder's path, and what changing it does to each configured assistant | **Change folder** | `installer/shared/setup-view.mjs:158-163` |
-| `assistant-configured` | The assistant's name and "Morrow is set up in this assistant." | **Remove**, and for Claude Desktop the note that it must also be removed inside Claude Desktop | `installer/shared/setup-view.mjs:168`, `installer/shared/setup-view.mjs:184`, `installer/shared/setup-view.mjs:191` |
-| `assistant-pending` | "Waiting for your approval in Claude Desktop." | **Open Claude Desktop**, **Check setup**, or **Remove** | `installer/shared/setup-view.mjs:169`, `installer/shared/setup-view.mjs:180` |
+| `assistant-configured` | The assistant's name and "Morrow is set up in this assistant." | **Remove**, and for Claude Desktop the note that it must also be removed inside Claude Desktop | `installer/shared/setup-view.mjs:168`, `installer/shared/setup-view.mjs:184`, `installer/shared/setup-view.mjs:192` |
+| `assistant-pending` | "Waiting for your approval in Claude Desktop." | **Open Claude Desktop**, **Show Morrow extension**, **Check setup**, or **Remove** | `installer/shared/setup-view.mjs:169`, `installer/shared/setup-view.mjs:180` |
 | `assistant-available` | "Not set up yet." | **Set up <assistant>** | `installer/shared/setup-view.mjs:172`, `installer/shared/setup-view.mjs:186` |
 | `assistant-absent` | "Not found on this computer." or "Not available in this Morrow version." | None. The row carries no control | `installer/shared/setup-view.mjs:170-171` |
 | `updates-hidden` | Nothing | None. No update record, or delivery is unavailable | `installer/renderer/renderer.js:151-158` |
@@ -122,14 +122,14 @@ their `<summary>`.
 | `updates-check-failed` | "Morrow could not check for an update." | **Try again** | `installer/renderer/renderer.js:211-212` |
 | `blackboard-hidden` | Nothing | None. The panel appears only after an assistant is configured and the local runtime is ready, so the first screen never asks for credentials | `installer/shared/setup-view.mjs:47-49`, `installer/renderer/renderer.js:285` |
 | `blackboard-empty` | "Connect a Blackboard Learn site (optional)", "Most people do not need this…" and four fields | Ask a Blackboard administrator for the key and secret, then **Save Blackboard connection** | `installer/renderer/index.html:48-85`, `installer/renderer/renderer.js:288` |
-| `blackboard-invalid` | One message under each field that is not ready, and focus moves to the first of them | Correct the named field. Messages clear as the value becomes right | `installer/renderer/renderer.js:564-604`, `installer/renderer/renderer.js:608-617` |
+| `blackboard-invalid` | One message under each field that is not ready, and focus moves to the first of them | Correct the named field. Messages clear as the value becomes right | `installer/renderer/renderer.js:570-610`, `installer/renderer/renderer.js:614-623` |
 | `blackboard-saved` | "Blackboard REST API configured. Live Blackboard access has not been tested.", and the saved site, account and stored name in one row | Saving verifies the integration account and opens a native chooser for the courses returned by Blackboard. **Remove connection** takes the connection and its secret off this computer | `installer/renderer/renderer.js:288-290`, `installer/renderer/renderer.js:266-278` |
-| `blackboard-save-failed` | The step's own problem in `#problem`; the secret field is cleared and the web address and key keep what was typed | Correct the value and save again | `installer/renderer/renderer.js:631-648` |
-| `blackboard-removal-failed` | The step's own problem in `#problem`; the saved connection row and its courses stay exactly as they are | Check status, then remove it again | `installer/renderer/renderer.js:511-526`, `installer/main.cjs:529-537` |
-| `retention` | "What stays on this computer", every path this installation keeps, and which ones Morrow can remove | Optional: **Remove Morrow's data** | `installer/shared/setup-view.mjs:378-394` |
-| `retention-partial` | "Morrow could not remove everything", the paths removed and the paths still on this computer | Close what is using them, then remove again, or remove them by hand | `installer/shared/setup-view.mjs:370` |
-| `removal-announced` | Nothing on screen. The result of a removal is read once in a `role="status"` region, in the words the section shows, because focus stays on the button that ran it | None. It repeats what the section already shows | `installer/shared/setup-view.mjs:461-467`, `installer/renderer/index.html:97`, `installer/renderer/renderer.js:347` |
-| `support` | "Where to get help", the Morrow version, the materials folder, the folder Morrow keeps its setup record in, and the support address. A value Morrow has not read is left out | None. Morrow opens no web page, so the address is text a person opens in their browser | `installer/shared/setup-view.mjs:436-453`, `installer/renderer/renderer.js:337` |
+| `blackboard-save-failed` | The step's own problem in `#problem`; the secret field is cleared and the web address and key keep what was typed | Correct the value and save again | `installer/renderer/renderer.js:637-654` |
+| `blackboard-removal-failed` | The step's own problem in `#problem`; the saved connection row and its courses stay exactly as they are | Check status, then remove it again | `installer/renderer/renderer.js:517-532`, `installer/main.cjs:529-537` |
+| `retention` | "What stays on this computer", every path this installation keeps, and which ones Morrow can remove | Optional: **Remove Morrow's data** | `installer/shared/setup-view.mjs:379-395` |
+| `retention-partial` | "Morrow could not remove everything", the paths removed and the paths still on this computer | Close what is using them, then remove again, or remove them by hand | `installer/shared/setup-view.mjs:371` |
+| `removal-announced` | Nothing on screen. The result of a removal is read once in a `role="status"` region, in the words the section shows, because focus stays on the button that ran it | None. It repeats what the section already shows | `installer/shared/setup-view.mjs:462-468`, `installer/renderer/index.html:97`, `installer/renderer/renderer.js:347` |
+| `support` | "Where to get help", the Morrow version, the materials folder, the folder Morrow keeps its setup record in, and the support address. A value Morrow has not read is left out | None. Morrow opens no web page, so the address is text a person opens in their browser | `installer/shared/setup-view.mjs:437-454`, `installer/renderer/renderer.js:337` |
 
 ---
 
@@ -386,7 +386,7 @@ restarts Morrow. Neither was observed here.
 
 One state has a control but no working one: `no-assistant` on a computer with no supported assistant
 shows "No supported assistant was found" with the setup button disabled
-(`installer/shared/setup-view.mjs:126`, `installer/shared/setup-view.mjs:250`). The next action —
+(`installer/shared/setup-view.mjs:126`, `installer/shared/setup-view.mjs:251`). The next action —
 install an assistant, then check status — is named in the text, and the header **Check status** works.
 
 ---
@@ -400,24 +400,25 @@ stale name here.
 | Control name | Surface | Source |
 | --- | --- | --- |
 | `Check status` | Morrow app | `installer/renderer/index.html:15` |
-| `Repair Morrow` | Morrow app | `installer/shared/setup-view.mjs:236` |
-| `Check again` | Morrow app | `installer/shared/setup-view.mjs:238`, `installer/shared/setup-view.mjs:414` |
-| `Open Claude Desktop` | Morrow app | `installer/shared/setup-view.mjs:249`, `installer/shared/setup-view.mjs:188` |
-| `Check setup` | Morrow app | `installer/shared/setup-view.mjs:249`, `installer/shared/setup-view.mjs:189` |
-| `Choose an assistant` | Morrow app | `installer/shared/setup-view.mjs:258` |
+| `Repair Morrow` | Morrow app | `installer/shared/setup-view.mjs:237` |
+| `Check again` | Morrow app | `installer/shared/setup-view.mjs:239`, `installer/shared/setup-view.mjs:415` |
+| `Open Claude Desktop` | Morrow app | `installer/shared/setup-view.mjs:250`, `installer/shared/setup-view.mjs:188` |
+| `Show Morrow extension` | Morrow app | `installer/shared/setup-view.mjs:189`, `installer/shared/setup-view.mjs:250` |
+| `Check setup` | Morrow app | `installer/shared/setup-view.mjs:250`, `installer/shared/setup-view.mjs:190` |
+| `Choose an assistant` | Morrow app | `installer/shared/setup-view.mjs:259` |
 | `Choose folder` | Morrow app | `installer/shared/setup-view.mjs:165`, `installer/shared/setup-view.mjs:172` |
 | `Change folder` | Morrow app | `installer/shared/setup-view.mjs:172` |
-| `Remove` | Morrow app | `installer/shared/setup-view.mjs:192`, `installer/renderer/renderer.js:297` |
-| `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:293` |
-| `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:279` |
-| `Check connection` | Morrow app | `installer/shared/setup-view.mjs:330` |
+| `Remove` | Morrow app | `installer/shared/setup-view.mjs:193`, `installer/renderer/renderer.js:297` |
+| `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:294` |
+| `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:280` |
+| `Check connection` | Morrow app | `installer/shared/setup-view.mjs:331` |
 | `Check for updates` | Morrow app | `installer/renderer/renderer.js:172` |
 | `Restart to update` | Morrow app | `installer/renderer/renderer.js:199` |
 | `Try restart again` | Morrow app | `installer/renderer/renderer.js:195` |
 | `Retry the update` | Morrow app | `installer/renderer/renderer.js:211` |
 | `Try again` | Morrow app | `installer/renderer/renderer.js:220` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:78` |
-| `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:400` |
+| `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:401` |
 | `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:428` |
 | `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:428` |
 | `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:428` |
@@ -467,9 +468,9 @@ Names a person reads as landmarks rather than presses:
 | Name | Surface | Source |
 | --- | --- | --- |
 | `Set up Morrow on this computer` | Morrow app | `installer/renderer/index.html:20` |
-| `Setup you can change` | Morrow app | `installer/shared/setup-view.mjs:214` |
+| `Setup you can change` | Morrow app | `installer/shared/setup-view.mjs:215` |
 | `Materials folder` | Morrow app | `installer/shared/setup-view.mjs:165` |
-| `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:450` |
+| `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:451` |
 | `Assistant` | Morrow app progress rail | `installer/shared/setup-view.mjs:100` |
 | `Connect a Blackboard Learn site (optional)` | Morrow app | `installer/renderer/index.html:50` |
 | `Morrow setup` | Setup guide | `connector/extension/onboarding/onboarding.html:14` |
@@ -490,7 +491,7 @@ owns the fix.
 `packages/bridge-loopback/src/index.ts:372` tells an approved person to "open the Morrow extension and
 select Connect course." The control is named **Connect course site** on every other surface and in the
 popup itself (`connector/extension/popup/popup-view.js:40`,
-`connector/extension/onboarding/onboarding.html:60`, `installer/shared/setup-view.mjs:307`). No
+`connector/extension/onboarding/onboarding.html:60`, `installer/shared/setup-view.mjs:308`). No
 control anywhere is called "Connect course". This is the first instruction a person reads after they
 approve the connection.
 
@@ -507,12 +508,12 @@ The button is **Connect selected courses in Plan**
 (`connector/extension/settings/settings.html:74`). The "All steps" lane quotes it
 (`connector/extension/onboarding/onboarding.html:64`). The "Guide me" lane says "connect the selected
 course in Plan" (`connector/extension/onboarding/onboarding-state.js:224`) and the Morrow app says
-"connect it in Plan" (`installer/shared/setup-view.mjs:307`). A person searching the settings page for
+"connect it in Plan" (`installer/shared/setup-view.mjs:308`). A person searching the settings page for
 the words they were given will not find them.
 
 **F-4. The progress rail never names repair.**
 `progress()` has no repair state (`installer/shared/setup-view.mjs:99-122`), so while the action panel
-says "Repair Morrow before you connect a course." (`installer/shared/setup-view.mjs:228`) the rail
+says "Repair Morrow before you connect a course." (`installer/shared/setup-view.mjs:229`) the rail
 marks an ordinary setup step as current. The rail and the panel give two different next steps on one
 screen. The header live region does name it ("Morrow needs repair",
 `installer/shared/setup-view.mjs:83`).
@@ -525,7 +526,7 @@ shows the failure, and the next render writes "Loading connected courses…"
 (`connector/extension/settings/settings.js:668`). The person reads a failure and three progress lines
 at once. **Refresh connected courses** is re-enabled
 (`connector/extension/settings/settings.js:874`), so this is not a dead end, but the page reports
-progress that is not happening. The Morrow app (`installer/shared/setup-view.mjs:401-407`), the popup
+progress that is not happening. The Morrow app (`installer/shared/setup-view.mjs:402-408`), the popup
 (`connector/extension/popup/popup-view.js:25`) and the setup guide
 (`connector/extension/onboarding/onboarding-state.js:32-54`) all state "not checked" in the same
 situation; this surface is the one that does not.
@@ -544,11 +545,11 @@ button. Where a limited context still returns named targets
 
 **F-7. Four states in the Morrow app say "check status again" without a control in the panel.**
 `runtime-not-ready`, `delivery-blocked`, `preview-preparing` and, in effect,
-`no-course` (`installer/shared/setup-view.mjs:257`, `installer/shared/setup-view.mjs:264`,
-`installer/shared/setup-view.mjs:278`, `installer/shared/setup-view.mjs:328`,
-`installer/shared/setup-view.mjs:307`). The control they mean is the header **Check status**
+`no-course` (`installer/shared/setup-view.mjs:258`, `installer/shared/setup-view.mjs:265`,
+`installer/shared/setup-view.mjs:279`, `installer/shared/setup-view.mjs:329`,
+`installer/shared/setup-view.mjs:308`). The control they mean is the header **Check status**
 (`installer/renderer/index.html:14`), which is present and keyboard reachable, and the window re-reads
-on focus (`installer/renderer/renderer.js:614`). The words name an action whose control is not in the
+on focus (`installer/renderer/renderer.js:620`). The words name an action whose control is not in the
 panel the words are in.
 
 ---

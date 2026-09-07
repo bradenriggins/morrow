@@ -14,6 +14,7 @@ const METHODS = new Set([
   "installer:install-update",
   "installer:run-first-read",
   "installer:open-claude-desktop",
+  "installer:reveal-claude-extension",
   "installer:repair",
   "installer:remove-data"
 ]);
