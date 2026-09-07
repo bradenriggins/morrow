@@ -600,14 +600,14 @@ test("no product page claims Morrow detects unclear link wording", { skip }, () 
   assert.deepEqual(found, [], "Morrow reports link signals for review; it does not detect or repair unclear link wording");
 });
 
-test("/how-it-works and /download state the Morrow Bridge install route as temporary", { skip }, () => {
+test("/how-it-works and /download give the current visual Morrow Bridge install steps", { skip }, () => {
   const problems = [];
   for (const file of ["how-it-works.html", "download.html"]) {
     const text = visibleText(productPage(file));
-    for (const required of ["Chrome Web Store", "Developer mode", "Load unpacked"]) {
+    for (const required of ["Show Bridge folder", "Developer mode", "Load unpacked"]) {
       if (!text.includes(required)) problems.push(`${file} does not name ${required}`);
     }
-    if (!/\btemporar/i.test(text)) problems.push(`${file} does not say the Developer mode step is temporary`);
+    if (/until Morrow Bridge has|temporary step/i.test(text)) problems.push(`${file} contains internal release-status copy`);
   }
   assert.deepEqual(problems, [], "the install route a person follows today has to be on the pages that describe setup");
 });
