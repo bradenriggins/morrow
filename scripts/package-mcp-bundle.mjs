@@ -291,9 +291,9 @@ function runtimeDependencies(packagesByName) {
   return resolved;
 }
 
-function copy(source, destination) {
+function copy(source, destination, filter) {
   mkdirSync(dirname(destination), { recursive: true, mode: 0o700 });
-  cpSync(source, destination, { recursive: true, dereference: true, preserveTimestamps: true });
+  cpSync(source, destination, { recursive: true, dereference: true, preserveTimestamps: true, filter });
 }
 
 function recordTree(root, prefix, destinations, records) {
@@ -390,7 +390,8 @@ function stagePayloadInput(staging, packages, dependencies, checkpoint) {
     for (const [name, source] of dependencies) {
       regularFiles(source);
       const destination = resolve(stage, "node_modules", ...name.split("/"));
-      copy(source, destination);
+      // Package-manager command shims contain build-host paths; runtime imports do not use them.
+      copy(source, destination, (file) => !/(?:^|\/)node_modules\/\.bin(?:\/|$)/.test(relative(source, file).replaceAll("\\", "/")));
       recordTree(destination, `node_modules/${name}`, (path) => [`app/node_modules/${name}/${path}`], records);
       stagedDependencies.set(name, destination);
     }

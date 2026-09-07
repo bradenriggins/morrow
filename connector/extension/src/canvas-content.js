@@ -967,13 +967,9 @@
   // scripts/test/canvas-new-quiz-item-guard.test.mjs executes both copies and
   // fails if one of them disagrees with that file.
   //
-  // New Quizzes merges interaction_data by id, so a PATCH that regenerates a
-  // choice, question, or blank id does not replace the old element: it orphans
-  // it into a blank ghost-stub choice, and the stubs accumulate. That is
-  // harvested ExamplePlatform production evidence, dated 1 June 2026, when one item
-  // held 10 real choices and 18 blank ones; Morrow has not reproduced it on a
-  // connected Canvas tenant. So an in-place PATCH may only keep every id it
-  // found, and the safe structural change is delete-then-add.
+  // In-place updates retain every interaction id. Morrow has not verified
+  // how structural edits merge on a live tenant, so structural changes use
+  // separate reviewed delete and create operations.
   const NEW_QUIZ_INTERACTION_ID_GROUPS = ["choices", "questions", "blanks", "entries"];
   const NEW_QUIZ_ITEM_OPERATION_KEY = "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item";
 

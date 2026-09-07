@@ -10,27 +10,25 @@ named in the environment:
 
 ```sh
 node scripts/package-mcp-bundle.mjs --target win32-x64 --prepare-desktop-payload <absolute-payload-path>
-MORROW_INSTALLER_PAYLOAD=<absolute-payload-path> MORROW_SIGNED_RELEASE=1 \
+MORROW_INSTALLER_PAYLOAD=<absolute-payload-path> MORROW_SIGNED_RELEASE=0 \
   pnpm --dir installer --ignore-workspace package:win
 ```
 
-`MORROW_SIGNED_RELEASE=1` sets `forceCodeSigning` and requires a stable SemVer
-version, so it needs the release signing inputs and a stable version. The output
-is `Morrow-<version>-win-x64.exe`. The signed release artifact is the only
-supported deployment input. Do not deploy an unpacked app or a separately copied
-`MorrowPayload` directory.
+The output is `Morrow-<version>-win-x64.exe`. Version `1.0.0` is an unsigned
+release. Automatic updates remain disabled. Use the complete NSIS installer;
+do not deploy an unpacked app or a separately copied `MorrowPayload` directory.
 
-**No signed Windows artifact exists.** No publisher certificate is available to
-this project, the repository version is `1.0.0-rc.0`, and every Windows artifact
-built so far came from the `windows-2022` job in
-`.github/workflows/desktop-release.yml` with `MORROW_SIGNED_RELEASE=0` and every
-signing variable cleared. That job starts on manual dispatch, and this checkout
-holds no receipt from it. Treat everything below as the contract a signed
-artifact must meet, not as a result that has been observed on a deployed machine.
+On 7 September, the unsigned 1.0.0 installer passed native `BOOTZ` installation,
+startup, damaged-payload refusal, exact repair, uninstall and retained-data
+checks through `scripts/test/desktop-windows-smoke.mjs`. That harness runs on
+native Windows only. Its saved receipt is
+`output/final-pass-20260907/smoke-1.0.0.harness.json`. It uses isolated application
+state. Public-download SmartScreen behavior and institution-managed deployment
+remain live-unverified. No signed Windows artifact exists.
 
 ## Silent deployment
 
-Run the signed installer in the target user's context:
+Run the unsigned installer in the target user's context:
 
 ```text
 Morrow-<version>-win-x64.exe /S
@@ -49,7 +47,7 @@ path.
 
 ## Intune and other MDM systems
 
-Deploy the same signed NSIS artifact in the user context. Detect installation
+Deploy the same NSIS artifact only when institution policy permits unsigned applications in the user context. Detect installation
 from the current-user Morrow application executable version or the matching
 current-user uninstall registration. Keep upgrade and uninstall in the same
 user context. This installer does not request administrator rights and cannot
@@ -80,7 +78,6 @@ Uninstall, or the uninstaller the installed copy registered for the current
 user. `installer/test/installer-controller.test.cjs` proves the in-app removal
 on macOS. `scripts/test/desktop-windows-smoke.mjs` runs the Windows uninstaller
 and then compares State, Materials, backups, and the assistant configuration
-byte for byte against the reading it took before the uninstall; that harness
-refuses to run anywhere but native Windows, and only the `windows-2022` job
-runs it. This checkout holds no receipt from that harness, so neither check has
-a saved Windows result here.
+byte for byte against the reading it took before the uninstall. The harness
+refuses to run anywhere but native Windows. The 7 September `BOOTZ` run passed
+with the configured upstream, assistant settings and journal preserved.

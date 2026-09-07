@@ -130,6 +130,8 @@ test("public candidate package only exposes shipped commands", () => {
     name: "morrow",
     scripts: {
       build: "pnpm -r build",
+      "canvas:readback:sync": "node scripts/sync-canvas-readback-plan.mjs",
+      "canvas:readback:check": "node scripts/sync-canvas-readback-plan.mjs --check",
       "package:connector": "node scripts/package-canvas-connector.mjs",
       "package:rc": "node scripts/package-profile.mjs --all",
       test: "pnpm test",
@@ -137,6 +139,8 @@ test("public candidate package only exposes shipped commands", () => {
   }))).toString("utf8"));
   assert.deepEqual(manifest.scripts, {
     build: "pnpm -r build",
+    "canvas:readback:sync": "node scripts/sync-canvas-readback-plan.mjs",
+    "canvas:readback:check": "node scripts/sync-canvas-readback-plan.mjs --check",
     "package:connector": "node scripts/package-canvas-connector.mjs",
   });
 });

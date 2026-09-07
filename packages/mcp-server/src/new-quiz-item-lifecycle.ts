@@ -12,13 +12,9 @@ import type { GatewayRuntime } from "./runtime.js";
  * change and they never schedule one.
  *
  * A replacement is planned as a delete and an add, in that order, never as an
- * in-place PATCH. New Quizzes merges the parts of a question by the ids the
- * question already holds, so a change that renumbers those ids leaves the old
- * parts behind as blank answers. That is harvested ExamplePlatform production
- * evidence from 1 June 2026, recorded in section 2.2 of
- * docs/research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md.
- * `connector/extension/src/new-quiz-item-guard.js` refuses the unsafe PATCH at
- * dispatch; these plans are the safe route in its place.
+ * in-place PATCH. Morrow has not verified structural edits on a live tenant.
+ * `connector/extension/src/new-quiz-item-guard.js` therefore requires every
+ * existing interaction id to survive an in-place update.
  *
  * The delete and the add are two separate Canvas requests. Nothing makes them
  * one change, so every replacement plan states the window in which the quiz
@@ -106,8 +102,8 @@ const CARRIED_PATHS = Object.freeze(new Set(CREATE_ARGUMENT_FIELDS.map((field) =
 const PROVIDER_ASSIGNED_PATHS = Object.freeze(new Set(["id", "entry.id"]));
 
 const LIMITS = Object.freeze([
-  "Morrow never plans an in-place structural change to a New Quiz question. The reason is harvested ExamplePlatform production evidence from 1 June 2026, when one question changed in place ended with 10 real answer choices and 18 blank ones. That evidence is live-unverified in Morrow.",
-  "Morrow has not run a New Quiz question create, delete, or delete-then-add against a live Canvas course. The route contract comes from the harvested ExamplePlatform client, so it stays live-unverified.",
+  "Morrow never plans an in-place structural change to a New Quiz question. The provider's handling of newly generated interaction IDs is not verified by Morrow on a live Canvas course.",
+  "Morrow has not run a New Quiz question create, delete, or delete-then-add against a live Canvas course. These routes remain live-unverified.",
   "This plan is exact for the moment Morrow read the quiz. Read the quiz again before you send anything if another person may have changed it.",
 ]);
 

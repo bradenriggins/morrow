@@ -4,7 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/client";
 import { getDefaultEnvironment, StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 import { describe, expect, it } from "vitest";
@@ -100,6 +100,54 @@ function batchIdOf(result: unknown): string {
 }
 
 describe("Morrow local owner", () => {
+  it("connects when an upstream needs more than ten seconds to start", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-local-owner-slow-"));
+    const configPath = join(directory, "morrow.upstreams.json");
+    const journalPath = join(directory, "gateway.sqlite3");
+    const ownerPath = `${journalPath}.local-owner.json`;
+    await writeFile(configPath, JSON.stringify({
+      schema: "morrow.upstreams.v1",
+      profile: "private-full",
+      toolSurface: "full",
+      sourcePolicy: { requireAttestation: false },
+      upstreams: [{
+        id: "example-legacy",
+        label: "Delayed startup fixture",
+        kind: "mcp-stdio",
+        command: process.execPath,
+        args: [
+          "--input-type=module",
+          "-e",
+          `await new Promise(resolve => setTimeout(resolve, 11_000)); await import(${JSON.stringify(pathToFileURL(fixturePath).href)});`,
+        ],
+        env: { FAKE_SOURCE: "example-legacy" },
+        priority: 1,
+        required: true,
+        enabled: true,
+      }],
+      filters: { excludePrefixes: [], excludeNames: [] },
+      operationJournal: { path: journalPath },
+      privacy: {
+        canvasOrigin: "local",
+        account: "local-account",
+        principal: "local-principal",
+        learnerVaultPath: join(directory, "learner-vault.json"),
+      },
+      maxCatalogTools: 20,
+    }));
+    let connection: ConnectedClient | null = null;
+    try {
+      connection = await connect(configPath);
+      expect(existsSync(ownerPath)).toBe(true);
+      const result = await connection.client.listTools();
+      expect(result.tools.some((tool) => tool.name === "morrow_health")).toBe(true);
+    } finally {
+      await connection?.client.close();
+      await waitFor(() => !existsSync(ownerPath), "the delayed owner's shutdown");
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 40_000);
+
   it("shares one durable runtime across stdio clients and closes when they leave", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-local-owner-"));
     const configPath = join(directory, "morrow.upstreams.json");

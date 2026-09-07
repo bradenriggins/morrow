@@ -22,7 +22,7 @@ Generated metadata does not by itself grant publication rights. The public packa
 
 Earlier Morrow and ExamplePlatform systems informed the required safety properties: typed operations, separate approval, effect receipts, readback, privacy projection, durable batches, restart recovery, and honest uncertain outcomes.
 
-The standalone runtime does not need either system. Historical comparison files and fixtures are not included in the public Canvas profile. No private repository history, credentials, institutional data, learner records, private deployment configuration, or covered course content may enter a public candidate.
+The standalone runtime does not need either system. Historical comparison files and fixtures are not included in the public source profile. No private repository history, credentials, institutional data, learner records, private deployment configuration, or covered course content may enter a public candidate.
 
 ## Prohibited material
 

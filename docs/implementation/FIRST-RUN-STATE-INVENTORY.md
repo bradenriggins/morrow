@@ -79,7 +79,7 @@ Two facts apply to every row, so they are stated once:
 | `runtime-not-ready` | "Morrow is getting ready." / "Morrow will show the next Bridge step when its local runtime is ready. It will not open Chrome setup before then." and "Local setup is still in progress" | **Check status** in the header. The panel has no control; its text says "Keep Morrow open, then check status again." | `installer/shared/setup-view.mjs:262-266` |
 | `delivery-blocked` | "Morrow Bridge is not available yet." / "Your assistant can be ready while the Chrome connection is still unavailable. Morrow will not suggest an unverified installation route." and "Chrome delivery is not ready" | **Check status** in the header. The panel has no control; the Bridge step shows status `blocked` | `installer/shared/setup-view.mjs:269-273`, rail `installer/shared/setup-view.mjs:117` |
 | `reload-required` | "Reload Morrow Bridge." / "Morrow staged a verified Bridge update. Chrome must reload Morrow Bridge before Morrow can check the update." and three numbered Chrome steps | Reload the extension in Chrome, then **Check Bridge** | `installer/shared/setup-view.mjs:276-280` |
-| `folder-not-ready` | "Morrow Bridge is not ready to open." / "Morrow has not confirmed that Chrome setup can start. It will not open a Browser setup page from this state." and "Check status again" | **Check status** in the header. The panel has no control | `installer/shared/setup-view.mjs:283-287` |
+| `folder-not-ready` | "Morrow Bridge is not ready to open." / "Morrow could not verify its Bridge folder. Repair Morrow to restore the folder from the copy included with the app." | **Repair Morrow**, or **Check again**, in the panel | `installer/shared/setup-view.mjs:283-287` |
 | `dev-temporary` | "Add Morrow Bridge." / "Use this temporary Chrome method until Morrow Bridge is available in the Chrome Web Store." and five numbered steps ending in "Connect Morrow" | **Show Bridge folder**, then the Chrome steps, then **Check Bridge** | `installer/shared/setup-view.mjs:290-294` |
 | `store-available` | "Install Morrow Bridge." / "Morrow Bridge uses the course site where you are already signed in. It asks Chrome for access only to the exact course site you choose." and three Chrome Web Store steps | Add it from the store, then **Check Bridge** | `installer/shared/setup-view.mjs:297-301` |
 | `not-paired` | "Connect Morrow Bridge." / "<assistant> is configured. Open Morrow Bridge in Chrome to complete the connection you start." and four numbered steps | Open the popup and select **Connect Morrow**, allow it on the Chrome connection page, then **Check Bridge** | `installer/shared/setup-view.mjs:305-309` |
@@ -542,8 +542,8 @@ button. Where a limited context still returns named targets
 `packages/mcp-server/src/approval-context.ts:786`,
 `packages/mcp-server/src/approval-context.ts:811`), the copy and the control disagree.
 
-**F-7. Five states in the Morrow app say "check status again" without a control in the panel.**
-`runtime-not-ready`, `delivery-blocked`, `folder-not-ready`, `preview-preparing` and, in effect,
+**F-7. Four states in the Morrow app say "check status again" without a control in the panel.**
+`runtime-not-ready`, `delivery-blocked`, `preview-preparing` and, in effect,
 `no-course` (`installer/shared/setup-view.mjs:257`, `installer/shared/setup-view.mjs:264`,
 `installer/shared/setup-view.mjs:278`, `installer/shared/setup-view.mjs:328`,
 `installer/shared/setup-view.mjs:307`). The control they mean is the header **Check status**

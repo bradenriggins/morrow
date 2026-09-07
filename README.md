@@ -319,8 +319,8 @@ Morrow is one desktop application. It carries the Morrow MCP runtime, the Node r
 
 | System | Artifact | What has been checked |
 | --- | --- | --- |
-| macOS on Apple silicon | `Morrow-<version>-mac-arm64.dmg`, with a matching `.zip` | An unsigned build from this checkout started and wrote a passing contained receipt through `scripts/test/desktop-mac-smoke.mjs`. |
-| Windows on x64 | `Morrow-<version>-win-x64.exe`, a one-click per-user NSIS installer | Install, start, damage, repair, uninstall, and retained data run through `scripts/test/desktop-windows-smoke.mjs`, which runs on native Windows only. This checkout holds no receipt from it. |
+| macOS on Apple silicon | `Morrow-<version>-mac-arm64.dmg`, with a matching `.zip` | The unsigned 1.0.0 disk image was mounted and installed on the MacBook. The packaged runtime passed `scripts/test/desktop-mac-smoke.mjs`, including the Bridge listener and private state modes. |
+| Windows on x64 | `Morrow-<version>-win-x64.exe`, a one-click per-user NSIS installer | The unsigned 1.0.0 installer passed install, start, damaged-payload refusal, exact repair, uninstall, and retained-data checks on native Windows `BOOTZ`. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. |
 
 There is no Intel macOS build and no Linux build. Nothing is signed or notarized. No release is published, so this file gives no download link: no released artifact exists to link to. Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
@@ -344,13 +344,13 @@ The app keeps the same window for the rest of the installation's life. It carrie
 - **Repair Morrow**, which checks the files inside Morrow, replaces the Morrow Bridge folder from the copy Morrow ships when the folder does not match it, and writes your assistant setting again. It leaves a newer assistant setting alone and changes nothing in your course.
 - **What stays on this computer**, which names the exact path of every place this installation keeps data, marks which of them Morrow can remove, and states the step this computer uses to remove the application itself. **Remove Morrow's data** first shows a confirmation listing every path it will remove and every path it will keep, then reads each path again and reports which are gone and which are still there.
 - Changing the materials folder and removing an assistant after setup.
-- The update state, when the build was made from a signed release. No build in existence was, so no build has run an update.
+- Manual installation of a newer unsigned build. Automatic updates remain disabled in unsigned releases.
 
 ### What the desktop app has not proved
 
-- The macOS build is unsigned and not notarized. No disk image was mounted, so Gatekeeper has never evaluated it. The Windows artifact is unsigned as well. Signing, notarization, Gatekeeper, and SmartScreen are live-unverified.
-- The Windows install, repair, uninstall, and retention steps run only in the `windows-2022` job of `.github/workflows/desktop-release.yml`, which starts on manual dispatch. No machine here can run them, and this checkout holds no receipt from that harness.
-- No signed old-to-new update has run on either platform.
+- The Mac and Windows releases are unsigned, as required for this release. Gatekeeper and SmartScreen behavior after a public download has not been verified.
+- Complete live-course setup through the final installed app is still open. The native startup and repair checks use isolated application state.
+- Automatic signed updates have not been tested or enabled. They are outside this unsigned release.
 - Morrow Bridge has no Chrome Web Store listing. The temporary Developer-mode step is the only route, and reloading the unpacked Bridge in Chrome always needs a person.
 
 See [current limits](LIMITATIONS.md) for the complete list. The exact saved receipt for each desktop result, and each result that has no receipt, is listed in the [completion goal](docs/implementation/MORROW-1.0-COMPLETION-GOAL.md).
@@ -419,7 +419,7 @@ To build a ZIP of the extension:
 pnpm package:connector
 ```
 
-Extract `artifacts/connector/morrow-canvas-connector-v1.0.1.zip`. Use **Load
+Extract `artifacts/connector/morrow-canvas-connector-v1.0.2.zip`. Use **Load
 unpacked** to select the extracted folder that contains `manifest.json`, not the
 ZIP file. Keep that folder in place while the extension is installed.
 

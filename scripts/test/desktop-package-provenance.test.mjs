@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { chmodSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
@@ -38,6 +38,13 @@ test("desktop payload seals the actual gateway package, records its source prove
   assert.equal(receipt.source.inputManifestFileCount, sealed.manifest.files.length);
   assert.equal(receipt.source.reproducibleFrom, "app/package-input-manifest.json");
   assert.match(receipt.source.note, /dirty[\s\S]*inputManifestSha256/);
+  for (const path of [
+    "node_modules/postcss/node_modules/.bin/nanoid",
+    "node_modules/cross-spawn/node_modules/.bin/node-which"
+  ]) {
+    assert.equal(existsSync(join(payload, "app", path)), false);
+    assert.equal(sealed.manifest.files.some((file) => file.path === path), false);
+  }
   assertPayloadSnapshot(payload, sealed);
 
   const sibling = join(payload, "app/packages/mcp-server/dist/config.js");

@@ -282,8 +282,8 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
   if (needsBridge(current) && bridge.folderReady !== true) {
     return {
       title: "Morrow Bridge is not ready to open.",
-      copy: "Morrow has not confirmed that Chrome setup can start. It will not open a Browser setup page from this state.",
-      body: '<div class="info-box"><strong>Check status again</strong><p>Morrow will show the supported Chrome setup when it is ready.</p></div>',
+      copy: "Morrow could not verify its Bridge folder. Repair Morrow to restore the folder from the copy included with the app.",
+      body: '<div class="info-box"><strong>Repair the local setup</strong><p>Repair checks Morrow, restores its Bridge folder, and checks your assistant setup. It preserves newer assistant settings and makes no course changes.</p></div><div class="inline-actions"><button class="primary-button" type="button" data-action="repair">Repair Morrow</button><button class="secondary-button" type="button" data-action="check-setup-state">Check again</button></div>',
     };
   }
   if (needsBridge(current) && bridge.delivery === "developer_temporary") {

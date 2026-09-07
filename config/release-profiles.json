@@ -43,14 +43,16 @@
         "morrow.upstreams.connector.example.json",
         "morrow.upstreams.public-canvas.example.json",
         "scripts/generate-canvas-api-catalog.mjs",
+        "scripts/sync-canvas-readback-plan.mjs",
         "scripts/package-canvas-connector.mjs",
+        "scripts/package-mcp-bundle.mjs",
         "scripts/lib/deterministic-archive.mjs"
       ],
       "exclude": [
         "packages/*/test/",
         "packages/mcp-server/src/meridian-runtime-adapter.ts"
       ],
-      "description": "Standalone Canvas MCP and Chrome connector source projection. Publication still requires current source-rights, provider-policy, live-proof, and independent-reproduction receipts."
+      "description": "Standalone Morrow MCP and Bridge source for Canvas, Moodle, and the Blackboard REST integration. The profile retains its historical name. Publication still requires current source-rights, provider-policy, live-proof, and independent-reproduction receipts."
     }
   }
 }

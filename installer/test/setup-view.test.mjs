@@ -186,9 +186,12 @@ test("no Bridge view offers to open a browser page for the person", () => {
   }
 });
 
-test("an unprepared Bridge folder does not offer the Chrome step", () => {
+test("an unprepared Bridge folder offers repair before the Chrome step", () => {
   const current = state({ ...READY_ASSISTANT, bridgeFolderReady: false });
-  assert.equal(actionView(current, { chosenAssistantId: "codex" }).title, "Morrow Bridge is not ready to open.");
+  const view = actionView(current, { chosenAssistantId: "codex" });
+  assert.equal(view.title, "Morrow Bridge is not ready to open.");
+  assert.match(view.body, /data-action="repair"/);
+  assert.doesNotMatch(view.body, /data-action="reveal-bridge-folder"/);
   assert.equal(step(current, "Bridge").status, "current");
 });
 

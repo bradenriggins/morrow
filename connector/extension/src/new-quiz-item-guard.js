@@ -1,31 +1,9 @@
-// The one rule Morrow follows before it changes a Canvas New Quiz item in
-// place. Section 2.2 of
-// docs/research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md is the
-// source.
-//
-// New Quizzes merges the sub-elements of `interaction_data` by `id`. A PATCH
-// that regenerates a choice, question, or blank id therefore does not replace
-// the old element. It orphans it into a blank ghost-stub choice, and the stubs
-// accumulate on the item.
-//
-// That behaviour is harvested ExamplePlatform production evidence, dated 1 June 2026,
-// when one production item held 10 real choices and 18 blank ones. Morrow has
-// not reproduced it on a connected Canvas tenant, so it is live-unverified
-// here and is treated as the reason for the rule rather than as a Morrow
-// observation.
-//
-// The rule that follows from it: an in-place PATCH is allowed only when every
-// interaction id it found survives the change. The safe structural change is
-// delete-then-add, because a clean delete never merges.
-//
-// Chrome injects connector/extension/src/canvas-content.js as a classic script
-// with no module scope, so that file carries its own copy of both functions.
-// scripts/test/canvas-new-quiz-item-guard.test.mjs runs this module and the
-// in-page copy against the same inputs and fails if they disagree.
+// In-place updates retain every interaction id. Morrow has not verified
+// how structural edits merge on a live tenant, so structural changes use
+// separate reviewed delete and create operations.
+// Chrome injects canvas-content.js as a classic script, so that file keeps
+// a second copy. canvas-new-quiz-item-guard.test.mjs checks both copies.
 
-// The four member lists a New Quiz item can carry under `interaction_data`.
-// `choices` covers choice, multi-answer, and ordering items, `questions` covers
-// matching, and `blanks` or `entries` covers rich fill in the blank.
 export const NEW_QUIZ_INTERACTION_ID_GROUPS = Object.freeze(["choices", "questions", "blanks", "entries"]);
 
 function plainObject(value) {

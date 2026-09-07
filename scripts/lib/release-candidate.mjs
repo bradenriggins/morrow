@@ -555,6 +555,8 @@ const PUBLIC_ROOT_SCRIPTS = new Set([
   "clients:render",
   "catalog:canvas",
   "catalog:canvas:check",
+  "canvas:readback:sync",
+  "canvas:readback:check",
   "package:connector",
   "package:connector:check",
 ]);

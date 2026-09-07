@@ -1,21 +1,8 @@
 /**
- * The check Morrow makes on a New Quizzes question payload before it plans a
- * write of one. Section 6 of
- * docs/research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md is the
- * source, and it applies to a proposed replacement as well as to a create.
- *
- * The rule that shapes the whole file: a validator that cannot check a shape
- * must not forbid it. An earlier hard allowlist of four interaction types made
- * ExamplePlatform refuse categorization, multi-answer, essay, true-false, ordering,
- * file upload, formula, and hot spot before Canvas ever saw them. On 29 August
- * 2026 three items were built and all three were rejected locally, so nobody
- * learned what Canvas would have said. A malformed payload that reaches Canvas
- * and comes back with a typed provider error is strictly better than telling a
- * person a question type does not exist. So four interaction shapes are checked
- * here — choice, matching, numeric, and rich fill in the blank — and every
- * other interaction type passes through untouched. The media rules run for all
- * of them, because an image with no alternative text is a defect in any
- * question type and Morrow can see it in every one.
+ * Validate known question shapes before a create or replacement. Canvas
+ * validates interaction types without a local checker. Choice, matching,
+ * numeric, and rich fill-in-the-blank shapes have local checks; media rules
+ * apply to all interaction types.
  *
  * These rules are the same rules as `connector/extension/src/quiz-item-payload.js`,
  * which is the module the Item Banks frame enforces them with. That module

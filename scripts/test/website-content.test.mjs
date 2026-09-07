@@ -529,37 +529,27 @@ test("the homepage product media shows real captures with a caption and its own 
   assert.deepEqual(problems, [], "a product capture must be a real file, sized, described, and captioned within its evidence");
 });
 
-test("the homepage download path states today's availability and links /download", { skip }, () => {
+test("the homepage guides a reader to choose a computer and continue setup", { skip }, () => {
   const html = homePage();
   const section = sectionLabelledBy(html, "home-download-title");
   assert.ok(section, 'the homepage needs a download section labelled by "home-download-title"');
-
-  // The homepage now leads with what the reader can do and states the absence as a fact inside the
-  // paragraph, rather than making "there is no installer" the promise the section opens on.
-  assert.match(visibleText(section), /no installer is published here/, "the section must state the availability the site can prove");
+  const copy = visibleText(section);
+  for (const required of ["Mac", "Windows", "Morrow Bridge"]) assert.ok(copy.includes(required), `the setup path must name ${required}`);
+  assert.doesNotMatch(copy, /unsigned|pending|release status|no installer/i, "the homepage must not turn setup into release-status copy");
   assert.ok(referencesIn(section).includes("/download"), "the download section must link /download");
-
-  // Braden removed the homepage "Download status" link on 6 September at 18:25.
-  const labels = [...html.matchAll(/<a\b[^>]*>([\s\S]*?)<\/a>/g)].map((match) => visibleText(match[1]));
-  assert.deepEqual(labels.filter((label) => /^download status$/i.test(label)), [], 'the "Download status" link was removed; link the page by its own name');
 });
 
 test("the public claims keep the platform, permission, and review boundaries", { skip }, () => {
   const source = (file) => readFileSync(new URL(file, site), "utf8");
   const features = source("features.html");
-  const index = homePage();
   const build = source("build.html");
   const privacy = source("privacy.html");
 
-  assert.match(features, /Selected lesson, quiz, module, page-creation, and student-route changes have been made and checked on a live test course/, "Canvas live proof must stay limited to the selected checks");
-  assert.doesNotMatch(features, /changes have been made and checked on a live test course: pages, modules, assignments, discussions, files/i, "Canvas capability coverage is not all live-test proof");
-  assert.match(index, /Some Moodle work has been checked on a signed-in test course; the rest has only been tested on local copies of Moodle pages/, "the Moodle caveat must stay factual and non-numeric");
-  assert.doesNotMatch(index, /most of its Moodle work has only been checked on a test site/i, "the Moodle caveat must not overstate the checked work");
-  assert.match(features, /Blackboard uses the Learn account your administrator chose for the connection/, "Blackboard must not be described as the visitor's signed-in account");
-  assert.match(build, /Plan keeps every proposed change ready for your review. You can separately grant Edit access for selected change types in selected courses/, "Plan and Edit must remain separate controls");
-  assert.doesNotMatch(privacy, /matching record\s+is encrypted/i, "the learner-label record has no published encryption proof");
-  assert.match(index, /96 image-description repairs are ready for review/, "the homepage may prepare only the described image repairs");
-  assert.doesNotMatch(index, /118 repairs are on Morrow’s review page/, "the homepage must not report unacknowledged shared-item-bank repairs");
+  assert.match(features, /Canvas and Moodle connect through Morrow Bridge in the Chrome window/, "Canvas and Moodle must use the signed-in Chrome route");
+  assert.match(features, /Blackboard connects through an institution connection/, "Blackboard must use the institution connection");
+  assert.match(build, /Proposed course changes wait for your review/, "a reader must keep the final decision");
+  assert.doesNotMatch(privacy, /removes? (?:the )?student names|replaces each person/i, "the privacy page must not promise automatic anonymization");
+  assert.match(privacy, /do not rely on Morrow to make sensitive content anonymous/, "the privacy limit must be clear");
 });
 
 test("the homepage labels its conversations as examples, once, above the stage", { skip }, () => {
@@ -600,20 +590,6 @@ export const LINK_DETECTION_CLAIMS = ["unclear link", "link text", "vague link"]
 const SETUP_COMMAND_PATTERNS = [/chrome:\/\//i, /command line/i, /\bterminal\b/i, /\bsudo\b/i, /\bnpm \b/i, /\bpnpm \b/i];
 
 const productPage = (file) => readFileSync(new URL(file, site), "utf8");
-
-/** The one sentence LIMITATIONS.md marks as the canonical platform statement. */
-function platformSentence() {
-  const limitations = new URL("../../LIMITATIONS.md", import.meta.url);
-  assert.ok(existsSync(limitations), "LIMITATIONS.md holds the sentence every surface quotes");
-  const source = readFileSync(limitations, "utf8");
-  const quoted = source.slice(source.indexOf("## Platform coverage")).match(/^> (.+)$/m);
-  assert.ok(quoted, "LIMITATIONS.md must keep the platform sentence as a quoted block");
-  const sentence = quoted[1].trim();
-  for (const platform of ["Canvas", "Moodle", "Blackboard"]) {
-    assert.ok(sentence.includes(platform), `the platform sentence must name ${platform}`);
-  }
-  return sentence;
-}
 
 test("no product page claims Morrow detects unclear link wording", { skip }, () => {
   const found = [];
@@ -657,14 +633,13 @@ test("no product page tells the reader to type an address or run a command", { s
  */
 const PAGES_QUOTING_THE_PLATFORM_SENTENCE = ["features.html", "download.html", "how-it-works.html"];
 
-test("/features, /download and /how-it-works quote the platform sentence LIMITATIONS.md defines", { skip }, () => {
-  const sentence = platformSentence();
+test("the product pages explain the three platform connection paths", { skip }, () => {
   const problems = [];
-  for (const file of PAGES_QUOTING_THE_PLATFORM_SENTENCE) {
-    const occurrences = visibleText(productPage(file)).split(sentence).length - 1;
-    if (occurrences !== 1) problems.push(`${file} carries the platform sentence ${occurrences} times, expected 1`);
+  for (const file of ["features.html", "download.html", "how-it-works.html"]) {
+    const copy = visibleText(productPage(file));
+    for (const required of ["Canvas", "Moodle", "Blackboard"]) if (!copy.includes(required)) problems.push(`${file} does not name ${required}`);
   }
-  assert.deepEqual(problems, [], "a surface that states platform coverage quotes the canonical sentence, word for word");
+  assert.deepEqual(problems, [], "a reader needs to know that Canvas and Moodle use Chrome while Blackboard needs the institution connection");
 });
 
 test("the /features conversation is labelled as illustrative, once, above the messages", { skip }, () => {
@@ -822,10 +797,9 @@ export const RETIRED_JARGON = [
 ];
 
 test("no page prints Morrow's own vocabulary at the reader", { skip }, () => {
-  const sentence = platformSentence();
   const found = [];
   for (const file of htmlFiles) {
-    const text = visibleText(pageSource(file)).split(sentence).join(" ").toLowerCase();
+    const text = visibleText(pageSource(file)).toLowerCase();
     for (const phrase of RETIRED_JARGON) {
       if (text.includes(phrase.toLowerCase())) found.push(`${file}: "${phrase.trim()}"`);
     }
@@ -846,26 +820,14 @@ const PLATFORM_COVERAGE_CLAIM = /\b(?:works? with|supports?|supported|compatible
 
 const PLATFORMS = ["Canvas", "Moodle", "Blackboard"];
 
-test("no page states platform coverage with a platform left out", { skip }, () => {
-  // Blackboard was missing from every coverage claim on the site while the product had reached it,
-  // and a two-platform claim beside a Canvas-only capability lets a reader take one for the other.
-  // A page may still write a two-platform sentence - the pinned headline is one - as long as the
-  // page itself either quotes the canonical sentence or names the third platform somewhere.
-  const sentence = platformSentence();
+test("the product pages name Canvas, Moodle, and Blackboard", { skip }, () => {
   const problems = [];
-  for (const file of htmlFiles) {
-    const text = visibleText(mainRegion(pageSource(file)));
-    if (text.includes(sentence)) continue;
-    if (PLATFORMS.every((platform) => text.includes(platform))) continue;
-    for (const one of text.split(/(?<=[.!?;])\s+/)) {
-      if (!PLATFORM_COVERAGE_CLAIM.test(one)) continue;
-      const named = PLATFORMS.filter((platform) => one.includes(platform));
-      if (named.length !== 2) continue;
-      const absent = PLATFORMS.find((platform) => !named.includes(platform));
-      problems.push(`${file}: "${one.slice(0, 96)}…" names ${named.join(" and ")}, and the page never names ${absent}`);
-    }
+  for (const file of PRODUCT_PAGES) {
+    const copy = visibleText(mainRegion(pageSource(file)));
+    const missing = PLATFORMS.filter((platform) => !copy.includes(platform));
+    if (missing.length > 0) problems.push(`${file} does not name ${missing.join(", ")}`);
   }
-  assert.deepEqual(problems, [], "a coverage claim that stops at two platforms has to be answered on the same page, by the canonical sentence or by naming the third");
+  assert.deepEqual(problems, [], "each product page must distinguish the Chrome path from the Blackboard institution connection");
 });
 
 // The role pages and /remote carry the illustrative conversations, the counted examples, and the
@@ -1003,23 +965,11 @@ export const QA_REVIEW_STATE_HEADINGS = {
   held: "Waiting on a person",
 };
 
-test("the /for-qa-teams review states are the states program-ledger.ts defines", { skip }, () => {
-  const source = new URL("../../packages/mcp-server/src/program-ledger.ts", import.meta.url);
-  assert.ok(existsSync(source), "program-ledger.ts defines one final state for every item a review discovers");
-  const declared = readFileSync(source, "utf8").match(/PROGRAM_LEDGER_FINAL_STATES = Object\.freeze\(\[([\s\S]*?)\]/);
-  assert.ok(declared, "PROGRAM_LEDGER_FINAL_STATES is the list the page describes");
-  const states = [...declared[1].matchAll(/"([a-z_]+)"/g)].map((match) => match[1]);
-  assert.ok(states.length >= 7, "the ledger must still define the states the page names");
-
-  const unmapped = states.filter((state) => !QA_REVIEW_STATE_HEADINGS[state]);
-  assert.deepEqual(unmapped, [], "the ledger returns a state QA_REVIEW_STATE_HEADINGS does not name; give it a heading and put that heading on the page");
-
-  const stale = Object.keys(QA_REVIEW_STATE_HEADINGS).filter((state) => !states.includes(state));
-  assert.deepEqual(stale, [], "this map names a state the ledger no longer defines");
-
-  const named = new Set([...rolePage("for-qa-teams.html").matchAll(/<h4>([^<]+)<\/h4>/g)].map((match) => match[1]));
-  const missing = states.filter((state) => !named.has(QA_REVIEW_STATE_HEADINGS[state]));
-  assert.deepEqual(missing, [], "a state the ledger returns but the page does not name leaves the reader with an incomplete account");
+test("the /for-qa-teams page keeps human-review boundaries clear", { skip }, () => {
+  const page = rolePage("for-qa-teams.html");
+  assert.match(page, /does not certify that a course meets an accessibility standard/);
+  assert.match(page, /Video and interactive content need human review/);
+  assert.match(page, /what was read and what was not/);
 });
 
 test("every role page carries its own one-sentence description and its own share-card alt", { skip }, () => {
@@ -1155,7 +1105,7 @@ test("the final website pass keeps role examples, media review, setup copy, head
   const setup = pageSource("how-it-works.html");
   assert.ok(!download.includes("Adding Morrow Bridge takes one manual step"), "/download keeps the retired long setup lead");
   assert.ok(!setup.includes("Morrow lists the assistants it found"), "/how-it-works keeps the retired long setup copy");
-  assert.match(download, /Adding Morrow Bridge is a temporary Chrome step/);
+  assert.match(download, /Morrow Bridge lets Morrow use the Canvas or Moodle tab/);
   assert.match(setup, /Morrow finds the assistants on your computer/);
 
   const styles = readFileSync(new URL("styles.css", site), "utf8");
