@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
@@ -53,12 +53,42 @@ function writeFixture() {
     uninstall: { completed: true, applicationRemoved: true, unrelatedDataPreserved: true },
   }));
   writeFileSync(resolve(evidence, "upgrade.json"), JSON.stringify({
-    schema: "morrow.native-manual-upgrade.v1",
-    newSource: COMMIT,
-    installerSha256,
+    schema: "morrow.native-windows-upgrade.v1",
+    oldArtifact: {
+      role: "published_v1.0.0",
+      source: "3720b76bfd5dc5d132627777be4034bf9ef0dae5",
+      sha256: "2750cd7b6746fb7f6701a92920158691eb9ad787732826597f6de4c3ed0fadf1",
+    },
+    newArtifact: { role: "workflow_build", source: COMMIT, sha256: installerSha256 },
     beforeReady: true,
     afterReady: true,
-    retained: [{ unchanged: true }],
+    privateAclBefore: "current_user_system_admin_sensitive_access_only",
+    privateAclAfter: "current_user_system_admin_sensitive_access_only",
+    retainedAfterUpgrade: [
+      { id: "course_material", sha256Before: "b".repeat(64), sha256After: "b".repeat(64), unchanged: true },
+      { id: "assistant_configuration", sha256Before: "c".repeat(64), sha256After: "c".repeat(64), unchanged: true },
+    ],
+    statePresentAfterUpgrade: true,
+    newApplication: {
+      sha256: "d".repeat(64),
+      fileVersion: "1.0.0",
+      productVersion: "1.0.0",
+      productName: "Morrow",
+      companyName: "Braden Riggins",
+      fileDescription: "Morrow",
+      signatureStatus: "NotSigned",
+      signerCertificate: null,
+    },
+    registration: { displayName: "Morrow 1.0.0", displayVersion: "1.0.0", publisher: "Braden Riggins" },
+    uninstall: {
+      completed: true,
+      uninstallerSignatureStatus: "NotSigned",
+      dataRetained: true,
+      stateRetained: true,
+      registryCount: 0,
+      shortcutCount: 0,
+      processCount: 0,
+    },
   }));
   return { root, evidence };
 }
@@ -135,4 +165,31 @@ test("only the native-Windows ACL skip is accepted, and only with bound evidence
     platform: "darwin",
     windowsEvidenceDirectory: evidence,
   }), /not bound to this installer and source/);
+});
+
+test("native Windows upgrade evidence fails closed when any release boundary is weakened", (t) => {
+  const cases = [
+    ["published artifact", (value) => { value.oldArtifact.sha256 = "0".repeat(64); }],
+    ["final source", (value) => { value.newArtifact.source = "0".repeat(40); }],
+    ["private state", (value) => { value.privateAclAfter = "unavailable"; }],
+    ["retained data", (value) => { value.retainedAfterUpgrade[0].unchanged = false; }],
+    ["unsigned application", (value) => { value.newApplication.signerCertificate = "CN=Unexpected"; }],
+    ["complete uninstall", (value) => { value.uninstall.stateRetained = false; }],
+  ];
+  for (const [label, mutate] of cases) {
+    const { root, evidence } = writeFixture();
+    t.after(() => rmSync(root, { recursive: true, force: true }));
+    const path = resolve(evidence, "upgrade.json");
+    const value = JSON.parse(readFileSync(path, "utf8"));
+    mutate(value);
+    writeFileSync(path, JSON.stringify(value));
+    assert.throws(() => validateTestOutput({
+      id: "workspace-test",
+      output: SKIP_LOG,
+      repositoryRoot: root,
+      commit: COMMIT,
+      platform: "darwin",
+      windowsEvidenceDirectory: evidence,
+    }), /not bound to this installer and source/, label);
+  }
 });

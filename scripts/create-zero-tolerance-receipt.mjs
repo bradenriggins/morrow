@@ -21,6 +21,10 @@ const WINDOWS_ACL_EVIDENCE = Object.freeze({
   upgrade: "upgrade.json",
 });
 const PRIVATE_WINDOWS_ACL = "current_user_system_admin_sensitive_access_only";
+const PUBLISHED_WINDOWS_ARTIFACT = Object.freeze({
+  source: "3720b76bfd5dc5d132627777be4034bf9ef0dae5",
+  sha256: "2750cd7b6746fb7f6701a92920158691eb9ad787732826597f6de4c3ed0fadf1",
+});
 const checks = {
   unapproved_provider_writes: ["workspace-test.log", "connector-test.log"],
   out_of_scope_targets_accepted: ["workspace-test.log", "connector-test.log"],
@@ -88,6 +92,48 @@ function isWindowsAclSmokeReceipt(value) {
     && value.stateSecurity?.descriptor?.acl === PRIVATE_WINDOWS_ACL;
 }
 
+function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
+  return value?.schema === "morrow.native-windows-upgrade.v1"
+    && value.oldArtifact?.role === "published_v1.0.0"
+    && value.oldArtifact?.source === PUBLISHED_WINDOWS_ARTIFACT.source
+    && value.oldArtifact?.sha256 === PUBLISHED_WINDOWS_ARTIFACT.sha256
+    && value.newArtifact?.role === "workflow_build"
+    && value.newArtifact?.source === commit
+    && value.newArtifact?.sha256 === installerSha256
+    && value.beforeReady === true
+    && value.afterReady === true
+    && value.privateAclBefore === PRIVATE_WINDOWS_ACL
+    && value.privateAclAfter === PRIVATE_WINDOWS_ACL
+    && Array.isArray(value.retainedAfterUpgrade)
+    && value.retainedAfterUpgrade.length === 2
+    && value.retainedAfterUpgrade.every((entry) => typeof entry?.id === "string"
+      && /^[a-f0-9]{64}$/.test(entry?.sha256Before)
+      && entry.sha256After === entry.sha256Before
+      && entry.unchanged === true)
+    && new Set(value.retainedAfterUpgrade.map((entry) => entry.id)).size === 2
+    && value.retainedAfterUpgrade.some((entry) => entry.id === "course_material")
+    && value.retainedAfterUpgrade.some((entry) => entry.id === "assistant_configuration")
+    && value.statePresentAfterUpgrade === true
+    && /^[a-f0-9]{64}$/.test(value.newApplication?.sha256)
+    && value.newApplication?.fileVersion === "1.0.0"
+    && value.newApplication?.productVersion === "1.0.0"
+    && value.newApplication?.productName === "Morrow"
+    && value.newApplication?.companyName === "Braden Riggins"
+    && value.newApplication?.fileDescription === "Morrow"
+    && value.newApplication?.signatureStatus === "NotSigned"
+    && value.newApplication?.signerCertificate === null
+    && value.registration?.displayName === "Morrow 1.0.0"
+    && value.registration?.displayVersion === "1.0.0"
+    && value.registration?.publisher === "Braden Riggins"
+    && value.uninstall?.completed === true
+    && value.uninstall?.uninstallerSignatureStatus === "NotSigned"
+    && value.uninstall?.dataRetained === true
+    && value.uninstall?.stateRetained === true
+    && value.uninstall?.registryCount === 0
+    && value.uninstall?.shortcutCount === 0
+    && value.uninstall?.processCount === 0;
+}
+
 function windowsAclEvidence({ repositoryRoot, commit, evidenceDirectory }) {
   if (typeof evidenceDirectory !== "string" || evidenceDirectory.trim() === "") {
     throw new Error("Windows ACL skip requires MORROW_WINDOWS_EVIDENCE_DIR");
@@ -115,14 +161,7 @@ function windowsAclEvidence({ repositoryRoot, commit, evidenceDirectory }) {
     || harness.uninstall?.unrelatedDataPreserved !== true) {
     throw new Error("native Windows harness receipt is not a completed smoke, repair, and uninstall proof");
   }
-  if (upgrade?.schema !== "morrow.native-manual-upgrade.v1"
-    || upgrade.newSource !== commit
-    || upgrade.installerSha256 !== installerSha256
-    || upgrade.beforeReady !== true
-    || upgrade.afterReady !== true
-    || !Array.isArray(upgrade.retained)
-    || upgrade.retained.length === 0
-    || !upgrade.retained.every((entry) => entry?.unchanged === true)) {
+  if (!isWindowsUpgradeReceipt(upgrade, { commit, installerSha256 })) {
     throw new Error("native Windows upgrade receipt is not bound to this installer and source");
   }
 
