@@ -29,11 +29,11 @@ jobs:
       - name: Install installer dependencies
         run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
 
-      - name: Test installer contracts
-        run: pnpm --dir installer --ignore-workspace test
-
       - name: Build Morrow packages
         run: pnpm build
+
+      - name: Test installer contracts
+        run: pnpm --dir installer --ignore-workspace test
 
       - name: Prepare isolated Windows payload and private artifact directory
         shell: pwsh
@@ -108,11 +108,11 @@ jobs:
       - name: Install installer dependencies
         run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
 
-      - name: Test installer contracts
-        run: pnpm --dir installer --ignore-workspace test
-
       - name: Build Morrow packages
         run: pnpm build
+
+      - name: Test installer contracts
+        run: pnpm --dir installer --ignore-workspace test
 
       - name: Package the unsigned Apple silicon payload, disk image, and archive
         shell: bash

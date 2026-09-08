@@ -18,7 +18,8 @@ const PACKAGE_BINDING = path.join(__dirname, "..", "..", "packages", "blackboard
 function privateAccess(file, mode) {
   try {
     const parent = fsSync.lstatSync(path.dirname(file));
-    return (mode & 0o077) === 0 && parent.isDirectory() && !parent.isSymbolicLink() && (parent.mode & 0o022) === 0;
+    if (!parent.isDirectory() || parent.isSymbolicLink()) return false;
+    return process.platform === "win32" || ((mode & 0o077) === 0 && (parent.mode & 0o022) === 0);
   } catch { return false; }
 }
 

@@ -114,14 +114,14 @@ test("the release workflow is dispatch-only and builds both desktop platforms", 
   assert.match(releaseJobs.get("macos-installer"), /^ {4}runs-on: macos-14$/m);
 });
 
-test("the macOS job installs, tests, builds, and keeps the artifact unsigned", () => {
+test("the macOS job installs, builds, tests the built runtime, and keeps the artifact unsigned", () => {
   const job = jobs(release).get("macos-installer");
   const commands = [...job.matchAll(/^\s+run: (?!\|)(.+)$/gm)].map((match) => match[1].trim());
   const ordered = [
     "pnpm install --frozen-lockfile",
     "pnpm --dir installer --ignore-workspace install --frozen-lockfile",
-    "pnpm --dir installer --ignore-workspace test",
-    "pnpm build"
+    "pnpm build",
+    "pnpm --dir installer --ignore-workspace test"
   ];
   let previous = -1;
   for (const command of ordered) {

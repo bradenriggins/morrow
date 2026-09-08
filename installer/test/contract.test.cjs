@@ -571,8 +571,8 @@ test("the Blackboard request clears FormData and reaches only the trusted filesy
   assert.match(main, /errorDetails\("blackboard_configuration_invalid"\)/);
   assert.match(controller, /hardenPrivateDirectory\(candidate, \{ trustedRoot: this\.home \}\)/);
   assert.match(controller, /privateDirectoryAccessAccepted\(candidate, \{ trustedRoot: this\.home \}\)/);
-  assert.match(renderer, /fields\.get\("applicationSecret"\);\n  fields\.delete\("applicationSecret"\);/);
-  assert.match(renderer, /finally \{\n    applicationSecret = "";/);
+  assert.match(renderer, /fields\.get\("applicationSecret"\);\r?\n  fields\.delete\("applicationSecret"\);/);
+  assert.match(renderer, /finally \{\r?\n    applicationSecret = "";/);
   assert.doesNotMatch(transaction, /\bfetch\b|BlackboardLearnRuntime|runtimeSnapshot|createRuntimeMonitor/);
 });
 

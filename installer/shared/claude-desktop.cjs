@@ -12,15 +12,21 @@ function launcherSource(configuration) {
   return `"use strict";
 const fs = require("node:fs");
 const crypto = require("node:crypto");
+const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { StringDecoder } = require("node:string_decoder");
 const config = ${JSON.stringify(configuration)};
 const launcherPath = fs.realpathSync(__filename);
 const launcherSha256 = crypto.createHash("sha256").update(fs.readFileSync(launcherPath)).digest("hex");
+function sameCanonicalPath(left, right) {
+  const pathApi = process.platform === "win32" ? path.win32 : path.posix;
+  if (pathApi.normalize(left) !== left || pathApi.normalize(right) !== right) return false;
+  return process.platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
+}
 function setupCurrent() {
   try {
     return crypto.createHash("sha256").update(fs.readFileSync(config.sourcePath)).digest("hex") === launcherSha256
-      && fs.realpathSync(config.workspaceRoot) === config.workspaceRoot;
+      && sameCanonicalPath(fs.realpathSync(config.workspaceRoot), config.workspaceRoot);
   } catch { return false; }
 }
 if (!setupCurrent()) {
@@ -194,13 +200,21 @@ function processAlive(pid) {
 }
 
 function windowsProcessStartQuery(pids) {
-  const filter = pids.filter((pid) => Number.isSafeInteger(pid) && pid > 0).map((pid) => `ProcessId=${pid}`).join(" OR ");
+  const identifiers = pids.filter((pid) => Number.isSafeInteger(pid) && pid > 0).join(", ");
   return [
     "$ErrorActionPreference = 'Stop'",
     "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-    `$processes = @(Get-CimInstance Win32_Process -Filter "${filter}" | ForEach-Object { [pscustomobject]@{ processId = [int]$_.ProcessId; startedAt = $_.CreationDate.ToUniversalTime().ToString('o') } })`,
+    `$processIdentifiers = @(${identifiers})`,
+    "$processes = @($processIdentifiers | ForEach-Object { try { $process = [System.Diagnostics.Process]::GetProcessById([int]$_); [pscustomobject]@{ processId = [int]$process.Id; startedAt = $process.StartTime.ToUniversalTime().ToString('o') } } catch {} })",
     "$processes | ConvertTo-Json -Compress"
   ].join("; ");
+}
+
+function sameCanonicalPath(left, right, platform = process.platform) {
+  if (typeof left !== "string" || typeof right !== "string") return false;
+  const pathApi = platform === "win32" ? path.win32 : path.posix;
+  if (pathApi.normalize(left) !== left || pathApi.normalize(right) !== right) return false;
+  return platform === "win32" ? left.toLowerCase() === right.toLowerCase() : left === right;
 }
 
 function parseWindowsProcessStartTimes(output) {
@@ -357,7 +371,7 @@ async function inspectClaudeDesktopConnection(setup) {
     if (!metadata) return { installed: false, running: false };
     const installedPath = await realPath(receipt.launcherPath, "file");
     const installedRelative = path.relative(root, installedPath);
-    if (installedPath !== receipt.launcherPath || metadata.launcherSha256 !== receipt.launcherSha256
+    if (!sameCanonicalPath(installedPath, receipt.launcherPath) || metadata.launcherSha256 !== receipt.launcherSha256
       || (!installedRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(installedRelative))) return { installed: false, running: false };
     for (const [value, kind] of [[metadata.nodePath, "file"], [metadata.serverEntryPath, "file"],
       [metadata.upstreamsPath, "file"], [metadata.workspaceRoot, "directory"]]) {
@@ -377,5 +391,6 @@ module.exports = {
   isCurrentClaudeDesktopSetup,
   inspectClaudeDesktopConnection,
   processAlive,
+  sameCanonicalPath,
   windowsProcessStartQuery
 };

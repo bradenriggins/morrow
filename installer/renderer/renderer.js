@@ -435,6 +435,7 @@ function scheduleSettlingRefresh(next) {
     settlingTimer = null;
     if (!busy) void refresh();
   }, SETTLING_REFRESH_MS);
+  settlingTimer?.unref?.();
 }
 
 async function handleAction(event) {

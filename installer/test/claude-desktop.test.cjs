@@ -12,6 +12,7 @@ const {
   parseWindowsProcessStartTimes,
   prepareClaudeDesktopBundle,
   processAlive,
+  sameCanonicalPath,
   windowsProcessStartQuery
 } = require("../shared/claude-desktop.cjs");
 const installerController = require("../shared/installer-controller.cjs");
@@ -246,8 +247,11 @@ test("process liveness treats EPERM as alive and the installer answers it in one
 
 test("the Windows start-time query asks for both ids and its answer is read", () => {
   const query = windowsProcessStartQuery([1234, 5678]);
-  assert.match(query, /Get-CimInstance Win32_Process -Filter "ProcessId=1234 OR ProcessId=5678"/);
+  assert.match(query, /\$processIdentifiers = @\(1234, 5678\)/);
+  assert.match(query, /System\.Diagnostics\.Process]::GetProcessById/);
   assert.match(query, /ConvertTo-Json -Compress/);
+  assert.equal(sameCanonicalPath("C:\\Users\\Teacher\\Morrow.cjs", "c:\\Users\\Teacher\\Morrow.cjs", "win32"), true);
+  assert.equal(sameCanonicalPath("C:\\Users\\Teacher\\Morrow.cjs", "C:\\Users\\Teacher\\..\\Morrow.cjs", "win32"), false);
   const started = parseWindowsProcessStartTimes('[{"processId":1234,"startedAt":"2026-09-06T10:00:00.1234567Z"},{"processId":5678,"startedAt":"2026-09-06T10:00:01.0000000Z"}]');
   assert.deepEqual([...started], [[1234, Date.parse("2026-09-06T10:00:00.123Z")], [5678, Date.parse("2026-09-06T10:00:01Z")]]);
   assert.equal(parseWindowsProcessStartTimes('{"processId":9,"startedAt":"2026-09-06T10:00:00.0000000Z"}').get(9), Date.parse("2026-09-06T10:00:00Z"));

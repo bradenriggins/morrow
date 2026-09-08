@@ -325,6 +325,7 @@ test("a window focus asks Morrow again at most once every five seconds, and neve
 
 test("setup asks again on its own while the runtime is still uncertain", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  t.after(() => t.mock.timers.reset());
   const calls = [];
   let answer = () => ok(state({ runtimeStatus: "uncertain" }));
   const dom = await load("settling", async (method) => {
@@ -348,6 +349,7 @@ test("setup asks again on its own while the runtime is still uncertain", async (
 
 test("a step that leaves the runtime uncertain settles without the person asking", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  t.after(() => t.mock.timers.reset());
   const methods = [];
   let current = state({ lifecycle: "repair_required", runtimeStatus: "repair_required", assistants: [], selectedAssistantId: null });
   const dom = await load("settling-after-step", async (method) => {
@@ -372,6 +374,7 @@ test("a step that leaves the runtime uncertain settles without the person asking
 
 test("setup stops asking again after a limited number of tries", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  t.after(() => t.mock.timers.reset());
   const calls = [];
   const dom = await load("settling-limit", async (method) => {
     calls.push(method);
