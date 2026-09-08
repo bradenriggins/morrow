@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "60089e77d52b2acfe280c38f227d032ae903e544",
+  "candidateCommit": "01a6d8c83b7545f3d1080de5914b21353429dfc3",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -1941,14 +1941,14 @@
     },
     {
       "path": "installer/shared/contract.cjs",
-      "sourceCommit": "36207499cd4f29d1b8f8a5d61d13b494e7381f89",
+      "sourceCommit": "01a6d8c83b7545f3d1080de5914b21353429dfc3",
       "originalPath": "installer/shared/contract.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "a44afa280e818de0876ab480af97cdb7d20cb4907f1650ef9adecd3033486a18",
-      "afterDigest": "6cb20f6da9234574cb2f259f0306a8c5ac9e25be14b4eeb3392251dcedc4beae"
+      "beforeDigest": "6cb20f6da9234574cb2f259f0306a8c5ac9e25be14b4eeb3392251dcedc4beae",
+      "afterDigest": "dccf548cc0783f001b89dc6a2d162c301d1ea4fc74822e4f5a8d7139c9a2eb29"
     },
     {
       "path": "installer/shared/electron-updater-adapter.cjs",
@@ -1963,14 +1963,14 @@
     },
     {
       "path": "installer/shared/installer-controller.cjs",
-      "sourceCommit": "36207499cd4f29d1b8f8a5d61d13b494e7381f89",
+      "sourceCommit": "01a6d8c83b7545f3d1080de5914b21353429dfc3",
       "originalPath": "installer/shared/installer-controller.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b8b4fccc8817149ed17ff807fc4e5aa862046d50d697cb931d7247b12c264fc7",
-      "afterDigest": "0684458bed6897fb81772b7ef28acabdb69a333c5c5f7bec4dd49dabaafcea4b"
+      "beforeDigest": "0684458bed6897fb81772b7ef28acabdb69a333c5c5f7bec4dd49dabaafcea4b",
+      "afterDigest": "ab4eb5e436d1abc0d7a35314e9295af9013ef845d7646f69ce8f62cf9b8e248c"
     },
     {
       "path": "installer/shared/runtime-monitor.mjs",
@@ -1996,14 +1996,14 @@
     },
     {
       "path": "installer/shared/setup-view.mjs",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "01a6d8c83b7545f3d1080de5914b21353429dfc3",
       "originalPath": "installer/shared/setup-view.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "33503766422abd6dc6cb272322dc6bec6ddd0138f94371d67a0f1139307f4d78",
-      "afterDigest": "d52246bec47d2249ff6fc804af5e088927ea444e75f9a903d0db5b332fc686fd"
+      "beforeDigest": "d52246bec47d2249ff6fc804af5e088927ea444e75f9a903d0db5b332fc686fd",
+      "afterDigest": "6564953633309c8043ef5a47dcfb36c96dc2edd373d927206964f1961731634d"
     },
     {
       "path": "installer/shared/state-policy.cjs",
@@ -2161,14 +2161,14 @@
     },
     {
       "path": "installer/test/installer-controller.test.cjs",
-      "sourceCommit": "36207499cd4f29d1b8f8a5d61d13b494e7381f89",
+      "sourceCommit": "01a6d8c83b7545f3d1080de5914b21353429dfc3",
       "originalPath": "installer/test/installer-controller.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f1e5b9cd4eb037f928e382955f675ad0314f3b0cf23b7dfcbfac16ada92dae08",
-      "afterDigest": "7b1b73c2eaedb684684324f09122e931fa98d5ec91c8ebaf5887ec3d003c13b0"
+      "beforeDigest": "7b1b73c2eaedb684684324f09122e931fa98d5ec91c8ebaf5887ec3d003c13b0",
+      "afterDigest": "5a269598971cc77add47fddc493137bd47546926994b2fcae8fbf64d738ed741"
     },
     {
       "path": "installer/test/main-lifecycle.test.cjs",
@@ -2249,14 +2249,14 @@
     },
     {
       "path": "installer/test/setup-view.test.mjs",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "01a6d8c83b7545f3d1080de5914b21353429dfc3",
       "originalPath": "installer/test/setup-view.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b4c8252ed64479066197c45ff435210293e4e0a022d8d8d992db42ea5ab35286",
-      "afterDigest": "550082876b3ecb3dfab5c580fef1e0261926627f6ee0f55d833a81343880f492"
+      "beforeDigest": "550082876b3ecb3dfab5c580fef1e0261926627f6ee0f55d833a81343880f492",
+      "afterDigest": "cbb3ec530f9e99db2efbde4134cfd8f736e11a045662cf1571e1ab1d0170c585"
     },
     {
       "path": "installer/test/state-policy.test.cjs",
