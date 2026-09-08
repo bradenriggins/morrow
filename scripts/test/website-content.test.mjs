@@ -549,6 +549,15 @@ test("the homepage guides a reader to choose a computer and continue setup", { s
   assert.ok(referencesIn(section).includes("/download"), "the download section must link /download");
 });
 
+test("the homepage offers two clear pill actions for features and setup", { skip }, () => {
+  const html = homePage();
+  assert.match(html, /<div class="hero-actions"><a class="button button-primary" href="\/features">See what Morrow can do [\s\S]*?<a class="button button-secondary" href="\/how-it-works">Get started with Morrow /);
+  const styles = pageSource("styles.css");
+  assert.match(styles, /\.button-secondary \{[^}]*border-color: var\(--line-strong\);[^}]*background: var\(--raised\);/);
+  assert.match(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.hero-actions \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*gap: 8px;[^}]*width: 100%;/);
+  assert.match(styles, /\.hero-actions \.button \{[^}]*min-height: 64px;/);
+});
+
 test("the public claims keep the platform, permission, and review boundaries", { skip }, () => {
   const source = (file) => readFileSync(new URL(file, site), "utf8");
   const features = source("features.html");
@@ -582,7 +591,7 @@ test("content uses surfaces and spacing instead of horizontal divider language",
     const lines = pageSource(file).split("\n");
     lines.forEach((line, index) => {
       if (!/border-(?:top|bottom|block)(?:-[a-z]+)?\s*:/.test(line)) return;
-      if (/\.nav-menu-button i::after|\.menu-toggle i|\.scenario-picker::after/.test(line)) return;
+      if (/\.nav-menu-button i::after|\.menu-toggle i|\.scenario-picker-button::after/.test(line)) return;
       problems.push(`${file}:${index + 1}: ${line.trim()}`);
     });
   }
@@ -590,12 +599,38 @@ test("content uses surfaces and spacing instead of horizontal divider language",
   assert.deepEqual(problems, [], "sections, lists, and cards must not rebuild the removed horizontal-rule system");
 });
 
-test("headings wrap at the type scale and conversation transcripts stay available", { skip }, () => {
+test("titles and body copy use natural wrapping and numbered cards keep the title beside the number", { skip }, () => {
   const styles = pageSource("styles.css");
+  const roles = pageSource("roles.css");
   const script = pageSource("script.js");
-  assert.match(styles, /h2, h3, h4 \{[^}]*white-space: normal;[^}]*text-wrap: balance;/);
+  assert.match(styles, /h1, h2, h3, h4 \{[^}]*max-width: none !important;[^}]*white-space: normal;[^}]*text-wrap: wrap;/);
+  assert.match(styles, /p \{ text-wrap: wrap; \}/);
+  assert.doesNotMatch(`${styles}\n${roles}`, /text-wrap:\s*(?:balance|pretty)/);
+  for (const selector of ["workflow-list li", "privacy-principles article", "support-routes a"]) {
+    assert.match(styles, new RegExp(`\\.${selector} \\{[^}]*grid-template-columns: (?:24px|28px) minmax\\(0, 1fr\\);`));
+  }
+  assert.match(styles, /\.support-issues article > div \{[^}]*grid-template-columns: 34px minmax\(0, 1fr\);/);
+  assert.match(roles, /\.role-page \.role-process li \{[^}]*grid-template-columns: 24px minmax\(0, 1fr\);/);
   assert.doesNotMatch(script, /fitTitles|createRange\(|conversation-stage\.js/);
   assert.doesNotMatch(styles, /\.conversation-bubble\.is-revealing|@keyframes scenario-enter/);
+});
+
+test("course conversations use rounded messages and a themed mobile example picker", { skip }, () => {
+  const styles = pageSource("styles.css");
+  const script = pageSource("script.js");
+  assert.match(styles, /\.conversation-request \{[^}]*border-radius: 18px;/);
+  assert.match(pageSource("roles.css"), /\.role-page \.role-message \{[^}]*border-radius: 18px;/);
+  assert.doesNotMatch(script, /createElement\('select'\)|new Option\(/);
+  for (const required of [
+    "pickerButton.setAttribute('aria-haspopup', 'listbox')",
+    "pickerList.setAttribute('role', 'listbox')",
+    "option.setAttribute('role', 'option')",
+    "event.key === 'Escape'",
+    "ArrowDown",
+    "ArrowUp",
+  ]) assert.ok(script.includes(required), `the custom example picker must include ${required}`);
+  assert.match(styles, /\.scenario-picker-button \{[^}]*white-space: normal;/);
+  assert.match(styles, /\.scenario-picker-list \{[^}]*border-radius: 12px;[^}]*background: var\(--raised\);/);
 });
 
 test("navigation disclosures do not claim menu semantics they do not implement", { skip }, () => {
@@ -773,7 +808,7 @@ test("the release download copy uses no em dash and keeps the direct homepage he
   );
   assert.match(
     pageSource("styles.css"),
-    /h1 \{ max-width: none !important; white-space: normal; text-wrap: balance; \}/,
+    /h1, h2, h3, h4 \{ max-width: none !important; white-space: normal; text-wrap: wrap; \}/,
     "page titles must wrap at a readable size instead of shrinking to one line",
   );
 });
