@@ -561,19 +561,14 @@ test("the public claims keep the platform, permission, and review boundaries", {
   assert.match(privacy, /do not rely on Morrow to make sensitive content anonymous/, "the privacy limit must be clear");
 });
 
-test("the homepage labels its conversations as examples, once, above the stage", { skip }, () => {
-  const html = homePage();
-  const label = "These examples use fictional course data.";
-  const at = html.indexOf(label);
-  assert.notEqual(at, -1, `the homepage needs the label "${label}" for its conversations`);
-  assert.equal(html.split(label).length - 1, 1, "one label covers the whole stage; a label for each conversation repeats it");
-
-  const stage = html.indexOf('class="scenario-stage');
-  assert.notEqual(stage, -1, "the homepage needs its conversation stage");
-  assert.ok(at < stage, "the label must sit above the stage so it is read before the first message");
-
-  const paragraph = html.slice(html.lastIndexOf("<p", at), at);
-  assert.ok(!/\bhidden\b/.test(paragraph), "the label must be visible before the reveal starts, not hidden markup");
+test("the site does not explain that its example course data is fictional", { skip }, () => {
+  const prohibited = /\b(?:fictional|mock|demo|simulated|sample|test) (?:course )?data\b|\b(?:example conversation|these examples)\b/i;
+  const problems = [];
+  for (const file of htmlFiles) {
+    const text = visibleText(pageSource(file));
+    if (prohibited.test(text)) problems.push(file);
+  }
+  assert.deepEqual(problems, [], "the website must show the examples without an unnecessary data disclaimer");
 });
 
 // The product pages carry the claims a reader checks before installing: what a course audit can
@@ -699,22 +694,7 @@ test("the product pages explain the three platform connection paths", { skip }, 
   assert.deepEqual(problems, [], "a reader needs to know that Canvas and Moodle use Chrome while Blackboard needs the institution connection");
 });
 
-test("the /features conversation is labelled as illustrative, once, above the messages", { skip }, () => {
-  // /features used to carry a block of counted example rows, labelled "These examples are
-  // illustrative." Those rows are gone; the page now shows one conversation, so the disclosure it
-  // needs is the conversation wording every other page uses, in the same place it always was:
-  // above the first message, in visible markup, once.
-  const html = productPage("features.html");
-  const label = "Example conversation with fictional course data.";
-  const at = html.indexOf(label);
-  assert.notEqual(at, -1, `the conversation on /features needs the label "${label}"`);
-  assert.equal(html.split(label).length - 1, 1, "one label covers the conversation; a label for each message repeats it");
 
-  const messages = html.indexOf('class="role-conversation"');
-  assert.notEqual(messages, -1, "/features needs its conversation");
-  assert.ok(at < messages, "the label must sit above the messages so it is read before the counts in them");
-  assert.ok(!/\bhidden\b/.test(html.slice(html.lastIndexOf("<p", at), at)), "the label must be visible markup");
-});
 
 // --- The copy the whole site shares --------------------------------------------------------------
 // Six checks over every page at once. Each one holds a correction that was made on seventeen files
@@ -900,24 +880,13 @@ const ROLE_PAGES = [
   "for-qa-teams.html",
 ];
 
-/** Every page in this lane that shows an illustrative conversation. `/for-teams` and `/features`
- *  each gained one, so both answer to the same disclosure rule as the five role pages. */
 const ILLUSTRATED_PAGES = [...ROLE_PAGES, "remote.html", "for-teams.html", "features.html"];
 
-/** The disclosure wordings an illustrative conversation may carry. */
-const FICTIONAL_DATA_LABELS = [
-  "Example conversation with fictional course data.",
-  "This example uses fictional course data.",
-];
-
 /**
- * The one sentence the role pages are allowed to repeat word for word. A reader should meet the
- * same disclosure wording on every page, so varying it would be a defect rather than the distinct
- * content the brief asks for. Nothing else may be shared; add an entry only for text whose value
- * comes from being identical.
+ * Sentences the role pages are allowed to repeat word for word. Nothing else may be shared; add an
+ * entry only for text whose value comes from being identical.
  */
 export const SHARED_ROLE_SENTENCES = [
-  "Example conversation with fictional course data.",
   // The speaker label on every assistant turn. A reader should meet the same label on every page,
   // so varying it would be the defect rather than the repetition. It is 27 characters, which is
   // longer than the run this check ignores, so without this entry every role page reads as sharing
@@ -958,29 +927,7 @@ function topLevelSection(html, id) {
   return html.slice(open, next === -1 ? html.length : next);
 }
 
-test("every illustrative conversation on a role page or /remote is labelled as fictional", { skip }, () => {
-  const problems = [];
-  for (const file of ILLUSTRATED_PAGES) {
-    const sections = conversationSections(rolePage(file));
-    if (sections.length === 0) problems.push(`${file} shows no conversation at all`);
-    for (const section of sections) {
-      // A block where Morrow answers is an illustrative conversation. The copyable first request has
-      // no reply: it is a template the reader sends, not an example of what Morrow returned.
-      if (!section.includes("role-message-response")) continue;
-      const heading = section.match(/<h2 id="([^"]+)"/)?.[1] ?? "an unnamed conversation";
-      const intro = section.match(/<div class="role-conversation-intro">([\s\S]*?)<\/div>/);
-      const text = intro ? visibleText(intro[1]) : "";
-      if (!FICTIONAL_DATA_LABELS.some((label) => text.includes(label))) {
-        problems.push(`${file}: "${heading}" shows a Morrow reply with no fictional-data label`);
-        continue;
-      }
-      if (section.indexOf('class="role-conversation-intro"') > section.indexOf("role-message")) {
-        problems.push(`${file}: "${heading}" places its label below the messages`);
-      }
-    }
-  }
-  assert.deepEqual(problems, [], "counts in an unlabelled conversation read as recorded customer results");
-});
+
 
 test("no role page and no /remote claims Morrow detects unclear link wording", { skip }, () => {
   const found = [];
