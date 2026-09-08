@@ -61,8 +61,26 @@ function writeFixture() {
     },
     newArtifact: { role: "workflow_build", source: COMMIT, sha256: installerSha256 },
     beforeReady: true,
+    beforeReadiness: {
+      coldGatewayReady: false,
+      retryUsed: true,
+      retryUsedIffColdNotReady: true,
+      finalGatewayReady: true,
+    },
     afterReady: true,
-    privateAclBefore: "current_user_system_admin_sensitive_access_only",
+    stateSecurity: {
+      before: {
+        stateAcl: "additional_principal_sensitive_access_allow",
+        descriptorAcl: "additional_principal_sensitive_access_allow",
+        acceptedAs: "pinned_3720_legacy",
+      },
+      after: {
+        stateAcl: "current_user_system_admin_sensitive_access_only",
+        descriptorAcl: "current_user_system_admin_sensitive_access_only",
+        acceptedAs: "private",
+      },
+    },
+    privateAclBefore: "additional_principal_sensitive_access_allow",
     privateAclAfter: "current_user_system_admin_sensitive_access_only",
     retainedAfterUpgrade: [
       { id: "course_material", sha256Before: "b".repeat(64), sha256After: "b".repeat(64), unchanged: true },
@@ -172,6 +190,8 @@ test("native Windows upgrade evidence fails closed when any release boundary is 
     ["published artifact", (value) => { value.oldArtifact.sha256 = "0".repeat(64); }],
     ["final source", (value) => { value.newArtifact.source = "0".repeat(40); }],
     ["private state", (value) => { value.privateAclAfter = "unavailable"; }],
+    ["legacy descriptor state", (value) => { value.stateSecurity.before.descriptorAcl = "unavailable"; }],
+    ["bounded legacy retry", (value) => { value.beforeReadiness.retryUsedIffColdNotReady = false; }],
     ["retained data", (value) => { value.retainedAfterUpgrade[0].unchanged = false; }],
     ["unsigned application", (value) => { value.newApplication.signerCertificate = "CN=Unexpected"; }],
     ["complete uninstall", (value) => { value.uninstall.stateRetained = false; }],

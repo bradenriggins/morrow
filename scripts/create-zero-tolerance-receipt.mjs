@@ -21,6 +21,7 @@ const WINDOWS_ACL_EVIDENCE = Object.freeze({
   upgrade: "upgrade.json",
 });
 const PRIVATE_WINDOWS_ACL = "current_user_system_admin_sensitive_access_only";
+const PINNED_3720_LEGACY_WINDOWS_ACL = "additional_principal_sensitive_access_allow";
 const PUBLISHED_WINDOWS_ARTIFACT = Object.freeze({
   source: "3720b76bfd5dc5d132627777be4034bf9ef0dae5",
   sha256: "2750cd7b6746fb7f6701a92920158691eb9ad787732826597f6de4c3ed0fadf1",
@@ -93,6 +94,14 @@ function isWindowsAclSmokeReceipt(value) {
 }
 
 function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
+  const beforeStateAcl = value?.stateSecurity?.before?.stateAcl;
+  const beforeDescriptorAcl = value?.stateSecurity?.before?.descriptorAcl;
+  const acceptedLegacyBefore = beforeStateAcl === PINNED_3720_LEGACY_WINDOWS_ACL
+    && beforeDescriptorAcl === PINNED_3720_LEGACY_WINDOWS_ACL
+    && value?.stateSecurity?.before?.acceptedAs === "pinned_3720_legacy";
+  const acceptedPrivateBefore = beforeStateAcl === PRIVATE_WINDOWS_ACL
+    && beforeDescriptorAcl === PRIVATE_WINDOWS_ACL
+    && value?.stateSecurity?.before?.acceptedAs === "private";
   return value?.schema === "morrow.native-windows-upgrade.v1"
     && value.oldArtifact?.role === "published_v1.0.0"
     && value.oldArtifact?.source === PUBLISHED_WINDOWS_ARTIFACT.source
@@ -101,8 +110,17 @@ function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
     && value.newArtifact?.source === commit
     && value.newArtifact?.sha256 === installerSha256
     && value.beforeReady === true
+    && typeof value.beforeReadiness?.coldGatewayReady === "boolean"
+    && typeof value.beforeReadiness?.retryUsed === "boolean"
+    && value.beforeReadiness.retryUsed === !value.beforeReadiness.coldGatewayReady
+    && value.beforeReadiness.retryUsedIffColdNotReady === true
+    && value.beforeReadiness.finalGatewayReady === true
     && value.afterReady === true
-    && value.privateAclBefore === PRIVATE_WINDOWS_ACL
+    && (acceptedLegacyBefore || acceptedPrivateBefore)
+    && value.privateAclBefore === beforeStateAcl
+    && value.stateSecurity?.after?.stateAcl === PRIVATE_WINDOWS_ACL
+    && value.stateSecurity?.after?.descriptorAcl === PRIVATE_WINDOWS_ACL
+    && value.stateSecurity?.after?.acceptedAs === "private"
     && value.privateAclAfter === PRIVATE_WINDOWS_ACL
     && Array.isArray(value.retainedAfterUpgrade)
     && value.retainedAfterUpgrade.length === 2
