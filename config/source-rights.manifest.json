@@ -1447,7 +1447,7 @@
     },
     {
       "path": "packages/mcp-server/src/runtime.ts",
-      "sha256": "e671b6ddb1bef9218d3760ddd9faf72dadc30c2705f9dd3bb1c2158d9dbff7a8",
+      "sha256": "051bb90d45966cbdfc784189d9adff26c66c403b78ace86132ed9f1e79d448e8",
       "disposition": "adapted_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
