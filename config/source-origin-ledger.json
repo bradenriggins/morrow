@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "2c80c23aedd5ef384878d804e6b0219310c3aafc",
+  "candidateCommit": "a322a6ef5cb84108b6a1591d899729def009974c",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -236,14 +236,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "ca276987be1979f8c1659e4cb62ca19833961a98",
+      "sourceCommit": "a322a6ef5cb84108b6a1591d899729def009974c",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "a6c522861b079e992337dc828d7a707d0ad5658f042f2d9c982dfe18780eb2ac",
-      "afterDigest": "347d057d254a5935907c2f4ef9c6233775eb5be9c332e03788ebaf3c459d4bc0"
+      "beforeDigest": "347d057d254a5935907c2f4ef9c6233775eb5be9c332e03788ebaf3c459d4bc0",
+      "afterDigest": "a88b0004107d147c9b801a30661c411185e7736847264090d4e38010ef0a02a9"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -4736,7 +4736,7 @@
     },
     {
       "path": "packages/mcp-server/src/runtime.ts",
-      "sourceCommit": "1447cdd1a79d0b06fa2db3fd575c4c0c26cfde96",
+      "sourceCommit": "6ff01e7486711172a69e2242a1d9cd64e7070e75",
       "originalPath": "packages/mcp-server/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -4745,8 +4745,8 @@
         "packages/mcp-server/test/approval-context.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2b3e03e26f7ce6f8a34cde2f7fc69a37537545ef57b71b371d705b3d933cfb4e",
-      "afterDigest": "e671b6ddb1bef9218d3760ddd9faf72dadc30c2705f9dd3bb1c2158d9dbff7a8"
+      "beforeDigest": "e671b6ddb1bef9218d3760ddd9faf72dadc30c2705f9dd3bb1c2158d9dbff7a8",
+      "afterDigest": "051bb90d45966cbdfc784189d9adff26c66c403b78ace86132ed9f1e79d448e8"
     },
     {
       "path": "packages/mcp-server/src/sandbox-upstream.ts",
@@ -5065,14 +5065,14 @@
     },
     {
       "path": "packages/mcp-server/test/canvas-connector.integration.test.ts",
-      "sourceCommit": "1447cdd1a79d0b06fa2db3fd575c4c0c26cfde96",
+      "sourceCommit": "6ff01e7486711172a69e2242a1d9cd64e7070e75",
       "originalPath": "packages/mcp-server/test/canvas-connector.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "7c30f63ba7b85ab60da3e0996d6ac1465e71e7f3963f26be01b16412e2b24264",
-      "afterDigest": "ed563196cc5dff85d1fd58a0b9ddcdf82d4a816b94f3ee1183aba68156fa0c0c"
+      "beforeDigest": "ed563196cc5dff85d1fd58a0b9ddcdf82d4a816b94f3ee1183aba68156fa0c0c",
+      "afterDigest": "8b5432d3e1188c2c76152669ab2a85b5b8814910ad4de1fe68adafb220de302d"
     },
     {
       "path": "packages/mcp-server/test/canvas-course-compose.test.ts",
