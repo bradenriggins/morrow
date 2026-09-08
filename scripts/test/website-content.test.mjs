@@ -555,7 +555,7 @@ test("the public claims keep the platform, permission, and review boundaries", {
   const privacy = source("privacy.html");
 
   assert.match(features, /Canvas and Moodle connect through Morrow Bridge in the Chrome window/, "Canvas and Moodle must use the signed-in Chrome route");
-  assert.match(features, /Blackboard connects through an institution connection/, "Blackboard must use the institution connection");
+  assert.match(features, /Blackboard uses a connection your administrator sets up/, "Blackboard must use the administrator connection");
   assert.match(build, /Proposed course changes wait for your review/, "a reader must keep the final decision");
   assert.doesNotMatch(privacy, /removes? (?:the )?student names|replaces each person/i, "the privacy page must not promise automatic anonymization");
   assert.match(privacy, /do not rely on Morrow to make sensitive content anonymous/, "the privacy limit must be clear");
@@ -616,10 +616,9 @@ test("/how-it-works and /download give the current visual Morrow Bridge install 
   assert.deepEqual(problems, [], "the install route a person follows today has to be on the pages that describe setup");
 });
 
-test("/download gives each native build its exact v1.0.0 release link and install steps", { skip }, () => {
+test("/download gives each computer its exact v1.0.0 release link and plain install steps", { skip }, () => {
   const html = productPage("download.html");
   const links = tagsNamed(html, "a");
-  const copy = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
 
   for (const [url, description] of [
     [MAC_DOWNLOAD_URL, "mac-download-title"],
@@ -630,18 +629,22 @@ test("/download gives each native build its exact v1.0.0 release link and instal
     assert.equal(link["aria-describedby"], description, `${url} must describe its matching build`);
   }
 
-  for (const [build, steps] of [
-    ["Mac", [
-      "Open the downloaded .dmg file.",
+  for (const [titleId, build, steps] of [
+    ["mac-download-title", "Mac", [
+      "Open the Morrow download.",
       "Drag Morrow into Applications.",
       "Open Morrow from Applications to start setup.",
     ]],
-    ["Windows", [
-      "Open the downloaded .exe file.",
+    ["windows-download-title", "Windows", [
+      "Open the Morrow download.",
       "Morrow installs for your account and opens automatically.",
       "If needed, open Morrow from the Start menu to start setup.",
     ]],
   ]) {
+    const labelled = html.indexOf(`aria-labelledby="${titleId}"`);
+    assert.ok(labelled >= 0, `${build} must have its own download card`);
+    const close = html.indexOf("</article>", labelled);
+    const copy = html.slice(labelled, close).replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
     const positions = steps.map((step) => copy.indexOf(step));
     assert.ok(positions.every((position) => position >= 0), `${build} must state each native install step`);
     assert.deepEqual(positions, [...positions].sort((left, right) => left - right), `${build} must state the steps in order`);
@@ -656,6 +659,11 @@ test("the release download copy uses no em dash and keeps the homepage headline 
     homePage(),
     /<h1 id="hero-title">Connect your own ChatGPT and Claude to your Canvas, Moodle, and Blackboard courses\.<\/h1>/,
     "the homepage headline is approved copy and must remain exact",
+  );
+  assert.match(
+    homePage(),
+    /<p class="hero-note">Morrow is and always will be free and open source\.<\/p>/,
+    "the homepage must state the permanent free and open source promise word for word",
   );
   assert.doesNotMatch(
     homePage(),
@@ -676,15 +684,6 @@ test("no product page tells the reader to type an address or run a command", { s
   assert.deepEqual(found, [], "setup is visual; a command or a typed address is not a step a reader is given");
 });
 
-/**
- * The three pages that quote the canonical platform sentence word for word. It is the one place the
- * site is allowed to print `REST API`, `catalog` and `tenant`, because LIMITATIONS.md requires those
- * exact words; every other sentence about platforms is written in the reader's language. Adding a
- * fourth page means a fourth surface to keep in step with LIMITATIONS.md, so add one only when a
- * page genuinely states coverage.
- */
-const PAGES_QUOTING_THE_PLATFORM_SENTENCE = ["features.html", "download.html", "how-it-works.html"];
-
 test("the product pages explain the three platform connection paths", { skip }, () => {
   const problems = [];
   for (const file of ["features.html", "download.html", "how-it-works.html"]) {
@@ -692,6 +691,50 @@ test("the product pages explain the three platform connection paths", { skip }, 
     for (const required of ["Canvas", "Moodle", "Blackboard"]) if (!copy.includes(required)) problems.push(`${file} does not name ${required}`);
   }
   assert.deepEqual(problems, [], "a reader needs to know that Canvas and Moodle use Chrome while Blackboard needs the institution connection");
+});
+
+const PUBLIC_COPY_PATTERNS = [
+  /\baccess token\b/i,
+  /\bdeveloper key\b/i,
+  /\bAPI credentials?\b/i,
+  /\binstitution-issued\b/i,
+  /\bcourse data\b/i,
+  /\bAI assistant\b/i,
+  /\bApple silicon\b/i,
+  /\b(?:Windows )?x64\b/i,
+  /\b64-bit\b/i,
+  /\bChrome \d+\b/i,
+  /\.dmg\b/i,
+  /\.exe\b/i,
+  /\bSHA-256\b/i,
+  /\bunsigned\b/i,
+  /\baccessibility pass\b/i,
+  /\bassistive-technology\b/i,
+  /\bthe gateway\b/i,
+];
+
+test("public copy uses educator language instead of setup and product jargon", { skip }, () => {
+  const found = [];
+  for (const file of htmlFiles) {
+    const text = visibleText(pageSource(file));
+    for (const pattern of PUBLIC_COPY_PATTERNS) {
+      const match = text.match(pattern);
+      if (match) found.push(`${file}: "${match[0]}"`);
+    }
+  }
+  assert.deepEqual(found, [], "write what an instructor sees and does, and keep file and system terms out of the public copy");
+});
+
+test("the free and open source promise is visible from every page", { skip }, () => {
+  const problems = [];
+  for (const page of readablePages) {
+    const header = region(page.html, "header");
+    const footer = region(page.html, "footer");
+    if (!header || !visibleText(header).includes("Free and open source")) problems.push(`${page.file}: header`);
+    if (!footer || !visibleText(footer).includes("Free and open source")) problems.push(`${page.file}: footer`);
+  }
+  assert.deepEqual(problems, [], "the free and open source page must be named in both shared navigation paths");
+  assert.ok(visibleText(pageSource("build.html")).includes("Morrow is and always will be free and open source."));
 });
 
 
@@ -736,6 +779,38 @@ test("every reply in every conversation is labelled 'Your Assistant using Morrow
   }
   assert.ok(replies > 40, `only ${replies} replies were found; this check would prove nothing`);
   assert.deepEqual(problems, [], "the reader talks to their own assistant, so every reply says which assistant is speaking and what it is using");
+});
+
+test("every illustrated conversation uses the role that would do the work", { skip }, () => {
+  const expected = {
+    "index.html": [
+      ...Array(3).fill("Instructor"),
+      ...Array(3).fill("Instructional designer"),
+      ...Array(3).fill("Instructor"),
+      ...Array(3).fill("LMS administrator"),
+      ...Array(3).fill("Curriculum developer, on phone"),
+    ],
+    "features.html": Array(3).fill("Instructor"),
+    "for-instructors.html": Array(6).fill("Instructor"),
+    "for-instructional-designers.html": Array(6).fill("Instructional designer"),
+    "for-lms-admins.html": Array(6).fill("LMS administrator"),
+    "for-curriculum-developers.html": Array(6).fill("Curriculum developer"),
+    "for-qa-teams.html": Array(6).fill("QA lead"),
+    "for-teams.html": Array(3).fill("Instructional designer"),
+    "remote.html": [...Array(3).fill("Instructor, on phone"), ...Array(3).fill("QA lead, on phone")],
+  };
+  const problems = [];
+  for (const [file, wanted] of Object.entries(expected)) {
+    const html = pageSource(file);
+    const actual = [];
+    for (const match of html.matchAll(/<[a-z]+\b[^>]*class="[^"]*(?:conversation-request|role-message-request)[^"]*"[^>]*>\s*<(span|strong)>([^<]+)<\/\1>/g)) {
+      actual.push(match[2]);
+    }
+    if (actual.length !== wanted.length || actual.some((speaker, index) => speaker !== wanted[index])) {
+      problems.push(`${file}: ${JSON.stringify(actual)}`);
+    }
+  }
+  assert.deepEqual(problems, [], "a course example must sound like the educator named above it");
 });
 
 /**
@@ -1096,7 +1171,7 @@ test("the final website pass keeps role examples, media review, setup copy, head
     ["features.html", "Videos and interactive content need human review."],
     ["for-instructional-designers.html", "embedded media that needs human review"],
     ["for-qa-teams.html", "Video and interactive content need human review."],
-    ["index.html", "Videos and PDFs are not in that count; they need human review."],
+    ["index.html", "I could not check the videos or PDFs, so those still need a person to review them."],
   ]) assert.ok(pageSource(file).includes(phrase), `${file} must use the shared human-review term`);
 
   for (const file of ["index.html", "how-it-works.html"]) {
