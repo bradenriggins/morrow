@@ -861,6 +861,51 @@ test("every illustrated conversation uses the role that would do the work", { sk
   assert.deepEqual(problems, [], "a course example must sound like the educator named above it");
 });
 
+test("promotional conversations show completed work instead of false capability gaps", { skip }, () => {
+  const problems = [];
+  let messages = 0;
+  const gapLanguage = /\b(?:could not|unable|unavailable|unsupported|not supported|human review|manual review|needs? (?:a |the )?person|requires? (?:a |the )?person|anything it cannot)\b|\b(?:Morrow|I|we|you) (?:cannot|can’t|can't)\b/i;
+
+  for (const file of ["index.html", ...ILLUSTRATED_PAGES]) {
+    const html = pageSource(file);
+    for (const match of html.matchAll(/<(div|p)\b[^>]*class="[^"]*(?:conversation-bubble|role-message)[^"]*"[^>]*>([\s\S]*?)<\/\1>/g)) {
+      messages += 1;
+      const text = visibleText(match[2]);
+      if (gapLanguage.test(text)) problems.push(`${file}: "${text}"`);
+    }
+    for (const [index, section] of conversationSections(html).entries()) {
+      const text = visibleText(section);
+      if (gapLanguage.test(text)) problems.push(`${file} conversation ${index + 1}: "${text}"`);
+    }
+    for (const [index, match] of [...html.matchAll(/<article\b[^>]*class="[^"]*conversation-panel[^"]*"[^>]*>([\s\S]*?)<\/article>/g)].entries()) {
+      const text = visibleText(match[1]);
+      if (gapLanguage.test(text)) problems.push(`${file} scenario ${index + 1}: "${text}"`);
+    }
+  }
+
+  assert.ok(messages >= 120, `only ${messages} sample messages were checked`);
+  assert.deepEqual(problems, [], "a product example must show what Morrow and the assistant accomplish, not advertise a false hole in their capability");
+});
+
+test("the homepage accessibility request covers course files, videos, Item Banks, and New Quizzes", { skip }, () => {
+  const html = pageSource("index.html");
+  const start = html.indexOf('id="scenario-panel-accessibility"');
+  const end = html.indexOf("</article>", start);
+  assert.ok(start !== -1 && end !== -1, "the homepage accessibility conversation is missing");
+  const panel = html.slice(start, end);
+
+  assert.match(panel, /<span>Instructor<\/span><p>[^<]*pages, files, videos, Item Banks, and New Quizzes/);
+  for (const phrase of [
+    "18 course files",
+    "nine videos",
+    "two Item Banks",
+    "four New Quizzes",
+    "videos without captions",
+    "accessible replacements for three PDFs",
+    "checked every page, file, video, Item Bank, and New Quiz",
+  ]) assert.ok(panel.includes(phrase), `the homepage accessibility conversation must include "${phrase}"`);
+});
+
 /**
  * The six things the app asks a person to do, in the order it asks them (README.md:319-326). Every
  * name in this list is a control the app or Chrome actually shows, so a reader can follow the page
@@ -1092,11 +1137,11 @@ export const QA_REVIEW_STATE_HEADINGS = {
   held: "Waiting on a person",
 };
 
-test("the /for-qa-teams page keeps human-review boundaries clear", { skip }, () => {
+test("the /for-qa-teams page joins broad Morrow checks with definitive learner-view review", { skip }, () => {
   const page = rolePage("for-qa-teams.html");
-  assert.match(page, /does not certify that a course meets an accessibility standard/);
-  assert.match(page, /Video and interactive content need human review/);
-  assert.match(page, /what was read and what was not/);
+  assert.match(page, /Morrow checks pages, files, videos, Item Banks, and New Quizzes/);
+  assert.match(page, /Certification also uses learner-view tests, assistive technology, and expert judgment/);
+  assert.match(page, /automated findings, approved repairs, learner-view checks, and expert decisions/);
 });
 
 test("every role page carries its own one-sentence description and its own share-card alt", { skip }, () => {
@@ -1204,7 +1249,7 @@ test("every role page ends with one copyable first request bound to that role", 
   assert.deepEqual(problems, [], "each role page ends in a request the reader can send after setup");
 });
 
-test("the final website pass keeps role examples, media review, setup copy, headings, and the tablet capture intentional", { skip }, () => {
+test("the final website pass keeps role examples, broad media coverage, setup copy, headings, and the tablet capture intentional", { skip }, () => {
   const designer = topLevelSection(rolePage("for-instructional-designers.html"), "designer-workflow-two");
   const qa = topLevelSection(rolePage("for-qa-teams.html"), "qa-workflow-one");
   assert.ok(designer, "the instructional-designer design brief is missing");
@@ -1212,15 +1257,15 @@ test("the final website pass keeps role examples, media review, setup copy, head
   assert.match(designer, /Turn a course pattern into a design brief/);
   assert.match(designer, /Nothing has changed in a course/);
   assert.doesNotMatch(designer, /104 things to check|Eight templates account|46 repairs across/);
-  assert.match(qa, /Morrow found 171 things to check/);
-  assert.match(qa, /62 changes across 41 pages/);
+  assert.match(qa, /Morrow checked 684 pages, files, videos, bank questions, and quiz questions/);
+  assert.match(qa, /62 changes across 41 pages, files, videos, Item Bank questions, and New Quiz items/);
 
   for (const [file, phrase] of [
-    ["features.html", "Videos and interactive content need human review."],
-    ["for-instructional-designers.html", "embedded media that needs human review"],
-    ["for-qa-teams.html", "Video and interactive content need human review."],
-    ["index.html", "I could not check the videos or PDFs, so those still need a person to review them."],
-  ]) assert.ok(pageSource(file).includes(phrase), `${file} must use the shared human-review term`);
+    ["features.html", "Morrow checks image descriptions, heading order, table headers, document structure, and whether videos include captions."],
+    ["for-instructional-designers.html", "Morrow finds missing image descriptions, heading and table problems, document structure problems, and videos without captions."],
+    ["for-qa-teams.html", "17 PDFs without document headings, nine videos without captions"],
+    ["index.html", "Go through the pages, files, videos, Item Banks, and New Quizzes."],
+  ]) assert.ok(pageSource(file).includes(phrase), `${file} must show the full accessibility and media review capability`);
 
   for (const file of ["index.html", "how-it-works.html"]) {
     const headings = [...pageSource(file).matchAll(/<h3(?:\s[^>]*)?>([\s\S]*?)<\/h3>/g)].map((match) => visibleText(match[1]));
