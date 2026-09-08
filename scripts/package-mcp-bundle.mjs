@@ -558,17 +558,7 @@ function copyRuntime(archive, staging, target) {
   mkdirSync(extracted, { recursive: true, mode: 0o700 });
   if (descriptor.extension === "zip") {
     if (process.platform === "win32") {
-      const script = resolve(staging, ".extract-node.ps1");
-      writeFileSync(script, [
-        "param([Parameter(Mandatory = $true)][string]$Archive, [Parameter(Mandatory = $true)][string]$Destination)",
-        "$ErrorActionPreference = 'Stop'",
-        "Expand-Archive -LiteralPath $Archive -DestinationPath $Destination -Force"
-      ].join("\r\n"), { mode: 0o600, flag: "wx" });
-      try {
-        run("powershell.exe", ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", script, "-Archive", archive, "-Destination", extracted]);
-      } finally {
-        rmSync(script, { force: true });
-      }
+      run("tar.exe", ["-xf", archive, "-C", extracted]);
     } else {
       run("unzip", ["-q", archive, "-d", extracted]);
     }

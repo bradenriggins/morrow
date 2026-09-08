@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Morrow Bridge",
   "description": "Morrow Bridge connects Canvas and Moodle to Morrow from your assistant. Your learning-platform sign-in stays in Chrome.",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxKPzBjXyxPr9Ldo6wKJCdBhHje1uXWrm+i1YeziYR0bUge+rH27V6+zGDVRyoLWyID2aNOofpCcBjqIVRH9JjhL8s7RxQa7mrIh6eM3aIEJ2xdaJA3HhNQ6/0QPCU22t64s0dvrkm12uqSJtMnYk0TjFbtKi7nLd1/KDMTPnpH3XWXNp8uRomqu+T0SGVugZNsOlFwOUSy2RMWAILdObolRJbncEILELdhxDjnQMEa7cumWbk2jhAA8nRXANNMo6ljZjmTmiDELAghDKX+wvbXmdkGve8Ns/UbLQi7rb9hSX/XrC5ZM0KpWwThukOBn9gcltxe23EFbqWnVHwqM/hwIDAQAB",
   "minimum_chrome_version": "116",
   "icons": { "128": "brand/morrow-knot-128.png" },
