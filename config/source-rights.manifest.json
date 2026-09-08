@@ -895,7 +895,7 @@
     },
     {
       "path": "packages/bridge-loopback/src/brand.ts",
-      "sha256": "c09d88186b91fb1723e247d374ba4ebf5484717b3a3b538e1b9f143dc5c41f6d",
+      "sha256": "ae847e3ab34d31f9d34380cceeded10b70b3547632d070c0c864188bb6a1cad0",
       "disposition": "adapted_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
