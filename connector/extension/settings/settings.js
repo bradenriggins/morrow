@@ -80,6 +80,7 @@ const state = {
   selected: new Set(),
   selectedCategories: new Set(),
   status: null,
+  statusReadFailed: false,
   view: "connected"
 };
 
@@ -98,7 +99,7 @@ function courseName(binding) {
 }
 
 function providerName(binding) {
-  const provider = String(binding.provider || "Course site");
+  const provider = String(binding.provider || "Learning platform");
   return provider === "moodle" ? "Moodle" : provider === "canvas" ? "Canvas" : provider;
 }
 
@@ -419,7 +420,7 @@ function renderCategories() {
     return;
   }
   if (selectedBindingsNeedSite()) {
-    categoryList.innerHTML = '<p class="state-message">Open every selected course site in Chrome, then refresh this page before you choose Edit.</p>';
+    categoryList.innerHTML = '<p class="state-message">Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit.</p>';
     return;
   }
   if (state.optionsLoading) {
@@ -468,7 +469,7 @@ function permissionState(binding) {
 
 function diagnosticDetails(binding) {
   const details = [];
-  if (binding.siteUrl || binding.origin) details.push(["Course site", binding.siteUrl || binding.origin]);
+  if (binding.siteUrl || binding.origin) details.push(["Learning platform", binding.siteUrl || binding.origin]);
   if (binding.principalId) details.push(["Signed-in account", binding.principalId]);
   if (binding.courseId) details.push(["Course ID", binding.courseId]);
   if (binding.sessionGeneration !== undefined && binding.sessionGeneration !== null) details.push(["Connection", `Session ${binding.sessionGeneration}`]);
@@ -485,7 +486,7 @@ function bindingNote(binding) {
   if (!isEligible(binding)) return "Morrow cannot identify this course. Reconnect it from the Morrow popup before you choose Edit.";
   if (permissionHasExpired(binding)) return "This temporary Edit access has ended. The course is back in Plan. Ask Morrow for Edit access again if you still need it.";
   if (isStale(binding)) return "Available actions changed. Edit is paused until you review and save the selected actions again.";
-  if (binding.runtimeVerified !== true) return "This course remains selected, but its site is closed. Open the course site before you save Edit.";
+  if (binding.runtimeVerified !== true) return "This course remains selected, but its site is closed. Open the learning platform before you save Edit.";
   const enabled = categoriesFor(binding);
   if (!enabled.length) return binding?.editPermission
     ? "Edit access is active. Select this course to read its exact allowed actions."
@@ -496,8 +497,8 @@ function bindingNote(binding) {
 
 function renderCourseContext(binding) {
   const account = binding.principalId || "Signed-in account unavailable";
-  const site = binding.siteUrl || binding.origin || "Course site unavailable";
-  return `<dl class="course-context"><div><dt>Account</dt><dd>${escapeHtml(account)}</dd></div><div><dt>Course site</dt><dd>${escapeHtml(site)}</dd></div></dl>`;
+  const site = binding.siteUrl || binding.origin || "Learning platform unavailable";
+  return `<dl class="course-context"><div><dt>Account</dt><dd>${escapeHtml(account)}</dd></div><div><dt>Learning platform</dt><dd>${escapeHtml(site)}</dd></div></dl>`;
 }
 
 function renderAvailableCourse(course) {
@@ -546,8 +547,10 @@ function renderAnchors() {
   if (current) siteAnchor.value = current.siteAnchorId;
   siteAnchor.disabled = state.busy || !availableAnchors.length;
   discoverCoursesButton.disabled = state.busy || !current;
-  if (!availableAnchors.length) {
-    siteAnchorDetails.textContent = "No signed-in course site is available. Open one course from a site in Chrome, then refresh this page.";
+  if (state.statusReadFailed) {
+    siteAnchorDetails.textContent = "Connected courses were not checked. Select Refresh connected courses.";
+  } else if (!availableAnchors.length) {
+    siteAnchorDetails.textContent = "No signed-in Canvas or Moodle course is available. Open one course in Chrome, then refresh this page.";
   } else if (current) {
     siteAnchorDetails.textContent = "Find courses from this signed-in site. You choose which courses to connect in Plan.";
   }
@@ -586,7 +589,9 @@ function renderCourses(focus = focusedCourseControl()) {
     }
   }
 
-  if (!state.status) {
+  if (state.statusReadFailed) {
+    courseList.innerHTML = '<p class="state-message">Connected courses were not checked. Select Refresh connected courses.</p>';
+  } else if (!state.status) {
     courseList.innerHTML = '<p class="state-message">Loading connected courses…</p>';
   } else if (availableView && discoveryExpired()) {
     courseList.innerHTML = '<p class="state-message">This available-course list has expired. Find available courses again before you connect courses.</p>';
@@ -602,8 +607,10 @@ function renderCourses(focus = focusedCourseControl()) {
 
   const ready = connected.filter((binding) => isEligible(binding) && binding.runtimeVerified === true);
   const max = Number.isInteger(state.status?.bindingLimit) ? state.status.bindingLimit : 500;
-  if (!state.status) {
-    connectionStatus.textContent = "Checking your connected course sites…";
+  if (state.statusReadFailed) {
+    connectionStatus.textContent = "Connected courses were not checked.";
+  } else if (!state.status) {
+    connectionStatus.textContent = "Checking your connected learning platforms…";
   } else if (availableView && !discoveryExpired()) {
     const found = state.discovery?.courseCount || discoveryItems().length;
     connectionStatus.textContent = state.discovery?.complete
@@ -695,12 +702,14 @@ function renderSelection() {
   }
   const categoriesSelected = state.selectedCategories.size;
   const availableCategories = availableCategoriesForSelection();
-  selectionSummary.textContent = !state.status
-    ? "Loading connected courses…"
+  selectionSummary.textContent = state.statusReadFailed
+    ? "Course access was not checked. Select Refresh connected courses."
+    : !state.status
+      ? "Loading connected courses…"
     : !selected.length
       ? "No course selected. Select a course above, then choose Plan or Edit."
       : needsSite
-        ? `${plural(selected.length, "course")} selected. Open every selected course site in Chrome before you choose Edit.`
+        ? `${plural(selected.length, "course")} selected. Open every selected learning platform in Chrome before you choose Edit.`
       : state.mode === "plan"
         ? `${plural(selected.length, "course")} selected. Plan keeps changes ready for your review.`
         : !availableCategories.size
@@ -716,7 +725,7 @@ function renderSelection() {
   editStageHint.textContent = !selected.length
     ? "Select courses, then choose Edit to review the available actions."
     : needsSite
-      ? "Open every selected course site in Chrome, then refresh this page before you choose Edit."
+      ? "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit."
     : "Choose Edit to review and select the actions Morrow may apply.";
   permissionActions.hidden = !selected.length;
   modePlan.disabled = state.busy || !selected.length;
@@ -738,7 +747,7 @@ function renderSelection() {
   returnPlanButton.textContent = `Return ${plural(selected.length, "selected course")} to Plan`;
   saveEditButton.textContent = showEditStage ? `Save Edit access for ${plural(selected.length, "course")}` : "Save Edit access";
   actionHelp.textContent = needsSite
-    ? "Open every selected course site in Chrome, then refresh this page before you choose Edit."
+    ? "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit."
     : state.mode === "plan"
     ? "To remove any saved Edit access, return the selected courses to Plan."
     : !availableCategories.size
@@ -880,6 +889,7 @@ async function refresh() {
     const result = normalizeStatus(await request("morrow_edit_policy_status"));
     if (generation !== state.readGeneration) return;
     state.status = result;
+    state.statusReadFailed = false;
     const valid = new Set(result.bindings.filter(isEligible).map((binding) => binding.sourceBindingId));
     state.selected = new Set([...state.selected].filter((id) => valid.has(id)));
     state.optionsByBinding = new Map([...state.optionsByBinding].filter(([sourceBindingId, details]) => {
@@ -907,6 +917,7 @@ async function refresh() {
   } catch (cause) {
     if (generation !== state.readGeneration) return;
     state.status = null;
+    state.statusReadFailed = true;
     state.categories = [];
     state.optionsByBinding.clear();
     state.selected.clear();

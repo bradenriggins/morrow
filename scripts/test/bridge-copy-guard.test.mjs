@@ -38,6 +38,21 @@ const EXTENSION_PAGES = [
   "connector/extension/onboarding/onboarding.html",
 ];
 
+const CURRENT_SETUP_SURFACES = [
+  ...EXTENSION_PAGES,
+  "connector/extension/popup/popup-view.js",
+  "connector/extension/popup/popup.js",
+  "connector/extension/settings/settings.js",
+  "connector/extension/onboarding/onboarding-state.js",
+  "connector/extension/src/bridge-problem-copy.js",
+  "connector/extension/src/service-worker.js",
+  "installer/renderer/index.html",
+  "installer/shared/setup-view.mjs",
+  "packages/bridge-loopback/src/index.ts",
+  "README.md",
+  "docs/implementation/MCP-START-HERE.md",
+];
+
 /**
  * Reads the visible text of every element whose class list holds `eyebrow`. It walks the markup
  * to the element's own closing tag, so a label wrapped in a link or a `<strong>` is still read.
@@ -109,7 +124,7 @@ test("the popup, settings, and setup guide carry no decorative eyebrow label", (
 test("the settings page states its headings without a label above each one", () => {
   const settings = readFileSync(new URL("connector/extension/settings/settings.html", root), "utf8");
   assert.deepEqual(eyebrowLabels(settings), []);
-  assert.match(settings, /<h1>Plan and Edit<\/h1>/);
+  assert.match(settings, /<h1>Plan and Edit settings<\/h1>/);
   assert.match(settings, /<h2 id="courses-title">Connected courses<\/h2>/);
   assert.match(settings, /<h3 id="site-discovery-title">Find courses<\/h3>/);
   assert.match(settings, /<h2 id="file-storage-title">Course file access<\/h2>/);
@@ -117,6 +132,25 @@ test("the settings page states its headings without a label above each one", () 
   // The order between choosing courses and choosing access is stated as a constraint the reader
   // can act on, so no "Step 1" or "Step 2" label is needed to carry it.
   assert.match(settings, /Select courses, then choose Edit to review the available actions\./);
+});
+
+test("current setup surfaces use three stages and platform-specific course actions", () => {
+  const retired = [];
+  for (const path of CURRENT_SETUP_SURFACES) {
+    const source = readFileSync(new URL(path, root), "utf8");
+    if (/Connect course(?: site)?\b/i.test(source)) retired.push(`${path}: retired course action`);
+    if (/\b(?:All steps|Six steps)\b/i.test(source)) retired.push(`${path}: retired setup count`);
+  }
+  assert.deepEqual(retired, []);
+  const app = readFileSync(new URL("installer/shared/setup-view.mjs", root), "utf8");
+  assert.match(app, /\["Assistant", "Morrow Bridge", "Course"\]/);
+  const popup = readFileSync(new URL("connector/extension/popup/popup-view.js", root), "utf8");
+  assert.match(popup, /`Connect \$\{platform\}`/);
+  assert.match(popup, /"Open Canvas or Moodle"/);
+  const popupPage = readFileSync(new URL("connector/extension/popup/popup.html", root), "utf8");
+  const help = popupPage.match(/<summary>How to connect<\/summary>\s*<ol>([\s\S]*?)<\/ol>/)?.[1] || "";
+  assert.equal((help.match(/<li>/g) || []).length, 3, "popup help must keep the same three setup stages as the app and website");
+  assert.match(help, /Choose your assistant[\s\S]*Finish Morrow Bridge setup[\s\S]*Open and connect your course/);
 });
 
 test("the approval pages carry no decorative eyebrow label", async () => {
@@ -201,7 +235,8 @@ test("the Chrome pairing pages carry no decorative eyebrow label", async () => {
   assert.match(pages.unavailable, /<section class="outcome"><h1>Start a new connection<\/h1>/);
   // This connection carries Canvas and Moodle. Blackboard uses the local REST connection instead.
   assert.match(pages.asked, /work with Canvas and Moodle through this Chrome extension/);
-  assert.match(pages.answered, /Open a Canvas or Moodle course in Chrome and sign in\./);
+  assert.match(pages.answered, /Open a signed-in Canvas or Moodle course in Chrome\./);
+  assert.match(pages.answered, /shows Connect Canvas or Connect Moodle/);
 });
 
 test("the approval result page states the result without a label above it", async () => {

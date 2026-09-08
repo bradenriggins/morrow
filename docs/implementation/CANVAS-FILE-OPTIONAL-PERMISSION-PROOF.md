@@ -15,7 +15,7 @@ node scripts/test/canvas-file-optional-permission-proof.mjs
 
 The script opens Chrome for Testing and stops at three operator checkpoints. Type these exact terminal confirmations after each browser action: `course-ready`, `declined`, and `allowed`.
 
-1. In the visible synthetic Canvas course tab, open the Morrow Bridge toolbar popup. Select **Connect course site** and allow the exact Canvas-site permission.
+1. In the visible synthetic Canvas course tab, open the Morrow Bridge toolbar popup. Select **Connect Canvas** and allow the exact Canvas-site permission.
 2. In Morrow Bridge Plan and Edit settings, decline the native Chrome request from **Enable course file access**.
 3. Select **Enable course file access** again and allow the native Chrome request.
 

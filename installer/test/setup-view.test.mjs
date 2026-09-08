@@ -131,8 +131,8 @@ test("Chrome must reload a staged Bridge update", () => {
   assert.doesNotMatch(view.body, /open-bridge-install/);
   assert.doesNotMatch(view.body, /chrome:\/\//);
   assert.equal(statusSummary(current), "Reload Morrow Bridge in Chrome");
-  assert.equal(step(current, "Bridge").status, "current");
-  assert.equal(step(current, "Bridge").detail, "Reload in Chrome, then check");
+  assert.equal(step(current, "Morrow Bridge").status, "current");
+  assert.equal(step(current, "Morrow Bridge").detail, "Reload in Chrome, then check");
 });
 
 test("Bridge delivery is unavailable", () => {
@@ -141,14 +141,14 @@ test("Bridge delivery is unavailable", () => {
   assert.equal(view.title, "Morrow Bridge is not available yet.");
   assert.deepEqual(actions(view.body), ["choose-workspace", "remove-assistant"], "no Chrome step is offered from a blocked delivery");
   assert.equal(statusSummary(current), "Morrow Bridge is not available yet");
-  assert.equal(step(current, "Bridge").status, "blocked");
-  assert.equal(step(current, "Bridge").detail, "Not available yet");
+  assert.equal(step(current, "Morrow Bridge").status, "blocked");
+  assert.equal(step(current, "Morrow Bridge").detail, "Not available yet");
 });
 
 test("an unavailable Bridge delivery blocks the action view on its own", () => {
   const current = state({ ...READY_ASSISTANT, bridgeDelivery: "unavailable" });
   assert.equal(actionView(current, { chosenAssistantId: "codex" }).title, "Morrow Bridge is not available yet.");
-  assert.equal(step(current, "Bridge").status, "blocked");
+  assert.equal(step(current, "Morrow Bridge").status, "blocked");
 });
 
 test("a ready Bridge folder that Chrome has not confirmed still asks for the Chrome step", () => {
@@ -160,7 +160,7 @@ test("a ready Bridge folder that Chrome has not confirmed still asks for the Chr
   assert.match(view.body, /data-action="reveal-bridge-folder"/);
   assert.match(view.body, /data-action="repair"/);
   assert.equal(statusSummary(current), "Set up Morrow Bridge in Chrome");
-  assert.equal(step(current, "Bridge").status, "current");
+  assert.equal(step(current, "Morrow Bridge").status, "current");
 
   // The temporary Developer mode step is numbered, visual, and command-free:
   // Show Bridge folder plus the exact Chrome menu path. Morrow offers no
@@ -197,7 +197,7 @@ test("an unprepared Bridge folder offers repair before the Chrome step", () => {
   assert.equal(view.title, "Morrow Bridge is not ready to open.");
   assert.match(view.body, /data-action="repair"/);
   assert.doesNotMatch(view.body, /data-action="reveal-bridge-folder"/);
-  assert.equal(step(current, "Bridge").status, "current");
+  assert.equal(step(current, "Morrow Bridge").status, "current");
 });
 
 test("a confirmed load in Chrome moves setup on to the connection", () => {
@@ -205,17 +205,16 @@ test("a confirmed load in Chrome moves setup on to the connection", () => {
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Connect Morrow Bridge.");
   assert.match(view.body, /data-action="check-bridge"/);
-  assert.equal(step(current, "Bridge").status, "done");
-  assert.equal(step(current, "Bridge").detail, "Installed in Chrome");
-  assert.equal(step(current, "Connect").status, "current");
+  assert.equal(step(current, "Morrow Bridge").status, "current");
+  assert.equal(step(current, "Morrow Bridge").detail, "Installed; connect to Morrow");
 });
 
 test("a paired Bridge without a connected course asks for the course", () => {
   const current = state(PAIRED);
   const view = actionView(current, { chosenAssistantId: "codex" });
-  assert.equal(view.title, "Connect your course.");
+  assert.equal(view.title, "Open your course in Chrome.");
   assert.equal(statusSummary(current), "Morrow Bridge is connected");
-  assert.equal(step(current, "Connect").status, "done");
+  assert.equal(step(current, "Morrow Bridge").status, "done");
   assert.equal(step(current, "Course").status, "current");
 });
 
@@ -229,7 +228,7 @@ test("a paired Bridge with a verified course and a ready first read offers the c
   assert.equal(view.title, "Check your course connection.");
   assert.match(view.body, /data-action="run-first-read"/);
   assert.equal(statusSummary(current), "First read is ready");
-  assert.equal(step(current, "First read").status, "current");
+  assert.equal(step(current, "Course").status, "current");
 });
 
 test("a paired Bridge Morrow has not confirmed in Chrome still reaches the course steps", () => {
@@ -275,7 +274,7 @@ test("every view answers with a title, copy, and body, and no step is both done 
     }
     assert.equal(typeof statusSummary(current), "string");
     const steps = progress(current);
-    assert.equal(steps.length, 5);
+    assert.equal(steps.length, 3);
     assert.equal(steps.filter((entry) => entry.current).length <= 1, true);
     for (const entry of steps) assert.equal(entry.status === "done" && entry.current, false);
   }
@@ -361,7 +360,7 @@ test("the folder row before setup asks for a folder and never claims a change it
   assert.doesNotMatch(chosen.body, /data-action="remove-assistant"/);
 
   const unknown = actionView(state({ assistants: [{ ...CHATGPT, detected: true }] }), { chosenAssistantId: null });
-  assert.match(unknown.body, /If you continue, Morrow creates its own Materials folder\./);
+  assert.match(unknown.body, /Otherwise, Morrow creates and uses its own Materials folder\./);
 });
 
 test("the repair state offers the repair alone, with no setup to change", () => {
@@ -471,7 +470,7 @@ test("an assistant on this computer that is not set up can be set up after setup
 // title that names only a thing tells a person nothing about it. These are the
 // verbs the setup views use. A view whose title names no function, action,
 // result or constraint fails here until it names one.
-const TITLE_VERB = /\b(?:add|approve|are|ask|asks|can|cannot|change|check|choose|complete|completed|configures|confirm|connect|connected|continue|could|did|does|finish|found|get|has|install|is|keeps|leaves|opens|read|reads|ready|reload|remove|removes|repair|restart|returned|set|show|stays|use|uses|was|will|writes)\b/i;
+const TITLE_VERB = /\b(?:add|open|approve|are|ask|asks|can|cannot|change|check|choose|complete|completed|configures|confirm|connect|connected|continue|could|did|does|finish|found|get|has|install|is|keeps|leaves|opens|read|reads|ready|reload|remove|removes|repair|restart|returned|set|show|stays|use|uses|was|will|writes)\b/i;
 
 // Names of things, with nothing said about them. None of them is a title.
 const BARE_LABELS = new Set([

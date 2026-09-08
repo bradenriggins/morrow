@@ -166,25 +166,26 @@ const healthyPopup = { paired: true, connected: true, runtimeHealthy: true };
 
 // One state per branch of the popup's detail text.
 const POPUP_STATES = new Map([
-  ["read-failed", null],
-  ["not-paired", { ...connection }],
-  ["pairing", { ...connection, pairing: true }],
-  ["connecting", { ...connection, paired: true, connecting: true }],
-  ["paired-not-connected", { ...connection, paired: true }],
-  ["runtime-mismatch", { ...connection, paired: true, connected: true, runtimeHealthy: false }],
-  ["connected-no-site", { ...connection, ...healthyPopup }],
-  ["site-ready-no-course", { ...connection, ...healthyPopup, siteAnchors: [anchor()] }],
-  ["site-stale", { ...connection, ...healthyPopup, siteAnchors: [anchor({ runtimeVerified: false })] }],
-  ["course-ready", { ...connection, ...healthyPopup, siteAnchors: [anchor()], bindings: [binding()], bindingCount: 1 }],
-  ["course-tab-closed", { ...connection, ...healthyPopup, siteAnchors: [anchor()], bindings: [binding({ runtimeVerified: false })], bindingCount: 1 }],
+  ["read-failed", { status: null }],
+  ["not-paired", { status: { ...connection } }],
+  ["pairing", { status: { ...connection, pairing: true } }],
+  ["connecting", { status: { ...connection, paired: true, connecting: true } }],
+  ["paired-not-connected", { status: { ...connection, paired: true } }],
+  ["runtime-mismatch", { status: { ...connection, paired: true, connected: true, runtimeHealthy: false } }],
+  ["connected-no-site", { status: { ...connection, ...healthyPopup } }],
+  ["detected-platform", { status: { ...connection, ...healthyPopup }, detectedProvider: "moodle", sourceNeedle: "Morrow Bridge detected" }],
+  ["site-ready-no-course", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor()] } }],
+  ["site-stale", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor({ runtimeVerified: false })] }, sourceNeedle: "The saved ${platform" }],
+  ["course-ready", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor()], bindings: [binding()], bindingCount: 1 }, sourceNeedle: "This selected course is connected. Keep" }],
+  ["course-tab-closed", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor()], bindings: [binding({ runtimeVerified: false })], bindingCount: 1 }, sourceNeedle: "This selected course is connected, but" }],
 ]);
 const POPUP_SECTION = "4. Morrow Bridge popup";
 
 test("the inventory carries what every popup state renders", () => {
   const details = new Set();
-  for (const [name, status] of POPUP_STATES) {
-    details.add(detailText(status));
-    for (const value of [statusValue(status), courseValue(status), primaryLabel(status), detailText(status)]) {
+  for (const [name, { status, detectedProvider }] of POPUP_STATES) {
+    details.add(detailText(status, detectedProvider));
+    for (const value of [statusValue(status), courseValue(status), primaryLabel(status, detectedProvider), detailText(status, detectedProvider)]) {
       carries(value, `the popup in ${name}`);
     }
   }
@@ -210,7 +211,11 @@ test("the inventory lists one popup state per branch", () => {
 
 test("every popup state cites the line its own detail is written on", () => {
   const rows = new Map(rowsUnder(POPUP_SECTION).map((row) => [row.state, row]));
-  const wrong = [...POPUP_STATES].map(([name, status]) => citationProblem(rows.get(name), detailText(status)));
+  // Dynamic platform names are emitted from template literals. For those rows, cite the static
+  // part of the exact template after the rendered sentence itself has passed the carry check.
+  const wrong = [...POPUP_STATES].map(([name, { status, detectedProvider, sourceNeedle }]) => citationProblem(
+    rows.get(name), sourceNeedle || detailText(status, detectedProvider),
+  ));
   assert.deepEqual(wrong.filter(Boolean), [], `${INVENTORY} section ${POPUP_SECTION} cites source that does not carry the state`);
 });
 
@@ -235,6 +240,9 @@ const GUIDE_STATES = new Map([
   ["ready", { ...connection, ...healthy, siteAnchors: [anchor()], bindings: [binding()], firstCourseRead }],
 ]);
 const GUIDE_SECTION = "5. Morrow Bridge setup guide";
+const GUIDE_SOURCE_NEEDLES = new Map([
+  ["site-saved-not-verified", "Open the saved ${platform"],
+]);
 
 test("the inventory carries what every setup guide state renders", () => {
   const titles = new Set();
@@ -267,7 +275,9 @@ test("the inventory lists one setup guide state per branch", () => {
 
 test("every setup guide state cites the line its own next step is written on", () => {
   const rows = new Map(rowsUnder(GUIDE_SECTION).map((row) => [row.state, row]));
-  const wrong = [...GUIDE_STATES].map(([name, status]) => citationProblem(rows.get(name), setupGuideState(status).detail));
+  const wrong = [...GUIDE_STATES].map(([name, status]) => citationProblem(
+    rows.get(name), GUIDE_SOURCE_NEEDLES.get(name) || setupGuideState(status).detail,
+  ));
   assert.deepEqual(wrong.filter(Boolean), [], `${INVENTORY} section ${GUIDE_SECTION} cites source that does not carry the state`);
 });
 

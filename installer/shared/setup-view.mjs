@@ -97,30 +97,46 @@ export function statusSummary(current) {
   return "Continue setup";
 }
 
-const STEP_LABELS = Object.freeze(["Assistant", "Bridge", "Connect", "Course", "First read"]);
+const STEP_LABELS = Object.freeze(["Assistant", "Morrow Bridge", "Course"]);
 
 export function progress(current) {
   if (!current) return STEP_LABELS.map((label) => ({ label, detail: "Not checked yet", status: "pending", current: false }));
+  const repairRequired = current.lifecycle === "repair_required" || current.runtime?.status === "repair_required";
   const assistant = configuredAssistant(current);
   const pending = pendingAssistant(current);
   const bridge = current?.bridge || {};
   const courseReady = verifiedCourse(current);
   const blocked = deliveryBlocked(current);
   const reloadRequired = bridge.manualChromeReloadRequired === true;
+  const loaded = bridge.loadedInChrome === true || bridge.paired === true;
+  const paired = bridge.paired === true;
   const firstPreviewReady = previewReady(current);
   const firstPreviewCompleted = previewCompleted(current);
-  const needsAssistant = !assistant;
-  const loaded = bridge.loadedInChrome === true || bridge.paired === true;
-  const bridgeStep = reloadRequired || needsBridge(current);
-  const needsPairing = Boolean(assistant) && bridge.paired !== true;
-  const needsCourse = bridge.paired === true && !courseReady;
-  const active = needsAssistant ? 0 : bridgeStep || blocked ? 1 : needsPairing ? 2 : needsCourse ? 3 : 4;
+  const active = repairRequired ? -1 : !assistant ? 0 : !paired ? 1 : firstPreviewCompleted ? -1 : 2;
+  const bridgeDetail = blocked
+    ? "Not available yet"
+    : reloadRequired
+      ? "Reload in Chrome, then check"
+      : paired
+        ? "Connected to Morrow"
+        : loaded
+          ? "Installed; connect to Morrow"
+          : bridge.delivery === "developer_temporary"
+            ? "Add in Chrome"
+            : "Install from Chrome";
+  const course = bridge.selectedCourseName
+    || (bridge.runtimeVerifiedCourseCount > 1 ? `${bridge.runtimeVerifiedCourseCount} courses` : "Selected course");
+  const courseDetail = firstPreviewCompleted
+    ? `${course}; first read complete`
+    : firstPreviewReady
+      ? `${course}; first read ready`
+      : courseReady
+        ? `${course}; first read not started`
+        : "Open Canvas or Moodle in Chrome";
   return [
-    { label: "Assistant", detail: assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: assistant ? "done" : pending ? "current" : "current" },
-    { label: "Bridge", detail: blocked ? "Not available yet" : reloadRequired ? "Reload in Chrome, then check" : loaded ? "Installed in Chrome" : bridge.delivery === "developer_temporary" ? "Temporary Chrome setup" : "Install from Chrome", status: blocked ? "blocked" : reloadRequired ? "current" : loaded ? "done" : active === 1 ? "current" : "pending" },
-    { label: "Connect", detail: bridge.paired === true ? "Connected" : "Connect it in Morrow Bridge", status: bridge.paired === true ? "done" : active === 2 ? "current" : "pending" },
-    { label: "Course", detail: courseReady ? (bridge.selectedCourseName || (bridge.runtimeVerifiedCourseCount > 1 ? `${bridge.runtimeVerifiedCourseCount} courses connected` : "Course selected")) : "Connect a signed-in course site", status: courseReady ? "done" : active === 3 ? "current" : "pending" },
-    { label: "First read", detail: firstPreviewCompleted ? "Complete" : firstPreviewReady ? "Ready to try" : "Not started", status: firstPreviewCompleted ? "done" : active === 4 ? "current" : "pending" },
+    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : assistant ? "done" : "current" },
+    { label: "Morrow Bridge", detail: bridgeDetail, status: blocked ? "blocked" : paired ? "done" : active === 1 ? "current" : "pending" },
+    { label: "Course", detail: courseDetail, status: firstPreviewCompleted ? "done" : active === 2 ? "current" : "pending" },
   ].map((step, index) => ({ ...step, current: index === active && step.status !== "done" }));
 }
 
@@ -157,12 +173,13 @@ function assistantTitles(assistants) {
  * here, before the change, because Morrow writes the new folder into every
  * assistant it configured.
  */
-function materialsRow(current) {
+function materialsRow(current, { optionalDisclosure = false } = {}) {
   const folder = typeof current?.materialsFolder === "string" && current.materialsFolder.length > 0 ? current.materialsFolder : null;
   const configured = configuredAssistants(current);
   const settled = configuredAssistant(current) !== null;
   if (!folder) {
-    return `<div class="materials-row"><div><h3>Materials folder</h3><p>Optional. Choose a folder for Morrow materials. If you continue, Morrow creates its own Materials folder.</p></div><button class="secondary-button" type="button" data-action="choose-workspace">Choose folder</button></div>`;
+    const row = `<div class="materials-row"><div><h3>Materials folder</h3><p>Choose a different folder only if you want Morrow materials somewhere else. Otherwise, Morrow creates and uses its own Materials folder.</p></div><button class="secondary-button" type="button" data-action="choose-workspace">Choose folder</button></div>`;
+    return optionalDisclosure ? `<details class="optional-setup"><summary>Optional: Choose another materials folder</summary>${row}</details>` : row;
   }
   const rebind = configured.length === 0 ? ""
     : ` Changing it writes the new folder into ${assistantTitles(configured)}.${configured.some((assistant) => assistant.id === "claude-desktop") ? " Claude Desktop then asks you to approve Morrow again." : ""}`;
@@ -256,7 +273,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     return {
       title: "Choose your assistant.",
       copy: "Morrow configures only the assistant you choose. Your course sign-in remains separate in Chrome.",
-      body: `${assistantCards(current, chosenAssistantId)}${materialsRow(current)}<div class="inline-actions"><button class="primary-button" type="button" data-action="install-assistant"${active ? "" : " disabled"}>${active ? `Set up ${escapeHtml(active.title)}` : "Choose an assistant"}</button></div>`,
+      body: `${assistantCards(current, chosenAssistantId)}${materialsRow(current, { optionalDisclosure: true })}<div class="inline-actions"><button class="primary-button" type="button" data-action="install-assistant"${active ? "" : " disabled"}>${active ? `Set up ${escapeHtml(active.title)}` : "Choose an assistant"}</button></div>`,
     };
   }
   if (current.runtime?.status !== "ready") {
@@ -297,7 +314,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
   if (needsBridge(current) && bridge.delivery === "available") {
     return {
       title: "Install Morrow Bridge.",
-      copy: "Morrow Bridge uses the course site where you are already signed in. It asks Chrome for access only to the exact course site you choose.",
+      copy: "Morrow Bridge uses the learning platform where you are already signed in. It asks Chrome for access only to the exact learning platform you choose.",
       body: '<ol class="instructions"><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Visit Chrome Web Store</strong>.</li><li>Search the store for <strong>Morrow Bridge</strong>, then select <strong>Add to Chrome</strong>.</li><li>Open <strong>Morrow Bridge</strong> in Chrome and select <strong>Connect Morrow</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
     };
   }
@@ -311,9 +328,9 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
   }
   if (!verifiedCourse(current)) {
     return {
-      title: "Connect your course.",
-      copy: "Connect a Canvas or Moodle course that you can access before Morrow reads course information.",
-      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>In <strong>Morrow Bridge</strong>, select Connect course site and allow Chrome access to that exact site.</li><li>Open Plan and Edit settings, choose a course, then connect it in <strong>Plan</strong>.</li></ol>',
+      title: "Open your course in Chrome.",
+      copy: "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course.",
+      body: '<ol class="instructions"><li>Open a Canvas or Moodle course you can access in <strong>Chrome</strong> and sign in.</li><li>Open <strong>Morrow Bridge</strong>. It identifies the platform and shows <strong>Connect Canvas</strong> or <strong>Connect Moodle</strong>.</li><li>Select that button and allow access to the exact platform address Chrome shows.</li><li>Open <strong>Plan and Edit settings</strong>, choose a course, then select <strong>Connect selected courses in Plan</strong>.</li></ol>',
     };
   }
   const course = bridge.firstPreviewCourseName || bridge.selectedCourseName || "your selected course";

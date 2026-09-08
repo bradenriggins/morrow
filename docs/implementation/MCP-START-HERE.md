@@ -25,11 +25,11 @@ This command sets up only the current project. Reopen that project in your assis
 1. In Chrome, open `chrome://extensions`.
 2. Turn on **Developer mode** and select **Load unpacked**.
 3. In this extracted folder, select `app/connector/extension`.
-4. Morrow opens its setup guide. Use **Guide me** for the next step or **Quick setup** for all steps. You can reopen the guide from **Setup guide** in Morrow Bridge.
+4. Morrow opens its setup guide. Use **Guide me** for the next action or **Setup overview** for the three stages. You can reopen the guide from **Setup guide** in Morrow Bridge.
 
 Keep your assistant open. In Morrow Bridge, select **Connect Morrow**. Select **Allow connection** in the page that opens.
 
-Open a permitted Canvas or Moodle course in Chrome and sign in. In Morrow Bridge, select **Connect course site** and allow Chrome access to that exact site. In **Plan and Edit settings**, find courses and connect one in **Plan**.
+Open a permitted Canvas or Moodle course in Chrome and sign in. Morrow Bridge identifies the platform and shows **Connect Canvas** or **Connect Moodle**. Select that button and allow Chrome access to the exact address shown. In **Plan and Edit settings**, find courses, choose one, and select **Connect selected courses in Plan**.
 
 When the guide shows **Try a first read**, return to your assistant and ask: “Use Morrow to list the modules in my selected course.” The guide shows **Ready to use** after that read returns, and names the course it read.
 

@@ -105,7 +105,7 @@ test("with no connected course the page states that, and offers no course to act
   assert.equal(page.text("#connection-status"), "No course is connected yet.");
   assert.equal(page.text("#course-list"), "No connected courses are available. Choose a signed-in site above to find courses you can connect.");
   assert.equal(page.query("#course-list").getAttribute("aria-busy"), "false");
-  assert.equal(page.text("#site-anchor-details"), "No signed-in course site is available. Open one course from a site in Chrome, then refresh this page.");
+  assert.equal(page.text("#site-anchor-details"), "No signed-in Canvas or Moodle course is available. Open one course in Chrome, then refresh this page.");
   assert.equal(page.query("#site-anchor").disabled, true);
   assert.equal(page.query("#discover-courses").disabled, true);
   assert.equal(page.text("#selection-summary"), "No course selected. Select a course above, then choose Plan or Edit.");
@@ -271,9 +271,9 @@ test("a selected course without a verified open site stays available for Plan re
   assert.deepEqual(page.messages("morrow_edit_policy_options"), []);
   assert.equal(page.query("#mode-edit").disabled, true);
   assert.equal(page.query("#return-plan").disabled, false);
-  assert.equal(page.text("#category-list"), "Open every selected course site in Chrome, then refresh this page before you choose Edit.");
-  assert.equal(page.text("#edit-stage-hint"), "Open every selected course site in Chrome, then refresh this page before you choose Edit.");
-  assert.equal(page.text("#action-help"), "Open every selected course site in Chrome, then refresh this page before you choose Edit.");
+  assert.equal(page.text("#category-list"), "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit.");
+  assert.equal(page.text("#edit-stage-hint"), "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit.");
+  assert.equal(page.text("#action-help"), "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit.");
 });
 
 test("an options response that is not runtime verified moves the course to site recovery", async () => {
@@ -287,7 +287,7 @@ test("an options response that is not runtime verified moves the course to site 
   assert.equal(page.query("#mode-edit").disabled, true);
   assert.deepEqual(listedActions(page), []);
   assert.equal(page.hidden("#error"), true);
-  assert.equal(page.text("#category-list"), "Open every selected course site in Chrome, then refresh this page before you choose Edit.");
+  assert.equal(page.text("#category-list"), "Open each selected course in Canvas or Moodle, then refresh this page before you choose Edit.");
   assert.equal(page.text(".permission-state"), "Course tab needed");
 });
 
@@ -453,9 +453,15 @@ test("a state the page cannot read is named as itself, with the next action", as
   });
   assert.equal(page.hidden("#error"), false);
   assert.equal(page.text("#error"), problemText("bridge_extension_unreachable"));
+  assert.equal(page.text("#connection-status"), "Connected courses were not checked.");
+  assert.equal(page.text("#site-anchor-details"), "Connected courses were not checked. Select Refresh connected courses.");
+  assert.equal(page.text("#course-list"), "Connected courses were not checked. Select Refresh connected courses.");
+  assert.equal(page.text("#selection-summary"), "Course access was not checked. Select Refresh connected courses.");
+  assert.equal(page.query("#refresh").disabled, false);
 
   const unreadable = await openSettings({ status: () => ({ bindings: [], editDurations: "hourly" }) });
   assert.equal(unreadable.text("#error"), problemText("edit_policy_status_unreadable"));
+  assert.equal(unreadable.text("#connection-status"), "Connected courses were not checked.");
 });
 
 test("course file access is off until Chrome grants it, and off again the moment Chrome takes it back", async () => {

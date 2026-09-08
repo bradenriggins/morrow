@@ -4,7 +4,7 @@ const { installerState } = require("../shared/contract.cjs");
 
 const view = import("../shared/setup-view.mjs");
 
-const STEPS = ["Assistant", "Bridge", "Connect", "Course", "First read"];
+const STEPS = ["Assistant", "Morrow Bridge", "Course"];
 
 const BASE = {
   lifecycle: "ready_for_assistant",
@@ -56,61 +56,61 @@ const CASES = [
   {
     name: "the local runtime is not ready",
     state: state({ ...CONFIGURED, runtimeStatus: "uncertain" }),
-    current: "Bridge",
+    current: "Morrow Bridge",
     title: "Morrow is getting ready."
   },
   {
     name: "Bridge delivery is blocked",
     state: state({ ...CONFIGURED, lifecycle: "bridge_delivery_unavailable", bridgeDelivery: "unavailable" }),
-    current: "Bridge",
+    current: "Morrow Bridge",
     title: "Morrow Bridge is not available yet."
   },
   {
     name: "Chrome must reload a staged Bridge update",
     state: state({ ...CONFIGURED, bridgeManualChromeReloadRequired: true }),
-    current: "Bridge",
+    current: "Morrow Bridge",
     title: "Reload Morrow Bridge."
   },
   {
     name: "the Bridge folder is not ready yet",
     state: state({ ...CONFIGURED, bridgeFolderReady: false }),
-    current: "Bridge",
+    current: "Morrow Bridge",
     title: "Morrow Bridge is not ready to open."
   },
   {
     name: "the Bridge folder is ready and Chrome has not confirmed the Bridge",
     state: state({ ...CONFIGURED, bridgeFolderReady: true }),
-    current: "Bridge",
+    current: "Morrow Bridge",
     title: "Add Morrow Bridge."
   },
   {
     name: "the Chrome Web Store route is available",
     state: state({ ...CONFIGURED, bridgeDelivery: "available", bridgeFolderReady: true }),
-    current: "Bridge",
+    current: "Morrow Bridge",
     title: "Install Morrow Bridge."
   },
   {
     name: "Chrome has the Bridge loaded but it is not paired",
     state: state({ ...CONFIGURED, bridgeLoadedInChrome: true, bridgeFolderReady: true }),
-    current: "Connect",
+    current: "Morrow Bridge",
     title: "Connect Morrow Bridge."
   },
   {
     name: "the Bridge is paired without a course",
     state: state(PAIRED),
     current: "Course",
-    title: "Connect your course."
+    title: "Open your course in Chrome."
   },
   {
     name: "a course is verified and the first read is not ready",
     state: state({ ...PAIRED, runtimeVerifiedCourseCount: 1, selectedCourseName: "BIOL 101" }),
-    current: "First read",
+    current: "Course",
     title: "Your selected course is connected."
   },
   {
     name: "the first read is ready",
     state: state({ ...PAIRED, runtimeVerifiedCourseCount: 1, selectedCourseName: "BIOL 101", firstPreview: { available: true } }),
-    current: "First read",
+    current: "Course",
     title: "Check your course connection."
   },
   {
@@ -122,7 +122,7 @@ const CASES = [
   {
     name: "Morrow needs repair",
     state: state({ lifecycle: "repair_required", runtimeStatus: "repair_required" }),
-    current: "Assistant",
+    current: null,
     title: "Repair Morrow before you connect a course."
   }
 ];
@@ -162,35 +162,33 @@ test("no step is both done and current, and every view answers with a title, cop
   }
 });
 
-test("the Bridge step reports installation, and the Connect step reports pairing", async () => {
+test("the Morrow Bridge stage covers installation and pairing", async () => {
   const { progress } = await view;
   const step = (current, label) => progress(current).find((entry) => entry.label === label);
   const temporary = state({ ...CONFIGURED, bridgeFolderReady: true });
-  assert.equal(step(temporary, "Bridge").status, "current");
-  assert.equal(step(temporary, "Bridge").detail, "Temporary Chrome setup");
-  assert.equal(step(temporary, "Connect").status, "pending");
+  assert.equal(step(temporary, "Morrow Bridge").status, "current");
+  assert.equal(step(temporary, "Morrow Bridge").detail, "Add in Chrome");
 
   const blocked = state({ ...CONFIGURED, bridgeDelivery: "unavailable" });
-  assert.equal(step(blocked, "Bridge").status, "blocked");
-  assert.equal(step(blocked, "Bridge").detail, "Not available yet");
+  assert.equal(step(blocked, "Morrow Bridge").status, "blocked");
+  assert.equal(step(blocked, "Morrow Bridge").detail, "Not available yet");
 
   const installed = state({ ...CONFIGURED, bridgeLoadedInChrome: true, bridgeFolderReady: true });
-  assert.equal(step(installed, "Bridge").status, "done");
-  assert.equal(step(installed, "Bridge").detail, "Installed in Chrome");
-  assert.equal(step(installed, "Connect").status, "current");
+  assert.equal(step(installed, "Morrow Bridge").status, "current");
+  assert.equal(step(installed, "Morrow Bridge").detail, "Installed; connect to Morrow");
 
   const paired = state(PAIRED);
-  assert.equal(step(paired, "Connect").status, "done");
-  assert.equal(step(paired, "Connect").detail, "Connected");
+  assert.equal(step(paired, "Morrow Bridge").status, "done");
+  assert.equal(step(paired, "Morrow Bridge").detail, "Connected to Morrow");
 });
 
-test("the first-read step names a state instead of a permission", async () => {
+test("the course stage carries course selection through the first read", async () => {
   const { progress } = await view;
   const firstRead = (overrides) => progress(state({ ...PAIRED, runtimeVerifiedCourseCount: 1, selectedCourseName: "BIOL 101", ...overrides }))
-    .find((step) => step.label === "First read");
-  assert.equal(firstRead({}).detail, "Not started");
-  assert.equal(firstRead({ firstPreview: { available: true } }).detail, "Ready to try");
-  assert.equal(firstRead({ firstPreview: { available: true, completed: true } }).detail, "Complete");
+    .find((step) => step.label === "Course");
+  assert.equal(firstRead({}).detail, "BIOL 101; first read not started");
+  assert.equal(firstRead({ firstPreview: { available: true } }).detail, "BIOL 101; first read ready");
+  assert.equal(firstRead({ firstPreview: { available: true, completed: true } }).detail, "BIOL 101; first read complete");
   assert.equal(firstRead({ firstPreview: { available: true, completed: true } }).status, "done");
 });
 

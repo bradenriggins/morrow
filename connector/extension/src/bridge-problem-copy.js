@@ -15,7 +15,7 @@
  */
 
 const COPY = {
-  // --- Connecting Morrow, Chrome and a course site ---------------------------------------------
+  // --- Connecting Morrow, Chrome and a learning platform ---------------------------------------------
   bridge_not_connected: {
     title: "Morrow is not running on this computer",
     detail: "Morrow Bridge asked the Morrow app on this computer to start a connection, and nothing answered.",
@@ -53,28 +53,28 @@ const COPY = {
   },
   course_tab_missing: {
     title: "No signed-in course tab is open here",
-    detail: "Morrow connects the course site that is open in front of you, and this Chrome window has none.",
-    action: "Open the signed-in course that Morrow should use in this Chrome window. Then select Connect course site.",
+    detail: "Morrow connects the signed-in Canvas or Moodle course that is open in front of you, and this Chrome window has none.",
+    action: "Open the signed-in Canvas or Moodle course that Morrow should use. Morrow Bridge will identify the platform and show Connect Canvas or Connect Moodle.",
   },
   course_site_access_required: {
-    title: "Chrome has not given Morrow access to this exact course site",
-    detail: "Morrow reads and changes only the course sites you allow in Chrome, and this one is not allowed yet.",
-    action: "Select Connect course site, then choose Allow in Chrome.",
+    title: "Chrome has not given Morrow access to this Canvas or Moodle address",
+    detail: "Morrow reads and changes only the Canvas or Moodle addresses you allow in Chrome, and this one is not allowed yet.",
+    action: "Select Connect Canvas or Connect Moodle, whichever Morrow Bridge shows, then choose Allow in Chrome.",
   },
   course_sign_in_required: {
     title: "This tab is not a signed-in course",
     detail: "Morrow could not find a signed-in Canvas or Moodle course in this tab.",
-    action: "Open a course page and sign in, then select Connect course site.",
+    action: "Open a Canvas or Moodle course and sign in. Morrow Bridge will identify the platform and show the matching Connect button.",
   },
   course_permission_denied: {
-    title: "Chrome did not give Morrow access to this course site",
+    title: "Chrome did not give Morrow access to this Canvas or Moodle address",
     detail: "The Chrome access request was answered with no, so nothing is connected.",
-    action: "Select Connect course site again, then choose Allow in Chrome.",
+    action: "Select the Connect Canvas or Connect Moodle button again, then choose Allow in Chrome.",
   },
   course_permission_prompt_missing: {
     title: "Chrome did not show its access request",
     detail: "Chrome never displayed the access request, so Morrow received no answer.",
-    action: "Close this popup, open it again, then select Connect course site as the first step.",
+    action: "Close this popup and open it again on the signed-in course. Then select the Connect Canvas or Connect Moodle button it shows.",
   },
   blackboard_browser_unsupported: {
     title: "Morrow does not connect Blackboard through Chrome",
@@ -111,12 +111,12 @@ const COPY = {
   edit_policy_binding_missing: {
     title: "This course is no longer connected",
     detail: "The course this action names is not one of the courses connected in this Chrome session.",
-    action: "Refresh this page, then reconnect the course site from the Morrow popup.",
+    action: "Refresh this page, then reconnect Canvas or Moodle from the Morrow Bridge popup.",
   },
   edit_policy_binding_stale: {
     title: "This course connection needs a signed-in tab again",
-    detail: "Edit access is saved only against a course site Morrow can reach right now, and this one is closed or signed out.",
-    action: "Reconnect the course site from the Morrow popup, then try again.",
+    detail: "Edit access is saved only for a Canvas or Moodle connection Morrow can reach now, and this one is closed or signed out.",
+    action: "Reconnect Canvas or Moodle from the Morrow Bridge popup, then try again.",
   },
   edit_policy_revision_stale: {
     title: "This course access changed before Morrow could save it",
@@ -149,18 +149,18 @@ const COPY = {
     action: "Open Plan and Edit settings from the Morrow popup, then search there.",
   },
   course_discovery_anchor_missing: {
-    title: "No connected course site is selected",
-    detail: "Morrow lists available courses from one signed-in course site, and none is selected here.",
-    action: "Choose a current signed-in course site, then find available courses again.",
+    title: "No connected learning platform is selected",
+    detail: "Morrow lists available courses from one signed-in Canvas or Moodle connection, and none is selected here.",
+    action: "Choose the current signed-in Canvas or Moodle connection, then find available courses again.",
   },
   course_discovery_anchor_stale: {
-    title: "This course site needs a signed-in tab again",
+    title: "This learning platform needs a signed-in tab again",
     detail: "Morrow reads available courses through a signed-in tab from that site, and it is closed or signed out.",
     action: "Open one course from this site in Chrome and sign in, then find available courses again.",
   },
   course_discovery_failed: {
     title: "Morrow could not read the available courses",
-    detail: "The course site did not return a list Morrow could read.",
+    detail: "Canvas or Moodle did not return a list Morrow could read.",
     action: "Keep one signed-in course tab open, then try again.",
   },
   course_discovery_more_failed: {
@@ -179,8 +179,8 @@ const COPY = {
     action: "Find courses again before connecting courses.",
   },
   course_discovery_complete: {
-    title: "Every available course from this site is already listed",
-    detail: "There is no further page to load for this course site.",
+    title: "Every available course from this platform is already listed",
+    detail: "There is no further page to load from this platform.",
     action: "Select the courses you want from the list, then connect them.",
   },
   course_selection_invalid: {
@@ -195,7 +195,7 @@ const COPY = {
   },
   course_selection_target_refused: {
     title: "Morrow could not confirm every selected course",
-    detail: "Morrow connects a course only after the course site returns that exact course, and one did not match.",
+    detail: "Morrow connects a course only after Canvas or Moodle returns that exact course, and one did not match.",
     action: "Find courses again and select the courses the site returns.",
   },
   binding_limit_reached: {
@@ -216,9 +216,9 @@ const COPY = {
 
   // --- One course read or change Morrow Bridge could not complete -------------------------------
   canvas_binding_required: {
-    title: "The course site tab is not open and signed in",
-    detail: "Morrow sent nothing. The signed-in course site this course was connected from is closed, signed out or moved.",
-    action: "Open a signed-in course from that site in Chrome, then select Connect course site in Morrow Bridge.",
+    title: "The Canvas or Moodle tab is not open and signed in",
+    detail: "Morrow sent nothing. The signed-in Canvas or Moodle tab for this course is closed, signed out, or showing another page.",
+    action: "Open the course in Canvas or Moodle and sign in. Morrow Bridge will identify the platform and show the matching Connect button.",
   },
   course_binding_mismatch: {
     title: "That request names a course you have not selected",
@@ -263,7 +263,7 @@ const COPY = {
   item_bank_dependency_review_required: {
     title: "Item bank changes need a complete review first",
     detail: "A change to an existing item bank can reach other courses, and Morrow cannot yet establish that evidence.",
-    action: "Make this change in your course site, or ask your assistant for the focused question image text repair.",
+    action: "Make this change directly in Canvas or Moodle, or ask your assistant for the focused question image text repair.",
   },
   bridge_maintenance_unavailable: {
     title: "Morrow could not run that upkeep step in Chrome",

@@ -2799,7 +2799,7 @@ function lostCourseSiteProblem(binding, operation) {
   const course = String(binding.courseName || "").trim().slice(0, 200);
   return problem("canvas_binding_required", [
     `Morrow sent nothing: the ${platform} site tab for ${course || "this selected course"} is not open and signed in.`,
-    `Open ${site} in Chrome, sign in, then select Connect course site in Morrow Bridge.`,
+    `Open ${site} in Chrome, sign in, then select Connect ${platform} in Morrow Bridge.`,
   ].join(" ").slice(0, 900), true);
 }
 
@@ -3600,6 +3600,28 @@ async function prepareCourseConnection(requestedTabId) {
   return intent;
 }
 
+// The action popup grants activeTab access when the person opens Morrow Bridge. This read-only
+// probe uses that temporary access to name Canvas or Moodle before Chrome asks for persistent site
+// access. It returns only the platform name and keeps no course or account details.
+async function detectActiveCoursePlatform(requestedTabId) {
+  const tab = Number.isInteger(requestedTabId)
+    ? await chrome.tabs.get(requestedTabId).catch(() => null)
+    : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
+  if (!tab?.id || !tab.url?.startsWith("https://")) return { provider: null };
+  const [moodle] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id, frameIds: [0] }, world: "MAIN", func: executeMoodleInPage,
+    args: [JSON.stringify({ mode: "probe" })],
+  }).catch(() => []);
+  if (moodle?.result?.ok === true) return { provider: "moodle" };
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, files: ["src/canvas-content.js"] });
+    const probe = await chrome.tabs.sendMessage(tab.id, { type: "morrow_canvas_probe" }, { frameId: 0 });
+    return { provider: probe?.ok === true ? "canvas" : null };
+  } catch {
+    return { provider: null };
+  }
+}
+
 async function completePreparedCourseConnection({ intentId, addedOrigins, popupConfirmed = false, openCourseSelection = false } = {}) {
   const pending = await preparedCourseConnection(intentId, { addedOrigins, popupConfirmed });
   if (!pending) return { completed: false };
@@ -3794,6 +3816,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   const run = message?.type === "morrow_pair" ? requestPairing
     : message?.type === "morrow_open_setup" ? openSetupGuide
+      : message?.type === "morrow_detect_course_platform" ? () => detectActiveCoursePlatform(message.tabId)
       : message?.type === "morrow_connect_course_prepare" ? () => prepareCourseConnection(message.tabId)
       : message?.type === "morrow_connect_course_complete" ? () => completePreparedCourseConnection({ intentId: message.intentId, popupConfirmed: true })
       : message?.type === "morrow_connect_course_cancel" ? () => cancelPreparedCourseConnection(message.intentId)

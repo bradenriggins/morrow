@@ -15,6 +15,16 @@ export function currentBinding(status) {
   return status?.bindings?.at(-1) || null;
 }
 
+function providerName(provider) {
+  return provider === "canvas" ? "Canvas" : provider === "moodle" ? "Moodle" : "";
+}
+
+export function currentPlatform(status, detectedProvider = null) {
+  const detected = providerName(detectedProvider);
+  if (detected) return detected;
+  return providerName(currentBinding(status)?.provider || currentSiteAnchor(status)?.provider);
+}
+
 export function runtimeNeedsReload(status) {
   return status?.connected === true && status.runtimeHealthy !== true;
 }
@@ -36,22 +46,45 @@ export function courseValue(status) {
   if (runtimeNeedsReload(status)) return "Not available";
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
+  const platform = currentPlatform(status);
   return binding
-    ? binding.runtimeVerified === true ? "Connected" : "Course site tab needed"
-    : anchor?.runtimeVerified === true ? "Ready" : anchor ? "Course site tab needed" : "Not connected";
+    ? binding.runtimeVerified === true ? "Connected" : `${platform || "Course"} tab needed`
+    : anchor?.runtimeVerified === true ? "Ready" : anchor ? `${platform || "Course"} tab needed` : "Not connected";
 }
 
-export function primaryLabel(status) {
+export function primaryLabel(status, detectedProvider = null) {
   if (!status) return "Try again";
   if (runtimeNeedsReload(status)) return "Open setup guide";
-  return status.pairing ? "Waiting for approval" : !status.paired ? "Connect Morrow" : canChooseCourses(status) ? "Choose courses" : !status.connected ? "Waiting for your assistant" : "Connect course site";
+  if (status.pairing) return "Waiting for approval";
+  if (!status.paired) return "Connect Morrow";
+  if (canChooseCourses(status)) return "Choose courses";
+  if (!status.connected) return "Waiting for your assistant";
+  const platform = currentPlatform(status, detectedProvider);
+  return platform ? `Connect ${platform}` : "Open Canvas or Moodle";
 }
 
-export function detailText(status) {
+function courseTabName(platform) {
+  return platform ? `${platform} course` : "Canvas or Moodle course";
+}
+
+function closedBindingDetail(platform, savedPlatform) {
+  if (platform && platform !== savedPlatform) {
+    return `The selected ${savedPlatform || "learning platform"} course is not open. Morrow Bridge detected ${platform}. Select Connect ${platform} to add it, or open the selected course in ${savedPlatform || "its learning platform"}.`;
+  }
+  return `This selected course is connected, but its ${savedPlatform || "learning platform"} tab is no longer open. Open the course in Chrome, sign in, then select ${savedPlatform ? `Connect ${savedPlatform}` : "the platform button Morrow Bridge shows"}.`;
+}
+
+function staleAnchorDetail(platform) {
+  return `The saved ${platform || "learning platform"} connection is no longer open. Open a ${courseTabName(platform)} in Chrome, sign in, then select ${platform ? `Connect ${platform}` : "the platform button Morrow Bridge shows"}.`;
+}
+
+export function detailText(status, detectedProvider = null) {
   if (!status) return "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again.";
   if (runtimeNeedsReload(status)) return "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.";
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
+  const platform = currentPlatform(status, detectedProvider);
+  const savedPlatform = currentPlatform(status);
   return status.pairing
     ? "Confirm this connection on the Morrow page that opens. Then return to this popup."
     : !status.paired
@@ -61,21 +94,25 @@ export function detailText(status) {
         : !status.connected
         ? "Open the assistant where you added Morrow. This popup will reconnect when Morrow is ready."
         : binding?.runtimeVerified === true
-          ? "This selected course is connected. Keep one signed-in course site tab open while you work in Morrow."
+          ? `This selected course is connected. Keep one signed-in ${courseTabName(platform)} tab open while you work in Morrow.`
           : binding
-            ? "This selected course is connected, but its course site tab is no longer open. Open a signed-in course from this site in Chrome, then select Connect course site."
+            ? closedBindingDetail(platform, savedPlatform)
             : anchor?.runtimeVerified === true
               ? "Choose courses in Plan and Edit settings. Plan keeps changes ready for your review."
               : anchor
-                ? "The saved course site is no longer open. Open a signed-in course from this site in Chrome, then connect the course site again."
-                : "Morrow is connected. Open a signed-in Canvas or Moodle course in Chrome, then select Connect course site.";
+                ? staleAnchorDetail(platform)
+                : platform
+                  ? `Morrow Bridge detected ${platform}. Select Connect ${platform} to allow access to this signed-in course.`
+                  : "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge will detect the platform and show Connect Canvas or Connect Moodle.";
 }
 
-export function controlState(status, { actionInFlight = false } = {}) {
+export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {
   if (!status) return { primaryDisabled: actionInFlight, primaryBusy: actionInFlight, secondaryDisabled: true };
   const waiting = Boolean(status.pairing || (!canChooseCourses(status) && status.paired && !status.connected));
+  const needsDetectedCourse = status.paired === true && status.connected === true
+    && !canChooseCourses(status) && currentBinding(status)?.runtimeVerified !== true;
   return {
-    primaryDisabled: actionInFlight || waiting,
+    primaryDisabled: actionInFlight || waiting || (needsDetectedCourse && !currentPlatform(status, detectedProvider)),
     primaryBusy: actionInFlight || status.pairing === true || status.connecting === true,
     secondaryDisabled: actionInFlight,
   };

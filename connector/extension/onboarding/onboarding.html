@@ -12,12 +12,12 @@
     <header class="setup-header">
       <span class="brand-wordmark"><img class="brand-mark" src="../brand/morrow-knot.svg" alt=""><span>morrow</span></span>
       <h1>Morrow setup</h1>
-      <p>Use Morrow to connect an assistant and a permitted course. You can close this guide and return at any time.</p>
+      <p>Follow one next action at a time. You can close this guide and return at any time.</p>
     </header>
 
     <div class="mode-switch" role="group" aria-label="Setup guide mode">
       <button id="guide-mode" class="mode-button" type="button" aria-pressed="true">Guide me</button>
-      <button id="quick-mode" class="mode-button" type="button" aria-pressed="false">All steps</button>
+      <button id="quick-mode" class="mode-button" type="button" aria-pressed="false">Setup overview</button>
     </div>
 
     <p id="error" role="alert" hidden></p>
@@ -44,28 +44,20 @@
     </section>
 
     <section id="quick-panel" class="quick-panel" hidden aria-labelledby="quick-title">
-      <h2 id="quick-title">All setup steps</h2>
+      <h2 id="quick-title">Three setup stages</h2>
       <ol class="setup-steps">
         <li>
-          <strong>Open Morrow</strong>
-          <p>Open the Morrow app and choose your assistant.</p>
+          <strong>Choose your assistant in Morrow</strong>
+          <p>Open the Morrow app and choose the assistant you use.</p>
           <p>Chrome works with one Morrow at a time. A second Morrow reports that another Morrow is already using this connection, and it starts without its course tools. Close the other Morrow, or use one Morrow for all your assistants.</p>
         </li>
         <li>
-          <strong>Connect Morrow Bridge</strong>
-          <p>Return to Morrow Bridge and select <b>Connect Morrow</b>. In the Morrow page that opens, select <b>Allow connection</b> only if you started it.</p>
+          <strong>Finish Morrow Bridge setup</strong>
+          <p>Follow the Bridge actions in the Morrow app. Then open Morrow Bridge, select <b>Connect Morrow</b>, and allow only the connection you started.</p>
         </li>
         <li>
-          <strong>Connect a course site</strong>
-          <p>Open a permitted Canvas or Moodle course in Chrome and sign in. In Morrow Bridge, select <b>Connect course site</b>, then allow Chrome access to that exact course site.</p>
-        </li>
-        <li>
-          <strong>Select a course in Plan</strong>
-          <p>Open Plan and Edit settings. Select <b>Find available courses</b>, choose a course, then select <b>Connect selected courses in Plan</b>.</p>
-        </li>
-        <li>
-          <strong>Try a first read</strong>
-          <p>Return to your assistant and ask: <q>Use Morrow to list the modules in my selected course.</q></p>
+          <strong>Open and connect your course</strong>
+          <p>Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows <b>Connect Canvas</b> or <b>Connect Moodle</b>. Select that button, choose courses in Plan, then complete the first read that Morrow shows.</p>
         </li>
       </ol>
       <button id="quick-open-settings" class="secondary" type="button">Open Plan and Edit settings</button>

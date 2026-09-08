@@ -437,7 +437,7 @@ async function main() {
 
     reader = createInterface({ input: process.stdin, output: process.stderr, terminal: true });
     setStage("operator_course_site_permission");
-    await askOperator(reader, "course-ready", "In Chrome for Testing, use the Morrow Bridge toolbar popup on the visible Canvas course. Select Connect course site and allow the exact Canvas-site permission.");
+    await askOperator(reader, "course-ready", "In Chrome for Testing, use the Morrow Bridge toolbar popup on the visible Canvas course. Select Connect Canvas and allow the exact Canvas-site permission.");
     setStage("verify_course_site_permission");
     await waitFor(async () => {
       const site = await popup.evaluate(async () => await chrome.runtime.sendMessage({ type: "morrow_status" }));

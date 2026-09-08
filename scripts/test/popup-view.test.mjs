@@ -118,16 +118,22 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.equal(primaryLabel(statuses[4]), "Waiting for your assistant");
   assert.equal(controlState(statuses[4]).primaryDisabled, true);
   assert.equal(courseValue(statuses[5]), "Not connected");
-  assert.equal(primaryLabel(statuses[5]), "Connect course site");
+  assert.equal(primaryLabel(statuses[5]), "Open Canvas or Moodle");
+  assert.equal(controlState(statuses[5]).primaryDisabled, true);
+  assert.equal(primaryLabel(statuses[5], "canvas"), "Connect Canvas");
+  assert.equal(controlState(statuses[5], { detectedProvider: "canvas" }).primaryDisabled, false);
+  assert.equal(primaryLabel(statuses[5], "moodle"), "Connect Moodle");
+  assert.match(detailText(statuses[5], "moodle"), /detected Moodle.*Connect Moodle/);
   assert.equal(canChooseCourses(statuses[6]), true);
   assert.equal(courseValue(statuses[6]), "Ready");
   assert.equal(primaryLabel(statuses[6]), "Choose courses");
   assert.equal(controlState(statuses[6]).primaryDisabled, false);
-  assert.equal(courseValue(statuses[7]), "Course site tab needed");
+  assert.equal(courseValue(statuses[7]), "Canvas tab needed");
   assert.equal(courseValue(statuses[8]), "Connected");
-  assert.match(detailText(statuses[8]), /Keep one signed-in course site tab open/);
-  assert.equal(courseValue(statuses[9]), "Course site tab needed");
-  assert.match(detailText(statuses[9]), /its course site tab is no longer open/);
+  assert.match(detailText(statuses[8]), /Keep one signed-in Canvas course tab open/);
+  assert.equal(courseValue(statuses[9]), "Canvas tab needed");
+  assert.match(detailText(statuses[9]), /its Canvas tab is no longer open/);
+  assert.match(detailText(statuses[9], "moodle"), /selected Canvas course is not open.*detected Moodle.*Connect Moodle/);
 });
 
 // The popup message types answer with a code, and the popup reads its words from that code, so the

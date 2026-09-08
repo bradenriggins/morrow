@@ -1,5 +1,5 @@
 import { problemText } from "../src/bridge-problem-copy.js";
-import { canChooseCourses, controlState, courseValue, currentBinding, currentSiteAnchor, detailText, nextError, primaryLabel, runtimeNeedsReload, statusValue } from "./popup-view.js";
+import { canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, nextError, primaryLabel, runtimeNeedsReload, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
 const canvasAction = document.querySelector("#canvas-action");
@@ -23,6 +23,7 @@ let current = null;
 let actionInFlight = false;
 let banner = null;
 let readGeneration = 0;
+let detectedProvider = null;
 
 // Every failure the service worker answers carries its own code, and the popup keeps that code as
 // the error it raises, so one state reaches the banner instead of one generic sentence.
@@ -47,21 +48,21 @@ function render(status) {
   value.textContent = statusValue(status);
   account.hidden = !binding && !anchor;
   if (binding || anchor) {
-    accountLabel.textContent = binding ? "Selected course" : anchor?.runtimeVerified === true ? "Signed-in course site" : "Saved course site";
+    accountLabel.textContent = binding ? "Selected course" : anchor?.runtimeVerified === true ? "Connected platform" : "Saved platform";
     accountOrigin.textContent = binding
       ? `${binding.courseName || "Selected course"}${status.bindingCount > 1 ? ` · ${status.bindingCount} courses selected` : ""}`
-      : `${anchor?.provider === "moodle" ? "Moodle" : anchor?.provider === "canvas" ? "Canvas" : "Course"} signed-in site`;
+      : `${anchor?.provider === "moodle" ? "Moodle" : anchor?.provider === "canvas" ? "Canvas" : "Learning platform"}`;
     setLastChecked(binding?.lastSeenAt ?? anchor?.lastSeenAt);
   }
-  courseLabel.textContent = binding ? "Selected course" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Course site" : "Course";
+  courseLabel.textContent = binding ? "Selected course" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Learning platform" : "Course";
   canvasValue.textContent = courseValue(status);
   disconnect.hidden = status?.paired !== true;
   primary.hidden = Boolean(runtimeReady && binding?.runtimeVerified === true);
   canvasAction.hidden = !(runtimeReady && binding?.runtimeVerified === true);
   editAccess.hidden = status?.paired !== true || !runtimeReady || chooseCourses || (!binding && !anchor);
   setupGuide.hidden = runtimeNeedsReload(status);
-  primary.textContent = primaryLabel(status);
-  detail.textContent = detailText(status);
+  primary.textContent = primaryLabel(status, detectedProvider);
+  detail.textContent = detailText(status, detectedProvider);
   updateControls(status);
 }
 
@@ -77,7 +78,7 @@ function setLastChecked(lastSeenAt) {
 }
 
 function updateControls(status = current) {
-  const controls = controlState(status, { actionInFlight });
+  const controls = controlState(status, { actionInFlight, detectedProvider });
   primary.disabled = controls.primaryDisabled;
   primary.setAttribute("aria-busy", String(controls.primaryBusy));
   canvasAction.disabled = controls.secondaryDisabled;
@@ -89,6 +90,14 @@ async function refresh() {
   try {
     const status = await message("morrow_status");
     if (generation !== readGeneration) return;
+    detectedProvider = null;
+    if (status?.paired === true && status?.connected === true && !canChooseCourses(status)
+      && currentBinding(status)?.runtimeVerified !== true) {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const result = await message("morrow_detect_course_platform", { tabId: tab?.id }).catch(() => null);
+      if (generation !== readGeneration) return;
+      detectedProvider = result?.provider === "canvas" || result?.provider === "moodle" ? result.provider : null;
+    }
     render(status);
     reportSuccess("status");
   } catch (cause) {

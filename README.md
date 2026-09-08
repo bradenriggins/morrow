@@ -21,13 +21,9 @@ Canvas and Moodle need no platform access token, developer key, OAuth app, hoste
 
 ## How a user works with Morrow
 
-1. Install the Morrow desktop app and choose your assistant in it. Morrow writes that assistant's settings. Open or restart that assistant.
-2. Open the Morrow Bridge extension in Chrome.
-3. Select **Connect Morrow**. On the page that opens, select **Allow connection** if you started this request.
-4. Open the Canvas or Moodle course you want to use in Chrome and sign in.
-5. Open the extension again and select **Connect course site**. Chrome asks for access to that course site. Canvas can also request access to an open New Quizzes site.
-6. In Morrow's settings, find and select the courses you need. Connect them in Plan. Keep one signed-in tab open for each course site; each selected course does not need its own tab.
-7. Return to your assistant. Ask it to use Morrow to inspect or change the selected courses. Plan keeps changes in review. In settings, you can grant Edit access to specific change types in specific courses.
+1. **Download and open Morrow.** Choose the download for your computer, install it, and open the app.
+2. **Follow the setup in the app.** Choose your assistant. Morrow then shows one next action at a time while you add Morrow Bridge to Chrome and connect it to Morrow. The materials folder is optional; Morrow creates a default one unless you choose another.
+3. **Open and connect your course.** Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows **Connect Canvas** or **Connect Moodle**. Select that button, allow the exact platform address Chrome shows, choose courses, select **Connect selected courses in Plan**, and complete the first read. Then return to your assistant and ask it to use Morrow. Plan keeps changes in review. In settings, you can grant Edit access to specific change types in specific courses.
 
 The extension shows two separate states: whether Morrow is connected to your assistant, and whether you have saved a course connection. It shows when the platform was
 last checked. A saved connection is not a promise that you are still signed in.
@@ -328,12 +324,13 @@ You need Chrome 116 or later and one supported assistant already installed on th
 
 ### What the app asks you to do
 
+The app presents three stages and shows one next action at a time:
+
 1. **Choose your assistant.** Morrow lists the assistants it found on this computer and configures only the one you select. Claude Desktop receives a generated local extension and asks you to approve it in Claude Desktop. Each of the other three receives one Morrow entry in its own settings file. Morrow keeps a private copy of a settings file before it changes it.
-2. **Choose where course materials go.** Morrow uses an empty Morrow materials folder and offers a native folder picker. You can change that folder after setup, and Morrow then writes the new folder into every assistant it configured.
-3. **Add Morrow Bridge to Chrome.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. This temporary step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block Developer mode or unpacked extensions, and Morrow does not work around that restriction.
-4. **Connect Morrow Bridge.** Open Morrow Bridge in Chrome and select **Connect Morrow**. On the Morrow page that opens, select **Allow connection** only if you started it.
-5. **Connect a course.** Open a Canvas or Moodle course you can access in Chrome and sign in. In Morrow Bridge, select **Connect course site** and allow Chrome access to that exact site. Then open Plan and Edit settings and connect that course in **Plan**.
-6. **Check the connection.** Morrow reads the course it names, once, to confirm the connection. That read changes nothing in the course.
+2. **Set up Morrow Bridge.** Select **Show Bridge folder**. Morrow opens the folder Chrome must load. In Chrome, open the three-dot menu, select **Extensions**, then **Manage Extensions**, turn on **Developer mode**, select **Load unpacked**, and select that folder. Open Morrow Bridge, select **Connect Morrow**, then select **Allow connection** on the Morrow page only if you started it. This temporary Chrome step stands until Morrow Bridge has a Chrome Web Store listing. A managed Chrome profile can block it, and Morrow does not work around that restriction.
+3. **Open and connect your course.** Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge identifies the platform and shows **Connect Canvas** or **Connect Moodle**. Select that button and allow the exact platform address Chrome shows. In Plan and Edit settings, choose a course and select **Connect selected courses in Plan**. Morrow then reads the course it names once to confirm the connection. That read changes nothing in the course.
+
+Morrow creates a default materials folder. Choosing another folder is optional, and you can change it after setup.
 
 Morrow does not ask you to open a terminal, type a path, install Node.js or pnpm, build source, or start a separate service.
 
@@ -385,8 +382,8 @@ Its documented use was:
    **Load unpacked**, then select the folder printed by
    `/path/to/morrow-v1.0.0-rc.0-darwin-arm64-mcp/bin/morrow connector-path`.
 4. Open Morrow Bridge, select **Connect Morrow**, allow the connection, then open a
-   signed-in Canvas or Moodle course and select **Connect course site**. Connect the
-   course in **Plan** in Plan and Edit settings.
+   signed-in Canvas or Moodle course and follow the course connection action shown
+   in that historical Bridge. Connect the course in **Plan** in Plan and Edit settings.
 
 `bin/morrow doctor --json` reported whether the bundled MCP and its local bridge listener started. Until Morrow Bridge connects, `ready` stays `false`, and that does not confirm a course connection.
 

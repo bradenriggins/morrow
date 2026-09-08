@@ -1297,9 +1297,9 @@ try {
   assert.equal(await firstInstallSetupGuide.getByRole("button", { name: "Guide me", exact: true }).getAttribute("aria-pressed"), "true");
   assert.doesNotMatch(await firstInstallSetupGuide.locator("main").textContent(), /(?:Terminal|command|Developer Mode|unpacked|\/path\/to|CLI)/i);
   await captureSetupGuide(firstInstallSetupGuide, "setup-guide-first-install");
-  await firstInstallSetupGuide.getByRole("button", { name: "All steps", exact: true }).click();
-  await firstInstallSetupGuide.getByRole("heading", { name: "All setup steps", exact: true }).waitFor();
-  for (const step of ["Open Morrow", "Connect Morrow Bridge", "Connect a course site", "Select a course in Plan", "Try a first read"]) {
+  await firstInstallSetupGuide.getByRole("button", { name: "Setup overview", exact: true }).click();
+  await firstInstallSetupGuide.getByRole("heading", { name: "Three setup stages", exact: true }).waitFor();
+  for (const step of ["Choose your assistant in Morrow", "Finish Morrow Bridge setup", "Open and connect your course"]) {
     await firstInstallSetupGuide.locator(".setup-steps strong", { hasText: step }).waitFor();
   }
   assert.doesNotMatch(await firstInstallSetupGuide.locator("main").textContent(), /(?:Terminal|command|Developer Mode|unpacked|\/path\/to|CLI)/i);
@@ -1425,6 +1425,11 @@ try {
     return tabs.find((tab) => tab.url === expectedUrl)?.id || null;
   }, assignmentCanvasUrl);
   assert.equal(Number.isInteger(canvasTabId), true);
+  const detectedCanvas = await popup.evaluate(async (tabId) => {
+    return await chrome.runtime.sendMessage({ type: "morrow_detect_course_platform", tabId });
+  }, canvasTabId);
+  assert.deepEqual(detectedCanvas, { ok: true, result: { provider: "canvas" } });
+  process.stderr.write("[browser-test] Morrow Bridge identifies the active Canvas course before it offers the platform action\n");
   const beforeNestedCourseConnect = canvas.requests().length;
   const connected = await popup.evaluate(async (tabId) => {
     return await chrome.runtime.sendMessage({ type: "morrow_connect_course", tabId });
@@ -3163,7 +3168,7 @@ try {
   assert.equal(lostSiteWrite.problem.code, "canvas_binding_required", JSON.stringify(lostSiteWrite));
   assert.equal(
     lostSiteWrite.problem.message,
-    `Morrow sent nothing: the Canvas site tab for Introduction to Human Biology is not open and signed in. Open ${new URL(canvasUrl).origin} in Chrome, sign in, then select Connect course site in Morrow Bridge.`,
+    `Morrow sent nothing: the Canvas site tab for Introduction to Human Biology is not open and signed in. Open ${new URL(canvasUrl).origin} in Chrome, sign in, then select Connect Canvas in Morrow Bridge.`,
   );
   assert.equal(canvas.sectionWrites(), sectionWritesBeforeLostSite);
   assert.equal(canvas.section("302").name, "Section B evening");
@@ -3193,15 +3198,15 @@ try {
   // The closed course site tab reads as one state with one next action in both places a person
   // looks, and neither keeps the connected state it showed a moment earlier.
   await popup.bringToFront();
-  await waitFor(async () => (await popup.locator("#canvas-value").innerText()) === "Course site tab needed", "the popup did not name the closed course site tab");
-  assert.equal(await popup.locator("#detail").innerText(), "This selected course is connected, but its course site tab is no longer open. Open a signed-in course from this site in Chrome, then select Connect course site.");
-  const reconnectControl = popup.getByRole("button", { name: "Connect course site", exact: true });
+  await waitFor(async () => (await popup.locator("#canvas-value").innerText()) === "Canvas tab needed", "the popup did not name the closed Canvas tab");
+  assert.equal(await popup.locator("#detail").innerText(), "This selected course is connected, but its Canvas tab is no longer open. Open the course in Chrome, sign in, then select Connect Canvas.");
+  const reconnectControl = popup.getByRole("button", { name: "Connect Canvas", exact: true });
   assert.equal(await reconnectControl.isVisible(), true);
   assert.equal(await reconnectControl.isEnabled(), true);
   const lostSiteGuide = await context.newPage();
   await lostSiteGuide.goto(`chrome-extension://${EXTENSION_ID}/onboarding/onboarding.html`);
-  await lostSiteGuide.getByText("Saved course site needs sign-in or reconnection", { exact: true }).waitFor();
-  await lostSiteGuide.getByRole("heading", { name: "Reconnect a course site", exact: true }).waitFor();
+  await lostSiteGuide.getByText("Saved Canvas needs sign-in or reconnection", { exact: true }).waitFor();
+  await lostSiteGuide.getByRole("heading", { name: "Reconnect Canvas", exact: true }).waitFor();
   await lostSiteGuide.close();
   process.stderr.write("[browser-test] a closed course site tab reads as one named state with one next action in the popup and the setup guide\n");
 

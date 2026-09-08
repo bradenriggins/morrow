@@ -27,6 +27,13 @@ function readCourseName(record) {
   return courseId ? `course ${courseId}` : "";
 }
 
+function platformName(status) {
+  const bindings = Array.isArray(status?.bindings) ? status.bindings : [];
+  const anchors = Array.isArray(status?.siteAnchors) ? status.siteAnchors : [];
+  const provider = bindings.at(-1)?.provider || anchors.at(-1)?.provider;
+  return provider === "canvas" ? "Canvas" : provider === "moodle" ? "Moodle" : "";
+}
+
 // A status the guide could not read states that, rather than leaving the last known lines on screen
 // as if they were current.
 function unreadState() {
@@ -48,7 +55,7 @@ function unreadState() {
       { id: "read", done: false, text: "First read is not checked" },
     ],
     title: "Follow the setup steps",
-    detail: "Morrow could not read this setup state, so it cannot name one next step. Select All steps to see every step. This guide reads the state again when you return to this tab.",
+    detail: "Morrow could not read this setup state, so it cannot name one next step. Select Setup overview to see the three stages. This guide reads the state again when you return to this tab.",
     showAssistantGuide: false,
     canOpenSettings: false,
   };
@@ -113,6 +120,7 @@ function readState(status) {
   // version result at all rather than a failed one.
   const runtimeHealthy = connected && status?.runtimeHealthy === true;
   const readCourse = readCourseName(status?.firstCourseRead);
+  const platform = platformName(status);
   const checks = [
     {
       id: "assistant",
@@ -149,10 +157,10 @@ function readState(status) {
       text: readyCourses > 0
         ? `${readyCourses} selected ${readyCourses === 1 ? "course is" : "courses are"} ready`
         : readySites > 0
-          ? "Course site is ready; select courses in Plan"
+          ? `${platform || "Learning platform"} is ready; select courses in Plan`
           : anchors.length > 0
-            ? "Saved course site needs sign-in or reconnection"
-            : "No course site is connected",
+            ? `Saved ${platform || "learning platform"} needs sign-in or reconnection`
+            : "No Canvas or Moodle course is connected",
     },
     {
       id: "read",
@@ -211,17 +219,17 @@ function readState(status) {
   };
   if (open === "course" && readySites === 0) return {
     ...state,
-    title: anchors.length ? "Reconnect a course site" : "Connect a course site",
+    title: anchors.length ? `Reconnect ${platform || "your learning platform"}` : "Open Canvas or Moodle",
     detail: anchors.length
-      ? "Open the saved course site in Chrome and sign in. In Morrow Bridge, select Connect course site and allow Chrome access to that exact site."
-      : "Open a permitted Canvas or Moodle course in Chrome and sign in. In Morrow Bridge, select Connect course site and allow Chrome access to that exact site.",
+      ? `Open the saved ${platform || "learning platform"} course in Chrome and sign in. Morrow Bridge identifies it and shows ${platform ? `Connect ${platform}` : "the matching platform button"}. Select that button and allow Chrome access to the exact address shown.`
+      : "Open a permitted Canvas or Moodle course in Chrome and sign in. Morrow Bridge identifies the platform and shows Connect Canvas or Connect Moodle. Select that button and allow Chrome access to the exact address shown.",
     showAssistantGuide: false,
     canOpenSettings: false,
   };
   if (open === "course") return {
     ...state,
     title: "Select a course in Plan",
-    detail: "Open Plan and Edit settings. Find available courses, choose a course, then connect the selected course in Plan.",
+    detail: "Open Plan and Edit settings. Find available courses, choose a course, then select Connect selected courses in Plan.",
     showAssistantGuide: false,
     canOpenSettings: true,
   };

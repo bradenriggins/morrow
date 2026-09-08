@@ -129,7 +129,7 @@ try {
     const measured = await measure(page);
     aligned(measured.updates, measured.action, width, "the Updates panel");
     aligned(measured.blackboard, measured.action, width, "the Blackboard panel");
-    assert.equal(measured.steps.length, 5, `five steps must render at ${width}px`);
+    assert.equal(measured.steps.length, 3, `three stages must render at ${width}px`);
     for (const size of measured.labels) assert.ok(size >= 12, `a step label is ${size}px at ${width}px`);
     // Narrow widths keep the detail of the step the person is on; wider widths keep every detail.
     for (const step of measured.steps) assert.equal(step.detail, width > 720 || step.current, `step detail at ${width}px`);

@@ -127,6 +127,9 @@ h3 { margin: 0; font-size: 14px; font-weight: 750; letter-spacing: -.015em; line
 .materials-row { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: center; padding: 12px 13px; border: 1px solid var(--border); border-radius: 11px; }
 .materials-row > :first-child { flex: 1 1 240px; min-width: 0; }
 .materials-row p { margin-top: 3px; font-size: 12px; line-height: 1.48; }
+.optional-setup { margin-top: 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-sunken); }
+.optional-setup summary { min-height: 44px; padding: 12px 14px; color: var(--text-secondary); cursor: pointer; font-size: 12px; font-weight: 730; }
+.optional-setup .materials-row { margin: 0 12px 12px; background: var(--surface); }
 .problem { margin-top: 16px; padding: 12px 13px; border: 1px solid color-mix(in srgb, var(--danger) 45%, var(--border)); border-radius: 10px; background: color-mix(in srgb, var(--danger) 7%, var(--surface)); color: var(--danger); font-size: 12px; line-height: 1.48; }
 .problem strong { display: block; color: var(--text); }
 .problem p { margin: 3px 0 0; }
@@ -182,7 +185,7 @@ h3 { margin: 0; font-size: 14px; font-weight: 750; letter-spacing: -.015em; line
   .intro { margin-bottom: 0; }
   .intro-copy { margin-top: 4px; font-size: 13px; line-height: 1.45; }
   .progress-panel { grid-column: 1; padding: 0; }
-  .progress-list { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 3px; }
+  .progress-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; }
   .progress-step { display: grid; grid-template-columns: 1fr; grid-template-rows: 23px minmax(0, 1fr); min-height: 54px; gap: 3px; padding: 6px 5px; text-align: center; }
   .step-state { margin: 0 auto; }
   .step-label { display: block; font-size: 12px; line-height: 1.25; }
@@ -196,7 +199,7 @@ h3 { margin: 0; font-size: 14px; font-weight: 750; letter-spacing: -.015em; line
   .blackboard-form label { min-height: 0; }
 }
 
-/* Narrower than five readable columns: the steps read as a list. */
+/* On a narrow phone, the three stages read as a list. */
 @media (max-width: 560px) {
   .progress-list { grid-template-columns: minmax(0, 1fr); }
   .progress-step { grid-template-columns: 25px minmax(0, 1fr); grid-template-rows: auto; min-height: 46px; gap: 3px 9px; padding: 7px 8px; text-align: left; }

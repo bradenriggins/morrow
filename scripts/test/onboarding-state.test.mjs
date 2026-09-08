@@ -51,7 +51,7 @@ test("setup guide directs an unpaired Bridge to the graphical Morrow app", () =>
 test("setup guide distinguishes a closed assistant, signed-out course, Plan selection, and ready course", () => {
   const connected = { paired: true, connected: true, runtimeHealthy: true };
   assert.equal(setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }).title, "Open Morrow again");
-  assert.equal(setupGuideState({ ...connected, bindings: [], siteAnchors: [{ runtimeVerified: false }] }).title, "Reconnect a course site");
+  assert.equal(setupGuideState({ ...connected, bindings: [], siteAnchors: [{ provider: "canvas", runtimeVerified: false }] }).title, "Reconnect Canvas");
   const plan = setupGuideState({ ...connected, bindings: [], siteAnchors: [{ runtimeVerified: true }] });
   assert.equal(plan.title, "Select a course in Plan");
   assert.equal(plan.canOpenSettings, true);
@@ -223,7 +223,7 @@ test("every heading this guide can render is short enough to stay on one line", 
     setupGuideState({ paired: true, connected: false, bindings: [], siteAnchors: [] }),
     setupGuideState({ paired: true, connected: true, runtimeHealthy: false, bindings: [], siteAnchors: [] }),
     setupGuideState({ paired: true, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [] }),
-    setupGuideState({ paired: true, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [{ runtimeVerified: false }] }),
+    setupGuideState({ paired: true, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [{ provider: "canvas", runtimeVerified: false }] }),
     setupGuideState({ paired: true, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [{ runtimeVerified: true }] }),
     setupGuideState({ paired: true, connected: true, runtimeHealthy: true, bindings: [{ runtimeVerified: true }], siteAnchors: [{ runtimeVerified: true }] }),
     setupGuideState(READY_STATUS),
@@ -298,7 +298,7 @@ function stubElement(text = "", hidden = false) {
 test("the setup guide answers a failed status read with an unknown checklist, then clears it", async () => {
   const nodes = {
     "#guide-mode": stubElement("Guide me"),
-    "#quick-mode": stubElement("All steps"),
+    "#quick-mode": stubElement("Setup overview"),
     "#guide-panel": stubElement(),
     "#quick-panel": stubElement("", true),
     "#readiness-title": stubElement("Checking setup"),

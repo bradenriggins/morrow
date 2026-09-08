@@ -609,7 +609,7 @@ test("support starts with setup, separates connection and course help, and keeps
   const positions = ids.map((id) => html.indexOf(`id="${id}"`));
   assert.ok(positions.every((position) => position >= 0), "support must include all four help routes");
   assert.deepEqual(positions, [...positions].sort((left, right) => left - right), "support routes must follow the order a reader needs");
-  assert.ok(referencesIn(html).includes("/how-it-works#steps-title"));
+  assert.ok(referencesIn(html).includes("/download"));
   assert.doesNotMatch(visibleText(html), /Not set up yet/i);
   assert.match(visibleText(html), /Do not send the same change again\.[\s\S]*check the earlier change/);
   assert.match(visibleText(html), /Do not send student records, passwords, sign-in details, or screenshots that show student information/);
@@ -699,15 +699,16 @@ test("no product page claims Morrow detects unclear link wording", { skip }, () 
   assert.deepEqual(found, [], "Morrow reports link signals for review; it does not detect or repair unclear link wording");
 });
 
-test("/how-it-works and /download give the current visual Morrow Bridge install steps", { skip }, () => {
+test("/how-it-works gives the exact Bridge actions and /download keeps setup in the app", { skip }, () => {
   const problems = [];
-  for (const file of ["how-it-works.html", "download.html"]) {
-    const text = visibleText(productPage(file));
-    for (const required of ["Show Bridge folder", "Developer mode", "Load unpacked"]) {
-      if (!text.includes(required)) problems.push(`${file} does not name ${required}`);
-    }
-    if (/until Morrow Bridge has|temporary step/i.test(text)) problems.push(`${file} contains internal release-status copy`);
+  const setup = visibleText(productPage("how-it-works.html"));
+  for (const required of ["Show Bridge folder", "Developer mode", "Load unpacked"]) {
+    if (!setup.includes(required)) problems.push(`how-it-works.html does not name ${required}`);
   }
+  const download = productPage("download.html");
+  if (!/guided screen[\s\S]*adding Morrow Bridge/.test(download)) problems.push("download.html must leave the detailed Bridge actions in the app");
+  if (!download.includes('/how-it-works#steps-title')) problems.push("download.html must link the full setup explanation");
+  if (/until Morrow Bridge has|temporary step/i.test(`${setup} ${visibleText(download)}`)) problems.push("setup contains internal release-status copy");
   assert.deepEqual(problems, [], "the install route a person follows today has to be on the pages that describe setup");
 });
 
@@ -873,7 +874,7 @@ test("each marketing page starts with the correct Morrow and assistant relations
     ["for-lms-admins.html", "Morrow lets your assistant compare every course section in one request."],
     ["for-qa-teams.html", "Morrow helps your assistant find repeated course problems and fix the cause."],
     ["for-teams.html", "Morrow helps your team coordinate work across a program."],
-    ["how-it-works.html", "Connect Morrow to your assistant and courses in six steps."],
+    ["how-it-works.html", "Download Morrow. The app walks you through the rest."],
     ["remote.html", "Keep using Morrow with your assistant from your phone."],
   ]);
 
@@ -1030,7 +1031,7 @@ test("the homepage accessibility request covers course files, videos, Item Banks
 });
 
 /**
- * The six things the app asks a person to do, in the order it asks them (README.md:319-326). Every
+ * The controls the app asks a person to use, in the order it asks for them. Every
  * name in this list is a control the app or Chrome actually shows, so a reader can follow the page
  * with the screen in front of them. The order matters as much as the names: the setup page was
  * describing an install route that had not been current for months, and a step named out of order
@@ -1043,7 +1044,8 @@ const SETUP_STEP_NAMES = [
   "Load unpacked",
   "Connect Morrow",
   "Allow connection",
-  "Connect course site",
+  "Connect Canvas",
+  "Connect Moodle",
   "Plan",
 ];
 
@@ -1060,6 +1062,35 @@ test("/how-it-works names every setup control, in the order the app asks for it"
     from = at + step.length;
   }
   assert.deepEqual(problems, [], "a reader follows these steps with the app open; a missing or reordered control leaves them stuck");
+});
+
+test("/how-it-works presents three stages and keeps the materials folder optional", { skip }, () => {
+  const section = sectionLabelledBy(pageSource("how-it-works.html"), "steps-title");
+  assert.ok(section, "the setup section is missing");
+  const list = section;
+  assert.equal((list.match(/<li><div class="workflow-word">/g) || []).length, 3, "setup must present exactly three high-level stages");
+  assert.match(list, /Download and open Morrow[\s\S]*Follow the setup in the app[\s\S]*Open your course and let Morrow Bridge identify it/);
+  assert.doesNotMatch(list, /<h3>[^<]*(?:materials|folder)/i, "the optional materials folder must not become a setup stage");
+});
+
+test("the main setup action goes straight to the download", { skip }, () => {
+  const problems = [];
+  for (const file of htmlFiles) {
+    if (file === "social-card.html") continue;
+    const html = pageSource(file);
+    const control = html.match(/<a class="nav-download" href="([^"]+)">([^<]+)<\/a>/);
+    if (!control) {
+      problems.push(`${file}: missing main download action`);
+      continue;
+    }
+    if (control[1] !== "/download" || control[2].trim() !== "Download") {
+      problems.push(`${file}: ${control[2].trim()} -> ${control[1]}`);
+    }
+  }
+  assert.deepEqual(problems, [], "the site must give one direct setup action instead of routing through another explanation page");
+  assert.doesNotMatch(visibleText(pageSource("features.html")), /six setup steps/i);
+  assert.match(pageSource("features.html"), /class="button button-primary" href="\/download">Download Morrow/);
+  assert.match(pageSource("support.html"), /class="button button-primary" href="\/download">Download Morrow/);
 });
 
 /**
@@ -1400,7 +1431,7 @@ test("the final website pass keeps role examples, broad media coverage, setup co
   const setup = pageSource("how-it-works.html");
   assert.ok(!download.includes("Adding Morrow Bridge takes one manual step"), "/download keeps the retired long setup lead");
   assert.ok(!setup.includes("Morrow lists the assistants it found"), "/how-it-works keeps the retired long setup copy");
-  assert.match(download, /Morrow Bridge connects Morrow on your computer to the Canvas or Moodle tab/);
+  assert.match(download, /Morrow Bridge connects Morrow on your computer to the signed-in Canvas or Moodle tab/);
   assert.match(setup, /Morrow finds the assistants on your computer/);
 
   const styles = readFileSync(new URL("styles.css", site), "utf8");
