@@ -61,6 +61,7 @@ async function writeFile(target, content) {
  * assistant reads. Every call it receives is recorded.
  */
 function controller(root, overrides = {}) {
+  const { beforeClientInstall, refuseClientId, ...controllerOverrides } = overrides;
   const calls = [];
   const installer = createInstallerController({
     app: { getPath: (name) => (name === "userData" ? path.join(root, "UserData") : root) },
@@ -83,9 +84,21 @@ function controller(root, overrides = {}) {
         const target = args[2] === "codex"
           ? path.join(root, "Home", ".codex", "config.toml")
           : path.join(args[args.indexOf("--client-project") + 1], ".mcp.json");
-        const current = await fs.readFile(target, "utf8").catch(() => "");
+        let current = await fs.readFile(target, "utf8").catch(() => "");
+        if (typeof beforeClientInstall === "function") {
+          await beforeClientInstall({ args, target, current });
+          current = await fs.readFile(target, "utf8").catch(() => "");
+        }
+        const expectedIndex = args.indexOf("--expected-config-sha256");
+        if (expectedIndex !== -1 && sha256(Buffer.from(current)) !== args[expectedIndex + 1]) {
+          return { code: 1, stdout: "", stderr: `Refusing to replace ${target} because it changed after Morrow recorded it` };
+        }
+        if (args[2] === refuseClientId) {
+          return { code: 1, stdout: "", stderr: "Refusing to replace existing Morrow server morrow" };
+        }
         if (args[2] === "codex") {
-          await writeFile(target, `${current.trimEnd()}${current.trim() ? "\n\n" : ""}${codexTable(workspaceRoot)}`);
+          const withoutMorrow = current.replace(/(?:^|\n)\[mcp_servers\.morrow\]\n[\s\S]*$/, "").trimEnd();
+          await writeFile(target, `${withoutMorrow}${withoutMorrow ? "\n\n" : ""}${codexTable(workspaceRoot)}`);
         } else {
           const document = current.trim() ? JSON.parse(current) : {};
           document.mcpServers = { ...(document.mcpServers || {}), ...claudeCodeEntry(workspaceRoot).mcpServers };
@@ -94,10 +107,40 @@ function controller(root, overrides = {}) {
       }
       return { code: 0, stdout: "", stderr: "" };
     },
-    ...overrides
+    ...controllerOverrides
   });
   return { installer, calls };
 }
+
+test("setting up an assistant for the first time does not require a recorded configuration digest", async () => {
+  const root = await temporaryRoot();
+  const { installer, calls } = controller(root);
+  installer.ensureRuntime = async () => installer.paths;
+
+  await installer.installAssistant("codex", null);
+
+  assert.deepEqual(calls.map((entry) => entry[0]), ["setup", "mcp"]);
+  assert.equal(calls[1].includes("--expected-config-sha256"), false);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  assert.equal((await installer.record()).configured.codex.sha256, sha256(await fs.readFile(target)));
+});
+
+test("an assistant configuration changed during its atomic write is reported as a configuration conflict", async () => {
+  const root = await temporaryRoot();
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const { installer } = controller(root, {
+    runCli: async () => ({
+      code: 1,
+      stdout: "",
+      stderr: `Refusing to replace ${target} because it changed during installation`
+    })
+  });
+
+  await assert.rejects(
+    () => installer.executeCli(["mcp", "install", "codex"]),
+    (error) => error.code === "existing_morrow_configuration"
+  );
+});
 
 test("removing an assistant whose settings file changed after Morrow wrote it is refused, and changes nothing", async () => {
   const root = await temporaryRoot();
@@ -253,6 +296,8 @@ test("changing the materials folder writes the new folder into every configured 
   // The project is the one the record describes, rebuilt from the file Morrow
   // recorded for that assistant, never a fresh guess.
   assert.equal(calls[1][calls[1].indexOf("--client-project") + 1], project);
+  assert.equal(calls[0][calls[0].indexOf("--expected-config-sha256") + 1], codexSha256);
+  assert.equal(calls[1][calls[1].indexOf("--expected-config-sha256") + 1], claudeCodeSha256);
 });
 
 test("choosing the folder that is already in use records the choice and rewrites no assistant", async () => {
@@ -323,28 +368,133 @@ test("a folder change stops before it writes anything when the record names a fi
   assert.equal(sha256(await fs.readFile(foreign)), foreignSha256);
 });
 
-test("a folder change that an assistant refuses leaves that assistant without a Morrow entry, and says so", async () => {
+test("a refused folder change keeps the assistant configuration and workspace record unchanged", async () => {
   const root = await temporaryRoot();
   const chosen = path.join(root, "Fall biology");
   await fs.mkdir(chosen, { recursive: true });
   const codex = path.join(root, "Home", ".codex", "config.toml");
-  const codexSha256 = await writeFile(codex, codexTable(path.join(root, "Materials")));
+  const originalMaterials = path.join(root, "Materials");
+  await fs.mkdir(originalMaterials, { recursive: true });
+  const original = codexTable(originalMaterials);
+  const codexSha256 = await writeFile(codex, original);
   const { installer } = controller(root, {
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
     runCli: async () => ({ code: 1, stdout: "", stderr: "Refusing to replace existing Morrow server morrow" })
   });
   await installer.writeRecord({
     ...freshRecord(),
+    materialsFolder: originalMaterials,
     selectedAssistantId: "codex",
     configured: { codex: { target: codex, sha256: codexSha256 } }
   });
 
   await assert.rejects(() => installer.configureWorkspace(null), (error) => error.code === "existing_morrow_configuration");
-  // Morrow removed its own entry and could not write it again, so the file
-  // carries no Morrow entry and the state reports the assistant as not set up
-  // rather than as bound to the folder that was chosen.
-  assert.equal(await fs.readFile(codex, "utf8"), "");
-  assert.equal((await installer.record()).materialsFolder, await fs.realpath(chosen));
+  assert.equal(await fs.readFile(codex, "utf8"), original);
+  assert.equal((await installer.record()).materialsFolder, originalMaterials);
+});
+
+test("a later assistant refusal rolls every earlier folder rebind back", async () => {
+  const root = await temporaryRoot();
+  const originalMaterials = path.join(root, "Materials");
+  const chosen = path.join(root, "Fall biology");
+  const project = path.join(root, "Project");
+  for (const directory of [originalMaterials, chosen, project]) await fs.mkdir(directory, { recursive: true });
+  const codex = path.join(root, "Home", ".codex", "config.toml");
+  const claudeCode = path.join(project, ".mcp.json");
+  const originalCodex = `[mcp_servers.other]\ncommand = "other"\n\n${codexTable(originalMaterials)}`;
+  const originalClaudeCode = `${JSON.stringify(claudeCodeEntry(originalMaterials), null, 2)}\n`;
+  const codexSha256 = await writeFile(codex, originalCodex);
+  const claudeCodeSha256 = await writeFile(claudeCode, originalClaudeCode);
+  const { installer } = controller(root, {
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
+    refuseClientId: "claude"
+  });
+  const originalRecord = {
+    ...freshRecord(),
+    materialsFolder: originalMaterials,
+    selectedAssistantId: "claude-code",
+    configured: {
+      codex: { target: codex, sha256: codexSha256 },
+      "claude-code": { target: claudeCode, sha256: claudeCodeSha256 }
+    }
+  };
+  await installer.writeRecord(originalRecord);
+
+  await assert.rejects(() => installer.configureWorkspace(null), (error) => error.code === "existing_morrow_configuration");
+
+  assert.equal(await fs.readFile(codex, "utf8"), originalCodex);
+  assert.equal(await fs.readFile(claudeCode, "utf8"), originalClaudeCode);
+  assert.deepEqual(await installer.record(), originalRecord);
+});
+
+test("a concurrent assistant edit during folder rebind is never replaced or rolled back", async () => {
+  const root = await temporaryRoot();
+  const originalMaterials = path.join(root, "Materials");
+  const chosen = path.join(root, "Fall biology");
+  for (const directory of [originalMaterials, chosen]) await fs.mkdir(directory, { recursive: true });
+  const codex = path.join(root, "Home", ".codex", "config.toml");
+  const original = codexTable(originalMaterials);
+  const edited = `[mcp_servers.other]\ncommand = "newer"\n\n${original}`;
+  const recorded = await writeFile(codex, original);
+  let changed = false;
+  const { installer, calls } = controller(root, {
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
+    beforeClientInstall: async ({ target }) => {
+      if (changed) return;
+      changed = true;
+      await fs.writeFile(target, edited);
+    }
+  });
+  const originalRecord = {
+    ...freshRecord(),
+    materialsFolder: originalMaterials,
+    selectedAssistantId: "codex",
+    configured: { codex: { target: codex, sha256: recorded } }
+  };
+  await installer.writeRecord(originalRecord);
+
+  await assert.rejects(() => installer.configureWorkspace(null), (error) => error.code === "existing_morrow_configuration");
+
+  assert.equal(await fs.readFile(codex, "utf8"), edited);
+  assert.deepEqual(await installer.record(), originalRecord);
+  assert.equal(calls[0][calls[0].indexOf("--expected-config-sha256") + 1], recorded);
+});
+
+test("an earlier assistant edit during a later rebind prevents the workspace commit", async () => {
+  const root = await temporaryRoot();
+  const originalMaterials = path.join(root, "Materials");
+  const chosen = path.join(root, "Fall biology");
+  const project = path.join(root, "Project");
+  for (const directory of [originalMaterials, chosen, project]) await fs.mkdir(directory, { recursive: true });
+  const codex = path.join(root, "Home", ".codex", "config.toml");
+  const claudeCode = path.join(project, ".mcp.json");
+  const originalCodex = codexTable(originalMaterials);
+  const concurrentCodex = `[mcp_servers.other]\ncommand = "newer"\n\n${codexTable(chosen)}`;
+  const originalClaudeCode = `${JSON.stringify(claudeCodeEntry(originalMaterials), null, 2)}\n`;
+  const codexSha256 = await writeFile(codex, originalCodex);
+  const claudeCodeSha256 = await writeFile(claudeCode, originalClaudeCode);
+  const { installer } = controller(root, {
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
+    beforeClientInstall: async ({ args }) => {
+      if (args[2] === "claude") await fs.writeFile(codex, concurrentCodex);
+    }
+  });
+  const originalRecord = {
+    ...freshRecord(),
+    materialsFolder: originalMaterials,
+    selectedAssistantId: "claude-code",
+    configured: {
+      codex: { target: codex, sha256: codexSha256 },
+      "claude-code": { target: claudeCode, sha256: claudeCodeSha256 }
+    }
+  };
+  await installer.writeRecord(originalRecord);
+
+  await assert.rejects(() => installer.configureWorkspace(null), (error) => error.code === "assistant_configuration_changed");
+
+  assert.equal(await fs.readFile(codex, "utf8"), concurrentCodex);
+  assert.equal(await fs.readFile(claudeCode, "utf8"), originalClaudeCode);
+  assert.deepEqual(await installer.record(), originalRecord);
 });
 
 test("a folder change makes the Claude Desktop extension again, for the folder that was chosen", async () => {

@@ -467,6 +467,7 @@ async function planContentAttachment(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const file = reviewedFile(input);
+  runtime.assertEffectTargetFree(attachmentEffectTarget(runtime, input));
   // A plan exists only to be dispatched, so it carries the write condition. An
   // instructor is refused before review instead of after approving a change
   // Morrow would then refuse to send.
@@ -510,6 +511,12 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
   };
 }
 
+function attachmentEffectTarget(runtime: BlackboardLearnRuntime, input: FileManifestInput) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "content-attachments", { contentId: input.content_id });
+}
+
 /**
  * The one dispatch: it stages the reviewed bytes once, attaches them once, and
  * re-reads the file it attached. Everything it can refuse it refuses before the
@@ -529,7 +536,7 @@ async function applyReviewedContentAttachment(
   }
   const file = reviewedFile(input);
   const bytes = reviewedBytes(input.privateAttachment, file);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, attachmentEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -544,6 +551,7 @@ async function applyReviewedContentAttachment(
   let dispatchState: BlackboardDispatchState = "not_sent";
   try {
     const uploadId = await stageUpload(write, file, bytes, signal);
+    dispatch.markSent();
     dispatchState = "applied_or_unknown";
     const created = await write.client.post(
       attachmentsPath(write.courseId, input.content_id),
@@ -559,6 +567,7 @@ async function applyReviewedContentAttachment(
     }
     const record = await write.client.get(attachmentPath(write.courseId, input.content_id, attachmentId), signal);
     const compared = compareAttachment(record, attachmentId, file, dispatchState);
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.content-attachment.readback.v1",
       ok: true,
@@ -578,6 +587,7 @@ async function applyReviewedContentAttachment(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    if (dispatchState === "applied_or_unknown") dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -606,6 +616,8 @@ async function verifyContentAttachment(
   const records = await comparator.client.collect(attachmentsPath(comparator.courseId, input.content_id), { label: "attachment", signal });
   const matches = records.filter((record) => record[FILENAME_FIELD] === file.filename);
   const size = matches.length === 1 ? exactSize(matches[0]![SIZE_FIELD]) : null;
+  const verified = matches.length === 1 && (size === null || size === file.sizeBytes);
+  runtime.recordEffectComparison(attachmentEffectTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.content-attachment.comparator.v1",
     ok: true,
@@ -613,7 +625,7 @@ async function verifyContentAttachment(
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
     contentId: input.content_id,
-    verified: matches.length === 1 && (size === null || size === file.sizeBytes),
+    verified,
     readback: READBACK_STATE,
     status: "api_configured_live_untested",
   };

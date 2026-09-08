@@ -455,7 +455,7 @@ describe("Blackboard memberships and users", () => {
     expect(replay).toMatchObject({
       ok: false,
       resultState: "not_sent",
-      problem: { code: "blackboard_patch_review_required", message: "This Blackboard effect grant was already dispatched." },
+      problem: { code: "blackboard_patch_review_required", message: "This Blackboard effect grant was already dispatched, and Morrow sent that change to Blackboard. It sent nothing now." },
     });
     expect(fixture.patchRequests()).toEqual(sent);
   });
@@ -475,8 +475,32 @@ describe("Blackboard memberships and users", () => {
     });
     expect(fixture.patchRequests()).toEqual([`PATCH ${studentPath}`]);
 
+    const unresolved = structured(await fixture.call("blackboard_unresolved_effects"));
+    expect(unresolved).toMatchObject({
+      ok: true,
+      count: 1,
+      effects: [{
+        operationId: "op:blackboard-memberships-test",
+        phase: "uncertain",
+        tenantId: "fixture",
+        courseId,
+        targetType: "course-membership",
+      }],
+    });
+    expect(JSON.stringify(unresolved)).not.toContain(studentId);
+
+    const blocked = structured(await fixture.call("blackboard_plan_membership_patch", {
+      learner_reference: reference,
+      patch,
+    }));
+    expect(blocked).toMatchObject({
+      ok: false,
+      problem: { code: "blackboard_effect_unresolved" },
+    });
+
     const verified = structured(await fixture.call("blackboard_verify_membership_patch", { learner_reference: reference, patch }));
     expect(verified).toMatchObject({ ok: true, verified: false });
+    expect(structured(await fixture.call("blackboard_unresolved_effects"))).toMatchObject({ ok: true, count: 0, effects: [] });
   });
 
   it("refuses a change to anything but the course role and availability, before any request", async () => {

@@ -422,6 +422,30 @@ export async function executeItemBankInPage(input) {
   // here because Chrome injects this function without its module scope.
   const itemBankOutcomeUnknown = (method, httpStatus) => method !== "GET"
     && !(Number.isInteger(httpStatus) && httpStatus >= 400 && httpStatus < 500 && httpStatus !== 408 && httpStatus !== 429);
+  const boundedResponseText = async (response) => {
+    const declared = response?.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) return { oversize: true };
+    if (!response?.body || typeof response.body.getReader !== "function") return { text: "" };
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_BYTES) {
+          await reader.cancel();
+          return { oversize: true };
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return { text: text + decoder.decode() };
+    } catch {
+      try { await reader.cancel(); } catch {}
+      return { unreadable: true };
+    }
+  };
   const sanitize = (value, depth = 0) => {
     if (depth > 24) return null;
     if (Array.isArray(value)) return value.slice(0, 10_000).map((entry) => sanitize(entry, depth + 1));
@@ -539,6 +563,7 @@ export async function executeItemBankInPage(input) {
       if (!hex(asText(record.consumers_sha256)) || record.consumers_sha256 !== await digest(stable(consumers))) return "consumers_digest_mismatch";
       if (typeof record.established_at !== "string" || !TIMEZONE.test(record.established_at) || !Number.isFinite(Date.parse(record.established_at))) return "established_at_unreadable";
       if (!Number.isFinite(now)) return "record_age_unknown";
+      if (Date.parse(record.established_at) > now) return "record_from_future";
       if (now - Date.parse(record.established_at) > FAN_OUT_MAX_AGE_MS) return "record_too_old";
       const external = externalCourseIds(consumers, course);
       if (!sameList(record.external_course_ids, external)) return "external_course_ids_mismatch";
@@ -701,18 +726,18 @@ export async function executeItemBankInPage(input) {
           method,
           headers: requestBody === undefined ? headers : { ...headers, "Content-Type": "application/json" },
           credentials: "omit",
+          redirect: "error",
           ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }),
         });
       } catch {
         return { transport: true };
       }
-      let payload;
-      try {
-        payload = await response.text();
-      } catch {
+      const read = await boundedResponseText(response);
+      if (read.unreadable) {
         return { transport: true, status: response.status };
       }
-      if (new TextEncoder().encode(payload).byteLength > MAX_BYTES) return { oversize: true, status: response.status };
+      if (read.oversize) return { oversize: true, status: response.status };
+      const payload = read.text;
       let data = null;
       let parsed = true;
       try { data = payload ? JSON.parse(payload) : null; } catch { data = payload.slice(0, MAX_BYTES); parsed = false; }
@@ -808,7 +833,7 @@ export async function executeItemBankInPage(input) {
       verification,
     };
   }
-  const pageParameter = operation.method === "GET" && ["list_banks", "list_entries"].includes(operation.nickname)
+  const pageParameter = operation.method === "GET" && ["list_banks", "list_entries", "list_shares"].includes(operation.nickname)
     ? operation.parameters.find((parameter) => parameter.inputName === "page")
     : null;
   const requestedStartPage = Number(query.get(pageParameter?.wireName || "") || 1);
@@ -830,14 +855,17 @@ export async function executeItemBankInPage(input) {
         method: operation.method,
         headers,
         credentials: "omit",
+        redirect: "error",
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
       });
     } catch {
       return { matched: true, ok: false, sent: operation.method !== "GET", outcomeUnknown: operation.method !== "GET", error: "item_bank_request_failed" };
     }
     status = response.status;
-    const text = await response.text();
-    if (new TextEncoder().encode(text).byteLength > MAX_BYTES) return { matched: true, ok: false, sent: true, status, outcomeUnknown: itemBankOutcomeUnknown(operation.method, status), error: "item_bank_response_too_large" };
+    const read = await boundedResponseText(response);
+    if (read.unreadable) return { matched: true, ok: false, sent: true, outcomeUnknown: operation.method !== "GET", status, error: "item_bank_response_unreadable" };
+    if (read.oversize) return { matched: true, ok: false, sent: true, status, outcomeUnknown: itemBankOutcomeUnknown(operation.method, status), error: "item_bank_response_too_large" };
+    const text = read.text;
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch { data = text.slice(0, MAX_BYTES); }
     if (!response.ok) return { matched: true, ok: false, sent: true, status: response.status, data: sanitize(data), apiHost, outcomeUnknown: itemBankOutcomeUnknown(operation.method, response.status) };

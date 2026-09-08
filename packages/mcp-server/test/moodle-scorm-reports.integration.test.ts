@@ -90,6 +90,20 @@ function result(command: BridgeCommand, digest: string): JsonObject {
     },
     snapshot_digest: "d".repeat(64),
   };
+  if (command.toolName === "moodle_get_course_participants") return {
+    schema: "morrow.canvas-browser-result.v1", ok: true, sent: false, provider: "moodle", complete: true,
+    data: {
+      schema: "morrow.moodle-course-participants.v1", provider: "moodle", course_id: 2,
+      participant_count: 1,
+      participants: [{ user_id: "7", roles: ["Student"], enrolment_methods: ["Manual enrolments"] }],
+      proof: {
+        method: "core_table_get_dynamic_table_content", complete: true,
+        required_capabilities: ["moodle/course:viewparticipants", "moodle/course:enrolreview"],
+        participant_limit: 500, page_size: 100, page_request_limit: 5, page_request_count: 1, total_rows: 1,
+      },
+    },
+    snapshot_digest: "c".repeat(64),
+  };
   if (command.toolName === "moodle_get_scorm_attempt_summary") return {
     schema: "morrow.canvas-browser-result.v1", ok: true, sent: false, provider: "moodle", complete: true,
     data: {
@@ -145,7 +159,12 @@ describe("Moodle SCORM report Full MCP exposure", () => {
         },
       });
 
-      const report = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_scorm_learner_report", arguments: { course_id: 2, module_id: 8, user_id: 7, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const participants = await client.callTool({ name: "morrow_capability_read", arguments: {
+        name: "moodle_get_course_participants",
+        arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
+      } });
+      const learnerToken = (participants.structuredContent as { data: { participants: { learnerToken: string }[] } }).data.participants[0]!.learnerToken;
+      const report = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_scorm_learner_report", arguments: { course_id: 2, module_id: 8, learner_token: learnerToken, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const reportText = JSON.stringify(report);
       expect(report.isError, reportText).not.toBe(true);
       for (const privateValue of ["Student Name", "Jane Moodle", "Moodle, Jane", "jane@example.edu", "private suspend data", "user_id"]) {
@@ -160,9 +179,9 @@ describe("Moodle SCORM report Full MCP exposure", () => {
         },
       });
 
-      const unknown = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_scorm_learner_report", arguments: { course_id: 2, module_id: 8, user_id: 99, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const unknown = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_scorm_learner_report", arguments: { course_id: 2, module_id: 8, learner_token: `learner_${"a".repeat(64)}`, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       expect(unknown.isError).toBe(true);
-      expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "learner_roster_identity_unavailable" } });
+      expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "moodle_scorm_learner_report_invalid" } });
       expect(JSON.stringify(unknown)).not.toContain("private suspend data");
 
       const mismatch = await gateway.call("moodle_get_scorm_attempt_summary", { course_id: 2, module_id: 9, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
@@ -172,18 +191,11 @@ describe("Moodle SCORM report Full MCP exposure", () => {
         expect(mismatchText).not.toContain(privateValue);
       }
 
-      // The refused learner report reads the roster twice: once in the dispatch
-      // that fails closed, and once more when the MCP egress boundary re-derives
-      // the learner scope for the problem result it returns instead.
-      expect(commands.map((command) => command.toolName)).toEqual([
-        "moodle_get_scorm_attempt_summary",
-        "moodle_get_scorm_learner_report",
-        "moodle_get_course_participant_roster",
-        "moodle_get_scorm_learner_report",
-        "moodle_get_course_participant_roster",
-        "moodle_get_course_participant_roster",
-        "moodle_get_scorm_attempt_summary",
-      ]);
+      const learnerReads = commands.filter((command) => command.toolName === "moodle_get_scorm_learner_report");
+      expect(learnerReads).toHaveLength(1);
+      expect(learnerReads[0]!.arguments).toMatchObject({ course_id: 2, module_id: 8, user_id: 7 });
+      expect(learnerReads[0]!.arguments).not.toHaveProperty("learner_token");
+      expect(commands.filter((command) => command.toolName === "moodle_get_course_participant_roster").length).toBeGreaterThanOrEqual(3);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

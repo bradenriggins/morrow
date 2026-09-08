@@ -30,11 +30,11 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
   const submissionStateSet = new Set(SUBMISSION_STATES);
   const SCORE_BUCKETS = Object.freeze(["below_60", "60_to_69", "70_to_79", "80_to_89", "90_and_above"]);
   const ACTIVITY_KINDS = Object.freeze([
-    Object.freeze({ kind: "pages", segment: "pages" }),
-    Object.freeze({ kind: "assignments", segment: "assignments" }),
-    Object.freeze({ kind: "discussions", segment: "discussion_topics" }),
-    Object.freeze({ kind: "quizzes", segment: "quizzes" }),
-    Object.freeze({ kind: "modules", segment: "modules" }),
+    Object.freeze({ kind: "pages", segment: "pages", idField: "page_id" }),
+    Object.freeze({ kind: "assignments", segment: "assignments", idField: "id" }),
+    Object.freeze({ kind: "discussions", segment: "discussion_topics", idField: "id" }),
+    Object.freeze({ kind: "quizzes", segment: "quizzes", idField: "id" }),
+    Object.freeze({ kind: "modules", segment: "modules", idField: "id" }),
   ]);
   const ACTIVITY_TIMESTAMP_FIELD = "updated_at";
   const OPERATIONS = new Map([
@@ -61,6 +61,11 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
   const id = (value) => {
     const text = typeof value === "number" && Number.isSafeInteger(value) ? String(value) : typeof value === "string" ? value : "";
     return ID.test(text) ? text : "";
+  };
+  const submissionId = (value) => {
+    const direct = object(value) ? id(value.id) : "";
+    const named = object(value) ? id(value.submission_id) : "";
+    return direct && named && direct !== named ? "" : direct || named;
   };
   const windowDays = (value) => Number.isSafeInteger(value) && value >= 1 && value <= MAX_WINDOW_DAYS ? value : 0;
   const points = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
@@ -246,6 +251,7 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
       let missingCount = 0;
       let excusedCount = 0;
       let rowCount = 0;
+      const submissionIds = new Set();
       const submissionsPath = `${assignmentPath}/submissions`;
       const result = await readList(submissionsPath, { per_page: "100" }, MAX_PAGES, (rows) => {
         if (rowCount + rows.length > MAX_ROWS) return "incomplete";
@@ -254,12 +260,14 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
           const late = object(row) ? row.late : null;
           const missing = object(row) ? row.missing : null;
           const excused = object(row) ? row.excused : null;
-          if (!object(row) || id(row.assignment_id) !== assignmentId || typeof state !== "string" || !submissionStateSet.has(state)
+          const rowId = submissionId(row);
+          if (!object(row) || !rowId || submissionIds.has(rowId) || id(row.assignment_id) !== assignmentId || typeof state !== "string" || !submissionStateSet.has(state)
             || (late !== null && late !== undefined && typeof late !== "boolean")
             || (missing !== null && missing !== undefined && typeof missing !== "boolean")
             || (excused !== null && excused !== undefined && typeof excused !== "boolean")) {
             return "response_invalid";
           }
+          submissionIds.add(rowId);
           counts[state] += 1;
           if (late === true) lateCount += 1;
           if (missing === true) missingCount += 1;
@@ -316,6 +324,7 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
       });
       if (assignmentList.state !== "complete") return listFailure(assignmentList);
       let rowCount = 0;
+      const submissionIds = new Set();
       const submissionQuery = { "student_ids[]": "all", per_page: "100" };
       const submissionList = await readList(`${coursePath}/students/submissions`, submissionQuery, MAX_SUBMISSION_PAGES, (rows) => {
         if (rowCount + rows.length > MAX_ROWS) return "incomplete";
@@ -324,11 +333,13 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
           const target = object(row) ? assignments.get(id(row.assignment_id)) : undefined;
           const score = object(row) ? row.score : null;
           const excused = object(row) ? row.excused : null;
-          if (!object(row) || !target || typeof state !== "string" || !submissionStateSet.has(state)
+          const rowId = submissionId(row);
+          if (!object(row) || !rowId || submissionIds.has(rowId) || !target || typeof state !== "string" || !submissionStateSet.has(state)
             || (score !== null && score !== undefined && typeof score !== "number")
             || (excused !== null && excused !== undefined && typeof excused !== "boolean")) {
             return "response_invalid";
           }
+          submissionIds.add(rowId);
           if (state === "submitted") target.submitted += 1;
           if (state === "graded") target.graded += 1;
           if (state === "pending_review") target.pendingReview += 1;
@@ -395,10 +406,13 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
         let changed = 0;
         let items = 0;
         let timestamped = true;
+        const itemIds = new Set();
         const result = await readList(`${coursePath}/${entry.segment}`, { per_page: "100" }, MAX_PAGES, (rows) => {
           if (items + rows.length > MAX_ITEMS) return "incomplete";
           for (const row of rows) {
-            if (!object(row)) return "response_invalid";
+            const rowId = object(row) ? id(row[entry.idField]) : "";
+            if (!object(row) || !rowId || itemIds.has(rowId)) return "response_invalid";
+            itemIds.add(rowId);
             const stamp = typeof row[ACTIVITY_TIMESTAMP_FIELD] === "string" ? Date.parse(row[ACTIVITY_TIMESTAMP_FIELD]) : Number.NaN;
             // A row without this exact field cannot be placed in the window.
             // The kind reports that it is unavailable rather than counting it

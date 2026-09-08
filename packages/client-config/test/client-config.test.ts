@@ -1,5 +1,6 @@
-import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,6 +21,10 @@ function fileContent(bundle: ReturnType<typeof buildClientConfigBundle>, path: s
   const entry = bundle.files.find((candidate) => candidate.path === path);
   if (!entry) throw new Error(`missing generated file ${path}`);
   return entry.content;
+}
+
+function sha256(content: string): string {
+  return createHash("sha256").update(content).digest("hex");
 }
 
 function refusalOf(attempt: () => unknown): MorrowClientConfigRefusal {
@@ -254,6 +259,11 @@ describe("buildClientConfigBundle", () => {
       upstreamConfigPath: "/tmp/morrow.upstreams.json",
       serverName: "Morrow with spaces",
     })).toThrow(/serverName/);
+    expect(() => buildClientConfigBundle({
+      repositoryRoot: "/tmp/morrow",
+      upstreamConfigPath: "/tmp/morrow.upstreams.json",
+      nodeCommand: "node",
+    })).toThrow(/nodeCommand must be an absolute path/);
   });
 });
 
@@ -405,6 +415,12 @@ describe("project installation and hermetic parity", () => {
       await writeFile(codexPath, unrelated, "utf8");
       expect(installMorrowClient(options)).toMatchObject({ changed: true });
       expect(await readFile(codexPath, "utf8")).toBe(`${unrelated.trimEnd()}\n\n${fileContent(buildClientConfigBundle({ ...options, workspaceRoot: canonicalRepositoryRoot }), "codex.config.toml")}`);
+
+      const trailingWhitespace = "model = \"gpt-6\"  \n# keep this exact spacing\n\n\n";
+      await writeFile(codexPath, trailingWhitespace, "utf8");
+      expect(installMorrowClient(options)).toMatchObject({ changed: true });
+      expect(await readFile(codexPath, "utf8"))
+        .toBe(`${trailingWhitespace}${fileContent(buildClientConfigBundle({ ...options, workspaceRoot: canonicalRepositoryRoot }), "codex.config.toml")}`);
 
       const conflictingInline = "mcp_servers = { morrow = { command = \"other\" } }\n";
       await writeFile(codexPath, conflictingInline, "utf8");
@@ -559,6 +575,234 @@ describe("project installation and hermetic parity", () => {
       expect(() => installMorrowClient({ ...options, client: "vscode" }))
         .toThrow(/must contain a JSON object/);
       expect(await readFile(vscodePath, "utf8")).toBe(wrongContainerType);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("preserves custom JSON formatting when it adds Morrow", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-json-format-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const settingsPath = join(repositoryRoot, ".gemini", "settings.json");
+    const custom = "{\r\n\t\"theme\" : \"night\",\r\n\t\"mcpServers\" : {\r\n\t\t\"other\" : { \"command\" : \"other\" }\r\n\t},\r\n\t\"tail\" : true\r\n}\r\n";
+    try {
+      await mkdir(dirname(serverEntryPath), { recursive: true });
+      await mkdir(dirname(settingsPath), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      await writeFile(settingsPath, custom, "utf8");
+
+      const installed = installMorrowClient({
+        repositoryRoot,
+        upstreamConfigPath,
+        serverEntryPath,
+        nodeCommand: process.execPath,
+        client: "gemini-cli",
+      });
+      const updated = await readFile(settingsPath, "utf8");
+      expect(installed).toMatchObject({ changed: true, sha256: sha256(updated) });
+      expect(updated).toContain("\t\t\"other\" : { \"command\" : \"other\" },\r\n\t\t\"morrow\" : {");
+      expect(updated).toContain("\r\n\t},\r\n\t\"tail\" : true\r\n}\r\n");
+      expect(updated.startsWith("{\r\n\t\"theme\" : \"night\",\r\n\t\"mcpServers\" : {")).toBe(true);
+      expect(installMorrowClient({
+        repositoryRoot,
+        upstreamConfigPath,
+        serverEntryPath,
+        nodeCommand: process.execPath,
+        client: "gemini-cli",
+      })).toMatchObject({ changed: false, sha256: installed.sha256 });
+      expect(await readFile(settingsPath, "utf8")).toBe(updated);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("binds an exact executable and refuses a server entry whose link escapes the repository", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-runtime-binding-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const outsideServerEntry = join(directory, "outside-server.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const nodeLink = join(repositoryRoot, "Morrow Node");
+    const options = {
+      repositoryRoot,
+      upstreamConfigPath,
+      serverEntryPath,
+      nodeCommand: nodeLink,
+      client: "gemini-cli" as const,
+    };
+    try {
+      await mkdir(dirname(serverEntryPath), { recursive: true });
+      await writeFile(outsideServerEntry, "console.error('outside');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      await symlink(process.execPath, nodeLink);
+      await symlink(outsideServerEntry, serverEntryPath);
+
+      expect(() => installMorrowClient(options)).toThrow(/serverEntryPath must be inside repositoryRoot/);
+      await rm(serverEntryPath);
+      await writeFile(serverEntryPath, "console.error('inside');\n", "utf8");
+
+      expect(installMorrowClient(options)).toMatchObject({ changed: true });
+      const settings = JSON.parse(await readFile(join(repositoryRoot, ".gemini", "settings.json"), "utf8")) as {
+        mcpServers: { morrow: { command: string } };
+      };
+      expect(settings.mcpServers.morrow.command).toBe(nodeLink);
+
+      if (process.platform !== "win32") {
+        const nonExecutable = join(repositoryRoot, "not-executable");
+        await writeFile(nonExecutable, "node placeholder\n", { encoding: "utf8", mode: 0o600 });
+        expect(() => installMorrowClient({ ...options, nodeCommand: nonExecutable }))
+          .toThrow(/nodeCommand is not executable/);
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a symbolic-link client file or parent without changing the link target", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-symlink-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const geminiDirectory = join(repositoryRoot, ".gemini");
+    const settingsPath = join(geminiDirectory, "settings.json");
+    const outsideDirectory = join(directory, "outside");
+    const outsideSettings = join(outsideDirectory, "settings.json");
+    const original = "{\n  \"theme\": \"preserve\"\n}\n";
+    const options = {
+      repositoryRoot,
+      upstreamConfigPath,
+      serverEntryPath,
+      nodeCommand: process.execPath,
+      client: "gemini-cli" as const,
+    };
+    try {
+      await mkdir(dirname(serverEntryPath), { recursive: true });
+      await mkdir(geminiDirectory, { recursive: true });
+      await mkdir(outsideDirectory, { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      await writeFile(outsideSettings, original, "utf8");
+
+      await symlink(outsideSettings, settingsPath);
+      expect(() => installMorrowClient(options)).toThrow(/settings\.json is a symbolic link/);
+      expect((await lstat(settingsPath)).isSymbolicLink()).toBe(true);
+      expect(await readFile(outsideSettings, "utf8")).toBe(original);
+
+      await rm(settingsPath);
+      await rm(geminiDirectory, { recursive: true });
+      await symlink(outsideDirectory, geminiDirectory, "dir");
+      expect(() => installMorrowClient(options)).toThrow(/\.gemini is a symbolic link/);
+      expect((await lstat(geminiDirectory)).isSymbolicLink()).toBe(true);
+      expect(await readFile(outsideSettings, "utf8")).toBe(original);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("replaces only a receipt-bound client entry during relocation and rejects a newer edit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-relocation-"));
+    const oldRoot = join(directory, "old-runtime");
+    const newRoot = join(directory, "new-runtime");
+    const clientProject = join(directory, "course-project");
+    const materials = join(directory, "Morrow Materials");
+    const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+    const fixture = async (root: string) => {
+      const serverEntryPath = join(root, "packages", "mcp-server", "dist", "index.js");
+      const upstreamConfigPath = join(root, "morrow.upstreams.json");
+      await mkdir(dirname(serverEntryPath), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      return { repositoryRoot: root, serverEntryPath, upstreamConfigPath };
+    };
+    try {
+      await mkdir(clientProject, { recursive: true });
+      await mkdir(materials, { recursive: true });
+      const oldRuntime = await fixture(oldRoot);
+      const newRuntime = await fixture(newRoot);
+      const settingsPath = join(clientProject, ".gemini", "settings.json");
+      await mkdir(dirname(settingsPath), { recursive: true });
+      const customPrefix = "{\n    \"theme\": \"night\",\n    \"mcpServers\": {}\n}\n";
+      await writeFile(settingsPath, customPrefix, "utf8");
+
+      const first = installMorrowClient({
+        ...oldRuntime,
+        nodeCommand: process.execPath,
+        client: "gemini-cli",
+        projectRoot: clientProject,
+        workspaceRoot: materials,
+      });
+      expect(first.sha256).toBe(sha256(await readFile(settingsPath, "utf8")));
+
+      const upgraded = spawnSync(process.execPath, [
+        cliPath, "mcp", "install", "gemini", "--scope", "project",
+        "--repository", newRoot, "--upstreams", newRuntime.upstreamConfigPath,
+        "--server-entry", newRuntime.serverEntryPath, "--node", process.execPath,
+        "--client-project", clientProject, "--workspace-root", materials,
+        "--expected-config-sha256", first.sha256, "--json",
+      ], { encoding: "utf8" });
+      expect(upgraded.status, upgraded.stderr).toBe(0);
+      const receipt = JSON.parse(upgraded.stdout) as { changed: boolean; sha256: string };
+      const upgradedText = await readFile(settingsPath, "utf8");
+      expect(receipt).toMatchObject({ changed: true, sha256: sha256(upgradedText) });
+      expect(upgradedText).toContain(newRuntime.serverEntryPath);
+      expect(upgradedText).not.toContain(oldRuntime.serverEntryPath);
+      expect(upgradedText.startsWith("{\n    \"theme\": \"night\",\n    \"mcpServers\": {")).toBe(true);
+
+      expect(installMorrowClient({
+        ...newRuntime,
+        nodeCommand: process.execPath,
+        client: "gemini-cli",
+        projectRoot: clientProject,
+        workspaceRoot: materials,
+        expectedConfigSha256: receipt.sha256,
+      })).toMatchObject({ changed: false, sha256: receipt.sha256 });
+
+      const newer = upgradedText.replace("\"night\"", "\"day\"");
+      await writeFile(settingsPath, newer, "utf8");
+      expect(() => installMorrowClient({
+        ...newRuntime,
+        nodeCommand: process.execPath,
+        client: "gemini-cli",
+        projectRoot: clientProject,
+        workspaceRoot: materials,
+        expectedConfigSha256: receipt.sha256,
+      })).toThrow(/changed after Morrow recorded it/);
+      expect(await readFile(settingsPath, "utf8")).toBe(newer);
+
+      const codexPath = join(clientProject, ".codex", "config.toml");
+      await mkdir(dirname(codexPath), { recursive: true });
+      const codexPrefix = "model = \"gpt-6\"  \n# preserve me\n\n";
+      await writeFile(codexPath, codexPrefix, "utf8");
+      const oldCodex = installMorrowClient({
+        ...oldRuntime,
+        nodeCommand: process.execPath,
+        client: "codex",
+        projectRoot: clientProject,
+        workspaceRoot: materials,
+      });
+      const laterCodexSection = "[projects.\"/tmp/other-course\"]  # preserve this section exactly\ntrust_level = \"trusted\"  \n\n# preserve the final whitespace\n  \n";
+      const oldCodexText = await readFile(codexPath, "utf8");
+      await writeFile(codexPath, `${oldCodexText}${laterCodexSection}`, "utf8");
+      const recordedCodexSha256 = sha256(await readFile(codexPath, "utf8"));
+      const newCodex = installMorrowClient({
+        ...newRuntime,
+        nodeCommand: process.execPath,
+        client: "codex",
+        projectRoot: clientProject,
+        workspaceRoot: materials,
+        expectedConfigSha256: recordedCodexSha256,
+      });
+      const codexText = await readFile(codexPath, "utf8");
+      expect(newCodex).toMatchObject({ changed: true, sha256: sha256(codexText) });
+      expect(codexText.startsWith(codexPrefix)).toBe(true);
+      expect(oldCodex.sha256).toBe(sha256(oldCodexText));
+      expect(codexText).toContain(newRuntime.serverEntryPath);
+      expect(codexText).not.toContain(oldRuntime.serverEntryPath);
+      expect(codexText.match(/\[mcp_servers\.morrow\]/g)).toHaveLength(1);
+      expect(codexText.endsWith(laterCodexSection)).toBe(true);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

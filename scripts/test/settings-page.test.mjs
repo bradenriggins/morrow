@@ -138,6 +138,26 @@ test("the connected-course summary counts only runtime-verified eligible courses
   assert.equal(page.text("#course-list"), "No connected courses are available. Choose a signed-in site above to find courses you can connect.");
 });
 
+test("an older settings response cannot replace a newer connected-course state", async () => {
+  let call = 0;
+  let resolveOlder;
+  const older = new Promise((resolve) => { resolveOlder = resolve; });
+  const page = await openSettings({ status: () => {
+    call += 1;
+    if (call === 1) return statusFixture([ANATOMY]);
+    if (call === 2) return older;
+    return statusFixture([]);
+  } });
+  page.listeners.storage[0]({}, "local");
+  page.listeners.storage[0]({}, "local");
+  await page.waitFor(() => page.messages("morrow_edit_policy_status").length === 3 && page.text("#connection-status") === "No course is connected yet.",
+    "the newer settings response did not render");
+  resolveOlder(statusFixture([PHYSIOLOGY]));
+  await page.flush();
+  assert.equal(page.text("#connection-status"), "No course is connected yet.");
+  assert.deepEqual(listedCourses(page), []);
+});
+
 test("a course search narrows the list, and the pages move through the courses that match", async () => {
   const courses = ["Anatomy", "Physiology", "Pharmacology", "Microbiology", "Nutrition", "Pathology", "Genetics", "Immunology"]
     .map((name, index) => canvasCourse(index + 1, name));
@@ -224,7 +244,7 @@ test("Edit actions stay closed until a course is selected and Edit is chosen", a
   await page.click("#mode-plan");
   assert.equal(page.hidden("#category-fieldset"), true);
   assert.equal(page.hidden("#save-edit"), true);
-  assert.equal(page.text("#action-help"), "Plan is active for these courses. Return them to Plan to remove any saved Edit access immediately.");
+  assert.equal(page.text("#action-help"), "To remove any saved Edit access, return the selected courses to Plan.");
 });
 
 test("Plan and Edit reads the individual actions for a course only when that course is selected", async () => {
@@ -239,6 +259,36 @@ test("Plan and Edit reads the individual actions for a course only when that cou
   assert.deepEqual(page.messages("morrow_edit_policy_options"),
     [{ type: "morrow_edit_policy_options", sourceBindingId: ANATOMY.sourceBindingId }]);
   assert.deepEqual(listedActions(page), [CHECKED_ACTION.label]);
+});
+
+test("a selected course without a verified open site stays available for Plan recovery only", async () => {
+  const stale = { ...ANATOMY, runtimeVerified: false, editPermission: editPermissionSummary(ANATOMY.sourceBindingId, Date.now() + ONE_HOUR_MS) };
+  const page = await openSettings({
+    status: () => statusFixture([stale]),
+    options: (sourceBindingId) => optionsFixture(sourceBindingId, [CHECKED_ACTION], { runtimeVerified: false }),
+  });
+  await page.click(`[data-binding-id="${stale.sourceBindingId}"] .course-select`);
+  assert.deepEqual(page.messages("morrow_edit_policy_options"), []);
+  assert.equal(page.query("#mode-edit").disabled, true);
+  assert.equal(page.query("#return-plan").disabled, false);
+  assert.equal(page.text("#category-list"), "Open every selected course site in Chrome, then refresh this page before you choose Edit.");
+  assert.equal(page.text("#edit-stage-hint"), "Open every selected course site in Chrome, then refresh this page before you choose Edit.");
+  assert.equal(page.text("#action-help"), "Open every selected course site in Chrome, then refresh this page before you choose Edit.");
+});
+
+test("an options response that is not runtime verified moves the course to site recovery", async () => {
+  const page = await openSettings({
+    status: () => statusFixture([ANATOMY]),
+    options: (sourceBindingId) => optionsFixture(sourceBindingId, [CHECKED_ACTION], { runtimeVerified: false }),
+  });
+  await page.click(`[data-binding-id="${ANATOMY.sourceBindingId}"] .course-select`);
+  await page.waitFor(() => page.messages("morrow_edit_policy_options").length === 1 && !page.text("#category-list").includes("Reading the current individual actions"),
+    "the unverified options response did not settle");
+  assert.equal(page.query("#mode-edit").disabled, true);
+  assert.deepEqual(listedActions(page), []);
+  assert.equal(page.hidden("#error"), true);
+  assert.equal(page.text("#category-list"), "Open every selected course site in Chrome, then refresh this page before you choose Edit.");
+  assert.equal(page.text(".permission-state"), "Course tab needed");
 });
 
 test("an action published for review only carries its reason and no Edit control", async () => {

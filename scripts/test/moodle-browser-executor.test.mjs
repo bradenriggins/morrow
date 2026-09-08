@@ -2263,7 +2263,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
       course_id: 2,
       module_id: 8,
       overrides: [
-        { override_id: 41, scope: "user", available_from: null, due_date: { year: 2026, month: 9, day: 12, hour: 17, minute: 0 }, cutoff_at: null },
+        { override_id: 41, scope: "user", user_id: 9, available_from: null, due_date: { year: 2026, month: 9, day: 12, hour: 17, minute: 0 }, cutoff_at: null },
         { override_id: 42, scope: "group", group_id: 5, group_name: "Section A", available_from: null, due_date: { year: 2026, month: 9, day: 14, hour: 9, minute: 0 }, cutoff_at: null },
       ],
       user_override_count: 1,
@@ -2275,6 +2275,8 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
       { field: "module_id", label: "Assignment", name: "Evidence analysis" },
     ]);
     assert.equal(JSON.stringify(overridesRead).includes("Robin Fields"), false);
+    assert.equal(Object.hasOwn(overridesRead.data.overrides[0], "group_id"), false);
+    assert.equal(Object.hasOwn(overridesRead.data.overrides[1], "user_id"), false);
     assert.ok(requests.includes("GET /mod/assign/overrides.php?cmid=8&mode=user"));
     assert.ok(requests.includes("GET /mod/assign/overrides.php?cmid=8&mode=group"));
 
@@ -2292,7 +2294,7 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
     assert.equal(createdOverride.data.override_id, 43);
     assert.deepEqual(createdOverride.data.overrides.map((entry) => entry.override_id), [41, 43, 42]);
     assert.deepEqual(createdOverride.data.overrides[1], {
-      override_id: 43, scope: "user", available_from: null,
+      override_id: 43, scope: "user", user_id: 10, available_from: null,
       due_date: { year: 2026, month: 9, day: 20, hour: 12, minute: 0 },
       cutoff_at: { year: 2026, month: 9, day: 21, hour: 12, minute: 0 },
     });
@@ -2305,7 +2307,8 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
       { field: "user_id", label: "User override", name: "One Moodle user" },
     ]);
     assert.equal(JSON.stringify(createdOverride).includes("Sam Ortega"), false);
-    assert.deepEqual(createdOverride.data.overrides.flatMap((entry) => Object.keys(entry)).filter((key) => /user/i.test(key)), []);
+    assert.equal(Object.hasOwn(createdOverride.data.overrides[1], "group_id"), false);
+    assert.equal(Object.hasOwn(createdOverride.data.overrides[2], "user_id"), false);
     assert.equal(overridePosts.length, 1);
     assert.equal(overridePosts[0].get("userid"), "10");
     assert.equal(overridePosts[0].get("duedate[day]"), "20");
@@ -4095,7 +4098,7 @@ test("Moodle executor writes the complete Quiz settings scope and Quiz overrides
       course_id: 2,
       module_id: 9,
       overrides: [
-        { override_id: 71, scope: "user", open_at: null, close_at: { year: 2026, month: 9, day: 12, hour: 17, minute: 0 }, time_limit_seconds: null, attempts_allowed: "0" },
+        { override_id: 71, scope: "user", user_id: 9, open_at: null, close_at: { year: 2026, month: 9, day: 12, hour: 17, minute: 0 }, time_limit_seconds: null, attempts_allowed: "0" },
         { override_id: 72, scope: "group", group_id: 5, group_name: "Section A", open_at: null, close_at: null, time_limit_seconds: 1800, attempts_allowed: "2" },
       ],
       user_override_count: 1,
@@ -4107,6 +4110,8 @@ test("Moodle executor writes the complete Quiz settings scope and Quiz overrides
       { field: "module_id", label: "Quiz", name: "Evidence quiz" },
     ]);
     assert.equal(JSON.stringify(overrideList).includes("Robin Fields"), false);
+    assert.equal(Object.hasOwn(overrideList.data.overrides[0], "group_id"), false);
+    assert.equal(Object.hasOwn(overrideList.data.overrides[1], "user_id"), false);
     assert.ok(requests.includes("GET /mod/quiz/overrides.php?cmid=9&mode=user"));
     assert.ok(requests.includes("GET /mod/quiz/overrides.php?cmid=9&mode=group"));
 
@@ -4120,7 +4125,7 @@ test("Moodle executor writes the complete Quiz settings scope and Quiz overrides
     assert.equal(created.data.override_id, 73);
     assert.deepEqual(created.data.overrides.map((entry) => entry.override_id), [71, 73, 72]);
     assert.deepEqual(created.data.overrides[1], {
-      override_id: 73, scope: "user", open_at: { year: 2026, month: 9, day: 20, hour: 12, minute: 0 },
+      override_id: 73, scope: "user", user_id: 10, open_at: { year: 2026, month: 9, day: 20, hour: 12, minute: 0 },
       close_at: null, time_limit_seconds: 5400, attempts_allowed: "3",
     });
     assert.deepEqual(created.data.overrides[0], overrideList.data.overrides[0]);
@@ -4128,6 +4133,8 @@ test("Moodle executor writes the complete Quiz settings scope and Quiz overrides
     assert.deepEqual([created.data.user_override_count, created.data.group_override_count, created.data.complete], [2, 1, true]);
     assert.deepEqual(created.targets[2], { field: "user_id", label: "User override", name: "One Moodle user" });
     assert.equal(JSON.stringify(created).includes("Sam Ortega"), false);
+    assert.equal(Object.hasOwn(created.data.overrides[1], "group_id"), false);
+    assert.equal(Object.hasOwn(created.data.overrides[2], "user_id"), false);
     assert.equal(overridePosts.length, 1);
     assert.deepEqual([overridePosts[0].get("userid"), overridePosts[0].get("timelimit[number]"), overridePosts[0].get("timelimit[timeunit]"), overridePosts[0].get("attempts"), overridePosts[0].get("timeclose[enabled]")], ["10", "5400", "1", "3", null]);
 

@@ -365,6 +365,7 @@ test("state() reports the Chrome load state the Bridge itself answered", async (
   await installer.ensureRuntime();
   await fs.writeFile(path.join(root, "UserData", "State", "morrow.upstreams.json"), "{}\n");
   installer.bridgeInstallation = installation;
+  installer.readBridgeInstallation = async () => installer.bridgeInstallation;
 
   // The first read starts the runtime and answers with what Morrow has already
   // observed, which is nothing yet. The read after it shows what that start found.
@@ -692,6 +693,23 @@ test("repair rebuilds a Bridge folder that was removed and re-issues its active-
   assert.equal((await fs.readdir(path.join(stateDirectory, "Backups"))).length, 1, "a Bridge folder that verifies is kept");
 });
 
+test("state stops reporting a Bridge folder that was removed while Morrow stayed open", async () => {
+  const root = await temporaryRoot();
+  const { installer } = await repairableController(root);
+  const stateDirectory = path.join(root, "UserData", "State");
+  const bridgeDirectory = path.join(root, "UserData", "Bridge");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
+  await installer.initializeBridgeAtStartup();
+
+  assert.equal((await installer.state()).bridge.folderReady, true);
+  await fs.rm(bridgeDirectory, { recursive: true, force: true });
+
+  const afterRemoval = await installer.state();
+  assert.equal(afterRemoval.bridge.folderReady, false, "state re-reads the app-owned Bridge folder from disk");
+  assert.equal(afterRemoval.bridge.loadedInChrome, false);
+});
+
 test("repair refuses a payload that no longer verifies and changes nothing", async () => {
   const root = await temporaryRoot();
   const { installer, calls } = await repairableController(root);
@@ -761,14 +779,14 @@ test("repair refuses to start while another operation holds the runtime", async 
   installer.bridgeReconciliation = null;
 });
 
-test("repair keeps an installer record it cannot read and starts a fresh one", async () => {
+test("repair keeps a malformed installer record in Backups and starts a fresh one", async () => {
   const root = await temporaryRoot();
   const { installer, calls } = await repairableController(root);
   const stateDirectory = path.join(root, "UserData", "State");
   await fs.mkdir(stateDirectory, { recursive: true });
-  const stored = `${JSON.stringify({ schema: "morrow.desktop-state.v2", version: 1, selectedAssistantId: "codex" })}\n`;
+  const stored = "{not-json\n";
   await fs.writeFile(path.join(stateDirectory, "installer.json"), stored);
-  await assert.rejects(() => installer.record(), /migration_required/);
+  await assert.rejects(() => installer.record(), /JSON/);
 
   const state = await installer.repair();
   assert.deepEqual(await installer.record(), freshRecord());
@@ -778,6 +796,32 @@ test("repair keeps an installer record it cannot read and starts a fresh one", a
   assert.equal(state.lifecycle, "ready_for_assistant");
   assert.equal(state.selectedAssistantId, null);
   assert.deepEqual(calls.map((entry) => entry[0]), ["setup"], "a fresh record names no assistant to configure");
+});
+
+test("repair leaves an installer record from another app version exactly as it is", async () => {
+  const root = await temporaryRoot();
+  const { installer, calls } = await repairableController(root);
+  const stateDirectory = path.join(root, "UserData", "State");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  const stored = `${JSON.stringify({
+    schema: "morrow.desktop-state.v1",
+    version: 2,
+    selectedAssistantId: "codex",
+    configured: {},
+    materialsFolder: path.join(root, "Materials from newer Morrow")
+  })}\n`;
+  const recordPath = path.join(stateDirectory, "installer.json");
+  await fs.writeFile(recordPath, stored);
+
+  await assert.rejects(() => installer.repair(), (error) => {
+    assert.equal(error.code, "installer_record_incompatible");
+    assert.equal(error.recovery, "Install the Morrow version that created this setup record. Morrow left the record unchanged.");
+    return true;
+  });
+
+  assert.equal(await fs.readFile(recordPath, "utf8"), stored);
+  assert.deepEqual(calls, []);
+  assert.equal((await installer.state()).lifecycle, "repair_required");
 });
 
 test("repair writes the assistant configuration again when the file Morrow wrote is gone", async () => {
@@ -799,11 +843,33 @@ test("repair writes the assistant configuration again when the file Morrow wrote
   assert.equal((await fs.stat(target)).isFile(), true);
   assert.deepEqual(calls.map((entry) => entry[0]), ["setup", "mcp"]);
   assert.equal(calls[1].includes("--client-project"), false, "ChatGPT is configured without an assistant project");
+  assert.equal(calls[1].includes("--expected-config-sha256"), false,
+    "a missing file has no current digest for the client configuration command to match");
   assert.equal(calls[1][2], "codex");
   const record = await installer.record();
   assert.equal(record.configured.codex.sha256, sha256(await fs.readFile(target)));
   assert.equal(state.assistants.find((assistant) => assistant.id === "codex").configured, true);
   assert.equal(state.lifecycle, "assistant_ready");
+});
+
+test("repair replaces an unchanged assistant configuration only through its recorded digest", async () => {
+  const root = await temporaryRoot();
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.writeFile(target, "[mcp_servers.morrow]\ncommand = \"morrow\"\n");
+  const recorded = sha256(await fs.readFile(target));
+  const { installer, calls } = await repairableController(root);
+  await installer.writeRecord({
+    ...freshRecord(),
+    selectedAssistantId: "codex",
+    configured: { codex: { target, sha256: recorded } }
+  });
+
+  await installer.repair();
+
+  assert.deepEqual(calls.map((entry) => entry[0]), ["setup", "mcp"]);
+  assert.equal(calls[1][calls[1].indexOf("--expected-config-sha256") + 1], recorded);
+  assert.equal((await installer.record()).configured.codex.sha256, recorded);
 });
 
 /**

@@ -362,6 +362,8 @@ async function planUltraAssignment(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const assignment = reviewedAssignment(input);
+  const target = assignmentEffectTarget(runtime, input);
+  runtime.assertEffectTargetFree(target);
   // A plan exists only to be dispatched, so it carries the write condition. An
   // instructor is refused before review instead of after approving a change
   // Morrow would then refuse to send.
@@ -409,6 +411,12 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
   };
 }
 
+function assignmentEffectTarget(runtime: BlackboardLearnRuntime, input: AssignmentPlanInput) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "ultra-assignment-create", {});
+}
+
 /**
  * The one dispatch: it sends one create request and then re-reads both records
  * Blackboard named. Everything it can refuse it refuses before that request
@@ -433,7 +441,8 @@ async function applyReviewedUltraAssignment(
     throw new BlackboardApiError("blackboard_patch_review_required", "The Blackboard effect grant does not match this exact reviewed plan.");
   }
   const assignment = reviewedAssignment(input);
-  runtime.claimReservedEffectGrant(grant);
+  const target = assignmentEffectTarget(runtime, input);
+  const dispatch = runtime.claimReservedEffectGrant(grant, target);
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -450,6 +459,7 @@ async function applyReviewedUltraAssignment(
   // failure from here on is reported as applied_or_unknown, and every refusal
   // raised above this point keeps not_sent.
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     const created = await write.client.post(createAssignmentPath(write.courseId), createRequest(assignment), signal);
@@ -498,6 +508,7 @@ async function applyReviewedUltraAssignment(
     if (gradedItem !== null && gradedItem !== contentId) {
       throw mismatch("Blackboard returned a gradebook column that grades a different item than the assignment it created.", dispatchState);
     }
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.ultra-assignment.readback.v1",
       ok: true,
@@ -524,6 +535,7 @@ async function applyReviewedUltraAssignment(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -559,13 +571,15 @@ async function verifyUltraAssignment(
     && isJsonObject(column[SCORE_FIELD]) && column[SCORE_FIELD].possible === assignment.pointsPossible
     && isJsonObject(column[GRADING_FIELD]) && instant(column[GRADING_FIELD].due) === assignment.due
   ));
+  const verified = matches.length === 1;
+  runtime.recordEffectComparison(assignmentEffectTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.ultra-assignment.comparator.v1",
     ok: true,
     tenantId: comparator.tenantId,
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
-    verified: matches.length === 1,
+    verified,
     readback: READBACK_STATE,
     status: "api_configured_live_untested",
   };

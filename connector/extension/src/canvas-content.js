@@ -24,7 +24,7 @@
   }
 
   async function pageJson(url) {
-    const response = await fetch(url, { credentials: "include", cache: "no-store", headers: { Accept: "application/json+canvas-string-ids" } });
+    const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" } });
     if (!response.ok) throw new Error("page_check_unavailable");
     return JSON.parse(await readBounded(response));
   }
@@ -46,6 +46,7 @@
       credentials: "include",
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
+      redirect: "error",
     });
     if (!response.ok) throw new Error(`canvas_course_http_${response.status}`);
     const course = JSON.parse(await readBounded(response));
@@ -82,6 +83,7 @@
       credentials: "include",
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
+      redirect: "error",
     });
     if (!response.ok) throw new Error(`canvas_courses_http_${response.status}`);
     const courses = JSON.parse(await readBounded(response));
@@ -743,17 +745,23 @@
   // next link refuses the read instead of silently reading somewhere else. Real
   // Canvas Link header shapes are live-unverified, so a Canvas deployment that
   // paginates onto a different path would stop here rather than be followed.
-  function linkHeaderUrls(value, origin, pathname) {
+  function linkHeaderUrls(value, origin, pathname, requested) {
     const links = new Map();
-    for (const part of String(value || "").split(",")) {
+    const raw = String(value || "");
+    if (!raw.trim()) return links;
+    for (const part of raw.split(",")) {
       const match = /^\s*<([^>]+)>;\s*rel="?([a-z]+)"?\s*$/i.exec(part);
-      if (!match) continue;
+      if (!match) throw new Error("canvas_pagination_header_refused");
       const relation = match[2].toLowerCase();
       const url = new URL(match[1]);
       if (url.origin !== origin || url.pathname !== pathname) {
         if (relation === "next") throw new Error("canvas_pagination_origin_refused");
         continue;
       }
+      if (relation === "next" && requested && !sameRequestParameters(url, requested)) {
+        throw new Error("canvas_pagination_parameters_refused");
+      }
+      if (links.has(relation)) throw new Error("canvas_pagination_header_refused");
       links.set(relation, url);
     }
     return links;
@@ -777,16 +785,29 @@
     return next !== null && last !== null && last >= next ? last - next + 1 : null;
   }
 
-  // A resumed read may only carry the pagination parameters Canvas itself adds.
-  // Any other parameter that Morrow did not send, for example an extra include,
-  // would widen the read, so the resume is refused instead. Canvas echoing every
-  // original parameter is not required here; that behaviour is live-unverified.
+  // A later page must preserve every query that defined the first page. Canvas
+  // may add one bounded per_page value and one page cursor. It may not remove a
+  // filter, change a value, repeat a control, or add a new query that widens the
+  // read.
   function sameRequestParameters(resumed, requested) {
-    const sent = new Set([...requested.searchParams].map(([name, value]) => `${name}=${value}`));
-    for (const [name, value] of resumed.searchParams) {
+    const requestedNames = new Set(requested.searchParams.keys());
+    const resumedNames = new Set(resumed.searchParams.keys());
+    for (const name of requestedNames) {
       if (name === "page" || name === "per_page") continue;
-      if (!sent.has(`${name}=${value}`)) return false;
+      const expected = requested.searchParams.getAll(name);
+      const observed = resumed.searchParams.getAll(name);
+      if (observed.length !== expected.length || expected.some((value, index) => observed[index] !== value)) return false;
     }
+    for (const name of resumedNames) if (name !== "page" && name !== "per_page" && !requestedNames.has(name)) return false;
+    const pages = resumed.searchParams.getAll("page");
+    if (pages.length !== 1 || pages[0].length < 1 || pages[0].length > 1_024) return false;
+    const expectedPerPage = requested.searchParams.getAll("per_page");
+    const observedPerPage = resumed.searchParams.getAll("per_page");
+    if (expectedPerPage.length > 0) {
+      if (observedPerPage.length !== expectedPerPage.length
+        || expectedPerPage.some((value, index) => observedPerPage[index] !== value)) return false;
+    } else if (observedPerPage.length > 1
+      || (observedPerPage.length === 1 && !/^(?:[1-9]|[1-9][0-9]|100)$/.test(observedPerPage[0]))) return false;
     return true;
   }
 
@@ -1348,6 +1369,7 @@
       credentials: "include",
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
+      redirect: "error",
     });
     if (!response.ok) throw new Error(`canvas_profile_http_${response.status}`);
     const profile = JSON.parse(await readBounded(response));
@@ -1403,7 +1425,7 @@
     }
     const isRead = operation.method === "GET";
     const headers = new Headers({ Accept: "application/json+canvas-string-ids" });
-    const options = { method: operation.method, credentials: "include", headers, cache: "no-store" };
+    const options = { method: operation.method, credentials: "include", headers, cache: "no-store", redirect: "error" };
     if (!isRead) {
       const csrfCookie = document.cookie.split(";").map((entry) => entry.trim()).find((entry) => entry.startsWith("_csrf_token="));
       const csrf = csrfCookie ? decodeURIComponent(csrfCookie.slice("_csrf_token=".length)) : "";
@@ -1472,7 +1494,7 @@
         return { ok: false, sent: true, status: response.status, ...(isRead ? {} : { outcomeUnknown }), error: payload, requestUrl: url.pathname };
       }
       pages.push(payload);
-      links = isRead ? linkHeaderUrls(response.headers.get("Link"), location.origin, url.pathname) : new Map();
+      links = isRead ? linkHeaderUrls(response.headers.get("Link"), location.origin, url.pathname, url) : new Map();
       next = isRead ? links.get("next")?.href || null : null;
     }
     const pagesRead = pagesBefore + pages.length;

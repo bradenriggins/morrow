@@ -304,6 +304,7 @@ test("the in-frame fan-out rule answers exactly as item-bank-fan-out.js does", a
     ["external_course_ids_mismatch", { ...record, external_course_ids: ["9"] }, EXTERNAL],
     ["acknowledgement_mismatch", record, ["77"]],
     ["established_at_unreadable", { ...record, established_at: "2026-09-06 18:00:00" }, EXTERNAL],
+    ["record_from_future", { ...record, established_at: new Date(Date.now() + 60_000).toISOString() }, EXTERNAL],
   ];
   for (const [label, fanOutRecord, acknowledged] of cases) {
     const reason = await validFanOut(fanOutRecord, { bankId: BANK, courseId: COURSE, acknowledgedCourseIds: acknowledged, now: Date.now() });

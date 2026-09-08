@@ -411,10 +411,29 @@ export async function executeMoodleActivityContentReadInPage(rawInput) {
     const parsed = await documentFrom(endpoint, "application/xml", "application/xml");
     if (parsed === "limit") return incomplete();
     if (parsed === "context") return fail("context_changed");
-    // Moodle's item export refuses to build a file for a Feedback that has no
-    // items, so an absent document is not proof of an empty item list.
-    if (!parsed) return fail("unavailable");
-    const items = feedbackItems(parsed);
+    // Moodle's export refuses an empty Feedback. Its new-item form has one
+    // possible position only when the complete saved item list is empty, so
+    // that native form supplies the zero-state proof the export cannot.
+    let items;
+    if (!parsed) {
+      const emptyPage = await documentFrom(url("/mod/feedback/edit_item.php", { cmid: moduleId, typ: "textfield" }), "text/html", "text/html");
+      if (emptyPage === "limit") return incomplete();
+      if (emptyPage === "context") return fail("context_changed");
+      const forms = emptyPage ? [...emptyPage.querySelectorAll("form")].filter((candidate) => {
+        try {
+          const action = new URL(candidate.getAttribute("action") || "", site.href);
+          return String(candidate.getAttribute("method") || "").toLowerCase() === "post"
+            && action.origin === site.origin && action.pathname === `${basePath}/mod/feedback/edit_item.php`;
+        } catch { return false; }
+      }) : [];
+      const positions = forms.length === 1
+        ? [...forms[0].querySelectorAll('select[name="position"] option')].map((option) => String(option.value ?? ""))
+        : [];
+      if (positions.length !== 1 || positions[0] !== "1") return fail("unavailable");
+      items = [];
+    } else {
+      items = feedbackItems(parsed);
+    }
     if (items === "limit") return incomplete();
     if (!items) return fail("response_invalid");
     data = {

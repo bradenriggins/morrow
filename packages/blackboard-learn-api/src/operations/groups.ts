@@ -37,13 +37,12 @@ const GROUP_ROUTE = `${GROUPS_ROUTE}/{group_id}`;
 const GROUP_SETS_ROUTE = `${GROUPS_ROUTE}/sets`;
 
 /**
- * The group membership routes, which Morrow calls at `v1` and at no other
- * version. It tries no second path for them: a `404` on a route Morrow guessed
- * cannot be told apart from a person who is not in the group, and reading one as
- * the other would plan a change against a membership nobody read. A site that
- * does not answer this path is reported as `blackboard_operation_unavailable`.
+ * The group membership routes, written at the current version Morrow asks for
+ * first. Morrow resolves the collection before it addresses one membership, so
+ * a missing version can fall back without treating a missing person as a
+ * missing route.
  */
-const GROUP_MEMBERS_ROUTE = "/learn/api/public/v1/courses/{course_id}/groups/{group_id}/users";
+const GROUP_MEMBERS_ROUTE = "/learn/api/public/v2/courses/{course_id}/groups/{group_id}/users";
 const GROUP_MEMBERSHIP_ROUTE = `${GROUP_MEMBERS_ROUTE}/{user_id}`;
 
 /** The exact fields every group and group-set read asks for, so no read is open-ended. */
@@ -179,12 +178,12 @@ function groupSetsPath(version: GroupApiVersion, courseId: string): string {
   return `${groupsPath(version, courseId)}/sets`;
 }
 
-function groupMembersPath(courseId: string, groupId: string): string {
-  return `/learn/api/public/v1/courses/${encodeURIComponent(courseId)}/groups/${encodeURIComponent(groupId)}/users`;
+function groupMembersPath(version: GroupApiVersion, courseId: string, groupId: string): string {
+  return `/learn/api/public/${version}/courses/${encodeURIComponent(courseId)}/groups/${encodeURIComponent(groupId)}/users`;
 }
 
-function groupMembershipPath(courseId: string, groupId: string, userId: string): string {
-  return `${groupMembersPath(courseId, groupId)}/${encodeURIComponent(userId)}`;
+function groupMembershipPath(version: GroupApiVersion, courseId: string, groupId: string, userId: string): string {
+  return `${groupMembersPath(version, courseId, groupId)}/${encodeURIComponent(userId)}`;
 }
 
 /** One Blackboard record identifier Morrow can name a record by, or `null`. */
@@ -279,11 +278,37 @@ async function collectGroupMembers(
   courseId: string,
   groupId: string,
   signal?: AbortSignal,
+): Promise<ResolvedCollection> {
+  for (const apiVersion of GROUP_API_VERSIONS) {
+    try {
+      return {
+        apiVersion,
+        records: await client.collect(groupMembersPath(apiVersion, courseId, groupId), {
+          label: "group membership", fields: MEMBER_FIELDS, signal,
+        }),
+      };
+    } catch (error) {
+      if (!routeMissing(error)) throw error;
+    }
+  }
+  throw routeUnavailable(
+    "group membership collection",
+    GROUP_API_VERSIONS.map((version) => groupMembersPath(version, courseId, groupId)),
+  );
+}
+
+async function collectGroupMembersAt(
+  client: BlackboardLearnClient,
+  apiVersion: GroupApiVersion,
+  courseId: string,
+  groupId: string,
+  signal?: AbortSignal,
 ): Promise<readonly JsonObject[]> {
+  const path = groupMembersPath(apiVersion, courseId, groupId);
   try {
-    return await client.collect(groupMembersPath(courseId, groupId), { label: "group membership", fields: MEMBER_FIELDS, signal });
+    return await client.collect(path, { label: "group membership", fields: MEMBER_FIELDS, signal });
   } catch (error) {
-    if (routeMissing(error)) throw routeUnavailable("group membership collection", [groupMembersPath(courseId, groupId)]);
+    if (routeMissing(error)) throw routeUnavailable("group membership collection", [path]);
     throw error;
   }
 }
@@ -560,6 +585,24 @@ function assertReviewedPlan(runtime: BlackboardLearnRuntime, grant: BlackboardEf
   }
 }
 
+function groupCreateEffectTarget(runtime: BlackboardLearnRuntime, input: GroupCreateInput) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "course-group-create", {});
+}
+
+function groupPatchEffectTarget(runtime: BlackboardLearnRuntime, input: GroupScope) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "course-group", { groupId: input.group_id });
+}
+
+function groupMembershipEffectTarget(runtime: BlackboardLearnRuntime, input: GroupScope, userId: string) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "group-membership", { groupId: input.group_id, userId });
+}
+
 /** What the readback after each change proves, in plain words. */
 const CREATE_READBACK_DETAIL = "Morrow re-read the group by the id Blackboard returned and compared its name, its description, and whether it is available, against the reviewed plan.";
 const PATCH_READBACK_DETAIL = "Morrow re-read the group and compared the group record, its name, its description, and whether it is available, against the reviewed plan.";
@@ -668,15 +711,15 @@ async function listGroupMembers(
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
   const group = await readGroup(read.client, read.courseId, input.group_id, signal);
-  const records = await collectGroupMembers(read.client, read.courseId, input.group_id, signal);
-  const members = memberAccountIds(records, input.group_id).map((userId) => ({ learnerToken: exactReference(read, userId) }));
+  const membership = await collectGroupMembers(read.client, read.courseId, input.group_id, signal);
+  const members = memberAccountIds(membership.records, input.group_id).map((userId) => ({ learnerToken: exactReference(read, userId) }));
   return {
     schema: "morrow.blackboard.group-members.v1",
     ok: true,
     tenantId: read.tenantId,
     sourceBindingId: read.sourceBindingId,
     courseId: read.courseId,
-    apiVersion: group.apiVersion,
+    apiVersion: membership.apiVersion,
     groupId: input.group_id,
     group: safeGroup(group.record, read.roster),
     members,
@@ -708,6 +751,7 @@ async function planCourseGroup(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const group = reviewedGroup(input);
+  runtime.assertEffectTargetFree(groupCreateEffectTarget(runtime, input));
   // A plan exists only to be dispatched, so it carries the write condition. An
   // instructor is refused before review instead of after approving a group
   // Morrow would then refuse to make.
@@ -790,7 +834,7 @@ async function applyReviewedCourseGroup(
   const grant = reservedGrant(input._morrow.outer_grant);
   assertReviewedPlan(runtime, grant, input.expected_plan_digest);
   const group = reviewedGroup(input);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, groupCreateEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -810,6 +854,7 @@ async function applyReviewedCourseGroup(
   // failure from here on is reported as applied_or_unknown, and every refusal
   // raised above this point keeps not_sent.
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     const created = await write.client.post(groupsPath(groups.apiVersion, write.courseId), groupRequest(group), signal);
@@ -823,6 +868,7 @@ async function applyReviewedCourseGroup(
     const record = await write.client.get(withFields(groupPath(groups.apiVersion, write.courseId, groupId), GROUP_FIELDS), signal);
     if (exactId(record.id) !== groupId) throw mismatch("Blackboard returned a different group than the one it created.", dispatchState);
     compareGroup(record, group, dispatchState);
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.course-group.readback.v1",
       ok: true,
@@ -841,6 +887,7 @@ async function applyReviewedCourseGroup(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -866,13 +913,15 @@ async function verifyCourseGroup(
   }, signal);
   const groups = await collectGroups(comparator.client, comparator.courseId, signal);
   const matches = groups.records.filter((record) => savedGroup(record, group));
+  const verified = matches.length === 1;
+  runtime.recordEffectComparison(groupCreateEffectTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.course-group.comparator.v1",
     ok: true,
     tenantId: comparator.tenantId,
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
-    verified: matches.length === 1,
+    verified,
     readback: REVIEWED_FIELDS,
     status: "api_configured_live_untested",
   };
@@ -918,6 +967,7 @@ async function planCourseGroupPatch(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const patch = reviewedPatch(input.patch);
+  runtime.assertEffectTargetFree(groupPatchEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -960,7 +1010,7 @@ async function applyReviewedCourseGroupPatch(
   const grant = reservedGrant(input._morrow.outer_grant);
   assertReviewedPlan(runtime, grant, input.expected_plan_digest);
   const patch = reviewedPatch(input.patch);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, groupPatchEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -978,6 +1028,7 @@ async function applyReviewedCourseGroupPatch(
   }
   const expected = expectedProtectedGroup(protectedGroup(frozen.record), patch);
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     await write.client.patch(groupPath(frozen.apiVersion, write.courseId, input.group_id), patch, signal);
@@ -985,6 +1036,7 @@ async function applyReviewedCourseGroupPatch(
     if (canonicalJson(protectedGroup(readback)) !== canonicalJson(expected)) {
       throw mismatch("Blackboard did not return every reviewed and protected group value after the change.", dispatchState);
     }
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.course-group-patch.readback.v1",
       ok: true,
@@ -1001,6 +1053,7 @@ async function applyReviewedCourseGroupPatch(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -1021,6 +1074,8 @@ async function verifyCourseGroupPatch(
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
   const group = await readGroup(comparator.client, comparator.courseId, input.group_id, signal);
+  const verified = groupFieldsMatch(group.record, patch);
+  runtime.recordEffectComparison(groupPatchEffectTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.course-group-patch.comparator.v1",
     ok: true,
@@ -1028,7 +1083,7 @@ async function verifyCourseGroupPatch(
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
     groupId: input.group_id,
-    verified: groupFieldsMatch(group.record, patch),
+    verified,
     readback: PROTECTED_STATE,
     status: "api_configured_live_untested",
   };
@@ -1067,7 +1122,8 @@ async function freezeGroupMembership(
 ): Promise<FrozenGroupMembership> {
   if (!rosterReference(write, userId)) throw new BlackboardApiError("blackboard_membership_mismatch", UNNAMEABLE_PERSON);
   const group = await readGroup(write.client, write.courseId, groupId, signal);
-  const members = memberAccountIds(await collectGroupMembers(write.client, write.courseId, groupId, signal), groupId);
+  const membership = await collectGroupMembers(write.client, write.courseId, groupId, signal);
+  const members = memberAccountIds(membership.records, groupId);
   const held = members.filter((member) => member === userId).length;
   if (held > 1) {
     throw new BlackboardApiError(
@@ -1089,10 +1145,10 @@ async function freezeGroupMembership(
     groupId,
     userId,
     action,
-    apiVersion: group.apiVersion,
+    apiVersion: membership.apiVersion,
     beforeDigest,
   }));
-  return { apiVersion: group.apiVersion, record: group.record, members, beforeDigest, planDigest };
+  return { apiVersion: membership.apiVersion, record: group.record, members, beforeDigest, planDigest };
 }
 
 /** The membership list one exact provider returns after this exact change. */
@@ -1110,6 +1166,7 @@ async function planGroupMembership(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const { reference, userId } = reviewedAccount(runtime, input);
+  runtime.assertEffectTargetFree(groupMembershipEffectTarget(runtime, input, userId));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -1163,7 +1220,7 @@ async function applyReviewedGroupMembership(
   const grant = reservedGrant(input._morrow.outer_grant);
   assertReviewedPlan(runtime, grant, input.expected_plan_digest);
   const { reference, userId } = reviewedAccount(runtime, input);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, groupMembershipEffectTarget(runtime, input, userId));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -1186,15 +1243,19 @@ async function applyReviewedGroupMembership(
   // from here on is reported as applied_or_unknown, and every refusal raised
   // above this point keeps not_sent.
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
-    const path = groupMembershipPath(write.courseId, input.group_id, userId);
+    const path = groupMembershipPath(frozen.apiVersion, write.courseId, input.group_id, userId);
     // The membership is named in full by the path, so the create request carries
     // no body of its own.
     if (action === "add") await write.client.put(path, {}, signal);
     else await write.client.del(path, signal);
     const group = await readGroup(write.client, write.courseId, input.group_id, signal);
-    const members = memberAccountIds(await collectGroupMembers(write.client, write.courseId, input.group_id, signal), input.group_id);
+    const members = memberAccountIds(
+      await collectGroupMembersAt(write.client, frozen.apiVersion, write.courseId, input.group_id, signal),
+      input.group_id,
+    );
     if (canonicalJson(protectedGroup(group.record)) !== frozenGroupValues) {
       throw mismatch("Blackboard returned different group values after this membership change.", dispatchState);
     }
@@ -1206,6 +1267,7 @@ async function applyReviewedGroupMembership(
         dispatchState,
       );
     }
+    dispatch.markVerified();
     return {
       schema: action === "add"
         ? "morrow.blackboard.group-membership.readback.v1"
@@ -1227,6 +1289,7 @@ async function applyReviewedGroupMembership(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -1253,11 +1316,11 @@ async function verifyGroupMembership(
   const comparator = await runtime.beginComparatorRead({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
-  const members = memberAccountIds(
-    await collectGroupMembers(comparator.client, comparator.courseId, input.group_id, signal),
-    input.group_id,
-  );
+  const membership = await collectGroupMembers(comparator.client, comparator.courseId, input.group_id, signal);
+  const members = memberAccountIds(membership.records, input.group_id);
   const held = members.filter((member) => member === userId).length;
+  const verified = action === "add" ? held === 1 : held === 0;
+  runtime.recordEffectComparison(groupMembershipEffectTarget(runtime, input, userId), verified);
   return {
     schema: action === "add"
       ? "morrow.blackboard.group-membership.comparator.v1"
@@ -1268,7 +1331,7 @@ async function verifyGroupMembership(
     courseId: comparator.courseId,
     groupId: input.group_id,
     learnerToken: reference,
-    verified: action === "add" ? held === 1 : held === 0,
+    verified,
     readback: PROTECTED_STATE,
     status: "api_configured_live_untested",
   };

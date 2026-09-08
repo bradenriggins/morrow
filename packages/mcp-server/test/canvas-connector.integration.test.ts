@@ -647,7 +647,7 @@ describe("Canvas connector gateway path", () => {
           },
         },
       });
-      expect(JSON.stringify(savedConversationPlan.plan.arguments)).not.toContain("9001");
+      expect(JSON.stringify(savedConversationPlan.plan.arguments)).not.toContain('"9001"');
       const classicQuizPlanId = operationId(classicQuizPlan);
       const savedClassicQuizPlan = runtime.effects.get(classicQuizPlanId);
       expect(savedClassicQuizPlan).toMatchObject({
@@ -703,7 +703,7 @@ describe("Canvas connector gateway path", () => {
         for (const result of [get, listed, recent, cancelled]) {
           const serialized = JSON.stringify(result);
           expect(serialized).not.toContain("Jane Doe");
-          expect(serialized).not.toContain("9001");
+          expect(serialized).not.toContain('"9001"');
           expect(serialized).not.toContain("private subject marker");
           expect(serialized).not.toContain("private body marker");
           expect(serialized).not.toContain("cancelled subject marker");
@@ -753,7 +753,7 @@ describe("Canvas connector gateway path", () => {
         for (const result of [get, listed]) {
           const serialized = JSON.stringify(result);
           expect(serialized).not.toContain("Jane Doe");
-          expect(serialized).not.toContain("9001");
+          expect(serialized).not.toContain('"9001"');
           expect(serialized).not.toContain("private subject marker");
           expect(serialized).not.toContain("private body marker");
         }

@@ -697,7 +697,7 @@ describe("Blackboard gradebook columns and attempts", () => {
     expect(replay).toMatchObject({
       ok: false,
       resultState: "not_sent",
-      problem: { code: "blackboard_patch_review_required", message: "This Blackboard effect grant was already dispatched." },
+      problem: { code: "blackboard_patch_review_required", message: "This Blackboard effect grant was already dispatched, and Morrow sent that change to Blackboard. It sent nothing now." },
     });
     expect(fixture.patchRequests()).toEqual(sent);
   });

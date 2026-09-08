@@ -82,7 +82,7 @@ test("the five enrolment and role writes are cataloged, routed, and separated fr
   assert.equal(byTool.get("moodle_assign_role").destructive, undefined);
 
   const worker = readFileSync(new URL("connector/extension/src/service-worker.js", root), "utf8");
-  assert.match(worker, /import \{ executeMoodleEnrolmentInPage \} from "\.\/moodle-enrolment-executor\.js";/);
+  assert.match(worker, /import \{ executeMoodleEnrolmentCandidateInPage, executeMoodleEnrolmentInPage \} from "\.\/moodle-enrolment-executor\.js";/);
   assert.match(worker, /MOODLE_ENROLMENT_WRITE_OPERATIONS = new Map\(\[/);
   assert.match(worker, /func: executeMoodleEnrolmentInPage/);
   for (const operation of Object.values(operations)) {

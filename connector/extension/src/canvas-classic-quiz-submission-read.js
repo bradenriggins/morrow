@@ -19,6 +19,11 @@ export async function executeCanvasClassicQuizSubmissionSummaryInPage(rawInput) 
     const text = typeof value === "number" && Number.isSafeInteger(value) ? String(value) : typeof value === "string" ? value : "";
     return ID.test(text) ? text : "";
   };
+  const submissionId = (value) => {
+    const direct = object(value) ? id(value.id) : "";
+    const named = object(value) ? id(value.submission_id) : "";
+    return direct && named && direct !== named ? "" : direct || named;
+  };
   const fail = (error, status) => ({ ok: false, sent: false, ...(Number.isInteger(status) ? { status } : {}), error });
   const incomplete = () => ({ ok: false, sent: false, complete: false, error: "canvas_classic_quiz_submission_summary_incomplete" });
   const input = (() => { try { return typeof rawInput === "string" ? JSON.parse(rawInput) : rawInput; } catch { return null; } })();
@@ -135,6 +140,7 @@ export async function executeCanvasClassicQuizSubmissionSummaryInPage(rawInput) 
     let page = route(submissionsPath, { per_page: "100" });
     let pagesRead = 0;
     let attemptCount = 0;
+    const submissionIds = new Set();
     for (;;) {
       if (!sameContext()) return fail("canvas_classic_quiz_submission_summary_context_changed");
       if (pagesRead >= MAX_PAGES) return incomplete();
@@ -156,9 +162,11 @@ export async function executeCanvasClassicQuizSubmissionSummaryInPage(rawInput) 
       if (!rows || attemptCount + rows.length > MAX_ATTEMPTS) return rows ? incomplete() : fail("canvas_classic_quiz_submission_response_invalid");
       for (const row of rows) {
         const state = object(row) ? row.workflow_state : null;
-        if (!object(row) || id(row.quiz_id) !== quizId || typeof state !== "string" || !stateSet.has(state)) {
+        const rowId = submissionId(row);
+        if (!object(row) || !rowId || submissionIds.has(rowId) || id(row.quiz_id) !== quizId || typeof state !== "string" || !stateSet.has(state)) {
           return fail("canvas_classic_quiz_submission_response_invalid");
         }
+        submissionIds.add(rowId);
         counts[state] += 1;
       }
       attemptCount += rows.length;

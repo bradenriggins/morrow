@@ -11,10 +11,14 @@ import {
 import {
   compressedTextPdf,
   docxWithMixedAltText,
+  docxWithSingleQuotedMetadata,
   docxWithoutAltText,
   emptyPdf,
   encryptedPdf,
   imageOnlyPdf,
+  officeWithDuplicatePartNames,
+  pdfWithTooManyObjectStreams,
+  pptxOverPartLimit,
   pptxWithMixedAltText,
   taggedPdf,
   truncatedOfficeFile,
@@ -112,6 +116,7 @@ test("a PDF structure this reader cannot parse fails closed", async () => {
   assert.equal(await refusal(unreadableStructurePdf(), PDF), "canvas_file_pdf_structure_not_readable");
   assert.equal(await refusal(emptyPdf(), PDF), "canvas_file_pdf_structure_not_readable");
   assert.equal(await refusal(Buffer.from("not a document at all"), PDF), "canvas_file_pdf_structure_not_readable");
+  assert.equal(await refusal(pdfWithTooManyObjectStreams(), PDF), "canvas_file_pdf_structure_not_readable");
 });
 
 test("a DOCX reports drawing description counts and heading style levels", async () => {
@@ -131,6 +136,14 @@ test("a DOCX reports drawing description counts and heading style levels", async
     heading_styles: { status: "not_determinable", defined_levels: null },
     interpretation: CANVAS_FILE_SIGNALS_INTERPRETATION,
   });
+  assert.deepEqual(await signals(docxWithSingleQuotedMetadata(), DOCX), {
+    format: "docx",
+    core_properties: "absent",
+    document_part: "present",
+    drawing_alt_text: { status: "observed", total: 1, with_description: 1, without_description: 0 },
+    heading_styles: { status: "observed", defined_levels: [3] },
+    interpretation: CANVAS_FILE_SIGNALS_INTERPRETATION,
+  });
 });
 
 test("a PPTX counts every picture shape and the ones that describe themselves", async () => {
@@ -142,6 +155,12 @@ test("a PPTX counts every picture shape and the ones that describe themselves", 
     picture_alt_text: { status: "observed", total: 3, with_description: 1, without_description: 2 },
     interpretation: CANVAS_FILE_SIGNALS_INTERPRETATION,
   });
+});
+
+test("a PPTX over the XML-part cap keeps its exact slide count and does not report partial picture counts", async () => {
+  const value = await signals(pptxOverPartLimit(), PPTX);
+  assert.equal(value.slide_count, 201);
+  assert.deepEqual(value.picture_alt_text, { status: "not_determinable", total: null, with_description: null, without_description: null });
 });
 
 test("an XLSX counts its sheets and its drawing descriptions", async () => {
@@ -158,6 +177,7 @@ test("an XLSX counts its sheets and its drawing descriptions", async () => {
 test("an Office container this reader cannot open fails closed", async () => {
   assert.equal(await refusal(truncatedOfficeFile(), DOCX), "canvas_file_office_structure_not_readable");
   assert.equal(await refusal(Buffer.from("PK truncated"), PPTX), "canvas_file_office_structure_not_readable");
+  assert.equal(await refusal(officeWithDuplicatePartNames(), DOCX), "canvas_file_office_structure_not_readable");
 });
 
 test("a signal set carries no document text and no description value", async () => {

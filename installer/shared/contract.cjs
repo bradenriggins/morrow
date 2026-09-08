@@ -51,6 +51,10 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow needs repair.",
     recovery: "Reinstall Morrow, then reopen it."
   },
+  installer_record_incompatible: {
+    message: "This Morrow setup record belongs to another app version.",
+    recovery: "Install the Morrow version that created this setup record. Morrow left the record unchanged."
+  },
   active_or_uncertain_operations: {
     message: "Morrow has work in progress, or cannot confirm that it is idle.",
     recovery: "Wait for the current step to finish, then start that step again."

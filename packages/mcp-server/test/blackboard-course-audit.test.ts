@@ -209,7 +209,7 @@ async function createTenant(): Promise<{
       });
       return;
     }
-    if (pathname === `/learn/api/public/v1/courses/${COURSE_ID}`) {
+    if (pathname === `/learn/api/public/v3/courses/${COURSE_ID}`) {
       json(response, { id: COURSE_ID, courseId: "BIO-101", name: "Biology" });
       return;
     }

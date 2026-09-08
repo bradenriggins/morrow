@@ -2,7 +2,7 @@
 
 Status: active. Renewed by Braden on 7 September 2026: finish the existing product, with a strict finish line and no unnecessary architecture work. This document is the completion contract. The September 7 handoff and its source Claude Code conversation were read before this final pass.
 
-Working copy: `/Users/example/Projects/.morrow-worktrees/example-worktree`, branch `codex/example-worktree`. Current controller: Codex thread `01a07d77-2e08-7263-bf34-1634efa55c08`. Starting HEAD: `6c15a421a519ea94fd868aef1b3bb808a995f145`; fetched `origin/main` is its ancestor. Preserve the current dirty source, other user work, private receipts, captures and transcripts. Starting files, hashes and both diff layers are preserved in `output/final-pass-20260907/`.
+Working copy: `/Users/example/Projects/.morrow-worktrees/morrow-1.0-final-20260907`, branch `codex/morrow-operation-completion-20260907`. Current controller: Codex thread `01a07d77-2e08-7263-bf34-1634efa55c08`. Starting HEAD: `858bf3225d9bf951db41a2080177a5a10bc1d9d3`. Preserve the current dirty source, other user work, private receipts, captures and transcripts. Final-pass evidence is stored under `output/perfection-pass-20260908/`.
 
 ## Strict definition of done — 7 September
 

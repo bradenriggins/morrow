@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl } from "../../connector/extension/src/course-connection-intent.js";
+import { canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl, validCourseConnectionIntent } from "../../connector/extension/src/course-connection-intent.js";
 
 const now = 1_800_000_000_000;
 const intent = Object.freeze({
@@ -31,4 +31,10 @@ test("onAdded only completes the exact permission request, preserving intent on 
   assert.equal(completion({ popupConfirmed: true, addedOrigins: undefined }), true);
   const partlyGranted = { ...intent, preGrantedOrigins: intent.origins };
   assert.equal(canCompleteCourseConnectionIntent(partlyGranted, { intentId: intent.id, tabId: 41, url: intent.url, permissionOrigins: intent.origins, addedOrigins: ["https://other.example.edu/*"], now }), true);
+});
+
+test("a connection intent cannot be created in the future", () => {
+  assert.equal(validCourseConnectionIntent(intent, now), true);
+  assert.equal(validCourseConnectionIntent({ ...intent, createdAt: now + 1 }, now), false);
+  assert.equal(validCourseConnectionIntent({ ...intent, createdAt: now + 60_000 }, now), false);
 });

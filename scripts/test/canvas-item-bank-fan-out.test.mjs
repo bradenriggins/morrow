@@ -131,12 +131,14 @@ test("a record that disagrees with its own consumers is refused", async () => {
   assert.equal(await reason([fanOut]), "missing_record");
 });
 
-test("a record older than one hour, or with no usable stamp, is refused", async () => {
+test("a record outside the current one-hour window, or with no usable stamp, is refused", async () => {
   const stale = await record({ observedAt: NOW - ITEM_BANK_FAN_OUT_MAX_AGE_MS - 60_000 });
   assert.equal(stale.established_at, "2026-09-06T16:59:00.000Z");
   assert.equal(await reason(stale), "record_too_old");
   const edge = await record({ observedAt: NOW - ITEM_BANK_FAN_OUT_MAX_AGE_MS });
   assert.equal(await reason(edge), null);
+  const future = await record({ observedAt: NOW + 1 });
+  assert.equal(await reason(future), "record_from_future");
 
   const fanOut = await record();
   assert.equal(await reason({ ...fanOut, established_at: "2026-09-06T17:59:00" }), "established_at_unreadable");

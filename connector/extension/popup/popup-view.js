@@ -15,19 +15,25 @@ export function currentBinding(status) {
   return status?.bindings?.at(-1) || null;
 }
 
+export function runtimeNeedsReload(status) {
+  return status?.connected === true && status.runtimeHealthy !== true;
+}
+
 export function canChooseCourses(status, binding = currentBinding(status), anchor = currentSiteAnchor(status)) {
-  return !binding && anchor?.runtimeVerified === true;
+  return status?.runtimeHealthy === true && !binding && anchor?.runtimeVerified === true;
 }
 
 // A null status means the status read failed. Every view below states that instead of leaving the
 // popup on its markup defaults.
 export function statusValue(status) {
   if (!status) return NOT_CHECKED;
+  if (runtimeNeedsReload(status)) return "Reload needed";
   return status.connected ? "Connected" : status.pairing ? "Waiting for approval" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
 }
 
 export function courseValue(status) {
   if (!status) return NOT_CHECKED;
+  if (runtimeNeedsReload(status)) return "Not available";
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   return binding
@@ -37,11 +43,13 @@ export function courseValue(status) {
 
 export function primaryLabel(status) {
   if (!status) return "Try again";
+  if (runtimeNeedsReload(status)) return "Open setup guide";
   return status.pairing ? "Waiting for approval" : !status.paired ? "Connect Morrow" : canChooseCourses(status) ? "Choose courses" : !status.connected ? "Waiting for your assistant" : "Connect course site";
 }
 
 export function detailText(status) {
   if (!status) return "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again.";
+  if (runtimeNeedsReload(status)) return "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.";
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   return status.pairing

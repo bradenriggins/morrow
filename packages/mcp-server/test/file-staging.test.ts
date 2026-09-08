@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   FileStageError,
   FileStageStore,
@@ -72,6 +72,30 @@ describe("FileStageStore", () => {
     clock.now += 60_000;
     expect(store.reap()).toBe(1);
     expect(() => store.bind({ handle: receipt.handle, scope, manifest: receipt.manifest, operationId: "operation:resource-42" })).toThrow("file_stage_unavailable");
+  });
+
+  it("zeroes and removes bound bytes at expiry while the store is idle", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(now);
+      const expired: Array<{ handle: string; operationId: string | null }> = [];
+      const store = new FileStageStore({
+        onExpire: (handle, operationId) => expired.push({ handle, operationId }),
+      });
+      const { receipt } = stage(store);
+      const binding = { handle: receipt.handle, scope, manifest: receipt.manifest, operationId: "operation:idle-expiry" };
+      store.bind(binding);
+      const retained = (store as unknown as { stages: Map<string, { bytes: Buffer }> }).stages.get(receipt.handle)!.bytes;
+      expect([...retained]).toEqual([0, 71, 85, 73, 68, 69, 10]);
+
+      vi.advanceTimersByTime(60_000);
+
+      expect([...retained]).toEqual([0, 0, 0, 0, 0, 0, 0]);
+      expect(expired).toEqual([{ handle: receipt.handle, operationId: binding.operationId }]);
+      expect(() => store.verify(binding)).toThrow("file_stage_unavailable");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("preserves valid all-zero binary bytes and bounds outstanding stages", () => {

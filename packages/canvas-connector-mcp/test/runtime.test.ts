@@ -6,7 +6,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import { augmentBridgeInputSchema, BRIDGE_PROTOCOL_VERSION, BRIDGE_SCHEMAS, parseBridgeJson, serializeBridgeMessage, type BridgeBinding, type BridgeCommand } from "@morrow/bridge-protocol";
 import type { CanvasConnectorConfig } from "../src/config.js";
-import { CanvasConnectorRuntime, ITEM_BANK_GUARD_FIELDS } from "../src/runtime.js";
+import {
+  CanvasConnectorRuntime,
+  ITEM_BANK_GUARD_FIELDS,
+  PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
+  PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+} from "../src/runtime.js";
 // The guard field list the connector checks at its boundary is the extension's list. A change to
 // one without the other would let a differently shaped guard through here and be refused later.
 import { ITEM_BANK_GUARD_FIELDS as EXTENSION_ITEM_BANK_GUARD_FIELDS } from "../../../connector/extension/src/item-bank-guard.js";
@@ -179,6 +184,121 @@ describe("CanvasConnectorRuntime", () => {
     await expect(runtime.editOptions("missing-binding")).rejects.toThrow("course connection");
   });
 
+  it("routes and privacy-projects one private Moodle enrolment candidate read outside every catalog", async () => {
+    const runtime = await start([{
+      sourceBindingId: "moodle:course-42",
+      provider: "moodle",
+      origin: "https://school.example.edu",
+      siteUrl: "https://school.example.edu/moodle",
+      courseId: "42",
+      principalFingerprint: "b".repeat(64),
+      sessionGeneration: 1,
+      runtimeVerified: true,
+    }]);
+    expect(runtime.operations.has(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL)).toBe(false);
+    expect(runtime.moodleCatalog.operations.some((entry) => entry.toolName === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL)).toBe(false);
+    const socket = sockets.at(-1)!;
+    let commands = 0;
+    let invalidResult = false;
+    socket.on("message", (raw) => {
+      const value = parseBridgeJson(raw.toString()) as { schema?: string };
+      if (value.schema !== BRIDGE_SCHEMAS.command) return;
+      const command = value as BridgeCommand;
+      commands += 1;
+      expect(command.kind).toBe("invoke_read");
+      expect(command.toolName).toBe(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL);
+      expect(command.operationKey).toBe(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION);
+      expect(command.sourceBindingId).toBe("moodle:course-42");
+      expect(command.arguments).toEqual({ course_id: 42, query: "Mary Jackson" });
+      expect(command.outerGrant).toBeUndefined();
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.result,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: command.requestId,
+        operationId: command.operationId,
+        generation: command.generation,
+        ok: true,
+        result: {
+          schema: "morrow.canvas-browser-result.v1",
+          ok: true,
+          sent: false,
+          status: 200,
+          complete: true,
+          provider: "moodle",
+          privateUnexpectedName: "Mary Jackson",
+          data: {
+            schema: "morrow.moodle-enrolment-candidate.private.v1",
+            provider: "moodle",
+            course_id: 42,
+            candidate: invalidResult ? { user_id: "not-an-id", email: "mary@example.edu" } : { user_id: "21", email: "mary@example.edu" },
+            match: { kind: "exact_native_query", candidate_count: 1, query: "Mary Jackson" },
+            proof: {
+              method: "native_manual_enrolment_candidate_search",
+              route: "/enrol/manual/manage.php",
+              complete: true,
+              dispatch_count: 0,
+              read_request_count: 2,
+              candidate_limit: 100,
+            },
+          },
+        },
+        completedAt: Date.now(),
+      }));
+    });
+    const input = {
+      course_id: 42,
+      query: "Mary Jackson",
+      _morrow: { source_binding_id: "moodle:course-42", operation_id: "operation:moodle-candidate-42" },
+    };
+    const resolved = await runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, input);
+    expect(resolved).toMatchObject({
+      schema: "morrow.canvas-connector.result.v1",
+      ok: true,
+      provider: "moodle",
+      toolName: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+      operationKey: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
+      commandKind: "invoke_read",
+      result: {
+        schema: "morrow.canvas-browser-result.v1",
+        ok: true,
+        sent: false,
+        complete: true,
+        provider: "moodle",
+        data: {
+          schema: "morrow.moodle-enrolment-candidate.private.v1",
+          course_id: 42,
+          candidate: { user_id: "21" },
+          match: { kind: "exact_native_query", candidate_count: 1 },
+          proof: { dispatch_count: 0, read_request_count: 2, candidate_limit: 100 },
+        },
+      },
+    });
+    for (const privateValue of ["Mary Jackson", "mary@example.edu"]) expect(JSON.stringify(resolved)).not.toContain(privateValue);
+
+    const beforeRefusals = commands;
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { ...input, query: " Mary Jackson" }))
+      .resolves.toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "moodle_enrolment_candidate_arguments_invalid" } });
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { ...input, course_id: 9 }))
+      .resolves.toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "moodle_binding_course_mismatch" } });
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { course_id: 42, query: "Mary Jackson" }))
+      .resolves.toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "moodle_binding_required" } });
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, {
+      ...input,
+      _morrow: { ...input._morrow, outer_grant: {
+        plan_digest: "a".repeat(64), approval_grant_digest: "b".repeat(64), effect_receipt_id: "effect:moodle-candidate-42",
+        dispatch_attempt: 1, gateway_process_id: "gateway:connector-test", authorization: { kind: "review" },
+      } },
+    })).resolves.toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "moodle_enrolment_candidate_arguments_invalid" } });
+    expect(commands).toBe(beforeRefusals);
+
+    invalidResult = true;
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, {
+      ...input,
+      _morrow: { ...input._morrow, operation_id: "operation:moodle-candidate-invalid-result" },
+    })).resolves.toMatchObject({ ok: false, problem: { code: "moodle_enrolment_candidate_result_invalid" } });
+    expect(commands).toBe(beforeRefusals + 1);
+  });
+
   it("forwards one verified private file attachment only to its exact Moodle Resource write", async () => {
     const runtime = await start([{
       sourceBindingId: "moodle:course-42",
@@ -275,7 +395,28 @@ describe("CanvasConnectorRuntime", () => {
     };
     expect(await runtime.call("canvas_transfer_course_file", base)).toMatchObject({
       ok: false,
+      resultState: "not_sent",
       problem: { code: "canvas_private_file_reservation_required" },
+    });
+    expect(await runtime.call("canvas_transfer_course_file", {
+      ...base,
+      privateAttachments: [attachment],
+      _morrow: {
+        source_binding_id: "canvas:test-account",
+        operation_id: "operation:canvas-file-mixed-42",
+        outer_grant: {
+          plan_digest: "a".repeat(64),
+          approval_grant_digest: "b".repeat(64),
+          effect_receipt_id: "effect:canvas-file-mixed-42",
+          dispatch_attempt: 1,
+          gateway_process_id: "gateway:connector-test",
+          authorization: { kind: "review" },
+        },
+      },
+    })).toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "canvas_private_attachment_refused" },
     });
     const dispatched = await runtime.call("canvas_transfer_course_file", {
       ...base,
@@ -294,6 +435,29 @@ describe("CanvasConnectorRuntime", () => {
     });
     expect(dispatched).toMatchObject({ ok: true });
     expect(commands).toBe(1);
+  });
+
+  it("refuses private file payloads on public Canvas routes before dispatch", async () => {
+    const runtime = await start();
+    const attachment = canvasPrivateAttachment();
+    expect(await runtime.call("canvas_update_course", {
+      id: "42",
+      privateAttachment: {},
+    })).toMatchObject({
+      ok: false,
+      provider: "canvas",
+      resultState: "not_sent",
+      problem: { code: "canvas_private_attachment_invalid" },
+    });
+    expect(await runtime.call("canvas_update_course", {
+      id: "42",
+      privateAttachment: attachment,
+    })).toMatchObject({
+      ok: false,
+      provider: "canvas",
+      resultState: "not_sent",
+      problem: { code: "canvas_private_attachment_refused" },
+    });
   });
 
   it("forwards one exact private Canvas Inbox command with no public recipients", async () => {
@@ -342,7 +506,17 @@ describe("CanvasConnectorRuntime", () => {
         operation_id: "operation:canvas-conversation-wrong-action",
         outer_grant: { ...grant, effect_receipt_id: "effect:canvas-conversation-wrong-action" },
       },
-    })).toMatchObject({ ok: false, problem: { code: "canvas_private_conversation_required" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "canvas_private_conversation_required" } });
+    expect(await runtime.call("canvas_send_private_conversation", {
+      course_id: "42",
+      privateConversation: conversation,
+      privateAttachments: [canvasPrivateAttachment()],
+      _morrow: {
+        source_binding_id: "canvas:test-account",
+        operation_id: "operation:canvas-conversation-mixed-payload",
+        outer_grant: { ...grant, effect_receipt_id: "effect:canvas-conversation-mixed-payload" },
+      },
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "canvas_private_conversation_refused" } });
     expect(await runtime.call("canvas_create_conversation", {
       body: "Raw public message",
       recipients: ["201"],
@@ -351,7 +525,7 @@ describe("CanvasConnectorRuntime", () => {
         operation_id: "operation:canvas-conversation-raw-public",
         outer_grant: { ...grant, effect_receipt_id: "effect:canvas-conversation-raw-public" },
       },
-    })).toMatchObject({ ok: false, problem: { code: "course_scope_required" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_scope_required" } });
     expect(await runtime.call("canvas_create_conversation", {
       body: "Forged private payload",
       recipients: ["201"],
@@ -361,7 +535,7 @@ describe("CanvasConnectorRuntime", () => {
         operation_id: "operation:canvas-conversation-forged-public",
         outer_grant: { ...grant, effect_receipt_id: "effect:canvas-conversation-forged-public" },
       },
-    })).toMatchObject({ ok: false, problem: { code: "canvas_private_conversation_refused" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "canvas_private_conversation_refused" } });
     expect(commands).toBe(1);
   });
 
@@ -385,6 +559,76 @@ describe("CanvasConnectorRuntime", () => {
       _morrow: { source_binding_id: "canvas:test-account" },
     })).toMatchObject({ ok: false, problem: { code: "course_binding_course_mismatch" } });
     expect(commands).toBe(1);
+  });
+
+  it("preserves extension before-send and unknown write outcomes", async () => {
+    const runtime = await start();
+    const socket = sockets.at(-1)!;
+    let responseIndex = 0;
+    socket.on("message", (raw) => {
+      const value = parseBridgeJson(raw.toString()) as { schema?: string };
+      if (value.schema !== BRIDGE_SCHEMAS.command) return;
+      const command = value as BridgeCommand;
+      const unknown = responseIndex++ === 1;
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.result,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: command.requestId,
+        operationId: command.operationId,
+        generation: command.generation,
+        ok: false,
+        ...(unknown ? {
+          result: {
+            readDescriptor: {
+              schema: "morrow.canvas-recovery-descriptor.v1",
+              strategy: "canvas-operation-readback",
+            },
+          },
+        } : {}),
+        problem: {
+          schema: "morrow.bridge.problem.v1",
+          code: unknown ? "write_outcome_unknown" : "edit_policy_stale",
+          message: unknown ? "The write outcome is unknown." : "The Edit permission changed before dispatch.",
+          recoverable: !unknown,
+        },
+        completedAt: Date.now(),
+      }));
+    });
+    const outerGrant = (suffix: string) => ({
+      plan_digest: "a".repeat(64),
+      approval_grant_digest: "b".repeat(64),
+      effect_receipt_id: `effect:outcome-${suffix}`,
+      dispatch_attempt: 1,
+      gateway_process_id: "gateway:connector-test",
+      authorization: { kind: "review" as const },
+    });
+
+    expect(await runtime.call("canvas_update_course", {
+      id: "42",
+      _morrow: {
+        source_binding_id: "canvas:test-account",
+        operation_id: "operation:outcome-before-send",
+        outer_grant: outerGrant("before-send"),
+      },
+    })).toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "edit_policy_stale" },
+    });
+    expect(await runtime.call("canvas_update_course", {
+      id: "42",
+      _morrow: {
+        source_binding_id: "canvas:test-account",
+        operation_id: "operation:outcome-unknown",
+        outer_grant: outerGrant("unknown"),
+      },
+    })).toMatchObject({
+      ok: false,
+      resultState: "unknown",
+      readDescriptor: { schema: "morrow.canvas-recovery-descriptor.v1" },
+      problem: { code: "write_outcome_unknown" },
+    });
+    expect(responseIndex).toBe(2);
   });
 
   it("uses the shared course admission contract for direct and held Canvas writes", async () => {
@@ -415,6 +659,7 @@ describe("CanvasConnectorRuntime", () => {
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: grant },
     })).toMatchObject({
       ok: false,
+      resultState: "not_sent",
       problem: {
         code: "course_scope_required",
         message: "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course.",
@@ -423,11 +668,11 @@ describe("CanvasConnectorRuntime", () => {
     expect(await runtime.call("canvas_clear_course_nicknames", {
       course_id: "42",
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: grant },
-    })).toMatchObject({ ok: false, problem: { code: "course_scope_required" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_scope_required" } });
     expect(await runtime.call("canvas_get_course_nickname", {
       course_id: "7",
       _morrow: { source_binding_id: "canvas:test-account" },
-    })).toMatchObject({ ok: false, problem: { code: "course_binding_course_mismatch" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_binding_course_mismatch" } });
     expect(commands).toBe(1);
   });
 
@@ -629,18 +874,18 @@ describe("CanvasConnectorRuntime", () => {
       bank_id: "91",
       item_id: "501",
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: outerGrant },
-    })).toMatchObject({ ok: false, problem: { code: "item_bank_fan_out_and_guard_required" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "item_bank_fan_out_and_guard_required" } });
     expect(await runtime.call("canvas_item_bank_update_item", {
       bank_id: "91",
       item_id: "501",
       morrow_item_bank_guard: { ...guard, course_id: "77" },
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: outerGrant },
-    })).toMatchObject({ ok: false, problem: { code: "course_binding_course_mismatch" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_binding_course_mismatch" } });
     expect(await runtime.call("canvas_item_bank_archive_bank", {
       bank_id: "91",
       morrow_item_bank_guard: guard,
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: outerGrant },
-    })).toMatchObject({ ok: false, problem: { code: "item_bank_dependency_review_required" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "item_bank_dependency_review_required" } });
     expect(calls).toBe(1);
   });
 
@@ -775,6 +1020,10 @@ describe("CanvasConnectorRuntime", () => {
           gateway_process_id: "gateway:connector-test",
         },
       },
-    })).rejects.toThrow("A bounded list resume belongs to a read.");
+    })).resolves.toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "bounded_list_resume_write_refused" },
+    });
   });
 });

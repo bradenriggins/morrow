@@ -18,7 +18,11 @@ import { problemText } from "../../connector/extension/src/bridge-problem-copy.j
 const LAST_SEEN = Date.UTC(2026, 8, 1, 15, 4, 5);
 const COURSE_ORIGIN = "https://canvas.example.edu";
 
-const connection = (fields = {}) => ({ paired: false, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [], ...fields });
+const connection = (fields = {}) => ({
+  paired: false, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [],
+  ...(fields.connected === true && fields.runtimeHealthy === undefined ? { runtimeHealthy: true } : {}),
+  ...fields,
+});
 const anchor = (fields = {}) => ({ siteAnchorId: "canvas:site", provider: "canvas", origin: COURSE_ORIGIN, principalId: "teacher@example.edu", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
 const binding = (fields = {}) => ({ sourceBindingId: "canvas:course-1", provider: "canvas", courseName: "Anatomy", runtimeVerified: true, lastSeenAt: LAST_SEEN, ...fields });
 
@@ -120,6 +124,24 @@ test("once Morrow is connected the popup names the course state and the one step
     const page = await openPopup({ status });
     assert.deepEqual(view(page), expected, name);
   }
+});
+
+test("a version-mismatched Bridge exposes only setup recovery", async () => {
+  const page = await openPopup({
+    status: () => connection({ paired: true, connected: true, runtimeHealthy: false, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] }),
+    handlers: { morrow_open_setup: () => ({ opened: true }) },
+  });
+  assert.deepEqual(view(page), {
+    connection: "Reload needed", courseLabel: "Selected course", course: "Not available",
+    primary: "Open setup guide", primaryDisabled: false, primaryBusy: "false",
+    secondary: null, disconnect: "Disconnect Morrow", planAndEdit: false, online: false,
+    account: "Selected course: Anatomy",
+    detail: "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome.",
+  });
+  assert.equal(page.hidden("#setup-guide"), true);
+  await page.click("#primary");
+  assert.deepEqual(page.messages("morrow_open_setup"), [{ type: "morrow_open_setup" }]);
+  assert.deepEqual(page.messages("morrow_connect_course_prepare"), []);
 });
 
 test("the popup states when it last saw the course site, or that it cannot say", async () => {
@@ -228,6 +250,27 @@ test("the popup reads the connection again whenever Chrome or the Bridge says it
   page.window.dispatchEvent(new DomEvent("focus"));
   await page.flush();
   assert.equal(page.messages("morrow_status").length, 4);
+});
+
+test("an older status response cannot replace a newer Bridge state", async () => {
+  let call = 0;
+  let resolveOlder;
+  const older = new Promise((resolve) => { resolveOlder = resolve; });
+  const page = await openPopup({ status: () => {
+    call += 1;
+    if (call === 1) return connection({ paired: true, connected: true });
+    if (call === 2) return older;
+    return connection({ paired: true, connected: true, bindings: [binding()], bindingCount: 1, siteAnchors: [anchor()] });
+  } });
+
+  page.window.dispatchEvent(new DomEvent("focus"));
+  page.window.dispatchEvent(new DomEvent("focus"));
+  await page.waitFor(() => page.messages("morrow_status").length === 3 && page.text("#canvas-value") === "Connected",
+    "the newer status response did not render");
+  resolveOlder(connection({ paired: true, connected: true }));
+  await page.flush();
+  assert.equal(page.text("#canvas-value"), "Connected");
+  assert.equal(page.text("#account-origin"), "Anatomy");
 });
 
 test("Disconnect says plainly when Chrome still holds site access", async () => {

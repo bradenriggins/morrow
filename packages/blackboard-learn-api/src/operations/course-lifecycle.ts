@@ -637,6 +637,24 @@ function assertReviewedPlan(runtime: BlackboardLearnRuntime, grant: BlackboardEf
   }
 }
 
+function courseAvailabilityEffectTarget(runtime: BlackboardLearnRuntime, input: CourseAvailabilityInput) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "course-availability", {});
+}
+
+function contentDatesEffectTarget(runtime: BlackboardLearnRuntime, input: ContentDatesInput) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "content-dates", { contentId: input.content_id });
+}
+
+function courseCopyEffectTarget(runtime: BlackboardLearnRuntime, input: CourseCopyInput) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "course-copy", { destinationCourseId: input.destination_course_id });
+}
+
 /** What the readback after each change proves, in plain words. */
 const COURSE_READBACK_DETAIL = "Morrow re-read the course and compared its name, its Learn mode, whether it is closed and complete, whether it is available, and its window, against the reviewed plan. It names every frozen value this change could move that it did not compare.";
 const CONTENT_READBACK_DETAIL = "Morrow re-read the content item and compared its title, its description, where it sits, whether it is available, and both dated-visibility dates, against the reviewed plan.";
@@ -682,6 +700,7 @@ async function planCourseAvailability(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const change = reviewedCourseAvailability(input);
+  runtime.assertEffectTargetFree(courseAvailabilityEffectTarget(runtime, input));
   // A plan exists only to be dispatched, so it carries the write condition. An
   // instructor is refused before review instead of after approving a change
   // Morrow would then refuse to send.
@@ -728,7 +747,7 @@ async function applyReviewedCourseAvailability(
   const grant = reservedGrant(input._morrow.outer_grant);
   assertReviewedPlan(runtime, grant, input.expected_plan_digest);
   const change = reviewedCourseAvailability(input);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, courseAvailabilityEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -750,6 +769,7 @@ async function applyReviewedCourseAvailability(
   // failure from here on is reported as applied_or_unknown, and every refusal
   // raised above this point keeps not_sent.
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     await write.client.patch(coursePath(write.courseId), courseRequest(change), signal);
@@ -758,6 +778,7 @@ async function applyReviewedCourseAvailability(
     if (canonicalJson(current) !== canonicalJson(expected)) {
       throw mismatch("Blackboard did not return every reviewed and protected course value after the change.", dispatchState);
     }
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.course-availability-patch.readback.v1",
       ok: true,
@@ -774,6 +795,7 @@ async function applyReviewedCourseAvailability(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -800,15 +822,17 @@ async function verifyCourseAvailability(
   const record = await readCourseRecord(comparator.client, comparator.courseId, signal);
   const current = protectedProjection(record, PROTECTED_COURSE_FIELDS);
   const expected = expectedProtectedCourse({}, change);
+  const verified = Object.keys(expected).every((key) => (
+    Object.hasOwn(current, key) && canonicalJson(current[key]) === canonicalJson(expected[key])
+  ));
+  runtime.recordEffectComparison(courseAvailabilityEffectTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.course-availability-patch.comparator.v1",
     ok: true,
     tenantId: comparator.tenantId,
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
-    verified: Object.keys(expected).every((key) => (
-      Object.hasOwn(current, key) && canonicalJson(current[key]) === canonicalJson(expected[key])
-    )),
+    verified,
     readback: PROTECTED_STATE,
     status: "api_configured_live_untested",
   };
@@ -843,6 +867,7 @@ async function planContentDatedVisibility(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const requested = requestedContentDates(input);
+  runtime.assertEffectTargetFree(contentDatesEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -884,7 +909,7 @@ async function applyReviewedContentDatedVisibility(
   const grant = reservedGrant(input._morrow.outer_grant);
   assertReviewedPlan(runtime, grant, input.expected_plan_digest);
   const requested = requestedContentDates(input);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, contentDatesEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -897,6 +922,7 @@ async function applyReviewedContentDatedVisibility(
   }
   const expected = expectedProtectedContent(frozen.frozen, frozen.dates);
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     await write.client.patch(contentPath(write.courseId, input.content_id), contentRequest(frozen.dates, frozen.frozen), signal);
@@ -904,6 +930,7 @@ async function applyReviewedContentDatedVisibility(
     if (canonicalJson(protectedProjection(readback, PROTECTED_CONTENT_FIELDS)) !== canonicalJson(expected)) {
       throw mismatch("Blackboard did not return every reviewed and protected content value after the change.", dispatchState);
     }
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.content-dates.readback.v1",
       ok: true,
@@ -918,6 +945,7 @@ async function applyReviewedContentDatedVisibility(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -942,6 +970,8 @@ async function verifyContentDatedVisibility(
   const record = await readContentRecord(comparator.client, comparator.courseId, input.content_id, signal);
   const current = protectedProjection(record, PROTECTED_CONTENT_FIELDS);
   const dates = reviewedContentDates(requested, current);
+  const verified = frozenString(current, ADAPTIVE_START) === dates.start && frozenString(current, ADAPTIVE_END) === dates.end;
+  runtime.recordEffectComparison(contentDatesEffectTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.content-dates.comparator.v1",
     ok: true,
@@ -949,7 +979,7 @@ async function verifyContentDatedVisibility(
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
     contentId: input.content_id,
-    verified: frozenString(current, ADAPTIVE_START) === dates.start && frozenString(current, ADAPTIVE_END) === dates.end,
+    verified,
     readback: PROTECTED_STATE,
     status: "api_configured_live_untested",
   };
@@ -992,6 +1022,7 @@ async function planCourseCopy(
   input: CourseCopyInput,
   signal?: AbortSignal,
 ): Promise<JsonObject> {
+  runtime.assertEffectTargetFree(courseCopyEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -1025,7 +1056,7 @@ async function applyReviewedCourseCopy(
 ): Promise<JsonObject> {
   const grant = reservedGrant(input._morrow.outer_grant);
   assertReviewedPlan(runtime, grant, input.expected_plan_digest);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, courseCopyEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -1037,6 +1068,7 @@ async function applyReviewedCourseCopy(
     );
   }
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     const sourceCourseId = String(frozen.record.id);
@@ -1063,6 +1095,7 @@ async function applyReviewedCourseCopy(
     if (!copiedCourseMatches(frozen.frozen, copied, input.destination_course_id)) {
       throw mismatch("Blackboard completed the course-copy task but did not return the reviewed copy of the selected source course.", dispatchState);
     }
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.course-copy.readback.v1",
       ok: true,
@@ -1077,6 +1110,7 @@ async function applyReviewedCourseCopy(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -1096,20 +1130,28 @@ async function verifyCourseCopy(
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
   let copied: JsonObject | undefined;
+  let terminal = false;
   if (input.task_reference) {
     const source = await readCourseRecord(comparator.client, comparator.courseId, signal);
     if (typeof source.id !== "string" || !BLACKBOARD_ID.test(source.id)) {
       throw new BlackboardApiError("blackboard_response_invalid", "Blackboard did not return the selected source course's internal identifier.");
     }
     const task = await comparator.client.readCourseCopyTask(courseCopyTaskPath(input.task_reference), source.id, signal);
-    if (task.state === "complete") copied = await comparator.client.get(task.coursePath, signal);
+    if (task.state === "complete") {
+      terminal = true;
+      copied = await comparator.client.get(task.coursePath, signal);
+    }
   } else {
     try {
       copied = await comparator.client.get(withFields(externalCoursePath(input.destination_course_id), COURSE_FIELDS), signal);
+      terminal = true;
     } catch (error) {
       if (!(error instanceof BlackboardApiError) || error.status !== 404) throw error;
     }
   }
+  const verified = Boolean(copied && typeof copied.id === "string" && BLACKBOARD_ID.test(copied.id)
+    && copied.courseId === input.destination_course_id);
+  if (verified || terminal) runtime.recordEffectComparison(courseCopyEffectTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.course-copy.comparator.v1",
     ok: true,
@@ -1117,8 +1159,7 @@ async function verifyCourseCopy(
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
     destinationCourseId: input.destination_course_id,
-    verified: Boolean(copied && typeof copied.id === "string" && BLACKBOARD_ID.test(copied.id)
-      && copied.courseId === input.destination_course_id),
+    verified,
     readback: "target_course_identity",
     status: "api_configured_live_untested",
   };

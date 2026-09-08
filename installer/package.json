@@ -2,6 +2,9 @@
   "name": "morrow-installer",
   "version": "1.0.0",
   "private": true,
+  "author": {
+    "name": "Braden Riggins"
+  },
   "description": "Morrow graphical setup for macOS and Windows",
   "main": "main.cjs",
   "scripts": {

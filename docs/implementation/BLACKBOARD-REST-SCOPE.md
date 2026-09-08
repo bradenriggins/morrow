@@ -69,7 +69,7 @@ The table is generated from the same registry as the catalog artifact, and
 | Tool | Module | Learn route | Access | Reachable from | Entitlement | Evidence |
 | --- | --- | --- | --- | --- | --- | --- |
 | `morrow_blackboard_health` | health | None. Sends no Blackboard request. | read | Full surface, or `morrow_capability_read` | `none` | `api_configured_live_untested` |
-| `blackboard_read_course` | course-read | `GET /learn/api/public/v1/courses/{course_id}` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
+| `blackboard_read_course` | course-read | `GET /learn/api/public/v3/courses/{course_id}?fields=id,courseId,name,description` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
 | `blackboard_list_course_contents` | course-read | `GET /learn/api/public/v1/courses/{course_id}/contents?recursive=false` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
 | `blackboard_read_course_content` | course-read | `GET /learn/api/public/v1/courses/{course_id}/contents/{content_id}` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
 | `blackboard_list_my_courses` | course-contents | `GET /learn/api/public/v1/users/{principal_id}/courses` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
@@ -113,19 +113,19 @@ The table is generated from the same registry as the catalog artifact, and
 | `blackboard_list_course_groups` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
 | `blackboard_list_course_group_sets` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/sets` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
 | `blackboard_read_course_group` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/{group_id}` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
-| `blackboard_list_group_members` | groups | `GET /learn/api/public/v1/courses/{course_id}/groups/{group_id}/users` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
+| `blackboard_list_group_members` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/{group_id}/users` | read | Full surface, or `morrow_capability_read` | `unknown` | `api_configured_live_untested` |
 | `blackboard_plan_course_group` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups` | read | Private source tool | `unknown` | `api_configured_live_untested` |
 | `blackboard_apply_reviewed_course_group` | groups | `POST /learn/api/public/v2/courses/{course_id}/groups` | write | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
 | `blackboard_verify_course_group` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups` | read | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
 | `blackboard_plan_course_group_patch` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/{group_id}` | read | Private source tool | `unknown` | `api_configured_live_untested` |
 | `blackboard_apply_reviewed_course_group_patch` | groups | `PATCH /learn/api/public/v2/courses/{course_id}/groups/{group_id}` | write | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
 | `blackboard_verify_course_group_patch` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/{group_id}` | read | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
-| `blackboard_plan_group_membership` | groups | `GET /learn/api/public/v1/courses/{course_id}/groups/{group_id}/users` | read | Private source tool | `unknown` | `api_configured_live_untested` |
-| `blackboard_apply_reviewed_group_membership` | groups | `PUT /learn/api/public/v1/courses/{course_id}/groups/{group_id}/users/{user_id}` | write | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
-| `blackboard_verify_group_membership` | groups | `GET /learn/api/public/v1/courses/{course_id}/groups/{group_id}/users` | read | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
-| `blackboard_plan_group_membership_removal` | groups | `GET /learn/api/public/v1/courses/{course_id}/groups/{group_id}/users` | read | Private source tool | `unknown` | `api_configured_live_untested` |
-| `blackboard_apply_reviewed_group_membership_removal` | groups | `DELETE /learn/api/public/v1/courses/{course_id}/groups/{group_id}/users/{user_id}` | write | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
-| `blackboard_verify_group_membership_removal` | groups | `GET /learn/api/public/v1/courses/{course_id}/groups/{group_id}/users` | read | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
+| `blackboard_plan_group_membership` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/{group_id}/users` | read | Private source tool | `unknown` | `api_configured_live_untested` |
+| `blackboard_apply_reviewed_group_membership` | groups | `PUT /learn/api/public/v2/courses/{course_id}/groups/{group_id}/users/{user_id}` | write | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
+| `blackboard_verify_group_membership` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/{group_id}/users` | read | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
+| `blackboard_plan_group_membership_removal` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/{group_id}/users` | read | Private source tool | `unknown` | `api_configured_live_untested` |
+| `blackboard_apply_reviewed_group_membership_removal` | groups | `DELETE /learn/api/public/v2/courses/{course_id}/groups/{group_id}/users/{user_id}` | write | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
+| `blackboard_verify_group_membership_removal` | groups | `GET /learn/api/public/v2/courses/{course_id}/groups/{group_id}/users` | read | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
 | `blackboard_plan_course_availability` | course-lifecycle | `GET /learn/api/public/v3/courses/{course_id}?fields=id,courseId,name,ultraStatus,closedComplete,availability` | read | Private source tool | `unknown` | `api_configured_live_untested` |
 | `blackboard_apply_reviewed_course_availability` | course-lifecycle | `PATCH /learn/api/public/v3/courses/{course_id}` | write | Gateway dispatch only | `unknown` | `api_configured_live_untested` |
 | `blackboard_verify_course_availability` | course-lifecycle | `GET /learn/api/public/v3/courses/{course_id}?fields=id,courseId,name,ultraStatus,closedComplete,availability` | read | Gateway dispatch only | `unknown` | `api_configured_live_untested` |

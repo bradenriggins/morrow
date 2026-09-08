@@ -189,6 +189,15 @@ import {
   projectMoodleSiteAdministrationBrowserResult,
 } from "./moodle-site-inventory.js";
 import {
+  MOODLE_ENROL_CANDIDATE_INPUT_TOOL,
+  MOODLE_ROSTER_LEARNER_INPUT_TOOLS,
+  PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
+  PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+  PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+  assertPublicMoodleLearnerInput,
+  isMoodleLearnerToken,
+} from "./moodle-learner-input.js";
+import {
   MOODLE_QUESTION_BANK_IMPACT_SCOPE_OPERATION,
   MOODLE_QUESTION_BANK_IMPACT_SCOPE_TOOL,
   projectMoodleQuestionBankImpactScopeBrowserResult,
@@ -243,6 +252,7 @@ export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_capability_get",
   "morrow_capability_read",
   "morrow_capability_change",
+  PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL,
   "morrow_request_edit_access",
   ...Object.values(MOODLE_STAGED_FILE_CAPABILITIES).map((capability) => capability.publicPlanToolName),
   "morrow_plan_canvas_file_upload",
@@ -279,6 +289,7 @@ const INTERNAL_SOURCE_TOOL_NAMES = Object.freeze([
  */
 export const PRIVATE_SOURCE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "moodle_get_course_participant_roster",
+  PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
   "canvas_get_all_quiz_submissions",
   "canvas_transfer_course_file",
   "canvas_send_private_conversation",
@@ -1274,8 +1285,12 @@ export class GatewayRuntime {
   private readonly journal: GatewayOperationJournal;
   private readonly effects: ProviderEffectBroker;
   private readonly resultArtifacts = new ResultArtifactStore();
-  private readonly fileStages = new FileStageStore();
   private readonly operationFileStages = new Map<string, readonly FileStageBinding[]>();
+  private readonly fileStages = new FileStageStore({
+    onExpire: (_handle, operationId) => {
+      if (operationId) this.operationFileStages.delete(operationId);
+    },
+  });
   private readonly publicationPolicy: PublicationPolicyHealth | undefined;
   private readonly learnerVault: LearnerVault;
   private readonly mcpRuntime: McpRuntimeHealth | undefined;
@@ -2663,6 +2678,123 @@ export class GatewayRuntime {
     return matches.length === 1 ? matches[0]! : null;
   }
 
+  private moodleEnrolmentCandidateTool(mapping: CatalogTool): CatalogTool | null {
+    const matches = this.catalog.tools.filter((candidate) => (
+      candidate.upstreamId === mapping.upstreamId
+      && candidate.upstreamName === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL
+      && candidate.annotations?.readOnlyHint === true
+      && candidate.capability?.provider === "moodle"
+      && candidate.capability?.route.backend === "canvas-connector"
+    ));
+    return matches.length === 1 ? matches[0]! : null;
+  }
+
+  private privateMoodleEnrolmentCandidate(
+    value: JsonObject,
+    expectedCourseId: string,
+  ): Readonly<{ userId: string; proof: JsonObject }> {
+    const structured = isJsonObject(value.structuredContent) ? value.structuredContent : null;
+    const browser = structured && isJsonObject(structured.result) ? structured.result : null;
+    const data = browser && isJsonObject(browser.data) ? browser.data : null;
+    const candidate = data && isJsonObject(data.candidate) ? data.candidate : null;
+    const match = data && isJsonObject(data.match) ? data.match : null;
+    const proof = data && isJsonObject(data.proof) ? data.proof : null;
+    const userId = candidate && typeof candidate.user_id === "string" ? candidate.user_id : "";
+    if (value.isError === true || structured?.schema !== "morrow.canvas-connector.result.v1"
+      || structured.ok !== true || structured.provider !== "moodle"
+      || structured.toolName !== PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL
+      || structured.operationKey !== PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION
+      || structured.commandKind !== "invoke_read"
+      || browser?.schema !== "morrow.canvas-browser-result.v1" || browser.ok !== true
+      || browser.sent !== false || browser.complete !== true || browser.provider !== "moodle"
+      || data?.schema !== "morrow.moodle-enrolment-candidate.private.v1" || data.provider !== "moodle"
+      || String(data.course_id) !== expectedCourseId || !/^[1-9][0-9]{0,18}$/u.test(userId)
+      || match?.kind !== "exact_native_query" || match.candidate_count !== 1
+      || proof?.method !== "native_manual_enrolment_candidate_search"
+      || proof.route !== "/enrol/manual/manage.php" || proof.complete !== true
+      || proof.dispatch_count !== 0 || proof.read_request_count !== 2 || proof.candidate_limit !== 100) {
+      throw new Error("moodle_enrolment_candidate_result_invalid");
+    }
+    return {
+      userId,
+      proof: {
+        method: "native_manual_enrolment_candidate_search",
+        route: "/enrol/manual/manage.php",
+        complete: true,
+        dispatch_count: 0,
+        read_request_count: 2,
+        candidate_limit: 100,
+      },
+    };
+  }
+
+  async findMoodleEnrolmentCandidate(
+    value: unknown,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
+    try {
+      if (!isJsonObject(value)) throw new TypeError("moodle_enrolment_candidate_request_invalid");
+      const courseId = this.requestCourseId(value);
+      const sourceBindingId = this.requestSourceBindingId(value);
+      const query = typeof value.query === "string" ? value.query : "";
+      if (!courseId || !sourceBindingId || !/^[A-Za-z0-9_.:@-]{1,160}$/u.test(sourceBindingId)
+        || query.length < 1 || query.length > 200 || query !== query.trim()
+        || /[\u0000-\u001f\u007f]/u.test(query)) {
+        throw new TypeError("moodle_enrolment_candidate_request_invalid");
+      }
+      options.signal?.throwIfAborted();
+      const candidates = this.catalog.tools.filter((candidate) => (
+        candidate.upstreamName === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL
+        && candidate.annotations?.readOnlyHint === true
+        && candidate.capability?.provider === "moodle"
+        && candidate.capability?.route.backend === "canvas-connector"
+      ));
+      if (candidates.length !== 1) throw new Error("moodle_enrolment_candidate_source_unavailable");
+      const mapping = candidates[0]!;
+      const binding = await this.verifiedBrowserBinding(mapping, value, options, "moodle");
+      const scope = this.moodleBindingScope(binding, sourceBindingId, courseId);
+      if (!scope) throw new Error("moodle_enrolment_candidate_binding_unavailable");
+      const source = await this.callSourceOwned(mapping.publicName, {
+        course_id: Number(courseId),
+        query,
+        _morrow: { source_binding_id: sourceBindingId },
+      }, options);
+      const candidate = this.privateMoodleEnrolmentCandidate(source, courseId);
+      const candidateToken = this.learnerVault.tokenize(scope, { id: candidate.userId, name: query });
+      return canonicalMorrowResult({
+        result: {
+          content: [{ type: "text", text: "Morrow found one exact enrolment candidate for this course." }],
+          structuredContent: {
+            schema: "morrow.moodle-enrolment-candidate.v1",
+            course_id: Number(courseId),
+            candidate_token: candidateToken,
+            match: { kind: "exact_native_query", candidate_count: 1 },
+            proof: candidate.proof,
+          },
+        },
+        tool: PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+        backend: mapping.upstreamId,
+        phase: "read",
+        verificationStatus: "not_applicable",
+      });
+    } catch (error) {
+      return canonicalMorrowResult({
+        result: {
+          content: [{ type: "text", text: "Morrow could not find one exact enrolment candidate for this course." }],
+          isError: true,
+          structuredContent: {
+            schema: "morrow.problem.v1",
+            code: "moodle_enrolment_candidate_unavailable",
+            detailDigest: sha256Text(error instanceof Error ? `${error.name}:${error.message}` : String(error)),
+          },
+        },
+        tool: PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+        phase: "read",
+        verificationStatus: "not_applicable",
+      });
+    }
+  }
+
   private isCanvasClassicQuizSubmissionSummary(mapping: CatalogTool): boolean {
     return mapping.upstreamName === CANVAS_CLASSIC_QUIZ_SUBMISSION_SUMMARY_TOOL
       && mapping.annotations?.readOnlyHint === true
@@ -3944,13 +4076,11 @@ export class GatewayRuntime {
 
   private moodleScormLearnerTarget(
     request: Readonly<Record<string, unknown>>,
-  ): Readonly<{ courseId: string; moduleId: number; userId: number }> | null {
+  ): Readonly<{ courseId: string; moduleId: number; learnerToken: string }> | null {
     const target = this.moodleScormModuleTarget(request);
-    const requestedUserId = request.user_id;
-    const userId = typeof requestedUserId === "number" && Number.isSafeInteger(requestedUserId)
-      ? requestedUserId
+    return target && isMoodleLearnerToken(request.learner_token)
+      ? { ...target, learnerToken: request.learner_token }
       : null;
-    return target && userId !== null && userId > 0 ? { ...target, userId } : null;
   }
 
   private async publicMoodleScormAttemptSummary(
@@ -4069,12 +4199,13 @@ export class GatewayRuntime {
       || !/^[0-9a-f]{64}$/u.test(browser.snapshot_digest)) {
       throw new Error("moodle_scorm_learner_report_invalid");
     }
+    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
+    const userId = this.moodleUserIdForToken(target.learnerToken, learner);
     const bound = projectMoodleScormLearnerReportBrowserResult(browser.data, {
       courseId: Number(target.courseId),
       moduleId: target.moduleId,
-      userId: target.userId,
+      userId,
     });
-    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
     const report = projectPublicMoodleScormLearnerReportResult(redactLearnerEgress(bound, learner) as JsonObject, {
       courseId: Number(target.courseId),
       moduleId: target.moduleId,
@@ -4151,13 +4282,11 @@ export class GatewayRuntime {
 
   private moodleLearnerGradeReportTarget(
     request: Readonly<Record<string, unknown>>,
-  ): Readonly<{ courseId: string; userId: number }> | null {
+  ): Readonly<{ courseId: string; learnerToken: string }> | null {
     const target = this.moodleGradeReportCourseTarget(request);
-    const requestedUserId = request.user_id;
-    const userId = typeof requestedUserId === "number" && Number.isSafeInteger(requestedUserId)
-      ? requestedUserId
+    return target && isMoodleLearnerToken(request.learner_token)
+      ? { ...target, learnerToken: request.learner_token }
       : null;
-    return target && userId !== null && userId > 0 ? { ...target, userId } : null;
   }
 
   private async publicMoodleGradeReportSummary(
@@ -4271,11 +4400,12 @@ export class GatewayRuntime {
       || !/^[0-9a-f]{64}$/u.test(browser.snapshot_digest)) {
       throw new Error("moodle_learner_grade_report_invalid");
     }
+    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
+    const userId = this.moodleUserIdForToken(target.learnerToken, learner);
     const bound = projectMoodleLearnerGradeReportBrowserResult(browser.data, {
       courseId: Number(target.courseId),
-      userId: target.userId,
+      userId,
     });
-    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
     const report = projectPublicMoodleLearnerGradeReportResult(redactLearnerEgress(bound, learner) as JsonObject, {
       courseId: Number(target.courseId),
     });
@@ -4341,13 +4471,11 @@ export class GatewayRuntime {
 
   private moodleParticipantLearnerTarget(
     request: Readonly<Record<string, unknown>>,
-  ): Readonly<{ courseId: string; userId: number }> | null {
+  ): Readonly<{ courseId: string; learnerToken: string }> | null {
     const target = this.moodleParticipantCourseTarget(request);
-    const requestedUserId = request.user_id;
-    const userId = typeof requestedUserId === "number" && Number.isSafeInteger(requestedUserId)
-      ? requestedUserId
+    return target && isMoodleLearnerToken(request.learner_token)
+      ? { ...target, learnerToken: request.learner_token }
       : null;
-    return target && userId !== null && userId > 0 ? { ...target, userId } : null;
   }
 
   /**
@@ -4569,11 +4697,12 @@ export class GatewayRuntime {
       || !/^[0-9a-f]{64}$/u.test(browser.snapshot_digest)) {
       throw new Error(this.moodleReadFailureCode(raw, "moodle_participant_enrolment_", "moodle_participant_enrolment_invalid"));
     }
+    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
+    const userId = this.moodleUserIdForToken(target.learnerToken, learner);
     const bound = projectMoodleParticipantEnrolmentBrowserResult(browser.data, {
       courseId: Number(target.courseId),
-      userId: target.userId,
+      userId,
     });
-    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
     const record = projectPublicMoodleParticipantEnrolmentResult(redactLearnerEgress(bound, learner) as JsonObject, {
       courseId: Number(target.courseId),
     });
@@ -4630,12 +4759,12 @@ export class GatewayRuntime {
 
   private moodleAssignmentLearnerTarget(
     request: Readonly<Record<string, unknown>>,
-  ): Readonly<{ courseId: string; moduleId: number; userId: number }> | null {
+  ): Readonly<{ courseId: string; moduleId: number; learnerToken: string }> | null {
     const courseId = this.requestCourseId(request);
     const moduleId = typeof request.module_id === "number" && Number.isSafeInteger(request.module_id) ? request.module_id : null;
-    const userId = typeof request.user_id === "number" && Number.isSafeInteger(request.user_id) ? request.user_id : null;
-    return courseId && Number.isSafeInteger(Number(courseId)) && moduleId !== null && moduleId > 0 && userId !== null && userId > 0
-      ? { courseId, moduleId, userId }
+    return courseId && Number.isSafeInteger(Number(courseId)) && moduleId !== null && moduleId > 0
+      && isMoodleLearnerToken(request.learner_token)
+      ? { courseId, moduleId, learnerToken: request.learner_token }
       : null;
   }
 
@@ -4677,12 +4806,13 @@ export class GatewayRuntime {
       || !/^[0-9a-f]{64}$/u.test(browser.snapshot_digest)) {
       throw new Error("moodle_assignment_submission_invalid");
     }
+    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
+    const userId = this.moodleUserIdForToken(target.learnerToken, learner);
     const bound = projectMoodleAssignmentSubmissionBrowserResult(browser.data, {
       courseId: Number(target.courseId),
       moduleId: target.moduleId,
-      userId: target.userId,
+      userId,
     });
-    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
     const record = projectPublicMoodleAssignmentSubmissionResult(redactLearnerEgress(bound, learner) as JsonObject, {
       courseId: Number(target.courseId),
       moduleId: target.moduleId,
@@ -4774,12 +4904,13 @@ export class GatewayRuntime {
       || !/^[0-9a-f]{64}$/u.test(browser.snapshot_digest)) {
       throw new Error("moodle_assignment_feedback_invalid");
     }
+    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
+    const userId = this.moodleUserIdForToken(target.learnerToken, learner);
     const bound = projectMoodleAssignmentFeedbackBrowserResult(browser.data, {
       courseId: Number(target.courseId),
       moduleId: target.moduleId,
-      userId: target.userId,
+      userId,
     });
-    const learner = await this.moodleLearnerContextForBinding(mapping, sourceBindingId, target.courseId, binding, options);
     const record = projectPublicMoodleAssignmentFeedbackResult(redactLearnerEgress(bound, learner) as JsonObject, {
       courseId: Number(target.courseId),
       moduleId: target.moduleId,
@@ -5099,7 +5230,9 @@ export class GatewayRuntime {
     if (Array.isArray(value)) return value.some((candidate) => this.hasLearnerToken(candidate));
     if (!isJsonObject(value)) return false;
     return Object.entries(value).some(([key, candidate]) => (
-      key === "learner_token" || key === "learnerToken" || this.hasLearnerToken(candidate)
+      key === "learner_token" || key === "learnerToken"
+      || key === "candidate_token" || key === "candidateToken"
+      || this.hasLearnerToken(candidate)
     ));
   }
 
@@ -5236,6 +5369,50 @@ export class GatewayRuntime {
     return { learnerRoster: this.learnerRoster, learnerVault: this.learnerVault, learnerScope: scope };
   }
 
+  private moodleUserIdForToken(token: string, context: LearnerTextRedactionContext): number {
+    const identity = context.learnerVault.resolve(context.learnerScope, token);
+    context.learnerRoster.observe(context.learnerScope, [identity]);
+    if (!/^[1-9][0-9]{0,18}$/.test(identity.id)) throw new Error("learner_token_unavailable");
+    const userId = Number(identity.id);
+    if (!Number.isSafeInteger(userId) || userId < 1) throw new Error("learner_token_unavailable");
+    return userId;
+  }
+
+  private async moodleEnrolmentCandidateUserId(
+    mapping: CatalogTool,
+    request: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<number> {
+    const sourceBindingId = this.requestSourceBindingId(request);
+    const courseId = this.requestCourseId(request);
+    const token = request.candidate_token;
+    if (!sourceBindingId || !courseId || !isMoodleLearnerToken(token)) {
+      throw new Error("learner_token_unavailable");
+    }
+    const binding = await this.verifiedBrowserBinding(mapping, request, options, "moodle");
+    const scope = this.moodleBindingScope(binding, sourceBindingId, courseId);
+    if (!scope) throw new Error("learner_token_unavailable");
+    const identity = this.learnerVault.resolve(scope, token);
+    if (!/^[1-9][0-9]{0,18}$/u.test(identity.id) || typeof identity.name !== "string"
+      || identity.name.length < 1 || identity.name.length > 200 || identity.name !== identity.name.trim()
+      || /[\u0000-\u001f\u007f]/u.test(identity.name)) {
+      throw new Error("learner_token_unavailable");
+    }
+    const candidateTool = this.moodleEnrolmentCandidateTool(mapping);
+    if (!candidateTool) throw new Error("learner_token_unavailable");
+    options.signal?.throwIfAborted();
+    const fresh = await this.callSourceOwned(candidateTool.publicName, {
+      course_id: Number(courseId),
+      query: identity.name,
+      _morrow: { source_binding_id: sourceBindingId },
+    }, options);
+    const candidate = this.privateMoodleEnrolmentCandidate(fresh, courseId);
+    if (candidate.userId !== identity.id) throw new Error("learner_token_unavailable");
+    const userId = Number(candidate.userId);
+    if (!Number.isSafeInteger(userId) || userId < 1) throw new Error("learner_token_unavailable");
+    return userId;
+  }
+
   private privacyContext(
     mapping: CatalogTool,
     request: Readonly<Record<string, unknown>>,
@@ -5266,7 +5443,7 @@ export class GatewayRuntime {
   }
 
   private privacyFailure(error: unknown): JsonObject {
-    const code = error instanceof Error && (/^learner_roster_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_/u.test(error.message))
+    const code = error instanceof Error && (/^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_/u.test(error.message))
       ? error.message
       : "privacy_output_refused";
     return {
@@ -5701,6 +5878,9 @@ export class GatewayRuntime {
   ): Promise<JsonObject> {
     const sourceBindingId = this.requestSourceBindingId(request);
     if (!sourceBindingId) return this.strictNativeEgress(value) as JsonObject;
+    if (options.toolName === PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL) {
+      return this.strictNativeEgress(value) as JsonObject;
+    }
     // Blackboard Learn's local API source creates learner tokens and removes
     // learner identifiers before returning its bounded result. It has no
     // Chrome binding or browser roster route, so applying the Canvas/Moodle
@@ -6370,6 +6550,24 @@ export class GatewayRuntime {
         },
       });
     }
+    try {
+      assertPublicMoodleLearnerInput(mapping.publicName, args);
+    } catch {
+      return canonicalMorrowResult({
+        tool: publicName,
+        phase: "rejected",
+        verificationStatus: "not_applicable",
+        result: {
+          content: [{ type: "text", text: "Use the opaque learner or enrolment-candidate token returned for this exact Moodle course connection." }],
+          isError: true,
+          structuredContent: {
+            schema: "morrow.problem.v1",
+            code: "learner_token_required",
+            resultState: "not_sent",
+          },
+        },
+      });
+    }
     if (mapping.annotations?.readOnlyHint === true) {
       const raw = await this.callSourceOwned(publicName, args, options);
       const result = await this.publicSourceResult(mapping, args, raw, options);
@@ -6465,6 +6663,7 @@ export class GatewayRuntime {
       });
     }
     try {
+      assertPublicMoodleLearnerInput(mapping.publicName, args);
       return this.planOperationWithControls(publicName, mapping, outerOperationControls(args), authorization, bindingScope);
     } catch (error) {
       return this.planOperationRejected(publicName, error);
@@ -7447,17 +7646,39 @@ export class GatewayRuntime {
       // the request actually carries one, using the fresh binding scope.
       if (!this.hasLearnerToken(routed.forwarded)) {
         dispatchedArguments = structuredClone(routed.forwarded) as Record<string, unknown>;
+      } else if (mapping.capability?.provider === "moodle"
+        && mapping.publicName === MOODLE_ENROL_CANDIDATE_INPUT_TOOL) {
+        const userId = await this.moodleEnrolmentCandidateUserId(mapping, routed.forwarded, options);
+        dispatchedArguments = structuredClone(routed.forwarded) as Record<string, unknown>;
+        delete dispatchedArguments.candidate_token;
+        delete dispatchedArguments.candidateToken;
+        dispatchedArguments.user_id = userId;
       } else {
-        const learner = await this.canvasLearnerContext(mapping, routed.forwarded, options);
-        dispatchedArguments = learner
+        const learner = mapping.capability?.provider === "moodle"
+          ? await this.moodleLearnerContext(mapping, routed.forwarded, options)
+          : await this.canvasLearnerContext(mapping, routed.forwarded, options);
+        const resolved = learner
           ? resolveLearnerTokens(routed.forwarded, this.learnerVault, learner.learnerScope)
           : resolveLearnerTokens(routed.forwarded, this.learnerVault, {
-            canvasOrigin: this.config.privacy.canvasOrigin,
-            account: this.config.privacy.account,
-            course: this.requestCourseId(routed.forwarded) || "unbound",
-            principal: this.config.privacy.principal,
-            profile: this.config.profile,
-          });
+              canvasOrigin: this.config.privacy.canvasOrigin,
+              account: this.config.privacy.account,
+              course: this.requestCourseId(routed.forwarded) || "unbound",
+              principal: this.config.privacy.principal,
+              profile: this.config.profile,
+            });
+        if (mapping.capability?.provider === "moodle"
+          && MOODLE_ROSTER_LEARNER_INPUT_TOOLS.has(mapping.publicName as never)) {
+          const learnerId = resolved.learner_id;
+          if (typeof learnerId !== "string" || !/^[1-9][0-9]{0,18}$/.test(learnerId)) {
+            throw new Error("learner_token_unavailable");
+          }
+          const userId = Number(learnerId);
+          if (!Number.isSafeInteger(userId) || userId < 1) throw new Error("learner_token_unavailable");
+          dispatchedArguments = { ...resolved, user_id: userId };
+          delete dispatchedArguments.learner_id;
+        } else {
+          dispatchedArguments = resolved;
+        }
       }
     } catch (error) {
       const failed = this.journal.recordFailedBeforeSend(prepared.record.operationId, error);

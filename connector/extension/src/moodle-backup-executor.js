@@ -31,6 +31,7 @@ export async function executeMoodleBackupInPage(rawInput) {
   const MAX_TABLES = 12;
   const MAX_SETTING_ROWS = 200;
   const MAX_STATE_ROWS = 2_000;
+  const MAX_FILE_AREAS = 20;
   const MAX_TEXT = 255;
   const ID = /^[1-9][0-9]{0,18}$/;
   const DIGEST = /^[a-f0-9]{64}$/;
@@ -39,6 +40,8 @@ export async function executeMoodleBackupInPage(rawInput) {
   // backup, restore or import workflow all change on every load of the same
   // page, so none of them is ever part of a digest or a result.
   const TRANSIENT_FIELD = /(?:sesskey|statekey|_qf__|csrf|token|secret|password|authorization|cookie|pathnamehash|contenthash)/i;
+  const COURSE_SETTINGS_TRANSIENT_FIELD = /(?:sesskey|statekey|_qf__|csrf|token|secret|password|authorization|cookie|(?:^|[\[_-])(?:draft|itemid)(?:$|[\]_-]))/i;
+  const DATE_COMPONENTS = ["year", "month", "day", "hour", "minute"];
   const WORKFLOW_FIELDS = new Set(["backup", "restore", "import"]);
   const RESTORE_FILE_PATH = "/backup/restorefile.php";
   const BACKUP_PATH = "/backup/backup.php";
@@ -47,6 +50,7 @@ export async function executeMoodleBackupInPage(rawInput) {
   const COPY_PATH = "/backup/copy.php";
   const COPY_PROGRESS_PATH = "/backup/copyprogress.php";
   const COURSE_VIEW_PATH = "/course/view.php";
+  const COURSE_SETTINGS_PATH = "/course/edit.php";
   const AJAX_PATH = "/lib/ajax/service.php";
   const PROGRESS_METHOD = "core_backup_get_async_backup_progress";
   const STATE_METHOD = "core_courseformat_get_state";
@@ -550,6 +554,80 @@ export async function executeMoodleBackupInPage(rawInput) {
     return { data, status: response.status, digest: await digest(data) };
   };
 
+  /**
+   * The exact digest preimage used by moodle_get_course_settings. Copy creates
+   * a new course, but its approval still binds the complete source-course
+   * settings form and every file area that form carries.
+   */
+  const courseSettingsDigest = async (context, courseId, step) => {
+    const endpoint = urlFor(context, COURSE_SETTINGS_PATH, { id: courseId });
+    const page = await readPage(context, endpoint, step, "moodle_course_settings_read_unavailable");
+    if (page.error) return page;
+    const forms = [...page.document.querySelectorAll("form")].filter((form) => {
+      if (String(form.getAttribute("method") || "").toLowerCase() !== "post") return false;
+      const action = form.getAttribute("action");
+      if (!action) return false;
+      try { return sameRoute(new URL(action, endpoint).href, endpoint); } catch { return false; }
+    });
+    if (forms.length !== 1) return { error: "moodle_course_settings_form_invalid", status: page.status };
+    const form = forms[0];
+    const entries = entriesFor(form);
+    if (!entries || !one(valuesOf(entries, "id"), courseId) || !one(valuesOf(entries, "sesskey"), context.sesskey)) {
+      return { error: "moodle_course_settings_form_invalid", status: page.status };
+    }
+    const draftItemId = (value) => typeof value === "string" && ID.test(value) ? value : "";
+    const readDraftListing = async (itemId) => {
+      let response;
+      try {
+        response = await fetch(urlFor(context, "/repository/draftfiles_ajax.php", { action: "list" }), {
+          method: "POST", credentials: "include", cache: "no-store",
+          headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+          body: new URLSearchParams({ sesskey: context.sesskey, itemid: itemId, filepath: "/" }),
+        });
+      } catch { return null; }
+      if (!response.ok) return null;
+      try {
+        const payload = JSON.parse(await response.text());
+        return object(payload) ? payload : null;
+      } catch { return null; }
+    };
+    const names = new Set();
+    for (const control of form.querySelectorAll('[data-fieldtype="filemanager"] input[type="hidden"][name]')) {
+      const name = String(control.getAttribute("name") || "");
+      if (name) names.add(name);
+    }
+    for (const [name] of entries) if (/\[itemid\]$/.test(name)) names.add(name);
+    if (names.size > MAX_FILE_AREAS) return { error: "moodle_course_settings_form_invalid", status: page.status };
+    const areas = new Map();
+    for (const name of names) {
+      const values = valuesOf(entries, name);
+      const itemId = values.length === 1 ? draftItemId(values[0]) : "";
+      const listing = itemId ? await readDraftListing(itemId) : null;
+      const state = !listing || !Number.isSafeInteger(listing.filecount) || listing.filecount < 0 || !Array.isArray(listing.list)
+        ? "unverified" : listing.filecount === 0 && listing.list.length === 0 ? "empty" : "nonempty";
+      areas.set(name, state);
+    }
+    const ignored = new Set();
+    const disabled = [];
+    for (const control of form.querySelectorAll('input[type="checkbox"][name$="[enabled]"]')) {
+      if (control.checked) continue;
+      const name = String(control.getAttribute("name") || "");
+      const prefix = name.slice(0, -"[enabled]".length);
+      if (!prefix) continue;
+      disabled.push(name);
+      for (const component of DATE_COMPONENTS) ignored.add(`${prefix}[${component}]`);
+      ignored.add(name);
+    }
+    const snapshot = [];
+    for (const [name, value] of entries) {
+      if (areas.has(name)) { snapshot.push([name, `file_area:${areas.get(name)}`]); continue; }
+      if (ignored.has(name) || COURSE_SETTINGS_TRANSIENT_FIELD.test(name)) continue;
+      snapshot.push([name, value]);
+    }
+    for (const name of disabled) snapshot.push([name, "0"]);
+    return { status: page.status, digest: await digest({ courseId, entries: snapshot }) };
+  };
+
   // ---- Progress, read once ----
 
   const readProgress = async (context, operationId, wanted) => {
@@ -622,23 +700,24 @@ export async function executeMoodleBackupInPage(rawInput) {
       return DIGEST.test(String(args.expected_digest || "")) ? { courseId, expectedDigest: args.expected_digest } : null;
     }
     if (definition.kind === "import") {
-      if (!exactKeys(args, ["course_id", "source_course_id", "acknowledge_course_change"]) || id(args.course_id) !== courseId) return null;
+      if (!exactKeys(args, ["course_id", "source_course_id", "acknowledge_course_change", "expected_digest"]) || id(args.course_id) !== courseId) return null;
       const sourceCourseId = id(args.source_course_id);
-      if (!sourceCourseId || sourceCourseId === courseId || args.acknowledge_course_change !== true) return null;
-      return { courseId, sourceCourseId };
+      if (!sourceCourseId || sourceCourseId === courseId || args.acknowledge_course_change !== true
+        || !DIGEST.test(String(args.expected_digest || ""))) return null;
+      return { courseId, sourceCourseId, expectedDigest: args.expected_digest };
     }
     if (definition.kind === "copy") {
       const optional = ["category_id", "new_id_number"];
-      const required = ["course_id", "new_full_name", "new_short_name", "acknowledge_new_course"];
+      const required = ["course_id", "new_full_name", "new_short_name", "acknowledge_new_course", "expected_digest"];
       const allowed = new Set([...required, ...optional]);
       if (!object(args) || Object.keys(args).some((key) => !allowed.has(key)) || required.some((key) => !Object.hasOwn(args, key))) return null;
-      if (id(args.course_id) !== courseId || args.acknowledge_new_course !== true) return null;
+      if (id(args.course_id) !== courseId || args.acknowledge_new_course !== true || !DIGEST.test(String(args.expected_digest || ""))) return null;
       if (!validText(args.new_full_name, 254) || !validText(args.new_short_name, 100)) return null;
       const categoryId = args.category_id === undefined ? "" : id(args.category_id);
       if (args.category_id !== undefined && !categoryId) return null;
       const idNumber = args.new_id_number === undefined ? "" : args.new_id_number;
       if (!validOptionalText(idNumber, 100)) return null;
-      return { courseId, fullName: args.new_full_name, shortName: args.new_short_name, categoryId, idNumber };
+      return { courseId, fullName: args.new_full_name, shortName: args.new_short_name, categoryId, idNumber, expectedDigest: args.expected_digest };
     }
     const modes = [...RESTORE_MODES.keys()];
     if (!object(args) || typeof args.restore_mode !== "string" || !modes.includes(args.restore_mode)) return null;
@@ -726,6 +805,7 @@ export async function executeMoodleBackupInPage(rawInput) {
   const runCourseImport = async (context, args) => {
     const before = await courseState(context, args.courseId, "read_course_state_before");
     if (before.error) return failure(before.error, before.status);
+    if (before.digest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", before.status);
 
     const endpoint = urlFor(context, IMPORT_PATH, { id: args.courseId, importid: args.sourceCourseId });
     const page = await readPage(context, endpoint, "load_import_form", "moodle_import_form_unavailable");
@@ -744,7 +824,7 @@ export async function executeMoodleBackupInPage(rawInput) {
     // an import never runs against a course that changed after it was reviewed.
     const fresh = await courseState(context, args.courseId, "read_course_state_fresh");
     if (fresh.error) return failure(fresh.error, fresh.status);
-    if (fresh.digest !== before.digest) {
+    if (fresh.digest !== args.expectedDigest || fresh.digest !== before.digest) {
       const cancelled = await cancelWorkflow(context, state, args.courseId, "cancel_import");
       return { ...failure("moodle_import_course_changed", fresh.status), workflow_cancelled: cancelled };
     }
@@ -847,6 +927,9 @@ export async function executeMoodleBackupInPage(rawInput) {
       ["userdata", ["0"]],
       [COPY_SUBMIT_FIELD, [submit]],
     ]);
+    const reviewed = await courseSettingsDigest(context, args.courseId, "read_course_settings_fresh");
+    if (reviewed.error) return failure(reviewed.error, reviewed.status);
+    if (reviewed.digest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", reviewed.status);
     const posted = await postForm(context, state, changes, "start_copy", "moodle_course_copy_unconfirmed", true);
     if (posted.error) return failure(posted.error, posted.status);
     if (posted.unconfirmed) return unconfirmedWrite(posted.unconfirmed, posted.status);

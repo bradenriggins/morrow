@@ -152,6 +152,31 @@ try {
   }
 
   {
+    let posts = 0;
+    install(async (urlValue, options = {}) => {
+      const url = new URL(String(urlValue));
+      const standard = courseAndProfile(url);
+      if (standard) return standard;
+      if (url.pathname === "/api/v1/courses/101/users/201") return json({ id: "201" });
+      if (options.method === "POST") posts += 1;
+      throw new Error(`unexpected request ${options.method || "GET"} ${url}`);
+    });
+    globalThis.document.cookie = "";
+    const result = await executeCanvasConversationInPage(request({
+      schema: CANVAS_CONVERSATION_PRIVATE_SCHEMA,
+      action: "create",
+      courseId: "101",
+      recipients: ["201"],
+      body: "Do not send without the current Canvas CSRF token.",
+    }));
+    assert.equal(result.ok, false);
+    assert.equal(result.sent, false);
+    assert.equal(result.outcomeUnknown, undefined);
+    assert.equal(result.error, "canvas_conversation_csrf_missing");
+    assert.equal(posts, 0, "a missing CSRF token must remain a before-send refusal");
+  }
+
+  {
     let conversationReads = 0;
     let posts = 0;
     install(async (urlValue, options = {}) => {

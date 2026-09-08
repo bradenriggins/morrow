@@ -34,7 +34,7 @@ export const blackboardCourseReadModule: BlackboardOperationModule = {
       inputSchema: scopeInput,
       annotations: READ_ANNOTATIONS,
       capability: {
-        family: "course-read", provider: "blackboard", sourceExport: "blackboard-learn-rest.v1",
+        family: "course-read", provider: "blackboard", sourceExport: "GET /learn/api/public/v3/courses/{course_id}",
         behavior: READ_BEHAVIOR,
         authority: { scopeClass: "tenant-course", approvalClass: "none", dataClass: "course" },
         route: { backend: "lms-api", dispatchBackend: "blackboard-rest" },
@@ -43,7 +43,7 @@ export const blackboardCourseReadModule: BlackboardOperationModule = {
       },
       rest: {
         method: "GET",
-        pathTemplate: "/learn/api/public/v1/courses/{course_id}",
+        pathTemplate: "/learn/api/public/v3/courses/{course_id}?fields=id,courseId,name,description",
         access: "read",
         entitlement: "unknown",
         reviewRoute: null,

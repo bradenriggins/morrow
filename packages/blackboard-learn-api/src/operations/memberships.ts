@@ -327,6 +327,12 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
   };
 }
 
+function membershipEffectTarget(runtime: BlackboardLearnRuntime, input: MembershipScope, userId: string) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "course-membership", { userId });
+}
+
 /** What the readback after a membership change proves, in plain words. */
 const READBACK_DETAIL = "Morrow re-read the membership and compared the membership record, the account, the course, the course role, and availability against the reviewed plan.";
 
@@ -406,6 +412,7 @@ async function planMembershipPatch(
 ): Promise<JsonObject> {
   const patch = reviewedPatch(input.patch);
   const { reference, userId } = reviewedAccount(runtime, input);
+  runtime.assertEffectTargetFree(membershipEffectTarget(runtime, input, userId));
   // A plan exists only to be dispatched, so it carries the write condition. An
   // instructor is refused before review instead of after approving a change
   // Morrow would then refuse to send.
@@ -453,7 +460,7 @@ async function applyReviewedMembershipPatch(
   }
   const patch = reviewedPatch(input.patch);
   const { reference, userId } = reviewedAccount(runtime, input);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, membershipEffectTarget(runtime, input, userId));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -474,6 +481,7 @@ async function applyReviewedMembershipPatch(
   // failure from here on is reported as applied_or_unknown, and every refusal
   // raised above this point keeps not_sent.
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     await write.client.patch(membershipPath(write.courseId, userId), patch, signal);
@@ -486,6 +494,7 @@ async function applyReviewedMembershipPatch(
         dispatchState,
       );
     }
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.membership-patch.readback.v1",
       ok: true,
@@ -501,6 +510,7 @@ async function applyReviewedMembershipPatch(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -530,6 +540,8 @@ async function verifyMembershipPatch(
   }, signal);
   const record = await comparator.client.get(membershipPath(comparator.courseId, userId), signal);
   const exact = record.courseId === comparator.courseId && record.userId === userId;
+  const verified = exact && membershipFieldsMatch(record, patch);
+  runtime.recordEffectComparison(membershipEffectTarget(runtime, input, userId), verified);
   return {
     schema: "morrow.blackboard.membership-patch.comparator.v1",
     ok: true,
@@ -537,7 +549,7 @@ async function verifyMembershipPatch(
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
     learnerToken: reference,
-    verified: exact && membershipFieldsMatch(record, patch),
+    verified,
     readback: READBACK_STATE,
     status: "api_configured_live_untested",
   };

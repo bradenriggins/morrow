@@ -8,6 +8,8 @@ import { join } from "node:path";
 import test from "node:test";
 import { chromium } from "playwright";
 import { executeMoodleBackupInPage } from "../../connector/extension/src/moodle-backup-executor.js";
+import { executeMoodleCourseSettingsInPage } from "../../connector/extension/src/moodle-course-settings-executor.js";
+import { executeMoodleInPage } from "../../connector/extension/src/moodle-executor.js";
 
 const ANCHOR_SESSION = "moodle-session-a";
 const FOREIGN_SESSION = "moodle-session-b";
@@ -25,6 +27,12 @@ const operations = Object.freeze({
   restore: { key: "moodle.form.backup.restore.course.write.v1", toolName: "moodle_start_course_restore", provider: "moodle", readOnly: false },
   import: { key: "moodle.form.backup.import.course.write.v1", toolName: "moodle_start_course_import", provider: "moodle", readOnly: false },
   copy: { key: "moodle.form.backup.copy.course.write.v1", toolName: "moodle_copy_course", provider: "moodle", readOnly: false },
+});
+const contentsRead = Object.freeze({
+  key: "moodle.ajax.core_courseformat_get_state.v1", toolName: "moodle_get_contents", provider: "moodle", readOnly: true,
+});
+const courseSettingsRead = Object.freeze({
+  key: "moodle.form.course.edit.settings.read.v1", toolName: "moodle_get_course_settings", provider: "moodle", readOnly: true,
 });
 
 /** The executor's digest preimage rule, so a test can recompute a returned digest. */
@@ -128,6 +136,7 @@ test("Moodle backup executor runs each native course-reuse step once and never r
   const posts = [];
   let origin = "";
   let workflowCounter = 0;
+  let courseSettingsDraft = 7000;
 
   const stageForm = (stage, restoreId, action) => `<form method="post" action="${action}" class="mform">
       ${hidden("stage", stage)}${hidden("restore", restoreId)}${hidden("contextid", COURSE_CONTEXT_ID)}
@@ -368,6 +377,32 @@ test("Moodle backup executor runs each native course-reuse step once and never r
       return;
     }
 
+    if (request.method === "GET" && url.pathname === "/course/edit.php" && url.search === "?id=2") {
+      const draftId = String(++courseSettingsDraft);
+      html(page(`<form method="post" action="${origin}/course/edit.php?id=2" id="id_editcourse">
+        ${hidden("id", "2")}${hidden("sesskey", sesskey())}${hidden("_qf__course_editcourse_form", "1")}
+        <fieldset id="id_courseformathdr">
+          <select name="format"><option value="topics" selected>Topics</option></select>
+        </fieldset>
+        <input type="checkbox" name="enddate[enabled]" value="1">
+        <select name="enddate[year]"><option value="2027" selected>2027</option></select>
+        <select name="enddate[month]"><option value="1" selected>1</option></select>
+        <select name="enddate[day]"><option value="1" selected>1</option></select>
+        <select name="enddate[hour]"><option value="0" selected>0</option></select>
+        <select name="enddate[minute]"><option value="0" selected>0</option></select>
+        <div data-fieldtype="filemanager"><input type="hidden" name="overviewfiles_filemanager" value="${draftId}"></div>
+        <input type="submit" name="saveanddisplay" value="Save and display">
+      </form>`));
+      return;
+    }
+    if (request.method === "POST" && url.pathname === "/repository/draftfiles_ajax.php" && url.search === "?action=list") {
+      const values = new URLSearchParams(await readBody(request));
+      assert.match(values.get("itemid") || "", /^[1-9][0-9]*$/);
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ filecount: 0, list: [], tree: { children: [] } }));
+      return;
+    }
+
     if (request.method === "POST" && url.pathname === "/lib/ajax/service.php") {
       const call = JSON.parse(await readBody(request))[0];
       assert.equal(url.searchParams.get("info"), call.methodname);
@@ -414,6 +449,14 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     const execute = (operation, argumentsValue) => pageHandle.evaluate(
       executeMoodleBackupInPage,
       JSON.stringify({ mode: "execute", operation, arguments: argumentsValue, binding, expiresAt: Date.now() + 120_000 }),
+    );
+    const executeContentsRead = (argumentsValue) => pageHandle.evaluate(
+      executeMoodleInPage,
+      JSON.stringify({ mode: "execute", operation: contentsRead, arguments: argumentsValue, binding, expiresAt: Date.now() + 120_000 }),
+    );
+    const executeCourseSettingsRead = (argumentsValue) => pageHandle.evaluate(
+      executeMoodleCourseSettingsInPage,
+      JSON.stringify({ mode: "execute", operation: courseSettingsRead, arguments: argumentsValue, binding, expiresAt: Date.now() + 120_000 }),
     );
     const loseNextPost = (pathname, marker) => pageHandle.evaluate(([path, needle]) => {
       const nativeFetch = globalThis.fetch;
@@ -696,11 +739,25 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     assert.deepEqual(await execute(operations.import, { course_id: 2, source_course_id: 2, acknowledge_course_change: true }), {
       ok: false, sent: false, error: "moodle_backup_arguments_invalid",
     });
-    assert.deepEqual(await execute(operations.import, { course_id: 2, source_course_id: 9, acknowledge_course_change: true }), {
+    const reviewedContents = await executeContentsRead({ course_id: 2 });
+    assert.equal(reviewedContents.ok, true, JSON.stringify(reviewedContents));
+    assert.equal(reviewedContents.snapshot_digest, digestOf(reviewedContents.data));
+    const importArguments = {
+      course_id: 2,
+      source_course_id: 7,
+      acknowledge_course_change: true,
+      expected_digest: reviewedContents.snapshot_digest,
+    };
+    const postsBeforeStaleImport = posts.length;
+    assert.deepEqual(await execute(operations.import, { ...importArguments, expected_digest: "0".repeat(64) }), {
+      ok: false, sent: false, status: 200, error: "moodle_expected_digest_mismatch",
+    });
+    assert.equal(posts.length, postsBeforeStaleImport, "a stale contents digest must not POST the import form");
+    assert.deepEqual(await execute(operations.import, { ...importArguments, source_course_id: 9 }), {
       ok: false, sent: false, status: 200, error: "moodle_import_form_invalid",
     });
     const postsBeforeImport = posts.length;
-    const imported = await execute(operations.import, { course_id: 2, source_course_id: 7, acknowledge_course_change: true });
+    const imported = await execute(operations.import, importArguments);
     assert.equal(imported.ok, true, JSON.stringify(imported));
     assert.equal(imported.verification.status, "verified");
     assert.equal(posts.length - postsBeforeImport, 1);
@@ -722,8 +779,13 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     // A course someone else changed between the two reads is not imported into, and the
     // native workflow Morrow opened is ended with its own Cancel.
     const postsBeforeChange = posts.length;
+    const beforeChangedImport = await executeContentsRead({ course_id: 2 });
+    assert.equal(beforeChangedImport.ok, true, JSON.stringify(beforeChangedImport));
     state.changeCourseOnNextRead = true;
-    const changed = await execute(operations.import, { course_id: 2, source_course_id: 7, acknowledge_course_change: true });
+    const changed = await execute(operations.import, {
+      ...importArguments,
+      expected_digest: beforeChangedImport.snapshot_digest,
+    });
     assert.equal(changed.ok, false);
     assert.equal(changed.sent, false);
     assert.equal(changed.error, "moodle_import_course_changed");
@@ -738,19 +800,40 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     assert.deepEqual(await execute(operations.copy, { course_id: 2, new_full_name: "Copy", new_short_name: "COPY-1" }), {
       ok: false, sent: false, error: "moodle_backup_arguments_invalid",
     });
+    const reviewedCourseSettings = await executeCourseSettingsRead({ course_id: 2 });
+    assert.equal(reviewedCourseSettings.ok, true, JSON.stringify(reviewedCourseSettings));
+    assert.equal(reviewedCourseSettings.snapshot_digest, digestOf({
+      courseId: "2",
+      entries: [
+        ["id", "2"],
+        ["format", "topics"],
+        ["overviewfiles_filemanager", "file_area:empty"],
+        ["enddate[enabled]", "0"],
+      ],
+    }));
+    const copyArguments = {
+      course_id: 2,
+      new_full_name: "Nursing Fundamentals 2027",
+      new_short_name: "NURS-101-2027",
+      acknowledge_new_course: true,
+      expected_digest: reviewedCourseSettings.snapshot_digest,
+    };
+    const postsBeforeStaleCopy = posts.length;
+    assert.deepEqual(await execute(operations.copy, { ...copyArguments, expected_digest: "0".repeat(64) }), {
+      ok: false, sent: false, status: 200, error: "moodle_expected_digest_mismatch",
+    });
+    assert.equal(posts.length, postsBeforeStaleCopy, "a stale course-settings digest must not POST the copy form");
     state.copyRoleChecked = true;
-    assert.deepEqual(await execute(operations.copy, {
-      course_id: 2, new_full_name: "Nursing Fundamentals 2027", new_short_name: "NURS-101-2027", acknowledge_new_course: true,
-    }), { ok: false, sent: false, status: 200, error: "moodle_course_copy_enrolments_refused" });
+    assert.deepEqual(await execute(operations.copy, copyArguments), {
+      ok: false, sent: false, status: 200, error: "moodle_course_copy_enrolments_refused",
+    });
     state.copyRoleChecked = false;
     // A category the native control does not offer is refused before anything is sent.
     assert.deepEqual(await execute(operations.copy, {
-      course_id: 2, new_full_name: "Nursing Fundamentals 2027", new_short_name: "NURS-101-2027", category_id: 9, acknowledge_new_course: true,
+      ...copyArguments, category_id: 9,
     }), { ok: false, sent: false, status: 200, error: "moodle_course_copy_category_refused" });
     const postsBeforeCopy = posts.length;
-    const copied = await execute(operations.copy, {
-      course_id: 2, new_full_name: "Nursing Fundamentals 2027", new_short_name: "NURS-101-2027", acknowledge_new_course: true,
-    });
+    const copied = await execute(operations.copy, copyArguments);
     assert.equal(copied.ok, true, JSON.stringify(copied));
     assert.equal(copied.verification.status, "verified");
     assert.equal(posts.length - postsBeforeCopy, 1);
@@ -775,7 +858,7 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     });
     // A copy Moodle is already making under that name is not started again.
     assert.deepEqual(await execute(operations.copy, {
-      course_id: 2, new_full_name: "Nursing Fundamentals 2027", new_short_name: "NURS-101-2028", acknowledge_new_course: true,
+      ...copyArguments, new_short_name: "NURS-101-2028",
     }), { ok: false, sent: false, status: 200, error: "moodle_course_copy_already_in_progress" });
     // A named category and a named ID number are both sent to the native controls.
     state.copies = [];
@@ -786,6 +869,7 @@ test("Moodle backup executor runs each native course-reuse step once and never r
       category_id: 4,
       new_id_number: "NURS-101-2029-ID",
       acknowledge_new_course: true,
+      expected_digest: reviewedCourseSettings.snapshot_digest,
     });
     assert.equal(placed.ok, true, JSON.stringify(placed));
     assert.equal(posts.at(-1).values.get("category"), "4");
@@ -797,7 +881,7 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     // stays unconfirmed rather than being sent again.
     state.copies = [];
     const refused = await execute(operations.copy, {
-      course_id: 2, new_full_name: "Nursing Fundamentals 2028", new_short_name: "NURS-201", acknowledge_new_course: true,
+      ...copyArguments, new_full_name: "Nursing Fundamentals 2028", new_short_name: "NURS-201",
     });
     assert.deepEqual(refused, {
       ok: false, sent: true, status: 200, outcomeUnknown: true,
@@ -878,12 +962,12 @@ test("the Moodle backup, restore, import and copy routes are wired and published
 
   const importEntry = entries[keys.indexOf(operations.import.key)];
   assert.equal(importEntry.reviewTool, "moodle_get_contents");
-  assert.deepEqual(importEntry.inputSchema.required, ["course_id", "source_course_id", "acknowledge_course_change"]);
+  assert.deepEqual(importEntry.inputSchema.required, ["course_id", "source_course_id", "acknowledge_course_change", "expected_digest"]);
   assert.match(importEntry.description, /does not delete anything/);
 
   const copy = entries[keys.indexOf(operations.copy.key)];
   assert.equal(copy.reviewTool, "moodle_get_course_settings");
-  assert.deepEqual(copy.inputSchema.required, ["course_id", "new_full_name", "new_short_name", "acknowledge_new_course"]);
+  assert.deepEqual(copy.inputSchema.required, ["course_id", "new_full_name", "new_short_name", "acknowledge_new_course", "expected_digest"]);
   assert.match(copy.description, /hidden/);
   assert.match(copy.description, /no learner data/);
 

@@ -51,6 +51,7 @@ if (!signedRelease) mac.identity = null;
 module.exports = {
   appId: "app.meetmorrow.installer",
   productName: "Morrow",
+  copyright: "Copyright © 2026 Braden Riggins",
   artifactName: "Morrow-${version}-${os}-${arch}.${ext}",
   directories: {
     app: __dirname,

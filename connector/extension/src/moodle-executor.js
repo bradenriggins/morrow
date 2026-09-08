@@ -1399,7 +1399,7 @@ export async function executeMoodleInPage(input) {
         scope: descriptor.scope,
         ...(descriptor.scope === "group"
           ? { group_id: Number(controlValue(documentValue, values, "groupid")) || null, group_name: selectedControlLabel(documentValue, "groupid") }
-          : {}),
+          : { user_id: Number(controlValue(documentValue, values, "userid")) || null }),
         ...Object.fromEntries(spec.fields.map(({ argument, field, kind }) => [
           argument,
           kind === "date" ? dateFromForm(values, field) : kind === "duration" ? durationFromForm(values, field) : controlValue(documentValue, values, field),

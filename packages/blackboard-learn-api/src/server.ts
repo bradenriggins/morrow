@@ -159,6 +159,7 @@ async function execute(action: () => Promise<JsonObject>) {
         code: known ? error.code : "blackboard_request_failed",
         message: known ? error.message : "Morrow could not complete the Blackboard request.",
         ...(known && error.status ? { status: error.status } : {}),
+        ...(known && error.diagnostics ? { diagnostics: error.diagnostics } : {}),
       },
     });
   }

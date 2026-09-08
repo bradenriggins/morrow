@@ -103,7 +103,14 @@ async function fixture(options: {
       let source = "";
       request.on("data", (chunk) => { source += String(chunk); });
       request.on("end", () => {
-        if (options.patchStatus) { json(response, { message: "failure" }, options.patchStatus); return; }
+        if (options.patchStatus) {
+          response.writeHead(options.patchStatus, {
+            "content-type": "application/json",
+            ...(options.patchStatus === 429 ? { "retry-after": "30", "x-rate-limit-remaining": "0" } : {}),
+          });
+          response.end(JSON.stringify({ message: "failure" }));
+          return;
+        }
         const requested = JSON.parse(source) as JsonObject;
         const previousAvailability = content.availability as JsonObject;
         content = { ...content, ...requested };
@@ -322,6 +329,41 @@ describe("Blackboard Learn REST vertical slice", () => {
     await expect(runtime.applyReservedContentPatch(plan, effectGrant(plan.planDigest, "effect:00000000-0000-4000-8000-000000000003")))
       .rejects.toMatchObject({ code: "blackboard_request_failed", status: 502 });
     expect(counts().patchCount).toBe(1);
+  });
+
+  it("returns the tenant's bounded rate-limit diagnostics through MCP", async () => {
+    const { runtime, binding, counts } = await fixture({ patchStatus: 429 });
+    const patch = { title: "Reviewed title" };
+    const plan = await runtime.planContentPatch({ tenantId: "fixture", sourceBindingId: binding, courseId, contentId, patch });
+    const client = new Client({ name: "blackboard-rate-limit-test", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+    const [left, right] = InMemoryTransport.createLinkedPair();
+    const running = serveStdio(() => createBlackboardLearnMcpServer(runtime, { includePrivateDispatch: true }), { transport: right });
+    await client.connect(left);
+    const result = await client.callTool({
+      name: "blackboard_apply_reviewed_content_patch",
+      arguments: {
+        tenant_id: "fixture",
+        source_binding_id: binding,
+        course_id: courseId,
+        content_id: contentId,
+        patch,
+        expected_plan_digest: plan.planDigest,
+        expected_connection: reviewedConnection(runtime, binding),
+        _morrow: { outer_grant: grantArguments(effectGrant(plan.planDigest, "effect:00000000-0000-4000-8000-000000000009")) },
+      },
+    });
+    expect(isJsonObject(result.structuredContent) ? result.structuredContent : {}).toMatchObject({
+      ok: false,
+      resultState: "applied_or_unknown",
+      problem: {
+        code: "blackboard_request_rate_limited",
+        status: 429,
+        diagnostics: { "retry-after": "30", "x-rate-limit-remaining": "0" },
+      },
+    });
+    expect(counts().patchCount).toBe(1);
+    await client.close();
+    await running.close();
   });
 
   it("refuses a forged or replayed effect grant without a second PATCH", async () => {

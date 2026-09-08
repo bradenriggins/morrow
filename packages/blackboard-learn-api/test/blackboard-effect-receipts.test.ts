@@ -428,6 +428,46 @@ describe("Blackboard effect record retention", () => {
     return { ...unsigned, dispatchToken: signBlackboardEffectGrant(gatewaySecret, unsigned) };
   }
 
+  it("persists and settles a hashed non-content target without exposing its key", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-generic-target-"));
+    try {
+      const path = join(directory, "state", "blackboard-effects.json");
+      const target = {
+        tenantId: "fixture",
+        courseId,
+        targetType: "gradebook-grade",
+        targetKey: "d".repeat(64),
+      } as const;
+      const otherTarget = { ...target, targetKey: "e".repeat(64) } as const;
+      const record = new BlackboardEffectReceipts(path);
+      const dispatch = record.claim(grant(receiptId(10), "op:blackboard-generic-target"), target);
+      dispatch.markSent();
+      dispatch.markUncertain();
+
+      expect(record.unresolved()).toMatchObject({
+        count: 1,
+        effects: [{
+          operationId: "op:blackboard-generic-target",
+          phase: "uncertain",
+          tenantId: "fixture",
+          courseId,
+          targetType: "gradebook-grade",
+        }],
+      });
+      expect(JSON.stringify(record.unresolved())).not.toContain(target.targetKey);
+      expect(() => record.assertTargetFree(target)).toThrow(/already sent a change/);
+      expect(() => record.assertTargetFree(otherTarget)).not.toThrow();
+
+      const restarted = new BlackboardEffectReceipts(path);
+      expect(() => restarted.assertTargetFree(target)).toThrow(/already sent a change/);
+      restarted.recordComparison(target, false);
+      expect(restarted.unresolved()).toMatchObject({ count: 0, effects: [] });
+      expect(() => restarted.assertTargetFree(target)).not.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("drops a settled record after its retention window and keeps an unconfirmed one however old it is", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-retention-"));
     try {

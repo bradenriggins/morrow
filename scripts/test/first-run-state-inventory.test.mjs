@@ -162,6 +162,7 @@ test("every Morrow app setup state cites the line its own title is written on", 
 const anchor = (fields = {}) => ({ provider: "canvas", runtimeVerified: true, lastSeenAt: 1, siteAnchorId: "site-1", ...fields });
 const binding = (fields = {}) => ({ courseName: "Biology 101", runtimeVerified: true, lastSeenAt: 1, ...fields });
 const connection = { paired: false, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [] };
+const healthyPopup = { paired: true, connected: true, runtimeHealthy: true };
 
 // One state per branch of the popup's detail text.
 const POPUP_STATES = new Map([
@@ -170,11 +171,12 @@ const POPUP_STATES = new Map([
   ["pairing", { ...connection, pairing: true }],
   ["connecting", { ...connection, paired: true, connecting: true }],
   ["paired-not-connected", { ...connection, paired: true }],
-  ["connected-no-site", { ...connection, paired: true, connected: true }],
-  ["site-ready-no-course", { ...connection, paired: true, connected: true, siteAnchors: [anchor()] }],
-  ["site-stale", { ...connection, paired: true, connected: true, siteAnchors: [anchor({ runtimeVerified: false })] }],
-  ["course-ready", { ...connection, paired: true, connected: true, siteAnchors: [anchor()], bindings: [binding()], bindingCount: 1 }],
-  ["course-tab-closed", { ...connection, paired: true, connected: true, siteAnchors: [anchor()], bindings: [binding({ runtimeVerified: false })], bindingCount: 1 }],
+  ["runtime-mismatch", { ...connection, paired: true, connected: true, runtimeHealthy: false }],
+  ["connected-no-site", { ...connection, ...healthyPopup }],
+  ["site-ready-no-course", { ...connection, ...healthyPopup, siteAnchors: [anchor()] }],
+  ["site-stale", { ...connection, ...healthyPopup, siteAnchors: [anchor({ runtimeVerified: false })] }],
+  ["course-ready", { ...connection, ...healthyPopup, siteAnchors: [anchor()], bindings: [binding()], bindingCount: 1 }],
+  ["course-tab-closed", { ...connection, ...healthyPopup, siteAnchors: [anchor()], bindings: [binding({ runtimeVerified: false })], bindingCount: 1 }],
 ]);
 const POPUP_SECTION = "4. Morrow Bridge popup";
 
@@ -192,8 +194,8 @@ test("the inventory carries what every popup state renders", () => {
 test("the inventory lists one popup state per branch", () => {
   const source = read("connector/extension/popup/popup-view.js");
   const body = source.slice(source.indexOf("export function detailText"), source.indexOf("export function controlState"));
-  // The guard clause, plus one arm per ternary and the last arm. `?.` is not a ternary.
-  const branches = 1 + (body.match(/\?(?!\.)/g) || []).length + 1;
+  // Each guard clause, plus one arm per ternary and the last arm. `?.` is not a ternary.
+  const branches = (body.match(/^\s*if\s*\(/gm) || []).length + (body.match(/\?(?!\.)/g) || []).length + 1;
   assert.equal(
     POPUP_STATES.size,
     branches,

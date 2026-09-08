@@ -14,6 +14,7 @@ const digest = createHash("sha256").update(bytes).digest("hex");
 
 function response({ status = 200, url = CANVAS + "/", json = {}, text = "", headers = {}, body = bytes } = {}) {
   const headerValues = new Headers(headers);
+  const streamBytes = body;
   return {
     status,
     ok: status >= 200 && status < 300,
@@ -21,7 +22,12 @@ function response({ status = 200, url = CANVAS + "/", json = {}, text = "", head
     headers: headerValues,
     async json() { return json; },
     async text() { return text; },
-    async arrayBuffer() { return body.buffer.slice(body.byteOffset, body.byteOffset + body.byteLength); },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(streamBytes);
+        controller.close();
+      },
+    }),
   };
 }
 
@@ -203,5 +209,20 @@ test("marks the effect unknown when readback bytes do not match the staged SHA-2
   assert.equal(result.sent, true);
   assert.equal(result.outcomeUnknown, true);
   assert.equal(result.error, "canvas_file_download_digest_mismatch");
+  assert.equal(requests.length, 11);
+});
+
+test("stops an undeclared oversized download while it is streaming", async () => {
+  const responses = fixtureResponses();
+  responses[10] = response({
+    url: STORAGE + "/download/material",
+    body: new Uint8Array(MAX_CANVAS_FILE_TRANSFER_BYTES + 1),
+  });
+  const { result, requests } = await run(input(), responses);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.sent, true);
+  assert.equal(result.outcomeUnknown, true);
+  assert.equal(result.error, "canvas_file_download_too_large");
   assert.equal(requests.length, 11);
 });

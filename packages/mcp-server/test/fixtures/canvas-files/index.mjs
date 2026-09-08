@@ -134,6 +134,11 @@ export function unreadableStructurePdf() {
   ]);
 }
 
+/** A PDF beyond the bounded compressed-object walk must not report a partial page count. */
+export function pdfWithTooManyObjectStreams() {
+  return buildPdf(Array.from({ length: 65 }, () => streamObject("/Type /ObjStm /N 0 /First 0", "")));
+}
+
 /** A file that claims to be a PDF and carries no object at all. */
 export function emptyPdf() {
   return Buffer.from("%PDF-1.4\n%%EOF\n", "latin1");
@@ -219,6 +224,29 @@ export function docxWithoutAltText() {
   ]);
 }
 
+/** XML permits single-quoted attributes and whitespace around the equals sign. */
+export function docxWithSingleQuotedMetadata() {
+  const document = [
+    "<?xml version='1.0' encoding='UTF-8'?><w:document xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main' xmlns:wp='http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing'>",
+    "<w:body><w:p><w:r><w:drawing><wp:inline><wp:docPr id='1' name='Diagram' descr = 'A labelled diagram'/></wp:inline></w:drawing></w:r></w:p></w:body></w:document>",
+  ].join("");
+  const styles = "<?xml version='1.0' encoding='UTF-8'?><w:styles xmlns:w='http://schemas.openxmlformats.org/wordprocessingml/2006/main'><w:style w:type='paragraph' w:styleId = 'Heading3'/></w:styles>";
+  return zip([
+    { name: "[Content_Types].xml", data: CONTENT_TYPES, stored: true },
+    { name: "word/document.xml", data: document },
+    { name: "word/styles.xml", data: styles },
+  ]);
+}
+
+/** A central directory with two entries for one part is ambiguous and invalid. */
+export function officeWithDuplicatePartNames() {
+  return zip([
+    { name: "[Content_Types].xml", data: CONTENT_TYPES, stored: true },
+    { name: "word/document.xml", data: "<w:document/>" },
+    { name: "word/document.xml", data: "<w:document><w:body/></w:document>" },
+  ]);
+}
+
 /** A PPTX with two slides and three pictures, one of which describes itself. */
 export function pptxWithMixedAltText() {
   const slide = (pictures) => [
@@ -239,6 +267,18 @@ export function pptxWithMixedAltText() {
       data: slide('<p:pic><p:nvPicPr><p:cNvPr id="4" name="Picture 4" descr="  "/></p:nvPicPr></p:pic>'),
       stored: true,
     },
+  ]);
+}
+
+/** The slide count remains exact when the bounded XML inspection cap is exceeded. */
+export function pptxOverPartLimit() {
+  return zip([
+    { name: "[Content_Types].xml", data: CONTENT_TYPES, stored: true },
+    { name: "ppt/presentation.xml", data: "<p:presentation/>" },
+    ...Array.from({ length: 201 }, (_, index) => ({
+      name: `ppt/slides/slide${index + 1}.xml`,
+      data: "<p:sld><p:cSld><p:spTree/></p:cSld></p:sld>",
+    })),
   ]);
 }
 

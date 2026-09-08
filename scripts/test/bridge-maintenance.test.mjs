@@ -177,3 +177,18 @@ test("a resume refuses a swapped file layer until the app restores the exact qui
     "bridge_resume_file_layer_unconfirmed",
   );
 });
+
+test("a resume keeps the fence when the restored Bridge is no longer a development install", async () => {
+  const testFixture = fixture();
+  const quiesced = await testFixture.create().control({ action: "quiesce" });
+  testFixture.chromeApi.management.getSelf = async () => ({ id: EXTENSION_ID, version: VERSION, installType: "normal" });
+  const restartedWorker = testFixture.create();
+  await rejectsCode(
+    () => restartedWorker.control({ action: "resume", quiesceEpoch: quiesced.quiesceEpoch, fileLayerRestored: true }),
+    "bridge_store_install_refused",
+  );
+  await rejectsCode(
+    () => restartedWorker.beginWrite({ operationId: "operation:still-blocked", effectReceiptId: "effect:still-blocked" }),
+    "bridge_update_quiesced",
+  );
+});

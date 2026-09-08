@@ -1,5 +1,5 @@
 import { problemText } from "../src/bridge-problem-copy.js";
-import { canChooseCourses, controlState, courseValue, currentBinding, currentSiteAnchor, detailText, nextError, primaryLabel, statusValue } from "./popup-view.js";
+import { canChooseCourses, controlState, courseValue, currentBinding, currentSiteAnchor, detailText, nextError, primaryLabel, runtimeNeedsReload, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
 const canvasAction = document.querySelector("#canvas-action");
@@ -22,6 +22,7 @@ const setupGuide = document.querySelector("#setup-guide");
 let current = null;
 let actionInFlight = false;
 let banner = null;
+let readGeneration = 0;
 
 // Every failure the service worker answers carries its own code, and the popup keeps that code as
 // the error it raises, so one state reaches the banner instead of one generic sentence.
@@ -40,7 +41,8 @@ function render(status) {
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const chooseCourses = canChooseCourses(status, binding, anchor);
-  pulse.classList.toggle("online", status?.connected === true);
+  const runtimeReady = status?.connected === true && !runtimeNeedsReload(status);
+  pulse.classList.toggle("online", runtimeReady);
   label.textContent = "Morrow";
   value.textContent = statusValue(status);
   account.hidden = !binding && !anchor;
@@ -54,9 +56,10 @@ function render(status) {
   courseLabel.textContent = binding ? "Selected course" : anchor?.runtimeVerified === true ? "Course selection" : anchor ? "Course site" : "Course";
   canvasValue.textContent = courseValue(status);
   disconnect.hidden = status?.paired !== true;
-  primary.hidden = Boolean(status?.connected && binding?.runtimeVerified === true);
-  canvasAction.hidden = !(status?.connected && binding?.runtimeVerified === true);
-  editAccess.hidden = status?.paired !== true || chooseCourses || (!binding && !anchor);
+  primary.hidden = Boolean(runtimeReady && binding?.runtimeVerified === true);
+  canvasAction.hidden = !(runtimeReady && binding?.runtimeVerified === true);
+  editAccess.hidden = status?.paired !== true || !runtimeReady || chooseCourses || (!binding && !anchor);
+  setupGuide.hidden = runtimeNeedsReload(status);
   primary.textContent = primaryLabel(status);
   detail.textContent = detailText(status);
   updateControls(status);
@@ -82,10 +85,14 @@ function updateControls(status = current) {
 }
 
 async function refresh() {
+  const generation = ++readGeneration;
   try {
-    render(await message("morrow_status"));
+    const status = await message("morrow_status");
+    if (generation !== readGeneration) return;
+    render(status);
     reportSuccess("status");
   } catch (cause) {
+    if (generation !== readGeneration) return;
     render(null);
     reportError("status", cause);
   }
@@ -173,6 +180,11 @@ async function connectCanvasCourse() {
 primary.addEventListener("click", async () => {
   if (!current) {
     await retryStatus();
+    return;
+  }
+  if (runtimeNeedsReload(current)) {
+    clearNotice();
+    await runAction(() => message("morrow_open_setup"));
     return;
   }
   if (canChooseCourses(current)) {

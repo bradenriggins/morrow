@@ -61,6 +61,8 @@ function usage(): string {
     "  --gemini-timeout <ms>     Gemini request timeout. Defaults to tool timeout in milliseconds.",
     "  --force                   Replace existing generated bundle files only.",
     "  --replace-generated       Replace an unchanged Morrow-generated local settings file.",
+    "  --expected-config-sha256 <sha256>",
+    "                            Replace an assistant entry only when the complete settings file still matches this recorded digest.",
     "  --json                    Emit machine-readable output where supported.",
     "  --help                    Show this help.",
     "",
@@ -319,6 +321,26 @@ function parseScope(args: readonly string[]): { readonly scope: MorrowClientScop
   return { scope, rest };
 }
 
+function parseExpectedConfigSha256(args: readonly string[]): {
+  readonly expectedConfigSha256?: string;
+  readonly rest: readonly string[];
+} {
+  let expectedConfigSha256: string | undefined;
+  const rest: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] !== "--expected-config-sha256") {
+      rest.push(args[index]!);
+      continue;
+    }
+    if (expectedConfigSha256 !== undefined) {
+      throw new Error("--expected-config-sha256 can be provided only once");
+    }
+    expectedConfigSha256 = exactDigest(nextValue(args, index, "--expected-config-sha256"), "--expected-config-sha256");
+    index += 1;
+  }
+  return { ...(expectedConfigSha256 ? { expectedConfigSha256 } : {}), rest };
+}
+
 function commandAvailable(command: string): boolean {
   const result = spawnSync(command, ["--version"], { stdio: "ignore" });
   return !result.error;
@@ -491,11 +513,13 @@ async function run(): Promise<void> {
 
   if (command === "mcp" && rest[0] === "install") {
     const client = exactClient(rest[1]);
-    const { scope, rest: optionArgs } = parseScope(rest.slice(2));
+    const { scope, rest: scopeArgs } = parseScope(rest.slice(2));
+    const { expectedConfigSha256, rest: optionArgs } = parseExpectedConfigSha256(scopeArgs);
     const { options, json } = parseSharedOptions(optionArgs);
     const installed = installMorrowClient({
       ...requireUpstreams(options),
       ...(options.clientProject ? { projectRoot: options.clientProject } : {}),
+      ...(expectedConfigSha256 ? { expectedConfigSha256 } : {}),
       client,
       scope,
     });

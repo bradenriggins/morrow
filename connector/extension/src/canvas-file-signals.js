@@ -84,7 +84,7 @@ function latin1(bytes, start = 0, end = bytes.byteLength) {
 
 function utf8(bytes) {
   try {
-    return new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   } catch {
     return null;
   }
@@ -279,13 +279,16 @@ async function pdfSignals(bytes, budget) {
     if (!catalog && /\/Type\s*\/Catalog\b/.test(object.dictionary)) catalog = object.dictionary;
     if (/\/Type\s*\/ObjStm\b/.test(object.dictionary)) objectStreams.push(object);
   }
+  if (objectStreams.length > MAX_PDF_OBJECT_STREAMS) {
+    return { ok: false, error: "canvas_file_pdf_structure_not_readable" };
+  }
 
   // Modern writers pack the catalog and the page objects into compressed object
   // streams. Inflating them here is bounded and exact; a stream this reader
   // cannot inflate refuses the whole file rather than reporting a short count.
   let compressedPages = 0;
   let inflatedStreams = 0;
-  for (const object of objectStreams.slice(0, MAX_PDF_OBJECT_STREAMS)) {
+  for (const object of objectStreams) {
     const data = await pdfStreamBytes(bytes, object, budget);
     if (!data) return { ok: false, error: "canvas_file_pdf_structure_not_readable" };
     inflatedStreams += 1;
@@ -379,7 +382,7 @@ function zipEntries(bytes) {
     const extraLength = view.getUint16(at + 30, true);
     const commentLength = view.getUint16(at + 32, true);
     const name = utf8(bytes.subarray(at + 46, at + 46 + nameLength));
-    if (name === null) return null;
+    if (name === null || entries.has(name)) return null;
     entries.set(name, {
       method: view.getUint16(at + 10, true),
       compressed: view.getUint32(at + 20, true),
@@ -418,20 +421,25 @@ async function zipPartText(bytes, entries, name, budget) {
  * does.
  */
 function drawingAltTextCounts(xml, container, tag) {
-  const described = (value) => /\bdescr="\s*[^"\s][^"]*"/.test(value);
-  const pattern = new RegExp(`<${tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b[^>]*>`, "g");
+  const described = (value) => /\bdescr\s*=\s*(?:"\s*[^"\s][^"]*"|'\s*[^'\s][^']*')/.test(value);
+  const escapedTag = tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`<${escapedTag}\\b[^>]*>`, "g");
   let total = 0;
   let withDescription = 0;
   if (container === tag) {
-    for (let match = pattern.exec(xml); match !== null && total < MAX_DRAWING_OBJECTS; match = pattern.exec(xml)) {
+    for (let match = pattern.exec(xml); match !== null; match = pattern.exec(xml)) {
       total += 1;
+      if (total > MAX_DRAWING_OBJECTS) return null;
       if (described(match[0])) withDescription += 1;
     }
     return { total, described: withDescription };
   }
   // One shape holds one naming element. A shape that carries none has no
   // description, so it is counted as a picture without alternative text.
-  for (const segment of xml.split(`<${container}`).slice(1, MAX_DRAWING_OBJECTS + 1)) {
+  const escapedContainer = container.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const segments = xml.split(new RegExp(`<${escapedContainer}\\b`)).slice(1);
+  if (segments.length > MAX_DRAWING_OBJECTS) return null;
+  for (const segment of segments) {
     pattern.lastIndex = 0;
     const match = pattern.exec(segment);
     total += 1;
@@ -464,7 +472,8 @@ async function officeSignals(bytes, format, budget) {
     const counts = document === null ? null : drawingAltTextCounts(document, "wp:docPr", "wp:docPr");
     const levels = styles === null
       ? null
-      : [...new Set((styles.match(/w:styleId="Heading([1-9])"/g) || []).map((entry) => Number(/\d/.exec(entry)[0])))].sort();
+      : [...new Set([...styles.matchAll(/\bw:styleId\s*=\s*(?:"Heading([1-9])"|'Heading([1-9])')/g)]
+        .map((match) => Number(match[1] || match[2])))].sort();
     return {
       ok: true,
       signals: {
@@ -481,10 +490,11 @@ async function officeSignals(bytes, format, budget) {
   }
 
   if (format === "pptx") {
-    const slides = partNames(entries, /^ppt\/slides\/slide\d+\.xml$/).slice(0, MAX_XML_PARTS);
+    const allSlides = partNames(entries, /^ppt\/slides\/slide\d+\.xml$/);
+    const slides = allSlides.slice(0, MAX_XML_PARTS);
     let total = 0;
     let described = 0;
-    let determinable = slides.length > 0;
+    let determinable = allSlides.length > 0 && allSlides.length <= MAX_XML_PARTS;
     for (const name of slides) {
       const slide = await zipPartText(bytes, entries, name, budget);
       if (slide === null) {
@@ -492,6 +502,10 @@ async function officeSignals(bytes, format, budget) {
         continue;
       }
       const counts = drawingAltTextCounts(slide, "p:pic", "p:cNvPr");
+      if (counts === null) {
+        determinable = false;
+        continue;
+      }
       total += counts.total;
       described += counts.described;
     }
@@ -500,7 +514,7 @@ async function officeSignals(bytes, format, budget) {
       signals: {
         ...base,
         document_part: presenceOf(entries, "ppt/presentation.xml"),
-        slide_count: slides.length,
+        slide_count: allSlides.length,
         picture_alt_text: determinable
           ? { status: "observed", total, with_description: described, without_description: total - described }
           : notDetermined,
@@ -508,10 +522,11 @@ async function officeSignals(bytes, format, budget) {
     };
   }
 
-  const drawings = partNames(entries, /^xl\/drawings\/drawing\d+\.xml$/).slice(0, MAX_XML_PARTS);
+  const allDrawings = partNames(entries, /^xl\/drawings\/drawing\d+\.xml$/);
+  const drawings = allDrawings.slice(0, MAX_XML_PARTS);
   let total = 0;
   let described = 0;
-  let determinable = true;
+  let determinable = allDrawings.length <= MAX_XML_PARTS;
   for (const name of drawings) {
     const drawing = await zipPartText(bytes, entries, name, budget);
     if (drawing === null) {
@@ -519,6 +534,10 @@ async function officeSignals(bytes, format, budget) {
       continue;
     }
     const counts = drawingAltTextCounts(drawing, "xdr:pic", "xdr:cNvPr");
+    if (counts === null) {
+      determinable = false;
+      continue;
+    }
     total += counts.total;
     described += counts.described;
   }

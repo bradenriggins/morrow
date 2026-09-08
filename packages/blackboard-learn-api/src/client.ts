@@ -196,6 +196,7 @@ export class BlackboardLearnClient {
         this.requests += 1;
         const response = await this.fetcher(url, {
           method: "POST",
+          redirect: "manual",
           headers: {
             authorization: `Basic ${Buffer.from(`${this.tenant.applicationKey}:${this.tenant.clientSecret}`, "utf8").toString("base64")}`,
             "content-type": "application/x-www-form-urlencoded",
@@ -252,6 +253,7 @@ export class BlackboardLearnClient {
       this.requests += 1;
       return this.fetcher(url, {
         ...init,
+        redirect: "manual",
         headers: { accept: "application/json", ...init.headers, authorization: `Bearer ${token.accessToken}` },
         signal,
       });

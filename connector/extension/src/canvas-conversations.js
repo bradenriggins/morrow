@@ -182,7 +182,7 @@ export async function executeCanvasConversationInPage(input) {
     let response;
     try {
       response = await fetch(new URL(path, location.origin), {
-        credentials: "include", cache: "no-store", headers: { Accept: "application/json+canvas-string-ids" },
+        credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" },
       });
     } catch { fail(code); }
     if (!response.ok) fail(code);
@@ -240,14 +240,14 @@ export async function executeCanvasConversationInPage(input) {
     if (!cookie) fail("canvas_conversation_csrf_missing");
     try { return decodeURIComponent(cookie.slice("_csrf_token=".length)); } catch { fail("canvas_conversation_csrf_invalid"); }
   };
-  const post = async (path, body) => {
+  const post = async (path, body, csrfToken) => {
     const headers = new Headers({
       Accept: "application/json+canvas-string-ids",
       "Content-Type": "application/json;charset=UTF-8",
-      "X-CSRF-Token": csrf(),
+      "X-CSRF-Token": csrfToken,
       "X-Requested-With": "XMLHttpRequest",
     });
-    return await fetch(new URL(path, location.origin), { method: "POST", credentials: "include", cache: "no-store", headers, body: JSON.stringify(body) });
+    return await fetch(new URL(path, location.origin), { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers, body: JSON.stringify(body) });
   };
   const responseMessageId = (conversation) => {
     const direct = id(conversation?.last_message?.id);
@@ -299,9 +299,10 @@ export async function executeCanvasConversationInPage(input) {
       }
       : { body: instruction.body, ...(instruction.recipients.length ? { recipients: instruction.recipients } : {}) };
     const path = instruction.action === "create" ? "/api/v1/conversations" : `/api/v1/conversations/${instruction.conversationId}/add_message`;
+    const csrfToken = csrf();
     sent = true;
     let response;
-    try { response = await post(path, body); } catch { return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_conversation_write_response_unknown" }; }
+    try { response = await post(path, body, csrfToken); } catch { return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_conversation_write_response_unknown" }; }
     responseStatus = response.status;
     if (!response.ok) return { ok: false, sent: true, status: response.status, error: "canvas_conversation_write_rejected" };
     const responseData = await readJson(response, "canvas_conversation_write_response_invalid");

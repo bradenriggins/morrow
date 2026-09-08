@@ -239,6 +239,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     const persistedFence = await loadFence();
     if (!persistedFence || persistedFence.quiesceEpoch !== request.quiesceEpoch) fail("bridge_resume_epoch_stale");
     const current = await identity();
+    if (current.installType !== "development") fail("bridge_store_install_refused");
     if (current.extensionId !== persistedFence.extensionId || current.manifestVersion !== persistedFence.manifestVersion) {
       fail("bridge_resume_file_layer_unconfirmed");
     }

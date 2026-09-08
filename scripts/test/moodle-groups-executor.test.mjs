@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
@@ -62,7 +63,7 @@ test("the group and grouping operations are cataloged, routed, and gated by thei
   assert.match(removal.description, /Morrow cannot undo it/);
   assert.match(removal.description, /lists every member the deletion removes/);
   assert.match(removal.description, /expected_member_count must be the number/);
-  assert.deepEqual(removal.inputSchema.required, ["course_id", "group_id", "expected_group_name", "expected_member_count"]);
+  assert.deepEqual(removal.inputSchema.required, ["course_id", "group_id", "expected_group_name", "expected_member_count", "expected_digest"]);
 
   for (const toolName of ["moodle_add_group_member", "moodle_remove_group_member"]) {
     const entry = byTool.get(toolName);
@@ -70,7 +71,7 @@ test("the group and grouping operations are cataloged, routed, and gated by thei
     assert.equal(entry.family, "learner-data", toolName);
     assert.equal(entry.destructive, undefined, toolName);
     assert.match(entry.description, /stable learner token/, toolName);
-    assert.deepEqual(entry.inputSchema.required, ["course_id", "group_id", "expected_group_name", "user_id"], toolName);
+    assert.deepEqual(entry.inputSchema.required, ["course_id", "group_id", "expected_group_name", "user_id", "expected_digest"], toolName);
   }
   for (const toolName of ["moodle_create_group", "moodle_update_group", "moodle_create_grouping", "moodle_update_grouping"]) {
     assert.match(byTool.get(toolName).description, /renders itself again and saves nothing, and that is reported as a refusal, not as an unknown outcome/, toolName);
@@ -424,9 +425,30 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/course/view.php?id=2`);
     const binding = { origin, siteUrl: `${origin}/`, principalId: "3", courseId: "2" };
-    const run = (operation, argumentsValue, expiresAt = Date.now() + 60_000) => page.evaluate(
+    const stable = (value) => {
+      if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+      if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`;
+      return JSON.stringify(value === undefined ? null : value);
+    };
+    const groupDigest = () => createHash("sha256").update(stable({
+      course_id: "2",
+      groups: model.groups
+        .map((group) => ({
+          id: group.id, name: group.name, visibility: group.visibility, participation: group.participation,
+          membership: group.members.map((userId) => ({ user_id: userId, name: model.people[userId] }))
+            .sort((left, right) => Number(left.user_id) - Number(right.user_id)),
+        }))
+        .sort((left, right) => Number(left.id) - Number(right.id)),
+    })).digest("hex");
+    const digestWrites = new Set([operations.createGroup.key, operations.updateGroup.key, operations.deleteGroup.key, operations.addMember.key, operations.removeMember.key]);
+    const rawRun = (operation, argumentsValue, expiresAt = Date.now() + 60_000) => page.evaluate(
       executeMoodleGroupsLifecycleInPage,
       JSON.stringify({ mode: "execute", operation, arguments: argumentsValue, binding, expiresAt }),
+    );
+    const run = (operation, argumentsValue, expiresAt = Date.now() + 60_000) => rawRun(
+      operation,
+      digestWrites.has(operation.key) ? { ...argumentsValue, expected_digest: argumentsValue.expected_digest || groupDigest() } : argumentsValue,
+      expiresAt,
     );
     const contents = () => page.evaluate(
       executeMoodleInPage,
@@ -470,6 +492,9 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
     await noWrite(await run(operations.createGroup, { course_id: 3, name: "Team C" }), countWrites(), "moodle_groups_arguments_invalid");
     assert.deepEqual(await run(operations.createGroup, { course_id: 2, name: "Team C" }, Date.now() - 1),
       { ok: false, sent: false, error: "moodle_execution_expired" });
+    await noWrite(await rawRun(operations.createGroup, {
+      course_id: 2, name: "Team C", expected_digest: "0".repeat(64),
+    }), countWrites(), "moodle_expected_digest_mismatch");
 
     // 3. One group is created with one POST of the native form.
     let before = countWrites();

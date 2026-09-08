@@ -4,7 +4,11 @@ import { canvasCatalogTools } from "@morrow/canvas-api-catalog";
 import { isJsonObject, type JsonObject, type JsonSchema, type SourceCapabilityMetadata } from "@morrow/contracts";
 import * as z from "zod/v4";
 import { canvasBrowserCatalogTools, moodleCatalogTools } from "./browser-catalog.js";
-import type { CanvasConnectorRuntime } from "./runtime.js";
+import {
+  PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
+  PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+  type CanvasConnectorRuntime,
+} from "./runtime.js";
 
 export function canvasConnectorSummary(value: JsonObject): string {
   const platform = value.provider === "moodle" ? "Moodle" : "Canvas";
@@ -151,6 +155,23 @@ function toolResult(value: JsonObject) {
   };
 }
 
+export function privateMoodleEnrolmentCandidateInputSchema(): JsonObject {
+  return augmentBridgeInputSchema({
+    type: "object",
+    properties: {
+      course_id: { type: "integer", minimum: 1 },
+      query: {
+        type: "string",
+        minLength: 1,
+        maxLength: 200,
+        description: "Exact full name as Moodle renders it in the native manual-enrolment candidate selector.",
+      },
+    },
+    required: ["course_id", "query"],
+    additionalProperties: false,
+  }, false, false);
+}
+
 export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime): McpServer {
   const server = new McpServer({ name: "morrow-canvas-connector", version: "1.0.0" });
   server.registerTool("morrow_canvas_connector_health", {
@@ -214,6 +235,37 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
     ]),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input) => toolResult(await runtime.bridgeMaintenance(input)));
+  server.registerTool(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, {
+    title: "Find one private Moodle enrolment candidate",
+    description: "Internal Morrow read that resolves one exact full name through this course's native manual-enrolment candidate selector. Only the numeric Moodle user ID leaves the signed-in browser session.",
+    inputSchema: fromJsonSchema(privateMoodleEnrolmentCandidateInputSchema()),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    _meta: {
+      "io.morrow/capability": {
+        family: "learner-data",
+        provider: "moodle",
+        sourcePath: "connector/extension/src/moodle-enrolment-executor.js",
+        sourceExport: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
+        behavior: {
+          readOnly: true, mutating: false, destructive: false, irreversible: false,
+          supportsDryRun: false, supportsReadback: true, supportsUndo: false, supportsBatch: false,
+          requiresBrowser: true, requiresLiveCanvas: false,
+        },
+        authority: { scopeClass: "course", approvalClass: "none", dataClass: "learner" },
+        route: { backend: "canvas-connector", dispatchBackend: "chrome-session-connector", readbackBackend: "chrome-session-connector", comparator: "native-exact-query" },
+        profiles: {
+          "private-full": { state: "supported" },
+          "public-canvas": { state: "profile_limited", reason: "This private source read is available only to Morrow's internal Moodle planning path." },
+          sandbox: { state: "profile_limited", reason: "This read requires a signed-in Moodle session." },
+          "read-only": { state: "supported" },
+        },
+        evidence: { transport: { state: "known" }, credentialBoundary: { state: "known" } },
+      },
+    },
+  }, async (argumentsValue) => toolResult(await runtime.call(
+    PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+    isJsonObject(argumentsValue) ? argumentsValue : {},
+  )));
   server.registerTool("canvas_send_private_conversation", {
     title: "Send reviewed Canvas Inbox message",
     description: "Internal Morrow route for one reviewed Canvas Inbox conversation or reply. Recipient identities and message content are private transport data and cannot be supplied through public Morrow capability arguments.",

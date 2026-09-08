@@ -15,6 +15,20 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
     return ID.test(raw) ? raw : "";
   };
   const text = (value, max = 1000) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+  const collapsed = (value, max = 1000) => {
+    const result = String(value ?? "").replace(/\s+/g, " ").trim().slice(0, max);
+    return text(result, max) ? result : "";
+  };
+  const stable = (value) => {
+    if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+    if (object(value)) return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`;
+    return JSON.stringify(value === undefined ? null : value);
+  };
+  const digest = async (value) => {
+    if (!globalThis.crypto?.subtle || typeof globalThis.TextEncoder !== "function") return "";
+    const bytes = await globalThis.crypto.subtle.digest("SHA-256", new TextEncoder().encode(stable(value)));
+    return Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  };
   const fail = (error, status) => ({ ok: false, sent: false, ...(Number.isInteger(status) ? { status } : {}), error });
   const incomplete = () => ({ ok: false, sent: false, complete: false, error: "moodle_course_groups_incomplete" });
   const input = (() => { try { return typeof rawInput === "string" ? JSON.parse(rawInput) : rawInput; } catch { return null; } })();
@@ -87,7 +101,7 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
   if (rawGroups.length > MAX_GROUPS) return incomplete();
   const groups = []; const groupIds = new Set();
   for (const raw of rawGroups) {
-    const groupId = id(raw?.id); const groupCourse = id(raw?.courseid); const name = raw?.name;
+    const groupId = id(raw?.id); const groupCourse = id(raw?.courseid); const name = collapsed(raw?.name);
     const visibility = raw?.visibility; const participation = raw?.participation;
     if (!groupId || groupCourse !== courseId || !text(name, 500) || !Number.isSafeInteger(visibility) || visibility < 0 || visibility > 3
       || typeof participation !== "boolean" || groupIds.has(groupId)) return fail("moodle_course_groups_invalid");
@@ -103,14 +117,20 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
     for (const rawRole of rawRoles) {
       if (!object(rawRole) || !Array.isArray(rawRole.users)) return fail("moodle_course_groups_invalid");
       for (const rawMember of rawRole.users) {
-        const userId = id(rawMember?.id); const name = rawMember?.name;
-        if (!userId || !text(name, 2000) || memberIds.has(userId)) return fail("moodle_course_groups_invalid");
+        const userId = id(rawMember?.id); const name = collapsed(rawMember?.name, 2000);
+        if (!userId || !name || memberIds.has(userId)) return fail("moodle_course_groups_invalid");
         memberIds.add(userId); membership.push({ user_id: userId, name });
         if (++memberCount > MAX_MEMBERS) return incomplete();
       }
     }
     group.membership = membership;
+    group.membership.sort((left, right) => Number(left.user_id) - Number(right.user_id));
   }
   if (!approved()) return fail("moodle_groups_context_changed");
-  return { ok: true, sent: false, complete: true, data: { course_id: courseId, groups } };
+  groups.sort((left, right) => Number(left.id) - Number(right.id));
+  const data = { course_id: courseId, groups };
+  const snapshotDigest = await digest(data);
+  return snapshotDigest
+    ? { ok: true, sent: false, complete: true, data, snapshot_digest: snapshotDigest }
+    : fail("moodle_groups_digest_unavailable");
 }

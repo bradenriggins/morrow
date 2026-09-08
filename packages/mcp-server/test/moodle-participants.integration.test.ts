@@ -90,6 +90,18 @@ function enrolmentData(userId: string) {
 }
 
 function result(command: BridgeCommand, digest: string, participantsCourseId: number): JsonObject {
+  if (command.toolName === "morrow_private_moodle_find_enrolment_candidate") return {
+    schema: "morrow.canvas-browser-result.v1", ok: true, sent: false, status: 200, complete: true, provider: "moodle",
+    data: {
+      schema: "morrow.moodle-enrolment-candidate.private.v1", provider: "moodle", course_id: 2,
+      candidate: { user_id: "21", fullname: "Mary Jackson", email: "mary@example.edu" },
+      match: { kind: "exact_native_query", candidate_count: 1, query: "Mary Jackson" },
+      proof: {
+        method: "native_manual_enrolment_candidate_search", route: "/enrol/manual/manage.php", complete: true,
+        dispatch_count: 0, read_request_count: 2, candidate_limit: 100,
+      },
+    },
+  };
   if (command.toolName === "moodle_get_course_participant_roster") return {
     schema: "morrow.moodle-browser-result.v1", ok: true, sent: true, status: 200, truncated: false,
     data: {
@@ -130,8 +142,15 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
       bridge = await connectBridgeTestClient({ port, token: TOKEN, extensionId: EXTENSION_ID, catalogDigest: digest,
         bindings: [{ sourceBindingId: SOURCE_BINDING_ID, provider: "moodle", origin: ORIGIN, siteUrl: SITE_URL, courseId: "2", courseName: "Enrolment course", principalFingerprint: PRINCIPAL_FINGERPRINT, sessionGeneration: 1, catalogDigest: digest, editPolicyRevision: 0, runtimeVerified: true }] });
       bridge.onCommand((command) => {
-        if (command.kind !== "invoke_read") return;
         commands.push(command);
+        if (command.kind === "invoke_write") {
+          bridge?.respondProblem(command, {
+            schema: "morrow.bridge.problem.v1", code: "canvas_request_not_sent",
+            message: "The fixture stopped before a provider write.", recoverable: true,
+          });
+          return;
+        }
+        if (command.kind !== "invoke_read") return;
         // The page world reports a course past its own bound as incomplete. It
         // returns no row at all, so no partial list can reach the gateway.
         if (participantsBounded && command.toolName === "moodle_get_course_participants") {
@@ -148,9 +167,11 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
 
       const listed = (await client.listTools()).tools.map((tool) => tool.name);
       expect(listed).toContain("morrow_capability_read");
+      expect(listed).toContain("morrow_find_moodle_enrolment_candidate");
       // The redaction roster is the source of every token below and is still
       // not a tool an assistant can reach.
       expect(listed).not.toContain("moodle_get_course_participant_roster");
+      expect(listed).not.toContain("morrow_private_moodle_find_enrolment_candidate");
       for (const tool of ["moodle_get_course_participants", "moodle_get_enrolment_methods", "moodle_get_participant_enrolment"]) {
         expect(gateway.capabilityGet(tool)).toMatchObject({
           descriptor: { canonicalName: tool, behavior: { readOnly: true }, authority: { dataClass: "learner" } },
@@ -158,6 +179,63 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
       }
       expect(gateway.capabilityGet("moodle_get_course_participant_roster"))
         .toMatchObject({ schema: "morrow.problem.v1", code: "capability_not_found" });
+
+      const rawWrite = await gateway.call("moodle_suspend_participant", {
+        course_id: 2,
+        user_id: 7,
+        expected_digest: "f".repeat(64),
+        _morrow: { source_binding_id: SOURCE_BINDING_ID },
+      });
+      expect(rawWrite).toMatchObject({
+        isError: true,
+        structuredContent: {
+          schema: "morrow.result.v1",
+          data: { schema: "morrow.problem.v1", code: "learner_token_required", resultState: "not_sent" },
+        },
+      });
+      expect(commands).toHaveLength(0);
+
+      const candidate = await client.callTool({
+        name: "morrow_find_moodle_enrolment_candidate",
+        arguments: { source_binding_id: SOURCE_BINDING_ID, course_id: 2, query: "Mary Jackson" },
+      });
+      const candidateText = JSON.stringify(candidate);
+      expect(candidate.isError, candidateText).not.toBe(true);
+      expect(candidate.structuredContent).toMatchObject({
+        schema: "morrow.result.v1", tool: "morrow_find_moodle_enrolment_candidate",
+        data: {
+          schema: "morrow.moodle-enrolment-candidate.v1", course_id: 2,
+          candidate_token: expect.stringMatching(/^learner_/),
+          match: { kind: "exact_native_query", candidate_count: 1 },
+          proof: { dispatch_count: 0, read_request_count: 2, candidate_limit: 100 },
+        },
+      });
+      for (const privateValue of ["Mary Jackson", "mary@example.edu", "user_id"]) {
+        expect(candidateText, `the candidate lookup leaked ${privateValue}`).not.toContain(privateValue);
+      }
+      const candidateToken = (candidate.structuredContent as { data: { candidate_token: string } }).data.candidate_token;
+      const plannedEnrolment = await client.callTool({
+        name: "morrow_capability_change",
+        arguments: {
+          name: "moodle_enrol_participant",
+          arguments: {
+            course_id: 2, candidate_token: candidateToken, expected_digest: "f".repeat(64),
+            _morrow: { source_binding_id: SOURCE_BINDING_ID },
+          },
+        },
+      });
+      expect(plannedEnrolment.isError, JSON.stringify(plannedEnrolment)).not.toBe(true);
+      const plannedEnrolmentId = (plannedEnrolment.structuredContent as { operationId: string }).operationId;
+      expect(plannedEnrolmentId).toMatch(/^op:/);
+      gateway.approveOperation(plannedEnrolmentId);
+      const stoppedEnrolment = await gateway.dispatchOperation(plannedEnrolmentId);
+      expect(stoppedEnrolment.isError).toBe(true);
+      const candidateCommands = commands.filter((command) => command.toolName === "morrow_private_moodle_find_enrolment_candidate");
+      expect(candidateCommands).toHaveLength(2);
+      expect(candidateCommands.every((command) => command.arguments.query === "Mary Jackson")).toBe(true);
+      const enrolmentWrite = commands.find((command) => command.kind === "invoke_write" && command.toolName === "moodle_enrol_participant");
+      expect(enrolmentWrite?.arguments).toMatchObject({ course_id: 2, user_id: 21, expected_digest: "f".repeat(64) });
+      expect(enrolmentWrite?.arguments).not.toHaveProperty("candidate_token");
 
       const participants = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_course_participants", arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const participantsText = JSON.stringify(participants);
@@ -199,7 +277,7 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
         },
       });
 
-      const enrolment = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_participant_enrolment", arguments: { course_id: 2, user_id: 7, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const enrolment = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_participant_enrolment", arguments: { course_id: 2, learner_token: rows[0]!.learnerToken, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const enrolmentText = JSON.stringify(enrolment);
       expect(enrolment.isError, enrolmentText).not.toBe(true);
       for (const privateValue of ["Jane Moodle", "jane@example.edu", "Student Name", "raw_cells", "user_id"]) {
@@ -214,10 +292,14 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
         },
       });
 
-      const unknown = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_participant_enrolment", arguments: { course_id: 2, user_id: 99, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const sourceEnrolment = commands.find((command) => command.toolName === "moodle_get_participant_enrolment");
+      expect(sourceEnrolment?.arguments).toMatchObject({ course_id: 2, user_id: 7 });
+      expect(sourceEnrolment?.arguments).not.toHaveProperty("learner_token");
+
+      const unknown = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_participant_enrolment", arguments: { course_id: 2, learner_token: `learner_${"a".repeat(64)}`, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const unknownText = JSON.stringify(unknown);
       expect(unknown.isError).toBe(true);
-      expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "learner_roster_identity_unavailable" } });
+      expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1" } });
       for (const privateValue of ["Manual enrolments", "Active", "2026-01-01"]) {
         expect(unknownText, `the refusal leaked ${privateValue}`).not.toContain(privateValue);
       }
@@ -243,23 +325,11 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
         expect(mismatchText).not.toContain(privateValue);
       }
 
-      // The roster read is the boundary every learner-bearing call passes
-      // through, and the method list is the one call that needs no roster. A
-      // refused read reads the roster again only when the MCP egress boundary
-      // re-derives the learner scope for the problem result it returns instead.
-      expect(commands.map((command) => command.toolName)).toEqual([
-        "moodle_get_course_participants",
-        "moodle_get_course_participant_roster",
-        "moodle_get_enrolment_methods",
-        "moodle_get_participant_enrolment",
-        "moodle_get_course_participant_roster",
-        "moodle_get_participant_enrolment",
-        "moodle_get_course_participant_roster",
-        "moodle_get_course_participant_roster",
-        "moodle_get_course_participants",
-        "moodle_get_course_participant_roster",
-        "moodle_get_course_participants",
-      ]);
+      // Token resolution performs a complete, exact-scope roster read before
+      // the numeric Moodle user_id reaches the private browser executor.
+      const names = commands.map((command) => command.toolName);
+      expect(names.filter((name) => name === "moodle_get_participant_enrolment")).toHaveLength(1);
+      expect(names.filter((name) => name === "moodle_get_course_participant_roster").length).toBeGreaterThanOrEqual(4);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

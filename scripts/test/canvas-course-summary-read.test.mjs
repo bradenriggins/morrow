@@ -23,6 +23,7 @@ const PRIVATE_VALUES = Object.freeze([
   "private grading comment", "private-essay.pdf", "Private page title", "Private discussion title",
   '"user_id":91', '"submission_id":100', '"score":100',
 ]);
+let nextPrivateSubmissionId = 100;
 
 /** One learner row, carrying every field the aggregate must never publish. */
 function learnerRow(assignmentId, workflowState, extra = {}) {
@@ -30,7 +31,7 @@ function learnerRow(assignmentId, workflowState, extra = {}) {
     assignment_id: assignmentId,
     workflow_state: workflowState,
     user_id: 91,
-    submission_id: 100,
+    submission_id: nextPrivateSubmissionId++,
     score: 100,
     user: { id: 91, name: "Jane Learner", email: "jane.student@example.edu" },
     submission_comments: [{ id: 5, author_name: "Rowan Learner", comment: "private grading comment" }],
@@ -64,6 +65,9 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     { id: 14, name: "Private assignment title", points_possible: 0, updated_at: ago(40) },
   ];
   const courseSubmissionRows = (page) => {
+    if (mode === "duplicate-gradebook-submission") {
+      return [learnerRow(11, "graded", { submission_id: 9_901, score: 95, excused: false })];
+    }
     if (page === "2") {
       return [
         ...scoredRows(13, 5, 48),
@@ -86,6 +90,9 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     if (mode === "unknown-state") return [learnerRow(8, "returned")];
     if (mode === "wrong-assignment") return [learnerRow(9, "graded")];
     if (mode === "overflow") return [learnerRow(8, "graded")];
+    if (mode === "duplicate-assignment-submission") {
+      return [learnerRow(8, "graded", { submission_id: 9_902, late: false, missing: false, excused: false })];
+    }
     if (page === "2") {
       return [
         learnerRow(8, "unsubmitted", { late: false, missing: true, excused: false }),
@@ -136,11 +143,12 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     }
     if (target.pathname === "/api/v1/courses/2/assignments") return json(assignmentRows());
     if (target.pathname === "/api/v1/courses/2/pages") {
-      return json([
+      const rows = [
         { page_id: 21, title: "Private page title", updated_at: ago(1) },
         { page_id: 22, title: "Private page title", updated_at: ago(2) },
         { page_id: 23, title: "Private page title", updated_at: ago(30) },
-      ]);
+      ];
+      return json(mode === "duplicate-activity-item" ? [rows[0], rows[0]] : rows);
     }
     if (target.pathname === "/api/v1/courses/2/discussion_topics") {
       return json([
@@ -332,6 +340,21 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     assert.deepEqual(
       await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 }),
       { ok: false, sent: false, error: "canvas_assignment_submission_summary_response_invalid" },
+    );
+    mode = "duplicate-assignment-submission";
+    assert.deepEqual(
+      await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 }),
+      { ok: false, sent: false, error: "canvas_assignment_submission_summary_response_invalid" },
+    );
+    mode = "duplicate-gradebook-submission";
+    assert.deepEqual(
+      await invoke(GRADEBOOK_SUMMARY, { course_id: 2 }),
+      { ok: false, sent: false, error: "canvas_course_gradebook_summary_response_invalid" },
+    );
+    mode = "duplicate-activity-item";
+    assert.deepEqual(
+      await invoke(ACTIVITY_SUMMARY, { course_id: 2, days: 7 }),
+      { ok: false, sent: false, error: "canvas_course_activity_summary_response_invalid" },
     );
     mode = "wrong-assignment-record";
     assert.deepEqual(

@@ -75,6 +75,7 @@ const state = {
   optionsLoading: false,
   optionsRequestToken: 0,
   pendingSaveConfirmation: false,
+  readGeneration: 0,
   saveConfirmedFor: null,
   selected: new Set(),
   selectedCategories: new Set(),
@@ -224,6 +225,10 @@ function selectedBindings() {
   return all.filter((binding) => state.selected.has(binding.sourceBindingId) && isEligible(binding));
 }
 
+function selectedBindingsNeedSite(bindings = selectedBindings()) {
+  return bindings.some((binding) => binding.runtimeVerified !== true);
+}
+
 function categoryById(id) {
   return state.categories.find((category) => category.id === id);
 }
@@ -232,7 +237,7 @@ function optionsFor(binding) {
   const detail = state.optionsByBinding.get(binding?.sourceBindingId);
   const summary = binding?.editPermission;
   const permission = detail?.editPermission;
-  return detail && detail.provider === binding?.provider
+  return binding?.runtimeVerified === true && detail?.runtimeVerified === true && detail.provider === binding?.provider
     && detail.policyRevision === Number(binding?.editPolicyRevision || 0)
     && detail.catalogDigest === state.status?.catalogDigest
     && Boolean(summary) === Boolean(permission)
@@ -411,6 +416,10 @@ function renderCategories() {
   const hasSelectedCourses = selectedBindings().length > 0;
   if (!hasSelectedCourses) {
     categoryList.innerHTML = '<p class="state-message">Select a course to read its available Edit and Review-only actions.</p>';
+    return;
+  }
+  if (selectedBindingsNeedSite()) {
+    categoryList.innerHTML = '<p class="state-message">Open every selected course site in Chrome, then refresh this page before you choose Edit.</p>';
     return;
   }
   if (state.optionsLoading) {
@@ -676,12 +685,22 @@ function renderEditDuration(showEditStage) {
 
 function renderSelection() {
   const selected = selectedBindings();
+  const needsSite = selectedBindingsNeedSite(selected);
+  if (needsSite && state.mode === "edit") {
+    state.mode = "plan";
+    state.pendingSaveConfirmation = false;
+    state.selectedCategories.clear();
+    modePlan.checked = true;
+    modeEdit.checked = false;
+  }
   const categoriesSelected = state.selectedCategories.size;
   const availableCategories = availableCategoriesForSelection();
   selectionSummary.textContent = !state.status
     ? "Loading connected courses…"
     : !selected.length
       ? "No course selected. Select a course above, then choose Plan or Edit."
+      : needsSite
+        ? `${plural(selected.length, "course")} selected. Open every selected course site in Chrome before you choose Edit.`
       : state.mode === "plan"
         ? `${plural(selected.length, "course")} selected. Plan keeps changes ready for your review.`
         : !availableCategories.size
@@ -689,17 +708,19 @@ function renderSelection() {
           : !categoriesSelected
             ? `${plural(selected.length, "course")} selected. Choose at least one change before you save Edit.`
             : `${plural(selected.length, "course")} selected. Morrow can make: ${categoryLabels([...state.selectedCategories])}.${courseReachNote([...state.selectedCategories])}`;
-  const showEditStage = state.mode === "edit" && selected.length > 0;
+  const showEditStage = state.mode === "edit" && selected.length > 0 && !needsSite;
   categoryFieldset.hidden = !showEditStage;
   categoryFieldset.disabled = state.busy || !showEditStage;
   renderEditDuration(showEditStage);
   editStageHint.hidden = showEditStage;
   editStageHint.textContent = !selected.length
     ? "Select courses, then choose Edit to review the available actions."
+    : needsSite
+      ? "Open every selected course site in Chrome, then refresh this page before you choose Edit."
     : "Choose Edit to review and select the actions Morrow may apply.";
   permissionActions.hidden = !selected.length;
   modePlan.disabled = state.busy || !selected.length;
-  modeEdit.disabled = state.busy || !selected.length;
+  modeEdit.disabled = state.busy || !selected.length || needsSite;
   returnPlanButton.hidden = false;
   saveEditButton.hidden = state.mode !== "edit";
   returnPlanButton.disabled = state.busy || !selected.length;
@@ -716,8 +737,10 @@ function renderSelection() {
   saveEditButton.disabled = state.busy || confirming || !showEditStage || !categoriesSelected || !availableCategories.size || !selectedEditDuration();
   returnPlanButton.textContent = `Return ${plural(selected.length, "selected course")} to Plan`;
   saveEditButton.textContent = showEditStage ? `Save Edit access for ${plural(selected.length, "course")}` : "Save Edit access";
-  actionHelp.textContent = state.mode === "plan"
-    ? "Plan is active for these courses. Return them to Plan to remove any saved Edit access immediately."
+  actionHelp.textContent = needsSite
+    ? "Open every selected course site in Chrome, then refresh this page before you choose Edit."
+    : state.mode === "plan"
+    ? "To remove any saved Edit access, return the selected courses to Plan."
     : !availableCategories.size
       ? "The selected courses use different platforms. Choose courses from one platform before you save Edit."
       : !categoriesSelected
@@ -850,16 +873,19 @@ function normalizeEditOptions(result, binding) {
 
 async function refresh() {
   if (state.busy) return;
+  const generation = ++state.readGeneration;
   courseList.setAttribute("aria-busy", "true");
   refreshButton.disabled = true;
   try {
     const result = normalizeStatus(await request("morrow_edit_policy_status"));
+    if (generation !== state.readGeneration) return;
     state.status = result;
     const valid = new Set(result.bindings.filter(isEligible).map((binding) => binding.sourceBindingId));
     state.selected = new Set([...state.selected].filter((id) => valid.has(id)));
     state.optionsByBinding = new Map([...state.optionsByBinding].filter(([sourceBindingId, details]) => {
       const binding = result.bindings.find((candidate) => candidate.sourceBindingId === sourceBindingId);
-      return binding && details?.provider === binding.provider && details.policyRevision === Number(binding.editPolicyRevision || 0) && details.catalogDigest === result.catalogDigest;
+      return binding?.runtimeVerified === true && details?.runtimeVerified === true && details.provider === binding.provider
+        && details.policyRevision === Number(binding.editPolicyRevision || 0) && details.catalogDigest === result.catalogDigest;
     }));
     const expiredSelected = selectedBindings().filter(permissionHasExpired);
     if (expiredSelected.length) {
@@ -879,14 +905,17 @@ async function refresh() {
     reconcileSelectedCategories();
     clearError();
   } catch (cause) {
+    if (generation !== state.readGeneration) return;
     state.status = null;
     state.categories = [];
     state.optionsByBinding.clear();
     state.selected.clear();
     showError(cause);
   } finally {
+    if (generation !== state.readGeneration) return;
     refreshButton.disabled = state.busy;
     await refreshCourseFileStorageAccess();
+    if (generation !== state.readGeneration) return;
     render();
     void refreshSelectedOptions();
   }
@@ -900,7 +929,7 @@ async function refreshSelectedOptions() {
     rebuildCategories();
     return;
   }
-  const pending = bindings.filter((binding) => !optionsFor(binding));
+  const pending = bindings.filter((binding) => binding.runtimeVerified === true && !optionsFor(binding));
   if (!pending.length) {
     state.optionsLoading = false;
     rebuildCategories();
@@ -914,6 +943,10 @@ async function refreshSelectedOptions() {
     const options = await Promise.all(pending.map(async (binding) => [binding, normalizeEditOptions(await request("morrow_edit_policy_options", { sourceBindingId: binding.sourceBindingId }), binding)]));
     if (requestToken !== state.optionsRequestToken) return;
     for (const [binding, detail] of options) state.optionsByBinding.set(binding.sourceBindingId, detail);
+    const needsSite = new Set(options.filter(([, detail]) => detail.runtimeVerified !== true).map(([binding]) => binding.sourceBindingId));
+    if (needsSite.size) {
+      state.status = { ...state.status, bindings: state.status.bindings.map((binding) => needsSite.has(binding.sourceBindingId) ? { ...binding, runtimeVerified: false } : binding) };
+    }
     state.optionsLoading = false;
     rebuildCategories();
     reconcileSelectedCategories();

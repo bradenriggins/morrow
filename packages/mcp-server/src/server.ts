@@ -13,6 +13,7 @@ import * as z from "zod/v4";
 import {
   isJsonObject,
   normalizeRequestedBy,
+  sha256Json,
   sha256Text,
   type JsonObject,
   type RequestedByIdentity,
@@ -28,6 +29,10 @@ import { registerCourseInventoryTool } from "./course-inventory.js";
 import { registerProgramLedgerResource, registerProgramLedgerTool } from "./program-ledger.js";
 import { registerMoodleResourceFileTool } from "./moodle-resource-file.js";
 import { registerCanvasCourseFileUploadTool } from "./canvas-file-transfer.js";
+import {
+  PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+  publicMoodleLearnerInputSchema,
+} from "./moodle-learner-input.js";
 
 function textAndStructured(summary: string, structuredContent: JsonObject): CallToolResult {
   return {
@@ -49,8 +54,8 @@ function safeInspectionFailure(error: unknown): CallToolResult {
   };
 }
 
-function publicToolInputSchema(schema: JsonObject): JsonObject {
-  const output = structuredClone(schema);
+function publicToolInputSchema(toolName: string, schema: JsonObject): JsonObject {
+  const output = publicMoodleLearnerInputSchema(toolName, schema);
   const properties = isJsonObject(output.properties) ? output.properties : {};
   const existing = isJsonObject(properties._morrow) ? properties._morrow : {};
   const controls = isJsonObject(existing.properties) ? existing.properties : {};
@@ -102,7 +107,8 @@ function publicCapabilityDescriptor(runtime: GatewayRuntime, name: string): Json
     ...result,
     descriptor: {
       ...result.descriptor,
-      inputSchema: publicToolInputSchema(mapping.inputSchema),
+      inputSchema: publicToolInputSchema(mapping.publicName, mapping.inputSchema),
+      inputSchemaSha256: sha256Json(publicToolInputSchema(mapping.publicName, mapping.inputSchema)),
     },
   };
 }
@@ -327,6 +333,28 @@ export function createMorrowServer(
   );
 
   server.registerTool(
+    PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+    {
+      title: "Find a Moodle enrolment candidate",
+      description: "Find one exact full name in the selected course's native Moodle enrolment list and return an opaque course-bound token for a reviewed enrolment plan.",
+      inputSchema: z.object({
+        source_binding_id: z.string().regex(/^[A-Za-z0-9_.:@-]{1,160}$/),
+        course_id: z.number().int().positive(),
+        query: z.string().min(1).max(200).refine((value) => value === value.trim() && !/[\u0000-\u001f\u007f]/u.test(value)),
+      }).strict(),
+      annotations: {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      },
+    },
+    async (input, context: ServerContext): Promise<CallToolResult> => (
+      await runtime.findMoodleEnrolmentCandidate(input, { signal: context.mcpReq.signal })
+    ) as unknown as CallToolResult,
+  );
+
+  server.registerTool(
     "morrow_catalog",
     {
       title: "Browse Morrow tools",
@@ -392,7 +420,7 @@ export function createMorrowServer(
   const publicInputValidators = new Map(
     runtime.catalog.tools.filter((tool) => !isPrivateSourceTool(tool)).map((tool) => [
       tool.publicName,
-      fromJsonSchema(publicToolInputSchema(tool.inputSchema)) as unknown as PublicInputValidator,
+      fromJsonSchema(publicToolInputSchema(tool.publicName, tool.inputSchema)) as unknown as PublicInputValidator,
     ]),
   );
   const registerCapabilityInvocation = (
@@ -500,7 +528,7 @@ export function createMorrowServer(
         {
           ...(tool.title ? { title: tool.title } : {}),
           ...(tool.description ? { description: tool.description } : {}),
-          inputSchema: fromJsonSchema(publicToolInputSchema(tool.inputSchema)),
+          inputSchema: fromJsonSchema(publicToolInputSchema(tool.publicName, tool.inputSchema)),
           ...(tool.annotations
             ? { annotations: tool.annotations as McpToolAnnotations }
             : {}),

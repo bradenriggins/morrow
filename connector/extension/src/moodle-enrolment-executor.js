@@ -908,3 +908,270 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
     return failure(message.startsWith("moodle_") ? message : "moodle_enrolment_execution_failed");
   }
 }
+
+/**
+ * Resolve one exact full name through Moodle's native manual-enrolment
+ * candidate selector. The full name and every other identity field stay in
+ * this page world. Only the numeric user ID and fixed proof fields leave it.
+ *
+ * This is a read. It sends two bounded GET requests, refuses redirects, and
+ * never submits the form. Chrome serializes this function for a MAIN-world
+ * injection, so every dependency remains inside the function body.
+ */
+export async function executeMoodleEnrolmentCandidateInPage(rawInput) {
+  const PROVIDER = "moodle";
+  const OPERATION = "moodle.private.enrolment_candidate.find.v1";
+  const TOOL = "morrow_private_moodle_find_enrolment_candidate";
+  const SCHEMA = "morrow.moodle-enrolment-candidate.private.v1";
+  const INSTANCES_PATH = "/enrol/instances.php";
+  const MANAGE_PATH = "/enrol/manual/manage.php";
+  const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+  const MAX_CANDIDATES = 100;
+  const MAX_QUERY = 200;
+  const MAX_LABEL = 1_000;
+  const ID = /^[1-9][0-9]{0,18}$/;
+
+  const object = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const id = (value) => {
+    const raw = typeof value === "number" && Number.isSafeInteger(value) ? String(value) : typeof value === "string" ? value : "";
+    return ID.test(raw) ? raw : "";
+  };
+  const exactQuery = (value) => typeof value === "string" && value.length >= 1 && value.length <= MAX_QUERY
+    && value === value.trim() && !/[\u0000-\u001f\u007f]/.test(value)
+    ? value
+    : "";
+  const label = (value) => {
+    const collapsed = String(value ?? "").replace(/\s+/g, " ").trim();
+    return collapsed.length >= 1 && collapsed.length <= MAX_LABEL && !/[\u0000-\u001f\u007f]/.test(collapsed)
+      ? collapsed
+      : "";
+  };
+  const failure = (error, status) => ({
+    ok: false,
+    sent: false,
+    ...(Number.isInteger(status) ? { status } : {}),
+    error,
+  });
+  const currentContext = () => {
+    const cfg = globalThis.M?.cfg;
+    if (!object(cfg) || typeof cfg.wwwroot !== "string") return null;
+    const principalId = id(cfg.userId);
+    if (!principalId) return null;
+    let site;
+    try { site = new URL(cfg.wwwroot); } catch { return null; }
+    if (site.protocol !== "https:" || site.search || site.hash || site.username || site.password) return null;
+    const basePath = site.pathname.replace(/\/$/, "");
+    const currentPath = String(globalThis.location?.pathname || "");
+    if (site.origin !== globalThis.location?.origin || !(currentPath === basePath || currentPath.startsWith(`${basePath}/`))) return null;
+    const configuredCourse = id(cfg.courseId);
+    const bodyCourses = [...new Set([...String(globalThis.document?.body?.className || "").matchAll(/(?:^|\s)course-([1-9][0-9]*)(?=\s|$)/g)].map((match) => match[1]))];
+    if (bodyCourses.length > 1 || (configuredCourse && bodyCourses[0] && configuredCourse !== bodyCourses[0])) return null;
+    const courseId = configuredCourse || bodyCourses[0] || "";
+    return courseId ? { origin: site.origin, siteUrl: site.href, basePath, principalId, courseId } : null;
+  };
+  const sameContext = (left, right) => Boolean(left) && Boolean(right) && left.origin === right.origin
+    && left.siteUrl === right.siteUrl && left.basePath === right.basePath && left.principalId === right.principalId
+    && left.courseId === right.courseId;
+  const bindingValid = (context, binding) => object(binding) && binding.origin === context.origin
+    && binding.siteUrl === context.siteUrl && id(binding.principalId) === context.principalId
+    && id(binding.courseId) === context.courseId;
+  const urlFor = (context, path, query) => {
+    const result = new URL(context.siteUrl);
+    result.pathname = `${context.basePath}${path}`;
+    result.search = new URLSearchParams(query).toString();
+    result.hash = "";
+    return result;
+  };
+  const exactUrl = (actual, expected) => {
+    try { return new URL(actual).href === expected.href; } catch { return false; }
+  };
+  const pageCourse = (documentValue) => {
+    const values = [...new Set([...String(documentValue?.body?.className || "").matchAll(/(?:^|\s)course-([1-9][0-9]*)(?=\s|$)/g)].map((match) => match[1]))];
+    return values.length === 1 ? values[0] : "";
+  };
+  const boundedText = async (response) => {
+    const declared = response?.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return null;
+    const reader = response?.body?.getReader?.();
+    if (!reader) return null;
+    const chunks = [];
+    let size = 0;
+    try {
+      while (true) {
+        const next = await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array)) return null;
+        size += next.value.byteLength;
+        if (size > MAX_RESPONSE_BYTES) {
+          await reader.cancel().catch(() => undefined);
+          return null;
+        }
+        chunks.push(next.value);
+      }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch { return null; }
+  };
+  const parseHtml = (html) => {
+    if (typeof html !== "string" || typeof globalThis.DOMParser !== "function") return null;
+    try { return new DOMParser().parseFromString(html, "text/html"); } catch { return null; }
+  };
+
+  let readRequestCount = 0;
+  const readPage = async (context, endpoint, expiresAt) => {
+    if (Date.now() >= expiresAt || !sameContext(context, currentContext())) return { error: "moodle_enrolment_candidate_context_changed" };
+    let response;
+    try {
+      readRequestCount += 1;
+      response = await fetch(endpoint, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+        redirect: "error",
+        headers: { Accept: "text/html" },
+      });
+    } catch { return { error: "moodle_enrolment_candidate_request_failed" }; }
+    const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
+    if (!response.ok || !exactUrl(response.url, endpoint) || !contentType.startsWith("text/html")
+      || !sameContext(context, currentContext())) {
+      return { error: "moodle_enrolment_candidate_response_unavailable", status: response.status };
+    }
+    const html = await boundedText(response);
+    const documentValue = parseHtml(html);
+    if (!documentValue || !sameContext(context, currentContext()) || Date.now() >= expiresAt) {
+      return { error: "moodle_enrolment_candidate_response_invalid", status: response.status };
+    }
+    return { document: documentValue, status: response.status };
+  };
+  const named = (root, name) => [...root.querySelectorAll("[name]")].filter((node) => node.getAttribute("name") === name);
+  const soleControl = (root, name, tag) => {
+    const controls = named(root, name).filter((node) => node.tagName === tag && !node.disabled);
+    return controls.length === 1 ? controls[0] : null;
+  };
+  const soleSubmit = (root, name) => {
+    const controls = named(root, name).filter((node) => (node.tagName === "INPUT" || node.tagName === "BUTTON")
+      && String(node.type || "").toLowerCase() === "submit" && !node.disabled);
+    return controls.length === 1 ? controls[0] : null;
+  };
+  const actionFor = (form, endpoint, context, enrolId, courseId) => {
+    let action;
+    try { action = new URL(form.getAttribute("action") || "", endpoint); } catch { return null; }
+    const actionCourse = action.searchParams.get("id");
+    if (action.origin !== context.origin || action.pathname !== `${context.basePath}${MANAGE_PATH}`
+      || id(action.searchParams.get("enrolid")) !== enrolId || (actionCourse !== null && id(actionCourse) !== courseId)
+      || action.hash || action.username || action.password) return null;
+    return action;
+  };
+  const candidateNames = (value) => {
+    const rendered = label(value);
+    if (!rendered) return [];
+    const values = [rendered];
+    const details = rendered.lastIndexOf(" (");
+    if (details > 0 && rendered.endsWith(")")) values.push(rendered.slice(0, details));
+    return [...new Set(values)];
+  };
+
+  try {
+    const input = (() => {
+      try { return typeof rawInput === "string" ? JSON.parse(rawInput) : rawInput; } catch { return null; }
+    })();
+    const context = currentContext();
+    if (!object(input) || !context) return failure("moodle_session_unavailable");
+    if (!Number.isSafeInteger(input.expiresAt) || Date.now() >= input.expiresAt) return failure("moodle_execution_expired");
+    const operation = input.operation;
+    if (!object(operation) || operation.key !== OPERATION || operation.toolName !== TOOL
+      || operation.provider !== PROVIDER || operation.readOnly !== true || operation.morrowPrivate !== true) {
+      return failure("moodle_enrolment_candidate_operation_refused");
+    }
+    if (!bindingValid(context, input.binding)) return failure("moodle_binding_mismatch");
+    if (!object(input.arguments) || Object.keys(input.arguments).length !== 2) {
+      return failure("moodle_enrolment_candidate_arguments_invalid");
+    }
+    const courseId = id(input.arguments.course_id);
+    const query = exactQuery(input.arguments.query);
+    if (!courseId || courseId !== context.courseId || !query) return failure("moodle_enrolment_candidate_arguments_invalid");
+
+    const instancesEndpoint = urlFor(context, INSTANCES_PATH, { id: courseId });
+    const instances = await readPage(context, instancesEndpoint, input.expiresAt);
+    if (instances.error) return failure(instances.error, instances.status);
+    if (pageCourse(instances.document) !== courseId) return failure("moodle_enrolment_candidate_course_mismatch", instances.status);
+    const methods = [];
+    for (const link of instances.document.querySelectorAll("a[href]")) {
+      let target;
+      try { target = new URL(link.getAttribute("href") || "", instancesEndpoint); } catch { continue; }
+      const enrolId = id(target.searchParams.get("enrolid"));
+      const linkedCourse = target.searchParams.get("id");
+      if (target.origin !== context.origin || target.pathname !== `${context.basePath}${MANAGE_PATH}` || !enrolId
+        || (linkedCourse !== null && id(linkedCourse) !== courseId) || target.hash || target.username || target.password) continue;
+      if (!methods.some((entry) => entry.enrolId === enrolId)) methods.push({ enrolId, target });
+    }
+    if (methods.length === 0) return failure("moodle_enrolment_candidate_manual_method_unavailable", instances.status);
+    if (methods.length !== 1) return failure("moodle_enrolment_candidate_manual_method_ambiguous", instances.status);
+
+    const manageEndpoint = new URL(methods[0].target.href);
+    manageEndpoint.searchParams.set("addselect_searchtext", query);
+    // Supplying this setting changes a Moodle user preference. The private
+    // resolver never does that. It filters the complete native result locally.
+    manageEndpoint.searchParams.delete("userselector_searchtype");
+    const manage = await readPage(context, manageEndpoint, input.expiresAt);
+    if (manage.error) return failure(manage.error, manage.status);
+    if (pageCourse(manage.document) !== courseId) return failure("moodle_enrolment_candidate_course_mismatch", manage.status);
+    const forms = [...manage.document.querySelectorAll("form")].filter((form) => {
+      if (String(form.getAttribute("method") || "").toLowerCase() !== "post") return false;
+      return Boolean(actionFor(form, manageEndpoint, context, methods[0].enrolId, courseId));
+    });
+    if (forms.length !== 1) return failure("moodle_enrolment_candidate_form_invalid", manage.status);
+    const form = forms[0];
+    const search = soleControl(form, "addselect_searchtext", "INPUT");
+    const candidates = soleControl(form, "addselect[]", "SELECT");
+    const role = soleControl(form, "roleid", "SELECT");
+    const add = soleSubmit(form, "add");
+    if (!search || !candidates || !role || !add || !candidates.multiple
+      || !["text", "search"].includes(String(search.type || "text").toLowerCase())
+      || search.value !== query || !actionFor(form, manageEndpoint, context, methods[0].enrolId, courseId)) {
+      return failure("moodle_enrolment_candidate_form_invalid", manage.status);
+    }
+    const options = [...candidates.options];
+    if (options.length > MAX_CANDIDATES) return failure("moodle_enrolment_candidate_excess", manage.status);
+    const rows = [];
+    for (const option of options) {
+      const userId = id(option.value);
+      const names = candidateNames(option.textContent);
+      if (!userId || option.disabled || names.length === 0) return failure("moodle_enrolment_candidate_form_invalid", manage.status);
+      if (rows.some((entry) => entry.userId === userId)) return failure("moodle_enrolment_candidate_ambiguous", manage.status);
+      rows.push({ userId, names });
+    }
+    const matches = rows.filter((entry) => entry.names.includes(query));
+    if (matches.length === 0) return failure("moodle_enrolment_candidate_absent", manage.status);
+    if (matches.length !== 1) return failure("moodle_enrolment_candidate_ambiguous", manage.status);
+    if (Date.now() >= input.expiresAt || !sameContext(context, currentContext())) {
+      return failure("moodle_enrolment_candidate_context_changed", manage.status);
+    }
+    return {
+      ok: true,
+      sent: false,
+      status: manage.status,
+      complete: true,
+      data: {
+        schema: SCHEMA,
+        provider: PROVIDER,
+        course_id: Number(courseId),
+        candidate: { user_id: matches[0].userId },
+        match: { kind: "exact_native_query", candidate_count: 1 },
+        proof: {
+          method: "native_manual_enrolment_candidate_search",
+          route: MANAGE_PATH,
+          complete: true,
+          dispatch_count: 0,
+          read_request_count: readRequestCount,
+          candidate_limit: MAX_CANDIDATES,
+        },
+      },
+    };
+  } catch (error) {
+    const message = String(error?.message || error);
+    return failure(message.startsWith("moodle_") ? message : "moodle_enrolment_candidate_execution_failed");
+  }
+}

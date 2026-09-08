@@ -270,14 +270,14 @@ test("course file access remains an explicit optional HTTPS permission", async (
 });
 
 test("the Morrow Bridge popup names Plan and Edit as its destination and never a Course Connector", () => {
-  const connectedWithSite = { paired: true, connected: true, bindings: [], siteAnchors: [{ siteAnchorId: "canvas:site", runtimeVerified: true }] };
+  const connectedWithSite = { paired: true, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [{ siteAnchorId: "canvas:site", runtimeVerified: true }] };
   assert.equal(primaryLabel(connectedWithSite), "Choose courses");
   assert.equal(detailText(connectedWithSite), "Choose courses in Plan and Edit settings. Plan keeps changes ready for your review.");
 
   const states = [null, {}, { paired: true }, { paired: true, pairing: true }, { paired: true, connecting: true },
-    { paired: true, connected: true }, connectedWithSite,
-    { paired: true, connected: true, bindings: [{ sourceBindingId: "canvas:course-1", runtimeVerified: true }] },
-    { paired: true, connected: true, bindings: [{ sourceBindingId: "canvas:course-1" }] }];
+    { paired: true, connected: true }, { paired: true, connected: true, runtimeHealthy: true }, connectedWithSite,
+    { paired: true, connected: true, runtimeHealthy: true, bindings: [{ sourceBindingId: "canvas:course-1", runtimeVerified: true }] },
+    { paired: true, connected: true, runtimeHealthy: true, bindings: [{ sourceBindingId: "canvas:course-1" }] }];
   const spoken = states.flatMap((status) => [statusValue(status), courseValue(status), primaryLabel(status), detailText(status)])
     .concat(PROBLEM_CODES.map((code) => problemText(code)));
   assert.deepEqual(spoken.filter((line) => /course connector/i.test(line)), []);

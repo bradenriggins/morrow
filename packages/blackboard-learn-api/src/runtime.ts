@@ -3,12 +3,13 @@ import { LearnerRoster, LearnerVault, redactLearnerEgress, type LearnerIdentity,
 import { BlackboardLearnClient } from "./client.js";
 import { deriveBlackboardSourceBindingId } from "./binding.js";
 import { blackboardEffectGrantAccepted, type BlackboardEffectGrant } from "./effect-grant.js";
-import { BLACKBOARD_EFFECT_STATE_IN_MEMORY, BlackboardEffectReceipts, type BlackboardEffectTarget } from "./operations/effect-receipts.js";
+import { BLACKBOARD_EFFECT_STATE_IN_MEMORY, BlackboardEffectReceipts, type BlackboardEffectDispatch, type BlackboardEffectTarget } from "./operations/effect-receipts.js";
 import { BLACKBOARD_SESSION_STATE_IN_MEMORY, BlackboardSessionGenerations, blackboardEffectScope } from "./operations/effect-scope.js";
 import { BLACKBOARD_ID, BLACKBOARD_SOURCE_BINDING_ID, BlackboardApiError, blackboardPrincipalVerification, withBlackboardDispatchState, type BlackboardApiFailureCode, type BlackboardContentPatchPlan, type BlackboardCourseBinding, type BlackboardDispatchState, type BlackboardPublicTenant, type BlackboardTenant } from "./types.js";
 
 const PATCH_FIELDS = ["title", "description", "availability"] as const;
 type PatchField = (typeof PATCH_FIELDS)[number];
+const COURSE_READ_FIELDS = ["id", "courseId", "name", "description"];
 
 /**
  * The one Blackboard content handler Morrow changes, and the folder handler it
@@ -737,7 +738,10 @@ export class BlackboardLearnRuntime {
     const requestsBefore = scope.client.requestCount;
     await this.verifyIdentity(scope, "read", signal);
     const roster = await this.preparedRoster(scope, "read", {}, signal);
-    const course = await scope.client.get(`/learn/api/public/v1/courses/${encodeURIComponent(scope.courseId)}`, signal);
+    const course = await scope.client.get(
+      `/learn/api/public/v3/courses/${encodeURIComponent(scope.courseId)}?fields=${COURSE_READ_FIELDS.join(",")}`,
+      signal,
+    );
     if (course.id !== scope.courseId) throw new BlackboardApiError("blackboard_scope_binding_mismatch", "Blackboard returned a different course.");
     return {
       schema: "morrow.blackboard.course.v1",
@@ -859,6 +863,33 @@ export class BlackboardLearnRuntime {
   }
 
   /**
+   * The durable, privacy-safe identity of one item or collection a reviewed
+   * change can affect. The target values are hashed before they reach the
+   * effect record, so a learner account id is never retained there.
+   */
+  effectTarget(
+    input: { readonly tenantId: string; readonly sourceBindingId: string; readonly courseId: string },
+    targetType: string,
+    identity: JsonObject,
+  ): BlackboardEffectTarget {
+    const scope = this.resolveScope(input.tenantId, input.sourceBindingId, input.courseId);
+    if (!/^[a-z][a-z0-9-]{0,63}$/.test(targetType)) {
+      throw new BlackboardApiError("blackboard_scope_binding_required", "The Blackboard effect target is invalid.");
+    }
+    return {
+      tenantId: scope.tenant.id,
+      courseId: scope.courseId,
+      targetType,
+      targetKey: sha256Text(canonicalJson({ targetType, identity })),
+    };
+  }
+
+  /** Refuses a plan while an earlier unconfirmed change still holds its target. */
+  assertEffectTargetFree(target: BlackboardEffectTarget): void {
+    this.effects.assertTargetFree(target);
+  }
+
+  /**
    * Accepts one reserved grant and spends its one-use receipt, so a replay of
    * the same grant sends nothing. An operation module claims the receipt before
    * its first provider request, so two concurrent dispatches of one approval
@@ -866,9 +897,15 @@ export class BlackboardLearnRuntime {
    * durable record here, so it stays spent if this server restarts under a
    * Gateway that is still running.
    */
-  claimReservedEffectGrant(grant: BlackboardEffectGrant): void {
+  claimReservedEffectGrant(grant: BlackboardEffectGrant, target: BlackboardEffectTarget): BlackboardEffectDispatch {
     this.assertReservedEffectGrant(grant);
-    this.effects.claim(grant);
+    this.effects.assertTargetFree(target);
+    return this.effects.claim(grant, target);
+  }
+
+  /** Settles any sent change held against this exact target after a fresh read. */
+  recordEffectComparison(target: BlackboardEffectTarget, verified: boolean): void {
+    this.effects.recordComparison(target, verified);
   }
 
   /**

@@ -12398,7 +12398,7 @@
       "toolName": "moodle_update_choice_option",
       "provider": "moodle",
       "summary": "Update one Moodle Choice option",
-      "description": "Change the text or the response limit of one exact option of one exact Moodle Choice. The option is bound by its own ID and by its position in the saved option list, so a list that moved since the change was reviewed is refused instead of written. The bridge binds the module through the native course/modedit.php Choice form and reads the complete option list from the repeated option controls of that same form. It refuses while Moodle has frozen the `allowmultiple` control, which Moodle does once the Choice has recorded responses, and it refuses a response-limit change while the Choice does not limit answers. It sends one POST through the native save-and-return control, so the redirect Moodle names is course/view.php and never /mod/choice/view.php, then reads the complete option list back and requires every other option and every other native setting unchanged. It requires moodle/course:manageactivities at that exact module context. Moodle cleans this control as it saves it, so a text carrying markup is refused before send: a rewritten value could not be compared against the approved one. Adding an option, removing one, and reordering the list stay with `moodle_update_choice`. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Change the text or the response limit of one exact option of one exact Moodle Choice. The option is bound by its own ID and by its position in the saved option list, so a list that moved since the change was reviewed is refused instead of written. The bridge binds the module through the native course/modedit.php Choice form and reads the complete option list from the repeated option controls of that same form. It refuses while Moodle has frozen the `allowmultiple` control, which Moodle does once the Choice has recorded responses, and it refuses a response-limit change while the Choice does not limit answers. It sends one POST through the native save-and-return control, so the redirect Moodle names is course/view.php and never /mod/choice/view.php, then reads the complete option list back and requires every other option and every other native setting unchanged. It requires moodle/course:manageactivities at that exact module context. Moodle cleans this control as it saves it, so a text carrying markup is refused before send: a rewritten value could not be compared against the approved one. Adding an option, removing one, and reordering the list stay with `moodle_update_choice`. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_choice_options, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_choice_options",
       "inputSchema": {
@@ -12433,13 +12433,19 @@
             "minimum": 0,
             "maximum": 1000000,
             "description": "How many learners may take this option. Moodle saves it only while the Choice limits answers."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_choice_options."
           }
         },
         "required": [
           "course_id",
           "module_id",
           "option_id",
-          "position"
+          "position",
+          "expected_digest"
         ],
         "anyOf": [
           {
@@ -12462,7 +12468,7 @@
       "toolName": "moodle_create_feedback_item",
       "provider": "moodle",
       "summary": "Create one Moodle Feedback question",
-      "description": "Add one written-answer question to one exact Moodle Feedback at one exact position, through Moodle's own /mod/feedback/edit_item.php form, which requires mod/feedback:edititems. The bridge binds the module through the native course/modedit.php Feedback form, reads the complete question list from Moodle's own item export, and requires the native position list to hold exactly the number of questions the change was reviewed against. It refuses while Moodle has frozen the `multiple_submit` control, which Moodle does once the Feedback has completed responses. It sends one POST and then reads the complete question list back, with the new question at the approved position and every other question unchanged and in the same order. Only the numeric, textarea and textfield question types are offered; every other native control of the new question keeps the value Moodle's own blank form carries. Moodle strips markup from the short label and exports the question text inside a CDATA section, so a label carrying markup, or a question text carrying the sequence that ends a CDATA section, is refused before send. Question dependencies, templates and every other question type stay out. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Add one written-answer question to one exact Moodle Feedback at one exact position, through Moodle's own /mod/feedback/edit_item.php form, which requires mod/feedback:edititems. The bridge binds the module through the native course/modedit.php Feedback form, reads the complete question list from Moodle's own item export, and requires the native position list to hold exactly the number of questions the change was reviewed against. It refuses while Moodle has frozen the `multiple_submit` control, which Moodle does once the Feedback has completed responses. It sends one POST and then reads the complete question list back, with the new question at the approved position and every other question unchanged and in the same order. Only the numeric, textarea and textfield question types are offered; every other native control of the new question keeps the value Moodle's own blank form carries. Moodle strips markup from the short label and exports the question text inside a CDATA section, so a label carrying markup, or a question text carrying the sequence that ends a CDATA section, is refused before send. Question dependencies, templates and every other question type stay out. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_feedback_items, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_feedback_items",
       "inputSchema": {
@@ -12510,6 +12516,11 @@
             "minimum": 0,
             "maximum": 200,
             "description": "How many questions the Feedback held when the change was reviewed, exactly as moodle_get_feedback_items reported it."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_feedback_items."
           }
         },
         "required": [
@@ -12520,7 +12531,8 @@
           "label",
           "required",
           "position",
-          "expected_item_count"
+          "expected_item_count",
+          "expected_digest"
         ],
         "additionalProperties": false
       },
@@ -12531,7 +12543,7 @@
       "toolName": "moodle_update_feedback_item",
       "provider": "moodle",
       "summary": "Update one Moodle Feedback question",
-      "description": "Change the question text, the short label, or the required flag of one exact question of one exact Moodle Feedback, through Moodle's own /mod/feedback/edit_item.php form, which requires mod/feedback:edititems. The question is bound by its own ID and by its position in the saved question list, so a list that moved since the change was reviewed is refused instead of written. The bridge binds the module through the native course/modedit.php Feedback form and reads the complete question list from Moodle's own item export first. It refuses while Moodle has frozen the `multiple_submit` control, which Moodle does once the Feedback has completed responses. It sends one POST through the native update control, never the save-as-new-question control, then reads the complete question list back and requires the question's own type, presentation and dependency, and every other question, unchanged. Only the numeric, textarea and textfield question types can be edited. Moodle strips markup from the short label and exports the question text inside a CDATA section, so a label carrying markup, or a question text carrying the sequence that ends a CDATA section, is refused before send. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Change the question text, the short label, or the required flag of one exact question of one exact Moodle Feedback, through Moodle's own /mod/feedback/edit_item.php form, which requires mod/feedback:edititems. The question is bound by its own ID and by its position in the saved question list, so a list that moved since the change was reviewed is refused instead of written. The bridge binds the module through the native course/modedit.php Feedback form and reads the complete question list from Moodle's own item export first. It refuses while Moodle has frozen the `multiple_submit` control, which Moodle does once the Feedback has completed responses. It sends one POST through the native update control, never the save-as-new-question control, then reads the complete question list back and requires the question's own type, presentation and dependency, and every other question, unchanged. Only the numeric, textarea and textfield question types can be edited. Moodle strips markup from the short label and exports the question text inside a CDATA section, so a label carrying markup, or a question text carrying the sequence that ends a CDATA section, is refused before send. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_feedback_items, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_feedback_items",
       "inputSchema": {
@@ -12567,13 +12579,19 @@
           },
           "required": {
             "type": "boolean"
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_feedback_items."
           }
         },
         "required": [
           "course_id",
           "module_id",
           "item_id",
-          "position"
+          "position",
+          "expected_digest"
         ],
         "anyOf": [
           {
@@ -12601,7 +12619,7 @@
       "toolName": "moodle_create_database_field",
       "provider": "moodle",
       "summary": "Create one Moodle Database field",
-      "description": "Add one field to one exact Moodle Database, through Moodle's own /mod/data/field.php form, which requires mod/data:managetemplates. The bridge binds the module through the native course/modedit.php Database form, reads the complete field list from Moodle's own field page, and requires the list to hold exactly the number of fields the change was reviewed against. A field changes the shape every saved entry is stored against, so the write proceeds only while Moodle's own activity overview says the Database holds no entry and shows the approval column that proves the count covers unapproved entries as well; without that column, or on a site older than Moodle 5.0 where the overview service does not exist, the write refuses. A name another field already uses is refused before send, because Moodle answers one with a notice instead of a save. It sends one POST, then reads the complete field list and the new field's own form back. Only the number, text and textarea field types are offered; every other native control keeps the value Moodle's own blank form carries. Templates, presets and field deletion stay out. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Add one field to one exact Moodle Database, through Moodle's own /mod/data/field.php form, which requires mod/data:managetemplates. The bridge binds the module through the native course/modedit.php Database form, reads the complete field list from Moodle's own field page, and requires the list to hold exactly the number of fields the change was reviewed against. A field changes the shape every saved entry is stored against, so the write proceeds only while Moodle's own activity overview says the Database holds no entry and shows the approval column that proves the count covers unapproved entries as well; without that column, or on a site older than Moodle 5.0 where the overview service does not exist, the write refuses. A name another field already uses is refused before send, because Moodle answers one with a notice instead of a save. It sends one POST, then reads the complete field list and the new field's own form back. Only the number, text and textarea field types are offered; every other native control keeps the value Moodle's own blank form carries. Templates, presets and field deletion stay out. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_database_fields, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_database_fields",
       "inputSchema": {
@@ -12643,6 +12661,11 @@
             "minimum": 0,
             "maximum": 100,
             "description": "How many fields the Database held when the change was reviewed, exactly as moodle_get_database_fields reported it."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_database_fields."
           }
         },
         "required": [
@@ -12652,7 +12675,8 @@
           "name",
           "description",
           "required",
-          "expected_field_count"
+          "expected_field_count",
+          "expected_digest"
         ],
         "additionalProperties": false
       },
@@ -12663,7 +12687,7 @@
       "toolName": "moodle_update_database_field",
       "provider": "moodle",
       "summary": "Update one Moodle Database field",
-      "description": "Change the name, the description, or the required flag of one exact field of one exact Moodle Database, through Moodle's own /mod/data/field.php form, which requires mod/data:managetemplates. The field is bound by its own ID and by its position in the saved field list, so a list that moved since the change was reviewed is refused instead of written. A field change reaches the shape every saved entry is stored against, so the write proceeds only while Moodle's own activity overview says the Database holds no entry and shows the approval column that proves the count covers unapproved entries as well; without that column, or on a site older than Moodle 5.0 where the overview service does not exist, the write refuses. A name another field already uses is refused before send. It sends one POST, then reads the complete field list and the field's own form back, and requires every other field and every native control this change did not name unchanged. Only the number, text and textarea field types can be edited. Templates, presets and field deletion stay out. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Change the name, the description, or the required flag of one exact field of one exact Moodle Database, through Moodle's own /mod/data/field.php form, which requires mod/data:managetemplates. The field is bound by its own ID and by its position in the saved field list, so a list that moved since the change was reviewed is refused instead of written. A field change reaches the shape every saved entry is stored against, so the write proceeds only while Moodle's own activity overview says the Database holds no entry and shows the approval column that proves the count covers unapproved entries as well; without that column, or on a site older than Moodle 5.0 where the overview service does not exist, the write refuses. A name another field already uses is refused before send. It sends one POST, then reads the complete field list and the field's own form back, and requires every other field and every native control this change did not name unchanged. Only the number, text and textarea field types can be edited. Templates, presets and field deletion stay out. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_database_fields, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_database_fields",
       "inputSchema": {
@@ -12699,13 +12723,19 @@
           },
           "required": {
             "type": "boolean"
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_database_fields."
           }
         },
         "required": [
           "course_id",
           "module_id",
           "field_id",
-          "position"
+          "position",
+          "expected_digest"
         ],
         "anyOf": [
           {
@@ -14397,7 +14427,7 @@
       "toolName": "moodle_create_group",
       "provider": "moodle",
       "summary": "Create a Moodle group",
-      "description": "Create one group in one exact Moodle course through Moodle's own group form. Requires moodle/course:managegroups at the course context. Morrow reads the course group list, loads the native form immediately before it acts, sends one POST of that form's complete control set with only the name and, where the request names them, the visibility and the participation flag changed, and then requires the course group list back with exactly one new group carrying the requested values and every other group unchanged. A lost response is reported as applied but unconfirmed and is never retried.A native Moodle form that refuses its own input renders itself again and saves nothing, and that is reported as a refusal, not as an unknown outcome. A name that already belongs to a group of this course is refused before anything is sent. A name carrying <, >, &, \" or ' is refused, because Moodle escapes a stored name for display and Morrow could not then compare the saved value against the requested one. The group description, ID number, enrolment key and picture are carried through the form unchanged and cannot be set here, and the new group has no members until moodle_add_group_member puts one in it. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Create one group in one exact Moodle course through Moodle's own group form. Requires moodle/course:managegroups at the course context. Morrow reads the course group list, loads the native form immediately before it acts, sends one POST of that form's complete control set with only the name and, where the request names them, the visibility and the participation flag changed, and then requires the course group list back with exactly one new group carrying the requested values and every other group unchanged. A lost response is reported as applied but unconfirmed and is never retried.A native Moodle form that refuses its own input renders itself again and saves nothing, and that is reported as a refusal, not as an unknown outcome. A name that already belongs to a group of this course is refused before anything is sent. A name carrying <, >, &, \" or ' is refused, because Moodle escapes a stored name for display and Morrow could not then compare the saved value against the requested one. The group description, ID number, enrolment key and picture are carried through the form unchanged and cannot be set here, and the new group has no members until moodle_add_group_member puts one in it. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_course_groups, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_course_groups",
       "dataClass": "course",
@@ -14427,11 +14457,17 @@
           "participation": {
             "type": "boolean",
             "description": "Whether the group takes part in group activities and group messaging."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_course_groups."
           }
         },
         "required": [
           "course_id",
-          "name"
+          "name",
+          "expected_digest"
         ],
         "additionalProperties": false
       },
@@ -14442,7 +14478,7 @@
       "toolName": "moodle_update_group",
       "provider": "moodle",
       "summary": "Change one Moodle group's name or visibility",
-      "description": "Change the name, the visibility or the participation flag of one exact group through Moodle's own group form. Requires moodle/course:managegroups at the course context. Moodle freezes the visibility and the participation controls as soon as the group has one member, so a change to either is refused with moodle_group_visibility_locked while the loaded form holds them frozen; the name stays writable. Morrow reads the course group list, requires expected_group_name to be the name that group carries now, loads the native form immediately before it acts, sends one POST of that form's complete control set with only the named controls changed, and then requires the course group list back with exactly the requested values on that group, every other group unchanged, and the form's own digest of every control this change did not name unchanged. A lost response is reported as applied but unconfirmed and is never retried.A native Moodle form that refuses its own input renders itself again and saves nothing, and that is reported as a refusal, not as an unknown outcome. A name carrying <, >, &, \" or ' is refused, because Moodle escapes a stored name for display and Morrow could not then compare the saved value against the requested one. The group description, ID number, enrolment key and picture are carried through unchanged and cannot be set here. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Change the name, the visibility or the participation flag of one exact group through Moodle's own group form. Requires moodle/course:managegroups at the course context. Moodle freezes the visibility and the participation controls as soon as the group has one member, so a change to either is refused with moodle_group_visibility_locked while the loaded form holds them frozen; the name stays writable. Morrow reads the course group list, requires expected_group_name to be the name that group carries now, loads the native form immediately before it acts, sends one POST of that form's complete control set with only the named controls changed, and then requires the course group list back with exactly the requested values on that group, every other group unchanged, and the form's own digest of every control this change did not name unchanged. A lost response is reported as applied but unconfirmed and is never retried.A native Moodle form that refuses its own input renders itself again and saves nothing, and that is reported as a refusal, not as an unknown outcome. A name carrying <, >, &, \" or ' is refused, because Moodle escapes a stored name for display and Morrow could not then compare the saved value against the requested one. The group description, ID number, enrolment key and picture are carried through unchanged and cannot be set here. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_course_groups, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_course_groups",
       "dataClass": "course",
@@ -14482,12 +14518,18 @@
           "participation": {
             "type": "boolean",
             "description": "Whether the group takes part in group activities and group messaging."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_course_groups."
           }
         },
         "required": [
           "course_id",
           "group_id",
-          "expected_group_name"
+          "expected_group_name",
+          "expected_digest"
         ],
         "additionalProperties": false
       },
@@ -14498,7 +14540,7 @@
       "toolName": "moodle_delete_group",
       "provider": "moodle",
       "summary": "Delete a Moodle group",
-      "description": "Delete one group of one exact Moodle course through Moodle's own group-deletion route. Morrow cannot undo it. Requires moodle/course:managegroups at the course context. The deletion removes the group with its name, description and picture and the files stored in them, the membership of every member, so each of them stops being in this group, the group's place in every grouping that holds it, its calendar events, and its group conversation with the messages in it where group messaging is on. Morrow reads the group's complete saved membership from Moodle's own group-management member route and lists every member the deletion removes before the change is approved; expected_member_count must be the number of members that list held, so a deletion that would take a different set of learners with it is refused before anything is sent. It sends one POST and then requires the course group list back without that group and with every other group unchanged. A lost response is reported as applied but unconfirmed and is never retried. Every member it names crosses the normal Moodle roster privacy boundary and is returned only as a stable learner token. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Delete one group of one exact Moodle course through Moodle's own group-deletion route. Morrow cannot undo it. Requires moodle/course:managegroups at the course context. The deletion removes the group with its name, description and picture and the files stored in them, the membership of every member, so each of them stops being in this group, the group's place in every grouping that holds it, its calendar events, and its group conversation with the messages in it where group messaging is on. Morrow reads the group's complete saved membership from Moodle's own group-management member route and lists every member the deletion removes before the change is approved; expected_member_count must be the number of members that list held, so a deletion that would take a different set of learners with it is refused before anything is sent. It sends one POST and then requires the course group list back without that group and with every other group unchanged. A lost response is reported as applied but unconfirmed and is never retried. Every member it names crosses the normal Moodle roster privacy boundary and is returned only as a stable learner token. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_course_groups, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_course_groups",
       "destructive": true,
@@ -14527,13 +14569,19 @@
             "minimum": 0,
             "maximum": 10000,
             "description": "The number of members the group held when the deletion was reviewed."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_course_groups."
           }
         },
         "required": [
           "course_id",
           "group_id",
           "expected_group_name",
-          "expected_member_count"
+          "expected_member_count",
+          "expected_digest"
         ],
         "additionalProperties": false
       },
@@ -14544,7 +14592,7 @@
       "toolName": "moodle_add_group_member",
       "provider": "moodle",
       "summary": "Add one member to a Moodle group",
-      "description": "Put one enrolled learner into one exact group through Moodle's own group member form. Requires moodle/course:managegroups at the course context. The learner must appear in that form's own candidate list for this exact group, so an identity Moodle does not offer for this group is refused with moodle_group_member_not_available before anything is sent. Moodle stops listing candidates when the course holds more of them than its own user-selector limit, which is 100 by default; Morrow then refuses with moodle_group_member_list_bounded rather than send a change it cannot bind. Morrow reads the group list and the group's saved membership, loads the member form immediately before it acts, sends one POST with Moodle's own add control and that one user, and then requires the saved membership back holding exactly the members it held plus that learner, with the course group list unchanged. A lost response is reported as applied but unconfirmed and is never retried. Membership does not change who can see the group or its members: a group whose visibility hides its membership still hides it, and the result states the visibility the group has. The learner crosses the normal Moodle roster privacy boundary and is returned only as a stable learner token. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Put one enrolled learner into one exact group through Moodle's own group member form. Requires moodle/course:managegroups at the course context. The learner must appear in that form's own candidate list for this exact group, so an identity Moodle does not offer for this group is refused with moodle_group_member_not_available before anything is sent. Moodle stops listing candidates when the course holds more of them than its own user-selector limit, which is 100 by default; Morrow then refuses with moodle_group_member_list_bounded rather than send a change it cannot bind. Morrow reads the group list and the group's saved membership, loads the member form immediately before it acts, sends one POST with Moodle's own add control and that one user, and then requires the saved membership back holding exactly the members it held plus that learner, with the course group list unchanged. A lost response is reported as applied but unconfirmed and is never retried. Membership does not change who can see the group or its members: a group whose visibility hides its membership still hides it, and the result states the visibility the group has. The learner crosses the normal Moodle roster privacy boundary and is returned only as a stable learner token. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_course_groups, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_course_groups",
       "dataClass": "learner",
@@ -14569,13 +14617,19 @@
           "user_id": {
             "type": "integer",
             "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_course_groups."
           }
         },
         "required": [
           "course_id",
           "group_id",
           "expected_group_name",
-          "user_id"
+          "user_id",
+          "expected_digest"
         ],
         "additionalProperties": false
       },
@@ -14586,7 +14640,7 @@
       "toolName": "moodle_remove_group_member",
       "provider": "moodle",
       "summary": "Remove one member from a Moodle group",
-      "description": "Take one learner out of one exact group through Moodle's own group member form. Requires moodle/course:managegroups at the course context. The learner must be in that group's complete saved membership, read from Moodle's own group-management member route, so a learner who is not a member is refused with moodle_group_member_absent before anything is sent. Morrow reads the group list and that membership, loads the member form immediately before it acts, sends one POST with Moodle's own remove control and that one user, and then requires the saved membership back holding exactly the members it held without that learner, with the course group list unchanged. A lost response is reported as applied but unconfirmed and is never retried. Moodle refuses a removal when the membership was placed by an enrolment plugin that keeps groups in step with it; that refusal happens on the site, so the saved membership is what decides the result. Removing a member does not remove the learner from the course, and it does not remove any work they have already submitted. The learner crosses the normal Moodle roster privacy boundary and is returned only as a stable learner token. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Take one learner out of one exact group through Moodle's own group member form. Requires moodle/course:managegroups at the course context. The learner must be in that group's complete saved membership, read from Moodle's own group-management member route, so a learner who is not a member is refused with moodle_group_member_absent before anything is sent. Morrow reads the group list and that membership, loads the member form immediately before it acts, sends one POST with Moodle's own remove control and that one user, and then requires the saved membership back holding exactly the members it held without that learner, with the course group list unchanged. A lost response is reported as applied but unconfirmed and is never retried. Moodle refuses a removal when the membership was placed by an enrolment plugin that keeps groups in step with it; that refusal happens on the site, so the saved membership is what decides the result. Removing a member does not remove the learner from the course, and it does not remove any work they have already submitted. The learner crosses the normal Moodle roster privacy boundary and is returned only as a stable learner token. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_course_groups, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_course_groups",
       "dataClass": "learner",
@@ -14611,13 +14665,19 @@
           "user_id": {
             "type": "integer",
             "minimum": 1
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_course_groups."
           }
         },
         "required": [
           "course_id",
           "group_id",
           "expected_group_name",
-          "user_id"
+          "user_id",
+          "expected_digest"
         ],
         "additionalProperties": false
       },
@@ -15126,7 +15186,7 @@
       "toolName": "moodle_start_course_import",
       "provider": "moodle",
       "summary": "Import another course into this Moodle course",
-      "description": "Copy the content of one other Moodle course into the approved course, through the native import form, using Moodle's own Jump to final step with the import settings that form already carries. It adds to the approved course and does not delete anything in it: Morrow uses only Moodle's merging import target. It carries no learner data, because Moodle locks user data out of an import. Morrow reads the complete course state before the import, reads it again immediately before the one POST and refuses when it changed, sends one POST, then reads the complete course state again and reports both with the activities the import added. Moodle runs an import inside that one request, so a large source course can take a long time. A result with no added activity is reported as applied but unconfirmed rather than as a success, and a lost response is reported as applied but unconfirmed; neither is retried. It requires the moodle/restore:restoretargetimport capability at the approved course and the moodle/backup:backuptargetimport capability at the source course. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Copy the content of one other Moodle course into the approved course, through the native import form, using Moodle's own Jump to final step with the import settings that form already carries. It adds to the approved course and does not delete anything in it: Morrow uses only Moodle's merging import target. It carries no learner data, because Moodle locks user data out of an import. Morrow reads the complete course state before the import, reads it again immediately before the one POST and refuses when it changed, sends one POST, then reads the complete course state again and reports both with the activities the import added. Moodle runs an import inside that one request, so a large source course can take a long time. A result with no added activity is reported as applied but unconfirmed rather than as a success, and a lost response is reported as applied but unconfirmed; neither is retried. It requires the moodle/restore:restoretargetimport capability at the approved course and the moodle/backup:backuptargetimport capability at the source course. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_contents, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_contents",
       "inputSchema": {
@@ -15147,12 +15207,18 @@
               true
             ],
             "description": "Confirms that this adds content to the whole course and that Morrow cannot undo it."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_contents."
           }
         },
         "required": [
           "course_id",
           "source_course_id",
-          "acknowledge_course_change"
+          "acknowledge_course_change",
+          "expected_digest"
         ],
         "additionalProperties": false
       },
@@ -15163,7 +15229,7 @@
       "toolName": "moodle_copy_course",
       "provider": "moodle",
       "summary": "Copy a Moodle course into a new course",
-      "description": "Create a new Moodle course from the approved course, through the native course copy form. The copy is always created hidden, so it cannot reach a learner before someone shows it, and it always carries no learner data and keeps no enrolments, because Morrow copies no people. Morrow refuses before sending when the form already keeps a role's enrolments. The copy is created without an ID number unless you give one, because Moodle refuses a course whose ID number is already in use and the form is seeded with the source course's own. Every other control of the form, including the dates it offers, is sent back unchanged. Morrow reads the course copies already in progress first, refuses a copy whose new full name is already being made, sends one POST, then reads the copies again and requires exactly one new copy with that exact name. Moodle makes the copy as scheduled tasks, so the new course is not finished when this returns. A short name Moodle already uses is refused by the native form and is reported as sent but not applied; a lost response is reported as applied but unconfirmed. Neither is retried. It requires moodle/backup:backupcourse, moodle/restore:restorecourse and moodle/course:create at that exact course context. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Create a new Moodle course from the approved course, through the native course copy form. The copy is always created hidden, so it cannot reach a learner before someone shows it, and it always carries no learner data and keeps no enrolments, because Morrow copies no people. Morrow refuses before sending when the form already keeps a role's enrolments. The copy is created without an ID number unless you give one, because Moodle refuses a course whose ID number is already in use and the form is seeded with the source course's own. Every other control of the form, including the dates it offers, is sent back unchanged. Morrow reads the course copies already in progress first, refuses a copy whose new full name is already being made, sends one POST, then reads the copies again and requires exactly one new copy with that exact name. Moodle makes the copy as scheduled tasks, so the new course is not finished when this returns. A short name Moodle already uses is refused by the native form and is reported as sent but not applied; a lost response is reported as applied but unconfirmed. Neither is retried. It requires moodle/backup:backupcourse, moodle/restore:restorecourse and moodle/course:create at that exact course context. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_course_settings, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_course_settings",
       "inputSchema": {
@@ -15199,13 +15265,19 @@
               true
             ],
             "description": "Confirms that this creates a new course, which Morrow cannot delete."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$",
+            "description": "The canonical SHA-256 digest of the complete snapshot from moodle_get_course_settings."
           }
         },
         "required": [
           "course_id",
           "new_full_name",
           "new_short_name",
-          "acknowledge_new_course"
+          "acknowledge_new_course",
+          "expected_digest"
         ],
         "additionalProperties": false
       },

@@ -143,6 +143,61 @@ test("a next link that changes the request path is refused instead of read", asy
   assert.deepEqual(requests.map((request) => request.pathname), [LIST_PATH]);
 });
 
+test("a next link cannot remove, change, or widen the first page query", async () => {
+  const links = [
+    `${ORIGIN}${LIST_PATH}?page=2&per_page=10`,
+    `${ORIGIN}${LIST_PATH}?search_term=other&page=2&per_page=10`,
+    `${ORIGIN}${LIST_PATH}?search_term=needle&include=body&page=2&per_page=10`,
+    `${ORIGIN}${LIST_PATH}?search_term=needle&page=2&page=3&per_page=10`,
+    `${ORIGIN}${LIST_PATH}?search_term=needle&page=2&per_page=101`,
+  ];
+  for (const href of links) {
+    const { result, requests } = await sendListRead(
+      { course_id: "42", search_term: "needle", morrow_max_pages: 5, morrow_list_resume: {} },
+      () => jsonResponse([{ page_id: "11", url: "page-1", title: "Page 1" }], { link: `<${href}>; rel="next"` }),
+    );
+    assert.equal(result.ok, false, href);
+    assert.equal(result.error, "canvas_pagination_parameters_refused", href);
+    assert.deepEqual(requests.map((request) => request.pathname), [LIST_PATH], href);
+  }
+});
+
+test("a next link may add one bounded page size while preserving the first page query", async () => {
+  const seen = [];
+  const { result } = await sendListRead(
+    { course_id: "42", search_term: "needle", morrow_max_pages: 5, morrow_list_resume: {} },
+    (url) => {
+      seen.push(url.search);
+      if (!url.searchParams.has("page")) {
+        return jsonResponse([{ page_id: "11", url: "page-1", title: "Page 1" }], {
+          link: `<${ORIGIN}${LIST_PATH}?search_term=needle&page=2&per_page=10>; rel="next"`,
+        });
+      }
+      return jsonResponse([{ page_id: "22", url: "page-2", title: "Page 2" }]);
+    },
+  );
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.truncated, false);
+  assert.deepEqual(seen, ["?search_term=needle", "?search_term=needle&page=2&per_page=10"]);
+});
+
+test("a malformed or ambiguous Link header cannot be mistaken for a complete list", async () => {
+  const values = [
+    `<${ORIGIN}${LIST_PATH}?page=2>; rel="next"; type="application/json"`,
+    `<${ORIGIN}${LIST_PATH}?page=2>; rel="next",<${ORIGIN}${LIST_PATH}?page=3>; rel="next"`,
+    "not-a-link-header",
+  ];
+  for (const link of values) {
+    const { result, requests } = await sendListRead(
+      { course_id: "42", morrow_max_pages: 5, morrow_list_resume: {} },
+      () => jsonResponse([{ page_id: "11", url: "page-1", title: "Page 1" }], { link }),
+    );
+    assert.equal(result.ok, false, link);
+    assert.equal(result.error, "canvas_pagination_header_refused", link);
+    assert.deepEqual(requests.map((request) => request.pathname), [LIST_PATH], link);
+  }
+});
+
 test("a resume token for another origin, another path, or a wider read is refused", async () => {
   const encode = (value) => Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
   const refused = [

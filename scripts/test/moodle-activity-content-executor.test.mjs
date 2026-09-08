@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:https";
 import { tmpdir } from "node:os";
@@ -32,6 +33,12 @@ test("every Choice, Feedback and Database child write is cataloged and routed th
     assert.equal(entries[0].provider, "moodle");
     assert.equal(entries[0].readOnly, false);
     assert.equal(entries[0].reviewTool, write.reviewTool);
+    assert.deepEqual(entries[0].inputSchema.properties.expected_digest, {
+      type: "string",
+      pattern: "^[a-f0-9]{64}$",
+      description: `The canonical SHA-256 digest of the complete snapshot from ${write.reviewTool}.`,
+    });
+    assert.ok(entries[0].inputSchema.required.includes("expected_digest"));
     assert.ok(readTools.has(entries[0].reviewTool), `${write.toolName} names a review tool that is not a catalog read`);
     assert.equal(entries[0].destructive, undefined, `${write.toolName} removes nothing and must not be marked destructive`);
     assert.ok(worker.includes(`["${write.key}", { toolName: "${write.toolName}"`), `${write.key} is not routed by the worker`);
@@ -394,7 +401,42 @@ ${state.feedback.items.map(item).join("\n")}
     browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/course/view.php?id=2`);
-    const invoke = (write, args) => page.evaluate(
+    const stable = (value) => {
+      if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+      if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`;
+      return JSON.stringify(value === undefined ? null : value);
+    };
+    const sha256 = (value) => createHash("sha256").update(stable(value)).digest("hex");
+    const feedbackItems = () => state.feedback.items.map((entry, index) => ({
+      item_id: entry.id, position: index + 1, type: entry.typ, required: entry.required,
+      text: entry.name, label: entry.label, presentation: entry.presentation,
+      depends_on_item_id: entry.dependitem === 0 ? null : entry.dependitem, depends_on_value: entry.dependvalue,
+    }));
+    const reviewDigest = (write) => {
+      if (write.toolName === "moodle_update_choice_option") {
+        const options = state.choice.options.map((entry, index) => ({ option_id: entry.id, position: index + 1, text: entry.text, response_limit: entry.limit }));
+        return sha256({
+          schema: "morrow.moodle-choice-options.v1", provider: "moodle", course_id: 2, module_id: 8, choice_id: 21,
+          option_count: options.length, options, limit_answers: state.choice.limitAnswers, allow_multiple: false, has_responses: state.choice.responses,
+          proof: { method: "course_modedit_form", complete: true, exact_module_binding: "course_modedit_form", required_capability: "moodle/course:manageactivities", option_limit: 100, option_rows: options.length, text_limit: 4000 },
+        });
+      }
+      if (write.toolName.includes("feedback_item")) {
+        const items = feedbackItems();
+        return sha256({
+          schema: "morrow.moodle-feedback-items.v1", provider: "moodle", course_id: 2, module_id: 9, feedback_id: 22,
+          anonymous: state.feedback.anonymous, item_count: items.length, items,
+          proof: { method: "course_modedit_form+mod_feedback_export_items", complete: true, exact_module_binding: "course_modedit_form", required_capability: "mod/feedback:edititems", item_limit: 200, item_rows: items.length, text_limit: 4000 },
+        });
+      }
+      const fields = state.data.fields.map((entry) => ({ field_id: entry.id, name: entry.name, type: entry.type }));
+      return sha256({
+        schema: "morrow.moodle-database-fields.v1", provider: "moodle", course_id: 2, module_id: 10, database_id: 31,
+        field_count: fields.length, default_sort_field_id: state.data.defaultSort, fields,
+        proof: { method: "course_modedit_form+mod_data_field_index", complete: true, exact_module_binding: "course_modedit_form", required_capability: "mod/data:managetemplates", field_limit: 100, field_rows: fields.length, text_limit: 4000 },
+      });
+    };
+    const rawInvoke = (write, args) => page.evaluate(
       executeMoodleActivityContentInPage,
       JSON.stringify({
         mode: "execute",
@@ -404,6 +446,7 @@ ${state.feedback.items.map(item).join("\n")}
         expiresAt: Date.now() + 60_000,
       }),
     );
+    const invoke = (write, args) => rawInvoke(write, { ...args, expected_digest: args.expected_digest || reviewDigest(write) });
     const write = (toolName) => WRITES.find((entry) => entry.toolName === toolName);
     // A refusal that already read a native page carries that page's status, so
     // the comparison names the fields the contract fixes.
@@ -422,6 +465,15 @@ ${state.feedback.items.map(item).join("\n")}
       assert.deepEqual(refused, { ok: false, sent: false, error: `${entry.prefix}_arguments_invalid` });
       assert.equal(requests.length, before, `${entry.toolName} reached the site with invalid arguments`);
     }
+    const staleBefore = posts();
+    assert.deepEqual(
+      refusal(await rawInvoke(write("moodle_update_choice_option"), {
+        course_id: 2, module_id: 8, option_id: 41, position: 1, text: "Morning lab 2", expected_digest: "0".repeat(64),
+      })),
+      { ok: false, sent: false, error: "moodle_expected_digest_mismatch" },
+    );
+    assert.equal(posts(), staleBefore, "a stale review digest sent a Choice write");
+    requests.length = 0;
     // A write that names no change at all is refused before anything is read.
     assert.deepEqual(
       await invoke(write("moodle_update_choice_option"), { course_id: 2, module_id: 8, option_id: 41, position: 1 }),

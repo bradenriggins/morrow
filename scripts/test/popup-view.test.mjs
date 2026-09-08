@@ -9,6 +9,7 @@ import {
   detailText,
   nextError,
   primaryLabel,
+  runtimeNeedsReload,
   statusValue,
 } from "../../connector/extension/popup/popup-view.js";
 
@@ -20,12 +21,24 @@ const statuses = [
   { paired: false, pairing: true, connecting: false, connected: false, bindings: [], siteAnchors: [] },
   { paired: true, pairing: false, connecting: true, connected: false, bindings: [], siteAnchors: [] },
   { paired: true, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [] },
-  { paired: true, pairing: false, connecting: false, connected: true, bindings: [], siteAnchors: [] },
-  { paired: true, pairing: false, connecting: false, connected: true, bindings: [], siteAnchors: [anchor()] },
-  { paired: true, pairing: false, connecting: false, connected: true, bindings: [], siteAnchors: [anchor({ runtimeVerified: false })] },
-  { paired: true, pairing: false, connecting: false, connected: true, bindings: [binding()], siteAnchors: [anchor()], bindingCount: 1 },
-  { paired: true, pairing: false, connecting: false, connected: true, bindings: [binding({ runtimeVerified: false })], siteAnchors: [anchor()], bindingCount: 1 },
+  { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [] },
+  { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [anchor()] },
+  { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [anchor({ runtimeVerified: false })] },
+  { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [binding()], siteAnchors: [anchor()], bindingCount: 1 },
+  { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [binding({ runtimeVerified: false })], siteAnchors: [anchor()], bindingCount: 1 },
 ];
+
+test("a connected socket with an unhealthy runtime asks for a Bridge reload", () => {
+  const status = { ...statuses[8], runtimeHealthy: false };
+  assert.equal(runtimeNeedsReload(status), true);
+  assert.equal(statusValue(status), "Reload needed");
+  assert.equal(courseValue(status), "Not available");
+  assert.equal(primaryLabel(status), "Open setup guide");
+  assert.equal(canChooseCourses(status), false);
+  assert.equal(controlState(status).primaryDisabled, false);
+  assert.match(detailText(status), /versions do not match/i);
+  assert.match(detailText(status), /reload Morrow Bridge/i);
+});
 
 test("a failed status read renders a definite state with a usable retry", () => {
   assert.equal(statusValue(null), "Not checked");
@@ -189,7 +202,7 @@ test("the popup answers a failed first status read with a retry, then clears it 
     assert.equal(nodes["#error"].textContent, problemText("bridge_extension_unreachable"));
 
     respond = async (request) => request.type === "morrow_status"
-      ? { ok: true, result: { paired: true, pairing: false, connecting: false, connected: true, bindings: [], bindingCount: 0, siteAnchors: [anchor()] } }
+      ? { ok: true, result: { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [], bindingCount: 0, siteAnchors: [anchor()] } }
       : { ok: false, error: "unexpected request" };
     await nodes["#primary"].listeners.click[0]();
     assert.equal(nodes["#error"].hidden, true);

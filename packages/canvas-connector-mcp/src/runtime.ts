@@ -53,6 +53,10 @@ const PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS = ["course_id", "folder_id", "filenam
 const PRIVATE_CANVAS_CONVERSATION_TOOL = "canvas_send_private_conversation";
 const PRIVATE_CANVAS_CONVERSATION_OPERATION = "canvas.private.conversation.send.v1";
 const PRIVATE_CANVAS_CONVERSATION_ARGUMENTS = ["course_id"];
+export const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL = "morrow_private_moodle_find_enrolment_candidate";
+export const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION = "moodle.private.enrolment_candidate.find.v1";
+const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_SCHEMA = "morrow.moodle-enrolment-candidate.private.v1";
+const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_ARGUMENTS = ["course_id", "query"];
 const CANVAS_CONTENT_GUARD_OPERATIONS = [
   { kind: "page_text", toolName: "canvas_update_create_page_courses", key: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses" },
   { kind: "page_image_alt", toolName: "canvas_update_create_page_courses", key: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses" },
@@ -198,6 +202,61 @@ function canvasConversationArgumentsMatch(argumentsValue: JsonObject, conversati
     && exactCourseId(argumentsValue.course_id) === conversation.courseId;
 }
 
+function privateMoodleEnrolmentCandidateArguments(value: JsonObject): { readonly courseId: string; readonly query: string } | undefined {
+  if (Object.keys(value).length !== PRIVATE_MOODLE_ENROLMENT_CANDIDATE_ARGUMENTS.length
+    || PRIVATE_MOODLE_ENROLMENT_CANDIDATE_ARGUMENTS.some((field) => !Object.hasOwn(value, field))) return undefined;
+  const courseId = exactCourseId(value.course_id);
+  const query = typeof value.query === "string" ? value.query : "";
+  return courseId && query.length >= 1 && query.length <= 200 && query === query.trim()
+    && !/[\u0000-\u001f\u007f]/.test(query)
+    ? { courseId, query }
+    : undefined;
+}
+
+/**
+ * The page result is treated as private input too. Project only the numeric ID
+ * and fixed proof fields so a changed or compromised page executor cannot pass
+ * a name, email address, query, or profile link through this connector.
+ */
+function privateMoodleEnrolmentCandidateResult(value: unknown, courseId: string): JsonObject | undefined {
+  if (!isJsonObject(value) || value.schema !== "morrow.canvas-browser-result.v1" || value.ok !== true
+    || value.sent !== false || value.complete !== true || value.provider !== "moodle" || !isJsonObject(value.data)) return undefined;
+  const data = value.data;
+  const candidate = isJsonObject(data.candidate) ? data.candidate : undefined;
+  const match = isJsonObject(data.match) ? data.match : undefined;
+  const proof = isJsonObject(data.proof) ? data.proof : undefined;
+  const userId = candidate ? exactCourseId(candidate.user_id) : undefined;
+  if (data.schema !== PRIVATE_MOODLE_ENROLMENT_CANDIDATE_SCHEMA || data.provider !== "moodle"
+    || exactCourseId(data.course_id) !== courseId || !userId
+    || match?.kind !== "exact_native_query" || match.candidate_count !== 1
+    || proof?.method !== "native_manual_enrolment_candidate_search"
+    || proof.route !== "/enrol/manual/manage.php" || proof.complete !== true || proof.dispatch_count !== 0
+    || proof.read_request_count !== 2 || proof.candidate_limit !== 100) return undefined;
+  return {
+    schema: "morrow.canvas-browser-result.v1",
+    ok: true,
+    sent: false,
+    complete: true,
+    provider: "moodle",
+    ...(Number.isInteger(value.status) ? { status: value.status } : {}),
+    data: {
+      schema: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_SCHEMA,
+      provider: "moodle",
+      course_id: Number(courseId),
+      candidate: { user_id: userId },
+      match: { kind: "exact_native_query", candidate_count: 1 },
+      proof: {
+        method: "native_manual_enrolment_candidate_search",
+        route: "/enrol/manual/manage.php",
+        complete: true,
+        dispatch_count: 0,
+        read_request_count: 2,
+        candidate_limit: 100,
+      },
+    },
+  };
+}
+
 function splitPrivateAttachment(value: Readonly<Record<string, unknown>>): {
   readonly publicInput: JsonObject;
   readonly privateAttachment?: BridgePrivateAttachment;
@@ -231,7 +290,20 @@ function failedProblem(
   problem: BridgeProblem | undefined,
   provider: BridgeProvider = "canvas",
   readDescriptor?: JsonObject,
+  resultState?: "not_sent" | "unknown",
 ): JsonObject {
+  const classifiedState = resultState
+    || (problem?.code === "write_outcome_unknown" ? "unknown" : undefined)
+    || (["canvas_request_not_sent", "canvas_binding_required", "canvas_content_guard_unavailable", "moodle_binding_required", "moodle_expected_digest_required", "moodle_binding_course_mismatch", "course_binding_required", "course_binding_course_mismatch", "course_binding_mismatch", "course_scope_required",
+      "canvas_semantic_target_course_mismatch", "canvas_semantic_target_input_refused", "canvas_semantic_target_resolution_stale",
+      "multi_context_object_not_supported", "stale_bridge_command", "operation_catalog_mismatch",
+      "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused",
+      "edit_policy_canvas_content_guard_required", "edit_policy_canvas_content_guard_refused", "edit_policy_page_guard_required",
+      "edit_policy_item_bank_guard_required", "edit_policy_fields_refused", "new_quiz_settings_review_required",
+      "item_bank_fan_out_and_guard_required", "item_bank_dependency_review_required", "private_attachment_refused",
+      "canvas_conversation_private_payload_refused", "canvas_private_attachment_required", "canvas_private_attachment_invalid",
+      "canvas_private_attachment_mismatch", "moodle_private_attachment_required", "moodle_private_attachment_invalid",
+      "moodle_private_attachment_mismatch"].includes(problem?.code || "") ? "not_sent" : undefined);
   return {
     schema: "morrow.canvas-connector.result.v1",
     ok: false,
@@ -239,8 +311,10 @@ function failedProblem(
     // A write whose outcome is unknown still returns its read-only comparator so
     // Morrow can check the saved result later instead of sending the change again.
     ...(readDescriptor ? { readDescriptor } : {}),
-    // These codes are the endings that changed nothing at the provider, so the
-    // gateway settles the record as failed and keeps the target unlocked.
+    // These endings changed nothing at the provider, so the gateway settles
+    // the record as failed and keeps the target unlocked. A local preflight
+    // passes `not_sent` directly. The named codes are refusals the extension
+    // can return before its provider executor runs.
     // canvas_request_not_sent now also carries a Canvas write the provider
     // refused with a definite-no-effect status, by the one rule in
     // connector/extension/src/canvas-write-outcome.js: a 4xx other than 408 and
@@ -249,9 +323,7 @@ function failedProblem(
     // canvas_binding_required is raised only by connector/extension/src/service-worker.js
     // commandContext, which runs before the change is dispatched, so a course site tab that closes
     // mid-batch fails every request in flight without sending any of them.
-    ...(["canvas_request_not_sent", "canvas_binding_required", "canvas_content_guard_unavailable", "moodle_binding_required", "moodle_expected_digest_required", "moodle_binding_course_mismatch", "course_binding_required", "course_binding_course_mismatch", "course_scope_required",
-      "canvas_semantic_target_course_mismatch", "canvas_semantic_target_input_refused", "canvas_semantic_target_resolution_stale",
-      "multi_context_object_not_supported"].includes(problem?.code || "") ? { resultState: "not_sent" } : {}),
+    ...(classifiedState ? { resultState: classifiedState } : {}),
     problem: problem || {
       schema: "morrow.bridge.problem.v1",
       code: "bridge_result_missing",
@@ -259,6 +331,16 @@ function failedProblem(
       recoverable: false,
     },
   };
+}
+
+function failedBeforeSend(problem: BridgeProblem, provider: BridgeProvider = "canvas"): JsonObject {
+  return failedProblem(problem, provider, undefined, "not_sent");
+}
+
+function bridgeErrorResultState(error: unknown): { readonly resultState?: "not_sent" | "unknown" } {
+  if (error instanceof BridgeOutcomeUnknownError) return { resultState: "unknown" };
+  if (error instanceof BridgeUnavailableError || error instanceof TypeError) return { resultState: "not_sent" };
+  return {};
 }
 
 export class CanvasConnectorRuntime {
@@ -455,23 +537,25 @@ export class CanvasConnectorRuntime {
     try {
       separated = splitPrivateAttachment(rawArguments);
     } catch {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_attachment_invalid",
         message: "The staged private Canvas file attachment could not be verified.",
         recoverable: false,
       });
     }
-    if (separated.privateConversation) {
-      return failedProblem({
+    if (separated.privateConversation || separated.privateAttachments) {
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
-        code: "canvas_private_conversation_refused",
-        message: "A private Canvas Inbox payload is not valid for a course-file transfer.",
+        code: separated.privateConversation ? "canvas_private_conversation_refused" : "canvas_private_attachment_refused",
+        message: separated.privateConversation
+          ? "A private Canvas Inbox payload is not valid for a course-file transfer."
+          : "A private file bundle is not valid for one Canvas course-file transfer.",
         recoverable: false,
       });
     }
     if (!separated.privateAttachment) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_attachment_required",
         message: "This reviewed Canvas course file needs its staged private attachment.",
@@ -480,7 +564,7 @@ export class CanvasConnectorRuntime {
     }
     const split = splitBridgeCallArguments(separated.publicInput);
     if (!split.options.sourceBindingId || !split.options.operationId || !split.options.outerGrant) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_file_reservation_required",
         message: "This private Canvas course-file route requires a current reviewed operation reservation.",
@@ -488,7 +572,7 @@ export class CanvasConnectorRuntime {
       });
     }
     if (!canvasFileAttachmentMatches(split.arguments, separated.privateAttachment)) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_attachment_mismatch",
         message: "The staged private file does not match this exact Canvas course and folder.",
@@ -498,7 +582,7 @@ export class CanvasConnectorRuntime {
     const courseId = exactCourseId(split.arguments.course_id);
     const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
     if (!courseId || binding?.provider !== "canvas" || binding.courseId !== courseId || binding.runtimeVerified !== true) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "course_binding_course_mismatch",
         message: "The selected Canvas binding is for a different or changed course.",
@@ -535,8 +619,7 @@ export class CanvasConnectorRuntime {
         operationKey: PRIVATE_CANVAS_COURSE_FILE_OPERATION,
         commandKind: "invoke_write",
         problem: bridgeFailureResult(error),
-        ...(error instanceof BridgeOutcomeUnknownError ? { resultState: "unknown" } : {}),
-        ...(error instanceof BridgeUnavailableError ? { resultState: "not_sent" } : {}),
+        ...bridgeErrorResultState(error),
       };
     }
   }
@@ -546,15 +629,23 @@ export class CanvasConnectorRuntime {
     try {
       separated = splitPrivateAttachment(rawArguments);
     } catch {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_conversation_invalid",
         message: "The private Canvas Inbox payload could not be verified.",
         recoverable: false,
       });
     }
-    if (separated.privateAttachment || !separated.privateConversation) {
-      return failedProblem({
+    if (separated.privateAttachment || separated.privateAttachments) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "canvas_private_conversation_refused",
+        message: "A private file payload is not valid for a Canvas Inbox change.",
+        recoverable: false,
+      });
+    }
+    if (!separated.privateConversation) {
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_conversation_required",
         message: "This private Canvas Inbox route needs its sealed reviewed payload.",
@@ -563,7 +654,7 @@ export class CanvasConnectorRuntime {
     }
     const split = splitBridgeCallArguments(separated.publicInput);
     if (!canvasConversationArgumentsMatch(split.arguments, separated.privateConversation)) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_conversation_mismatch",
         message: "The reviewed Canvas Inbox payload does not match one exact current course.",
@@ -571,7 +662,7 @@ export class CanvasConnectorRuntime {
       });
     }
     if (!split.options.sourceBindingId || !split.options.operationId || !split.options.outerGrant) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_conversation_reservation_required",
         message: "This private Canvas Inbox route requires one current reviewed operation reservation.",
@@ -580,7 +671,7 @@ export class CanvasConnectorRuntime {
     }
     const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
     if (binding?.provider !== "canvas" || binding.courseId !== separated.privateConversation.courseId || binding.runtimeVerified !== true) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "course_binding_course_mismatch",
         message: "The selected Canvas binding is for a different or changed course.",
@@ -617,13 +708,98 @@ export class CanvasConnectorRuntime {
         operationKey: PRIVATE_CANVAS_CONVERSATION_OPERATION,
         commandKind: "invoke_write",
         problem: bridgeFailureResult(error),
-        ...(error instanceof BridgeOutcomeUnknownError ? { resultState: "unknown" } : {}),
-        ...(error instanceof BridgeUnavailableError ? { resultState: "not_sent" } : {}),
+        ...bridgeErrorResultState(error),
+      };
+    }
+  }
+
+  private async callPrivateMoodleEnrolmentCandidate(rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+    let separated: ReturnType<typeof splitPrivateAttachment>;
+    let split: ReturnType<typeof splitBridgeCallArguments>;
+    try {
+      separated = splitPrivateAttachment(rawArguments);
+      split = splitBridgeCallArguments(separated.publicInput);
+    } catch {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "moodle_enrolment_candidate_arguments_invalid",
+        message: "This private Moodle candidate lookup needs one exact course and one exact full name.",
+        recoverable: false,
+      }, "moodle");
+    }
+    const parsed = privateMoodleEnrolmentCandidateArguments(split.arguments);
+    if (!parsed || separated.privateAttachment || separated.privateAttachments || separated.privateConversation
+      || split.options.outerGrant || split.options.canvasContentGuard || split.options.pageGuard || split.options.listResume) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "moodle_enrolment_candidate_arguments_invalid",
+        message: "This private Moodle candidate lookup accepts only one exact course and one exact full name.",
+        recoverable: false,
+      }, "moodle");
+    }
+    if (!split.options.sourceBindingId) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "moodle_binding_required",
+        message: "This private Moodle candidate lookup needs one exact current Moodle binding.",
+        recoverable: true,
+      }, "moodle");
+    }
+    const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
+    if (binding?.provider !== "moodle" || binding.courseId !== parsed.courseId || binding.runtimeVerified !== true) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "moodle_binding_course_mismatch",
+        message: "The selected Moodle binding is for a different or changed course.",
+        recoverable: true,
+      }, "moodle");
+    }
+    try {
+      const response = await this.bridge.invoke({
+        kind: "invoke_read",
+        toolName: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+        operationKey: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
+        arguments: { course_id: Number(parsed.courseId), query: parsed.query },
+        sourceBindingId: split.options.sourceBindingId,
+        operationId: split.options.operationId || `private-moodle-enrolment-candidate:${randomUUID()}`,
+      });
+      if (!response.ok) return failedProblem(response.problem, "moodle");
+      const result = privateMoodleEnrolmentCandidateResult(response.result, parsed.courseId);
+      if (!result) {
+        return failedProblem({
+          schema: "morrow.bridge.problem.v1",
+          code: "moodle_enrolment_candidate_result_invalid",
+          message: "Morrow refused an invalid private Moodle candidate result.",
+          recoverable: false,
+        }, "moodle");
+      }
+      return {
+        schema: "morrow.canvas-connector.result.v1",
+        ok: true,
+        provider: "moodle",
+        toolName: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+        operationKey: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
+        commandKind: "invoke_read",
+        result,
+      };
+    } catch (error) {
+      return {
+        schema: "morrow.canvas-connector.result.v1",
+        ok: false,
+        provider: "moodle",
+        toolName: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+        operationKey: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
+        commandKind: "invoke_read",
+        problem: bridgeFailureResult(error),
+        ...bridgeErrorResultState(error),
       };
     }
   }
 
   async call(toolName: string, rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+    if (toolName === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL) {
+      return await this.callPrivateMoodleEnrolmentCandidate(rawArguments);
+    }
     if (toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL) {
       return await this.callPrivateCanvasCourseFileTransfer(rawArguments);
     }
@@ -635,7 +811,7 @@ export class CanvasConnectorRuntime {
     const provider = operationProvider(operation);
     if (isCanvasOperation(operation) && operation.service === "item_bank" && !operation.readOnly && operation.nickname !== "create_bank"
       && !guardedItemBankUpdate(operation, rawArguments)) {
-      return failedProblem(operation.nickname === "update_item"
+      return failedBeforeSend(operation.nickname === "update_item"
         ? {
           schema: "morrow.bridge.problem.v1",
           code: "item_bank_fan_out_and_guard_required",
@@ -653,15 +829,17 @@ export class CanvasConnectorRuntime {
     try {
       separated = splitPrivateAttachment(rawArguments);
     } catch {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
-        code: "moodle_private_attachment_invalid",
-        message: "The staged private file attachment could not be verified.",
+        code: provider === "canvas" ? "canvas_private_attachment_invalid" : "moodle_private_attachment_invalid",
+        message: provider === "canvas"
+          ? "The staged private Canvas file attachment could not be verified."
+          : "The staged private file attachment could not be verified.",
         recoverable: false,
       }, provider);
     }
     if (separated.privateConversation) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_conversation_refused",
         message: "A private Canvas Inbox payload is only accepted by Morrow's internal reviewed Inbox route.",
@@ -670,17 +848,19 @@ export class CanvasConnectorRuntime {
     }
     const privateMoodleStagedFile = privateMoodleStagedFileOperation(operation);
     if ((separated.privateAttachment || separated.privateAttachments) && !privateMoodleStagedFile) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
-        code: "moodle_private_attachment_refused",
-        message: "A private file attachment is only accepted for one exact Moodle staged-file change.",
+        code: provider === "canvas" ? "canvas_private_attachment_refused" : "moodle_private_attachment_refused",
+        message: provider === "canvas"
+          ? "A private file attachment is only accepted by Morrow's internal reviewed Canvas course-file route."
+          : "A private file attachment is only accepted for one exact Moodle staged-file change.",
         recoverable: false,
       }, provider);
     }
     if (privateMoodleStagedFile && ((privateMoodleStagedFile.attachmentMode === "single" && !separated.privateAttachment)
       || (privateMoodleStagedFile.attachmentMode === "multiple" && !separated.privateAttachments)
       || (separated.privateAttachment && separated.privateAttachments))) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "moodle_private_attachment_required",
         message: "This Moodle staged-file change needs its staged private file attachment.",
@@ -692,7 +872,7 @@ export class CanvasConnectorRuntime {
       && (!separated.privateAttachment || !moodleStagedFileAttachmentMatches(split.arguments, separated.privateAttachment, privateMoodleStagedFile.argumentNames)))
       || (privateMoodleStagedFile.attachmentMode === "multiple"
         && (!separated.privateAttachments || !moodleStagedFileAttachmentsMatch(split.arguments, separated.privateAttachments, privateMoodleStagedFile.argumentNames))))) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "moodle_private_attachment_mismatch",
         message: "The staged private file does not match this exact Moodle staged-file change.",
@@ -700,31 +880,51 @@ export class CanvasConnectorRuntime {
       }, provider);
     }
     if ("morrow_canvas_content_guard" in split.arguments || "morrow_page_guard" in split.arguments) {
-      throw new TypeError("Canvas content guards must use Morrow's local controls.");
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "canvas_content_guard_transport_refused",
+        message: "Canvas content guards must use Morrow's local controls.",
+        recoverable: false,
+      }, provider);
     }
     if ("morrow_list_resume" in split.arguments) {
-      throw new TypeError("A bounded list resume must use Morrow's local controls.");
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "bounded_list_resume_transport_refused",
+        message: "A bounded list resume must use Morrow's local controls.",
+        recoverable: false,
+      }, provider);
     }
     if (split.options.listResume && !operation.readOnly) {
-      throw new TypeError("A bounded list resume belongs to a read.");
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "bounded_list_resume_write_refused",
+        message: "A bounded list resume belongs to a read.",
+        recoverable: false,
+      }, provider);
     }
     if (split.options.canvasContentGuard && split.options.pageGuard) {
-      throw new TypeError("Canvas content guard controls are ambiguous.");
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "canvas_content_guard_ambiguous",
+        message: "Canvas content guard controls are ambiguous.",
+        recoverable: false,
+      }, provider);
     }
     if (split.options.canvasContentGuard) {
       if (!supportedCanvasContentGuardOperation(operation, split.options.canvasContentGuard)
         || this.bridge.health().runtimeRevision !== "1.0.0-rc.2") {
-        return failedProblem({ schema: "morrow.bridge.problem.v1", code: "canvas_content_guard_unavailable", message: "This Canvas content repair needs the current Morrow extension and a connected course.", recoverable: true }, provider);
+        return failedBeforeSend({ schema: "morrow.bridge.problem.v1", code: "canvas_content_guard_unavailable", message: "This Canvas content repair needs the current Morrow extension and a connected course.", recoverable: true }, provider);
       }
     }
     if (split.options.pageGuard && (toolName !== "canvas_update_create_page_courses" || this.bridge.health().runtimeRevision !== "1.0.0-rc.2")) {
-      return failedProblem({ schema: "morrow.bridge.problem.v1", code: "canvas_content_guard_unavailable", message: "This legacy Page correction needs the current Morrow extension and a connected course.", recoverable: true }, provider);
+      return failedBeforeSend({ schema: "morrow.bridge.problem.v1", code: "canvas_content_guard_unavailable", message: "This legacy Page correction needs the current Morrow extension and a connected course.", recoverable: true }, provider);
     }
     const canvasHold = isCanvasOperation(operation) && !operation.readOnly
       ? canvasOperationAdmission(operation).write
       : undefined;
     if (canvasHold?.state === "held" && !guardedItemBankUpdate(operation, split.arguments)) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "course_scope_required",
         // The sentence for this exact hold class, the same one the published capability and the
@@ -735,7 +935,7 @@ export class CanvasConnectorRuntime {
     }
     const scopedCourse = courseScope(operation, split.arguments);
     if (!operation.readOnly && !scopedCourse.scoped) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "course_scope_required",
         message: "This unscoped provider change remains held because Morrow cannot prove one exact course binding.",
@@ -743,7 +943,7 @@ export class CanvasConnectorRuntime {
       }, provider);
     }
     if ((provider === "moodle" || scopedCourse.scoped) && !split.options.sourceBindingId) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: provider === "moodle" ? "moodle_binding_required" : "course_binding_required",
         message: provider === "moodle"
@@ -755,7 +955,7 @@ export class CanvasConnectorRuntime {
     if (scopedCourse.semanticTarget) {
       const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
       if (!scopedCourse.objectId || binding?.provider !== provider || !exactCourseId(binding.courseId)) {
-        return failedProblem({
+        return failedBeforeSend({
           schema: "morrow.bridge.problem.v1",
           code: "canvas_semantic_target_course_mismatch",
           message: `Morrow needs one exact Canvas ${scopedCourse.semanticTarget.object} and one selected course before it can change it.`,
@@ -765,7 +965,7 @@ export class CanvasConnectorRuntime {
     } else if (scopedCourse.scoped) {
       const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
       if (!scopedCourse.courseId || binding?.provider !== provider || binding.courseId !== scopedCourse.courseId) {
-        return failedProblem({
+        return failedBeforeSend({
           schema: "morrow.bridge.problem.v1",
           code: provider === "moodle" ? "moodle_binding_course_mismatch" : "course_binding_course_mismatch",
           message: provider === "moodle"
@@ -776,7 +976,7 @@ export class CanvasConnectorRuntime {
       }
     }
     if (provider === "moodle" && !operation.readOnly && !/^[0-9a-f]{64}$/.test(String(split.arguments.expected_digest || ""))) {
-      return failedProblem({
+      return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "moodle_expected_digest_required",
         message: "This Moodle change needs the snapshot digest from its exact preceding read.",
@@ -824,8 +1024,7 @@ export class CanvasConnectorRuntime {
         operationKey: operation.key,
         commandKind: kind,
         problem: bridgeFailureResult(error),
-        ...(error instanceof BridgeOutcomeUnknownError ? { resultState: "unknown" } : {}),
-        ...(error instanceof BridgeUnavailableError ? { resultState: "not_sent" } : {}),
+        ...bridgeErrorResultState(error),
       };
     }
   }

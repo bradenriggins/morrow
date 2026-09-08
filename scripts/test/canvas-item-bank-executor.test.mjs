@@ -207,6 +207,35 @@ test("Item Bank list reads stay course-bound and report bounded pagination", asy
   });
 });
 
+test("Item Bank share reads page through every bounded affected-course result", async () => {
+  await withPageContext(async () => {
+    const requestedPages = [];
+    globalThis.fetch = async (url) => {
+      const page = new URL(url).searchParams.get("page");
+      requestedPages.push(page);
+      return new Response(JSON.stringify([{ id: `share-${page}`, entity_id: page }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+
+    const result = await executeItemBankInPage(input("list_shares", {
+      bank_id: "91",
+      page: 3,
+      per_page: 50,
+      morrow_max_pages: 2,
+    }));
+
+    assert.deepEqual(requestedPages, ["3", "4"]);
+    assert.equal(result.pageCount, 2);
+    assert.equal(result.truncated, true);
+    assert.deepEqual(result.data, [
+      { id: "share-3", entity_id: "3" },
+      { id: "share-4", entity_id: "4" },
+    ]);
+  });
+});
+
 test("Item Bank lists flag sanitized and unknown collection data as incomplete", async () => {
   await withPageContext(async () => {
     globalThis.fetch = async (url) => {

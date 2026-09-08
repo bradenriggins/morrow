@@ -553,9 +553,20 @@ class InstallerController {
     // Desktop approval again for a folder that did not change.
     const changed = (await this.effectiveWorkspace(record)) !== materials;
     if (changed) await this.closeRuntimeMonitor();
-    this.workspace = materials;
-    await this.writeRecord({ ...record, materialsFolder: materials });
-    if (changed) await this.bindConfiguredAssistants(bindings, materials);
+    const staged = changed ? await this.bindConfiguredAssistants(bindings, materials) : [];
+    try {
+      const configured = { ...(record.configured || {}) };
+      for (const change of staged) {
+        await change.verify?.();
+        configured[change.assistant.id] = change.entry;
+      }
+      await this.writeRecord({ ...record, materialsFolder: materials, configured });
+      this.workspace = materials;
+    } catch (error) {
+      await this.rollbackAssistantBindings(staged);
+      throw error;
+    }
+    for (const change of staged) await change.commit?.().catch(() => {});
     return true;
   }
 
@@ -579,20 +590,35 @@ class InstallerController {
   /**
    * Writes the materials folder into every assistant this installation
    * configured, so each assistant starts Morrow in the exact folder Morrow
-   * uses. Morrow removes its own entry first: the client configuration refuses
-   * to replace an entry that is already there. An assistant Morrow cannot write
-   * again is left without a Morrow entry, which the setup state then reports as
-   * not set up rather than as bound to the new folder.
+   * uses. Each client file is replaced only while its complete bytes still
+   * match the digest Morrow recorded. The installer record changes only after
+   * every assistant was written and read back. A failure restores each earlier
+   * file only if nothing else changed it after Morrow's write.
    */
   async bindConfiguredAssistants(bindings, materials) {
-    for (const { assistant, entry, project } of bindings) {
-      if (assistant.id === "claude-desktop") {
-        await this.rebuildClaudeDesktopSetup(entry, materials);
-        continue;
+    const staged = [];
+    try {
+      for (const { assistant, entry, project } of bindings) {
+        if (assistant.id === "claude-desktop") {
+          staged.push(await this.stageClaudeDesktopSetup(assistant, entry, materials));
+          continue;
+        }
+        if (typeof entry.sha256 !== "string") throw errorDetails("setup_failed");
+        const installed = await this.installClientConfiguration(assistant, entry.target, project, materials, {
+          expectedConfigSha256: entry.sha256,
+          updateRecord: false
+        });
+        staged.push({ assistant, entry: installed.entry, verify: installed.verify, rollback: installed.rollback });
       }
-      await this.removeClientConfiguration(assistant, entry);
-      await this.installClientConfiguration(assistant, entry.target, project, materials);
+      return staged;
+    } catch (error) {
+      await this.rollbackAssistantBindings(staged);
+      throw error;
     }
+  }
+
+  async rollbackAssistantBindings(staged) {
+    for (const change of [...staged].reverse()) await change.rollback?.().catch(() => {});
   }
 
   async ensureRuntime() {
@@ -806,7 +832,9 @@ class InstallerController {
       env: this.childEnvironment()
     });
     if (result.code !== 0) {
-      if (/Refusing to replace existing Morrow (?:server|configuration)/i.test(result.stderr)) throw errorDetails("existing_morrow_configuration");
+      if (/Refusing to replace (?:existing Morrow (?:server|configuration)|.+ because it changed (?:after Morrow recorded it|during installation))/i.test(result.stderr)) {
+        throw errorDetails("existing_morrow_configuration");
+      }
       throw errorDetails("setup_failed");
     }
   }
@@ -890,7 +918,7 @@ class InstallerController {
    * copied first, and a failure puts the copy back only when the file on disk is
    * still exactly what Morrow wrote, so an edit made by anything else survives.
    */
-  async installClientConfiguration(assistant, target, project, materials) {
+  async installClientConfiguration(assistant, target, project, materials, options = {}) {
     const backup = await captureConfiguration(target, path.join(this.paths.state, "Backups"));
     let installedConfigurationSha256 = null;
     try {
@@ -901,19 +929,33 @@ class InstallerController {
         "--upstreams", this.paths.upstreams,
         "--node", this.paths.node,
         "--server-entry", this.paths.server,
-        "--workspace-root", materials,
-        "--json"
+        "--workspace-root", materials
       ];
       if (project) argumentsValue.push("--client-project", project);
+      if (options.expectedConfigSha256) {
+        argumentsValue.push("--expected-config-sha256", options.expectedConfigSha256);
+      }
+      argumentsValue.push("--json");
       await this.executeCli(argumentsValue);
       const content = await fs.readFile(target);
       installedConfigurationSha256 = fileHash(content);
-      const updated = await this.record();
-      await this.writeRecord({
-        ...updated,
-        selectedAssistantId: assistant.id,
-        configured: { ...(updated.configured || {}), [assistant.id]: { target, sha256: fileHash(content) } }
-      });
+      const entry = { target, sha256: installedConfigurationSha256 };
+      if (options.updateRecord !== false) {
+        const updated = await this.record();
+        await this.writeRecord({
+          ...updated,
+          selectedAssistantId: assistant.id,
+          configured: { ...(updated.configured || {}), [assistant.id]: entry }
+        });
+      }
+      return {
+        entry,
+        verify: async () => {
+          const currentSha256 = await fs.readFile(target).then(fileHash, () => null);
+          if (currentSha256 !== installedConfigurationSha256) throw errorDetails("assistant_configuration_changed");
+        },
+        rollback: async () => restoreConfiguration(backup, installedConfigurationSha256)
+      };
     } catch (error) {
       if (installedConfigurationSha256) await restoreConfiguration(backup, installedConfigurationSha256).catch(() => {});
       if (error.code) throw error;
@@ -985,13 +1027,11 @@ class InstallerController {
   }
 
   /**
-   * Generates the Claude Desktop bundle again for a different materials folder,
-   * records it, then removes the bundle it replaces. Claude Desktop reads the
-   * folder from the extension a person approved, so this cannot rebind the
-   * folder on its own: the assistant stays waiting for approval until that
-   * person approves Morrow in Claude Desktop again.
+   * Generates the Claude Desktop bundle for a different materials folder. The
+   * caller records it only after every assistant rebind succeeds, then removes
+   * the old bundle. Until that commit, a failure removes only the new bundle.
    */
-  async rebuildClaudeDesktopSetup(entry, materials) {
+  async stageClaudeDesktopSetup(assistant, previousEntry, materials) {
     let setup;
     try {
       setup = await prepareClaudeDesktopBundle({
@@ -1007,15 +1047,17 @@ class InstallerController {
       if (error?.code) throw error;
       throw errorDetails("setup_failed");
     }
-    const record = await this.record();
-    await this.writeRecord({
-      ...record,
-      configured: {
-        ...(record.configured || {}),
-        "claude-desktop": { bundlePath: setup.bundlePath, installationId: setup.installationId, receiptPath: setup.receiptPath }
-      }
-    });
-    await this.removeClaudeDesktopSetup(entry);
+    const entry = { bundlePath: setup.bundlePath, installationId: setup.installationId, receiptPath: setup.receiptPath };
+    return {
+      assistant,
+      entry,
+      verify: async () => {
+        const info = await fs.lstat(entry.bundlePath).catch(() => null);
+        if (!info?.isFile() || info.isSymbolicLink()) throw errorDetails("setup_failed");
+      },
+      rollback: async () => this.removeClaudeDesktopSetup(entry),
+      commit: async () => this.removeClaudeDesktopSetup(previousEntry)
+    };
   }
 
   /**
@@ -1106,15 +1148,17 @@ class InstallerController {
   }
 
   /**
-   * Re-creates State and re-reads the installer record. A record Morrow cannot
-   * read is copied into State/Backups before a fresh record replaces it, so a
-   * record from another version is kept, never discarded.
+   * Re-creates State and re-reads the installer record. A malformed record is
+   * copied into State/Backups before a fresh record replaces it. A valid record
+   * from another version is left exactly as it is until that version can read
+   * or migrate it.
    */
   async repairInstallerRecord() {
     await mkdirPrivate(this.paths.state);
     try {
       return await this.record();
-    } catch {
+    } catch (error) {
+      if (error?.message === "migration_required") throw errorDetails("installer_record_incompatible");
       await captureConfiguration(this.recordPath, path.join(this.paths.state, "Backups"));
       const fresh = freshRecord();
       await this.writeRecord(fresh);
@@ -1180,7 +1224,9 @@ class InstallerController {
     if (current !== null && current !== entry.sha256) throw errorDetails("existing_morrow_configuration");
     const materials = await this.effectiveWorkspace(record);
     if (!materials) throw errorDetails("workspace_required");
-    await this.installClientConfiguration(assistant, entry.target, configured.project, materials);
+    await this.installClientConfiguration(assistant, entry.target, configured.project, materials, {
+      ...(current === null ? {} : { expectedConfigSha256: entry.sha256 })
+    });
   }
 
   /**
@@ -1498,7 +1544,20 @@ class InstallerController {
       };
     }));
     const runtime = await this.runtimeSnapshot(materials, { wait: false }).catch(() => unobservedRuntime());
-    const bridgeInstallation = this.bridgeInstallation;
+    // The Bridge folder can change while Morrow is open. Read it from disk for
+    // each displayed state so a removed or damaged folder cannot keep the
+    // startup result and continue to look ready. An update owns the folder
+    // while its transaction is active, so that short transition keeps the last
+    // complete result until the update refreshes it.
+    let bridgeInstallation = this.bridgeInstallation;
+    if (!this.bridgeLeaseId && !this.bridgeReconciliation) {
+      if (complete) {
+        bridgeInstallation = await this.readBridgeInstallation().catch(() => null);
+      } else {
+        bridgeInstallation = null;
+      }
+      this.bridgeInstallation = bridgeInstallation;
+    }
     const count = runtime.bindings.runtimeVerifiedCourseCount;
     const bridge = {
       paired: runtime.health.bridgeConnected,

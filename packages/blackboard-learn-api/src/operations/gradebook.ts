@@ -600,6 +600,18 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
   };
 }
 
+function columnEffectTarget(runtime: BlackboardLearnRuntime, input: ColumnScope) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "gradebook-column", { columnId: input.column_id });
+}
+
+function gradeEffectTarget(runtime: BlackboardLearnRuntime, input: GradeScope, userId: string) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "gradebook-grade", { columnId: input.column_id, userId });
+}
+
 /** What the readback after each change proves, in plain words. */
 const COLUMN_READBACK_DETAIL = "Morrow re-read the gradebook column and compared its identity, its name and description, the points possible, whether it is available, and every grading value it froze, against the reviewed plan.";
 const GRADE_READBACK_DETAIL = "Morrow re-read the grade and compared the person, the column, and every value this change set. It reports the status and whether the grade is exempt beside that comparison and does not fail on them, because Blackboard sets those itself when a grade is saved and no live Blackboard tenant has been read.";
@@ -787,6 +799,7 @@ async function planGradebookColumnPatch(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const patch = reviewedColumnPatch(input.patch);
+  runtime.assertEffectTargetFree(columnEffectTarget(runtime, input));
   // A plan exists only to be dispatched, so it carries the write condition. An
   // instructor is refused before review instead of after approving a change
   // Morrow would then refuse to send.
@@ -834,7 +847,7 @@ async function applyReviewedGradebookColumnPatch(
     throw new BlackboardApiError("blackboard_patch_review_required", "The Blackboard effect grant does not match this exact reviewed plan.");
   }
   const patch = reviewedColumnPatch(input.patch);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, columnEffectTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -860,6 +873,7 @@ async function applyReviewedGradebookColumnPatch(
   // failure from here on is reported as applied_or_unknown, and every refusal
   // raised above this point keeps not_sent.
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     await write.client.patch(columnPath(write.courseId, input.column_id), patch, signal);
@@ -875,6 +889,7 @@ async function applyReviewedGradebookColumnPatch(
         dispatchState,
       );
     }
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.gradebook-column-patch.readback.v1",
       ok: true,
@@ -891,6 +906,7 @@ async function applyReviewedGradebookColumnPatch(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -915,6 +931,9 @@ async function verifyGradebookColumnPatch(
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
   const record = await comparator.client.get(withFields(columnPath(comparator.courseId, input.column_id), COLUMN_FIELDS), signal);
+  const verified = record.id === input.column_id
+    && savedValues(record, patch, PROTECTED_COLUMN_FIELDS, COLUMN_PATCH_FIELDS, PATCHED_COLUMN_FIELDS);
+  runtime.recordEffectComparison(columnEffectTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.gradebook-column-patch.comparator.v1",
     ok: true,
@@ -922,8 +941,7 @@ async function verifyGradebookColumnPatch(
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
     columnId: input.column_id,
-    verified: record.id === input.column_id
-      && savedValues(record, patch, PROTECTED_COLUMN_FIELDS, COLUMN_PATCH_FIELDS, PATCHED_COLUMN_FIELDS),
+    verified,
     readback: COLUMN_READBACK_STATE,
     status: "api_configured_live_untested",
   };
@@ -937,6 +955,7 @@ async function planGradebookGradePatch(
 ): Promise<JsonObject> {
   const patch = reviewedGradePatch(input.patch);
   const { reference, userId } = reviewedAccount(runtime, input);
+  runtime.assertEffectTargetFree(gradeEffectTarget(runtime, input, userId));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -983,7 +1002,7 @@ async function applyReviewedGradebookGradePatch(
   }
   const patch = reviewedGradePatch(input.patch);
   const { reference, userId } = reviewedAccount(runtime, input);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, gradeEffectTarget(runtime, input, userId));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -1006,6 +1025,7 @@ async function applyReviewedGradebookGradePatch(
     { score: "score", text: "text" },
   );
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     await write.client.patch(gradePath(write.courseId, input.column_id, userId), patch, signal);
@@ -1021,6 +1041,7 @@ async function applyReviewedGradebookGradePatch(
         dispatchState,
       );
     }
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.gradebook-grade-patch.readback.v1",
       ok: true,
@@ -1035,6 +1056,7 @@ async function applyReviewedGradebookGradePatch(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -1056,6 +1078,8 @@ async function verifyGradebookGradePatch(
   }, signal);
   const record = await comparator.client.get(withFields(gradePath(comparator.courseId, input.column_id, userId), GRADE_FIELDS), signal);
   const exact = record.userId === userId && (record.columnId === undefined || record.columnId === input.column_id);
+  const verified = exact && savedValues(record, patch, PROTECTED_GRADE_FIELDS, GRADE_PATCH_FIELDS, { score: "score", text: "text" });
+  runtime.recordEffectComparison(gradeEffectTarget(runtime, input, userId), verified);
   return {
     schema: "morrow.blackboard.gradebook-grade-patch.comparator.v1",
     ok: true,
@@ -1064,7 +1088,7 @@ async function verifyGradebookGradePatch(
     courseId: comparator.courseId,
     columnId: input.column_id,
     learnerToken: reference,
-    verified: exact && savedValues(record, patch, PROTECTED_GRADE_FIELDS, GRADE_PATCH_FIELDS, { score: "score", text: "text" }),
+    verified,
     readback: GRADE_READBACK_STATE,
     status: "api_configured_live_untested",
   };

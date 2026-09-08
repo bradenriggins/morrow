@@ -172,6 +172,7 @@ export async function validFanOut(record, { bankId, courseId, acknowledgedCourse
   if (!SHA256.test(text(record.consumers_sha256)) || record.consumers_sha256 !== await digest(consumers)) return "consumers_digest_mismatch";
   if (typeof record.established_at !== "string" || !TIMEZONE.test(record.established_at) || !Number.isFinite(Date.parse(record.established_at))) return "established_at_unreadable";
   if (!Number.isFinite(now)) return "record_age_unknown";
+  if (Date.parse(record.established_at) > now) return "record_from_future";
   if (now - Date.parse(record.established_at) > ITEM_BANK_FAN_OUT_MAX_AGE_MS) return "record_too_old";
   const external = externalCourseIds(consumers, course);
   if (!sameList(record.external_course_ids, external)) return "external_course_ids_mismatch";

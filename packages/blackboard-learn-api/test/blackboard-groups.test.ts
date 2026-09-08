@@ -28,7 +28,9 @@ const groupSetsV2Path = `${groupsV2Path}/sets`;
 const groupSetsV1Path = `${groupsV1Path}/sets`;
 const groupV2Path = `${groupsV2Path}/${groupId}`;
 const groupV1Path = `${groupsV1Path}/${groupId}`;
-const membersPath = `${groupsV1Path}/${groupId}/users`;
+const membersV2Path = `${groupsV2Path}/${groupId}/users`;
+const membersV1Path = `${groupsV1Path}/${groupId}/users`;
+const membersPath = membersV2Path;
 const studentMembershipPath = `${membersPath}/${studentId}`;
 const guestMembershipPath = `${membersPath}/${guestId}`;
 
@@ -191,16 +193,17 @@ async function harness(options: FixtureOptions = {}) {
     }
     if (pathname === createdHere) { json(response, created || { message: "not found" }, created ? 200 : 404); return; }
 
-    // Group memberships are read and written at v1 only, whichever version the
-    // group routes answered.
-    if (pathname === membersPath) {
+    // Group memberships use the same current-first, legacy-fallback policy as
+    // the group records around them.
+    const membersHere = servedVersion === "v1" ? membersV1Path : membersV2Path;
+    if (pathname === membersHere) {
       json(response, { results: memberRecords(), paging: {} });
       memberReads += 1;
       // Someone else puts another person into the group after Morrow froze the plan.
       if (options.membershipBetweenReads && memberReads === 1) members = [...members, guestId];
       return;
     }
-    const membership = new RegExp(`^${membersPath}/([^/]+)$`).exec(pathname);
+    const membership = new RegExp(`^${membersHere}/([^/]+)$`).exec(pathname);
     if (membership && (method === "PUT" || method === "DELETE")) {
       const userId = membership[1] || "";
       if (!options.ignoreMembership) {
@@ -374,6 +377,11 @@ describe("Blackboard groups, group sets and group membership", () => {
     expect(one).toMatchObject({ ok: true, apiVersion: "v1", groupId });
     expect(fixture.requests()).toContain(`GET ${groupV2Path}`);
     expect(fixture.requests()).toContain(`GET ${groupV1Path}`);
+
+    const members = structured(await fixture.call("blackboard_list_group_members", { group_id: groupId }));
+    expect(members).toMatchObject({ ok: true, apiVersion: "v1", groupId, count: 1 });
+    expect(fixture.requests()).toContain(`GET ${membersV2Path}`);
+    expect(fixture.requests()).toContain(`GET ${membersV1Path}`);
   });
 
   it("reports a site that answers no group route as unavailable, and names both paths it asked", async () => {
@@ -769,7 +777,7 @@ describe("Blackboard groups, group sets and group membership", () => {
     expect(replay).toMatchObject({
       ok: false,
       resultState: "not_sent",
-      problem: { code: "blackboard_patch_review_required", message: "This Blackboard effect grant was already dispatched." },
+      problem: { code: "blackboard_patch_review_required", message: "This Blackboard effect grant was already dispatched, and Morrow sent that change to Blackboard. It sent nothing now." },
     });
     expect(fixture.writeRequests()).toEqual(sent);
   });

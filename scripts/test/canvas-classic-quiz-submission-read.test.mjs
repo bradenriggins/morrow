@@ -29,7 +29,8 @@ test("Canvas Classic Quiz submission summary follows only bounded exact paginati
   const privateRows = (page) => {
     if (mode === "unknown") return [{ quiz_id: 8, workflow_state: "graded", user_id: 91, score: 100, answer: "private answer" }];
     if (mode === "wrong-quiz") return [{ quiz_id: 9, workflow_state: "complete", user_id: 91, score: 100 }];
-    if (mode === "overflow") return [{ quiz_id: 8, workflow_state: "complete", user_id: 91, score: 100 }];
+    if (mode === "overflow") return [{ quiz_id: 8, workflow_state: "complete", user_id: 91, submission_id: 1_000 + Number(page || 0), score: 100 }];
+    if (mode === "duplicate") return [{ quiz_id: 8, workflow_state: "complete", user_id: 91, submission_id: 100, score: 100 }];
     if (page === "two") return [
       { quiz_id: 8, workflow_state: "untaken", user_id: 93, submission_id: 102, score: null, answers: [{ id: 7, answer: "private answer" }], comments: "private second comment", email: "rowan.student@example.edu" },
       { quiz_id: 8, workflow_state: "settings_only", user_id: 94, submission_id: 103, score: null, email: "taylor.student@example.edu" },
@@ -118,6 +119,8 @@ test("Canvas Classic Quiz submission summary follows only bounded exact paginati
     mode = "unknown";
     assert.deepEqual(await invoke(), { ok: false, sent: false, error: "canvas_classic_quiz_submission_response_invalid" });
     mode = "wrong-quiz";
+    assert.deepEqual(await invoke(), { ok: false, sent: false, error: "canvas_classic_quiz_submission_response_invalid" });
+    mode = "duplicate";
     assert.deepEqual(await invoke(), { ok: false, sent: false, error: "canvas_classic_quiz_submission_response_invalid" });
     mode = "wrong-course";
     assert.deepEqual(await invoke(), { ok: false, sent: false, error: "canvas_classic_quiz_submission_summary_target_unavailable" });

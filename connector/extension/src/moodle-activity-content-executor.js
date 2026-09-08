@@ -73,6 +73,7 @@ export async function executeMoodleActivityContentInPage(rawInput) {
   const MAX_FIELD_NAME = 255;
   const RESPONSE_LIMIT = 1_000_000;
   const ID = /^[1-9][0-9]{0,18}$/;
+  const DIGEST = /^[a-f0-9]{64}$/;
   const COUNT = /^(?:0|[1-9][0-9]{0,6})$/;
   const FIELD_TYPE = /^[a-z][a-z0-9_]{0,50}$/;
   const CONTROL = /[\u0000-\u001f\u007f]/;
@@ -687,8 +688,9 @@ export async function executeMoodleActivityContentInPage(rawInput) {
     if (!object(args) || id(args.course_id) !== courseId || !id(args.module_id)) return null;
     const moduleId = id(args.module_id);
     const allowed = (names) => Object.keys(args).every((key) => names.includes(key));
+    if (!DIGEST.test(String(args.expected_digest || ""))) return null;
     if (definition.kind === "choice-option") {
-      if (!allowed(["course_id", "module_id", "option_id", "position", "text", "response_limit"])
+      if (!allowed(["course_id", "module_id", "option_id", "position", "text", "response_limit", "expected_digest"])
         || !id(args.option_id) || !Number.isSafeInteger(args.position) || args.position < 1 || args.position > MAX_OPTIONS) return null;
       const changesText = Object.hasOwn(args, "text");
       const changesLimit = Object.hasOwn(args, "response_limit");
@@ -696,13 +698,13 @@ export async function executeMoodleActivityContentInPage(rawInput) {
       if (changesText && (!plainText(args.text, MAX_TEXT) || !savedAsSent(args.text, true))) return null;
       if (changesLimit && !count(args.response_limit, RESPONSE_LIMIT)) return null;
       return {
-        courseId, moduleId, optionId: id(args.option_id), position: args.position,
+        courseId, moduleId, optionId: id(args.option_id), position: args.position, expectedDigest: args.expected_digest,
         ...(changesText ? { text: args.text } : {}), ...(changesLimit ? { responseLimit: args.response_limit } : {}),
       };
     }
     if (definition.kind === "feedback-item") {
       if (definition.create) {
-        if (!allowed(["course_id", "module_id", "type", "text", "label", "required", "position", "expected_item_count"])
+        if (!allowed(["course_id", "module_id", "type", "text", "label", "required", "position", "expected_item_count", "expected_digest"])
           || !FEEDBACK_ITEM_TYPES.includes(args.type) || !plainText(args.text, MAX_ITEM_TEXT) || !savedAsSent(args.text, false)
           || typeof args.label !== "string" || args.label.length > MAX_LABEL || args.label !== args.label.trim()
           || CONTROL.test(args.label) || !savedAsSent(args.label, true)
@@ -710,10 +712,10 @@ export async function executeMoodleActivityContentInPage(rawInput) {
           || !Number.isSafeInteger(args.position) || args.position < 1 || args.position > args.expected_item_count + 1) return null;
         return {
           courseId, moduleId, type: args.type, text: args.text, label: args.label,
-          required: args.required, position: args.position, expectedCount: args.expected_item_count,
+          required: args.required, position: args.position, expectedCount: args.expected_item_count, expectedDigest: args.expected_digest,
         };
       }
-      if (!allowed(["course_id", "module_id", "item_id", "position", "text", "label", "required"])
+      if (!allowed(["course_id", "module_id", "item_id", "position", "text", "label", "required", "expected_digest"])
         || !id(args.item_id) || !Number.isSafeInteger(args.position) || args.position < 1 || args.position > MAX_ITEMS) return null;
       const changes = ["text", "label", "required"].filter((key) => Object.hasOwn(args, key));
       if (!changes.length) return null;
@@ -722,24 +724,24 @@ export async function executeMoodleActivityContentInPage(rawInput) {
         || args.label !== args.label.trim() || CONTROL.test(args.label) || !savedAsSent(args.label, true))) return null;
       if (changes.includes("required") && typeof args.required !== "boolean") return null;
       return {
-        courseId, moduleId, itemId: id(args.item_id), position: args.position,
+        courseId, moduleId, itemId: id(args.item_id), position: args.position, expectedDigest: args.expected_digest,
         ...(changes.includes("text") ? { text: args.text } : {}),
         ...(changes.includes("label") ? { label: args.label } : {}),
         ...(changes.includes("required") ? { required: args.required } : {}),
       };
     }
     if (definition.create) {
-      if (!allowed(["course_id", "module_id", "type", "name", "description", "required", "expected_field_count"])
+      if (!allowed(["course_id", "module_id", "type", "name", "description", "required", "expected_field_count", "expected_digest"])
         || !DATABASE_FIELD_TYPES.includes(args.type) || !plainText(args.name, MAX_FIELD_NAME)
         || typeof args.description !== "string" || args.description.length > MAX_FIELD_NAME
         || args.description !== args.description.trim() || CONTROL.test(args.description)
         || typeof args.required !== "boolean" || !count(args.expected_field_count, MAX_FIELDS)) return null;
       return {
         courseId, moduleId, type: args.type, name: args.name, description: args.description,
-        required: args.required, expectedCount: args.expected_field_count,
+        required: args.required, expectedCount: args.expected_field_count, expectedDigest: args.expected_digest,
       };
     }
-    if (!allowed(["course_id", "module_id", "field_id", "position", "name", "description", "required"])
+    if (!allowed(["course_id", "module_id", "field_id", "position", "name", "description", "required", "expected_digest"])
       || !id(args.field_id) || !Number.isSafeInteger(args.position) || args.position < 1 || args.position > MAX_FIELDS) return null;
     const changes = ["name", "description", "required"].filter((key) => Object.hasOwn(args, key));
     if (!changes.length) return null;
@@ -748,7 +750,7 @@ export async function executeMoodleActivityContentInPage(rawInput) {
       || args.description !== args.description.trim() || CONTROL.test(args.description))) return null;
     if (changes.includes("required") && typeof args.required !== "boolean") return null;
     return {
-      courseId, moduleId, fieldId: id(args.field_id), position: args.position,
+      courseId, moduleId, fieldId: id(args.field_id), position: args.position, expectedDigest: args.expected_digest,
       ...(changes.includes("name") ? { name: args.name } : {}),
       ...(changes.includes("description") ? { description: args.description } : {}),
       ...(changes.includes("required") ? { required: args.required } : {}),
@@ -764,6 +766,54 @@ export async function executeMoodleActivityContentInPage(rawInput) {
   });
   const publicOptions = (options) => options.map(({ option_id: optionId, position, text, response_limit: limit }) =>
     ({ option_id: optionId, position, text, response_limit: limit }));
+  const reviewProofFor = (extra) => ({
+    method: definition.kind === "feedback-item" ? `${MODULE_BINDING}+mod_feedback_export_items` : definition.method,
+    complete: true,
+    exact_module_binding: MODULE_BINDING,
+    required_capability: definition.capability,
+    ...extra,
+  });
+  const choiceReviewData = (args, instanceId, options, limitAnswers, allowMultiple) => ({
+    schema: "morrow.moodle-choice-options.v1",
+    provider: PROVIDER,
+    course_id: Number(args.courseId),
+    module_id: Number(args.moduleId),
+    choice_id: Number(instanceId),
+    option_count: options.length,
+    options: publicOptions(options),
+    limit_answers: limitAnswers,
+    allow_multiple: allowMultiple,
+    has_responses: false,
+    proof: reviewProofFor({ option_limit: MAX_OPTIONS, option_rows: options.length, text_limit: MAX_TEXT }),
+  });
+  const feedbackReviewData = (args, instanceId, anonymous, items) => ({
+    schema: "morrow.moodle-feedback-items.v1",
+    provider: PROVIDER,
+    course_id: Number(args.courseId),
+    module_id: Number(args.moduleId),
+    feedback_id: Number(instanceId),
+    anonymous,
+    item_count: items.length,
+    items,
+    proof: reviewProofFor({ item_limit: MAX_ITEMS, item_rows: items.length, text_limit: MAX_TEXT }),
+  });
+  const databaseReviewData = (args, instanceId, listing) => ({
+    schema: "morrow.moodle-database-fields.v1",
+    provider: PROVIDER,
+    course_id: Number(args.courseId),
+    module_id: Number(args.moduleId),
+    database_id: Number(instanceId),
+    field_count: listing.fields.length,
+    default_sort_field_id: listing.defaultSort,
+    fields: listing.fields.map(({ field_id: fieldId, name, type }) => ({ field_id: fieldId, name, type })),
+    proof: reviewProofFor({ field_limit: MAX_FIELDS, field_rows: listing.fields.length, text_limit: MAX_TEXT }),
+  });
+  const expectedDigestMismatch = (status) => ({
+    ok: false,
+    sent: false,
+    ...(Number.isInteger(status) ? { status } : {}),
+    error: "moodle_expected_digest_mismatch",
+  });
 
   let writeAttempted = false;
   try {
@@ -815,6 +865,11 @@ export async function executeMoodleActivityContentInPage(rawInput) {
       // `submitbutton` sends Moodle to the Choice's own view page, which
       // records a view, so only the save-and-return control is used.
       if (submits.length !== 1) return failure("target_unavailable", bound.status);
+      const allowMultiple = selectedValue(writableSelect(bound.form, "allowmultiple")) === "1";
+      const limitAnswersValue = selectedValue(limitAnswers) === "1";
+      if (await digest(choiceReviewData(args, bound.instanceId, before, limitAnswersValue, allowMultiple)) !== args.expectedDigest) {
+        return expectedDigestMismatch(bound.status);
+      }
       const guarded = protectedEntries(bound.form, bound.entries, new Set(changes.keys()));
       const posted = await postForm(context, bound.action, bound.entries, changes, { name: "submitbutton2", value: submits[0].value });
       if (posted.error) return failure(posted.error, bound.status);
@@ -887,6 +942,30 @@ export async function executeMoodleActivityContentInPage(rawInput) {
       if (args.text !== undefined) changes.set("name", args.text);
       if (args.label !== undefined) changes.set("label", args.label);
       if (args.required !== undefined) changes.set("required", args.required ? itemForm.requiredValue : itemForm.requiredOffValue);
+      const freshBound = await bindModule(context, args.courseId, args.moduleId);
+      if (freshBound.limited) return incomplete();
+      if (freshBound.error || freshBound.instanceId !== bound.instanceId) return failure(freshBound.error || "target_unavailable", freshBound.status);
+      if (namedControls(freshBound.form, "multiple_submit_static").length > 0 || !writableSelect(freshBound.form, "multiple_submit")) {
+        return failure("responses_exist", freshBound.status);
+      }
+      const freshAnonymous = writableSelect(freshBound.form, "anonymous");
+      if (!freshAnonymous || !["1", "2"].includes(selectedValue(freshAnonymous))) return failure("target_unavailable", freshBound.status);
+      const fresh = await feedbackItemList(context, args.moduleId);
+      if (fresh.limited) return incomplete();
+      if (fresh.error) return failure(fresh.error, fresh.status);
+      let freshItems = fresh.items;
+      if (fresh.unavailable) {
+        const empty = await feedbackItemForm(context, args.moduleId, "", "textfield");
+        if (empty.limited) return incomplete();
+        if (empty.error || empty.positions.length !== 1) return failure(empty.error || "read_unavailable", empty.status);
+        freshItems = [];
+      }
+      if (stable(freshItems) !== stable(beforeItems) || selectedValue(freshAnonymous) !== selectedValue(anonymous)) {
+        return failure("item_list_changed", fresh.status);
+      }
+      if (await digest(feedbackReviewData(args, freshBound.instanceId, selectedValue(freshAnonymous) === "1", freshItems)) !== args.expectedDigest) {
+        return expectedDigestMismatch(fresh.status);
+      }
       const posted = await postForm(context, itemForm.action, itemForm.entries, changes, itemForm.submit);
       if (posted.error) return failure(posted.error, itemForm.status);
       if (posted.unconfirmed) return unconfirmed(posted.unconfirmed, posted.status);
@@ -972,6 +1051,20 @@ export async function executeMoodleActivityContentInPage(rawInput) {
     // The native required control carries no value attribute, so Moodle reads
     // it as set whenever it arrives and as clear whenever it does not.
     if (args.required !== undefined) changes.set("required", args.required ? fieldForm.requiredValue : null);
+    const freshEntries = await databaseIsEmpty(context, args.courseId, args.moduleId);
+    if (freshEntries.limited) return incomplete();
+    if (freshEntries.error) return failure(freshEntries.error, freshEntries.status);
+    if (freshEntries.entryCount !== 0) return failure("entries_exist", freshEntries.status);
+    const freshBound = await bindModule(context, args.courseId, args.moduleId);
+    if (freshBound.limited) return incomplete();
+    if (freshBound.error || freshBound.instanceId !== bound.instanceId) return failure(freshBound.error || "target_unavailable", freshBound.status);
+    const fresh = await databaseFields(context, args.courseId, args.moduleId, freshBound.instanceId);
+    if (fresh.limited) return incomplete();
+    if (fresh.error) return failure(fresh.error, fresh.status);
+    if (stable(fresh.fields) !== stable(before.fields) || fresh.defaultSort !== before.defaultSort) return failure("field_list_changed", fresh.status);
+    if (await digest(databaseReviewData(args, freshBound.instanceId, fresh)) !== args.expectedDigest) {
+      return expectedDigestMismatch(fresh.status);
+    }
     const guarded = protectedEntries(fieldForm.form, fieldForm.entries, new Set(changes.keys()));
     const posted = await postForm(context, fieldForm.action, fieldForm.entries, changes, null);
     if (posted.error) return failure(posted.error, fieldForm.status);

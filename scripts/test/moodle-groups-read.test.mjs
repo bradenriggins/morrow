@@ -55,7 +55,7 @@ test("Moodle group map uses the core group list and native GET member read with 
     const fixtureCount = () => requests.filter((request) => request.path !== "/favicon.ico").length;
     const beforeInvalid = memberCount(); assert.deepEqual(await run({ course_id: 2, extra: true }), { ok: false, sent: false, error: "moodle_arguments_invalid" }); assert.equal(memberCount(), beforeInvalid);
     const current = await run(); assert.equal(current.ok, true, JSON.stringify(current)); assert.deepEqual(current.data, { course_id: "2", groups: [
-      { id: "8", name: "Team A", visibility: 0, participation: true, membership: [{ user_id: "7", name: "Student Name" }, { user_id: "3", name: "Course Teacher" }] },
+      { id: "8", name: "Team A", visibility: 0, participation: true, membership: [{ user_id: "3", name: "Course Teacher" }, { user_id: "7", name: "Student Name" }] },
       { id: "9", name: "Team B", visibility: 2, participation: false, membership: [{ user_id: "3", name: "Course Teacher" }] },
     ] });
     assert.equal(requests.filter((request) => request.method === "POST" && request.path !== "/lib/ajax/service.php").length, 0);

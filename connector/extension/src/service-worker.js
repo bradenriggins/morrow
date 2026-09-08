@@ -19,7 +19,7 @@ import { executeMoodleGlossaryWikiInPage } from "./moodle-glossary-wiki-executor
 import { executeMoodleCourseGroupsInPage } from "./moodle-groups-read.js";
 import { executeMoodleGroupsLifecycleInPage } from "./moodle-groups-executor.js";
 import { executeMoodleCourseParticipantsInPage, executeMoodleEnrolmentMethodsInPage, executeMoodleParticipantEnrolmentInPage } from "./moodle-participants-read.js";
-import { executeMoodleEnrolmentInPage } from "./moodle-enrolment-executor.js";
+import { executeMoodleEnrolmentCandidateInPage, executeMoodleEnrolmentInPage } from "./moodle-enrolment-executor.js";
 import { executeMoodleCourseSettingsInPage } from "./moodle-course-settings-executor.js";
 import { executeMoodleCalendarInPage } from "./moodle-calendar-executor.js";
 import { executeMoodleCompletionInPage } from "./moodle-completion-executor.js";
@@ -90,6 +90,21 @@ const PRIVATE_CANVAS_COURSE_FILE_OPERATION = Object.freeze({
   readOnly: false,
   service: "canvas_file_transfer",
   path: "/v1/courses/{course_id}/folders/{folder_id}/files",
+});
+const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL = "morrow_private_moodle_find_enrolment_candidate";
+const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION_KEY = "moodle.private.enrolment_candidate.find.v1";
+const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION = Object.freeze({
+  key: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION_KEY,
+  toolName: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
+  provider: "moodle",
+  readOnly: true,
+  service: "moodle_private_enrolment_candidate",
+  method: "GET",
+  path: "/enrol/manual/manage.php",
+  resource: "Private manual-enrolment candidate",
+  summary: "Find one private Moodle enrolment candidate",
+  description: "Internal Morrow read that returns only the numeric user ID for one exact native candidate match.",
+  morrowPrivate: true,
 });
 const PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD = Object.freeze({
   key: PRIVATE_CANVAS_CONVERSATION_OPERATION,
@@ -694,6 +709,14 @@ function privateCanvasCourseFileCommand(command) {
     && command?.toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL
     && command?.operationKey === PRIVATE_CANVAS_COURSE_FILE_OPERATION_KEY
     ? PRIVATE_CANVAS_COURSE_FILE_OPERATION
+    : null;
+}
+
+function privateMoodleEnrolmentCandidateCommand(command) {
+  return command?.kind === "invoke_read"
+    && command?.toolName === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL
+    && command?.operationKey === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION_KEY
+    ? PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION
     : null;
 }
 
@@ -1720,6 +1743,21 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
     return await executeCanvasCourseFileSignals(binding, operation, args, expiresAt);
   }
   if (operation.provider === "moodle") {
+    if (operation.key === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION_KEY) {
+      if (operation.toolName !== PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL || !operation.readOnly || operation.morrowPrivate !== true
+        || privateAttachment !== undefined || privateAttachments !== undefined || privateConversation !== undefined) {
+        return { ok: false, sent: false, error: "moodle_enrolment_candidate_arguments_invalid" };
+      }
+      try {
+        const [execution] = await chrome.scripting.executeScript({
+          target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeMoodleEnrolmentCandidateInPage,
+          args: [JSON.stringify({ operation, arguments: args, binding: { origin: binding.origin, siteUrl: binding.siteUrl, principalId: binding.principalId, courseId: binding.courseId }, expiresAt })],
+        });
+        return execution?.result || { ok: false, sent: false, error: "moodle_enrolment_candidate_result_missing" };
+      } catch {
+        return { ok: false, sent: false, error: "moodle_enrolment_candidate_execution_interrupted" };
+      }
+    }
     const courseReportRead = MOODLE_COURSE_REPORT_READ_OPERATIONS.get(operation.key);
     if (courseReportRead) {
       if (operation.toolName !== courseReportRead.toolName || !operation.readOnly
@@ -2769,7 +2807,8 @@ async function commandContext(command) {
   if (command.generation !== state.generation || Date.now() > command.expiresAt) {
     return { failure: problem("stale_bridge_command", "The bridge command is stale.", false) };
   }
-  const operation = state.operations.get(command.toolName) || privateCanvasCourseFileCommand(command);
+  const operation = state.operations.get(command.toolName) || privateCanvasCourseFileCommand(command)
+    || privateMoodleEnrolmentCandidateCommand(command);
   if (!operation || operation.key !== command.operationKey || operation.readOnly !== (command.kind === "invoke_read")) {
     return { failure: problem("operation_catalog_mismatch", "The command does not match the connector catalog.", false) };
   }

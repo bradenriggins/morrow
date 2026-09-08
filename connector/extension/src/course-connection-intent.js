@@ -14,7 +14,7 @@ export function validCourseConnectionIntent(value, now = Date.now(), ttlMs = 60_
     && Array.isArray(value.origins) && value.origins.length > 0
     && value.origins.every((origin) => typeof origin === "string" && /^https:\/\/[^/*]+\/\*$/.test(origin))
     && Array.isArray(value.preGrantedOrigins) && value.preGrantedOrigins.every((origin) => value.origins.includes(origin))
-    && Number.isFinite(value.createdAt) && value.createdAt + ttlMs >= now;
+    && Number.isFinite(value.createdAt) && value.createdAt <= now && value.createdAt + ttlMs >= now;
 }
 
 export function canClaimCourseConnectionIntent(intent, { intentId, tabId, url, permissionOrigins, now = Date.now(), ttlMs = 60_000 }) {

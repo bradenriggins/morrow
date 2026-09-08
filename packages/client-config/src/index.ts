@@ -1,6 +1,7 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   renameSync,
   realpathSync,
@@ -113,6 +114,8 @@ export interface InstallMorrowClientOptions extends ClientConfigBundleOptions {
   readonly client: SupportedMorrowClient;
   readonly scope?: MorrowClientScope;
   readonly projectRoot?: string;
+  /** Replace the client file only when its complete bytes still match this recorded digest. */
+  readonly expectedConfigSha256?: string;
 }
 
 export interface InstalledMorrowClient {
@@ -120,6 +123,8 @@ export interface InstalledMorrowClient {
   readonly scope: MorrowClientScope;
   readonly path: string;
   readonly changed: boolean;
+  /** Digest read back from the complete client configuration after installation. */
+  readonly sha256: string;
 }
 
 export interface LocalCanvasConfiguration {
@@ -170,7 +175,8 @@ function exactCommand(value: string | undefined): string {
   if (!command || /[\r\n\0]/.test(command)) {
     throw new TypeError("nodeCommand is invalid");
   }
-  return command;
+  if (!isAbsolute(command)) throw new TypeError("nodeCommand must be an absolute path");
+  return resolve(command);
 }
 
 function exactInteger(
@@ -544,6 +550,40 @@ function canonicalDirectory(path: string, label: string): string {
   return realpathSync(absolute);
 }
 
+function canonicalRegularFile(path: string, label: string): string {
+  const absolute = exactAbsolutePath(path, label);
+  assertRegularFile(absolute, label);
+  return realpathSync(absolute);
+}
+
+function exactExecutable(path: string, label: string): string {
+  const absolute = exactAbsolutePath(path, label);
+  const canonical = canonicalRegularFile(absolute, label);
+  if (process.platform !== "win32" && (statSync(canonical).mode & 0o111) === 0) {
+    throw new Error(`${label} is not executable: ${path}`);
+  }
+  return absolute;
+}
+
+function assertNoSymlinkPath(root: string, path: string): void {
+  const boundary = exactAbsolutePath(root, "client configuration root");
+  const target = exactAbsolutePath(path, "client configuration path");
+  const suffix = relative(boundary, target);
+  if (suffix.startsWith("..") || isAbsolute(suffix)) {
+    throw new Error(`Refusing to write ${target} outside ${boundary}`);
+  }
+  for (let current = target; ; current = dirname(current)) {
+    try {
+      if (lstatSync(current).isSymbolicLink()) {
+        throw new Error(`Refusing to write ${target} because ${current} is a symbolic link`);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
+    if (current === boundary) break;
+  }
+}
+
 function safeChmod(path: string, mode: number): void {
   try { chmodSync(path, mode); } catch { /* best effort on non-POSIX filesystems */ }
 }
@@ -870,13 +910,229 @@ function parseClientJson(path: string, content: string): Record<string, unknown>
   return jsonObject(parsed, path);
 }
 
+interface JsonToken {
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+interface JsonObjectMember {
+  readonly key: string;
+  readonly keyStart: number;
+  readonly keyEnd: number;
+  readonly valueStart: number;
+  readonly valueEnd: number;
+}
+
+interface JsonObjectText {
+  readonly openEnd: number;
+  readonly closeStart: number;
+  readonly members: readonly JsonObjectMember[];
+}
+
+function tokenizeJson(content: string): readonly JsonToken[] {
+  const tokens: JsonToken[] = [];
+  for (let index = 0; index < content.length;) {
+    if (/\s/.test(content[index]!)) {
+      index += 1;
+      continue;
+    }
+    const start = index;
+    if (content[index] === '"') {
+      index += 1;
+      while (index < content.length) {
+        if (content[index] === "\\") {
+          index += 2;
+          continue;
+        }
+        index += 1;
+        if (content[index - 1] === '"') break;
+      }
+    } else if ("{}[],:".includes(content[index]!)) {
+      index += 1;
+    } else {
+      while (index < content.length && !/\s/.test(content[index]!) && !"{}[],:".includes(content[index]!)) {
+        index += 1;
+      }
+    }
+    tokens.push({ text: content.slice(start, index), start, end: index });
+  }
+  return tokens;
+}
+
+function afterJsonValue(tokens: readonly JsonToken[], start: number): number {
+  const opening = tokens[start]?.text;
+  if (opening !== "{" && opening !== "[") return start + 1;
+  const stack = [opening];
+  for (let index = start + 1; index < tokens.length; index += 1) {
+    const token = tokens[index]!.text;
+    if (token === "{" || token === "[") stack.push(token);
+    if (token === "}" || token === "]") {
+      const expected = token === "}" ? "{" : "[";
+      if (stack.pop() !== expected) throw new Error("valid JSON had an inconsistent container");
+      if (stack.length === 0) return index + 1;
+    }
+  }
+  throw new Error("valid JSON had an unterminated container");
+}
+
+function jsonObjectText(
+  content: string,
+  tokens: readonly JsonToken[],
+  openIndex: number,
+  label: string,
+): JsonObjectText {
+  if (tokens[openIndex]?.text !== "{") throw new Error(`${label} must contain a JSON object`);
+  const members: JsonObjectMember[] = [];
+  let index = openIndex + 1;
+  while (tokens[index]?.text !== "}") {
+    const key = tokens[index];
+    if (!key || !key.text.startsWith('"') || tokens[index + 1]?.text !== ":") {
+      throw new Error(`${label} must contain a JSON object`);
+    }
+    const valueIndex = index + 2;
+    const afterValue = afterJsonValue(tokens, valueIndex);
+    members.push({
+      key: JSON.parse(key.text) as string,
+      keyStart: key.start,
+      keyEnd: key.end,
+      valueStart: tokens[valueIndex]!.start,
+      valueEnd: tokens[afterValue - 1]!.end,
+    });
+    index = afterValue;
+    if (tokens[index]?.text === ",") index += 1;
+    else if (tokens[index]?.text !== "}") throw new Error(`${label} must contain a JSON object`);
+  }
+  return {
+    openEnd: tokens[openIndex]!.end,
+    closeStart: tokens[index]!.start,
+    members,
+  };
+}
+
+function oneJsonMember(object: JsonObjectText, key: string, label: string): JsonObjectMember | undefined {
+  const matches = object.members.filter((member) => member.key === key);
+  if (matches.length > 1) throw new Error(`Refusing to edit ${label} because ${key} appears more than once`);
+  return matches[0];
+}
+
+function lineIndent(content: string, offset: number): string {
+  const lineStart = content.lastIndexOf("\n", offset - 1) + 1;
+  return content.slice(lineStart, offset).match(/^[\t ]*/)?.[0] || "";
+}
+
+function jsonIndentUnit(content: string, object: JsonObjectText): string {
+  const closingIndent = lineIndent(content, object.closeStart);
+  for (const member of object.members) {
+    const memberIndent = lineIndent(content, member.keyStart);
+    if (memberIndent.startsWith(closingIndent) && memberIndent.length > closingIndent.length) {
+      return memberIndent.slice(closingIndent.length);
+    }
+  }
+  return closingIndent.includes("\t") ? "\t" : "  ";
+}
+
+function jsonColon(content: string, object: JsonObjectText): string {
+  const member = object.members[0];
+  if (!member) return ": ";
+  const separator = content.slice(member.keyEnd, member.valueStart);
+  return separator.includes(":") ? separator : ": ";
+}
+
+function formattedJsonValue(
+  value: unknown,
+  multiline: boolean,
+  propertyIndent: string,
+  indentUnit: string,
+  lineEnding: string,
+): string {
+  if (!multiline) return JSON.stringify(value);
+  return JSON.stringify(value, null, indentUnit).split("\n").join(`${lineEnding}${propertyIndent}`);
+}
+
+function addJsonMember(
+  content: string,
+  object: JsonObjectText,
+  key: string,
+  value: unknown,
+): string {
+  const interior = content.slice(object.openEnd, object.closeStart);
+  const multiline = interior.includes("\n");
+  const lineEnding = content.includes("\r\n") ? "\r\n" : "\n";
+  const indentUnit = jsonIndentUnit(content, object);
+  const propertyIndent = object.members[0]
+    ? lineIndent(content, object.members[0]!.keyStart)
+    : `${lineIndent(content, object.closeStart)}${indentUnit}`;
+  const property = `${JSON.stringify(key)}${jsonColon(content, object)}${formattedJsonValue(value, multiline, propertyIndent, indentUnit, lineEnding)}`;
+  let insertion = object.closeStart;
+  while (insertion > object.openEnd && /\s/.test(content[insertion - 1]!)) insertion -= 1;
+  const prefix = object.members.length === 0
+    ? multiline ? `${lineEnding}${propertyIndent}` : ""
+    : multiline ? `,${lineEnding}${propertyIndent}` : ", ";
+  return `${content.slice(0, insertion)}${prefix}${property}${content.slice(insertion)}`;
+}
+
+function replaceJsonMemberValue(
+  content: string,
+  object: JsonObjectText,
+  member: JsonObjectMember,
+  value: unknown,
+): string {
+  const multiline = content.slice(object.openEnd, object.closeStart).includes("\n");
+  const lineEnding = content.includes("\r\n") ? "\r\n" : "\n";
+  const propertyIndent = lineIndent(content, member.keyStart);
+  const replacement = formattedJsonValue(value, multiline, propertyIndent, jsonIndentUnit(content, object), lineEnding);
+  return `${content.slice(0, member.valueStart)}${replacement}${content.slice(member.valueEnd)}`;
+}
+
+function editClientJson(
+  path: string,
+  content: string,
+  container: string,
+  serverName: string,
+  entry: Record<string, unknown>,
+  replace: boolean,
+): string {
+  const tokens = tokenizeJson(content);
+  const document = jsonObjectText(content, tokens, 0, path);
+  const containerMember = oneJsonMember(document, container, path);
+  if (!containerMember) return addJsonMember(content, document, container, { [serverName]: entry });
+  const containerOpen = tokens.findIndex((token) => token.start === containerMember.valueStart);
+  const servers = jsonObjectText(content, tokens, containerOpen, `${path}.${container}`);
+  const server = oneJsonMember(servers, serverName, `${path}.${container}`);
+  if (!server) return addJsonMember(content, servers, serverName, entry);
+  if (!replace) throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
+  return replaceJsonMemberValue(content, servers, server, entry);
+}
+
+function exactExpectedConfigSha256(value: string | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (!/^[0-9a-f]{64}$/.test(value)) {
+    throw new TypeError("expectedConfigSha256 must be a lowercase SHA-256 digest");
+  }
+  return value;
+}
+
+function assertExpectedClientConfig(
+  path: string,
+  current: ExpectedFileText,
+  expectedConfigSha256: string | undefined,
+): void {
+  if (expectedConfigSha256 === undefined) return;
+  if (!current.exists || sha256Text(current.content) !== expectedConfigSha256) {
+    throw new Error(`Refusing to replace ${path} because it changed after Morrow recorded it`);
+  }
+}
+
 function installJsonEntry(
   path: string,
   container: string,
   serverName: string,
   entry: Record<string, unknown>,
+  expectedConfigSha256?: string,
 ): boolean {
   const current = currentFileText(path);
+  assertExpectedClientConfig(path, current, expectedConfigSha256);
   const document = current.exists
     ? parseClientJson(path, current.content)
     : {};
@@ -885,11 +1141,20 @@ function installJsonEntry(
     : jsonObject(document[container], `${path}.${container}`);
   const existing = servers[serverName];
   if (existing !== undefined) {
-    if (JSON.stringify(existing) === JSON.stringify(entry)) return false;
-    throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
+    if (isDeepStrictEqual(existing, entry)) return false;
+    if (expectedConfigSha256 === undefined) {
+      throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
+    }
   }
-  document[container] = { ...servers, [serverName]: entry };
-  writePrivateText(path, jsonFile(document), current);
+  const content = current.exists
+    ? editClientJson(path, current.content, container, serverName, entry, existing !== undefined)
+    : jsonFile({ [container]: { [serverName]: entry } });
+  const checked = parseClientJson(path, content);
+  const checkedServers = jsonObject(checked[container], `${path}.${container}`);
+  if (!isDeepStrictEqual(checkedServers[serverName], entry)) {
+    throw new Error(`Refusing to write ${path} because the prepared Morrow entry is invalid`);
+  }
+  writePrivateText(path, content, current);
   return true;
 }
 
@@ -915,29 +1180,102 @@ function codexMcpServer(document: Record<string, unknown>, serverName: string, p
   return tomlObject(servers, `${path}.mcp_servers`)[serverName];
 }
 
-function installCodexEntry(path: string, serverName: string, section: string): boolean {
+function appendCodexSection(content: string, section: string): string {
+  if (content.length === 0) return section;
+  const separator = content.endsWith("\n\n") ? "" : content.endsWith("\n") ? "\n" : "\n\n";
+  return `${content}${separator}${section}`;
+}
+
+function replaceRecordedCodexSection(
+  path: string,
+  content: string,
+  serverName: string,
+  section: string,
+): string {
+  const headers = new Set([
+    `[mcp_servers.${serverName}]`,
+    `[mcp_servers.${JSON.stringify(serverName)}]`,
+    `[mcp_servers.'${serverName}']`,
+  ]);
+  let offset = 0;
+  let start = -1;
+  let end = content.length;
+  for (const line of content.match(/[^\n]*(?:\n|$)/g) || []) {
+    const withoutNewline = line.endsWith("\n") ? line.slice(0, -1) : line;
+    const header = withoutNewline.trim().replace(/\s+#.*$/, "");
+    if (headers.has(header)) {
+      if (start !== -1) {
+        throw new Error(`Refusing to replace Morrow in ${path} without rewriting existing TOML`);
+      }
+      start = offset;
+    } else if (start !== -1 && header.startsWith("[")) {
+      end = offset;
+      break;
+    }
+    offset += line.length;
+  }
+  if (start === -1) {
+    throw new Error(`Refusing to replace Morrow in ${path} without rewriting existing TOML`);
+  }
+  return `${content.slice(0, start)}${section}${content.slice(end)}`;
+}
+
+function installCodexEntry(
+  path: string,
+  serverName: string,
+  section: string,
+  expectedConfigSha256?: string,
+): boolean {
   const current = currentFileText(path);
+  assertExpectedClientConfig(path, current, expectedConfigSha256);
   const document = parseCodexToml(path, current.content);
   const expected = codexMcpServer(parseCodexToml(path, section), serverName, path);
   const existing = codexMcpServer(document, serverName, path);
   if (existing !== undefined) {
     if (isDeepStrictEqual(existing, expected)) return false;
-    throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
+    if (expectedConfigSha256 === undefined) {
+      throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
+    }
   }
-  const content = `${current.content.trimEnd()}${current.content.trim() ? "\n\n" : ""}${section}`;
+  const content = existing === undefined
+    ? appendCodexSection(current.content, section)
+    : replaceRecordedCodexSection(path, current.content, serverName, section);
+  let prepared: Record<string, unknown>;
   try {
-    parseCodexToml(path, content);
+    prepared = parseCodexToml(path, content);
   } catch {
     throw new Error(`Refusing to add Morrow to ${path} without rewriting existing TOML`);
   }
+  if (!isDeepStrictEqual(codexMcpServer(prepared, serverName, path), expected)) {
+    throw new Error(`Refusing to replace Morrow in ${path} without rewriting existing TOML`);
+  }
   writePrivateText(path, content, current);
   return true;
+}
+
+function installedClientDigest(
+  path: string,
+  client: SupportedMorrowClient,
+  container: string | undefined,
+  serverName: string,
+  expected: Record<string, unknown>,
+): string {
+  const content = readFileSync(path, "utf8");
+  const actual = client === "codex"
+    ? codexMcpServer(parseCodexToml(path, content), serverName, path)
+    : jsonObject(parseClientJson(path, content)[container!], `${path}.${container}`)[serverName];
+  if (!isDeepStrictEqual(actual, expected)) {
+    throw new Error(`Morrow could not confirm its configuration in ${path}`);
+  }
+  return sha256Text(content);
 }
 
 export function installMorrowClient(options: InstallMorrowClientOptions): InstalledMorrowClient {
   const client = exactClient(options.client);
   const scope = exactScope(options.scope);
   const repositoryRoot = exactAbsolutePath(options.repositoryRoot, "repositoryRoot");
+  const canonicalRepositoryRoot = canonicalDirectory(repositoryRoot, "repositoryRoot");
+  const expectedConfigSha256 = exactExpectedConfigSha256(options.expectedConfigSha256);
   if (scope === "user" && options.projectRoot !== undefined) {
     throw new TypeError("projectRoot is supported only for project-scoped client configuration");
   }
@@ -947,14 +1285,41 @@ export function installMorrowClient(options: InstallMorrowClientOptions): Instal
   const workspaceRoot = options.workspaceRoot === undefined
     ? configurationRoot
     : canonicalDirectory(options.workspaceRoot, "workspaceRoot");
-  const bundle = buildClientConfigBundle({ ...options, workspaceRoot });
-  assertRegularFile(bundle.args[0]!, "Morrow server entry");
+  const command = exactExecutable(options.nodeCommand || process.execPath, "nodeCommand");
+  const serverEntryPath = exactAbsolutePath(
+    options.serverEntryPath || resolve(repositoryRoot, DEFAULT_SERVER_ENTRY),
+    "Morrow server entry",
+  );
+  const canonicalServerEntryPath = canonicalRegularFile(serverEntryPath, "Morrow server entry");
+  assertWithinRepository(canonicalRepositoryRoot, canonicalServerEntryPath);
   assertRegularFile(exactAbsolutePath(options.upstreamConfigPath, "upstreamConfigPath"), "Upstream configuration");
-  const path = morrowClientConfigPath({ client, scope, projectRoot: configurationRoot });
+  const bundle = buildClientConfigBundle({
+    ...options,
+    repositoryRoot,
+    workspaceRoot,
+    nodeCommand: command,
+    serverEntryPath,
+  });
+  const homeDirectory = exactAbsolutePath(homedir(), "homeDirectory");
+  const path = morrowClientConfigPath({ client, scope, projectRoot: configurationRoot, homeDirectory });
+  const clientConfigurationRoot = scope === "project"
+    ? configurationRoot
+    : client === "claude-desktop" && process.platform === "win32"
+      ? dirname(dirname(path))
+      : homeDirectory;
+  assertNoSymlinkPath(clientConfigurationRoot, path);
+  const expectedEntry = client === "codex"
+    ? tomlObject(
+      codexMcpServer(parseCodexToml(path, codexSection(bundle)), bundle.serverName, path),
+      `${path}.mcp_servers.${bundle.serverName}`,
+    )
+    : serverEntry(bundle, client, options.upstreamConfigPath);
   const changed = client === "codex"
-    ? installCodexEntry(path, bundle.serverName, codexSection(bundle))
-    : installJsonEntry(path, CLIENT_JSON[client].container, bundle.serverName, serverEntry(bundle, client));
-  return { client, scope, path, changed };
+    ? installCodexEntry(path, bundle.serverName, codexSection(bundle), expectedConfigSha256)
+    : installJsonEntry(path, CLIENT_JSON[client].container, bundle.serverName, expectedEntry, expectedConfigSha256);
+  const container = client === "codex" ? undefined : CLIENT_JSON[client].container;
+  const sha256 = installedClientDigest(path, client, container, bundle.serverName, expectedEntry);
+  return { client, scope, path, changed, sha256 };
 }
 
 export function buildClientParityReport(options: ClientConfigBundleOptions): ClientParityReport {

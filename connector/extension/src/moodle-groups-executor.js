@@ -484,6 +484,36 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
   };
 
   /**
+   * The complete canonical snapshot returned by moodle_get_course_groups. Raw
+   * learner IDs remain inside the browser result until the Gateway projects
+   * them through the course roster.
+   */
+  const courseGroupsState = async (context, courseId) => {
+    const listed = await groupList(context, courseId);
+    if (listed.error || listed.incomplete) return listed;
+    const memberships = new Map();
+    let memberCount = 0;
+    for (const group of listed.groups) {
+      const membership = await groupMembers(context, courseId, group.group_id);
+      if (membership.error || membership.incomplete) return membership;
+      memberCount += membership.members.length;
+      if (memberCount > MAX_MEMBERS) return { incomplete: true, status: membership.status };
+      memberships.set(group.group_id, membership.members);
+    }
+    const data = {
+      course_id: courseId,
+      groups: listed.groups.map((group) => ({
+        id: group.group_id,
+        name: group.name,
+        visibility: group.visibility,
+        participation: group.participation,
+        membership: memberships.get(group.group_id) || [],
+      })),
+    };
+    return { groups: listed.groups, memberships, data, status: listed.status, snapshotDigest: await digest(data) };
+  };
+
+  /**
    * The user IDs Moodle's own member form offers as candidates for one exact
    * group, and the form itself. A user that form does not offer is not a
    * candidate for this group, whatever the request says, so an addition is
@@ -693,42 +723,45 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
       return exactKeys(args, ["course_id"]) ? base : null;
     }
     if (definition.kind === "group_create") {
-      if (!optionalKeys(args, ["course_id", "name"], ["visibility", "participation"])) return null;
+      if (!optionalKeys(args, ["course_id", "name", "expected_digest"], ["visibility", "participation"])) return null;
       const name = writableName(args.name);
       const visibility = Object.hasOwn(args, "visibility") ? visibilityOf(args.visibility) : undefined;
-      if (!name || visibility === null || (Object.hasOwn(args, "participation") && typeof args.participation !== "boolean")) return null;
-      return { ...base, name, ...(visibility === undefined ? {} : { visibility }), ...(Object.hasOwn(args, "participation") ? { participation: args.participation } : {}) };
+      if (!name || visibility === null || !DIGEST.test(String(args.expected_digest || ""))
+        || (Object.hasOwn(args, "participation") && typeof args.participation !== "boolean")) return null;
+      return { ...base, name, expectedDigest: args.expected_digest, ...(visibility === undefined ? {} : { visibility }), ...(Object.hasOwn(args, "participation") ? { participation: args.participation } : {}) };
     }
     if (definition.kind === "group_update") {
-      if (!optionalKeys(args, ["course_id", "group_id", "expected_group_name"], ["name", "visibility", "participation"])) return null;
+      if (!optionalKeys(args, ["course_id", "group_id", "expected_group_name", "expected_digest"], ["name", "visibility", "participation"])) return null;
       const groupId = id(args.group_id);
       const expectedName = collapsed(args.expected_group_name, 1_000);
       const name = Object.hasOwn(args, "name") ? writableName(args.name) : undefined;
       const visibility = Object.hasOwn(args, "visibility") ? visibilityOf(args.visibility) : undefined;
-      if (!groupId || !expectedName || name === "" || visibility === null
+      if (!groupId || !expectedName || name === "" || visibility === null || !DIGEST.test(String(args.expected_digest || ""))
         || (Object.hasOwn(args, "participation") && typeof args.participation !== "boolean")
         || (name === undefined && visibility === undefined && !Object.hasOwn(args, "participation"))) return null;
       return {
-        ...base, groupId, expectedName,
+        ...base, groupId, expectedName, expectedDigest: args.expected_digest,
         ...(name === undefined ? {} : { name }),
         ...(visibility === undefined ? {} : { visibility }),
         ...(Object.hasOwn(args, "participation") ? { participation: args.participation } : {}),
       };
     }
     if (definition.kind === "group_delete") {
-      if (!exactKeys(args, ["course_id", "group_id", "expected_group_name", "expected_member_count"])) return null;
+      if (!exactKeys(args, ["course_id", "group_id", "expected_group_name", "expected_member_count", "expected_digest"])) return null;
       const groupId = id(args.group_id);
       const expectedName = collapsed(args.expected_group_name, 1_000);
       const expectedMembers = Number.isSafeInteger(args.expected_member_count) && args.expected_member_count >= 0
         && args.expected_member_count <= MAX_MEMBERS ? args.expected_member_count : null;
-      return groupId && expectedName && expectedMembers !== null ? { ...base, groupId, expectedName, expectedMembers } : null;
+      return groupId && expectedName && expectedMembers !== null && DIGEST.test(String(args.expected_digest || ""))
+        ? { ...base, groupId, expectedName, expectedMembers, expectedDigest: args.expected_digest } : null;
     }
     if (definition.kind === "member_add" || definition.kind === "member_remove") {
-      if (!exactKeys(args, ["course_id", "group_id", "expected_group_name", "user_id"])) return null;
+      if (!exactKeys(args, ["course_id", "group_id", "expected_group_name", "user_id", "expected_digest"])) return null;
       const groupId = id(args.group_id);
       const expectedName = collapsed(args.expected_group_name, 1_000);
       const userId = id(args.user_id);
-      return groupId && expectedName && userId ? { ...base, groupId, expectedName, userId } : null;
+      return groupId && expectedName && userId && DIGEST.test(String(args.expected_digest || ""))
+        ? { ...base, groupId, expectedName, userId, expectedDigest: args.expected_digest } : null;
     }
     if (definition.kind === "grouping_create") {
       if (!exactKeys(args, ["course_id", "name", "expected_digest"])) return null;
@@ -790,7 +823,7 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
   };
 
   const runGroupCreate = async (context, args) => {
-    const before = await groupList(context, args.courseId);
+    let before = await groupList(context, args.courseId);
     if (before.error) return failure(before.error, before.status);
     if (before.incomplete) return failure("moodle_course_groups_incomplete", before.status);
     if (before.groups.some((entry) => entry.name === args.name)) return failure("moodle_group_name_taken", before.status);
@@ -810,6 +843,12 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
       if (!writableAdvCheckbox(state.form, "participation")) return failure("moodle_group_visibility_locked", loaded.status);
       changes.set("participation", args.participation ? "1" : "0");
     }
+    const reviewed = await courseGroupsState(context, args.courseId);
+    if (reviewed.error) return failure(reviewed.error, reviewed.status);
+    if (reviewed.incomplete) return failure("moodle_course_groups_incomplete", reviewed.status);
+    if (reviewed.snapshotDigest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", reviewed.status);
+    if (reviewed.groups.some((entry) => entry.name === args.name)) return failure("moodle_group_name_taken", reviewed.status);
+    before = { groups: reviewed.groups, status: reviewed.status };
     const posted = await post(context, state.action, formBody(state, changes), "redirect", urlFor(context, GROUP_INDEX_PATH, { id: args.courseId }), state.marker);
     if (posted.error) return failure(posted.error, posted.status);
     if (posted.validation) return refusedByForm(posted.status);
@@ -835,10 +874,10 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
   };
 
   const runGroupUpdate = async (context, args) => {
-    const before = await groupList(context, args.courseId);
+    let before = await groupList(context, args.courseId);
     if (before.error) return failure(before.error, before.status);
     if (before.incomplete) return failure("moodle_course_groups_incomplete", before.status);
-    const target = groupOf(before.groups, args.groupId);
+    let target = groupOf(before.groups, args.groupId);
     if (!target) return failure("moodle_group_absent", before.status);
     if (target.name !== args.expectedName) return failure("moodle_expected_group_name_mismatch", before.status);
     if (args.name !== undefined && before.groups.some((entry) => entry.group_id !== args.groupId && entry.name === args.name)) {
@@ -868,6 +907,17 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
       if (!writableAdvCheckbox(state.form, "participation")) return failure("moodle_group_visibility_locked", loaded.status);
       changes.set("participation", args.participation ? "1" : "0");
     }
+    const reviewed = await courseGroupsState(context, args.courseId);
+    if (reviewed.error) return failure(reviewed.error, reviewed.status);
+    if (reviewed.incomplete) return failure("moodle_course_groups_incomplete", reviewed.status);
+    if (reviewed.snapshotDigest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", reviewed.status);
+    const reviewedTarget = groupOf(reviewed.groups, args.groupId);
+    if (!reviewedTarget || reviewedTarget.name !== args.expectedName) return failure("moodle_expected_group_name_mismatch", reviewed.status);
+    if (args.name !== undefined && reviewed.groups.some((entry) => entry.group_id !== args.groupId && entry.name === args.name)) {
+      return failure("moodle_group_name_taken", reviewed.status);
+    }
+    before = { groups: reviewed.groups, status: reviewed.status };
+    target = reviewedTarget;
     const posted = await post(context, state.action, formBody(state, changes), "redirect", urlFor(context, GROUP_INDEX_PATH, { id: args.courseId }), state.marker);
     if (posted.error) return failure(posted.error, posted.status);
     if (posted.validation) return refusedByForm(posted.status);
@@ -897,15 +947,15 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
   };
 
   const runGroupDelete = async (context, args) => {
-    const before = await groupList(context, args.courseId);
-    if (before.error) return failure(before.error, before.status);
-    if (before.incomplete) return failure("moodle_course_groups_incomplete", before.status);
-    const target = groupOf(before.groups, args.groupId);
+    const reviewed = await courseGroupsState(context, args.courseId);
+    if (reviewed.error) return failure(reviewed.error, reviewed.status);
+    if (reviewed.incomplete) return failure("moodle_course_groups_incomplete", reviewed.status);
+    if (reviewed.snapshotDigest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", reviewed.status);
+    const before = { groups: reviewed.groups, status: reviewed.status };
+    let target = groupOf(before.groups, args.groupId);
     if (!target) return failure("moodle_group_absent", before.status);
     if (target.name !== args.expectedName) return failure("moodle_expected_group_name_mismatch", before.status);
-    const membership = await groupMembers(context, args.courseId, args.groupId);
-    if (membership.error) return failure(membership.error, membership.status);
-    if (membership.incomplete) return failure("moodle_course_groups_incomplete", membership.status);
+    const membership = { members: reviewed.memberships.get(args.groupId) || [], status: reviewed.status };
     // The approval named a membership. A deletion that would take a different
     // set of learners with it is not the approved deletion.
     if (membership.members.length !== args.expectedMembers) return failure("moodle_expected_member_count_mismatch", membership.status);
@@ -940,16 +990,16 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
 
   const runMemberChange = async (context, definition, args) => {
     const adding = definition.kind === "member_add";
-    const before = await groupList(context, args.courseId);
+    let before = await groupList(context, args.courseId);
     if (before.error) return failure(before.error, before.status);
     if (before.incomplete) return failure("moodle_course_groups_incomplete", before.status);
-    const target = groupOf(before.groups, args.groupId);
+    let target = groupOf(before.groups, args.groupId);
     if (!target) return failure("moodle_group_absent", before.status);
     if (target.name !== args.expectedName) return failure("moodle_expected_group_name_mismatch", before.status);
-    const membership = await groupMembers(context, args.courseId, args.groupId);
+    let membership = await groupMembers(context, args.courseId, args.groupId);
     if (membership.error) return failure(membership.error, membership.status);
     if (membership.incomplete) return failure("moodle_course_groups_incomplete", membership.status);
-    const present = membership.members.find((entry) => entry.user_id === args.userId) || null;
+    let present = membership.members.find((entry) => entry.user_id === args.userId) || null;
     if (adding && present) return failure("moodle_group_member_already_present", membership.status);
     if (!adding && !present) return failure("moodle_group_member_absent", membership.status);
     // Adding binds the identity through Moodle's own candidate list for this
@@ -960,6 +1010,19 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
     if (candidates.error) return failure(candidates.error, candidates.status);
     if (adding && !candidates.addable.has(args.userId)) return failure("moodle_group_member_not_available", candidates.status);
     const state = candidates.state;
+    const reviewed = await courseGroupsState(context, args.courseId);
+    if (reviewed.error) return failure(reviewed.error, reviewed.status);
+    if (reviewed.incomplete) return failure("moodle_course_groups_incomplete", reviewed.status);
+    if (reviewed.snapshotDigest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", reviewed.status);
+    const reviewedTarget = groupOf(reviewed.groups, args.groupId);
+    if (!reviewedTarget || reviewedTarget.name !== args.expectedName) return failure("moodle_expected_group_name_mismatch", reviewed.status);
+    membership = { members: reviewed.memberships.get(args.groupId) || [], status: reviewed.status };
+    const reviewedPresent = membership.members.find((entry) => entry.user_id === args.userId) || null;
+    if (adding && reviewedPresent) return failure("moodle_group_member_already_present", reviewed.status);
+    if (!adding && !reviewedPresent) return failure("moodle_group_member_absent", reviewed.status);
+    before = { groups: reviewed.groups, status: reviewed.status };
+    target = reviewedTarget;
+    present = reviewedPresent;
     // The member form saves from three controls only: the session key it was
     // loaded with, the one user, and Moodle's own add or remove button.
     const body = new URLSearchParams();

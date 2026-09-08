@@ -568,6 +568,18 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
   };
 }
 
+function announcementCreateTarget(runtime: BlackboardLearnRuntime, input: AnnouncementPlanInput) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "course-announcement-create", {});
+}
+
+function announcementPatchTarget(runtime: BlackboardLearnRuntime, input: AnnouncementPatchPlanInput) {
+  return runtime.effectTarget({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, "course-announcement", { announcementId: input.announcement_id });
+}
+
 /** What one approved announcement plan is bounded to: one announcement, no file, and nobody named. */
 function planLimits(): JsonObject {
   return { announcements: 1, files: 0, learnersNamed: 0 };
@@ -580,6 +592,7 @@ async function planCourseAnnouncement(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const announcement = reviewedAnnouncement(input);
+  runtime.assertEffectTargetFree(announcementCreateTarget(runtime, input));
   // A plan exists only to be dispatched, so it carries the write condition. An
   // instructor is refused before review instead of after approving an
   // announcement Morrow would then refuse to send.
@@ -637,7 +650,7 @@ async function applyReviewedCourseAnnouncement(
     throw new BlackboardApiError("blackboard_patch_review_required", "The Blackboard effect grant does not match this exact reviewed plan.");
   }
   const announcement = reviewedAnnouncement(input);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, announcementCreateTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -659,6 +672,7 @@ async function applyReviewedCourseAnnouncement(
   // every failure from here on is reported as applied_or_unknown, and every
   // refusal raised above this point keeps not_sent.
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     const created = await write.client.post(announcementsPath(write.courseId), announcementRequest(announcement), signal);
@@ -671,6 +685,7 @@ async function applyReviewedCourseAnnouncement(
     }
     const record = await readAnnouncement(write.client, write.courseId, announcementId, signal);
     const verification = compareAnnouncement(record, announcement, dispatchState);
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.course-announcement.readback.v1",
       ok: true,
@@ -689,6 +704,7 @@ async function applyReviewedCourseAnnouncement(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -715,13 +731,15 @@ async function verifyCourseAnnouncement(
   }, signal);
   const records = await collectAnnouncements(comparator.client, comparator.courseId, signal);
   const matches = records.filter((record) => savedAnnouncement(record, announcement));
+  const verified = matches.length === 1;
+  runtime.recordEffectComparison(announcementCreateTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.course-announcement.comparator.v1",
     ok: true,
     tenantId: comparator.tenantId,
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
-    verified: matches.length === 1,
+    verified,
     readback: READBACK_STATE,
     status: "api_configured_live_untested",
   };
@@ -746,6 +764,7 @@ async function planCourseAnnouncementPatch(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const announcement = reviewedAnnouncement(input);
+  runtime.assertEffectTargetFree(announcementPatchTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -797,7 +816,7 @@ async function applyReviewedCourseAnnouncementPatch(
     throw new BlackboardApiError("blackboard_patch_review_required", "The Blackboard effect grant does not match this exact reviewed plan.");
   }
   const announcement = reviewedAnnouncement(input);
-  runtime.claimReservedEffectGrant(grant);
+  const dispatch = runtime.claimReservedEffectGrant(grant, announcementPatchTarget(runtime, input));
   const write = await runtime.beginCourseWrite({
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
@@ -814,11 +833,13 @@ async function applyReviewedCourseAnnouncementPatch(
     );
   }
   let dispatchState: BlackboardDispatchState = "not_sent";
+  dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
     await write.client.patch(announcementPath(write.courseId, input.announcement_id), announcementRequest(announcement), signal);
     const record = await readAnnouncement(write.client, write.courseId, input.announcement_id, signal);
     const verification = compareAnnouncement(record, announcement, dispatchState);
+    dispatch.markVerified();
     return {
       schema: "morrow.blackboard.course-announcement-patch.readback.v1",
       ok: true,
@@ -835,6 +856,7 @@ async function applyReviewedCourseAnnouncementPatch(
       status: "api_configured_live_untested",
     };
   } catch (error) {
+    dispatch.markUncertain();
     throw withBlackboardDispatchState(error, dispatchState);
   }
 }
@@ -855,6 +877,8 @@ async function verifyCourseAnnouncementPatch(
     tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
   }, signal);
   const record = await readAnnouncement(comparator.client, comparator.courseId, input.announcement_id, signal);
+  const verified = savedAnnouncement(record, announcement);
+  runtime.recordEffectComparison(announcementPatchTarget(runtime, input), verified);
   return {
     schema: "morrow.blackboard.course-announcement-patch.comparator.v1",
     ok: true,
@@ -862,7 +886,7 @@ async function verifyCourseAnnouncementPatch(
     sourceBindingId: comparator.sourceBindingId,
     courseId: comparator.courseId,
     announcementId: input.announcement_id,
-    verified: savedAnnouncement(record, announcement),
+    verified,
     readback: READBACK_STATE,
     status: "api_configured_live_untested",
   };

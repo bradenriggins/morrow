@@ -169,16 +169,17 @@ Two facts apply to every row:
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `read-failed` | Morrow "Not checked", Course "Not checked", and "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again." | **Try again**, which re-reads the status (`connector/extension/popup/popup.js:94-103`, `connector/extension/popup/popup.js:174-177`) | `connector/extension/popup/popup-view.js:44`, values `connector/extension/popup/popup-view.js:3`, controls `connector/extension/popup/popup-view.js:67` |
-| `not-paired` | Morrow "Not connected", Course "Not connected", and "Add Morrow to your assistant, then open it. Select Connect Morrow to continue." | **Connect Morrow** | `connector/extension/popup/popup-view.js:50`, values `connector/extension/popup/popup-view.js:26`, `connector/extension/popup/popup-view.js:35` |
-| `pairing` | Morrow "Waiting for approval", and "Confirm this connection on the Morrow page that opens. Then return to this popup." | The Chrome connection page (section 3). In the popup the primary control is disabled and only **Open setup guide** and the help disclosure remain; **Disconnect Morrow** is hidden because the Bridge is not paired yet | `connector/extension/popup/popup-view.js:48`, controls `connector/extension/popup/popup-view.js:68-72`, hidden at `connector/extension/popup/popup.js:56` |
-| `connecting` | Morrow "Connecting…", and "Connecting to Morrow. Keep this popup open or return in a moment." | None needed. The popup re-reads on focus, on a storage change and on the Bridge's own message (`connector/extension/popup/popup.js:217-226`) | `connector/extension/popup/popup-view.js:52`, value `connector/extension/popup/popup-view.js:26` |
-| `paired-not-connected` | Morrow "Not available", primary reads "Waiting for your assistant" and is disabled, and "Open the assistant where you added Morrow. This popup will reconnect when Morrow is ready." | Open the assistant. **Disconnect Morrow** is available here | `connector/extension/popup/popup-view.js:54`, label `connector/extension/popup/popup-view.js:40`, controls `connector/extension/popup/popup-view.js:68` |
-| `connected-no-site` | Morrow "Connected", Course "Not connected", and "Morrow is connected. Open a signed-in Canvas or Moodle course in Chrome, then select Connect course site." | Open a course tab, then **Connect course site** | `connector/extension/popup/popup-view.js:63` |
-| `site-ready-no-course` | Course "Ready", primary reads "Choose courses", and "Choose courses in Plan and Edit settings. Plan keeps changes ready for your review." | **Choose courses**, which opens Plan and Edit settings (`connector/extension/popup/popup.js:178-182`) | `connector/extension/popup/popup-view.js:60`, value `connector/extension/popup/popup-view.js:35` |
-| `site-stale` | Course "Course site tab needed" and "The saved course site is no longer open. Open a signed-in course from this site in Chrome, then connect the course site again." | Open a signed-in course from that site, then **Connect course site** | `connector/extension/popup/popup-view.js:62` |
-| `course-ready` | Course "Connected", the selected course name and the time it was last checked, and "This selected course is connected. Keep one signed-in course site tab open while you work in Morrow." | Ask the assistant. On this surface **Check or switch course** replaces the primary control (`connector/extension/popup/popup.js:57-58`) | `connector/extension/popup/popup-view.js:56`, value `connector/extension/popup/popup-view.js:34`, account `connector/extension/popup/popup.js:65-74` |
-| `course-tab-closed` | Course "Course site tab needed" and "This selected course is connected, but its course site tab is no longer open. Open a signed-in course from this site in Chrome, then select Connect course site." | Open a signed-in course from that site, then **Connect course site** | `connector/extension/popup/popup-view.js:58` |
+| `read-failed` | Morrow "Not checked", Course "Not checked", and "Morrow could not read this connection state. Select Try again. If the state does not change, close this popup and open it again." | **Try again**, which re-reads the status | `connector/extension/popup/popup-view.js:51` |
+| `not-paired` | Morrow "Not connected", Course "Not connected", and "Add Morrow to your assistant, then open it. Select Connect Morrow to continue." | **Connect Morrow** | `connector/extension/popup/popup-view.js:58` |
+| `pairing` | Morrow "Waiting for approval", and "Confirm this connection on the Morrow page that opens. Then return to this popup." | The Chrome connection page (section 3). In the popup the primary control is disabled and only **Open setup guide** and the help disclosure remain; **Disconnect Morrow** is hidden because the Bridge is not paired yet | `connector/extension/popup/popup-view.js:56`, controls `connector/extension/popup/popup.js:44-64` |
+| `connecting` | Morrow "Connecting…", and "Connecting to Morrow. Keep this popup open or return in a moment." | None needed. The popup re-reads on focus, on a storage change and on the Bridge's own message | `connector/extension/popup/popup-view.js:60` |
+| `paired-not-connected` | Morrow "Not available", primary reads "Waiting for your assistant" and is disabled, and "Open the assistant where you added Morrow. This popup will reconnect when Morrow is ready." | Open the assistant. **Disconnect Morrow** is available here | `connector/extension/popup/popup-view.js:62` |
+| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome." | **Open setup guide**. The green online state, course action, Plan/Edit card, and duplicate footer setup link are hidden; **Disconnect Morrow** remains available | `connector/extension/popup/popup-view.js:52`, controls `connector/extension/popup/popup.js:44-64` |
+| `connected-no-site` | Morrow "Connected", Course "Not connected", and "Morrow is connected. Open a signed-in Canvas or Moodle course in Chrome, then select Connect course site." | Open a course tab, then **Connect course site** | `connector/extension/popup/popup-view.js:71` |
+| `site-ready-no-course` | Course "Ready", primary reads "Choose courses", and "Choose courses in Plan and Edit settings. Plan keeps changes ready for your review." | **Choose courses**, which opens Plan and Edit settings | `connector/extension/popup/popup-view.js:68` |
+| `site-stale` | Course "Course site tab needed" and "The saved course site is no longer open. Open a signed-in course from this site in Chrome, then connect the course site again." | Open a signed-in course from that site, then **Connect course site** | `connector/extension/popup/popup-view.js:70` |
+| `course-ready` | Course "Connected", the selected course name and the time it was last checked, and "This selected course is connected. Keep one signed-in course site tab open while you work in Morrow." | Ask the assistant. On this surface **Check or switch course** replaces the primary control | `connector/extension/popup/popup-view.js:64` |
+| `course-tab-closed` | Course "Course site tab needed" and "This selected course is connected, but its course site tab is no longer open. Open a signed-in course from this site in Chrome, then select Connect course site." | Open a signed-in course from that site, then **Connect course site** | `connector/extension/popup/popup-view.js:66` |
 
 Course-connection failures have their own recovery sentences rather than one generic message: no
 usable tab (`connector/extension/src/bridge-problem-copy.js:54`, raised at
@@ -422,12 +423,12 @@ stale name here.
 | `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
 | `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
 | `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
-| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:18`, `connector/extension/popup/popup-view.js:40` |
-| `Try again` | Popup | `connector/extension/popup/popup-view.js:39` |
-| `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:40` |
-| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:40` |
-| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:40` |
-| `Connect course site` | Popup | `connector/extension/popup/popup-view.js:40` |
+| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:18`, `connector/extension/popup/popup-view.js:47` |
+| `Try again` | Popup | `connector/extension/popup/popup-view.js:45` |
+| `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:31` |
+| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:47` |
+| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:47` |
+| `Connect course site` | Popup | `connector/extension/popup/popup-view.js:47` |
 | `Check or switch course` | Popup | `connector/extension/popup/popup.html:19` |
 | `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:20` |
 | `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:22` |
@@ -438,19 +439,19 @@ stale name here.
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:43`, `connector/extension/onboarding/onboarding.html:71` |
 | `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:30` |
 | `Find available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:41` |
-| `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:620` |
-| `Select this page to connect` | Plan and Edit settings | `connector/extension/settings/settings.js:620` |
-| `Clear this page` | Plan and Edit settings | `connector/extension/settings/settings.js:619` |
+| `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:629` |
+| `Select this page to connect` | Plan and Edit settings | `connector/extension/settings/settings.js:629` |
+| `Clear this page` | Plan and Edit settings | `connector/extension/settings/settings.js:628` |
 | `Previous page` | Plan and Edit settings | `connector/extension/settings/settings.html:59` |
 | `Next page` | Plan and Edit settings | `connector/extension/settings/settings.html:61` |
-| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:65`, `connector/extension/settings/settings.js:576` |
+| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:65`, `connector/extension/settings/settings.js:585` |
 | `View connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:73` |
-| `Connect selected courses in Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:74`, `connector/extension/settings/settings.js:652` |
-| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:92`, `connector/extension/settings/settings.js:742` |
-| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:742` |
+| `Connect selected courses in Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:74`, `connector/extension/settings/settings.js:661` |
+| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:92`, `connector/extension/settings/settings.js:765` |
+| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:765` |
 | `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:93` |
 | `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:141` |
-| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:142`, `connector/extension/settings/settings.js:718` |
+| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:142`, `connector/extension/settings/settings.js:324` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:151` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:152` |
 | `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:844` |

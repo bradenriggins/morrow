@@ -35,6 +35,7 @@ interface Sent {
   readonly method: string;
   readonly url: URL;
   readonly body?: string;
+  readonly redirect?: RequestRedirect;
 }
 
 /**
@@ -44,18 +45,20 @@ interface Sent {
  */
 function transport(answer: (request: Sent) => Answer, options?: { readonly diagnosticHeaders?: readonly string[] }) {
   const sent: Sent[] = [];
+  const tokenRedirects: Array<RequestRedirect | undefined> = [];
   let tokens = 0;
   const fetcher = (async (input: URL | RequestInfo, init: RequestInit = {}) => {
     const url = new URL(String(input));
     const method = String(init.method || "GET");
     if (url.pathname === tokenPath) {
       tokens += 1;
+      tokenRedirects.push(init.redirect);
       return new Response(JSON.stringify({ access_token: "temporary-token", expires_in: 3600 }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }
-    const request: Sent = { method, url, ...(typeof init.body === "string" ? { body: init.body } : {}) };
+    const request: Sent = { method, url, redirect: init.redirect, ...(typeof init.body === "string" ? { body: init.body } : {}) };
     sent.push(request);
     const next = answer(request);
     const status = next.status ?? 200;
@@ -68,6 +71,7 @@ function transport(answer: (request: Sent) => Answer, options?: { readonly diagn
   return {
     sent,
     tokens: () => tokens,
+    tokenRedirects,
     client: new BlackboardLearnClient(tenant, fetcher, options ? { ...options } : {}),
   };
 }
@@ -168,6 +172,24 @@ describe("Blackboard transport", () => {
     }
     expect(sent).toHaveLength(0);
     expect(tokens()).toBe(0);
+  });
+
+  it("never follows redirects for credentials, reads, or writes", async () => {
+    const { client, sent, tokenRedirects } = transport(() => ({
+      status: 307,
+      body: { message: "redirected" },
+      headers: { location: "https://outside.example/collect" },
+    }));
+
+    await expect(client.get(contentPath)).rejects.toMatchObject({ code: "blackboard_request_failed", status: 307 });
+    await expect(client.patch(contentPath, { title: "Reviewed title" }))
+      .rejects.toMatchObject({ code: "blackboard_request_failed", status: 307 });
+
+    expect(tokenRedirects).toEqual(["manual"]);
+    expect(sent.map((request) => [request.method, request.redirect])).toEqual([
+      ["GET", "manual"],
+      ["PATCH", "manual"],
+    ]);
   });
 
   it("names a collection query in typed fields instead of a concatenated query string", async () => {

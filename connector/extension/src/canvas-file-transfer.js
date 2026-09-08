@@ -107,8 +107,30 @@ export async function executeCanvasCourseFileTransferInPage(input) {
   const boundedBytes = async (response) => {
     const length = response.headers.get("content-length");
     if (length !== null && (!/^(?:0|[1-9][0-9]*)$/.test(length) || Number(length) > limit)) throw new Error("canvas_file_download_too_large");
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > limit) throw new Error("canvas_file_download_too_large");
+    if (!response.body || typeof response.body.getReader !== "function") throw new Error("canvas_file_download_unreadable");
+    const reader = response.body.getReader();
+    const chunks = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > limit) {
+          await reader.cancel();
+          throw new Error("canvas_file_download_too_large");
+        }
+        chunks.push(next.value);
+      }
+    } catch (error) {
+      try { await reader.cancel(); } catch {}
+      throw error;
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
     return bytes;
   };
   const transferMode = plainObject(input) && typeof input.mode === "string" ? input.mode : "direct";

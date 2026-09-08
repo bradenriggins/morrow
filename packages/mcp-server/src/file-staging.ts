@@ -180,9 +180,28 @@ function operationId(value: unknown): string | null {
 export class FileStageStore {
   private readonly stages = new Map<string, StoredStage>();
   private readonly now: () => number;
+  private readonly onExpire?: (handle: string, operationId: string | null) => void;
+  private expiryTimer: NodeJS.Timeout | null = null;
 
-  constructor(options: { readonly now?: () => number } = {}) {
+  constructor(options: {
+    readonly now?: () => number;
+    readonly onExpire?: (handle: string, operationId: string | null) => void;
+  } = {}) {
     this.now = options.now || Date.now;
+    this.onExpire = options.onExpire;
+  }
+
+  private scheduleExpiry(): void {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
+    let expiresAt = Number.POSITIVE_INFINITY;
+    for (const stage of this.stages.values()) expiresAt = Math.min(expiresAt, stage.expiresAt);
+    if (!Number.isFinite(expiresAt)) return;
+    this.expiryTimer = setTimeout(() => {
+      this.expiryTimer = null;
+      this.reap();
+    }, Math.max(1, expiresAt - this.now()));
+    this.expiryTimer.unref();
   }
 
   stage(request: FileStageRequest): FileStageReceipt {
@@ -204,6 +223,7 @@ export class FileStageStore {
       bytes: Buffer.from(bytes),
       operationId: null,
     });
+    this.scheduleExpiry();
     return { handle, manifest: { ...manifest }, expiresAt };
   }
 
@@ -233,6 +253,7 @@ export class FileStageStore {
     const bytes = new Uint8Array(stage.bytes);
     stage.bytes.fill(0);
     this.stages.delete(binding.handle);
+    this.scheduleExpiry();
     return { manifest: { ...stage.manifest }, bytes };
   }
 
@@ -253,6 +274,7 @@ export class FileStageStore {
     if (!stage) return;
     stage.bytes.fill(0);
     this.stages.delete(handle);
+    this.scheduleExpiry();
   }
 
   reap(now = this.now()): number {
@@ -261,12 +283,16 @@ export class FileStageStore {
       if (now < stage.expiresAt) continue;
       stage.bytes.fill(0);
       this.stages.delete(handle);
+      try { this.onExpire?.(handle, stage.operationId); } catch { /* expiry cleanup must continue */ }
       removed += 1;
     }
+    this.scheduleExpiry();
     return removed;
   }
 
   clear(): void {
+    if (this.expiryTimer) clearTimeout(this.expiryTimer);
+    this.expiryTimer = null;
     for (const stage of this.stages.values()) stage.bytes.fill(0);
     this.stages.clear();
   }

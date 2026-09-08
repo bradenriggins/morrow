@@ -30,6 +30,9 @@ export const EXTERNAL_LINK_ALLOWLIST = [
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-mac-arm64.dmg",
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-win-x64.exe",
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-source.zip",
+  "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/SHA256SUMS",
+  "https://support.apple.com/en-us/102445",
+  "https://support.microsoft.com/en-us/office/protect-my-pc-from-viruses",
 ];
 
 const MAC_DOWNLOAD_URL = "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-mac-arm64.dmg";
@@ -656,7 +659,7 @@ test("the release download copy uses no em dash and keeps the homepage headline 
   }
   assert.match(
     homePage(),
-    /<h1 id="hero-title" aria-label="Morrow connects your own ChatGPT and Claude to your Canvas, Moodle, and Blackboard courses\."><span class="hero-title-wide">Morrow connects your own ChatGPT and Claude to your courses\.<\/span><span class="hero-title-compact">Morrow connects ChatGPT and Claude\.<\/span><\/h1>/,
+    /<h1 id="hero-title">Connect your own ChatGPT and Claude to your Canvas, Moodle, and Blackboard courses\.<\/h1>/,
     "the homepage headline is approved copy and must remain exact",
   );
 });

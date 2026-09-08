@@ -124,11 +124,11 @@ async function harness(options: {
       json(response, { results: options.memberships || [instructorMembership, studentMembership], paging: {} }); return;
     }
     if (pathname === `/learn/api/public/v3/courses/${courseId}`) {
+      if (url.searchParams.get("fields")?.includes("description")) {
+        courseReadCount += 1;
+        json(response, course); return;
+      }
       json(response, { id: courseId, courseId: "BIO-101", name: "Biology", ultraStatus: "Ultra", closedComplete: false }); return;
-    }
-    if (pathname === `/learn/api/public/v1/courses/${courseId}`) {
-      courseReadCount += 1;
-      json(response, course); return;
     }
     if (pathname === `/learn/api/public/v1/courses/${courseId}/contents`) {
       json(response, { results: [content], paging: {} }); return;
