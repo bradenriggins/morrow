@@ -220,11 +220,14 @@ test("Check Bridge returns safe installer errors even when the runtime or state 
   const check = () => started.handlers.get("installer:reconcile-bridge")(event);
   assert.deepEqual((await check()).error, errorDetails("runtime_repair_required"));
 
-  for (const error of [
-    Object.assign(new Error("private MCP detail"), { code: -32603 }),
-    { code: "unknown_runtime_error", message: "private runtime detail", recovery: "private internal path" },
-    { code: "setup_failed", message: "private runtime detail", recovery: "private internal path" },
-    null
+  failure = new Error("private Bridge mismatch detail");
+  assert.deepEqual((await check()).error, errorDetails("bridge_check_failed"));
+
+  for (const [error, expected] of [
+    [Object.assign(new Error("private MCP detail"), { code: -32603 }), "setup_failed"],
+    [{ code: "unknown_runtime_error", message: "private runtime detail", recovery: "private internal path" }, "setup_failed"],
+    [{ code: "setup_failed", message: "private runtime detail", recovery: "private internal path" }, "setup_failed"],
+    [null, "bridge_check_failed"]
   ]) {
     failure = error;
     for (const unreadable of [false, true]) {
@@ -232,7 +235,7 @@ test("Check Bridge returns safe installer errors even when the runtime or state 
       const result = await check();
       assert.equal(result.ok, false);
       assert.deepEqual(result.state, state);
-      assert.deepEqual(result.error, errorDetails("setup_failed"));
+      assert.deepEqual(result.error, errorDetails(expected));
       assert.doesNotMatch(JSON.stringify(result), /private/);
     }
   }

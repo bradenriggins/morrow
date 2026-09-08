@@ -586,7 +586,7 @@ async function startMorrow() {
       await installer.reconcileBridgeRelease();
       return respond();
     } catch (error) {
-      return failed(error);
+      return failed(error?.code ? error : errorDetails("bridge_check_failed"));
     }
   });
   ipcMain.handle("installer:check-for-updates", async (event, ...input) => {

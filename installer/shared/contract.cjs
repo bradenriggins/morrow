@@ -63,6 +63,10 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow could not show the Morrow Bridge folder.",
     recovery: "Close Morrow and open it again, then select Show Bridge folder. If Morrow still cannot show it, reinstall Morrow."
   },
+  bridge_check_failed: {
+    message: "Morrow could not confirm Morrow Bridge.",
+    recovery: "Open Morrow Bridge in Chrome, select Connect Morrow, then return here and select Check Bridge."
+  },
   blackboard_configuration_invalid: {
     message: "Morrow could not save the Blackboard connection.",
     recovery: "Check the Blackboard web address, the application key and secret from your administrator, and the account ID, then save again."
