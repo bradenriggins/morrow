@@ -551,11 +551,11 @@ test("the homepage guides a reader to choose a computer and continue setup", { s
 
 test("the homepage offers two clear pill actions for features and setup", { skip }, () => {
   const html = homePage();
-  assert.match(html, /<div class="hero-actions"><a class="button button-primary" href="\/features">See what Morrow can do [\s\S]*?<a class="button button-secondary" href="\/how-it-works">Get started with Morrow /);
+  assert.match(html, /<div class="hero-actions"><a class="button button-primary" href="\/features">See features [\s\S]*?<a class="button button-secondary" href="\/how-it-works">Get started /);
   const styles = pageSource("styles.css");
   assert.match(styles, /\.button-secondary \{[^}]*border-color: var\(--line-strong\);[^}]*background: var\(--raised\);/);
   assert.match(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.hero-actions \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*gap: 8px;[^}]*width: 100%;/);
-  assert.match(styles, /\.hero-actions \.button \{[^}]*min-height: 64px;/);
+  assert.match(styles, /\.hero-actions \.button \{[^}]*min-height: 50px;[^}]*font-size: 14px;[^}]*white-space: nowrap;/);
 });
 
 test("the public claims keep the platform, permission, and review boundaries", { skip }, () => {
