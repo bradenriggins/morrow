@@ -138,13 +138,19 @@ server.registerTool("morrow_capability_read", {
   if (name === "canvas_get_single_course_courses") {
     const valid = input && input.id === "42" && input._morrow && input._morrow.source_binding_id === "canvas:course-42";
     return { content: [{ type: "text", text: "course" }], structuredContent: {
-      schema: "morrow.result.v1", data: valid ? { id: "42" } : { id: "wrong" },
+      schema: "morrow.result.v1", data: {
+        schema: "morrow.canvas-connector.result.v1", ok: true, provider: "canvas", commandKind: "invoke_read",
+        result: { schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, data: valid ? { id: "42" } : { id: "wrong" } },
+      },
     }};
   }
   if (name === "moodle_get_course") {
     const valid = input && input.course_id === "77" && input._morrow && input._morrow.source_binding_id === "moodle:course-77";
     return { content: [{ type: "text", text: "course" }], structuredContent: {
-      schema: "morrow.result.v1", data: valid ? { course_id: "77" } : { course_id: "wrong" },
+      schema: "morrow.result.v1", data: {
+        schema: "morrow.canvas-connector.result.v1", ok: true, provider: "moodle", commandKind: "invoke_read",
+        result: { schema: "morrow.moodle-browser-result.v1", ok: true, sent: true, data: valid ? { course_id: "77" } : { course_id: "wrong" } },
+      },
     }};
   }
   return { isError: true, content: [{ type: "text", text: "unavailable" }], structuredContent: { schema: "morrow.problem.v1" } };

@@ -5300,9 +5300,18 @@ export class GatewayRuntime {
   ): Promise<LearnerTextRedactionContext | undefined> {
     if (!isCanvasConnector(mapping) || mapping.capability?.provider !== "canvas") return undefined;
     const sourceBindingId = this.requestSourceBindingId(request);
-    const requestedCourseId = this.requestCourseId(request);
+    // Canvas's single-course API names the course path parameter `id`. Keep
+    // that exceptional meaning bound to this exact tool; other Canvas tools
+    // also use `id` for assignments, quizzes, files, and other resources.
+    const requestedCourseId = this.requestCourseId(request)
+      ?? (mapping.upstreamName === "canvas_get_single_course_courses"
+        ? this.requestCourseId({ course_id: request.id })
+        : null);
     if (!sourceBindingId || !requestedCourseId) return undefined;
-    const binding = await this.verifiedBrowserBinding(mapping, request, options, "canvas");
+    const binding = await this.verifiedBrowserBinding(mapping, {
+      ...request,
+      course_id: requestedCourseId,
+    }, options, "canvas");
     return this.canvasLearnerContextForBinding(
       mapping,
       sourceBindingId,

@@ -357,8 +357,14 @@ function sameBinding(left, right) {
 function matchingCourse(binding, result) {
   if (result?.isError === true) return false;
   const envelope = object(result?.structuredContent);
-  const data = object(envelope?.data);
-  if (!data || envelope?.schema !== "morrow.result.v1") return false;
+  const connector = object(envelope?.data);
+  const browser = object(connector?.result);
+  const data = object(browser?.data);
+  if (!data || envelope?.schema !== "morrow.result.v1"
+    || connector?.schema !== "morrow.canvas-connector.result.v1"
+    || connector?.ok !== true || connector?.provider !== binding.provider
+    || connector?.commandKind !== "invoke_read"
+    || browser?.ok !== true || browser?.sent !== true) return false;
   const returned = binding.provider === "canvas" ? data.id : data.course_id;
   return String(returned) === binding.courseId;
 }

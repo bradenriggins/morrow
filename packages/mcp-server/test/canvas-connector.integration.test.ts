@@ -314,6 +314,27 @@ describe("Canvas connector gateway path", () => {
       if (directory) rmSync(directory, { recursive: true, force: true });
     });
 
+    it("reads the selected Canvas course through its API id field", async () => {
+      await bindingsApplied();
+      const course = await runtime.call("canvas_get_single_course_courses", {
+        id: "42",
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(course.isError).not.toBe(true);
+      expect(course.structuredContent).toMatchObject({
+        schema: "morrow.result.v1",
+        status: "succeeded",
+        data: {
+          schema: "morrow.canvas-connector.result.v1",
+          ok: true,
+          provider: "canvas",
+          commandKind: "invoke_read",
+          result: { data: { id: "42", name: "Biology" } },
+        },
+      });
+      expect(writeCommands).toBe(0);
+    });
+
     it("checks the structure of two New Quizzes and writes nothing", async () => {
       // The report keeps question titles and counts, never a question body.
       expect(repeatedBody.length).toBe(2_107);
