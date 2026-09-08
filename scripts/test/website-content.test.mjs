@@ -27,6 +27,7 @@ export const BANNED_PHRASES = RETIRED_PHRASES;
  * own route by the canonical and Open Graph test.
  */
 export const EXTERNAL_LINK_ALLOWLIST = [
+  "https://github.com/example-owner/morrow-downloads",
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-mac-arm64.dmg",
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-win-x64.exe",
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-source.zip",
@@ -725,15 +726,21 @@ test("public copy uses educator language instead of setup and product jargon", {
   assert.deepEqual(found, [], "write what an instructor sees and does, and keep file and system terms out of the public copy");
 });
 
-test("the free and open source promise is visible from every page", { skip }, () => {
+test("the GitHub header control and free and open source promise stay visible", { skip }, () => {
   const problems = [];
   for (const page of readablePages) {
     const header = region(page.html, "header");
     const footer = region(page.html, "footer");
-    if (!header || !visibleText(header).includes("Free and open source")) problems.push(`${page.file}: header`);
+    const github = header ? tagsNamed(header, "a").filter((tag) => tag.class === "github-link") : [];
+    if (github.length !== 1) problems.push(`${page.file}: expected one GitHub header control, found ${github.length}`);
+    else {
+      if (github[0].href !== "https://github.com/example-owner/morrow-downloads") problems.push(`${page.file}: GitHub header target`);
+      if (github[0].target !== "_blank" || github[0].rel !== "noopener noreferrer") problems.push(`${page.file}: GitHub header safety`);
+      if (!visibleText(header).includes("View on GitHub")) problems.push(`${page.file}: GitHub header label`);
+    }
     if (!footer || !visibleText(footer).includes("Free and open source")) problems.push(`${page.file}: footer`);
   }
-  assert.deepEqual(problems, [], "the free and open source page must be named in both shared navigation paths");
+  assert.deepEqual(problems, [], "keep the established GitHub header control and the plain footer source link on every page");
   assert.ok(visibleText(pageSource("build.html")).includes("Morrow is and always will be free and open source."));
 });
 
