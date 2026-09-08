@@ -676,6 +676,11 @@ test("the release download copy uses no em dash and keeps the direct homepage he
     /\.hero h1 \{ font-size: clamp\(2rem, 8\.5vw, 2\.25rem\); \}/,
     "the mobile homepage title must keep its balanced smaller size",
   );
+  assert.match(
+    pageSource("styles.css"),
+    /h1 \{ max-width: none !important; white-space: normal; text-wrap: balance; \}/,
+    "page titles must wrap at a readable size instead of shrinking to one line",
+  );
 });
 
 test("no product page tells the reader to type an address or run a command", { skip }, () => {
@@ -760,22 +765,22 @@ test("the GitHub header control and free and open source promise stay visible", 
   assert.deepEqual(valueItems, [
     "Turn a syllabus, readings, and faculty notes into organized lessons, activities, and assessments.",
     "Review an existing course for accessibility problems, missing instructions, inconsistent dates, and differences between sections.",
-    "See the exact pages, assignments, quizzes, discussions, or dates before Morrow saves any change.",
+    "See the exact pages, assignments, quizzes, discussions, or dates before your assistant uses Morrow to save any change.",
     "After an approved change, see what changed, what stayed untouched, and what still needs you.",
   ], "the homepage hero must lead with four concrete course-work results");
 });
 
-test("each marketing page starts with a direct Morrow action or result", { skip }, () => {
+test("each marketing page starts with the correct Morrow and assistant relationship", { skip }, () => {
   const expected = new Map([
-    ["features.html", "Morrow helps you build, review, and improve the courses you manage."],
-    ["for-curriculum-developers.html", "Morrow traces one learning outcome across your program."],
-    ["for-instructional-designers.html", "Morrow builds one course and helps you improve fourteen more."],
-    ["for-instructors.html", "Morrow checks all your course sections in one request."],
-    ["for-lms-admins.html", "Morrow compares every course section in one request."],
-    ["for-qa-teams.html", "Morrow finds repeated course problems and helps you fix the cause."],
+    ["features.html", "Morrow helps your assistant build, review, and improve the courses you manage."],
+    ["for-curriculum-developers.html", "Morrow helps your assistant trace one learning outcome across your program."],
+    ["for-instructional-designers.html", "Morrow helps your assistant build one course and improve fourteen more."],
+    ["for-instructors.html", "Morrow lets your assistant check all your course sections in one request."],
+    ["for-lms-admins.html", "Morrow lets your assistant compare every course section in one request."],
+    ["for-qa-teams.html", "Morrow helps your assistant find repeated course problems and fix the cause."],
     ["for-teams.html", "Morrow helps your team coordinate work across a program."],
     ["how-it-works.html", "Connect Morrow to your assistant and courses in six steps."],
-    ["remote.html", "Morrow keeps your course work moving from your phone."],
+    ["remote.html", "Keep using Morrow with your assistant from your phone."],
   ]);
 
   const actual = new Map([...expected.keys()].map((file) => {
@@ -887,6 +892,30 @@ test("promotional conversations show completed work instead of false capability 
   assert.deepEqual(problems, [], "a product example must show what Morrow and the assistant accomplish, not advertise a false hole in their capability");
 });
 
+test("course work belongs to the assistant and Morrow stays the tool it uses", { skip }, () => {
+  const problems = [];
+  const misassignedWork = /\bMorrow (?:builds|reviews|checks|checked|reads|read|drafts|groups|compares|traces|prepares|creates|created|made|applies|applied)\b/i;
+
+  for (const file of PUBLIC_ROUTES.map(fileForRoute)) {
+    const main = visibleText(mainRegion(pageSource(file)));
+    const match = main.match(misassignedWork);
+    if (match) problems.push(`${file}: assigns course work to the tool with "${match[0]}"`);
+  }
+
+  for (const file of ["index.html", ...ILLUSTRATED_PAGES]) {
+    for (const match of pageSource(file).matchAll(/<(div|p)\b[^>]*class="[^"]*(?:conversation-bubble|role-message)[^"]*"[^>]*>([\s\S]*?)<\/\1>/g)) {
+      const text = visibleText(match[2]);
+      if (misassignedWork.test(text)) problems.push(`${file}: assistant says "${text}"`);
+    }
+  }
+
+  assert.match(
+    visibleText(mainRegion(pageSource("index.html"))),
+    /Your assistant can use Morrow to build lessons[\s\S]*Morrow supplies the course tools; your assistant does the work/,
+  );
+  assert.deepEqual(problems, [], "the assistant performs course work; Morrow supplies the course tools it uses");
+});
+
 test("the homepage accessibility request covers course files, videos, Item Banks, and New Quizzes", { skip }, () => {
   const html = pageSource("index.html");
   const start = html.indexOf('id="scenario-panel-accessibility"');
@@ -902,7 +931,7 @@ test("the homepage accessibility request covers course files, videos, Item Banks
     "four New Quizzes",
     "videos without captions",
     "accessible replacements for three PDFs",
-    "checked every page, file, video, Item Bank, and New Quiz",
+    "opened every item through Morrow and checked it again",
   ]) assert.ok(panel.includes(phrase), `the homepage accessibility conversation must include "${phrase}"`);
 });
 
@@ -1139,7 +1168,7 @@ export const QA_REVIEW_STATE_HEADINGS = {
 
 test("the /for-qa-teams page joins broad Morrow checks with definitive learner-view review", { skip }, () => {
   const page = rolePage("for-qa-teams.html");
-  assert.match(page, /Morrow checks pages, files, videos, Item Banks, and New Quizzes/);
+  assert.match(page, /Your assistant uses Morrow to check pages, files, videos, Item Banks, and New Quizzes/);
   assert.match(page, /Certification also uses learner-view tests, assistive technology, and expert judgment/);
   assert.match(page, /automated findings, approved repairs, learner-view checks, and expert decisions/);
 });
@@ -1257,12 +1286,12 @@ test("the final website pass keeps role examples, broad media coverage, setup co
   assert.match(designer, /Turn a course pattern into a design brief/);
   assert.match(designer, /Nothing has changed in a course/);
   assert.doesNotMatch(designer, /104 things to check|Eight templates account|46 repairs across/);
-  assert.match(qa, /Morrow checked 684 pages, files, videos, bank questions, and quiz questions/);
+  assert.match(qa, /I used Morrow to check 684 pages, files, videos, bank questions, and quiz questions/);
   assert.match(qa, /62 changes across 41 pages, files, videos, Item Bank questions, and New Quiz items/);
 
   for (const [file, phrase] of [
-    ["features.html", "Morrow checks image descriptions, heading order, table headers, document structure, and whether videos include captions."],
-    ["for-instructional-designers.html", "Morrow finds missing image descriptions, heading and table problems, document structure problems, and videos without captions."],
+    ["features.html", "Your assistant uses Morrow to check image descriptions, heading order, table headers, document structure, and whether videos include captions."],
+    ["for-instructional-designers.html", "Your assistant uses Morrow to find missing image descriptions, heading and table problems, document structure problems, and videos without captions."],
     ["for-qa-teams.html", "17 PDFs without document headings, nine videos without captions"],
     ["index.html", "Go through the pages, files, videos, Item Banks, and New Quizzes."],
   ]) assert.ok(pageSource(file).includes(phrase), `${file} must show the full accessibility and media review capability`);
@@ -1277,7 +1306,7 @@ test("the final website pass keeps role examples, broad media coverage, setup co
   const setup = pageSource("how-it-works.html");
   assert.ok(!download.includes("Adding Morrow Bridge takes one manual step"), "/download keeps the retired long setup lead");
   assert.ok(!setup.includes("Morrow lists the assistants it found"), "/how-it-works keeps the retired long setup copy");
-  assert.match(download, /Morrow Bridge lets Morrow use the Canvas or Moodle tab/);
+  assert.match(download, /Morrow Bridge lets your assistant use Morrow with the Canvas or Moodle tab/);
   assert.match(setup, /Morrow finds the assistants on your computer/);
 
   const styles = readFileSync(new URL("styles.css", site), "utf8");
