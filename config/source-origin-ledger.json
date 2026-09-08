@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "0ef999184a6750980c1418ae979c491dfed44921",
+  "candidateCommit": "1fd5cd230e40acac98e9e67ef014cfcd8620220a",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -1809,14 +1809,14 @@
     },
     {
       "path": "installer/main.cjs",
-      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "sourceCommit": "1fd5cd230e40acac98e9e67ef014cfcd8620220a",
       "originalPath": "installer/main.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "0c13a48626e19b42f5e470d1d3d47464d7ec880b77d1641e6b92ffb36ec9be50",
-      "afterDigest": "41b698d942f29b7b5b82fe5ed16c501568eb79dafb913817b7730295be74f7eb"
+      "beforeDigest": "41b698d942f29b7b5b82fe5ed16c501568eb79dafb913817b7730295be74f7eb",
+      "afterDigest": "2ba1a2c20a126f42c1a6c8e2783aab7922a5d452b475a7143a858c766f3d8241"
     },
     {
       "path": "installer/package.json",
@@ -1941,14 +1941,14 @@
     },
     {
       "path": "installer/shared/contract.cjs",
-      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "sourceCommit": "1fd5cd230e40acac98e9e67ef014cfcd8620220a",
       "originalPath": "installer/shared/contract.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "beb4b76e05002c894cd51d62e3eff98b87c4441cad39e8d4f7c2a0a0e60946e4",
-      "afterDigest": "87b166fd7d084af864554b829adc2ebb8243226681ea7a3786fc034ce4b80b29"
+      "beforeDigest": "87b166fd7d084af864554b829adc2ebb8243226681ea7a3786fc034ce4b80b29",
+      "afterDigest": "6df0fe3b7bb1fbefb096cea42b9ef715aeac22da44f4b19a52de29a5fc06b2c2"
     },
     {
       "path": "installer/shared/electron-updater-adapter.cjs",
@@ -2128,14 +2128,14 @@
     },
     {
       "path": "installer/test/contract.test.cjs",
-      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "sourceCommit": "1fd5cd230e40acac98e9e67ef014cfcd8620220a",
       "originalPath": "installer/test/contract.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f49f0b88c3042d43b87d4e389e481cff251cfccdbec537cbc01c83abbdffba33",
-      "afterDigest": "ea14a5ef031ae63ff2253501b2e9432466854c5bd14f148de9acfd5edd981e23"
+      "beforeDigest": "ea14a5ef031ae63ff2253501b2e9432466854c5bd14f148de9acfd5edd981e23",
+      "afterDigest": "76423d35768c51953381ca9bf26618ba142682dcaf405b0433190c7c5270f1b2"
     },
     {
       "path": "installer/test/electron-builder-config.test.cjs",
