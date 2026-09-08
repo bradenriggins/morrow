@@ -101,10 +101,21 @@ test("wrong active-folder identity or malformed nonce proof is refused before qu
   );
 });
 
-test("Store-installed Bridge is refused without a broader management permission", async () => {
+test("Store-installed Bridge reports signed status without reading an unpacked-folder marker", async () => {
   const testFixture = fixture({ installType: "normal" });
-  await rejectsCode(() => testFixture.create().control({ action: "quiesce" }), "bridge_store_install_refused");
-  await rejectsCode(() => testFixture.create().control({ action: "readback" }), "bridge_store_install_refused");
+  const maintenance = testFixture.create();
+  assert.deepEqual(await maintenance.control({ action: "status" }), {
+    schema: "morrow.bridge.update-status.v1",
+    extensionId: EXTENSION_ID,
+    manifestVersion: VERSION,
+    installType: "normal",
+    quiescent: false,
+    activeFolderProof: null,
+  });
+  assert.deepEqual(testFixture.calls, [], "Store status never reads an app-owned file");
+  await rejectsCode(() => maintenance.control({ action: "quiesce" }), "bridge_store_install_refused");
+  await rejectsCode(() => maintenance.control({ action: "readback" }), "bridge_store_install_refused");
+  assert.deepEqual(testFixture.calls, [], "Store installs never enter file-layer maintenance");
 });
 
 test("pending and unknown write receipts block quiescence before any file-layer handoff", async () => {

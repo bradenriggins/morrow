@@ -387,6 +387,7 @@ describe("MorrowRuntime durable batches", () => {
     let socket: WebSocket | undefined;
     let server: ReturnType<typeof serveStdio> | undefined;
     let client: Client | undefined;
+    let storeStatus = false;
     try {
       runtime = await MorrowRuntime.connect(connectorConfig(directory, port), { statePath: join(directory, "gateway.sqlite3") });
       socket = await connectAuditBridge(port, [], [], {
@@ -412,7 +413,14 @@ describe("MorrowRuntime durable batches", () => {
           }
           expect(command.kind).toBe("bridge_maintenance");
           expect(command.maintenance).toEqual({ action: "status" });
-          return {
+          return storeStatus ? {
+            schema: "morrow.bridge.update-status.v1",
+            extensionId: "a".repeat(32),
+            manifestVersion: "1.0.3",
+            installType: "normal",
+            quiescent: false,
+            activeFolderProof: null,
+          } : {
             schema: "morrow.bridge.update-status.v1",
             extensionId: "a".repeat(32),
             manifestVersion: "1.0.2",
@@ -434,6 +442,15 @@ describe("MorrowRuntime durable batches", () => {
         schema: "morrow.bridge.update-status.v1",
         extensionId: "a".repeat(32),
         installType: "development",
+      });
+      storeStatus = true;
+      await expect(runtime.bridgeMaintenance({ action: "status" })).resolves.toEqual({
+        schema: "morrow.bridge.update-status.v1",
+        extensionId: "a".repeat(32),
+        manifestVersion: "1.0.3",
+        installType: "normal",
+        quiescent: false,
+        activeFolderProof: null,
       });
       await expect(runtime.bridgeMaintenance({ action: "status", path: "/tmp/Bridge" }))
         .rejects.toThrow("private Bridge maintenance control");

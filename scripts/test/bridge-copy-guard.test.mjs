@@ -153,6 +153,18 @@ test("current setup surfaces use three stages and platform-specific course actio
   assert.match(help, /Choose your assistant[\s\S]*Finish Morrow Bridge setup[\s\S]*Open and connect your course/);
 });
 
+test("the popup discloses course data use before its connection action", () => {
+  const popup = readFileSync(new URL("connector/extension/popup/popup.html", root), "utf8");
+  const disclosure = popup.indexOf('class="data-disclosure"');
+  const connectionAction = popup.indexOf('id="primary"');
+  assert.ok(disclosure >= 0 && disclosure < connectionAction, "the disclosure must appear before the connection action");
+  assert.match(popup, /reads the Canvas or Moodle pages and course content needed for your requests/);
+  assert.match(popup, /Course content can include names, email addresses, and messages/);
+  assert.match(popup, /to the assistant you choose/);
+  assert.match(popup, /Your Chrome password and cookies stay in Chrome/);
+  assert.match(popup, /href="https:\/\/meetmorrow\.app\/privacy"/);
+});
+
 test("the approval pages carry no decorative eyebrow label", async () => {
   const pages = await approvalPages({
     operationId: "op:copy-guard-review",

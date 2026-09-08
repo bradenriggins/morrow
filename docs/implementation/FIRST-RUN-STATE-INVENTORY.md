@@ -190,7 +190,7 @@ no course or account value (`connector/extension/src/service-worker.js:3606`).
 Every control is a native button. A control that does not apply is hidden, which removes it from the
 tab order (`connector/extension/popup/popup.js:60`). The help disclosure uses the same three stages as the app and website:
 choose the assistant, finish Morrow Bridge, then open and connect the course
-(`connector/extension/popup/popup.html:29-31`).
+(`connector/extension/popup/popup.html:33-35`).
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
@@ -506,7 +506,7 @@ stale name here.
 | `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
 | `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
 | `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
-| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:18`, `connector/extension/popup/popup-view.js:59` |
+| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:22`, `connector/extension/popup/popup-view.js:59` |
 | `Try again` | Popup | `connector/extension/popup/popup-view.js:56` |
 | `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:41` |
 | `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:61` |
@@ -514,11 +514,11 @@ stale name here.
 | `Open Canvas or Moodle` | Popup | `connector/extension/popup/popup-view.js:63` |
 | `Connect Canvas` | Popup | `connector/extension/popup/popup-view.js:106` |
 | `Connect Moodle` | Popup | `connector/extension/popup/popup-view.js:106` |
-| `Check or switch course` | Popup | `connector/extension/popup/popup.html:19` |
-| `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:20` |
-| `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:22` |
-| `Open setup guide` | Popup | `connector/extension/popup/popup.html:25` |
-| `How to connect` | Popup | `connector/extension/popup/popup.html:27` |
+| `Check or switch course` | Popup | `connector/extension/popup/popup.html:23` |
+| `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:24` |
+| `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:26` |
+| `Open setup guide` | Popup | `connector/extension/popup/popup.html:29` |
+| `How to connect` | Popup | `connector/extension/popup/popup.html:31` |
 | `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:19` |
 | `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:20` |
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:43`, `connector/extension/onboarding/onboarding.html:43` |
@@ -600,7 +600,7 @@ This approval-page issue does not block first-run setup and was not changed in t
   seen.
 - Nobody used a screen reader. Live-region behaviour, reading order, and how the popup's four regions
   (`connector/extension/popup/popup.html:14`, `connector/extension/popup/popup.html:15`,
-  `connector/extension/popup/popup.html:23`, `connector/extension/popup/popup.html:24`) sound in
+  `connector/extension/popup/popup.html:27`, `connector/extension/popup/popup.html:28`) sound in
   sequence are unverified.
 - No live LMS was used. Every course state above comes from a state built in a test, not from Canvas,
   Moodle or Blackboard.

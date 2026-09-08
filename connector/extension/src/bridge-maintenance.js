@@ -188,7 +188,11 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
 
   async function status() {
     const current = await identity();
-    const proof = await activeFolderProof(current);
+    // Chrome Web Store installs do not contain the app-owned marker that binds
+    // an unpacked development copy to Morrow's Bridge folder. Their signed
+    // extension identity is sufficient for status only; every file-layer
+    // maintenance action below remains limited to development installs.
+    const proof = current.installType === "normal" ? null : await activeFolderProof(current);
     const persistedFence = await loadFence();
     return {
       schema: STATUS_SCHEMA,

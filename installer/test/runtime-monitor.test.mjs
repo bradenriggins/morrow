@@ -227,6 +227,7 @@ async function bridgeOwnerEndpoint(workspaceRoot, journalPath) {
   const leaseToken = "morrow-runtime-monitor-bridge-test-lease-token-123456";
   const calls = [];
   let malformed = false;
+  let storeStatus = false;
   const proof = () => ({
     schema: "morrow.bridge.active-folder-proof.v1",
     extensionId,
@@ -237,9 +238,9 @@ async function bridgeOwnerEndpoint(workspaceRoot, journalPath) {
   });
   const resultFor = (control) => {
     if (malformed) return { schema: "morrow.bridge.update-status.v1" };
-    if (control.action === "status") return {
-      schema: "morrow.bridge.update-status.v1", extensionId, manifestVersion, installType: "development", quiescent: false, activeFolderProof: proof(),
-    };
+    if (control.action === "status") return storeStatus
+      ? { schema: "morrow.bridge.update-status.v1", extensionId, manifestVersion: "1.0.3", installType: "normal", quiescent: false, activeFolderProof: null }
+      : { schema: "morrow.bridge.update-status.v1", extensionId, manifestVersion, installType: "development", quiescent: false, activeFolderProof: proof() };
     if (control.action === "quiesce") return {
       schema: "morrow.bridge.update-quiesced.v1", extensionId, manifestVersion, installType: "development", quiescent: true,
       quiesceEpoch: "runtime-monitor-bridge-quiesce-epoch", activeFolderProof: proof(),
@@ -309,6 +310,7 @@ async function bridgeOwnerEndpoint(workspaceRoot, journalPath) {
     leaseToken,
     calls,
     malformed: () => { malformed = true; },
+    useStoreStatus: () => { storeStatus = true; },
     async close() {
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     },
@@ -401,8 +403,17 @@ test("uses only the held private owner lease for Bridge maintenance", async (t) 
     },
   });
   assert.equal(JSON.stringify(status).includes(endpoint.leaseToken), false);
+  endpoint.useStoreStatus();
+  assert.deepEqual(await monitor.bridgeMaintenance({ action: "status" }), {
+    schema: "morrow.bridge.update-status.v1",
+    extensionId: endpoint.extensionId,
+    manifestVersion: "1.0.3",
+    installType: "normal",
+    quiescent: false,
+    activeFolderProof: null,
+  });
   await assert.rejects(monitor.bridgeMaintenance({ action: "quiesce" }), /lease is not held/);
-  assert.equal(endpoint.calls.length, 1, "non-status Bridge controls must not reach the owner before acquire");
+  assert.equal(endpoint.calls.length, 2, "non-status Bridge controls must not reach the owner before acquire");
 
   await monitor.start();
   assert.deepEqual(await monitor.maintenance({ action: "acquire", holderPid: process.pid }), {
@@ -435,6 +446,7 @@ test("uses only the held private owner lease for Bridge maintenance", async (t) 
     workspace: call.workspace,
   }));
   assert.deepEqual(privateCalls.map(({ action, control, hasLease }) => ({ action, control, hasLease })), [
+    { action: "bridge", control: "status", hasLease: false },
     { action: "bridge", control: "status", hasLease: false },
     { action: "acquire", control: null, hasLease: false },
     { action: "bridge", control: "quiesce", hasLease: true },

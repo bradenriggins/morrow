@@ -104,9 +104,12 @@ function privateBridgeMaintenanceResult(control: BridgeMaintenanceControl, value
   const extensionId = source.extensionId;
   const manifestVersion = source.manifestVersion;
   if (control.action === "status") {
+    const statusProof = source.installType === "normal"
+      ? source.activeFolderProof === null
+      : activeFolderProof(source.activeFolderProof, extensionId, manifestVersion);
     if (!exactKeys(source, ["schema", "extensionId", "manifestVersion", "installType", "quiescent", "activeFolderProof"])
       || source.schema !== "morrow.bridge.update-status.v1" || !["admin", "development", "normal", "sideload", "other"].includes(String(source.installType))
-      || typeof source.quiescent !== "boolean" || !activeFolderProof(source.activeFolderProof, extensionId, manifestVersion)) {
+      || typeof source.quiescent !== "boolean" || !statusProof) {
       throw new Error("The private Bridge status result is invalid.");
     }
   } else if (control.action === "quiesce") {

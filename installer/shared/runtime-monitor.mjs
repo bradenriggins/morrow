@@ -266,11 +266,14 @@ function bridgeRecord(control, value) {
   const extensionId = record.extensionId;
   const manifestVersion = record.manifestVersion;
   if (control.action === "status") {
+    const statusProof = record.installType === "normal"
+      ? record.activeFolderProof === null
+      : activeFolderProof(record.activeFolderProof, extensionId, manifestVersion);
     if (!exactKeys(record, ["schema", "extensionId", "manifestVersion", "installType", "quiescent", "activeFolderProof"])
       || record.schema !== "morrow.bridge.update-status.v1"
       || !["admin", "development", "normal", "sideload", "other"].includes(record.installType)
       || typeof record.quiescent !== "boolean"
-      || !activeFolderProof(record.activeFolderProof, extensionId, manifestVersion)) return null;
+      || !statusProof) return null;
   } else if (control.action === "quiesce") {
     if (!exactKeys(record, ["schema", "extensionId", "manifestVersion", "installType", "quiescent", "quiesceEpoch", "activeFolderProof"])
       || record.schema !== "morrow.bridge.update-quiesced.v1"

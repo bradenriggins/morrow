@@ -723,7 +723,11 @@ class InstallerController {
 
   async currentBridgeStatus(record, monitor) {
     const status = await monitor.bridgeMaintenance({ action: "status" });
-    if (!sameBridgeChallenge(record, status)) throw new Error("Morrow Bridge active folder is unconfirmed");
+    if (status?.extensionId !== BRIDGE_EXTENSION_ID) throw new Error("Morrow Bridge identity is unconfirmed");
+    if (status.installType === "normal") return status;
+    if (status.installType !== "development" || !sameBridgeChallenge(record, status)) {
+      throw new Error("Morrow Bridge active folder is unconfirmed");
+    }
     return status;
   }
 
@@ -1505,7 +1509,8 @@ class InstallerController {
     if (!monitor || runtime?.health?.gatewayReady !== true) return "unknown";
     try {
       const answer = await monitor.bridgeMaintenance({ action: "status" });
-      return sameBridgeChallenge(installation, answer) ? true : "unknown";
+      if (answer?.extensionId === BRIDGE_EXTENSION_ID && answer.installType === "normal") return true;
+      return answer?.installType === "development" && sameBridgeChallenge(installation, answer) ? true : "unknown";
     } catch {
       return "unknown";
     }

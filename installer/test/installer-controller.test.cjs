@@ -273,6 +273,18 @@ function bridgeStatusAnswer(challenge, overrides = {}) {
   };
 }
 
+function storeBridgeStatusAnswer(overrides = {}) {
+  return {
+    schema: "morrow.bridge.update-status.v1",
+    extensionId: BRIDGE_EXTENSION_ID,
+    manifestVersion: "1.0.3",
+    installType: "normal",
+    quiescent: false,
+    activeFolderProof: null,
+    ...overrides
+  };
+}
+
 const READY_HEALTH = { attempted: true, gatewayReady: true, bridgeConnected: false, canRestart: "yes" };
 
 test("the reported Chrome load state comes from a proof, never from the written folder", async () => {
@@ -331,6 +343,45 @@ test("the reported Chrome load state comes from a proof, never from the written 
 
   installer.runtimeMonitor = { bridgeMaintenance: async () => { throw new Error("Morrow Bridge maintenance result is invalid"); } };
   assert.equal(await installer.bridgeLoadedInChrome(installation, runtime), "unknown");
+});
+
+test("a paired Chrome Web Store Bridge is accepted without app-folder maintenance", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const installation = bridgeInstallation();
+  const storeStatus = storeBridgeStatusAnswer({ manifestVersion: "1.0.9" });
+  const calls = [];
+  const monitor = {
+    bridgeMaintenance: async (control) => {
+      calls.push(control);
+      return storeStatus;
+    }
+  };
+  installer.runtimeMonitor = monitor;
+
+  assert.deepEqual(await installer.currentBridgeStatus(installation, monitor), storeStatus);
+  assert.equal(await installer.bridgeLoadedInChrome(installation, { health: { ...READY_HEALTH } }), true);
+
+  let staged = false;
+  installer.verifiedBridgeInstallation = async () => installation;
+  installer.packagedBridgeRelease = async () => ({ version: "1.0.4" });
+  installer.bridgeMonitor = async () => monitor;
+  installer.stageBridgeUpdate = async () => { staged = true; };
+  assert.equal(await installer.reconcileBridgeRelease(), installation);
+  assert.equal(staged, false, "Morrow never stages an app-folder swap for the Store Bridge");
+  assert.deepEqual(calls, [{ action: "status" }, { action: "status" }, { action: "status" }]);
+
+  await assert.rejects(
+    () => installer.currentBridgeStatus(installation, { bridgeMaintenance: async () => storeBridgeStatusAnswer({ extensionId: "a".repeat(32) }) }),
+    /identity is unconfirmed/,
+  );
+  await assert.rejects(
+    () => installer.currentBridgeStatus(installation, { bridgeMaintenance: async () => ({
+      ...bridgeStatusAnswer(installation.activeFolderChallenge),
+      installType: "admin",
+    }) }),
+    /active folder is unconfirmed/,
+  );
 });
 
 test("state() reports the Chrome load state the Bridge itself answered", async () => {
