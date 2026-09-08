@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "0927afa02e35094544e97b7912dc553b2d25dac8",
+  "candidateCommit": "ca276987be1979f8c1659e4cb62ca19833961a98",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -236,14 +236,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "0927afa02e35094544e97b7912dc553b2d25dac8",
+      "sourceCommit": "ca276987be1979f8c1659e4cb62ca19833961a98",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9484034c739fb28bac5ea1946dfc64519ff6492c6ece8f6caee883a05b1f5cca",
-      "afterDigest": "a6c522861b079e992337dc828d7a707d0ad5658f042f2d9c982dfe18780eb2ac"
+      "beforeDigest": "a6c522861b079e992337dc828d7a707d0ad5658f042f2d9c982dfe18780eb2ac",
+      "afterDigest": "347d057d254a5935907c2f4ef9c6233775eb5be9c332e03788ebaf3c459d4bc0"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -1974,14 +1974,14 @@
     },
     {
       "path": "installer/shared/runtime-monitor.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "1447cdd1a79d0b06fa2db3fd575c4c0c26cfde96",
       "originalPath": "installer/shared/runtime-monitor.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "bde6795c236d595ba4ee14a45eb37984ecaec51d722d59767007d098d5f63244"
+      "beforeDigest": "bde6795c236d595ba4ee14a45eb37984ecaec51d722d59767007d098d5f63244",
+      "afterDigest": "de246cc9e6bdb0b725ab69cb0be3eb3d9c27a26b1215664b8e059735ac3b7c6d"
     },
     {
       "path": "installer/shared/runtime.cjs",
@@ -2216,14 +2216,14 @@
     },
     {
       "path": "installer/test/runtime-monitor.test.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "1447cdd1a79d0b06fa2db3fd575c4c0c26cfde96",
       "originalPath": "installer/test/runtime-monitor.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "6c1d67beaf7d40c2002bac2dd1f608dbfbab8a87c2a23eaa30f80efcc64c7f44"
+      "beforeDigest": "6c1d67beaf7d40c2002bac2dd1f608dbfbab8a87c2a23eaa30f80efcc64c7f44",
+      "afterDigest": "0abb3a685c4d9106a35485daa86f08f8e39ff7c2c2dae06b1e8236fd8da7153c"
     },
     {
       "path": "installer/test/runtime.test.cjs",
@@ -4736,7 +4736,7 @@
     },
     {
       "path": "packages/mcp-server/src/runtime.ts",
-      "sourceCommit": "36207499cd4f29d1b8f8a5d61d13b494e7381f89",
+      "sourceCommit": "1447cdd1a79d0b06fa2db3fd575c4c0c26cfde96",
       "originalPath": "packages/mcp-server/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -4745,8 +4745,8 @@
         "packages/mcp-server/test/approval-context.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "123774ef19fe1791824cb11ea7b29b42df3185f605e735ae0de1c3fdcc4d41d3",
-      "afterDigest": "2b3e03e26f7ce6f8a34cde2f7fc69a37537545ef57b71b371d705b3d933cfb4e"
+      "beforeDigest": "2b3e03e26f7ce6f8a34cde2f7fc69a37537545ef57b71b371d705b3d933cfb4e",
+      "afterDigest": "e671b6ddb1bef9218d3760ddd9faf72dadc30c2705f9dd3bb1c2158d9dbff7a8"
     },
     {
       "path": "packages/mcp-server/src/sandbox-upstream.ts",
@@ -5065,14 +5065,14 @@
     },
     {
       "path": "packages/mcp-server/test/canvas-connector.integration.test.ts",
-      "sourceCommit": "36207499cd4f29d1b8f8a5d61d13b494e7381f89",
+      "sourceCommit": "1447cdd1a79d0b06fa2db3fd575c4c0c26cfde96",
       "originalPath": "packages/mcp-server/test/canvas-connector.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "274e68df32826217671d58298b9eff1f0482295d96dec4f466d8ce7d2a0aa694",
-      "afterDigest": "7c30f63ba7b85ab60da3e0996d6ac1465e71e7f3963f26be01b16412e2b24264"
+      "beforeDigest": "7c30f63ba7b85ab60da3e0996d6ac1465e71e7f3963f26be01b16412e2b24264",
+      "afterDigest": "ed563196cc5dff85d1fd58a0b9ddcdf82d4a816b94f3ee1183aba68156fa0c0c"
     },
     {
       "path": "packages/mcp-server/test/canvas-course-compose.test.ts",
