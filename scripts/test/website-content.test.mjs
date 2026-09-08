@@ -572,6 +572,100 @@ test("the site does not explain that its example course data is fictional", { sk
   assert.deepEqual(problems, [], "the website must show the examples without an unnecessary data disclaimer");
 });
 
+test("content uses surfaces and spacing instead of horizontal divider language", { skip }, () => {
+  const problems = [];
+  for (const file of htmlFiles) {
+    if (/<hr\b/i.test(pageSource(file))) problems.push(`${file}: contains an hr element`);
+  }
+
+  for (const file of STYLESHEETS) {
+    const lines = pageSource(file).split("\n");
+    lines.forEach((line, index) => {
+      if (!/border-(?:top|bottom|block)(?:-[a-z]+)?\s*:/.test(line)) return;
+      if (/\.nav-menu-button i::after|\.menu-toggle i|\.scenario-picker::after/.test(line)) return;
+      problems.push(`${file}:${index + 1}: ${line.trim()}`);
+    });
+  }
+
+  assert.deepEqual(problems, [], "sections, lists, and cards must not rebuild the removed horizontal-rule system");
+});
+
+test("headings wrap at the type scale and conversation transcripts stay available", { skip }, () => {
+  const styles = pageSource("styles.css");
+  const script = pageSource("script.js");
+  assert.match(styles, /h2, h3, h4 \{[^}]*white-space: normal;[^}]*text-wrap: balance;/);
+  assert.doesNotMatch(script, /fitTitles|createRange\(|conversation-stage\.js/);
+  assert.doesNotMatch(styles, /\.conversation-bubble\.is-revealing|@keyframes scenario-enter/);
+});
+
+test("navigation disclosures do not claim menu semantics they do not implement", { skip }, () => {
+  const problems = htmlFiles.filter((file) => /aria-haspopup=/.test(pageSource(file)));
+  assert.deepEqual(problems, []);
+});
+
+test("support starts with setup, separates connection and course help, and keeps uncertain changes safe", { skip }, () => {
+  const html = pageSource("support.html");
+  const ids = ["support-start", "connection-help", "course-help", "support-contact"];
+  const positions = ids.map((id) => html.indexOf(`id="${id}"`));
+  assert.ok(positions.every((position) => position >= 0), "support must include all four help routes");
+  assert.deepEqual(positions, [...positions].sort((left, right) => left - right), "support routes must follow the order a reader needs");
+  assert.ok(referencesIn(html).includes("/how-it-works#steps-title"));
+  assert.doesNotMatch(visibleText(html), /Not set up yet/i);
+  assert.match(visibleText(html), /Do not send the same change again\.[\s\S]*check the earlier change/);
+  assert.match(visibleText(html), /Do not send student records, passwords, sign-in details, or screenshots that show student information/);
+  assert.ok(referencesIn(html).includes("mailto:hello@meetmorrow.app"));
+});
+
+test("privacy value is prominent and stays inside the proven learner-report boundary", { skip }, () => {
+  for (const file of ["index.html", "features.html", "how-it-works.html", "download.html", "privacy.html"]) {
+    const html = pageSource(file);
+    assert.match(html, /data-privacy-value/, `${file} needs a visible privacy-value block`);
+    assert.ok(referencesIn(html).includes("/privacy") || file === "privacy.html", `${file} must link to the full privacy policy`);
+  }
+
+  const combined = ["index.html", "features.html", "how-it-works.html", "download.html"].map(pageSource).join("\n");
+  assert.match(combined, /sign-in stays in Chrome/);
+  assert.match(combined, /known roster identities/);
+  assert.match(combined, /exact course and complete roster/);
+  assert.match(combined, /Course text can still contain personal information/);
+  assert.doesNotMatch(combined, /automatic(?:ally)? (?:remove|filter|redact)|all (?:student|learner) (?:names|information)|fully anonymous/i);
+
+  const privacy = pageSource("privacy.html");
+  assert.match(privacy, /This is not general anonymization/);
+  assert.match(privacy, /do not rely on Morrow to make sensitive content anonymous/);
+});
+
+test("the footer presents the full site in three readable groups", { skip }, () => {
+  const problems = [];
+  for (const page of readablePages) {
+    const footer = region(page.html, "footer");
+    if (!footer) continue;
+    const groups = [...footer.matchAll(/class="footer-group"/g)].length;
+    for (const label of ["Product", "For educators", "Help and trust"]) {
+      if (!visibleText(footer).includes(label)) problems.push(`${page.file}: missing ${label}`);
+    }
+    if (groups !== 3) problems.push(`${page.file}: ${groups} footer groups`);
+  }
+  assert.deepEqual(problems, []);
+  assert.match(pageSource("styles.css"), /\.site-footer a \{[^}]*min-height: 44px/);
+});
+
+test("team reports do not promise a shared or cross-computer Morrow workspace", { skip }, () => {
+  const teams = visibleText(pageSource("for-teams.html"));
+  assert.match(teams, /Morrow does not provide a shared team workspace/);
+  assert.doesNotMatch(teams, /open (?:the set|a handoff|the handoff) through Morrow on (?:her|his|their) own computer/i);
+  assert.match(teams, /share through your institution’s approved system/);
+});
+
+test("role-page setup actions describe what their links do", { skip }, () => {
+  const problems = [];
+  for (const file of ILLUSTRATED_PAGES.filter((name) => name !== "features.html")) {
+    const text = visibleText(pageSource(file));
+    if (text.includes("Copy your first request")) problems.push(file);
+  }
+  assert.deepEqual(problems, []);
+});
+
 // The product pages carry the claims a reader checks before installing: what a course audit can
 // detect, which platforms Morrow reaches, and what adding Morrow Bridge takes today. Each check
 // below reads the page together with the source its claim comes from, so a change to either side
@@ -1306,7 +1400,7 @@ test("the final website pass keeps role examples, broad media coverage, setup co
   const setup = pageSource("how-it-works.html");
   assert.ok(!download.includes("Adding Morrow Bridge takes one manual step"), "/download keeps the retired long setup lead");
   assert.ok(!setup.includes("Morrow lists the assistants it found"), "/how-it-works keeps the retired long setup copy");
-  assert.match(download, /Morrow Bridge lets your assistant use Morrow with the Canvas or Moodle tab/);
+  assert.match(download, /Morrow Bridge connects Morrow on your computer to the Canvas or Moodle tab/);
   assert.match(setup, /Morrow finds the assistants on your computer/);
 
   const styles = readFileSync(new URL("styles.css", site), "utf8");
