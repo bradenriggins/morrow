@@ -335,6 +335,45 @@ describe("Canvas connector gateway path", () => {
       expect(writeCommands).toBe(0);
     });
 
+    it("returns the selected Canvas course through the compact MCP boundary", async () => {
+      await bindingsApplied();
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client(
+        { name: "morrow-canvas-course-first-read", version: "1" },
+        { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+      );
+      try {
+        await client.connect(clientTransport);
+        const course = await client.callTool({
+          name: "morrow_capability_read",
+          arguments: {
+            name: "canvas_get_single_course_courses",
+            arguments: {
+              id: "42",
+              _morrow: { source_binding_id: sourceBindingId },
+            },
+          },
+        });
+        expect(course.isError, JSON.stringify(course)).not.toBe(true);
+        expect(course.structuredContent).toMatchObject({
+          schema: "morrow.result.v1",
+          status: "succeeded",
+          data: {
+            schema: "morrow.canvas-connector.result.v1",
+            ok: true,
+            provider: "canvas",
+            commandKind: "invoke_read",
+            result: { data: { id: "42", name: "Biology" } },
+          },
+        });
+      } finally {
+        await client.close();
+        await server.close();
+      }
+      expect(writeCommands).toBe(0);
+    }, CASE_TIMEOUT_MS);
+
     it("checks the structure of two New Quizzes and writes nothing", async () => {
       // The report keeps question titles and counts, never a question body.
       expect(repeatedBody.length).toBe(2_107);

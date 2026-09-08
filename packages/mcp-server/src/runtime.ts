@@ -5940,8 +5940,19 @@ export class GatewayRuntime {
     const candidates = this.catalog.tools.filter((candidate) => isCanvasConnector(candidate));
     const sourceIds = [...new Set(candidates.map((candidate) => candidate.upstreamId))];
     if (sourceIds.length !== 1) throw new Error("learner_roster_source_unavailable");
-    const mapping = candidates.find((candidate) => candidate.upstreamId === sourceIds[0])!;
-    const binding = await this.verifiedBrowserBinding(mapping, request, options);
+    // Use the capability Morrow stamped on its own canonical result when the
+    // compact MCP wrapper invoked it. A Canvas route can name its course with a
+    // tool-specific path field such as `id`; an arbitrary connector mapping
+    // cannot interpret that field without confusing it with resource IDs.
+    const exactMapping = [
+      stampedTool ? this.toolByPublicName.get(stampedTool) : undefined,
+      options.toolName ? this.toolByPublicName.get(options.toolName) : undefined,
+    ].find((candidate) => candidate && isCanvasConnector(candidate));
+    const mapping = exactMapping || candidates.find((candidate) => candidate.upstreamId === sourceIds[0])!;
+    const bindingRequest = mapping.upstreamName === "canvas_get_single_course_courses"
+      ? { ...request, course_id: request.id }
+      : request;
+    const binding = await this.verifiedBrowserBinding(mapping, bindingRequest, options);
     if (binding.provider === "moodle") {
       if (this.isMoodleStagedFileMetadata(value, request, options.toolName)) {
         return this.strictNativeEgress(value) as JsonObject;
