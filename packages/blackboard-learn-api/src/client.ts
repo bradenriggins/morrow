@@ -11,6 +11,8 @@ const MAX_DIAGNOSTIC_HEADER_LENGTH = 200;
 const AUTHENTICATED_PRINCIPAL_PATH = "/learn/api/public/v1/users/me";
 /** A record, a created record, or a change the tenant accepted without describing it. */
 const ACCEPTED_STATUS = new Set([200, 201, 204]);
+/** The documented asynchronous course-copy request answers 202 with a task Location. */
+const COURSE_COPY_ACCEPTED_STATUS = 202;
 
 /**
  * The response headers Morrow keeps on a failure. Anthology tells an integration
@@ -229,6 +231,18 @@ export class BlackboardLearnClient {
     signal?: AbortSignal,
     retryUnauthorized = true,
   ): Promise<JsonObject | null> {
+    const response = await this.response(url, init, signal, retryUnauthorized);
+    if (!ACCEPTED_STATUS.has(response.status)) throw responseError(response, this.diagnosticHeaders);
+    return jsonResponse(response);
+  }
+
+  /** Sends one authenticated request after proving it stays on this Learn site. */
+  private async response(
+    url: URL,
+    init: RequestInit,
+    signal?: AbortSignal,
+    retryUnauthorized = true,
+  ): Promise<Response> {
     const origin = new URL(this.tenant.baseUrl).origin;
     if (url.origin !== origin || url.username || url.password) {
       throw new ApiError("blackboard_scope_binding_mismatch", "Blackboard request origin does not match this configured tenant.");
@@ -248,8 +262,7 @@ export class BlackboardLearnClient {
         this.token = undefined;
         response = await send();
       }
-      if (!ACCEPTED_STATUS.has(response.status)) throw responseError(response, this.diagnosticHeaders);
-      return jsonResponse(response);
+      return response;
     } catch (error) { throw abortError(error) || error; }
   }
 
@@ -288,6 +301,72 @@ export class BlackboardLearnClient {
 
   async put(path: string, payload: JsonObject, signal?: AbortSignal): Promise<JsonObject | null> {
     return this.write("PUT", path, payload, signal);
+  }
+
+  /**
+   * Starts the documented asynchronous Learn course-copy task. The Location is
+   * read with redirects disabled, because a followed redirect would discard the
+   * task identifier Morrow must verify before it reports success.
+   */
+  async startCourseCopy(
+    courseId: string,
+    targetCourseId: string,
+    canonicalCourseId: string,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    const response = await this.response(new URL(`/learn/api/public/v2/courses/${encodeURIComponent(courseId)}/copy`, this.tenant.baseUrl), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ targetCourse: { courseId: targetCourseId } }),
+      redirect: "manual",
+    }, signal, false);
+    if (response.status !== COURSE_COPY_ACCEPTED_STATUS) throw responseError(response, this.diagnosticHeaders);
+    return this.courseCopyTaskPath(response.headers.get("location"), canonicalCourseId);
+  }
+
+  /**
+   * Reads the task returned by `startCourseCopy`. Learn documents 200 while the
+   * copy is still running and 303 with the copied course Location when it ends.
+   */
+  async readCourseCopyTask(taskPath: string, courseId: string, signal?: AbortSignal): Promise<
+    { readonly state: "pending" } | { readonly state: "complete"; readonly coursePath: string }
+  > {
+    const task = new URL(this.courseCopyTaskPath(taskPath, courseId), this.tenant.baseUrl);
+    const response = await this.response(task, { method: "GET", redirect: "manual" }, signal);
+    if (response.status === 200) {
+      await jsonResponse(response);
+      return { state: "pending" };
+    }
+    if (response.status !== 303) throw responseError(response, this.diagnosticHeaders);
+    return { state: "complete", coursePath: this.courseCopyTargetPath(response.headers.get("location")) };
+  }
+
+  private courseCopyTaskPath(raw: string | null, courseId: string): string {
+    if (!raw) throw new ApiError("blackboard_response_invalid", "Blackboard accepted the course copy without a task location.");
+    let task: URL;
+    try { task = new URL(raw, this.tenant.baseUrl); }
+    catch { throw new ApiError("blackboard_response_invalid", "Blackboard returned an invalid course-copy task location."); }
+    const expected = `/learn/api/public/v1/courses/${encodeURIComponent(courseId)}/tasks/`;
+    const taskId = task.pathname.startsWith(expected) ? task.pathname.slice(expected.length) : "";
+    if (task.origin !== new URL(this.tenant.baseUrl).origin || task.username || task.password
+      || task.search || task.hash || !taskId || taskId.includes("/")) {
+      throw new ApiError("blackboard_response_invalid", "Blackboard returned an invalid course-copy task location.");
+    }
+    return task.pathname;
+  }
+
+  private courseCopyTargetPath(raw: string | null): string {
+    if (!raw) throw new ApiError("blackboard_response_invalid", "Blackboard completed the course copy without the copied course location.");
+    let course: URL;
+    try { course = new URL(raw, this.tenant.baseUrl); }
+    catch { throw new ApiError("blackboard_response_invalid", "Blackboard returned an invalid copied-course location."); }
+    const segments = course.pathname.split("/").filter(Boolean);
+    const valid = segments.length === 6 && segments[0] === "learn" && segments[1] === "api" && segments[2] === "public"
+      && /^v[1-3]$/.test(segments[3] || "") && segments[4] === "courses" && Boolean(segments[5]);
+    if (course.origin !== new URL(this.tenant.baseUrl).origin || course.username || course.password || course.hash || !valid) {
+      throw new ApiError("blackboard_response_invalid", "Blackboard returned an invalid copied-course location.");
+    }
+    return `${course.pathname}${course.search}`;
   }
 
   /**

@@ -166,11 +166,6 @@ const EFFECT_STATES = new Set([
   "verified", "failed", "applied_or_unknown", "cancelled", "closed_by_person",
 ]);
 const VERIFICATION_STATES = new Set(["not_requested", "unconfirmed", "verified"]);
-const DIGEST_FIELDS = [
-  "catalogDigest", "targetIdentityDigest", "requestDigest", "forwardedRequestDigest", "planDigest",
-  "approvalGrantDigest", "upstreamResultDigest", "readbackDigest",
-] as const;
-const DIGEST = /^[a-f0-9]{64}$/;
 const OPERATION_ID = /^[A-Za-z0-9_.:@-]{1,160}$/;
 const EFFECT_RECEIPT_ID = /^effect:[a-f0-9-]{36}$/;
 
@@ -189,17 +184,11 @@ function technicalOperation(operation: JsonObject): JsonObject {
   if (Number.isSafeInteger(operation.dispatchAttempt) && Number(operation.dispatchAttempt) >= 0) {
     receipt.dispatchAttempt = Number(operation.dispatchAttempt);
   }
-  const digests: JsonObject = {};
-  for (const field of DIGEST_FIELDS) {
-    const value = operation[field];
-    if (typeof value === "string" && DIGEST.test(value)) digests[field] = value;
-  }
   return {
     ...(typeof operation.operationId === "string" && OPERATION_ID.test(operation.operationId)
       ? { operationId: operation.operationId } : {}),
     ...(Object.keys(status).length ? { status } : {}),
     ...(Object.keys(receipt).length ? { receipt } : {}),
-    ...(Object.keys(digests).length ? { digests } : {}),
   };
 }
 
@@ -279,6 +268,9 @@ function readableName(value: string): string {
     moodle_hide_activity: "Hide activity",
     moodle_move_activity: "Move activity",
     blackboard_apply_reviewed_content_patch: "Edit item",
+    blackboard_apply_reviewed_course_copy: "Copy Blackboard course",
+    source_course_id: "Source Course ID",
+    destination_course_id: "New Course ID",
     limit: "Maximum courses",
     course_id: "Course ID",
     section_id: "Section ID",
@@ -349,6 +341,37 @@ function readableName(value: string): string {
     points: "Points",
     quiz_instructions: "Quiz instructions",
     quiz_description: "Quiz description",
+    quiz_quiz_settings_allow_backtracking: "Allow returning to previous questions",
+    quiz_quiz_settings_calculator_type: "Calculator",
+    quiz_quiz_settings_filter_ip_address: "Restrict access by IP address",
+    quiz_quiz_settings_filters_ips: "Allowed IP address ranges",
+    quiz_quiz_settings_has_time_limit: "Use a time limit",
+    quiz_quiz_settings_session_time_limit_in_seconds: "Time limit in seconds",
+    quiz_quiz_settings_multiple_attempts_multiple_attempts_enabled: "Allow multiple attempts",
+    quiz_quiz_settings_multiple_attempts_attempt_limit: "Limit the number of attempts",
+    quiz_quiz_settings_multiple_attempts_max_attempts: "Maximum attempts",
+    quiz_quiz_settings_multiple_attempts_cooling_period: "Require a wait between attempts",
+    quiz_quiz_settings_multiple_attempts_cooling_period_seconds: "Wait between attempts in seconds",
+    quiz_quiz_settings_multiple_attempts_score_to_keep: "Score to keep",
+    quiz_quiz_settings_one_at_a_time_type: "Question display",
+    quiz_quiz_settings_require_student_access_code: "Require an access code",
+    quiz_quiz_settings_student_access_code: "Access code",
+    quiz_quiz_settings_shuffle_answers: "Shuffle answers",
+    quiz_quiz_settings_shuffle_questions: "Shuffle questions",
+    quiz_quiz_settings_result_view_settings_result_view_restricted: "Restrict students' results view",
+    quiz_quiz_settings_result_view_settings_display_items: "Show questions in results",
+    quiz_quiz_settings_result_view_settings_display_item_response: "Show student responses",
+    quiz_quiz_settings_result_view_settings_display_item_response_qualifier: "Attempts that show student responses",
+    quiz_quiz_settings_result_view_settings_display_item_response_correctness: "Show whether responses are correct",
+    quiz_quiz_settings_result_view_settings_display_item_response_correctness_qualifier: "Attempts that show response correctness",
+    quiz_quiz_settings_result_view_settings_display_item_correct_answer: "Show correct answers",
+    quiz_quiz_settings_result_view_settings_display_item_feedback: "Show question feedback",
+    quiz_quiz_settings_result_view_settings_display_points_awarded: "Show points earned",
+    quiz_quiz_settings_result_view_settings_display_points_possible: "Show possible points",
+    quiz_quiz_settings_result_view_settings_show_item_responses_at: "Start showing student responses",
+    quiz_quiz_settings_result_view_settings_hide_item_responses_at: "Stop showing student responses",
+    quiz_quiz_settings_result_view_settings_show_item_response_correctness_at: "Start showing response correctness",
+    quiz_quiz_settings_result_view_settings_hide_item_response_correctness_at: "Stop showing response correctness",
     message: "Content preview",
     canvas_create_quiz_item: "Add quiz question",
     canvas_update_quiz_item: "Edit quiz question",
@@ -575,11 +598,14 @@ function namedTargetsMissing(operations: readonly JsonObject[], contexts: Readon
     const plan = object(operation.plan);
     if (!/^(canvas|moodle|blackboard)_/.test(String(plan.tool))) return false;
     const request = object(plan.arguments);
+    const blackboardCourseCopy = plan.tool === "blackboard_apply_reviewed_course_copy"
+      && typeof request.course_id === "string" && request.course_id.trim().length > 0
+      && typeof request.destination_course_id === "string" && request.destination_course_id.trim().length > 0;
     const context = contexts.get(String(operation.operationId));
     const targets = context?.targets || [];
     const source = context?.current?.current_section;
     return (plan.tool === "moodle_move_activity" && operation.state === "awaiting_approval" && (typeof source !== "string" || !source.trim()))
-      || targets.some((item) => !item.name.trim()) || ["id", "course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "section_id", "target_section_id", "category_id", "grade_item_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
+      || targets.some((item) => !item.name.trim()) || ["id", ...(!blackboardCourseCopy ? ["course_id"] : []), "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "section_id", "target_section_id", "category_id", "grade_item_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
       field in request && !targets.some((item) => item.field === field && item.name.trim()));
   });
 }
@@ -750,7 +776,11 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     const name = typeof entry.tool === "string" ? readableName(entry.tool) : "Requested changes";
     const blackboardEdit = entry.tool === BLACKBOARD_CONTENT_PATCH_APPLY_TOOL;
     const blackboardPatch = blackboardEdit ? blackboardContentFields(object(request.patch)) : "";
-    const hiddenFields = ["expected_digest", "expected_connection", "tenant_id", "source_binding_id", "expected_plan_digest", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id"] : []), ...targets.map((item) => item.field)];
+    const blackboardCourseCopy = entry.tool === "blackboard_apply_reviewed_course_copy";
+    const displayedRequest = blackboardCourseCopy
+      ? { source_course_id: request.course_id, destination_course_id: request.destination_course_id }
+      : request;
+    const hiddenFields = ["expected_digest", "expected_connection", "tenant_id", "source_binding_id", "expected_plan_digest", "morrow_new_quiz_settings_guard", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id"] : []), ...targets.map((item) => item.field)];
     const guardedImageAlt = ["image_alt", "page_image_alt", "assignment_image_alt", "discussion_image_alt"].includes(String(pageGuard.kind));
     const guardedText = ["text", "page_text"].includes(String(pageGuard.kind));
     const changes = blackboardPatch
@@ -761,7 +791,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
       ? `<div><dt>Image</dt><dd>Image ${pageGuard.image_index}</dd></div><div><dt>Alternative text</dt><dd>${pageGuard.decorative ? "Decorative image (empty alternative text)" : escapeHtml(pageGuard.alt_text)}</dd></div>`
       : guardedText && typeof pageGuard.find_text === "string" && typeof pageGuard.replace_text === "string"
       ? `<div><dt>Current text</dt><dd>${escapeHtml(pageGuard.find_text)}</dd></div><div><dt>Replacement</dt><dd>${pageGuard.replace_text === "" ? "Remove this text" : escapeHtml(pageGuard.replace_text)}</dd></div>`
-      : requestFields(["moodle_create_page", "moodle_create_label", "moodle_create_url", "moodle_create_resource_file", "moodle_create_folder_file", "moodle_create_imscp_package", "moodle_create_scorm_package", "moodle_create_assignment", "moodle_create_quiz", "moodle_create_forum", "moodle_create_choice"].includes(String(entry.tool)) ? { ...request, visible: false } : request, hiddenFields);
+      : requestFields(["moodle_create_page", "moodle_create_label", "moodle_create_url", "moodle_create_resource_file", "moodle_create_folder_file", "moodle_create_imscp_package", "moodle_create_scorm_package", "moodle_create_assignment", "moodle_create_quiz", "moodle_create_forum", "moodle_create_choice"].includes(String(entry.tool)) ? { ...displayedRequest, visible: false } : displayedRequest, hiddenFields);
     const addingQuestion = entry.tool === "canvas_create_quiz_item";
     const question = addingQuestion || entry.tool === "canvas_update_quiz_item";
     const preview = question ? questionPreview(request, hiddenFields, context?.question) : changes

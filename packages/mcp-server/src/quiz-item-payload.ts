@@ -36,7 +36,7 @@ const RICH_FILL_SLUGS: readonly string[] = ["rich_fill_blank", "rich_fill", "ric
  * here is refused rather than sent unchecked, because every other rich fill rule
  * keys off the kind and an unread kind makes the rest of them undecidable.
  */
-const BLANK_KINDS: Readonly<Record<string, string>> = { openentry: "openEntry", textinchoices: "TextInChoices", wordbank: "wordbank" };
+const BLANK_KINDS: Readonly<Record<string, string>> = { openentry: "openEntry", dropdown: "TextInChoices", textinchoices: "TextInChoices", wordbank: "wordbank" };
 
 const INTERACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 /** Comments, and tags whose attribute values may hold a ">" inside quotes. */
@@ -246,10 +246,27 @@ function matchingReason(interaction: unknown, scoring: unknown): string | null {
 
 function numericReason(interaction: unknown, scoring: unknown): string | null {
   const value = plainObject(scoring) ? scoring.value : undefined;
-  // `typeof true` is "boolean" in JavaScript, so a boolean cannot reach the
-  // number check here. The harvest names the boolean case because in Python,
-  // where the harvested validator ran, a boolean is a kind of integer.
-  if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value))) return "numeric_scoring_value_not_a_number";
+  if (Array.isArray(value)) {
+    // The public New Quiz item contract uses a list of typed numeric responses.
+    const ids = memberIds(value, "numeric_response_invalid", "numeric_response_invalid");
+    if (!Array.isArray(ids) || ids.length === 0) return "numeric_response_invalid";
+    const numeric = (number: unknown): boolean => (typeof number === "number" || (typeof number === "string" && number.trim() !== ""))
+      && Number.isFinite(Number(number));
+    for (const response of value) {
+      if (!plainObject(response)) return "numeric_response_invalid";
+      if (response.type === "withinARange") {
+        if (!numeric(response.start) || !numeric(response.end) || Number(response.start) > Number(response.end)) return "numeric_response_invalid";
+      } else {
+        if (!numeric(response.value)) return "numeric_response_invalid";
+        if (response.type === "marginOfError") {
+          if (!numeric(response.margin) || Number(response.margin) < 0 || !["percent", "absolute"].includes(asText(response.margin_type))) return "numeric_response_invalid";
+        } else if (response.type === "preciseResponse") {
+          if (!numeric(response.precision) || !Number.isInteger(Number(response.precision)) || Number(response.precision) < 0
+            || !["decimals", "significantDigits"].includes(asText(response.precision_type))) return "numeric_response_invalid";
+        } else if (response.type !== "exactResponse") return "numeric_response_invalid";
+      }
+    }
+  } else if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value))) return "numeric_scoring_value_not_a_number";
   if (!plainObject(interaction)) return null;
   const units = interaction.units;
   if (units !== undefined && units !== null && !(typeof units === "string" && units.trim() !== "")) return "numeric_units_blank";
@@ -303,7 +320,7 @@ function textInChoicesReason(blank: Plain, row: Plain | null): string | null {
   return correct !== "" && tokens.includes(correct) ? null : "rich_fill_text_in_choices_value_not_listed";
 }
 
-function wordBankReason(interaction: Plain, scoring: unknown, itemBody: unknown, ids: readonly string[]): string | null {
+function wordBankReason(interaction: Plain, scoring: unknown, itemBody: unknown, ids: readonly string[], wordBankIds: readonly string[]): string | null {
   if (!Array.isArray(interaction.word_bank_choices) || interaction.word_bank_choices.length < 2) return "rich_fill_word_bank_choices_too_few";
   const choiceIds = memberIds(interaction.word_bank_choices, "rich_fill_word_bank_choice_id_invalid", "rich_fill_word_bank_choice_id_duplicate");
   if (!Array.isArray(choiceIds)) return choiceIds;
@@ -314,12 +331,13 @@ function wordBankReason(interaction: Plain, scoring: unknown, itemBody: unknown,
   for (const blankId of ids) {
     const answer = rowAnswer(scoringRow(scoring, blankId));
     const value = asText(answer?.value);
-    if (value.trim() === "") return "rich_fill_blank_answer_missing";
-    // The learner sees the word bank; `blank_text` is what the blank shows when
-    // the answer is revealed, so it has to be that answer and not another word.
-    if (asText(answer?.blank_text) !== value) return "rich_fill_blank_text_mismatch";
-    if (!choiceIds.includes(asText(answer?.choice_id))) return "rich_fill_choice_id_unknown";
-    answers.push(value);
+    if (wordBankIds.includes(blankId)) {
+      if (value.trim() === "") return "rich_fill_blank_answer_missing";
+      // A word-bank blank must point at the same answer that it reveals.
+      if (asText(answer?.blank_text) !== value) return "rich_fill_blank_text_mismatch";
+      if (!choiceIds.includes(asText(answer?.choice_id))) return "rich_fill_choice_id_unknown";
+    }
+    answers.push(asText(answer?.blank_text) || value);
   }
   const markers = [...String(itemBody ?? "").matchAll(BLANK_MARKER)].map((match) => match[1] ?? match[2] ?? "");
   if (!sameIdSet([...new Set(markers)], ids)) return "rich_fill_body_blank_markers_mismatch";
@@ -344,13 +362,14 @@ function richFillReason(interaction: unknown, scoring: unknown, itemBody: unknow
   if (!Array.isArray(ids)) return ids;
   const kinds = blanks.map((blank, index) => plainObject(blank) ? blankKind(blank, scoringRow(scoring, ids[index] ?? "")) : "");
   if (kinds.includes("")) return "rich_fill_blank_kind_unreadable";
-  // A word bank is one shared list for the whole question. Mixing it with a
-  // typed or a listed blank leaves the other blanks pointing at nothing.
-  const wordBank = kinds.includes("wordbank");
-  if (wordBank && kinds.some((kind) => kind !== "wordbank")) return "rich_fill_word_bank_mixed_with_other_blanks";
-  if (wordBank) return wordBankReason(interaction, scoring, itemBody, ids);
+  const wordBankIds = ids.filter((_, index) => kinds[index] === "wordbank");
+  if (wordBankIds.length > 0) {
+    const reason = wordBankReason(interaction, scoring, itemBody, ids, wordBankIds);
+    if (reason) return reason;
+  }
   for (const [index, blank] of blanks.entries()) {
     if (!plainObject(blank)) return "rich_fill_blank_id_invalid";
+    if (kinds[index] === "wordbank") continue;
     const row = scoringRow(scoring, ids[index] ?? "");
     const reason = kinds[index] === "openEntry" ? openEntryReason(blank, row) : textInChoicesReason(blank, row);
     if (reason) return reason;
@@ -413,17 +432,17 @@ const MESSAGES: Readonly<Record<string, string>> = {
   matching_edit_data_matches_missing: "A matching question needs entry.scoring_data.edit_data.matches, covering every prompt.",
   matching_edit_data_matches_mismatch: "The match list does not cover exactly the prompts this matching question holds, once each.",
   numeric_scoring_value_not_a_number: "A numeric question needs a number as its answer.",
+  numeric_response_invalid: "A numeric response needs a unique id, a supported response type and valid numeric values for that type.",
   numeric_units_blank: "The units on this numeric question are empty. Name the units or leave them out.",
   numeric_dimensions_invalid: "The accepted range on this numeric question needs numbers for the values it names.",
   numeric_dimensions_min_above_max: "The lowest accepted value on this numeric question is above the highest.",
   rich_fill_blanks_missing: "A fill-in-the-blank question needs at least one blank in entry.interaction_data.",
   rich_fill_blank_id_duplicate: "Two blanks in this question share one id.",
   rich_fill_blank_id_invalid: "One blank in this question has no id Morrow can read.",
-  rich_fill_blank_kind_unreadable: "Morrow cannot tell what kind one blank is. Morrow reads a typed blank (openEntry), a listed-choice blank (TextInChoices), and a word-bank blank.",
+  rich_fill_blank_kind_unreadable: "Morrow cannot tell what kind one blank is. Morrow reads a typed blank (openEntry), a listed-choice blank (dropdown or TextInChoices), and a word-bank blank.",
   rich_fill_open_entry_answers_missing: "A typed blank needs at least one answer, and no answer may be empty.",
   rich_fill_text_in_choices_too_few: "A listed-choice blank needs at least two choices.",
   rich_fill_text_in_choices_value_not_listed: "The correct value of a listed-choice blank is not one of the choices it lists.",
-  rich_fill_word_bank_mixed_with_other_blanks: "A word bank is one shared list for the whole question, so its blanks cannot be mixed with typed or listed-choice blanks.",
   rich_fill_word_bank_choices_too_few: "A word bank needs at least two choices.",
   rich_fill_word_bank_choice_id_duplicate: "Two word-bank choices share one id.",
   rich_fill_word_bank_choice_id_invalid: "One word-bank choice has no id Morrow can read.",

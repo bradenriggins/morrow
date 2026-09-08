@@ -64,11 +64,24 @@ const ownItem = { id: "6", entry_type: "Item", entry: { item_body: "<p>Which org
 
 type Overrides = {
   course?: JsonObject;
+  courses?: Record<string, JsonObject>;
+  bindings?: JsonObject[];
+  bank?: JsonObject;
+  courseQuizzes?: Record<string, JsonObject>;
+  onRead?: (tool: string, args: JsonObject, calls: { tool: string; arguments: JsonObject }[]) => JsonObject | undefined;
   entries?: JsonObject;
   shares?: JsonObject;
   quizzes?: JsonObject;
   items?: Record<string, JsonObject>;
 };
+
+function courseBinding(id: string): JsonObject {
+  return {
+    sourceBindingId: id === courseId ? sourceBindingId : `canvas:course-${id}`, provider: "canvas",
+    origin: "https://school.instructure.com", courseId: id, principalFingerprint: "a".repeat(64),
+    sessionGeneration: 1, catalogDigest: "b".repeat(64), runtimeVerified: true,
+  };
+}
 
 function fixture(overrides: Overrides = {}) {
   const calls: { tool: string; arguments: JsonObject }[] = [];
@@ -79,13 +92,24 @@ function fixture(overrides: Overrides = {}) {
     capabilityGet: () => ({ descriptor: { route: { backend: "canvas-connector" } } }),
     resultPage: () => { throw new Error("unexpected artifact page"); },
     callSourceOwned: async (tool: string, args: JsonObject) => {
-      expect((args._morrow as JsonObject).source_binding_id).toBe(sourceBindingId);
       calls.push({ tool, arguments: args });
-      if (tool === "canvas_get_single_course_courses") return overrides.course ?? readResult({ id: courseId, name: "Biology" });
+      const custom = overrides.onRead?.(tool, args, calls);
+      if (custom) return custom;
+      if (tool === "morrow_browser_bindings") {
+        const bindings = overrides.bindings ?? [courseBinding(courseId), courseBinding("77"), courseBinding("88")];
+        return { structuredContent: { schema: "morrow.browser-bindings.v1", ok: true, count: bindings.length, bindings } };
+      }
+      const requestedCourseId = String(args.course_id ?? (tool === "canvas_get_single_course_courses" ? args.id : courseId));
+      expect((args._morrow as JsonObject).source_binding_id).toBe(courseBinding(requestedCourseId).sourceBindingId);
+      if (tool === "canvas_get_single_course_courses") return overrides.courses?.[String(args.id)]
+        ?? (args.id === courseId ? overrides.course : undefined) ?? readResult({ id: String(args.id), name: "Biology" });
+      if (tool === "canvas_item_bank_get_bank") return overrides.bank ?? readResult({ id: bankId, title: "Biology bank" });
+      if (tool === "canvas_get_new_quiz") return readResult({ id: String(args.assignment_id), course_id: String(args.course_id) });
       if (tool === "canvas_item_bank_list_entries") return overrides.entries ?? readResult([{ id: "20", entry_type: "BankEntry" }], { pageCount: 1 });
       if (tool === "canvas_item_bank_list_shares") return overrides.shares ?? readResult([]);
-      if (tool === "canvas_list_new_quizzes") return overrides.quizzes ?? readResult([{ id: "70", title: "Cell check" }]);
-      if (tool === "canvas_list_quiz_items") return overrides.items?.[String(args.assignment_id)] ?? readResult([ownItem]);
+      if (tool === "canvas_list_new_quizzes") return overrides.courseQuizzes?.[String(args.course_id)]
+        ?? (args.course_id === courseId ? overrides.quizzes ?? readResult([{ id: "70", title: "Cell check" }]) : readResult([]));
+      if (tool === "canvas_list_quiz_items") return overrides.items?.[`${args.course_id}:${args.assignment_id}`] ?? overrides.items?.[String(args.assignment_id)] ?? readResult([ownItem]);
       throw new Error(`unexpected tool ${tool}`);
     },
   } as unknown as GatewayRuntime;
@@ -121,21 +145,20 @@ describe("item bank fan-out reader", () => {
       { course_id: "77", entity_type: "shared_bank", entity_id: "77" },
     ]);
     expect(record.sources).toEqual([
-      { name: "bank_entries", pages: 1, exhausted: true },
-      { name: "shared_banks", pages: 1, exhausted: true },
-      { name: "quiz_uses", pages: 2, exhausted: true },
+      { name: "bank_entries", pages: 2, exhausted: true },
+      { name: "shared_banks", pages: 2, exhausted: true },
+      { name: "quiz_uses", pages: 5, exhausted: true },
     ]);
     expect(report.unread).toEqual([]);
     expect(text).toContain("course 77");
 
     const { validFanOut } = await bridgeFanOut();
     expect(await validFanOut(record, { bankId, courseId, acknowledgedCourseIds: record.external_course_ids, now: now() })).toBeNull();
-    expect(calls.map((call) => call.tool)).toEqual([
-      "canvas_get_single_course_courses", "canvas_item_bank_list_entries", "canvas_item_bank_list_shares",
-      "canvas_list_new_quizzes", "canvas_list_quiz_items",
-    ]);
-    expect(calls[1]?.arguments).toMatchObject({ bank_id: bankId, morrow_max_pages: 25 });
-    expect(calls[2]?.arguments).toMatchObject({ bank_id: bankId, per_page: 100 });
+    expect(calls.filter((call) => call.tool === "canvas_list_new_quizzes").map((call) => call.arguments.course_id))
+      .toEqual(["42", "42", "77", "77"]);
+    expect(calls.find((call) => call.tool === "canvas_item_bank_list_entries")?.arguments).toMatchObject({ bank_id: bankId, morrow_max_pages: 25 });
+    expect(calls.find((call) => call.tool === "canvas_item_bank_list_shares")?.arguments).toMatchObject({ bank_id: bankId, per_page: 100 });
+
   });
 
   it("records an unreadable share list as unread, never as an empty fan-out", async () => {
@@ -180,7 +203,7 @@ describe("item bank fan-out reader", () => {
     expect(record.complete).toBe(false);
     expect(record.external_course_ids).toEqual(["77", "88"]);
     expect(report.unread).toEqual([{ source: "quiz_uses", reasons: [expect.stringContaining("course 77, course 88")] }]);
-    expect((report.observed as JsonObject).quiz_use_courses_declared_by_caller).toEqual([]);
+    expect((report.observed as JsonObject).quiz_use_courses_requested).toEqual([]);
     expect(text).toContain("course 77, course 88");
 
     const { validFanOut } = await bridgeFanOut();
@@ -196,14 +219,100 @@ describe("item bank fan-out reader", () => {
     expect(record.complete).toBe(true);
     expect(record.external_course_ids).toEqual(["77", "88"]);
     expect((report.observed as JsonObject)).toMatchObject({
-      quiz_use_courses_read_by_morrow: ["42"], quiz_use_courses_declared_by_caller: ["77", "88"], quizzes_read: 1,
+      quiz_use_courses_read_by_morrow: ["42", "77", "88"], quiz_use_courses_requested: ["77", "88"], quizzes_read: 1,
     });
     expect(text).toContain("2 other courses: course 77, course 88");
-    expect(text).toContain("Morrow did not read those courses and records the declaration as yours");
+    expect(text).toContain("Morrow completed quiz reads for course 42, course 77, course 88");
 
     const { validFanOut } = await bridgeFanOut();
     expect(await validFanOut(record, { bankId, courseId, acknowledgedCourseIds: ["77", "88"], now: now() })).toBeNull();
     expect(await validFanOut(record, { bankId, courseId, acknowledgedCourseIds: ["77"], now: now() })).toBe("acknowledgement_mismatch");
+  });
+
+  it("reads external quiz items under their own course binding and includes their bank use", async () => {
+    const { runtime, calls } = fixture({
+      shares: sharedInto(["77"]),
+      courseQuizzes: { "77": readResult([{ id: "80", course_id: "77" }]) },
+      items: { "77:80": readResult([bankDrawItem]) },
+    });
+    const { record, report } = await readFanOut(runtime, ["77"]);
+
+    expect(record.complete).toBe(true);
+    expect(record.consumers).toEqual([
+      { course_id: "77", entity_type: "quiz_use", entity_id: "80" },
+      { course_id: "77", entity_type: "shared_bank", entity_id: "77" },
+    ]);
+    expect(calls.filter((call) => call.tool === "canvas_list_quiz_items")).toContainEqual({
+      tool: "canvas_list_quiz_items",
+      arguments: { course_id: "77", assignment_id: "80", morrow_max_pages: 25, _morrow: { source_binding_id: "canvas:course-77" } },
+    });
+    expect(report.observed).toMatchObject({ quiz_use_courses_read_by_morrow: ["42", "77"], quizzes_read: 2 });
+  });
+
+  it.each([
+    ["missing", []],
+    ["unverified", [{ ...courseBinding("77"), runtimeVerified: false }]],
+    ["another site", [{ ...courseBinding("77"), origin: "https://other.instructure.com" }]],
+    ["another account", [{ ...courseBinding("77"), principalFingerprint: "c".repeat(64) }]],
+    ["ambiguous", [courseBinding("77"), { ...courseBinding("77"), sourceBindingId: "canvas:other-77" }]],
+  ])("refuses a declared course whose binding is %s without reading through another binding", async (_name, external) => {
+    const { runtime, calls } = fixture({ shares: sharedInto(["77"]), bindings: [courseBinding(courseId), ...external] });
+    const { record } = await readFanOut(runtime, ["77"]);
+
+    expect(record.complete).toBe(false);
+    expect(record.unreachable).toEqual(["quiz_uses"]);
+    expect(calls.some((call) => call.arguments.course_id === "77" || call.arguments.id === "77")).toBe(false);
+  });
+
+  it.each([
+    ["permission denied", unavailableResult("The teacher cannot read these items.")],
+    ["truncated", budgetExceededResult([bankDrawItem], 25)],
+    ["wrong quiz", readResult([{ ...bankDrawItem, quiz_id: "999" }])],
+    ["conflicting bank", readResult([{ ...bankDrawItem, bank_id: "999" }])],
+  ])("keeps external quiz use unread when its item read is %s", async (_name, items) => {
+    const { runtime } = fixture({
+      shares: sharedInto(["77"]), courseQuizzes: { "77": readResult([{ id: "80" }]) },
+      items: { "77:80": items },
+    });
+    const { record, report } = await readFanOut(runtime, ["77"]);
+
+    expect(record.complete).toBe(false);
+    expect(record.unreachable).toEqual(["quiz_uses"]);
+    expect(report.observed).toMatchObject({ quiz_use_courses_read_by_morrow: ["42"] });
+    const { validFanOut } = await bridgeFanOut();
+    expect(await validFanOut(record, { bankId, courseId, acknowledgedCourseIds: ["77"], now: now() }))
+      .toBe("incomplete_unread_source_is_not_an_empty_fan_out");
+  });
+
+  it.each(["course", "quiz", "bank", "shares", "binding"])("refuses a %s context that changes during enumeration", async (kind) => {
+    const { runtime } = fixture({
+      shares: sharedInto(["77"]), courseQuizzes: { "77": readResult([{ id: "80" }]) },
+      onRead: (tool, args, calls) => {
+        const matching = calls.filter((call) => call.tool === tool && call.arguments.id === args.id && call.arguments.assignment_id === args.assignment_id);
+        if (kind === "course" && tool === "canvas_get_single_course_courses" && args.id === "77" && matching.length === 2) return readResult({ id: "88", name: "Moved" });
+        if (kind === "quiz" && tool === "canvas_get_new_quiz" && args.assignment_id === "80" && matching.length === 2) return readResult({ id: "81" });
+        if (kind === "bank" && tool === "canvas_item_bank_get_bank" && matching.length === 2) return readResult({ id: "92" });
+        if (kind === "shares" && tool === "canvas_item_bank_list_shares" && matching.length === 2) return sharedInto(["77", "88"]);
+        if (kind === "binding" && tool === "morrow_browser_bindings" && matching.length === 2) {
+          const bindings = [courseBinding(courseId), { ...courseBinding("77"), sessionGeneration: 2 }];
+          return { structuredContent: { schema: "morrow.browser-bindings.v1", ok: true, count: 2, bindings } };
+        }
+        return undefined;
+      },
+    });
+    const { record } = await readFanOut(runtime, ["77"]);
+    expect(record.complete).toBe(false);
+    expect(record.unreachable).toContain("quiz_uses");
+  });
+
+  it("shares one quiz-item read budget across courses and refuses the unread remainder", async () => {
+    const quizzes = readResult(Array.from({ length: 101 }, (_, index) => ({ id: String(index + 1) })));
+    const { runtime, calls } = fixture({ shares: sharedInto(["77"]), quizzes, courseQuizzes: { "77": quizzes } });
+    const { record, report } = await readFanOut(runtime, ["77"]);
+
+    expect(record.complete).toBe(false);
+    expect(calls.filter((call) => call.tool === "canvas_list_quiz_items")).toHaveLength(200);
+    expect(report.observed).toMatchObject({ quiz_use_courses_read_by_morrow: ["42"], quizzes_read: 200 });
   });
 
   it("records a bank shared into two other courses as two consumers", async () => {

@@ -61,6 +61,8 @@ const PRIVATE_MOODLE_SCORM_PACKAGE_TOOL = "moodle_create_scorm_package";
 const PRIVATE_MOODLE_SCORM_PACKAGE_OPERATION = "moodle.form.course.modedit.scorm.package.create.write.v1";
 const PRIVATE_MOODLE_H5P_ACTIVITY_TOOL = "moodle_create_h5pactivity";
 const PRIVATE_MOODLE_H5P_ACTIVITY_OPERATION = "moodle.form.course.modedit.h5pactivity.create.write.v1";
+const PRIVATE_MOODLE_H5P_REPLACE_TOOL = "moodle_replace_h5pactivity_package";
+const PRIVATE_MOODLE_H5P_REPLACE_OPERATION = "moodle.form.course.modedit.h5pactivity.package.replace.write.v1";
 const PRIVATE_MOODLE_RESOURCE_REPLACE_TOOL = "moodle_replace_resource_file";
 const PRIVATE_MOODLE_RESOURCE_REPLACE_OPERATION = "moodle.form.course.modedit.resource.file.replace.write.v1";
 const PRIVATE_MOODLE_SCORM_REPLACE_TOOL = "moodle_replace_scorm_package";
@@ -771,6 +773,8 @@ export class LoopbackBridgeServer {
           && invocation.operationKey === PRIVATE_MOODLE_SCORM_PACKAGE_OPERATION)
         || (invocation.toolName === PRIVATE_MOODLE_H5P_ACTIVITY_TOOL
           && invocation.operationKey === PRIVATE_MOODLE_H5P_ACTIVITY_OPERATION)
+        || (invocation.toolName === PRIVATE_MOODLE_H5P_REPLACE_TOOL
+          && invocation.operationKey === PRIVATE_MOODLE_H5P_REPLACE_OPERATION)
         || (invocation.toolName === PRIVATE_MOODLE_RESOURCE_REPLACE_TOOL
           && invocation.operationKey === PRIVATE_MOODLE_RESOURCE_REPLACE_OPERATION)
         || (invocation.toolName === PRIVATE_MOODLE_SCORM_REPLACE_TOOL

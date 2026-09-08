@@ -6,7 +6,7 @@ const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
-const { ASSISTANTS, installerState } = require("./contract.cjs");
+const { ASSISTANTS, errorDetails, installerState } = require("./contract.cjs");
 const { DATA_REMOVAL_SCHEMA, freshRecord, insideDirectory, inspectRecord, retentionSnapshot } = require("./state-policy.cjs");
 const {
   bridgeInstallationStatus,
@@ -109,64 +109,6 @@ function run(executable, argumentsValue, options = {}) {
       resolve({ code, stdout: limitedText(output), stderr: limitedText(error) });
     });
   });
-}
-
-function errorDetails(code) {
-  const values = {
-    assistant_not_found: {
-      message: "That assistant is not available on this computer.",
-      recovery: "Install or open the assistant, then return to Morrow."
-    },
-    workspace_required: {
-      message: "Choose a Morrow materials folder first.",
-      recovery: "Choose a folder that contains only the materials you want Morrow to use."
-    },
-    existing_morrow_configuration: {
-      message: "Morrow is already set up differently.",
-      recovery: "Your existing assistant settings were left unchanged. Review that setup before trying again."
-    },
-    assistant_configuration_changed: {
-      message: "That assistant's settings file changed after Morrow wrote it.",
-      recovery: "Morrow left that file exactly as it is. Open it, remove the morrow entry yourself, then select Check status."
-    },
-    runtime_repair_required: {
-      message: "Morrow needs repair.",
-      recovery: "Reinstall Morrow, then reopen it."
-    },
-    active_or_uncertain_operations: {
-      message: "Morrow has work in progress, or cannot confirm that it is idle.",
-      recovery: "Wait for the current step to finish, then start that step again."
-    },
-    bridge_delivery_unavailable: {
-      message: "Morrow Bridge is not available from the Chrome Web Store yet.",
-      recovery: "Use the temporary Chrome instructions in Morrow, then return here."
-    },
-    bridge_folder_unavailable: {
-      message: "Morrow could not show the Morrow Bridge folder.",
-      recovery: "Close Morrow and open it again, then select Show Bridge folder. If Morrow still cannot show it, reinstall Morrow."
-    },
-    blackboard_configuration_invalid: {
-      message: "Morrow could not save the Blackboard connection.",
-      recovery: "Check the Blackboard web address, the application key and secret from your administrator, and the account ID, then save again."
-    },
-    blackboard_course_selection_invalid: {
-      message: "Morrow could not save that Blackboard course.",
-      recovery: "Check the course ID in the course web address. It looks like _45_1. Your Blackboard connection was left as it was."
-    },
-    blackboard_removal_failed: {
-      message: "Morrow could not remove that Blackboard connection.",
-      recovery: "Check status to see the Blackboard connection Morrow has now, then remove it again."
-    },
-    setup_failed: {
-      message: "Morrow could not finish this step.",
-      recovery: "Morrow did not replace a newer assistant setting. Reopen Morrow and check its current setup before trying again."
-    },
-    cancelled: {
-      message: "No folder was selected.",
-      recovery: "Choose a folder when you are ready."
-    }
-  };
-  return { code, ...values[code] };
 }
 
 /**

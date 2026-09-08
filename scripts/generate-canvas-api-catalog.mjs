@@ -220,6 +220,33 @@ function classicQuizAnswersParameter(parameter) {
   };
 }
 
+// The New Quizzes model describes IP ranges as pairs and these settings as
+// nullable. Swagger's scalar parameter types lose both parts of that contract.
+// https://developerdocs.instructure.com/services/canvas/resources/new_quizzes
+function newQuizSettingsParameter(parameter) {
+  if (parameter.location !== "form") return parameter;
+  const nullable = new Set([
+    "quiz[quiz_settings][calculator_type]",
+    "quiz[quiz_settings][student_access_code]",
+    "quiz[quiz_settings][session_time_limit_in_seconds]",
+    "quiz[quiz_settings][multiple_attempts][max_attempts]",
+    "quiz[quiz_settings][multiple_attempts][cooling_period_seconds]",
+  ]);
+  if (["quiz[quiz_settings][filters][ips]", "quiz[quiz_settings][filters][ips][]"].includes(parameter.wireName)) {
+    return {
+      ...parameter,
+      schema: {
+        ...parameter.schema,
+        type: ["array", "null"],
+        items: { type: "array", minItems: 2, maxItems: 2, items: { type: "string" } },
+      },
+    };
+  }
+  return nullable.has(parameter.wireName)
+    ? { ...parameter, schema: { ...parameter.schema, type: [parameter.schema.type, "null"] } }
+    : parameter;
+}
+
 function createModuleItemInputSchema(parameters) {
   return {
     ...inputSchema(parameters),
@@ -314,7 +341,7 @@ function normalizeOfficialOperation(resource, api, rawOperation) {
   const parameters = parameterRecords(rawOperation.parameters).map((parameter) => (
     createModuleItem && parameter.wireName === "module_item[content_id]"
       ? { ...parameter, required: false }
-      : parameter
+      : path.startsWith("/quiz/v1/") ? newQuizSettingsParameter(parameter) : parameter
   ));
   const inputParameters = [
     ...parameters,
@@ -447,7 +474,7 @@ function applyCustomGradebookColumnUpdateParameters(operations) {
   update.inputSchema = inputSchema(update.parameters);
 }
 
-function applyClassicQuizDescriptionUpdateParameter(operations) {
+function applyClassicQuizUpdateParameters(operations) {
   const create = operations.find((operation) => (
     operation.method === "POST"
     && operation.path === "/v1/courses/{course_id}/quizzes"
@@ -460,15 +487,16 @@ function applyClassicQuizDescriptionUpdateParameter(operations) {
   ));
   if (!create || !update) throw new Error("Canvas Classic Quiz create/update operations are required.");
 
-  const description = create.parameters.find((parameter) => (
-    parameter.location === "form" && parameter.inputName === "quiz_description" && parameter.wireName === "quiz[description]"
-  ));
-  if (!description || create.parameters.filter((parameter) => parameter.wireName === "quiz[description]").length !== 1) {
-    throw new Error("Canvas Classic Quiz creation description parameter no longer matches the documented update contract.");
+  // Canvas's edit contract inherits the create fields and adds notify_of_update.
+  // https://developerdocs.instructure.com/services/canvas/resources/quizzes
+  const inherited = create.parameters.filter((parameter) => parameter.location === "form")
+    .map((parameter) => ({ ...parameter, required: false }));
+  if (!inherited.some((parameter) => parameter.wireName === "quiz[title]")) {
+    throw new Error("Canvas Classic Quiz creation fields no longer match the documented update contract.");
   }
 
   const byWireName = new Map(update.parameters.map((parameter) => [parameter.wireName, parameter]));
-  byWireName.set(description.wireName, { ...description, required: false });
+  for (const parameter of inherited) byWireName.set(parameter.wireName, parameter);
   update.parameters = [...byWireName.values()].sort((left, right) => ascii(left.inputName, right.inputName));
   update.inputSchema = inputSchema(update.parameters);
 }
@@ -514,7 +542,7 @@ async function buildCatalog() {
   }
   assignToolNames(official);
   applyCustomGradebookColumnUpdateParameters(official);
-  applyClassicQuizDescriptionUpdateParameter(official);
+  applyClassicQuizUpdateParameters(official);
   applyClassicQuizAnswerParameters(official);
   const itemBank = itemBankOperations();
   const courseFileContent = [courseFileTextOperation()];

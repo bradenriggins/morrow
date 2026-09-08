@@ -81,6 +81,19 @@ const VALID_ANSWERS = [
   { answer_text: "", answer_weight: 0, answer_html: "<p>Ankara</p>" },
 ];
 
+test("a Classic Quiz edit carries its documented title, time limit and shuffle fields", async () => {
+  const { result, requests } = await sendQuizQuestionWrite("canvas_edit_quiz", {
+    course_id: "42", id: "77", quiz_title: "Cell structures", quiz_time_limit: 30, quiz_shuffle_answers: true,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].pathname, "/api/v1/courses/42/quizzes/77");
+  assert.equal(requests[0].method, "PUT");
+  assert.deepEqual([...new URLSearchParams(requests[0].body).entries()], [
+    ["quiz[shuffle_answers]", "true"], ["quiz[time_limit]", "30"], ["quiz[title]", "Cell structures"],
+  ]);
+});
+
 test("a Classic Quiz question write sends every answer as indexed form fields", async () => {
   const { result, requests } = await sendQuizQuestionWrite("canvas_update_existing_quiz_question", {
     course_id: "42",

@@ -1162,6 +1162,7 @@ export function matchesBridgeEditPermission(
   binding: Omit<BridgeBinding, "editPermission"> & { readonly editPermission?: BridgeEditPermission },
   input: BridgeEditPermissionMatchInput,
 ): boolean {
+  if (Object.hasOwn(input.arguments, "morrow_new_quiz_settings_guard")) return false;
   const permission = binding.editPermission;
   if (!permission || binding.runtimeVerified !== true || binding.provider !== input.provider
     || permission.sourceBindingId !== binding.sourceBindingId || permission.catalogDigest !== input.catalogDigest

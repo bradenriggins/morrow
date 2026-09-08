@@ -138,8 +138,10 @@ describe("reviewed Moodle file dispatch", () => {
               ? { course_id: 2, module_id: 31, files: [{ filename: "old.pdf", size_bytes: 4 }] }
               : message.toolName === "moodle_get_folder_files"
                 ? { course_id: 2, module_id: 32, files: [], paths: ["/"] }
-                : message.toolName === "moodle_get_scorm"
-                  ? { course_id: 2, module_id: 33, name: "SCORM" }
+              : message.toolName === "moodle_get_scorm"
+                ? { course_id: 2, module_id: 33, name: "SCORM" }
+                : message.toolName === "moodle_get_h5pactivity"
+                  ? { course_id: 2, module_id: 34, name: "H5P activity", visible: false }
                   : { course_id: 2, section_id: 7, name: "Resource", visible: false }, snapshot_digest: formDigest,
           ...(message.kind === "invoke_write" ? {
             verification: { schema: "morrow.browser-verification.v1", status: "verified", strategy: "saved_resource_file_bytes" },
@@ -181,6 +183,7 @@ describe("reviewed Moodle file dispatch", () => {
       expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("morrow_plan_moodle_folder_files");
       expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("morrow_plan_moodle_scorm_package_replacement");
       expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("morrow_plan_moodle_h5p_package");
+      expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("morrow_plan_moodle_h5p_package_replacement");
       const hiddenRoster = await client.callTool({
         name: "morrow_capability_read",
         arguments: { name: "moodle_get_course_participant_roster", arguments: { course_id: 2 } },
@@ -393,6 +396,37 @@ describe("reviewed Moodle file dispatch", () => {
       expect((await runtime.dispatchOperation(h5pId)).isError).toBe(true);
       expect(writes).toHaveLength(7);
 
+      const invalidH5pReplacement = await client.callTool({ name: "morrow_plan_moodle_h5p_package_replacement", arguments: {
+        source_binding_id: sourceBindingId, course_id: 2, module_id: 34, file_path: "replacement.zip",
+      } });
+      expect(invalidH5pReplacement.isError).toBe(true);
+      expect(writes).toHaveLength(7);
+      const h5pReplacementBytes = Buffer.from("synthetic-private-h5p-replacement-fixture");
+      const h5pReplacementDigest = createHash("sha256").update(h5pReplacementBytes).digest("hex");
+      writeFileSync(join(directory, "replacement.h5p"), h5pReplacementBytes);
+      const h5pReplacementPlan = await client.callTool({ name: "morrow_plan_moodle_h5p_package_replacement", arguments: {
+        source_binding_id: sourceBindingId, course_id: 2, module_id: 34, file_path: "replacement.h5p",
+      } });
+      expect(h5pReplacementPlan.isError, JSON.stringify(h5pReplacementPlan)).not.toBe(true);
+      const h5pReplacementId = operationId(h5pReplacementPlan as unknown as JsonObject);
+      expect(runtime.operationGet(h5pReplacementId)).toMatchObject({
+        state: "awaiting_approval", publicToolName: "moodle_replace_h5pactivity_package", plan: { arguments: {
+          course_id: 2, module_id: 34, filename: "replacement.h5p", size_bytes: h5pReplacementBytes.length,
+          sha256: h5pReplacementDigest, expected_digest: formDigest,
+        } },
+      });
+      runtime.approveOperation(h5pReplacementId);
+      const h5pReplacementDispatch = await runtime.dispatchOperation(h5pReplacementId);
+      expect(h5pReplacementDispatch.isError, JSON.stringify(h5pReplacementDispatch)).not.toBe(true);
+      expect(runtime.operationGet(h5pReplacementId)).toMatchObject({ state: "verified" });
+      expect(writes[7]?.toolName).toBe("moodle_replace_h5pactivity_package");
+      expect(writes[7]?.privateAttachment).toMatchObject({
+        bytes_base64: h5pReplacementBytes.toString("base64"),
+        manifest: { filename: "replacement.h5p", size_bytes: h5pReplacementBytes.length, sha256: h5pReplacementDigest },
+      });
+      expect((await runtime.dispatchOperation(h5pReplacementId)).isError).toBe(true);
+      expect(writes).toHaveLength(8);
+
       const generic = await runtime.call("moodle_create_resource_file", {
         course_id: 2, section_id: 7, name: input.name, filename: "guide.txt", size_bytes: bytes.length, sha256: digest,
         expected_digest: formDigest, _morrow: { source_binding_id: sourceBindingId },
@@ -410,7 +444,7 @@ describe("reviewed Moodle file dispatch", () => {
         return JSON.stringify(response).includes('"sessionGeneration":2');
       }).toBe(true);
       expect((await runtime.dispatchOperation(changed)).isError).toBe(true);
-      expect(writes).toHaveLength(7);
+      expect(writes).toHaveLength(8);
       expect(runtime.operationGet(changed)).toMatchObject({ state: "cancelled", dispatchAttempt: 0 });
 
       const lost = operationId(await runtime.planMoodleResourceFile(input, { workspaceRoot }));
@@ -423,7 +457,7 @@ describe("reviewed Moodle file dispatch", () => {
       await connectBrowser();
       expect((await runtime.dispatchOperation(lost)).isError).toBe(true);
       expect(runtime.operationGet(lost)).toMatchObject({ state: "cancelled", dispatchAttempt: 0 });
-      expect(writes).toHaveLength(7);
+      expect(writes).toHaveLength(8);
     } finally {
       await approval?.close();
       await client?.close();

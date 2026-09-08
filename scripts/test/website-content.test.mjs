@@ -32,6 +32,9 @@ export const EXTERNAL_LINK_ALLOWLIST = [
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-source.zip",
 ];
 
+const MAC_DOWNLOAD_URL = "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-mac-arm64.dmg";
+const WINDOWS_DOWNLOAD_URL = "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-win-x64.exe";
+
 const SITE_ORIGIN = "https://meetmorrow.app";
 
 // Every route the site publishes. `/` is index.html; `/<name>` is `<name>.html`.
@@ -615,6 +618,49 @@ test("/how-it-works and /download give the current visual Morrow Bridge install 
   assert.deepEqual(problems, [], "the install route a person follows today has to be on the pages that describe setup");
 });
 
+test("/download gives each native build its exact v1.0.0 release link and install steps", { skip }, () => {
+  const html = productPage("download.html");
+  const links = tagsNamed(html, "a");
+  const copy = html.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ");
+
+  for (const [url, description] of [
+    [MAC_DOWNLOAD_URL, "mac-download-title"],
+    [WINDOWS_DOWNLOAD_URL, "windows-download-title"],
+  ]) {
+    const link = links.find((candidate) => candidate.href === url);
+    assert.ok(link, `/download must link to ${url}`);
+    assert.equal(link["aria-describedby"], description, `${url} must describe its matching build`);
+  }
+
+  for (const [build, steps] of [
+    ["Mac", [
+      "Open the downloaded .dmg file.",
+      "Drag Morrow into Applications.",
+      "Open Morrow from Applications to start setup.",
+    ]],
+    ["Windows", [
+      "Open the downloaded .exe file.",
+      "Morrow installs for your account and opens automatically.",
+      "If needed, open Morrow from the Start menu to start setup.",
+    ]],
+  ]) {
+    const positions = steps.map((step) => copy.indexOf(step));
+    assert.ok(positions.every((position) => position >= 0), `${build} must state each native install step`);
+    assert.deepEqual(positions, [...positions].sort((left, right) => left - right), `${build} must state the steps in order`);
+  }
+});
+
+test("the release download copy uses no em dash and keeps the homepage headline exact", { skip }, () => {
+  for (const file of ["download.html", "how-it-works.html", "styles.css"]) {
+    assert.doesNotMatch(readFileSync(new URL(file, site), "utf8"), /\u2014/, `${file} must not contain an em dash`);
+  }
+  assert.match(
+    homePage(),
+    /<h1 id="hero-title">Connect your own ChatGPT and Claude to your Canvas, Moodle, and Blackboard courses\.<\/h1>/,
+    "the homepage headline is approved copy and must remain exact",
+  );
+});
+
 test("no product page tells the reader to type an address or run a command", { skip }, () => {
   const found = [];
   for (const file of PRODUCT_PAGES) {
@@ -953,7 +999,7 @@ test("the link labels /for-instructional-designers quotes are the ones the audit
 
 /**
  * The heading /for-qa-teams gives each state `PROGRAM_LEDGER_FINAL_STATES` defines. The headings
- * used to be the state names themselves, spelled out — "Evidence ready pending review" — which told
+ * used to be the state names themselves, spelled out as "Evidence ready pending review", which told
  * a reader nothing, so the page says what each one means to them instead and the mapping is
  * declared here. Every state must have an entry and every entry must be a heading on the page, so a
  * state added to the ledger still fails this check exactly as it did before.

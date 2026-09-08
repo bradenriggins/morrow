@@ -21,6 +21,41 @@ describe("Canvas API catalog", () => {
       .toBe("/quiz/v1/courses/9007199254740993/quizzes/9223372036854775807");
   });
 
+  it("retains New Quiz IP ranges and explicit setting resets through request and readback", () => {
+    const ranges = [["10.0.0.1", "10.0.0.20"], ["192.168.1.1", "192.168.1.5"]];
+    const input = {
+      course_id: "42", assignment_id: "77", quiz_instructions: "",
+      quiz_quiz_settings_filters_ips: ranges,
+      quiz_quiz_settings_student_access_code: null,
+      quiz_quiz_settings_session_time_limit_in_seconds: null,
+    };
+    for (const toolName of ["canvas_create_new_quiz", "canvas_update_single_quiz"]) {
+      const operation = catalog.operations.find((candidate) => candidate.toolName === toolName)!;
+      expect(operation.inputSchema).toMatchObject({ properties: {
+        quiz_quiz_settings_filters_ips: {
+          type: ["array", "null"], items: { type: "array", minItems: 2, maxItems: 2, items: { type: "string" } },
+        },
+        quiz_quiz_settings_student_access_code: { type: ["string", "null"] },
+        quiz_quiz_settings_session_time_limit_in_seconds: { type: ["integer", "null"] },
+      } });
+      expect(operationArguments(operation, input).body).toEqual([
+        ["quiz[instructions]", ""],
+        ["quiz[quiz_settings][filters][ips]", ranges],
+        ["quiz[quiz_settings][session_time_limit_in_seconds]", null],
+        ["quiz[quiz_settings][student_access_code]", null],
+      ]);
+      const plan = planBrowserReadback(catalog.operations, operation, input, { id: "77" });
+      expect(plan).toBeTruthy();
+      const saved = { id: "77", instructions: "", quiz_settings: {
+        filters: { ips: ranges }, student_access_code: null, session_time_limit_in_seconds: null,
+      } };
+      expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: saved }).status).toBe("verified");
+      expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: {
+        ...saved, quiz_settings: { ...saved.quiz_settings, session_time_limit_in_seconds: 3600 },
+      } }).status).toBe("mismatch");
+    }
+  });
+
   it("accepts a Page module item with its page slug and no content ID", () => {
     const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_create_module_item");
     expect(operation).toBeTruthy();
@@ -110,16 +145,27 @@ describe("Canvas API catalog", () => {
     });
   });
 
-  it("inherits only the documented Classic Quiz description update field", () => {
+  it("inherits documented Classic Quiz creation fields as optional updates", () => {
+    const create = catalog.operations.find((candidate) => candidate.toolName === "canvas_create_quiz")!;
     const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_edit_quiz");
     expect(operation).toBeTruthy();
     expect(operation!.inputSchema.required).toEqual(["course_id", "id"]);
-    expect(operation!.parameters.filter((parameter) => parameter.location === "form")).toMatchObject([
-      { inputName: "quiz_description", wireName: "quiz[description]", required: false, schema: { type: "string" } },
-      { inputName: "quiz_notify_of_update", wireName: "quiz[notify_of_update]", required: false, schema: { type: "boolean" } },
+    const form = operation!.parameters.filter((parameter) => parameter.location === "form");
+    for (const parameter of create.parameters.filter((parameter) => parameter.location === "form")) {
+      expect(form).toContainEqual({ ...parameter, required: false });
+    }
+    expect(form).toContainEqual(expect.objectContaining({ inputName: "quiz_notify_of_update", required: false }));
+    const args = { course_id: "42", id: "77", quiz_title: "Cell structures", quiz_time_limit: 30, quiz_shuffle_answers: true };
+    expect(operationArguments(operation!, args).body).toEqual([
+      ["quiz[shuffle_answers]", true], ["quiz[time_limit]", 30], ["quiz[title]", "Cell structures"],
     ]);
-    expect(operationArguments(operation!, { course_id: "42", id: "77", quiz_description: "<p>Updated</p>" }).body)
-      .toEqual([["quiz[description]", "<p>Updated</p>"]]);
+    const plan = planBrowserReadback(catalog.operations, operation!, args, { id: "77" });
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: {
+      id: "77", title: "Cell structures", time_limit: 30, shuffle_answers: true,
+    } }).status).toBe("verified");
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: {
+      id: "77", title: "Cell structures", time_limit: 20, shuffle_answers: true,
+    } }).status).toBe("mismatch");
   });
 
   it("types the Classic Quiz answer array and sends it as indexed form fields", () => {

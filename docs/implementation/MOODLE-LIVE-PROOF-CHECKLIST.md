@@ -36,16 +36,16 @@ A receipt is complete when it carries all of these. The harness writes each one:
 
 ## Write classes
 
-- **native form** (108 operations). Moodle's own `mod_form` or `edit.php` POST. The proof must show the reloaded form immediately before the POST, exactly one POST, and the fresh native settings read after it.
+- **native form** (110 operations). Moodle's own `mod_form` or `edit.php` POST. The proof must show the reloaded form immediately before the POST, exactly one POST, and the fresh native settings read after it.
 - **same-site AJAX** (17 operations). Moodle's own `/lib/ajax/service.php` method. The proof must show the exact method name, exactly one call, and the fresh state read after it.
 
 The local fixture in the harness serves one write class today: `moodle.form.course.modedit.label.write.v1`, the Text and media area content edit. Every other write needs an authorized disposable Moodle site.
 
-A write that carries reviewed local file bytes is planned through its own `morrow_plan_moodle_*` tool, not through `morrow_capability_change`. The harness has no local file staging step, so it cannot yet run these 8 writes on any target: `moodle_add_folder_files`, `moodle_create_folder_file`, `moodle_create_h5pactivity`, `moodle_create_imscp_package`, `moodle_create_resource_file`, `moodle_create_scorm_package`, `moodle_replace_resource_file`, `moodle_replace_scorm_package`.
+A write that carries reviewed local file bytes is planned through its own `morrow_plan_moodle_*` tool, not through `morrow_capability_change`. The harness has no local file staging step, so it cannot yet run these 9 writes on any target: `moodle_add_folder_files`, `moodle_create_folder_file`, `moodle_create_h5pactivity`, `moodle_create_imscp_package`, `moodle_create_resource_file`, `moodle_create_scorm_package`, `moodle_replace_h5pactivity_package`, `moodle_replace_resource_file`, `moodle_replace_scorm_package`.
 
 ## Every catalog write
 
-125 writes, from `connector/extension/generated/moodle-browser-catalog.json`.
+127 writes, from `connector/extension/generated/moodle-browser-catalog.json`.
 
 | Tool | Class | Review read | Capability stated in the catalog | Current evidence |
 | --- | --- | --- | --- | --- |
@@ -117,6 +117,7 @@ A write that carries reviewed local file bytes is planned through its own `morro
 | `moodle_remove_quiz_slot` | native form | `moodle_get_quiz_structure` | `mod/quiz:manage` | fixture-only |
 | `moodle_remove_role` | same-site AJAX | `moodle_get_course_participants` | `moodle/course:viewparticipants`, `moodle/course:enrolreview`, `moodle/role:assign` | fixture-only |
 | `moodle_reorder_quiz_slot` | native form | `moodle_get_quiz_structure` | `mod/quiz:manage` | fixture-only |
+| `moodle_replace_h5pactivity_package` | native form | `moodle_get_h5pactivity` | `moodle/course:manageactivities` | fixture-only |
 | `moodle_replace_resource_file` | native form | `moodle_get_resource_files` | `moodle/course:manageactivities` | fixture-only |
 | `moodle_replace_scorm_package` | native form | `moodle_get_scorm` | `moodle/course:manageactivities` | fixture-only |
 | `moodle_reply_to_forum_post` | native form | `moodle_get_forum_post_target` | `mod/forum:replypost` | fixture-only |
@@ -138,6 +139,7 @@ A write that carries reviewed local file bytes is planned through its own `morro
 | `moodle_update_activity_restrictions` | native form | `moodle_get_activity_restrictions` | `moodle/course:manageactivities` | fixture-only |
 | `moodle_update_assignment` | native form | `moodle_get_assignment` | `moodle/course:manageactivities` | signed-in checked, receipts in [the parity record](THREE-LMS-BRIDGE-PARITY.md) |
 | `moodle_update_assignment_override` | native form | `moodle_get_assignment_overrides` | `mod/assign:manageoverrides` | fixture-only |
+| `moodle_update_bigbluebuttonbn` | native form | `moodle_get_bigbluebuttonbn` | not stated; record the capability observed at proof time | fixture-only |
 | `moodle_update_book` | native form | `moodle_get_book` | not stated; record the capability observed at proof time | fixture-only |
 | `moodle_update_book_chapter` | native form | `moodle_get_book_chapter` | not stated; record the capability observed at proof time | fixture-only |
 | `moodle_update_choice` | native form | `moodle_get_choice` | not stated; record the capability observed at proof time | fixture-only |

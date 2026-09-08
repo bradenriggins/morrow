@@ -408,8 +408,27 @@ function noInput(input) {
   if (input.length !== 0) throw errorDetails("setup_failed");
 }
 
+/**
+ * The failure answer for one setup action. The state is read again so the
+ * setup page shows what Morrow has now, and falls back to the fixed repair
+ * state when that read itself fails. An error that carries a code is forwarded
+ * to the strict result contract, which emits only the fixed public details for
+ * that code; an error the contract refuses — a code outside the public list,
+ * such as an MCP -32603 — and an error with no code each collapse to the fixed
+ * setup_failed details, so no internal message or path ever reaches the
+ * renderer.
+ */
+async function failed(error) {
+  const state = await installer.state().catch(() => repairRequiredState());
+  try {
+    return envelope(state, error?.code ? error : errorDetails("setup_failed"));
+  } catch {
+    return envelope(state, errorDetails("setup_failed"));
+  }
+}
+
 async function respond(options) {
-  try { return envelope(await installer.state(options), null); } catch { return envelope(await installer.state().catch(() => repairRequiredState()), errorDetails("setup_failed")); }
+  try { return envelope(await installer.state(options), null); } catch { return failed(errorDetails("setup_failed")); }
 }
 
 function createWindow() {
@@ -501,9 +520,9 @@ async function startMorrow() {
       // answers with the state that step reached, and with the exact reason
       // when part of it did not finish.
       const selected = await installer.configureWorkspace(mainWindow);
-      return selected ? respond() : envelope(await installer.state(), errorDetails("cancelled"));
+      return selected ? respond() : failed(errorDetails("cancelled"));
     } catch (error) {
-      return envelope(await installer.state().catch(() => repairRequiredState()), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:configure-blackboard", async (event, input) => {
@@ -512,7 +531,7 @@ async function startMorrow() {
       await installer.configureBlackboard(input);
       return respond();
     } catch {
-      return envelope(await installer.state(), errorDetails("blackboard_configuration_invalid"));
+      return failed(errorDetails("blackboard_configuration_invalid"));
     }
   });
   ipcMain.handle("installer:select-blackboard-courses", async (event, input) => {
@@ -521,7 +540,7 @@ async function startMorrow() {
       await installer.selectBlackboardCourses(input);
       return respond();
     } catch {
-      return envelope(await installer.state(), errorDetails("blackboard_course_selection_invalid"));
+      return failed(errorDetails("blackboard_course_selection_invalid"));
     }
   });
   // Removal answers with the state Morrow read back from its own files, so a
@@ -532,7 +551,7 @@ async function startMorrow() {
       await installer.removeBlackboardTenant(input);
       return respond();
     } catch {
-      return envelope(await installer.state(), errorDetails("blackboard_removal_failed"));
+      return failed(errorDetails("blackboard_removal_failed"));
     }
   });
   ipcMain.handle("installer:install-assistant", async (event, input) => {
@@ -542,8 +561,7 @@ async function startMorrow() {
       await installer.installAssistant(assertAssistantId(input.assistantId), mainWindow);
       return respond();
     } catch (error) {
-      const detail = error?.code ? error : errorDetails("setup_failed");
-      return envelope(await installer.state(), detail);
+      return failed(error);
     }
   });
   ipcMain.handle("installer:remove-assistant", async (event, input) => {
@@ -553,13 +571,13 @@ async function startMorrow() {
       await installer.removeAssistant(assertAssistantId(input.assistantId));
       return respond();
     } catch (error) {
-      return envelope(await installer.state().catch(() => repairRequiredState()), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:reveal-bridge-folder", async (event) => {
     trusted(event);
     try { await installer.revealBridgeFolder(); return respond(); }
-    catch { return envelope(await installer.state(), errorDetails("bridge_folder_unavailable")); }
+    catch { return failed(errorDetails("bridge_folder_unavailable")); }
   });
   ipcMain.handle("installer:reconcile-bridge", async (event, ...input) => {
     trusted(event);
@@ -568,7 +586,7 @@ async function startMorrow() {
       await installer.reconcileBridgeRelease();
       return respond();
     } catch (error) {
-      return envelope(await installer.state(), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:check-for-updates", async (event, ...input) => {
@@ -578,7 +596,7 @@ async function startMorrow() {
       await updateController.check();
       return respond();
     } catch (error) {
-      return envelope(await installer.state(), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:install-update", async (event, ...input) => {
@@ -588,7 +606,7 @@ async function startMorrow() {
       await updateController.installWhenIdle();
       return respond();
     } catch (error) {
-      return envelope(await installer.state(), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:run-first-read", async (event, ...input) => {
@@ -598,7 +616,7 @@ async function startMorrow() {
       await installer.firstSafeRead();
       return respond();
     } catch (error) {
-      return envelope(await installer.state(), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:open-claude-desktop", async (event, ...input) => {
@@ -608,7 +626,7 @@ async function startMorrow() {
       await installer.openClaudeDesktop();
       return respond();
     } catch (error) {
-      return envelope(await installer.state(), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:reveal-claude-extension", async (event, ...input) => {
@@ -618,7 +636,7 @@ async function startMorrow() {
       await installer.revealClaudeDesktopBundle();
       return respond();
     } catch (error) {
-      return envelope(await installer.state(), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:repair", async (event, ...input) => {
@@ -629,7 +647,7 @@ async function startMorrow() {
       // never a separate claim that the repair succeeded.
       return envelope(await installer.repair(), null);
     } catch (error) {
-      return envelope(await installer.state().catch(() => repairRequiredState()), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   ipcMain.handle("installer:remove-data", async (event, ...input) => {
@@ -642,7 +660,7 @@ async function startMorrow() {
       await installer.removeData(mainWindow);
       return respond();
     } catch (error) {
-      return envelope(await installer.state().catch(() => repairRequiredState()), error?.code ? error : errorDetails("setup_failed"));
+      return failed(error);
     }
   });
   createWindow();

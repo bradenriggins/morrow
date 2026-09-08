@@ -310,9 +310,9 @@ describe("outer provider effects", () => {
           operationId: "op:privacy-safe-1234",
           status: { state: "awaiting_approval", verification: "unconfirmed" },
           receipt: { dispatchAttempt: 1, effectReceiptId: "effect:123e4567-e89b-12d3-a456-426614174000" },
-          digests: { requestDigest: digest, planDigest: "b".repeat(64) },
         }],
       });
+      expect(entry).not.toHaveProperty("digests");
       expect(entry).not.toHaveProperty("plan");
       expect(entry).not.toHaveProperty("readback");
       expect(entry).not.toHaveProperty("forwardedRequest");

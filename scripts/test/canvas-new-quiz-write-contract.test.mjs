@@ -35,7 +35,7 @@ function settingsDigest(quizSettings) {
  * the request Canvas would receive. `quiz` answers the New Quiz read the
  * settings guard makes; `quizStatus` makes that read fail.
  */
-async function sendCanvas(toolName, args, { quiz = null, quizStatus = 200 } = {}) {
+async function sendCanvas(toolName, args, { quiz = null, quizStatus = 200, savedQuiz = quiz, savedQuizStatus = 200 } = {}) {
   const keys = ["location", "document", "fetch", "chrome", "__morrowCanvasConnectorInstalled"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const operation = catalogOperation(toolName);
@@ -56,7 +56,9 @@ async function sendCanvas(toolName, args, { quiz = null, quizStatus = 200 } = {}
         body: options.body ?? null,
       });
       if (method === "GET") {
-        return quizStatus === 200 ? jsonResponse(quiz) : jsonResponse({ errors: [{ message: "no" }] }, quizStatus);
+        const afterWrite = requests.some((request) => request.method !== "GET");
+        const status = afterWrite ? savedQuizStatus : quizStatus;
+        return status === 200 ? jsonResponse(afterWrite ? savedQuiz : quiz) : jsonResponse({ errors: [{ message: "no" }] }, status);
       }
       return jsonResponse({ id: QUIZ_ID });
     },
@@ -231,16 +233,18 @@ test("a quiz Morrow cannot read stops the settings change instead of warning abo
 });
 
 test("a settings change sends the complete merged block and reports the exact preserved keys", async () => {
+  const change = { shuffle_answers: true, result_view_settings: { display_item_correct_answer: true } };
+  const merge = mergeQuizSettings(CURRENT_SETTINGS, change);
   const { result, requests } = await sendCanvas("canvas_update_single_quiz", {
     course_id: COURSE_ID,
     assignment_id: QUIZ_ID,
     quiz_quiz_settings_shuffle_answers: true,
     quiz_quiz_settings_result_view_settings_display_item_correct_answer: true,
     ...guard(),
-  }, { quiz: NEW_QUIZ });
+  }, { quiz: NEW_QUIZ, savedQuiz: { ...NEW_QUIZ, quiz_settings: merge.merged } });
   assert.equal(result.ok, true);
-  const change = { shuffle_answers: true, result_view_settings: { display_item_correct_answer: true } };
-  const merge = mergeQuizSettings(CURRENT_SETTINGS, change);
+  assert.equal(result.verification.status, "verified");
+  assert.deepEqual(requests.map((request) => request.method), ["GET", "PATCH", "GET"]);
   const write = requests.find((request) => request.method === "PATCH");
   assert.ok(write, "the merged settings change was never sent");
   assert.match(write.contentType, /^application\/json/);
@@ -275,6 +279,64 @@ test("a settings change sends the complete merged block and reports the exact pr
     "session_time_limit_in_seconds",
     "shuffle_questions",
   ]);
+});
+
+test("New Quiz writes preserve IP ranges, null resets and empty instructions", async () => {
+  const requested = {
+    filters: { ips: [["10.0.0.1", "10.0.0.20"], ["192.168.1.1", "192.168.1.5"]] },
+    student_access_code: null,
+    session_time_limit_in_seconds: null,
+    multiple_attempts: { max_attempts: null, cooling_period_seconds: null },
+  };
+  for (const toolName of ["canvas_create_new_quiz", "canvas_update_single_quiz"]) {
+    const update = toolName === "canvas_update_single_quiz";
+    const { result, requests } = await sendCanvas(toolName, {
+      course_id: COURSE_ID,
+      ...(update ? { assignment_id: QUIZ_ID, ...guard() } : {}),
+      quiz_instructions: "",
+      quiz_quiz_settings_filters_ips: requested.filters.ips,
+      quiz_quiz_settings_student_access_code: null,
+      quiz_quiz_settings_session_time_limit_in_seconds: null,
+      quiz_quiz_settings_multiple_attempts_max_attempts: null,
+      quiz_quiz_settings_multiple_attempts_cooling_period_seconds: null,
+    }, { quiz: NEW_QUIZ, savedQuiz: { ...NEW_QUIZ, quiz_settings: mergeQuizSettings(CURRENT_SETTINGS, requested).merged } });
+    assert.equal(result.ok, true);
+    if (update) assert.equal(result.verification.status, "verified");
+    const write = requests.find((request) => request.method !== "GET");
+    assert.ok(write);
+    assert.deepEqual(JSON.parse(write.body), { quiz: {
+      instructions: "",
+      quiz_settings: update ? mergeQuizSettings(CURRENT_SETTINGS, requested).merged : requested,
+    } });
+  }
+
+  const { result, requests } = await sendCanvas("canvas_update_single_quiz", {
+    course_id: COURSE_ID, assignment_id: QUIZ_ID, quiz_quiz_settings_student_access_code: null,
+  }, { quiz: NEW_QUIZ });
+  assert.equal(result.sent, false);
+  assert.match(result.error, /^new_quiz_settings_guard_required:/);
+  assert.deepEqual(requests, []);
+});
+
+test("the settings check rejects changed protected settings and cannot confirm an unread saved quiz", async () => {
+  const args = { course_id: COURSE_ID, assignment_id: QUIZ_ID, quiz_quiz_settings_shuffle_answers: true, ...guard() };
+  const savedSettings = mergeQuizSettings(CURRENT_SETTINGS, { shuffle_answers: true }).merged;
+  const wrongPreservedSetting = { ...savedSettings, shuffle_questions: true };
+  for (const [savedQuiz, savedQuizStatus, status, reason] of [
+    [{ ...NEW_QUIZ, quiz_settings: wrongPreservedSetting }, 200, "mismatch", "new_quiz_settings_readback_mismatch"],
+    [{ ...NEW_QUIZ, course_id: "43", quiz_settings: savedSettings }, 200, "mismatch", "new_quiz_settings_readback_target_changed"],
+    [{ ...NEW_QUIZ, quiz_settings: savedSettings }, 403, "unconfirmed", "new_quiz_settings_readback_unavailable"],
+  ]) {
+    const { result, requests } = await sendCanvas("canvas_update_single_quiz", args, { quiz: NEW_QUIZ, savedQuiz, savedQuizStatus });
+    assert.equal(result.sent, true);
+    assert.equal(result.verification.status, status);
+    assert.equal(result.verification.reason, reason);
+    assert.equal(requests.filter((request) => request.method === "PATCH").length, 1);
+  }
+  const { result, requests } = await sendCanvas("canvas_update_single_quiz", args, { quiz: { ...NEW_QUIZ, course_id: "43" } });
+  assert.equal(result.sent, false);
+  assert.match(result.error, /^new_quiz_settings_target_changed:/);
+  assert.equal(requests.filter((request) => request.method === "PATCH").length, 0);
 });
 
 test("a title, instructions, date or points change needs no settings guard and reads no quiz", async () => {

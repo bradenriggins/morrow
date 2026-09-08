@@ -917,7 +917,7 @@
       const wireName = String(parameter.wireName || "");
       if (parameter.location !== "form" || !wireName.startsWith(NEW_QUIZ_SETTINGS_WIRE_PREFIX)) continue;
       const value = args[parameter.inputName];
-      if (value === undefined || value === null || value === "") continue;
+      if (value === undefined) continue;
       present = true;
       assignJsonValue(requested, wireName.slice(NEW_QUIZ_SETTINGS_WIRE_PREFIX.length), value);
     }
@@ -953,13 +953,35 @@
       throw new Error("new_quiz_settings_read_failed: Morrow could not read this quiz before changing its settings. No change was sent.");
     }
     const quizId = pageId(args.assignment_id);
-    if (!quizId || !plainObject(before) || pageId(before.id) !== quizId || !plainObject(before.quiz_settings)) {
+    if (!quizId || !plainObject(before) || pageId(before.id) !== quizId || !plainObject(before.quiz_settings)
+      || (before.course_id !== undefined && pageId(before.course_id) !== pageId(args.course_id))) {
       throw new Error("new_quiz_settings_target_changed: This quiz does not report the settings Morrow has to preserve. No change was sent.");
     }
     if (await bodyDigest(stable(before.quiz_settings)) !== guard.current_quiz_settings_sha256) {
       throw new Error("new_quiz_settings_stale: These New Quiz settings changed in Canvas after they were read. No change was sent. Read the settings again and make a new change.");
     }
     return mergeQuizSettings(before.quiz_settings, settings);
+  }
+
+  async function verifyNewQuizSettingsChange(args, url, expectedSettings) {
+    const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-settings" };
+    let saved;
+    try {
+      saved = await pageJson(url);
+    } catch {
+      return { ...base, status: "unconfirmed", reason: "new_quiz_settings_readback_unavailable" };
+    }
+    if (!plainObject(saved) || pageId(saved.id) !== pageId(args.assignment_id)
+      || (saved.course_id !== undefined && pageId(saved.course_id) !== pageId(args.course_id))) {
+      return { ...base, status: "mismatch", reason: "new_quiz_settings_readback_target_changed" };
+    }
+    if (!plainObject(saved.quiz_settings)) {
+      return { ...base, status: "unconfirmed", reason: "new_quiz_settings_readback_missing" };
+    }
+    if (stable(saved.quiz_settings) !== stable(expectedSettings)) {
+      return { ...base, status: "mismatch", reason: "new_quiz_settings_readback_mismatch" };
+    }
+    return { ...base, status: "verified", evidence: "complete_settings_reread_after_write" };
   }
 
   // The New Quiz item id rule, copied from src/new-quiz-item-guard.js because
@@ -1132,7 +1154,10 @@
       const value = args[parameter.inputName];
       const preserveGuardedEmptyPageBody = operation.toolName === "canvas_update_create_page_courses"
         && Boolean(args.morrow_page_guard || args.morrow_canvas_content_guard) && parameter.inputName === "wiki_page_body";
-      if (value === undefined || value === null || (value === "" && !preserveGuardedEmptyPageBody)) {
+      const preserveNewQuizValue = usesJsonBody(operation) && operation.path.startsWith("/quiz/v1/")
+        && parameter.location === "form";
+      if (value === undefined || (value === null && !preserveNewQuizValue)
+        || (value === "" && !preserveGuardedEmptyPageBody && !preserveNewQuizValue)) {
         if (parameter.required) throw new TypeError(`${parameter.inputName} is required`);
         continue;
       }
@@ -1461,7 +1486,10 @@
       ...(pageRead ? { pageBodySha256: await bodyDigest(data.body) } : {}),
       // Every settings change reports the keys it carried over from the quiz's
       // current settings, so the person reads what was kept rather than trusting it.
-      ...(newQuizSettings ? { newQuizSettingsPreserved: newQuizSettings.preserved } : {}),
+      ...(newQuizSettings ? {
+        newQuizSettingsPreserved: newQuizSettings.preserved,
+        verification: await verifyNewQuizSettingsChange(args, url, newQuizSettings.merged),
+      } : {}),
       ...(args.morrow_page_guard ? { verification: await verifyPageChange(args, url) } : {}),
       ...(canvasContentChange ? { verification: await verifyCanvasContentChange(args, url, exactCourseId) } : {}),
       ...(assignmentDueDate ? { verification: await verifyAssignmentDueDateChange(assignmentDueDate, url, exactCourseId) } : {}),

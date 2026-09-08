@@ -70,9 +70,10 @@ function plant(id, exports) {
  * packaged, so the update policy is disabled and the update controller stops
  * before its first check.
  */
-async function startedMorrow() {
-  const recorded = { channels: [], events: new Map(), permissions: {}, window: null, loadedFile: null, windowOpen: null, started: null };
+async function startedMorrow(controller = {}) {
+  const recorded = { channels: [], handlers: new Map(), events: new Map(), permissions: {}, window: null, loadedFile: null, windowOpen: null, started: null };
   const webContents = {
+    mainFrame: { url: pathToFileURL(fs.realpathSync(path.join(installerRoot, "renderer", "index.html"))).href },
     on(event, handler) { recorded.events.set(event, handler); return webContents; },
     setWindowOpenHandler(handler) { recorded.windowOpen = handler; }
   };
@@ -98,7 +99,7 @@ async function startedMorrow() {
         loadFile(file) { recorded.loadedFile = file; }
       },
       dialog: {},
-      ipcMain: { handle(channel) { recorded.channels.push(channel); } },
+      ipcMain: { handle(channel, handler) { recorded.channels.push(channel); recorded.handlers.set(channel, handler); } },
       session: {
         defaultSession: {
           setPermissionRequestHandler(handler) { recorded.permissions.request = handler; },
@@ -116,7 +117,7 @@ async function startedMorrow() {
     }),
     plant(require.resolve("../shared/installer-controller.cjs"), {
       ...require("../shared/installer-controller.cjs"),
-      createInstallerController: () => ({ initializeBridgeAtStartup: async () => {} })
+      createInstallerController: () => ({ initializeBridgeAtStartup: async () => {}, ...controller })
     })
   ];
   const payload = process.env.MORROW_INSTALLER_PAYLOAD;
@@ -202,6 +203,39 @@ test("IPC contract exposes no implementation paths or privilege", () => {
   assert.equal(JSON.stringify(result).includes("/"), false);
   assert.throws(() => assertAssistantId("../../anything"), /invalid/);
   assert.equal(assertAssistantId("codex"), "codex");
+});
+
+test("Check Bridge returns safe installer errors even when the runtime or state read fails", async () => {
+  const state = repairRequiredState();
+  let failure = errorDetails("runtime_repair_required");
+  let stateFailure = false;
+  const started = await startedMorrow({
+    reconcileBridgeRelease: async () => { throw failure; },
+    state: async () => {
+      if (stateFailure) throw new Error("private state read failed");
+      return state;
+    }
+  });
+  const event = { sender: started.window.webContents, senderFrame: started.window.webContents.mainFrame };
+  const check = () => started.handlers.get("installer:reconcile-bridge")(event);
+  assert.deepEqual((await check()).error, errorDetails("runtime_repair_required"));
+
+  for (const error of [
+    Object.assign(new Error("private MCP detail"), { code: -32603 }),
+    { code: "unknown_runtime_error", message: "private runtime detail", recovery: "private internal path" },
+    { code: "setup_failed", message: "private runtime detail", recovery: "private internal path" },
+    null
+  ]) {
+    failure = error;
+    for (const unreadable of [false, true]) {
+      stateFailure = unreadable;
+      const result = await check();
+      assert.equal(result.ok, false);
+      assert.deepEqual(result.state, state);
+      assert.deepEqual(result.error, errorDetails("setup_failed"));
+      assert.doesNotMatch(JSON.stringify(result), /private/);
+    }
+  }
 });
 
 test("installer state exposes only public Blackboard tenant fields", () => {

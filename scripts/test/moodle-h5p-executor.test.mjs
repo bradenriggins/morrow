@@ -21,6 +21,7 @@ const CONTEXT_ID = "88";
 const creationRead = { key: "moodle.form.course.modedit.h5pactivity.create.read.v1", toolName: "moodle_get_h5pactivity_creation_form", provider: "moodle", readOnly: true };
 const activityRead = { key: "moodle.form.course.modedit.h5pactivity.read.v1", toolName: "moodle_get_h5pactivity", provider: "moodle", readOnly: true };
 const create = { key: "moodle.form.course.modedit.h5pactivity.create.write.v1", toolName: "moodle_create_h5pactivity", provider: "moodle", readOnly: false };
+const replace = { key: "moodle.form.course.modedit.h5pactivity.package.replace.write.v1", toolName: "moodle_replace_h5pactivity_package", provider: "moodle", readOnly: false };
 const update = { key: "moodle.form.course.modedit.h5pactivity.write.v1", toolName: "moodle_update_h5pactivity", provider: "moodle", readOnly: false };
 
 function zipArchive(entryName) {
@@ -238,8 +239,14 @@ test("Moodle H5P executor creates one hidden activity from a reviewed package an
     if (request.method === "POST" && url.pathname === "/repository/draftfiles_ajax.php") {
       const values = new URLSearchParams((await readBody(request)).toString("utf8"));
       assert.equal(values.get("sesskey"), SESSION);
-      const draft = drafts.get(values.get("itemid") || "") || null;
+      const itemId = values.get("itemid") || "";
+      const draft = drafts.get(itemId) || null;
       response.setHeader("content-type", "application/json");
+      if (url.searchParams.get("action") === "delete") {
+        if (!draft || values.get("filepath") !== "/" || values.get("filename") !== draft.filename) return response.end(JSON.stringify({ error: "refused" }));
+        drafts.set(itemId, null);
+        return response.end(JSON.stringify({ filepath: "/" }));
+      }
       return response.end(JSON.stringify(listing(draft, Boolean(draft?.reference))));
     }
     if (request.method === "POST" && url.pathname === "/repository/repository_ajax.php") {
@@ -515,6 +522,46 @@ test("Moodle H5P executor creates one hidden activity from a reviewed package an
     assert.equal(unknown.verification.status, "unconfirmed");
     assert.equal(posts.length, 6);
 
+    // The package replacement holds the same hidden activity boundary. It
+    // rejects stale or malformed reviewed packages before it changes the draft
+    // area, then sends exactly one POST and reads the saved package bytes.
+    const replacementBytes = zipArchive("h5p.json");
+    const replacement = manifestOf("reviewed-replacement.h5p", replacementBytes);
+    const postsBeforeReplacement = posts.length;
+    const uploadsBeforeReplacement = uploads();
+    const replacementRead = await run(activityRead, { course_id: 2, module_id: 77 });
+    assert.deepEqual(
+      await run(replace, { course_id: 2, module_id: 77, ...replacement, expected_digest: "0".repeat(64) }, attachment("file:h5p-replacement-stale", replacement, replacementBytes)),
+      { ok: false, sent: false, status: 200, error: "moodle_expected_digest_mismatch" },
+    );
+    assert.deepEqual(
+      await run(replace, { course_id: 2, module_id: 77, ...unusable, expected_digest: replacementRead.snapshot_digest }, attachment("file:h5p-replacement-invalid", unusable, withoutDefinition)),
+      { ok: false, sent: false, status: 200, error: "moodle_h5pactivity_package_definition_invalid" },
+    );
+    assert.equal(posts.length, postsBeforeReplacement);
+    assert.equal(uploads(), uploadsBeforeReplacement);
+    const replaced = await run(replace, {
+      course_id: 2, module_id: 77, ...replacement, expected_digest: replacementRead.snapshot_digest,
+    }, attachment("file:h5p-replacement", replacement, replacementBytes));
+    assert.equal(replaced.ok, true, JSON.stringify(replaced));
+    assert.deepEqual(replaced.verification, { schema: "morrow.browser-verification.v1", status: "verified" });
+    assert.equal(posts.length, postsBeforeReplacement + 1);
+    assert.equal(uploads(), uploadsBeforeReplacement + 1);
+    assert.match(posts.at(-1).get("packagefile") || "", /^\d+$/);
+    assert.equal(posts.at(-1).get("visible"), "0");
+    assert.deepEqual(replaced.data.package, replacement);
+    assert.deepEqual(activity.package, { filename: replacement.filename, bytes: replacementBytes });
+    assert.ok(requests.includes(`GET /pluginfile.php/${CONTEXT_ID}/mod_h5pactivity/package/0/${replacement.filename}?forcedownload=1`));
+    assert.equal(replaced.data.protected_setting_names.includes("packagefile"), false);
+
+    activity.visible = true;
+    const beforeVisibleReplacement = await run(activityRead, { course_id: 2, module_id: 77 });
+    assert.deepEqual(
+      await run(replace, { course_id: 2, module_id: 77, ...replacement, expected_digest: beforeVisibleReplacement.snapshot_digest }, attachment("file:h5p-replacement-visible", replacement, replacementBytes)),
+      { ok: false, sent: false, status: 200, error: "moodle_h5pactivity_activity_visible_refused" },
+    );
+    activity.visible = false;
+
     // Nothing in this fixture opened the activity view, a report, or the H5P player,
     // and every POST carried the draft area of the form reloaded immediately before it.
     assert.deepEqual(playerRoutes(), []);
@@ -534,6 +581,7 @@ test("the Moodle H5P catalog, worker, and documentation state the same bounded r
   assert.deepEqual(entries.map((entry) => entry.key).sort(), [
     "moodle.form.course.modedit.h5pactivity.create.read.v1",
     "moodle.form.course.modedit.h5pactivity.create.write.v1",
+    "moodle.form.course.modedit.h5pactivity.package.replace.write.v1",
     "moodle.form.course.modedit.h5pactivity.read.v1",
     "moodle.form.course.modedit.h5pactivity.write.v1",
   ]);
@@ -542,7 +590,7 @@ test("the Moodle H5P catalog, worker, and documentation state the same bounded r
     assert.ok(entry.description.includes("content bank"), `${entry.toolName} must state the content-bank boundary`);
   }
   const writes = entries.filter((entry) => entry.readOnly !== true);
-  assert.deepEqual(writes.map((entry) => entry.toolName).sort(), ["moodle_create_h5pactivity", "moodle_update_h5pactivity"]);
+  assert.deepEqual(writes.map((entry) => entry.toolName).sort(), ["moodle_create_h5pactivity", "moodle_replace_h5pactivity_package", "moodle_update_h5pactivity"]);
   for (const entry of writes) {
     assert.ok(["moodle_get_h5pactivity", "moodle_get_h5pactivity_creation_form"].includes(entry.reviewTool), `${entry.toolName} needs a review tool`);
     assert.ok(entry.description.includes("no signed-in Moodle site has run it"), `${entry.toolName} must state the evidence limit`);
@@ -553,13 +601,22 @@ test("the Moodle H5P catalog, worker, and documentation state the same bounded r
   assert.equal(filename.test("reviewed-activity.h5p"), true, "the create must accept a .h5p package");
   assert.equal(filename.test("reviewed-activity.zip"), false, "the create must accept only a .h5p package");
   assert.ok(creation.description.includes("Byte equality does not establish H5P validity or learner access"));
+  const replacement = writes.find((entry) => entry.toolName === "moodle_replace_h5pactivity_package");
+  assert.equal(replacement.reviewTool, "moodle_get_h5pactivity");
+  assert.equal(replacement.destructive, true);
+  assert.equal(replacement.irreversible, true);
+  assert.ok(replacement.description.includes("one root h5p.json"));
+  assert.ok(replacement.description.includes("refuses an activity that is visible to learners"));
 
   const worker = readFileSync(new URL("connector/extension/src/service-worker.js", root), "utf8");
   assert.match(worker, /import \{ executeMoodleH5pInPage \} from "\.\/moodle-h5p-executor\.js";/);
   for (const entry of entries) assert.match(worker, new RegExp(`"${entry.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`));
   assert.match(worker, /toolName: "moodle_create_h5pactivity", key: "moodle\.form\.course\.modedit\.h5pactivity\.create\.write\.v1"/);
+  assert.match(worker, /toolName: "moodle_replace_h5pactivity_package", key: "moodle\.form\.course\.modedit\.h5pactivity\.package\.replace\.write\.v1"/);
 
   const documentation = readFileSync(new URL("docs/implementation/MOODLE-FULL-FUNCTIONALITY.md", root), "utf8");
   assert.ok(documentation.includes("moodle_create_h5pactivity"), "the H5P row must name the create operation");
+  assert.ok(documentation.includes("moodle_replace_h5pactivity_package"), "the H5P row must name the package replacement operation");
+  assert.ok(documentation.includes("morrow_plan_moodle_h5p_package_replacement"), "the H5P row must name the replacement planner");
   assert.ok(documentation.includes("Content bank selection is out of scope"), "the H5P row must record the content-bank gap");
 });

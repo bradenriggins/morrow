@@ -25,16 +25,18 @@ function moodleSnapshot(state: string): JsonObject {
  * call answers with, which is how a request that can no longer be approved
  * reaches the state page.
  */
-function approvalServer(review: JsonObject, approved: JsonObject = review): LoopbackApprovalServer {
+function approvalServer(
+  review: JsonObject,
+  approved: JsonObject = review,
+  targets: { field: string; label: string; name: string }[] = [
+    { field: "course_id", label: "Course", name: "Biology 101" },
+    { field: "module_id", label: "Page", name: "Week 2 overview" },
+  ],
+): LoopbackApprovalServer {
   return new LoopbackApprovalServer({
     operationGet: () => review,
     operationList: () => ({ schema: "morrow.operations.list.v1", returned: 1, operations: [review] }),
-    operationReviewContext: async () => ({
-      targets: [
-        { field: "course_id", label: "Course", name: "Biology 101" },
-        { field: "module_id", label: "Page", name: "Week 2 overview" },
-      ],
-    }),
+    operationReviewContext: async () => ({ targets }),
     approveOperation: () => approved,
     runApprovedOperation: async () => undefined,
     cancelOperation: () => review,
@@ -129,6 +131,74 @@ describe("approval page copy", () => {
       expect(body).toContain("<h1>Edit Page?</h1>");
       expect(body.match(/<h1/g)).toHaveLength(1);
       expect(body).not.toContain("aria-label=\"Before Morrow makes changes\"");
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("shows New Quiz settings with instructor-facing labels and no internal hashes", async () => {
+    const internalHash = "a".repeat(64);
+    const snapshot: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      requestDigest: internalHash,
+      planDigest: internalHash,
+      plan: {
+        tool: "canvas_update_single_quiz",
+        arguments: {
+          course_id: "42",
+          assignment_id: "77",
+          quiz_quiz_settings_shuffle_answers: true,
+          quiz_quiz_settings_session_time_limit_in_seconds: 900,
+          expected_digest: internalHash,
+          morrow_new_quiz_settings_guard: { current_quiz_settings_sha256: internalHash },
+          _morrow: { source_binding_id: "canvas:instructor" },
+        },
+      },
+    };
+    const server = approvalServer(snapshot, snapshot, [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+      { field: "assignment_id", label: "New Quiz", name: "Cell structure check" },
+    ]);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain("Shuffle answers");
+      expect(body).toContain("Time limit in seconds");
+      expect(body).not.toContain("morrow_new_quiz_settings_guard");
+      expect(body).not.toContain(internalHash);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("shows Blackboard course copy source and destination labels without an internal plan hash", async () => {
+    const internalHash = "b".repeat(64);
+    const snapshot: JsonObject = {
+      ...moodleSnapshot("awaiting_approval"),
+      requestDigest: internalHash,
+      planDigest: internalHash,
+      plan: {
+        tool: "blackboard_apply_reviewed_course_copy",
+        arguments: {
+          tenant_id: "tenant:college",
+          source_binding_id: "blackboard:instructor",
+          course_id: "COURSE-101",
+          destination_course_id: "COURSE-101-COPY",
+          expected_plan_digest: internalHash,
+          expected_connection: { principal_fingerprint: internalHash, session_generation: 1 },
+          _morrow: { source_binding_id: "blackboard:instructor" },
+        },
+      },
+    };
+    const server = approvalServer(snapshot, snapshot, []);
+    try {
+      const baseUrl = await server.start();
+      const { body } = await reviewPage(baseUrl);
+      expect(body).toContain("<h1>Copy Blackboard course?</h1>");
+      expect(body).toContain("<dt>Source Course ID</dt><dd>COURSE-101</dd>");
+      expect(body).toContain("<dt>New Course ID</dt><dd>COURSE-101-COPY</dd>");
+      expect(body).toContain('class="approve"');
+      expect(body).not.toContain(internalHash);
     } finally {
       await server.close();
     }

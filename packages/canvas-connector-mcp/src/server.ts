@@ -58,6 +58,23 @@ export function canvasConnectorSummary(value: JsonObject): string {
  */
 const ITEM_BANK_GUARDED_WRITE_TOOL = "canvas_item_bank_update_item";
 
+export function newQuizSettingsWriteSchema(inputSchema: JsonSchema): JsonObject {
+  const schema = augmentBridgeInputSchema(inputSchema);
+  return {
+    ...schema,
+    properties: {
+      ...(isJsonObject(schema.properties) ? schema.properties : {}),
+      morrow_new_quiz_settings_guard: {
+        type: "object",
+        description: "Fresh complete quiz_settings digest from morrow_plan_new_quiz_settings. Required when this request changes a New Quiz setting.",
+        properties: { current_quiz_settings_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" } },
+        required: ["current_quiz_settings_sha256"],
+        additionalProperties: false,
+      },
+    },
+  };
+}
+
 const ITEM_BANK_GUARD_PROPERTIES: JsonObject = {
   kind: { const: "item_bank_entry_image_alt" },
   course_id: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
@@ -301,6 +318,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
       ...(tool.description ? { description: tool.description } : {}),
       inputSchema: fromJsonSchema(guardedItemBank
         ? itemBankGuardedWriteSchema(tool.inputSchema)
+        : tool.name === "canvas_update_single_quiz" ? newQuizSettingsWriteSchema(tool.inputSchema)
         : augmentBridgeInputSchema(tool.inputSchema, [
           "canvas_update_create_page_courses",
           "canvas_edit_assignment",
@@ -326,7 +344,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
       inputSchema: fromJsonSchema(augmentBridgeInputSchema(
         tool.inputSchema,
         false,
-        tool.name === "moodle_create_resource_file" || tool.name === "moodle_create_folder_file" || tool.name === "moodle_create_imscp_package" || tool.name === "moodle_create_scorm_package" || tool.name === "moodle_replace_resource_file" || tool.name === "moodle_replace_scorm_package" || tool.name === "moodle_create_h5pactivity",
+        tool.name === "moodle_create_resource_file" || tool.name === "moodle_create_folder_file" || tool.name === "moodle_create_imscp_package" || tool.name === "moodle_create_scorm_package" || tool.name === "moodle_replace_resource_file" || tool.name === "moodle_replace_scorm_package" || tool.name === "moodle_create_h5pactivity" || tool.name === "moodle_replace_h5pactivity_package",
         false,
         tool.name === "moodle_add_folder_files",
       )),

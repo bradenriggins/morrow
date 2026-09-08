@@ -1,7 +1,8 @@
 /**
  * The Moodle BigBlueButton route (`mod_bigbluebuttonbn`): read one activity,
- * read the creation form, and create one hidden room with its schedule and a
- * bounded pair of room settings.
+ * read the creation form, create one hidden room, and update a room that is
+ * provably closed. Creation and updates use the same bounded schedule and
+ * room-setting contract.
  *
  * Morrow performs no BigBlueButton server action. It never joins, starts or
  * ends a meeting, never asks for a recording, and never sends a request to any
@@ -120,6 +121,7 @@ export async function executeMoodleBigBlueButtonInPage(rawInput) {
     "moodle.form.course.modedit.bigbluebuttonbn.read.v1": { toolName: "moodle_get_bigbluebuttonbn", readOnly: true, kind: "activity" },
     "moodle.form.course.modedit.bigbluebuttonbn.create.read.v1": { toolName: "moodle_get_bigbluebuttonbn_creation_form", readOnly: true, kind: "creation-form" },
     "moodle.form.course.modedit.bigbluebuttonbn.create.write.v1": { toolName: "moodle_create_bigbluebuttonbn", readOnly: false, kind: "create" },
+    "moodle.form.course.modedit.bigbluebuttonbn.write.v1": { toolName: "moodle_update_bigbluebuttonbn", readOnly: false, kind: "update" },
   });
 
   const parseInput = () => {
@@ -232,16 +234,52 @@ export async function executeMoodleBigBlueButtonInPage(rawInput) {
   const argumentsFor = (definition, args, binding) => {
     const courseId = id(binding?.courseId);
     if (!courseId) return null;
-    const creating = definition.kind !== "activity";
+    const creating = definition.kind !== "activity" && definition.kind !== "update";
     const targetKey = creating ? "section_id" : "module_id";
     const required = definition.kind === "create"
       ? ["course_id", targetKey, "name", "opening_time", "expected_digest"]
-      : ["course_id", targetKey];
-    const optional = definition.kind === "create" ? ["closing_time", "wait_for_moderator"] : [];
+      : definition.kind === "update"
+        ? ["course_id", targetKey, "expected_digest"]
+        : ["course_id", targetKey];
+    const optional = definition.kind === "create"
+      ? ["closing_time", "wait_for_moderator"]
+      : definition.kind === "update"
+        ? ["name", "opening_time", "closing_time", "wait_for_moderator"]
+        : [];
     if (!exactKeys(args, required, optional) || id(args.course_id) !== courseId || !id(args[targetKey])) return null;
     const target = { courseId, targetId: id(args[targetKey]) };
-    if (definition.kind !== "create") return target;
+    if (definition.kind !== "create" && definition.kind !== "update") return target;
     if (!DIGEST.test(String(args.expected_digest || ""))) return null;
+    if (definition.kind === "update") {
+      const settings = {};
+      if (Object.hasOwn(args, "name")) {
+        if (!validText(args.name, MAX_NAME_LENGTH) || collapsed(args.name, MAX_NAME_LENGTH) !== args.name) return null;
+        settings.name = args.name;
+      }
+      if (Object.hasOwn(args, "opening_time")) {
+        const openingTime = civil(args.opening_time);
+        if (!openingTime) return null;
+        let closingTime;
+        if (Object.hasOwn(args, "closing_time")) {
+          if (args.closing_time === null) {
+            closingTime = null;
+          } else {
+            closingTime = civil(args.closing_time);
+            if (!closingTime || compareCivil(closingTime, openingTime) <= 0) return null;
+          }
+          settings.closingTime = closingTime;
+        }
+        settings.openingTime = openingTime;
+      } else if (Object.hasOwn(args, "closing_time")) {
+        return null;
+      }
+      if (Object.hasOwn(args, "wait_for_moderator")) {
+        if (typeof args.wait_for_moderator !== "boolean") return null;
+        settings.waitForModerator = args.wait_for_moderator;
+      }
+      if (Object.keys(settings).length === 0) return null;
+      return { ...target, expectedDigest: args.expected_digest, settings };
+    }
     // A name Moodle would collapse could never equal the name it saves.
     if (!validText(args.name, MAX_NAME_LENGTH) || collapsed(args.name, MAX_NAME_LENGTH) !== args.name) return null;
     const openingTime = civil(args.opening_time);
@@ -664,6 +702,17 @@ export async function executeMoodleBigBlueButtonInPage(rawInput) {
     proof: proofFor(),
   });
   const snapshotDigest = (form) => digest({ values: form.values });
+  const protectedDigest = (form, settings) => {
+    const values = { ...form.values };
+    if (Object.hasOwn(settings, "name")) delete values.name;
+    if (Object.hasOwn(settings, "waitForModerator")) delete values[WAIT_FIELD];
+    if (Object.hasOwn(settings, "openingTime")) {
+      for (const name of Object.keys(values)) {
+        if (name.startsWith(`${OPENING_FIELD}[`) || name.startsWith(`${CLOSING_FIELD}[`)) delete values[name];
+      }
+    }
+    return digest({ values });
+  };
   const readCreationForm = async (context, args) => {
     const state = await courseState(context, args.courseId);
     if (state.error) return failure(state.error, state.status);
@@ -781,12 +830,27 @@ export async function executeMoodleBigBlueButtonInPage(rawInput) {
     if (compareCivil(settings.openingTime, form.siteTime) <= 0) return "moodle_bigbluebuttonbn_room_open_now";
     return "";
   };
-  const scheduleOverrides = (settings) => {
+  const updateGuard = (form, settings) => {
+    // The form has no live-session state. A setting update is allowed only when
+    // Moodle's own schedule rule can prove the room is closed right now.
+    if (form.roomOpenNow !== false) return "moodle_bigbluebuttonbn_room_open_now";
+    if (Object.hasOwn(settings, "name") && !form.nameWritable) return "moodle_bigbluebuttonbn_setting_not_writable";
+    if (Object.hasOwn(settings, "waitForModerator") && !form.waitWritable) return "moodle_bigbluebuttonbn_setting_not_writable";
+    if (Object.hasOwn(settings, "openingTime")) {
+      if (!form.scheduleWritable || !form.siteTime) return "moodle_bigbluebuttonbn_setting_not_writable";
+      const closingTime = Object.hasOwn(settings, "closingTime") ? settings.closingTime : form.closing.date;
+      if (closingTime && compareCivil(closingTime, settings.openingTime) <= 0) return "moodle_bigbluebuttonbn_schedule_invalid";
+      if (compareCivil(settings.openingTime, form.siteTime) <= 0) return "moodle_bigbluebuttonbn_room_open_now";
+    }
+    return "";
+  };
+  const scheduleOverrides = (settings, currentClosingTime = null) => {
     const overrides = { [`${OPENING_FIELD}[enabled]`]: ["1"] };
     for (const key of DATE_KEYS) overrides[`${OPENING_FIELD}[${key}]`] = [String(settings.openingTime[key])];
-    if (settings.closingTime) {
+    const closingTime = Object.hasOwn(settings, "closingTime") ? settings.closingTime : currentClosingTime;
+    if (closingTime) {
       overrides[`${CLOSING_FIELD}[enabled]`] = ["1"];
-      for (const key of DATE_KEYS) overrides[`${CLOSING_FIELD}[${key}]`] = [String(settings.closingTime[key])];
+      for (const key of DATE_KEYS) overrides[`${CLOSING_FIELD}[${key}]`] = [String(closingTime[key])];
     } else {
       overrides[`${CLOSING_FIELD}[enabled]`] = [];
     }
@@ -842,6 +906,54 @@ export async function executeMoodleBigBlueButtonInPage(rawInput) {
       verification: { schema: "morrow.browser-verification.v1", status: "verified" },
     };
   };
+  const runUpdate = async (context, args) => {
+    const before = await readActivity(context, args);
+    if (!before.ok) return before;
+    if (before.snapshot_digest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", before.status);
+    const reviewProblem = updateGuard(before.form, args.settings);
+    if (reviewProblem) return failure(reviewProblem, before.status);
+    const refreshed = await readActivity(context, args);
+    if (!refreshed.ok) return refreshed;
+    if (refreshed.snapshot_digest !== args.expectedDigest || refreshed.form.action !== before.form.action) {
+      return failure("moodle_expected_digest_mismatch", refreshed.status);
+    }
+    const sendProblem = updateGuard(refreshed.form, args.settings);
+    if (sendProblem) return failure(sendProblem, refreshed.status);
+    const protectedBefore = await protectedDigest(refreshed.form, args.settings);
+    const overrides = {};
+    if (Object.hasOwn(args.settings, "name")) overrides.name = [args.settings.name];
+    if (Object.hasOwn(args.settings, "openingTime")) {
+      Object.assign(overrides, scheduleOverrides(args.settings, refreshed.form.closing.date));
+    }
+    if (Object.hasOwn(args.settings, "waitForModerator")) overrides[WAIT_FIELD] = args.settings.waitForModerator ? ["1"] : [];
+    const posted = await postForm(context, refreshed.form, args.courseId, overrides);
+    if (posted.error) {
+      if (posted.notSent === true) return failure(posted.error, refreshed.status);
+      if (posted.validation === true) return appliedButRefused(posted.error, posted.status);
+      return unconfirmedWrite("moodle_bigbluebuttonbn_update_unconfirmed", posted.status);
+    }
+    const saved = await readActivity(context, args);
+    if (!saved.ok) return unconfirmedWrite("moodle_bigbluebuttonbn_update_not_verified", posted.status);
+    const protectedAfter = await protectedDigest(saved.form, args.settings);
+    const expectedClosing = Object.hasOwn(args.settings, "openingTime")
+      ? Object.hasOwn(args.settings, "closingTime") ? args.settings.closingTime : refreshed.form.closing.date
+      : null;
+    const wrongName = Object.hasOwn(args.settings, "name") && saved.data.name !== args.settings.name;
+    const wrongSchedule = Object.hasOwn(args.settings, "openingTime")
+      && (!sameCivil(saved.data.schedule.opening_time, args.settings.openingTime)
+        || !sameCivil(saved.data.schedule.closing_time, expectedClosing));
+    const wrongWait = Object.hasOwn(args.settings, "waitForModerator")
+      && saved.data.room.wait_for_moderator !== args.settings.waitForModerator;
+    if (protectedAfter !== protectedBefore || wrongName || wrongSchedule || wrongWait) {
+      return unconfirmedWrite("moodle_bigbluebuttonbn_update_not_verified", posted.status);
+    }
+    return {
+      ok: true, sent: true, status: posted.status ?? saved.status,
+      data: { ...saved.data, updated: true },
+      targets: saved.targets, snapshot_digest: saved.snapshot_digest,
+      verification: { schema: "morrow.browser-verification.v1", status: "verified" },
+    };
+  };
   const readResult = (read) => read.ok
     ? { ok: true, sent: true, status: read.status, data: read.data, targets: read.targets, snapshot_digest: read.snapshot_digest }
     : read;
@@ -857,7 +969,7 @@ export async function executeMoodleBigBlueButtonInPage(rawInput) {
     if (!args) return failure("moodle_bigbluebuttonbn_arguments_invalid");
     if (definition.kind === "creation-form") return readResult(await readCreationForm(context, args));
     if (definition.kind === "activity") return readResult(await readActivity(context, args));
-    return await runCreate(context, args);
+    return definition.kind === "update" ? await runUpdate(context, args) : await runCreate(context, args);
   } catch (error) {
     if (dispatched) return unconfirmedWrite("moodle_bigbluebuttonbn_write_unconfirmed");
     return failure(String(error?.message || error).startsWith("moodle_") ? String(error.message) : "moodle_bigbluebuttonbn_execution_failed");

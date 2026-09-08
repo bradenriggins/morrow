@@ -92,6 +92,8 @@ describe("blackboard operation registry", () => {
       "blackboard_verify_course_availability",
       "blackboard_apply_reviewed_content_dated_visibility",
       "blackboard_verify_content_dated_visibility",
+      "blackboard_apply_reviewed_course_copy",
+      "blackboard_verify_course_copy",
       "blackboard_apply_reviewed_content_patch",
       "blackboard_verify_content_patch",
     ]);
@@ -104,18 +106,9 @@ describe("blackboard operation registry", () => {
     for (const tool of BLACKBOARD_TOOL_DEFINITIONS) {
       expect(["unknown", "none"]).toContain(tool.rest.entitlement);
       if (tool.rest.method === null) {
-        // Three tools send no Blackboard request: the local configuration check
-        // and the read of Morrow's own record of unconfirmed changes, neither of
-        // which is a Morrow catalog capability, and the held course copy, which
-        // carries a capability block that reports itself unavailable in every
-        // profile because no tenant Swagger has confirmed a copy route or a
-        // status resource. It is a private source tool for that reason: the
-        // Gateway holds an unavailable capability out of its catalog, so a
-        // public name for it would answer nowhere.
-        expect(["morrow_blackboard_health", "blackboard_unresolved_effects", "blackboard_course_copy"]).toContain(tool.name);
+        expect(["morrow_blackboard_health", "blackboard_unresolved_effects"]).toContain(tool.name);
         expect(tool.rest.entitlement).toBe("none");
-        if (tool.name === "blackboard_course_copy") expect(tool.capability?.family).toBe("course-copy");
-        else expect(tool.capability).toBeNull();
+        expect(tool.capability).toBeNull();
         continue;
       }
       expect(tool.capability?.provider).toBe("blackboard");
@@ -130,7 +123,7 @@ describe("blackboard operation registry", () => {
   it("marks private exactly the Blackboard names the Gateway keeps out of its catalog", async () => {
     const registryPrivate = BLACKBOARD_TOOL_DEFINITIONS.filter((tool) => tool.private).map((tool) => tool.name);
     expect([...registryPrivate].sort()).toEqual([...await gatewayPrivateBlackboardNames()].sort());
-    expect(registryPrivate).toHaveLength(43);
+    expect(registryPrivate).toHaveLength(45);
   });
 
   it("names a review route and a readback comparator for every write", () => {
@@ -149,7 +142,7 @@ describe("blackboard operation registry", () => {
       expect(row.reviewRoute).toBeNull();
       expect(row.readbackComparator).toBeNull();
     }
-    expect(catalog.counts).toMatchObject({ tools: rows.length, writes: 14 });
+    expect(catalog.counts).toMatchObject({ tools: rows.length, writes: 15 });
   });
 
   it("keeps the generated catalog artifact current", async () => {

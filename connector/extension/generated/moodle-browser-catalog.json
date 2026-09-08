@@ -745,7 +745,7 @@
       "toolName": "moodle_get_assignment",
       "provider": "moodle",
       "summary": "Read a Moodle Assignment",
-      "description": "Read one standard Moodle Assignment and create the digest required for a later Assignment edit. The result carries every Assignment control Morrow can write — availability dates, submission types and their limits, feedback types, submission settings, group submission settings, notifications, grade type, scale and category, marking workflow, and blind marking — together with the values each native list offers. A control the site does not have, because it disabled that submission or feedback plugin, is returned as null or an empty value and cannot be written. submissions_or_grades_exist is true when the native form has frozen blind marking, which Moodle does once the Assignment has submissions or grades. Returned availability, due, cutoff, and grading due dates are civil times in the Moodle user's configured timezone.",
+      "description": "Read one standard Moodle Assignment and create the digest required for a later Assignment edit. The result carries every Assignment control Morrow can write \u2014 availability dates, submission types and their limits, feedback types, submission settings, group submission settings, notifications, grade type, scale and category, marking workflow, and blind marking \u2014 together with the values each native list offers. A control the site does not have, because it disabled that submission or feedback plugin, is returned as null or an empty value and cannot be written. submissions_or_grades_exist is true when the native form has frozen blind marking, which Moodle does once the Assignment has submissions or grades. Returned availability, due, cutoff, and grading due dates are civil times in the Moodle user's configured timezone.",
       "readOnly": true,
       "inputSchema": {
         "type": "object",
@@ -6044,7 +6044,7 @@
       "toolName": "moodle_show_book_chapter",
       "provider": "moodle",
       "summary": "Show a Moodle Book chapter",
-      "description": "Show one hidden Book chapter after review of the complete Book structure. Showing a main chapter also shows its direct subchapters. It uses Moodle’s sesskey-protected native action once and verifies the exact saved visibility scope.",
+      "description": "Show one hidden Book chapter after review of the complete Book structure. Showing a main chapter also shows its direct subchapters. It uses Moodle\u2019s sesskey-protected native action once and verifies the exact saved visibility scope.",
       "readOnly": false,
       "reviewTool": "moodle_list_book_chapters",
       "inputSchema": {
@@ -6082,7 +6082,7 @@
       "toolName": "moodle_hide_book_chapter",
       "provider": "moodle",
       "summary": "Hide a Moodle Book chapter",
-      "description": "Hide one visible Book chapter after review of the complete Book structure. Hiding a main chapter also hides its direct subchapters. It uses Moodle’s sesskey-protected native action once and verifies the exact saved visibility scope.",
+      "description": "Hide one visible Book chapter after review of the complete Book structure. Hiding a main chapter also hides its direct subchapters. It uses Moodle\u2019s sesskey-protected native action once and verifies the exact saved visibility scope.",
       "readOnly": false,
       "reviewTool": "moodle_list_book_chapters",
       "inputSchema": {
@@ -6120,7 +6120,7 @@
       "toolName": "moodle_delete_book_chapter",
       "provider": "moodle",
       "summary": "Delete a Moodle Book chapter",
-      "description": "Delete one Book chapter after review of the complete Book structure. Deleting a main chapter also deletes its direct subchapters and their chapter files. It uses Moodle’s sesskey-protected native action once and verifies the exact remaining structure.",
+      "description": "Delete one Book chapter after review of the complete Book structure. Deleting a main chapter also deletes its direct subchapters and their chapter files. It uses Moodle\u2019s sesskey-protected native action once and verifies the exact remaining structure.",
       "readOnly": false,
       "reviewTool": "moodle_list_book_chapters",
       "destructive": true,
@@ -9106,7 +9106,7 @@
       "toolName": "moodle_get_qbank_question_creation_form",
       "provider": "moodle",
       "summary": "Read the Moodle form that creates one new question in a dedicated hidden Question bank",
-      "description": "Read the native Moodle form that creates one new truefalse or shortanswer question in the approved hidden mod_qbank activity's own bank category. Morrow starts at that bank page, /question/edit.php for the approved category and module, and requires its add-question control, which is how moodle/question:add at the bank context is visible to a browser. It follows that control's own chooser to /question/bank/editquestion/question.php and requires a creation form: no question ID and no copy control, the approved category and question context, status ready, no file manager, file picker or file input, an empty rich-text area for every draft area the form carries, no selected tag, and a return address on the bank page with no appendqnumstring, which is what would make the same native chain add a Quiz slot in one request. It re-derives the course's complete Question bank impact scope first and refuses when that scope is incomplete or when any stored random filter uses jointype NONE. It saves nothing and opens no Quiz page. The result carries no session key and no draft item ID. Question bank updates stay held, and question creation stays held outside this dedicated hidden bank.",
+      "description": "Read the native Moodle form that creates one new multichoice, truefalse or shortanswer question in the approved hidden mod_qbank activity's own bank category. Morrow starts at that bank page, /question/edit.php for the approved category and module, and requires its add-question control, which is how moodle/question:add at the bank context is visible to a browser. It follows that control's own chooser to /question/bank/editquestion/question.php and requires a creation form: no question ID and no copy control, the approved category and question context, status ready, no file manager, file picker or file input, empty draft areas except the native text-only default combined feedback for multichoice, which is preserved, no selected tag, and a return address on the bank page with no appendqnumstring, which is what would make the same native chain add a Quiz slot in one request. It re-derives the course's complete Question bank impact scope first and refuses when that scope is incomplete or when any stored random filter uses jointype NONE. It saves nothing and opens no Quiz page. The result carries no session key and no draft item ID. Question bank updates stay held, and question creation stays held outside this dedicated hidden bank.",
       "readOnly": true,
       "inputSchema": {
         "type": "object",
@@ -9133,6 +9133,7 @@
           "qtype": {
             "type": "string",
             "enum": [
+              "multichoice",
               "shortanswer",
               "truefalse"
             ]
@@ -9154,7 +9155,7 @@
       "toolName": "moodle_create_qbank_question",
       "provider": "moodle",
       "summary": "Create one new question in a dedicated hidden Moodle Question bank",
-      "description": "Create one new truefalse or shortanswer question in the approved hidden mod_qbank activity's own bank category, through Moodle's own creation chain. It requires moodle/question:add in that category context, which Morrow requires the bank page's add-question control to show. Morrow reads the exact creation form, reloads it immediately before sending, sends one POST that keeps every other native control, and then reads the bank page and the saved entry back. It requires exactly one bank entry that the bank page did not list before the POST, and that entry's ready version, name, question text, answers, feedback, category and question context must equal what was approved. It never updates, clones or moves a saved entry, it carries no file and no tag, and it adds no Quiz slot: attaching this question to a Quiz is a separate approved action. It re-derives the course's complete Question bank impact scope first and refuses when that scope is incomplete or when any stored random filter uses jointype NONE. A lost response after the POST is reported as applied or unknown and is never retried. Question bank updates stay held, and question creation stays held outside this dedicated hidden bank. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Create one new multichoice, truefalse or shortanswer question in the approved hidden mod_qbank activity's own bank category, through Moodle's own creation chain. It requires moodle/question:add in that category context, which Morrow requires the bank page's add-question control to show. Morrow reads the exact creation form, reloads it immediately before sending, sends one POST that keeps every other native control, and then reads the bank page and the saved entry back. It requires exactly one bank entry that the bank page did not list before the POST, and that entry's ready version, name, question text, answers, feedback, category and question context must equal what was approved. It never updates, clones or moves a saved entry, it carries no file and no tag, and it adds no Quiz slot: attaching this question to a Quiz is a separate approved action. It re-derives the course's complete Question bank impact scope first and refuses when that scope is incomplete or when any stored random filter uses jointype NONE. A lost response after the POST is reported as applied or unknown and is never retried. Question bank updates stay held, and question creation stays held outside this dedicated hidden bank. Browser-fixture proof only; no signed-in Moodle site has run it.",
       "readOnly": false,
       "reviewTool": "moodle_get_qbank_question_creation_form",
       "inputSchema": {
@@ -9182,6 +9183,7 @@
           "qtype": {
             "type": "string",
             "enum": [
+              "multichoice",
               "shortanswer",
               "truefalse"
             ]
@@ -9225,12 +9227,12 @@
                 "text": {
                   "type": "string",
                   "minLength": 1,
-                  "maxLength": 255
+                  "maxLength": 8192
                 },
                 "fraction": {
                   "type": "string",
                   "pattern": "^-?(?:0|1)(?:\\.[0-9]{1,7})?$",
-                  "description": "A grade fraction the native form offers, as text, for example 1.0 or 0.0. One answer must be worth 1.0."
+                  "description": "A grade fraction the native form offers, as text, for example 1.0 or 0.0."
                 },
                 "feedback": {
                   "type": "string",
@@ -9244,11 +9246,15 @@
               ],
               "additionalProperties": false
             },
-            "description": "shortanswer only: the accepted answers, one of them worth the full grade."
+            "description": "shortanswer or multichoice only. Short answer needs at least one full-credit answer. Multiple choice needs at least two choices; single-answer needs a full-credit choice, multiple-answer needs positive fractions summing to 1 after native rounding. Use the native form's fraction values. Short-answer text is limited to 255 characters."
           },
           "expected_digest": {
             "type": "string",
             "pattern": "^[a-f0-9]{64}$"
+          },
+          "single": {
+            "type": "boolean",
+            "description": "multichoice only: true for one answer, false for multiple answers."
           }
         },
         "required": [
@@ -13124,6 +13130,59 @@
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/h5pactivity/lib.php#L457-L499"
     },
     {
+      "key": "moodle.form.course.modedit.h5pactivity.package.replace.write.v1",
+      "toolName": "moodle_replace_h5pactivity_package",
+      "provider": "moodle",
+      "summary": "Replace a hidden Moodle H5P package",
+      "description": "Replace the saved package of one existing hidden local Moodle H5P activity with one reviewed .h5p package of at most 1 MiB that holds one root h5p.json. A package change can make prior learner attempts no longer match the activity's content. It requires moodle/course:manageactivities at that exact module context, refuses an activity that is visible to learners, and refuses a package that comes from the shared content bank. It checks the ZIP central directory and the root h5p.json before send, reloads the exact native form immediately before sending, sends one native POST, then compares the saved package bytes through pluginfile.php. It never opens the activity view, an attempt report, or the H5P player. Archive preflight and byte equality do not establish H5P validity or learner access. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_h5pactivity",
+      "destructive": true,
+      "irreversible": true,
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "filename": {
+            "type": "string",
+            "minLength": 5,
+            "maxLength": 255,
+            "pattern": "\\.[hH]5[pP]$"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1048576
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "filename",
+          "size_bytes",
+          "sha256",
+          "expected_digest"
+        ],
+        "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/h5pactivity/lib.php#L457-L499"
+    },
+    {
       "key": "moodle.form.course.modedit.h5pactivity.write.v1",
       "toolName": "moodle_update_h5pactivity",
       "provider": "moodle",
@@ -13522,6 +13581,160 @@
           "expected_digest"
         ],
         "additionalProperties": false
+      },
+      "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/bigbluebuttonbn/lib.php#L88-L120"
+    },
+    {
+      "key": "moodle.form.course.modedit.bigbluebuttonbn.write.v1",
+      "toolName": "moodle_update_bigbluebuttonbn",
+      "provider": "moodle",
+      "summary": "Update settings of one closed Moodle BigBlueButton room",
+      "description": "Update the reviewed name, schedule or wait-for-moderator setting of one exact BigBlueButton activity through its native Moodle settings form. The saved form and reviewed digest must match before the request. The room must be closed at the site's own readable current time, and a changed schedule must keep it closed. Morrow preserves every other form control, including guest, recording, participant and presentation settings, sends one change, and compares the saved form with the approved fields and unchanged controls. Guest credentials and participant mappings stay in Chrome. Morrow performs no BigBlueButton server action: it never joins, starts or ends a meeting, and never asks for a recording. The native form cannot confirm an active meeting, so live_session_state is always not_read. Recording controls and participant controls are read and reported, never changed. It requires the selected course and module plus the digest from moodle_get_bigbluebuttonbn.",
+      "readOnly": false,
+      "reviewTool": "moodle_get_bigbluebuttonbn",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "course_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "module_id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "opening_time": {
+            "type": "object",
+            "properties": {
+              "year": {
+                "type": "integer",
+                "minimum": 1970,
+                "maximum": 2100
+              },
+              "month": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 12
+              },
+              "day": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 31
+              },
+              "hour": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 23
+              },
+              "minute": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 59
+              }
+            },
+            "required": [
+              "year",
+              "month",
+              "day",
+              "hour",
+              "minute"
+            ],
+            "additionalProperties": false,
+            "description": "Civil date and time in the Moodle user's configured timezone. This is not a UTC timestamp. The room must be scheduled to open after the site's current time."
+          },
+          "closing_time": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "year": {
+                    "type": "integer",
+                    "minimum": 1970,
+                    "maximum": 2100
+                  },
+                  "month": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 12
+                  },
+                  "day": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 31
+                  },
+                  "hour": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 23
+                  },
+                  "minute": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 59
+                  }
+                },
+                "required": [
+                  "year",
+                  "month",
+                  "day",
+                  "hour",
+                  "minute"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The new closing time, or null to remove it. Supply opening_time with this field. A closing time must follow the opening time."
+          },
+          "wait_for_moderator": {
+            "type": "boolean",
+            "description": "Whether a learner has to wait for a moderator before the session starts. Left as the form's own default when it is not given."
+          },
+          "expected_digest": {
+            "type": "string",
+            "pattern": "^[a-f0-9]{64}$"
+          }
+        },
+        "required": [
+          "course_id",
+          "module_id",
+          "expected_digest"
+        ],
+        "anyOf": [
+          {
+            "required": [
+              "name"
+            ]
+          },
+          {
+            "required": [
+              "opening_time"
+            ]
+          },
+          {
+            "required": [
+              "closing_time"
+            ]
+          },
+          {
+            "required": [
+              "wait_for_moderator"
+            ]
+          }
+        ],
+        "additionalProperties": false,
+        "dependencies": {
+          "closing_time": [
+            "opening_time"
+          ]
+        }
       },
       "documentation": "https://github.com/moodle/moodle/blob/v5.2.2/public/mod/bigbluebuttonbn/lib.php#L88-L120"
     },

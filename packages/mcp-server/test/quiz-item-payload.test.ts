@@ -18,6 +18,8 @@ type PayloadCases = {
   readonly UNCHECKABLE_ENTRY: JsonObject;
   readonly IMAGE: string;
   item(entry: JsonObject): JsonObject;
+  typedNumeric(): JsonObject;
+  mixedRichFill(): JsonObject;
 };
 
 async function bridgePayload(): Promise<BridgePayload> {
@@ -127,6 +129,17 @@ const readableQuestion: JsonObject = question({
 });
 
 describe("New Quiz question create planning checks the payload", () => {
+  it("plans the documented Numeric and mixed fill-in-the-blank question shapes", async () => {
+    const cases = await payloadCases();
+    for (const supplied of [cases.typedNumeric(), cases.mixedRichFill()]) {
+      const { runtime } = fixture();
+      const item = question(supplied.entry as JsonObject);
+      const result = await planNewQuizItemCreate(runtime, { source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", item });
+      expect(result.isError).toBeUndefined();
+      expect((result.structuredContent as JsonObject).status).toBe("planned");
+    }
+  });
+
   it("plans a question whose images name their alternative text", async () => {
     const { runtime } = fixture();
     const result = await planNewQuizItemCreate(runtime, { source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", item: readableQuestion });

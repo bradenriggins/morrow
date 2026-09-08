@@ -1,7 +1,9 @@
 import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
+import { normalizeBridgeBindings, type BridgeBinding } from "@morrow/bridge-protocol";
 import { isJsonObject, sha256Json, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
 import { canvasReadResult } from "./canvas-read.js";
+import { resolveResultArtifact, type ResultArtifactPage } from "./result-artifacts.js";
 import type { GatewayRuntime } from "./runtime.js";
 
 const canvasId = z.string().regex(/^[1-9][0-9]{0,18}$/);
@@ -10,7 +12,7 @@ const inputSchema = z.object({
   course_id: canvasId,
   bank_id: canvasId,
   quiz_use_course_ids: z.array(canvasId).max(200).default([]).describe(
-    "Other courses whose New Quizzes have already been enumerated for this bank. Morrow reads one course through one connection, so these are recorded as a caller declaration, never as a Morrow read.",
+    "Other connected courses whose New Quizzes Morrow must read for this bank. Each course needs one verified connection on the selected Canvas site and account. Naming a course is not evidence that it was read.",
   ),
 });
 
@@ -29,7 +31,7 @@ const ENTRY_PAGE_BUDGET = 25;
 const QUIZ_PAGE_BUDGET = 25;
 /** Share rows one response may carry. A response this long may be one page of more. */
 const SHARE_PER_PAGE = 100;
-/** Quizzes whose items one call reads. A course with more leaves quiz_uses unread. */
+/** Quizzes whose items one call reads across all selected courses. */
 const MAX_QUIZ_ITEM_READS = 200;
 /** Distinct reasons one unread source reports before it says only that there are more. */
 const MAX_UNREAD_REASONS = 8;
@@ -42,8 +44,8 @@ const BANK_ID_KEYS = ["bank_id", "item_bank_id", "bankId", "itemBankId"];
 const BANK_OBJECT_KEYS = ["bank", "item_bank"];
 
 const limits = Object.freeze([
-  "No Canvas route lists the quizzes that draw from an item bank. Morrow enumerates the New Quizzes in the selected course only, so quiz use in any other course is only ever as complete as the courses you enumerated yourself. This limit is permanent.",
-  "Morrow reads one course through one connection, so it cannot read another course's quizzes here. Course ids supplied in quiz_use_course_ids are recorded as your declaration, not as a Morrow read.",
+  "No Canvas route lists the quizzes that draw from an item bank. Morrow enumerates the selected course and the connected courses requested in quiz_use_course_ids. It cannot prove quiz use outside those courses.",
+  "Each requested course is read through its own verified connection on the same Canvas site and account. Every course named by a bank share must be included. A missing connection, incomplete read, or changed context leaves quiz use unread.",
   "A share row names one course. A bank shared with an account can reach courses that no share row names, so Morrow records that source as unread instead of counting the rows it can see.",
   "A bank entry names an item, not a course, so bank entries add no course to this record. They are walked to show that the bank itself was read to its end.",
   "This record is exact for the moment it was read. The guarded Item Bank repair refuses a record more than one hour old, and refuses any record that is not complete.",
@@ -117,23 +119,49 @@ function fanOutRecord(input: {
   };
 }
 
-/** A bank id named by one New Quiz item, or "" when the item names none. */
-function bankReference(item: JsonObject): string {
+/** An absent bank is ""; conflicting or invalid claims are null. */
+function bankReference(item: JsonObject): string | null {
   const holders = [item, item.entry, item.properties].filter(isJsonObject);
+  const ids = new Set<string>();
   for (const holder of holders) {
     for (const key of BANK_ID_KEYS) {
+      if (holder[key] === undefined) continue;
       const id = exactId(holder[key]);
-      if (id) return id;
+      if (!id) return null;
+      ids.add(id);
     }
     for (const key of BANK_OBJECT_KEYS) {
       const nested = holder[key];
       if (isJsonObject(nested)) {
         const id = exactId(nested.id);
-        if (id) return id;
+        if (!id) return null;
+        ids.add(id);
       }
     }
   }
-  return "";
+  return ids.size > 1 ? null : [...ids][0] ?? "";
+}
+
+function verifiedBinding(binding: BridgeBinding): boolean {
+  return binding.provider === "canvas" && binding.runtimeVerified === true
+    && !!binding.courseId && !!binding.origin && !!binding.principalFingerprint
+    && Number.isSafeInteger(binding.sessionGeneration) && Number(binding.sessionGeneration) >= 1
+    && !!binding.catalogDigest;
+}
+
+function bindingContext(binding: BridgeBinding): JsonObject {
+  return {
+    sourceBindingId: binding.sourceBindingId, provider: binding.provider,
+    courseId: binding.courseId!, origin: binding.origin!, principalFingerprint: binding.principalFingerprint!,
+    sessionGeneration: binding.sessionGeneration!, catalogDigest: binding.catalogDigest!,
+    runtimeVerified: binding.runtimeVerified,
+  };
+}
+
+function belongsToCourse(row: JsonObject, courseId: string, quizId?: string): boolean {
+  return (row.course_id === undefined || exactId(row.course_id) === courseId)
+    && (quizId === undefined || ((row.quiz_id === undefined || exactId(row.quiz_id) === quizId)
+      && (row.assignment_id === undefined || exactId(row.assignment_id) === quizId)));
 }
 
 function notEstablished(reason: string): CallToolResult {
@@ -173,7 +201,7 @@ export async function readItemBankFanOut(
     consumers.set(`${consumer.course_id} ${consumer.entity_type} ${consumer.entity_id}`, consumer);
   };
 
-  const call = async (toolName: string, args: JsonObject): Promise<JsonObject> => {
+  const call = async (toolName: string, args: JsonObject, sourceBindingId = input.source_binding_id): Promise<JsonObject> => {
     signal.throwIfAborted();
     const matches = runtime.searchCatalog({ query: toolName, limit: 100 }).tools.filter((tool) => {
       const descriptor = runtime.capabilityGet(tool.publicName).descriptor;
@@ -184,18 +212,18 @@ export async function readItemBankFanOut(
     if (matches.length !== 1) throw new Error(`The Canvas connection does not provide one ${toolName} read.`);
     source = matches[0]!.upstreamId;
     return canvasReadResult(runtime, await runtime.callSourceOwned(matches[0]!.publicName, {
-      ...args, _morrow: { source_binding_id: input.source_binding_id },
+      ...args, _morrow: { source_binding_id: sourceBindingId },
     }, { signal }));
   };
-  const readRecord = async (toolName: string, args: JsonObject): Promise<JsonObject> => {
-    const result = await call(toolName, args);
+  const readRecord = async (toolName: string, args: JsonObject, sourceBindingId = input.source_binding_id): Promise<JsonObject> => {
+    const result = await call(toolName, args, sourceBindingId);
     if (!isJsonObject(result.data)) throw new Error(`Canvas did not return one ${toolName} record.`);
     return result.data;
   };
   // A list read that reached its page budget comes back as an incomplete result,
   // so every collection here is either walked to its end or explicitly unread.
-  const readList = async (toolName: string, args: JsonObject): Promise<{ rows: JsonObject[]; pages: number }> => {
-    const result = await call(toolName, args);
+  const readList = async (toolName: string, args: JsonObject, sourceBindingId = input.source_binding_id): Promise<{ rows: JsonObject[]; pages: number }> => {
+    const result = await call(toolName, args, sourceBindingId);
     if (!Array.isArray(result.data)) throw new Error(`Canvas did not return a ${toolName} list.`);
     const rows = result.data.filter(isJsonObject);
     if (rows.length !== result.data.length) throw new Error(`Canvas returned a ${toolName} row that was not a structured record.`);
@@ -203,6 +231,21 @@ export async function readItemBankFanOut(
     return { rows, pages };
   };
   const failure = (error: unknown): string => error instanceof Error && error.message ? error.message : "Canvas did not return a complete list.";
+  const readBindings = async (): Promise<readonly BridgeBinding[]> => {
+    signal.throwIfAborted();
+    const matches = runtime.searchCatalog({ query: "morrow_browser_bindings", limit: 100 }).tools.filter((tool) => (
+      tool.upstreamName === "morrow_browser_bindings" && tool.upstreamId === source && tool.annotations?.readOnlyHint === true
+    ));
+    if (matches.length !== 1) throw new Error("The Canvas course connections are unavailable or ambiguous.");
+    const response = resolveResultArtifact(await runtime.callSourceOwned(matches[0]!.publicName, {}, { signal }),
+      (handle, offset) => runtime.resultPage(handle, offset) as unknown as ResultArtifactPage);
+    const content = response.structuredContent;
+    if (response.isError === true || !isJsonObject(content) || content.schema !== "morrow.browser-bindings.v1"
+      || content.ok !== true || !Array.isArray(content.bindings) || content.count !== content.bindings.length) {
+      throw new Error("Canvas did not return its complete course connection list.");
+    }
+    return normalizeBridgeBindings(content.bindings);
+  };
 
   let course: JsonObject;
   try {
@@ -214,16 +257,35 @@ export async function readItemBankFanOut(
     return notEstablished("The selected course could not be confirmed from a fresh Canvas read.");
   }
   const courseName = course.name.trim();
+  let bindings: readonly BridgeBinding[];
+  let selectedBinding: BridgeBinding;
+  let bank: JsonObject;
+  try {
+    bindings = await readBindings();
+    const selected = bindings.filter((binding) => binding.sourceBindingId === input.source_binding_id
+      && binding.courseId === input.course_id && verifiedBinding(binding));
+    if (selected.length !== 1) throw new Error("The selected course connection is unavailable or changed.");
+    selectedBinding = selected[0]!;
+    bank = await readRecord("canvas_item_bank_get_bank", { bank_id: input.bank_id });
+    if (exactId(bank.id) !== input.bank_id) throw new Error("The Item Bank read returned a different or missing bank identifier.");
+  } catch (error) {
+    return notEstablished(failure(error));
+  }
 
   // 1. Bank entries. An entry names an item, not a course, so it adds no
   // consumer. Walking it to an empty page is what shows the bank was read.
   const entries: SourceState = { name: "bank_entries", pages: 0, exhausted: false };
   let entryCount = 0;
+  let entryDigest: string | undefined;
   try {
     const listed = await readList("canvas_item_bank_list_entries", { bank_id: input.bank_id, morrow_max_pages: ENTRY_PAGE_BUDGET });
     entries.pages = listed.pages;
+    if (listed.rows.some((row) => row.bank_id !== undefined && exactId(row.bank_id) !== input.bank_id)) {
+      throw new Error("Canvas returned an entry from a different or unknown bank.");
+    }
     entries.exhausted = true;
     entryCount = listed.rows.length;
+    entryDigest = sha256Json(listed.rows);
   } catch (error) {
     unreadSource("bank_entries", `${failure(error)} Morrow walks at most ${ENTRY_PAGE_BUDGET} pages of bank entries in one read.`);
   }
@@ -232,12 +294,18 @@ export async function readItemBankFanOut(
   // names any other kind of entity reaches courses this route cannot list.
   const shares: SourceState = { name: "shared_banks", pages: 0, exhausted: false };
   let shareRowCount = 0;
+  let shareDigest: string | undefined;
   try {
     const listed = await readList("canvas_item_bank_list_shares", { bank_id: input.bank_id, per_page: SHARE_PER_PAGE });
     shares.pages = 1;
     shareRowCount = listed.rows.length;
     let readable = true;
     for (const row of listed.rows) {
+      if (row.bank_id !== undefined && exactId(row.bank_id) !== input.bank_id) {
+        readable = false;
+        unreadSource("shared_banks", "Canvas returned a share from a different or unknown bank.");
+        continue;
+      }
       const entityType = typeof row.entity_type === "string" ? row.entity_type
         : typeof row.entityType === "string" ? row.entityType : "";
       const entityId = exactId(row.entity_id ?? row.entityId);
@@ -263,77 +331,144 @@ export async function readItemBankFanOut(
       unreadSource("shared_banks", `Canvas returned ${listed.rows.length} share rows, which is as many as Morrow asked for, so the list may continue. Paging this route is not established.`);
     }
     shares.exhausted = readable;
+    shareDigest = sha256Json(listed.rows);
   } catch (error) {
     unreadSource("shared_banks", failure(error));
   }
 
-  // 3. Quiz uses. No Item Banks route lists the quizzes that draw from a bank,
-  // so this source is a Canvas-side enumeration of the selected course only.
+  // A course id selects work; only complete reads under its own binding prove it.
   const quizUses: SourceState = { name: "quiz_uses", pages: 0, exhausted: false };
-  const declaredCourseIds = [...new Set(input.quiz_use_course_ids)].sort(compareCourseIds);
+  const requestedCourseIds = [...new Set(input.quiz_use_course_ids)].sort(compareCourseIds);
+  const coursesToRead = [...new Set([input.course_id, ...requestedCourseIds])].sort(compareCourseIds);
+  const readCourseIds = new Set<string>();
+  const usedBindings = new Map<string, BridgeBinding>([[input.course_id, selectedBinding]]);
   let quizzesRead = 0;
-  let selectedCourseEnumerated = false;
-  try {
-    const listed = await readList("canvas_list_new_quizzes", { course_id: input.course_id, morrow_max_pages: QUIZ_PAGE_BUDGET });
-    quizUses.pages = listed.pages;
-    selectedCourseEnumerated = true;
-    if (listed.rows.length > MAX_QUIZ_ITEM_READS) {
-      selectedCourseEnumerated = false;
-      unreadSource("quiz_uses", `This course has ${listed.rows.length} New Quizzes and Morrow reads the items of at most ${MAX_QUIZ_ITEM_READS} in one call.`);
+  let quizReadAttempts = 0;
+  for (const currentCourseId of coursesToRead) {
+    const candidates = currentCourseId === input.course_id ? [selectedBinding] : bindings.filter((binding) => (
+      binding.courseId === currentCourseId && verifiedBinding(binding)
+      && binding.origin === selectedBinding.origin && binding.principalFingerprint === selectedBinding.principalFingerprint
+      && binding.catalogDigest === selectedBinding.catalogDigest
+    ));
+    if (candidates.length !== 1) {
+      unreadSource("quiz_uses", `The connection for ${courseLabel(currentCourseId)} is missing, ambiguous, or belongs to a different Canvas site or account.`);
+      continue;
     }
-    for (const quiz of listed.rows.slice(0, MAX_QUIZ_ITEM_READS)) {
-      if (signal.aborted) {
-        selectedCourseEnumerated = false;
-        unreadSource("quiz_uses", "Morrow reached its time limit before it read the items of every New Quiz in this course.");
-        break;
+    const binding = candidates[0]!;
+    usedBindings.set(currentCourseId, binding);
+    let enumerated = true;
+    try {
+      const currentCourse = await readRecord("canvas_get_single_course_courses", { id: currentCourseId }, binding.sourceBindingId);
+      if (exactId(currentCourse.id) !== currentCourseId || typeof currentCourse.name !== "string" || !currentCourse.name.trim()
+        || (currentCourseId === input.course_id && sha256Json(currentCourse) !== sha256Json(course))) {
+        throw new Error("The course changed or its current identity could not be confirmed.");
       }
-      const quizId = exactId(quiz.id);
-      if (!quizId) {
-        selectedCourseEnumerated = false;
-        unreadSource("quiz_uses", "Canvas listed a New Quiz without an exact identifier, so its items were not read.");
-        continue;
-      }
-      let items: JsonObject[];
-      try {
-        const quizItems = await readList("canvas_list_quiz_items", { course_id: input.course_id, assignment_id: quizId });
-        quizUses.pages += quizItems.pages;
-        items = quizItems.rows;
-        quizzesRead += 1;
-      } catch (error) {
-        selectedCourseEnumerated = false;
-        unreadSource("quiz_uses", `The items of quiz ${quizId} could not be read. ${failure(error)}`);
-        continue;
-      }
-      for (const item of items) {
-        const entryType = typeof item.entry_type === "string" ? item.entry_type : "";
-        const namedBank = bankReference(item);
-        if (namedBank === input.bank_id) {
-          addConsumer({ course_id: input.course_id, entity_type: "quiz_use", entity_id: quizId });
-        } else if (namedBank === "" && !OWN_CONTENT_ENTRY_TYPES.has(entryType)) {
-          // A bank-drawing item that names no bank, or an entry type Canvas has
-          // not documented, could be drawing from this bank. Not knowing is not
-          // the same answer as not drawing from it.
-          selectedCourseEnumerated = false;
-          unreadSource("quiz_uses", BANK_DRAW_ENTRY_TYPES.has(entryType)
-            ? `Quiz ${quizId} draws from an item bank that its item does not name, so Morrow cannot say whether it is this bank.`
-            : `Quiz ${quizId} carries an item whose entry type Canvas does not document, so Morrow cannot say whether it draws from this bank.`);
+      const listed = await readList("canvas_list_new_quizzes", { course_id: currentCourseId, morrow_max_pages: QUIZ_PAGE_BUDGET }, binding.sourceBindingId);
+      quizUses.pages += listed.pages;
+      const quizIds = new Set<string>();
+      for (const quiz of listed.rows) {
+        const quizId = exactId(quiz.id);
+        if (!quizId || quizIds.has(quizId) || !belongsToCourse(quiz, currentCourseId, quizId)) {
+          enumerated = false;
+          unreadSource("quiz_uses", `Canvas listed a New Quiz in ${courseLabel(currentCourseId)} with missing, repeated, or mismatched context.`);
+          continue;
         }
+        quizIds.add(quizId);
+        if (quizReadAttempts >= MAX_QUIZ_ITEM_READS) {
+          enumerated = false;
+          unreadSource("quiz_uses", `Morrow reads the items of at most ${MAX_QUIZ_ITEM_READS} New Quizzes across all requested courses in one call. ${courseLabel(currentCourseId)} still has unread quizzes.`);
+          break;
+        }
+        quizReadAttempts += 1;
+        try {
+          const quizArgs = { course_id: currentCourseId, assignment_id: quizId };
+          const currentQuiz = await readRecord("canvas_get_new_quiz", quizArgs, binding.sourceBindingId);
+          if (exactId(currentQuiz.id) !== quizId || !belongsToCourse(currentQuiz, currentCourseId, quizId)) {
+            throw new Error("The fresh quiz read returned different or missing context.");
+          }
+          const quizItems = await readList("canvas_list_quiz_items", { ...quizArgs, morrow_max_pages: QUIZ_PAGE_BUDGET }, binding.sourceBindingId);
+          quizUses.pages += quizItems.pages;
+          quizzesRead += 1;
+          const itemIds = new Set<string>();
+          for (const item of quizItems.rows) {
+            const itemId = exactId(item.id);
+            const entryType = typeof item.entry_type === "string" ? item.entry_type : "";
+            const namedBank = bankReference(item);
+            if (!itemId || itemIds.has(itemId) || !belongsToCourse(item, currentCourseId, quizId) || namedBank === null) {
+              enumerated = false;
+              unreadSource("quiz_uses", `Quiz ${quizId} in ${courseLabel(currentCourseId)} carries an item with missing, repeated, or conflicting context.`);
+              continue;
+            }
+            itemIds.add(itemId);
+            if (namedBank === input.bank_id) {
+              addConsumer({ course_id: currentCourseId, entity_type: "quiz_use", entity_id: quizId });
+            } else if (namedBank === "" && !OWN_CONTENT_ENTRY_TYPES.has(entryType)) {
+              enumerated = false;
+              unreadSource("quiz_uses", BANK_DRAW_ENTRY_TYPES.has(entryType)
+                ? `Quiz ${quizId} in ${courseLabel(currentCourseId)} draws from an item bank that its item does not name, so Morrow cannot say whether it is this bank.`
+                : `Quiz ${quizId} in ${courseLabel(currentCourseId)} carries an item whose entry type Canvas does not document, so Morrow cannot say whether it draws from this bank.`);
+            }
+          }
+          const checkedQuiz = await readRecord("canvas_get_new_quiz", quizArgs, binding.sourceBindingId);
+          if (sha256Json(checkedQuiz) !== sha256Json(currentQuiz)) throw new Error("The quiz changed while its items were read.");
+        } catch (error) {
+          enumerated = false;
+          unreadSource("quiz_uses", `Quiz ${quizId} in ${courseLabel(currentCourseId)} could not be confirmed. ${failure(error)}`);
+        }
+      }
+      const checkedList = await readList("canvas_list_new_quizzes", { course_id: currentCourseId, morrow_max_pages: QUIZ_PAGE_BUDGET }, binding.sourceBindingId);
+      quizUses.pages += checkedList.pages;
+      if (sha256Json(checkedList.rows) !== sha256Json(listed.rows)) throw new Error("The course quiz list changed during enumeration.");
+      const checkedCourse = await readRecord("canvas_get_single_course_courses", { id: currentCourseId }, binding.sourceBindingId);
+      if (sha256Json(checkedCourse) !== sha256Json(currentCourse)) throw new Error("The course changed during enumeration.");
+      if (enumerated) readCourseIds.add(currentCourseId);
+    } catch (error) {
+      unreadSource("quiz_uses", `${courseLabel(currentCourseId)} could not be enumerated. ${failure(error)}`);
+    }
+  }
+
+  // A long enumeration must not certify sources or bindings that changed while it ran.
+  try {
+    const checkedBank = await readRecord("canvas_item_bank_get_bank", { bank_id: input.bank_id });
+    if (sha256Json(checkedBank) !== sha256Json(bank)) throw new Error("The bank changed during enumeration.");
+    if (entries.exhausted) {
+      const checkedEntries = await readList("canvas_item_bank_list_entries", { bank_id: input.bank_id, morrow_max_pages: ENTRY_PAGE_BUDGET });
+      entries.pages += checkedEntries.pages;
+      if (sha256Json(checkedEntries.rows) !== entryDigest) throw new Error("The bank entries changed during enumeration.");
+    }
+    if (shares.exhausted) {
+      const checkedShares = await readList("canvas_item_bank_list_shares", { bank_id: input.bank_id, per_page: SHARE_PER_PAGE });
+      shares.pages += checkedShares.pages;
+      if (sha256Json(checkedShares.rows) !== shareDigest) throw new Error("The bank shares changed during enumeration.");
+    }
+    const currentBindings = await readBindings();
+    for (const [currentCourseId, binding] of usedBindings) {
+      const current = currentBindings.find((entry) => entry.sourceBindingId === binding.sourceBindingId);
+      if (!current || !verifiedBinding(current) || sha256Json(bindingContext(current)) !== sha256Json(bindingContext(binding))) {
+        readCourseIds.delete(currentCourseId);
+        unreadSource("quiz_uses", `The connection for ${courseLabel(currentCourseId)} changed during enumeration.`);
+        if (currentCourseId === input.course_id) throw new Error("The selected bank connection changed during enumeration.");
       }
     }
   } catch (error) {
-    unreadSource("quiz_uses", failure(error));
+    entries.exhausted = false;
+    shares.exhausted = false;
+    readCourseIds.clear();
+    unreadSource("bank_entries", failure(error));
+    unreadSource("shared_banks", failure(error));
+    unreadSource("quiz_uses", "Morrow could not confirm that the bank and course connections stayed current during enumeration.");
   }
   const externalShareCourseIds = [...new Set([...consumers.values()]
     .filter((consumer) => consumer.entity_type === "shared_bank" && consumer.course_id !== input.course_id)
     .map((consumer) => consumer.course_id))].sort(compareCourseIds);
-  const undeclaredCourseIds = externalShareCourseIds.filter((id) => !declaredCourseIds.includes(id));
-  if (selectedCourseEnumerated && !shares.exhausted) {
+  const unreadCourseIds = externalShareCourseIds.filter((id) => !readCourseIds.has(id));
+  if (!shares.exhausted) {
     unreadSource("quiz_uses", "Morrow could not read every course this bank reaches, so it cannot say which courses still need their quizzes enumerated.");
   }
-  if (selectedCourseEnumerated && shares.exhausted && undeclaredCourseIds.length > 0) {
-    unreadSource("quiz_uses", `This bank reaches ${courseList(undeclaredCourseIds)}. Morrow cannot read another course through this connection, so quiz use there stays unread until those courses are enumerated and supplied in quiz_use_course_ids.`);
+  if (shares.exhausted && unreadCourseIds.length > 0) {
+    unreadSource("quiz_uses", `This bank reaches ${courseList(unreadCourseIds)}, whose quiz use remains unread. Include these courses in quiz_use_course_ids and keep their verified course connections available.`);
   }
-  quizUses.exhausted = selectedCourseEnumerated && shares.exhausted && undeclaredCourseIds.length === 0;
+  quizUses.exhausted = shares.exhausted && unreadCourseIds.length === 0 && coursesToRead.every((id) => readCourseIds.has(id));
 
   const record = fanOutRecord({
     bankId: input.bank_id,
@@ -371,8 +506,8 @@ export async function readItemBankFanOut(
       share_row_count: shareRowCount,
       quizzes_read: quizzesRead,
       quiz_uses_found: quizUseCount,
-      quiz_use_courses_read_by_morrow: selectedCourseEnumerated ? [input.course_id] : [],
-      quiz_use_courses_declared_by_caller: declaredCourseIds,
+      quiz_use_courses_read_by_morrow: [...readCourseIds].sort(compareCourseIds),
+      quiz_use_courses_requested: requestedCourseIds,
     },
     unread: unreadDetail,
     limits,
@@ -380,10 +515,10 @@ export async function readItemBankFanOut(
   const lines = [
     summary,
     `Course: ${courseName} (${courseLabel(input.course_id)}). Item bank ${input.bank_id}.`,
-    `Morrow read ${entryCount} bank ${entryCount === 1 ? "entry" : "entries"}, ${shareRowCount} share ${shareRowCount === 1 ? "row" : "rows"}, and the items of ${quizzesRead} New ${quizzesRead === 1 ? "Quiz" : "Quizzes"} in this course, where it found ${quizUseCount} ${quizUseCount === 1 ? "quiz" : "quizzes"} drawing from this bank.`,
-    declaredCourseIds.length
-      ? `You declared that the New Quizzes in ${courseList(declaredCourseIds)} were already enumerated. Morrow did not read those courses and records the declaration as yours.`
-      : "You declared no other enumerated course, so this record covers quiz use in the selected course only.",
+    `Morrow read ${entryCount} bank ${entryCount === 1 ? "entry" : "entries"}, ${shareRowCount} share ${shareRowCount === 1 ? "row" : "rows"}, and the items of ${quizzesRead} New ${quizzesRead === 1 ? "Quiz" : "Quizzes"} across the requested courses, where it found ${quizUseCount} ${quizUseCount === 1 ? "quiz" : "quizzes"} drawing from this bank.`,
+    readCourseIds.size
+      ? `Morrow completed quiz reads for ${courseList([...readCourseIds].sort(compareCourseIds))}.`
+      : "Morrow could not complete quiz reads for any requested course.",
     ...(unreadDetail.length
       ? [`Morrow could not read: ${unreadDetail.map((entry) => `${entry.source} — ${entry.reasons.join(" ")}`).join(" ")}`]
       : []),
@@ -398,7 +533,7 @@ export async function readItemBankFanOut(
 export function registerItemBankFanOutTool(server: McpServer, runtime: GatewayRuntime): void {
   server.registerTool("morrow_read_item_bank_fan_out", {
     title: "Read the courses one item bank reaches",
-    description: "Read, from Canvas, which courses and New Quizzes draw from one New Quizzes item bank, and record what could not be read. Does not change Canvas. No Canvas route lists the quizzes that draw from a bank, so quiz use is enumerated in the selected course only and any other course must be enumerated separately and named in quiz_use_course_ids. A source Morrow could not read is reported as unread, never as an empty result.",
+    description: "Read, from Canvas, which courses and New Quizzes draw from one New Quizzes item bank, and record what could not be read. Does not change Canvas. No Canvas route lists the quizzes that draw from a bank, so Morrow reads the selected course and each course named in quiz_use_course_ids through its own verified connection on the same Canvas site and account. All courses named by shares must be read. Naming a course never counts as a completed read. A source Morrow could not read is reported as unread, never as an empty result.",
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async (input, context) => await readItemBankFanOut(runtime, input, context.mcpReq.signal));

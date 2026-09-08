@@ -17,6 +17,8 @@ import { BLACKBOARD_ACTIONS } from "../src/blackboard-actions.js";
 const COURSE_ID = "_22_1";
 const CONTENT_ID = "_33_1";
 const PRINCIPAL_ID = "_11_1";
+const COPY_DESTINATION_ID = "BIO-101-COPY";
+const COPIED_COURSE_ID = "_23_1";
 const CREDENTIAL_REVISION = "8c751fc3-ecf9-4558-b86b-d97a34e93295";
 const TEST_CERTIFICATE = fileURLToPath(new URL("./fixtures/blackboard-test-cert.pem", import.meta.url));
 const TEST_KEY = fileURLToPath(new URL("./fixtures/blackboard-test-key.pem", import.meta.url));
@@ -83,6 +85,8 @@ async function createFixture(): Promise<{
   const announcements = new Map<string, JsonObject>();
   const attachments = new Map<string, JsonObject>();
   let uploadedBytes = 0;
+  let copyTaskReads = 0;
+  let copyStarted = false;
   let learnerMembership: JsonObject = {
     id: "_membership_2", courseId: COURSE_ID, userId: "_44_1", courseRoleId: "Student", availability: { available: "Yes" },
   };
@@ -177,6 +181,36 @@ async function createFixture(): Promise<{
     }
     if (pathname === `/learn/api/public/v3/courses/${COURSE_ID}`) {
       json(response, { id: COURSE_ID, courseId: "BIO-101", name: "Biology", ultraStatus: "Ultra", closedComplete: false });
+      return;
+    }
+    if (pathname === `/learn/api/public/v2/courses/${COURSE_ID}/copy` && request.method === "POST") {
+      let body = "";
+      for await (const chunk of request) body += String(chunk);
+      expect(JSON.parse(body)).toEqual({ targetCourse: { courseId: COPY_DESTINATION_ID } });
+      copyStarted = true;
+      response.writeHead(202, { location: `/learn/api/public/v1/courses/${COURSE_ID}/tasks/_99_1` });
+      response.end();
+      return;
+    }
+    if (pathname === `/learn/api/public/v1/courses/${COURSE_ID}/tasks/_99_1`) {
+      copyTaskReads += 1;
+      if (copyTaskReads < 3) json(response, { status: "Running" });
+      else {
+        response.writeHead(303, { location: `/learn/api/public/v3/courses/${COPIED_COURSE_ID}` });
+        response.end();
+      }
+      return;
+    }
+    if (pathname === `/learn/api/public/v3/courses/${COPIED_COURSE_ID}`
+      || pathname === `/learn/api/public/v3/courses/externalId%3A${COPY_DESTINATION_ID}`) {
+      if (!copyStarted) { json(response, { message: "not found" }, 404); return; }
+      json(response, {
+        id: COPIED_COURSE_ID,
+        courseId: COPY_DESTINATION_ID,
+        name: "Biology",
+        ultraStatus: "Ultra",
+        closedComplete: false,
+      });
       return;
     }
     if (pathname === `/learn/api/public/v1/courses/${COURSE_ID}/contents/${CONTENT_ID}` && request.method === "GET") {
@@ -283,7 +317,7 @@ describe("Blackboard API Gateway effect integration", () => {
       client = new Client({ name: "morrow-blackboard-actions", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
       await client.connect(left);
       const names = (await client.listTools()).tools.map((tool) => tool.name);
-      expect(BLACKBOARD_ACTIONS).toHaveLength(13);
+      expect(BLACKBOARD_ACTIONS).toHaveLength(14);
       for (const action of BLACKBOARD_ACTIONS) {
         expect(names).toContain(action.publicName);
         expect(names).not.toContain(action.apply.name);
@@ -341,6 +375,47 @@ describe("Blackboard API Gateway effect integration", () => {
       const vault = await readFile(join(fixture.directory, "home", ".morrow", "blackboard-learners.json"), "utf8");
       expect(vault).not.toContain("Jane");
       expect(vault).not.toContain("_44_1");
+    } finally {
+      await client?.close();
+      await server?.close();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 40_000);
+
+  it("retains one asynchronous course-copy task and verifies it without resending", async () => {
+    const fixture = await createFixture();
+    let runtime: MorrowRuntime | undefined;
+    let client: Client | undefined;
+    let server: ReturnType<typeof serveStdio> | undefined;
+    try {
+      runtime = await MorrowRuntime.connect(configuration(resolve("../.."), fixture), { statePath: join(fixture.directory, "course-copy.sqlite3") });
+      const [left, right] = InMemoryTransport.createLinkedPair();
+      server = serveStdio(() => createFullMorrowServer(runtime!), { transport: right });
+      client = new Client({ name: "morrow-blackboard-copy", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+      await client.connect(left);
+      const scope = { tenant_id: "fixture", source_binding_id: sourceBindingId(fixture.baseUrl), course_id: COURSE_ID };
+      const planned = await client.callTool({
+        name: "morrow_plan_blackboard_course_copy",
+        arguments: { ...scope, destination_course_id: COPY_DESTINATION_ID },
+      });
+      expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
+      const id = operationId(planned);
+      runtime.gateway.approveOperation(id);
+      const dispatched = await runtime.gateway.dispatchOperation(id);
+      expect(dispatched.isError, JSON.stringify(dispatched)).not.toBe(true);
+      expect(dispatched.structuredContent).toMatchObject({ effectState: "awaiting_verification" });
+      expect(runtime.gateway.operationGet(id)).toMatchObject({
+        state: "awaiting_verification",
+        sourceTaskId: expect.stringMatching(/^bbcopy:[A-Za-z0-9_-]+$/),
+      });
+      expect(fixture.counts().requests.filter((entry) => entry === `POST /learn/api/public/v2/courses/${COURSE_ID}/copy`)).toHaveLength(1);
+
+      const verified = await runtime.gateway.reconcileOperation(id);
+      expect(verified.isError, JSON.stringify(verified)).not.toBe(true);
+      expect(verified.structuredContent).toMatchObject({ effectState: "verified", verification: { status: "verified" } });
+      expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "verified", verificationStatus: "verified" });
+      expect(fixture.counts().requests.filter((entry) => entry === `POST /learn/api/public/v2/courses/${COURSE_ID}/copy`)).toHaveLength(1);
     } finally {
       await client?.close();
       await server?.close();

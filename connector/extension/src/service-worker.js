@@ -76,6 +76,7 @@ const PRIVATE_MOODLE_STAGED_FILE_OPERATIONS = Object.freeze([
   Object.freeze({ toolName: "moodle_create_scorm_package", key: "moodle.form.course.modedit.scorm.package.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" }),
   Object.freeze({ toolName: "moodle_replace_resource_file", key: "moodle.form.course.modedit.resource.file.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" }),
   Object.freeze({ toolName: "moodle_replace_scorm_package", key: "moodle.form.course.modedit.scorm.package.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" }),
+  Object.freeze({ toolName: "moodle_replace_h5pactivity_package", key: "moodle.form.course.modedit.h5pactivity.package.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" }),
   Object.freeze({ toolName: "moodle_add_folder_files", key: "moodle.form.course.modedit.folder.files.add.write.v1", argumentNames: Object.freeze(["course_id", "module_id", "folder_path", "files", "expected_digest"]), attachmentMode: "multiple" }),
   Object.freeze({ toolName: "moodle_create_h5pactivity", key: "moodle.form.course.modedit.h5pactivity.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" }),
 ]);
@@ -296,15 +297,18 @@ const MOODLE_BIGBLUEBUTTON_OPERATION_KEYS = new Set([
   "moodle.form.course.modedit.bigbluebuttonbn.read.v1",
   "moodle.form.course.modedit.bigbluebuttonbn.create.read.v1",
   "moodle.form.course.modedit.bigbluebuttonbn.create.write.v1",
+  "moodle.form.course.modedit.bigbluebuttonbn.write.v1",
 ]);
 // The H5P activity route. It reads activity and creation settings, creates one
-// hidden activity from one reviewed .h5p package, and edits bounded settings.
+// hidden activity from one reviewed .h5p package, replaces a saved package,
+// and edits bounded settings.
 // It never opens /mod/h5pactivity/view.php, an attempt report, or the H5P
 // player, and it refuses a form whose package comes from the content bank.
 const MOODLE_H5P_OPERATION_KEYS = new Set([
   "moodle.form.course.modedit.h5pactivity.read.v1",
   "moodle.form.course.modedit.h5pactivity.create.read.v1",
   "moodle.form.course.modedit.h5pactivity.create.write.v1",
+  "moodle.form.course.modedit.h5pactivity.package.replace.write.v1",
   "moodle.form.course.modedit.h5pactivity.write.v1",
 ]);
 // Phase one of the hidden Question bank isolation route: create the activity,
@@ -2127,7 +2131,8 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
       }
     }
     if (MOODLE_H5P_OPERATION_KEYS.has(operation.key)) {
-      const expectsAttachment = operation.key === "moodle.form.course.modedit.h5pactivity.create.write.v1";
+      const expectsAttachment = operation.key === "moodle.form.course.modedit.h5pactivity.create.write.v1"
+        || operation.key === "moodle.form.course.modedit.h5pactivity.package.replace.write.v1";
       if (privateConversation !== undefined || (privateAttachment !== undefined) !== expectsAttachment) {
         return { ok: false, sent: false, error: "moodle_h5pactivity_arguments_invalid" };
       }
@@ -2625,6 +2630,7 @@ async function editScopeProblem(command, binding, operation) {
   if (command.kind !== "invoke_write") return null;
   const authorization = command.outerGrant?.authorization;
   if (!authorization || authorization.kind === "review") return null;
+  if (Object.hasOwn(command.arguments || {}, "morrow_new_quiz_settings_guard")) return problem("new_quiz_settings_review_required", "New Quiz settings need review for this exact change.", true);
   if (authorization.kind !== "edit_scope") return problem("edit_policy_authorization_invalid", "The Edit permission evidence is invalid.", false);
   const api = await catalog();
   const stored = await storage();
@@ -3119,6 +3125,7 @@ function genericCanvasWriteReadback(command, operation, privateConversation) {
     && operation.provider === "canvas"
     && !command.arguments?.morrow_canvas_content_guard
     && !command.arguments?.morrow_page_guard
+    && !command.arguments?.morrow_new_quiz_settings_guard
     && !privateConversation
     && !privateCanvasCourseFileOperation(operation)
     && !isCanvasOperationReadback(operation);
@@ -3279,6 +3286,7 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
   if (command.kind === "invoke_write") {
     const guardedCanvasContent = command.arguments?.morrow_canvas_content_guard;
     const guardedPage = command.arguments?.morrow_page_guard;
+    const guardedNewQuizSettings = command.arguments?.morrow_new_quiz_settings_guard;
     // A guarded Item Bank repair reads the question again inside the Item Banks
     // frame, because only that frame holds the credential the read needs. Its
     // own answer is the verification; no second route can produce one.
@@ -3287,11 +3295,11 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       && Object.hasOwn(command.arguments || {}, "assignment_due_at")
       && Object.keys(command.arguments || {}).every((field) => ["course_id", "id", "assignment_due_at"].includes(field));
     const namedCanvasReadback = operation.provider === "canvas" && isCanvasOperationReadback(operation);
-    const semanticReadback = Boolean(semantic) && !guardedCanvasContent && !guardedPage && !privateConversation && !namedCanvasReadback;
+    const semanticReadback = Boolean(semantic) && !guardedCanvasContent && !guardedPage && !guardedNewQuizSettings && !privateConversation && !namedCanvasReadback;
     const namedPlan = namedCanvasReadback
       ? planCanvasOperationReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data)
       : null;
-    const plan = guardedCanvasContent || guardedPage || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
+    const plan = guardedCanvasContent || guardedPage || guardedNewQuizSettings || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
     readDescriptor = genericCanvasWriteReadback(command, operation, privateConversation)
       ? canvasRecoveryDescriptor(operation, command.arguments || {}, result.data)
       : null;
@@ -3301,6 +3309,8 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_content_verification_missing" };
     } else if (guardedPage) {
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "page_verification_missing" };
+    } else if (guardedNewQuizSettings) {
+      verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "new_quiz_settings_verification_missing" };
     } else if (guardedItemBank) {
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "item_bank_verification_missing" };
     } else if (dueDateOnlyAssignment) {

@@ -28,9 +28,12 @@ export const MOODLE_FOLDER_FILES_OPERATION = "moodle.form.course.modedit.folder.
 export const MOODLE_SCORM_REPLACEMENT_TOOL = "moodle_replace_scorm_package";
 export const MOODLE_SCORM_REPLACEMENT_READ_TOOL = "moodle_get_scorm";
 export const MOODLE_SCORM_REPLACEMENT_OPERATION = "moodle.form.course.modedit.scorm.package.replace.write.v1";
+export const MOODLE_H5P_REPLACEMENT_TOOL = "moodle_replace_h5pactivity_package";
+export const MOODLE_H5P_REPLACEMENT_READ_TOOL = "moodle_get_h5pactivity";
+export const MOODLE_H5P_REPLACEMENT_OPERATION = "moodle.form.course.modedit.h5pactivity.package.replace.write.v1";
 export const RESOURCE_FILE_APPROVAL_TTL_MS = 15 * 60_000;
 
-export type MoodleStagedFileKind = "resource" | "folder" | "imscp" | "scorm" | "h5p" | "resource_replacement" | "folder_files" | "scorm_replacement";
+export type MoodleStagedFileKind = "resource" | "folder" | "imscp" | "scorm" | "h5p" | "resource_replacement" | "folder_files" | "scorm_replacement" | "h5p_replacement";
 
 export type MoodleStagedFileCapability = Readonly<{
   kind: MoodleStagedFileKind;
@@ -93,6 +96,12 @@ export const MOODLE_STAGED_FILE_CAPABILITIES: Readonly<Record<MoodleStagedFileKi
     preparationReadToolName: MOODLE_SCORM_REPLACEMENT_READ_TOOL, operationKey: MOODLE_SCORM_REPLACEMENT_OPERATION, planMode: "replace",
     publicPlanToolName: "morrow_plan_moodle_scorm_package_replacement", title: "Prepare a SCORM package replacement for review",
     description: "Prepare one local ZIP file from this assistant's project folder to replace the saved package of one selected Moodle SCORM activity.", noun: "SCORM package replacement",
+  }),
+  h5p_replacement: Object.freeze({
+    kind: "h5p_replacement", module: "h5pactivity", toolName: MOODLE_H5P_REPLACEMENT_TOOL,
+    preparationReadToolName: MOODLE_H5P_REPLACEMENT_READ_TOOL, operationKey: MOODLE_H5P_REPLACEMENT_OPERATION, planMode: "replace",
+    publicPlanToolName: "morrow_plan_moodle_h5p_package_replacement", title: "Prepare an H5P package replacement for review",
+    description: "Prepare one local .h5p file from this assistant's project folder to replace the saved package of one selected hidden Moodle H5P activity.", noun: "H5P package replacement",
   }),
 });
 

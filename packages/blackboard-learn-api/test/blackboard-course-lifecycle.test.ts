@@ -11,7 +11,8 @@ import { createBlackboardLearnMcpServer } from "../src/server.js";
 import type { BlackboardTenant } from "../src/types.js";
 
 const courseId = "_22_1";
-const destinationCourseId = "_23_1";
+const destinationCourseId = "BIO-101-COPY";
+const copiedCourseId = "_23_1";
 const principalId = "_11_1";
 const studentId = "_44_1";
 const contentId = "_55_1";
@@ -20,6 +21,10 @@ const effectSecret = Buffer.alloc(32, 7).toString("base64url");
 
 const rosterPath = `/learn/api/public/v1/courses/${courseId}/users`;
 const coursePath = `/learn/api/public/v3/courses/${courseId}`;
+const courseCopyPath = `/learn/api/public/v2/courses/${courseId}/copy`;
+const courseCopyTaskPath = `/learn/api/public/v1/courses/${courseId}/tasks/_99_1`;
+const copiedCoursePath = `/learn/api/public/v1/courses/${copiedCourseId}`;
+const copiedCourseExternalPath = `/learn/api/public/v3/courses/externalId%3A${destinationCourseId}`;
 const contentPath = `/learn/api/public/v1/courses/${courseId}/contents/${contentId}`;
 const folderPath = `/learn/api/public/v1/courses/${courseId}/contents/${folderId}`;
 
@@ -41,6 +46,11 @@ afterEach(async () => { await close?.(); close = undefined; });
 function json(response: ServerResponse, value: unknown, status = 200): void {
   response.writeHead(status, { "content-type": "application/json" });
   response.end(JSON.stringify(value));
+}
+
+function location(response: ServerResponse, value: string, status: number): void {
+  response.writeHead(status, { location: value });
+  response.end();
 }
 
 function structured(result: unknown): JsonObject {
@@ -83,14 +93,22 @@ interface FixtureOptions {
    * the field and empties it. Both answers mean the item holds no date.
    */
   readonly keepsClearedDatesAsNull?: boolean;
+  /** Leave the documented copy task running after the copy request. */
+  readonly copyPending?: boolean;
+  /** Answer the first task read as running, then complete it on the next read. */
+  readonly copyPendingOnce?: boolean;
+  /** Complete the task but return a target that does not match the source. */
+  readonly copyMismatch?: boolean;
 }
 
 async function harness(options: FixtureOptions = {}) {
   const requests: string[] = [];
   const coursePatches: JsonObject[] = [];
   const contentPatches: JsonObject[] = [];
+  const courseCopies: JsonObject[] = [];
   let courseReads = 0;
   let contentReads = 0;
+  let copyTaskReads = 0;
 
   let course: JsonObject = {
     id: courseId,
@@ -118,6 +136,7 @@ async function harness(options: FixtureOptions = {}) {
       ...(options.noItemWindow ? {} : { adaptiveRelease: { start: "2026-09-28T08:00:00.000Z", end: "2026-10-01T23:59:00.000Z" } }),
     },
   };
+  let copiedCourse: JsonObject | undefined;
 
   const folder: JsonObject = {
     id: folderId,
@@ -187,6 +206,30 @@ async function harness(options: FixtureOptions = {}) {
         }
         json(response, course);
       });
+      return;
+    }
+    if (pathname === courseCopyPath && method === "POST") {
+      void body(request).then((raw) => {
+        const requested = JSON.parse(raw) as JsonObject;
+        courseCopies.push(requested);
+        copiedCourse = {
+          ...course,
+          id: copiedCourseId,
+          courseId: destinationCourseId,
+          ...(options.copyMismatch ? { name: "Different course" } : {}),
+        };
+        location(response, courseCopyTaskPath, 202);
+      });
+      return;
+    }
+    if (pathname === courseCopyTaskPath) {
+      copyTaskReads += 1;
+      if (options.copyPending || (options.copyPendingOnce && copyTaskReads === 1)) json(response, { status: "Running" });
+      else location(response, copiedCoursePath, 303);
+      return;
+    }
+    if ((pathname === copiedCoursePath || pathname === copiedCourseExternalPath) && copiedCourse) {
+      json(response, copiedCourse);
       return;
     }
     if (pathname === coursePath) {
@@ -277,6 +320,7 @@ async function harness(options: FixtureOptions = {}) {
     )),
     coursePatchBodies: () => [...coursePatches],
     contentPatchBodies: () => [...contentPatches],
+    courseCopyBodies: () => [...courseCopies],
     savedCourse: () => ({ ...course }),
     savedContent: () => ({ ...content }),
     call,
@@ -678,16 +722,104 @@ describe("Blackboard course availability, dates and course copy", () => {
     expect(structured(await fixture.call("blackboard_verify_content_dated_visibility", args))).toMatchObject({ verified: true });
   });
 
-  it("reports course copy as unavailable, names what is missing, and sends no request at all", async () => {
+  it("copies one reviewed source course through its task and re-reads the copied course", async () => {
     const fixture = await harness();
-    const refused = structured(await fixture.call("blackboard_course_copy", { destination_course_id: destinationCourseId }));
-    expect(refused).toMatchObject({ ok: false, resultState: "not_sent" });
-    expect(problem(refused)).toMatchObject({ code: "blackboard_operation_unavailable" });
-    const message = String(problem(refused).message);
-    expect(message).toContain("Morrow does not copy a Blackboard course.");
-    expect(message).toContain("one route that starts the copy and a separate resource that reports whether it finished");
-    expect(message).toContain("Morrow guesses no Blackboard path.");
-    expect(fixture.requests()).toEqual([]);
+    const args = { destination_course_id: destinationCourseId };
+    const plan = structured(await fixture.call("blackboard_plan_course_copy", args));
+    expect(plan).toMatchObject({
+      schema: "morrow.blackboard.course-copy.plan.v1",
+      ok: true,
+      destinationCourseId,
+      request: { targetCourse: { courseId: destinationCourseId } },
+      reviewRequired: true,
+    });
+    expect(fixture.writeRequests()).toEqual([]);
+    const applied = structured(await fixture.call(
+      "blackboard_apply_reviewed_course_copy",
+      applyArguments(args, String(plan.planDigest)),
+    ));
+    expect(applied).toMatchObject({
+      schema: "morrow.blackboard.course-copy.readback.v1",
+      ok: true,
+      resultState: "applied",
+      destinationCourseId,
+      copiedCourse: { id: copiedCourseId, courseId: destinationCourseId, name: "Biology" },
+    });
+    expect(fixture.courseCopyBodies()).toEqual([{ targetCourse: { courseId: destinationCourseId } }]);
+    expect(fixture.writeRequests()).toEqual([`POST ${courseCopyPath}`]);
+    expect(structured(await fixture.call("blackboard_verify_course_copy", args))).toMatchObject({
+      schema: "morrow.blackboard.course-copy.comparator.v1",
+      ok: true,
+      destinationCourseId,
+      verified: true,
+    });
+  });
+
+  it("does not repeat a course copy while Blackboard still reports its task running", async () => {
+    const fixture = await harness({ copyPending: true });
+    const args = { destination_course_id: destinationCourseId };
+    const planDigest = await planDigestOf(fixture, "blackboard_plan_course_copy", args);
+    const pending = structured(await fixture.call(
+      "blackboard_apply_reviewed_course_copy",
+      applyArguments(args, planDigest),
+    ));
+    expect(pending).toMatchObject({
+      schema: "morrow.blackboard.course-copy.pending.v1",
+      ok: true,
+      resultState: "awaiting_provider",
+      taskId: expect.stringMatching(/^bbcopy:[A-Za-z0-9_-]+$/),
+    });
+    expect(fixture.writeRequests()).toEqual([`POST ${courseCopyPath}`]);
+  });
+
+  it("retains the exact task and verifies it after a pending course copy completes", async () => {
+    const fixture = await harness({ copyPendingOnce: true });
+    const args = { destination_course_id: destinationCourseId };
+    const planDigest = await planDigestOf(fixture, "blackboard_plan_course_copy", args);
+    const pending = structured(await fixture.call(
+      "blackboard_apply_reviewed_course_copy",
+      applyArguments(args, planDigest),
+    ));
+    const verified = structured(await fixture.call("blackboard_verify_course_copy", {
+      ...args,
+      task_reference: pending.taskId,
+    }));
+    expect(verified).toMatchObject({
+      schema: "morrow.blackboard.course-copy.comparator.v1",
+      ok: true,
+      destinationCourseId,
+      verified: true,
+    });
+    expect(fixture.writeRequests()).toEqual([`POST ${courseCopyPath}`]);
+  });
+
+  it("keeps an unconfirmed course copy when its completed task returns a different course", async () => {
+    const fixture = await harness({ copyMismatch: true });
+    const args = { destination_course_id: destinationCourseId };
+    const planDigest = await planDigestOf(fixture, "blackboard_plan_course_copy", args);
+    const failed = structured(await fixture.call(
+      "blackboard_apply_reviewed_course_copy",
+      applyArguments(args, planDigest),
+    ));
+    expect(failed).toMatchObject({ ok: false, resultState: "applied_or_unknown" });
+    expect(problem(failed)).toMatchObject({ code: "blackboard_content_mismatch" });
+    expect(fixture.writeRequests()).toEqual([`POST ${courseCopyPath}`]);
+  });
+
+  it("calls a course copy unverified, not failed, while the destination course does not exist", async () => {
+    const fixture = await harness();
+    const args = { destination_course_id: destinationCourseId };
+    // The Gateway freezes this comparator while it plans the copy, before any
+    // course exists at the reviewed Course ID, so Blackboard's 404 is an answer.
+    const before = structured(await fixture.call("blackboard_verify_course_copy", args));
+    expect(before).toMatchObject({
+      schema: "morrow.blackboard.course-copy.comparator.v1",
+      ok: true,
+      destinationCourseId,
+      verified: false,
+    });
+    expect(fixture.requests()).toContain(`GET ${copiedCourseExternalPath}`);
+    expect(fixture.writeRequests()).toEqual([]);
   });
 
   it("returns no learner name or address in any course lifecycle result", async () => {

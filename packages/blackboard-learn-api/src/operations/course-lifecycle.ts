@@ -22,6 +22,8 @@ const COURSE_FIELDS = ["id", "courseId", "name", "ultraStatus", "closedComplete"
 const COURSE_PATCH_ROUTE = "/learn/api/public/v3/courses/{course_id}";
 const COURSE_READ_ROUTE = `${COURSE_PATCH_ROUTE}?fields=${COURSE_FIELDS.join(",")}`;
 const CONTENT_ROUTE = "/learn/api/public/v1/courses/{course_id}/contents/{content_id}";
+const COURSE_COPY_ROUTE = "/learn/api/public/v2/courses/{course_id}/copy";
+const COURSE_COPY_TASK_ROUTE = "/learn/api/public/v1/courses/{course_id}/tasks/{task_id}";
 
 const AVAILABILITY_FIELD = "availability";
 const DURATION_FIELD = "duration";
@@ -108,15 +110,6 @@ const PROTECTED_CONTENT_FIELDS: readonly (readonly string[])[] = [
 const ADAPTIVE_START = `${AVAILABILITY_FIELD}.${ADAPTIVE_RELEASE_FIELD}.start`;
 const ADAPTIVE_END = `${AVAILABILITY_FIELD}.${ADAPTIVE_RELEASE_FIELD}.end`;
 
-/**
- * What Morrow will not do to a Blackboard course, in the words every tool in
- * this module states. Copying a course is a long-running Blackboard operation:
- * it needs a route that starts the copy and a separate resource that says
- * whether it finished. No Blackboard tenant Swagger has been read here, so
- * neither is confirmed, and Morrow guesses no Blackboard path.
- */
-const COURSE_COPY_HELD = "Morrow does not copy a Blackboard course. A course copy is a long-running Blackboard operation: it needs one route that starts the copy and a separate resource that reports whether it finished, and no Blackboard tenant Swagger has been read here to confirm either one. Morrow guesses no Blackboard path. Ask your Blackboard administrator which course copy route and which copy status resource this site's Swagger publishes.";
-
 /** What every reviewed Blackboard change reports about itself, by Morrow profile. */
 const WRITE_PROFILES = {
   "private-full": { state: "supported" },
@@ -130,14 +123,6 @@ const COMPARATOR_PROFILES = {
   "public-canvas": { state: "profile_limited", reason: "This action needs a configured Blackboard REST tenant." },
   sandbox: { state: "profile_limited", reason: "This action needs a configured Blackboard REST tenant." },
   "read-only": { state: "private_only", reason: "Gateway-only Blackboard verification." },
-} as const;
-
-/** The held copy reports the same state in every profile: no tenant confirms the route. */
-const HELD_PROFILES = {
-  "private-full": { state: "profile_limited", reason: "No Blackboard tenant Swagger has confirmed a course copy route or a copy status resource." },
-  "public-canvas": { state: "profile_limited", reason: "No Blackboard tenant Swagger has confirmed a course copy route or a copy status resource." },
-  sandbox: { state: "profile_limited", reason: "No Blackboard tenant Swagger has confirmed a course copy route or a copy status resource." },
-  "read-only": { state: "profile_limited", reason: "No Blackboard tenant Swagger has confirmed a course copy route or a copy status resource." },
 } as const;
 
 const EVIDENCE = {
@@ -176,13 +161,48 @@ const contentDatesApplyInput = contentDatesInput.extend({
   _morrow: z.strictObject({ outer_grant: effectGrantInput }),
 });
 
-const courseCopyInput = scopeInput.extend({ destination_course_id: z.string().regex(BLACKBOARD_ID) });
+const courseCopyInput = scopeInput.extend({
+  // The documented copy request receives the new course's external Course ID,
+  // not a generated Blackboard primary key.
+  destination_course_id: z.string().trim().min(1).max(255).regex(/^[^\u0000-\u001f\u007f]+$/),
+});
+const courseCopyVerificationInput = courseCopyInput.extend({
+  task_reference: z.string().regex(/^bbcopy:[A-Za-z0-9_-]{1,140}$/).optional(),
+});
+const courseCopyApplyInput = courseCopyInput.extend({
+  expected_plan_digest: z.string().regex(SHA256),
+  _morrow: z.strictObject({ outer_grant: effectGrantInput }),
+});
 
 type CourseAvailabilityInput = z.output<typeof courseAvailabilityInput>;
 type ContentDatesInput = z.output<typeof contentDatesInput>;
+type CourseCopyInput = z.output<typeof courseCopyInput>;
+type CourseCopyVerificationInput = z.output<typeof courseCopyVerificationInput>;
 
 function coursePath(courseId: string): string {
   return `/learn/api/public/v3/courses/${encodeURIComponent(courseId)}`;
+}
+
+function externalCoursePath(courseId: string): string {
+  return coursePath(`externalId:${courseId}`);
+}
+
+function courseCopyTaskReference(taskPath: string): string {
+  const encoded = Buffer.from(taskPath, "utf8").toString("base64url");
+  const reference = `bbcopy:${encoded}`;
+  if (!/^bbcopy:[A-Za-z0-9_-]{1,140}$/.test(reference)) {
+    throw new BlackboardApiError("blackboard_response_invalid", "Blackboard returned a course-copy task identifier Morrow cannot retain.");
+  }
+  return reference;
+}
+
+function courseCopyTaskPath(reference: string): string {
+  const encoded = reference.slice("bbcopy:".length);
+  const path = Buffer.from(encoded, "base64url").toString("utf8");
+  if (courseCopyTaskReference(path) !== reference) {
+    throw new BlackboardApiError("blackboard_response_invalid", "The retained Blackboard course-copy task identifier is invalid.");
+  }
+  return path;
 }
 
 function contentPath(courseId: string, contentId: string): string {
@@ -684,7 +704,6 @@ async function planCourseAvailability(
     reviewRequired: true,
     limits: { fields: ["availability.available", "availability.duration"], courses: 1 },
     notCompared: courseNotCompared(change),
-    courseCopyHeld: COURSE_COPY_HELD,
     readback: PROTECTED_STATE,
     readbackDetail: COURSE_READBACK_DETAIL,
     status: "api_configured_live_untested",
@@ -936,6 +955,175 @@ async function verifyContentDatedVisibility(
   };
 }
 
+/** One copy plan binds the selected source course and the exact new Course ID. */
+async function freezeCourseCopy(
+  write: BlackboardCourseRead,
+  destinationCourseId: string,
+  signal?: AbortSignal,
+): Promise<{ readonly record: JsonObject; readonly frozen: JsonObject; readonly beforeDigest: string; readonly planDigest: string }> {
+  const record = await readCourseRecord(write.client, write.courseId, signal);
+  if (typeof record.id !== "string" || !BLACKBOARD_ID.test(record.id)
+    || typeof record.courseId !== "string" || !record.courseId) {
+    throw new BlackboardApiError("blackboard_response_invalid", "Blackboard did not return the selected source course's identifiers.");
+  }
+  if (record.courseId === destinationCourseId) {
+    throw new BlackboardApiError("blackboard_response_invalid", "The new Blackboard Course ID must differ from the selected source course's Course ID.");
+  }
+  const frozen = protectedProjection(record, PROTECTED_COURSE_FIELDS);
+  const beforeDigest = sha256Text(canonicalJson(frozen));
+  const planDigest = sha256Text(canonicalJson({
+    tenantId: write.tenantId,
+    sourceBindingId: write.sourceBindingId,
+    sourceCourseId: write.courseId,
+    destinationCourseId,
+    beforeDigest,
+  }));
+  return { record, frozen, beforeDigest, planDigest };
+}
+
+function copiedCourseMatches(source: JsonObject, copied: JsonObject, destinationCourseId: string): boolean {
+  if (copied.courseId !== destinationCourseId || typeof copied.id !== "string" || !BLACKBOARD_ID.test(copied.id)) return false;
+  return canonicalJson(comparable(protectedProjection(copied, PROTECTED_COURSE_FIELDS), ["id", "courseId"]))
+    === canonicalJson(comparable(source, ["id", "courseId"]));
+}
+
+async function planCourseCopy(
+  runtime: BlackboardLearnRuntime,
+  input: CourseCopyInput,
+  signal?: AbortSignal,
+): Promise<JsonObject> {
+  const write = await runtime.beginCourseWrite({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, signal);
+  const frozen = await freezeCourseCopy(write, input.destination_course_id, signal);
+  return {
+    schema: "morrow.blackboard.course-copy.plan.v1",
+    ok: true,
+    tenantId: write.tenantId,
+    sourceBindingId: write.sourceBindingId,
+    courseId: write.courseId,
+    source: safeCourseAvailability(frozen.record, write.roster),
+    destinationCourseId: input.destination_course_id,
+    beforeDigest: frozen.beforeDigest,
+    request: { targetCourse: { courseId: input.destination_course_id } },
+    planDigest: frozen.planDigest,
+    reviewRequired: true,
+    limits: { sourceCourses: 1, destinationCourses: 1 },
+    readback: "task_location_and_copied_course",
+    readbackDetail: "Morrow starts one Learn course-copy task, reads that exact task, and when Learn marks it complete, re-reads the copied course from the task location and compares the source fields Learn documents as copied.",
+    status: "api_configured_live_untested",
+    effect_scope: runtime.effectScope({
+      tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+    }),
+  };
+}
+
+async function applyReviewedCourseCopy(
+  runtime: BlackboardLearnRuntime,
+  input: z.output<typeof courseCopyApplyInput>,
+  signal?: AbortSignal,
+): Promise<JsonObject> {
+  const grant = reservedGrant(input._morrow.outer_grant);
+  assertReviewedPlan(runtime, grant, input.expected_plan_digest);
+  runtime.claimReservedEffectGrant(grant);
+  const write = await runtime.beginCourseWrite({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, signal);
+  const frozen = await freezeCourseCopy(write, input.destination_course_id, signal);
+  if (frozen.planDigest !== input.expected_plan_digest) {
+    throw new BlackboardApiError(
+      "blackboard_content_mismatch",
+      "The Blackboard source course Morrow read does not match the reviewed copy plan. It changed after review, or this request describes a different destination. Nothing was sent.",
+    );
+  }
+  let dispatchState: BlackboardDispatchState = "not_sent";
+  try {
+    dispatchState = "applied_or_unknown";
+    const sourceCourseId = String(frozen.record.id);
+    const taskPath = await write.client.startCourseCopy(write.courseId, input.destination_course_id, sourceCourseId, signal);
+    const task = await write.client.readCourseCopyTask(taskPath, sourceCourseId, signal);
+    if (task.state === "pending") {
+      return {
+        schema: "morrow.blackboard.course-copy.pending.v1",
+        ok: true,
+        resultState: "awaiting_provider",
+        tenantId: write.tenantId,
+        sourceBindingId: write.sourceBindingId,
+        courseId: write.courseId,
+        destinationCourseId: input.destination_course_id,
+        taskId: courseCopyTaskReference(taskPath),
+        problem: {
+          code: "blackboard_response_incomplete",
+          message: "Blackboard accepted the course copy, but its task is still running. Morrow did not repeat the copy. Verify this operation after Blackboard completes the task.",
+        },
+        status: "api_configured_live_untested",
+      };
+    }
+    const copied = await write.client.get(task.coursePath, signal);
+    if (!copiedCourseMatches(frozen.frozen, copied, input.destination_course_id)) {
+      throw mismatch("Blackboard completed the course-copy task but did not return the reviewed copy of the selected source course.", dispatchState);
+    }
+    return {
+      schema: "morrow.blackboard.course-copy.readback.v1",
+      ok: true,
+      resultState: "applied",
+      tenantId: write.tenantId,
+      sourceBindingId: write.sourceBindingId,
+      courseId: write.courseId,
+      destinationCourseId: input.destination_course_id,
+      taskPath,
+      copiedCourse: safeCourseAvailability(copied, write.roster),
+      readback: "task_location_and_copied_course",
+      status: "api_configured_live_untested",
+    };
+  } catch (error) {
+    throw withBlackboardDispatchState(error, dispatchState);
+  }
+}
+
+/**
+ * The Gateway's fresh-read comparator for one reviewed course copy. It runs
+ * before the copy as well as after it — the Gateway freezes its comparator
+ * while it plans the operation — so a destination course Blackboard does not
+ * hold yet is `verified: false`, not a failure.
+ */
+async function verifyCourseCopy(
+  runtime: BlackboardLearnRuntime,
+  input: CourseCopyVerificationInput,
+  signal?: AbortSignal,
+): Promise<JsonObject> {
+  const comparator = await runtime.beginComparatorRead({
+    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+  }, signal);
+  let copied: JsonObject | undefined;
+  if (input.task_reference) {
+    const source = await readCourseRecord(comparator.client, comparator.courseId, signal);
+    if (typeof source.id !== "string" || !BLACKBOARD_ID.test(source.id)) {
+      throw new BlackboardApiError("blackboard_response_invalid", "Blackboard did not return the selected source course's internal identifier.");
+    }
+    const task = await comparator.client.readCourseCopyTask(courseCopyTaskPath(input.task_reference), source.id, signal);
+    if (task.state === "complete") copied = await comparator.client.get(task.coursePath, signal);
+  } else {
+    try {
+      copied = await comparator.client.get(withFields(externalCoursePath(input.destination_course_id), COURSE_FIELDS), signal);
+    } catch (error) {
+      if (!(error instanceof BlackboardApiError) || error.status !== 404) throw error;
+    }
+  }
+  return {
+    schema: "morrow.blackboard.course-copy.comparator.v1",
+    ok: true,
+    tenantId: comparator.tenantId,
+    sourceBindingId: comparator.sourceBindingId,
+    courseId: comparator.courseId,
+    destinationCourseId: input.destination_course_id,
+    verified: Boolean(copied && typeof copied.id === "string" && BLACKBOARD_ID.test(copied.id)
+      && copied.courseId === input.destination_course_id),
+    readback: "target_course_identity",
+    status: "api_configured_live_untested",
+  };
+}
+
 function readCapability(sourceExport: string): SourceCapabilityMetadata {
   return {
     family: "course-read",
@@ -989,33 +1177,34 @@ function dispatchCapability(family: string, sourceExport: string): SourceCapabil
 
 /**
  * When a Blackboard course is open, when learners see one item in it, and the
- * course copy Morrow holds.
+ * reviewed copy of one whole course.
  *
- * Two reviewed changes: whether the course is available and the window it is
- * open in, and the two dated-visibility dates on one document. Each is the three
- * routes every Morrow provider change is — the plan an instructor reviews, the
- * dispatch the Gateway makes once against a signed one-use effect grant, and the
- * fresh-read comparator — and each freezes every protected value of the record
- * it changes, so a course somebody else renamed between review and dispatch is
- * refused before anything is sent.
+ * Three reviewed changes: whether the course is available and the window it is
+ * open in, the two dated-visibility dates on one document, and one course copy.
+ * Each is the three routes every Morrow provider change is — the plan an
+ * instructor reviews, the dispatch the Gateway makes once against a signed
+ * one-use effect grant, and the fresh-read comparator — and each freezes every
+ * protected value of the record it reads, so a course somebody else renamed
+ * between review and dispatch is refused before anything is sent.
  *
  * Dated visibility is a separate operation from the content patch on purpose:
  * the content patch sets a title, a description, and whether an item is
  * available, and neither route sets the other's fields. That is what lets an
  * approval page show the exact dates a person is approving.
  *
- * Course copy is held. It is a long-running Blackboard operation and needs both
- * a route that starts the copy and a resource that reports whether it finished;
- * no Blackboard tenant Swagger has been read here to confirm either, and Morrow
- * guesses no path. `blackboard_course_copy` therefore sends no Blackboard
- * request at all and names what is missing.
+ * Course copy is the documented asynchronous Learn operation
+ * (https://docs.blackboard.com/docs/blackboard/rest-apis/hands-on/copying-courses):
+ * one `POST /learn/api/public/v2/courses/{courseId}/copy` whose answer names a
+ * task at exactly `GET /learn/api/public/v1/courses/{courseId}/tasks/{taskId}`,
+ * and that task answers 200 while the copy runs and 303 with the copied
+ * course's location when it ends. The dispatch sends the copy once and never
+ * repeats it: a task still running is returned as `applied_or_unknown` for a
+ * later verification, and a completed task is read back through its own
+ * Location and compared against the frozen source course.
  *
- * Nothing here is reachable yet. Both changes are private source tools and
- * Morrow's Gateway has no public plan tool for a Blackboard course date, so
- * nothing can plan, approve, or dispatch one; the held copy is private for the
- * same reason, and the Gateway publishes its reason through
- * `morrow_profile_status` rather than offering a name that answers nowhere.
- * docs/implementation/BLACKBOARD-REST-SCOPE.md records this.
+ * The source routes remain private. The Gateway derives one public plan tool
+ * from each reviewed triplet, keeps dispatch private, and performs the frozen
+ * comparator after the reserved write.
  */
 export const blackboardCourseLifecycleModule: BlackboardOperationModule = {
   id: "course-lifecycle",
@@ -1023,7 +1212,7 @@ export const blackboardCourseLifecycleModule: BlackboardOperationModule = {
     blackboardTool({
       name: "blackboard_plan_course_availability",
       title: "Plan Blackboard course availability and dates",
-      description: `Prepare one change to whether a Blackboard Learn course is available and to the window it is open in, for Morrow review. The plan states who gains or loses access, and the exact request one approved dispatch sends. Morrow sets a course to available Yes or No, and its window to ${DURATION_CONTINUOUS} or to ${DURATION_RANGE} with exact dates; it sets no term and no fixed number of days. This tool changes nothing. ${COURSE_COPY_HELD}`,
+      description: `Prepare one change to whether a Blackboard Learn course is available and to the window it is open in, for Morrow review. The plan states who gains or loses access, and the exact request one approved dispatch sends. Morrow sets a course to available Yes or No, and its window to ${DURATION_CONTINUOUS} or to ${DURATION_RANGE} with exact dates; it sets no term and no fixed number of days. This tool changes nothing.`,
       private: true,
       gatewayDispatchOnly: false,
       inputSchema: courseAvailabilityInput,
@@ -1135,39 +1324,61 @@ export const blackboardCourseLifecycleModule: BlackboardOperationModule = {
       run: (runtime, input, signal) => verifyContentDatedVisibility(runtime, input, signal),
     }),
     blackboardTool({
-      name: "blackboard_course_copy",
-      title: "Copy one Blackboard course (unavailable)",
-      description: `${COURSE_COPY_HELD} This tool sends no Blackboard request. It reports that copy is unavailable and names what is missing, so nothing here copies a course by a path Morrow assumed.`,
-      // A source tool, not a Morrow capability an assistant can call. Its
-      // profiles admit it nowhere, so the Gateway holds it out of the catalog in
-      // every profile and publishes its reason in `morrow_profile_status`
-      // instead. A public name that answered nowhere would be the one thing
-      // worse than a held operation: a capability a person cannot reach.
+      name: "blackboard_plan_course_copy",
+      title: "Plan a Blackboard course copy",
+      description: "Prepare one Blackboard Learn course copy for Morrow review. The selected course is the source. Enter the Course ID Blackboard should give the new course. Morrow freezes the selected source course before review and sends no copy request while planning.",
       private: true,
       gatewayDispatchOnly: false,
       inputSchema: courseCopyInput,
-      annotations: READ_ANNOTATIONS,
-      capability: {
-        family: "course-copy",
-        provider: "blackboard",
-        sourceExport: "blackboard-learn-rest.v1",
-        behavior: READ_BEHAVIOR,
-        authority: { scopeClass: "tenant-course", approvalClass: "standard", dataClass: "course" },
-        route: { backend: "lms-api", dispatchBackend: "blackboard-rest" },
-        profiles: HELD_PROFILES,
-        evidence: EVIDENCE,
-      },
+      annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      capability: planCapability("course-copy", `POST ${COURSE_COPY_ROUTE}`),
       rest: {
-        method: null,
-        pathTemplate: null,
+        method: "GET",
+        pathTemplate: COURSE_READ_ROUTE,
         access: "read",
-        entitlement: "none",
+        entitlement: "unknown",
         reviewRoute: null,
         readbackComparator: null,
       },
-      run: async () => {
-        throw new BlackboardApiError("blackboard_operation_unavailable", COURSE_COPY_HELD);
+      run: (runtime, input, signal) => planCourseCopy(runtime, input, signal),
+    }),
+    blackboardTool({
+      name: "blackboard_apply_reviewed_course_copy",
+      title: "Apply a reserved Blackboard course copy",
+      description: "Internal Morrow dispatch route. This request requires an exact signed Gateway effect grant.",
+      private: true,
+      gatewayDispatchOnly: true,
+      inputSchema: courseCopyApplyInput,
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+      capability: dispatchCapability("course-copy", `POST ${COURSE_COPY_ROUTE}`),
+      rest: {
+        method: "POST",
+        pathTemplate: COURSE_COPY_ROUTE,
+        access: "write",
+        entitlement: "unknown",
+        reviewRoute: "blackboard_plan_course_copy",
+        readbackComparator: "blackboard_verify_course_copy",
       },
+      run: (runtime, input, signal) => applyReviewedCourseCopy(runtime, input, signal),
+    }),
+    blackboardTool({
+      name: "blackboard_verify_course_copy",
+      title: "Verify a Blackboard course copy",
+      description: "Internal Morrow fresh-read comparator for one reviewed Blackboard course copy. It finds the target by its reviewed Course ID and states whether Blackboard now has that course.",
+      private: true,
+      gatewayDispatchOnly: true,
+      inputSchema: courseCopyVerificationInput,
+      annotations: READ_ANNOTATIONS,
+      capability: readCapability(`GET ${COURSE_PATCH_ROUTE}`),
+      rest: {
+        method: "GET",
+        pathTemplate: COURSE_COPY_TASK_ROUTE,
+        access: "read",
+        entitlement: "unknown",
+        reviewRoute: null,
+        readbackComparator: null,
+      },
+      run: (runtime, input, signal) => verifyCourseCopy(runtime, input, signal),
     }),
   ],
 };

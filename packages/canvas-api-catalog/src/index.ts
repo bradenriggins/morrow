@@ -245,7 +245,9 @@ export function operationArguments(operation: CanvasApiOperation, input: JsonObj
   const body: [string, unknown][] = [];
   for (const parameter of operation.parameters) {
     const value = input[parameter.inputName];
-    if (value === undefined || value === null || value === "") {
+    const preserveNewQuizValue = operation.family === "new-quizzes" && operation.path.startsWith("/quiz/v1/")
+      && ["POST", "PATCH"].includes(operation.method) && parameter.location === "form";
+    if (value === undefined || (!preserveNewQuizValue && (value === null || value === ""))) {
       if (parameter.required) throw new TypeError(`${parameter.inputName} is required`);
       continue;
     }

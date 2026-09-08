@@ -107,8 +107,10 @@ test("phase two of the Moodle Qbank route is cataloged, wired, and leaves every 
   assert.match(byTool.get("moodle_add_qbank_question_to_quiz").description, /mod\/quiz:manage/);
   assert.match(byTool.get("moodle_add_qbank_question_to_quiz").description, /moodle\/question:use/);
   assert.match(byTool.get("moodle_add_qbank_question_to_quiz").description, /version NULL/);
-  assert.deepEqual(byTool.get("moodle_create_qbank_question").inputSchema.properties.qtype.enum, ["shortanswer", "truefalse"]);
-  assert.deepEqual(byTool.get("moodle_get_qbank_question_creation_form").inputSchema.properties.qtype.enum, ["shortanswer", "truefalse"]);
+  assert.deepEqual(byTool.get("moodle_create_qbank_question").inputSchema.properties.qtype.enum, ["multichoice", "shortanswer", "truefalse"]);
+  assert.deepEqual(byTool.get("moodle_get_qbank_question_creation_form").inputSchema.properties.qtype.enum, ["multichoice", "shortanswer", "truefalse"]);
+  assert.equal(byTool.get("moodle_create_qbank_question").inputSchema.properties.single.type, "boolean");
+  assert.equal(byTool.get("moodle_create_qbank_question").inputSchema.properties.answers.items.properties.text.maxLength, 8192);
 
   const worker = readFileSync(new URL("connector/extension/src/service-worker.js", root), "utf8");
   assert.match(worker, /import \{ executeMoodleQbankQuestionInPage \} from "\.\/moodle-qbank-question-executor\.js";/);
@@ -160,6 +162,10 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
     formSessionQueue: [],
     postOutcome: "saved",
     savedNameOverride: "",
+    numbering: "abc",
+    savedNumberingOverride: "",
+    normalizeSavedFractions: false,
+    gradeOptions: ["1.0", "0.5", "0.0", "-1.0"],
   };
   const requests = [];
   const posts = [];
@@ -203,7 +209,7 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
           ${control("cmid", BANK_MODULE_ID)}${control("category", CATEGORY_ID)}
           ${state.bankView === "append-quiz" ? control("appendqnumstring", "addquestion") : ""}
           <div id="qtypechoicecontainer"><div class="qtypes">
-            <input type="radio" name="qtype" value="truefalse"><input type="radio" name="qtype" value="shortanswer">
+            <input type="radio" name="qtype" value="truefalse"><input type="radio" name="qtype" value="shortanswer"><input type="radio" name="qtype" value="multichoice">
           </div></div>
           <button type="submit">Create a new question</button></form></div>`;
     const secondContext = state.bankView === "two-contexts"
@@ -223,8 +229,11 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
   };
 
   const editor = (field, text, itemid) => `<textarea name="${field}[text]">${escaped(text)}</textarea>${control(`${field}[format]`, "1")}${control(`${field}[itemid]`, itemid)}`;
-  const answerRow = (index, answer) => `<input type="text" name="answer[${index}][text]" value="${escaped(answer?.text || "")}">
-    <select name="fraction[${index}]">${["1.0", "0.5", "0.0"].map((value) => `<option value="${value}"${(answer?.fraction || "0.0") === value ? " selected=\"selected\"" : ""}>${value}</option>`).join("")}</select>
+  // Core Short answer uses a plain answer input. Multichoice uses an editor.
+  const answerRow = (index, answer, qtype, saved = false) => `${qtype === "multichoice"
+    ? editor(`answer[${index}]`, answer?.text || "", `88460${index}`)
+    : `<input type="text" name="answer[${index}]" value="${escaped(answer?.text || "")}">`}
+    <select name="fraction[${index}]">${(qtype === "multichoice" ? state.gradeOptions : ["1.0", "0.5", "0.0"]).map((value) => saved && state.normalizeSavedFractions ? String(Number(value)) : value).map((value) => `<option value="${value}"${Number(answer?.fraction || "0.0") === Number(value) ? " selected" : ""}>${value}</option>`).join("")}</select>
     ${editor(`feedback[${index}]`, answer?.feedback || "", `88450${index}`)}`;
   const questionForm = (qtype, saved) => {
     const view = saved ? "core" : state.formView;
@@ -236,8 +245,15 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
     const typed = qtype === "truefalse"
       ? `<select name="correctanswer"><option value="0"${saved?.correctanswer === "0" ? " selected=\"selected\"" : ""}>False</option><option value="1"${(saved?.correctanswer || "1") === "1" ? " selected=\"selected\"" : ""}>True</option></select>
          ${editor("feedbacktrue", saved?.feedbacktrue || "", "884403")}${editor("feedbackfalse", saved?.feedbackfalse || "", "884404")}`
+      : qtype === "multichoice"
+        ? `<select name="single"><option value="0"${saved?.single === "0" ? " selected" : ""}>Multiple answers</option><option value="1"${(saved?.single || "1") === "1" ? " selected" : ""}>One answer</option></select>
+           ${control("shuffleanswers", "0")}<input type="checkbox" name="shuffleanswers" value="1" checked>
+           <select name="answernumbering">${["abc", "123"].map((value) => `<option value="${value}"${(saved ? state.savedNumberingOverride || saved.numbering : state.numbering) === value ? " selected" : ""}>${value}</option>`).join("")}</select>
+           <select name="showstandardinstruction"><option value="0">No</option><option value="1" selected>Yes</option></select>
+           ${["correctfeedback", "partiallycorrectfeedback", "incorrectfeedback"].map((field) => editor(field, "Native default feedback.", "884607")).join("")}
+           ${[0, 1, 2, 3, 4].map((index) => answerRow(index, saved?.answers?.[index], qtype, Boolean(saved))).join("")}`
       : `<select name="usecase"><option value="0"${(saved?.usecase || "0") === "0" ? " selected=\"selected\"" : ""}>No</option><option value="1"${saved?.usecase === "1" ? " selected=\"selected\"" : ""}>Yes</option></select>
-         ${[0, 1, 2].map((index) => answerRow(index, saved?.answers?.[index])).join("")}`;
+         ${[0, 1, 2].map((index) => answerRow(index, saved?.answers?.[index], qtype, Boolean(saved))).join("")}`;
     return `<!doctype html><html><body class="path-question course-2"><form method="post" action="/question/bank/editquestion/question.php">
       ${control("sesskey", sesskey)}${control("qtype", qtype)}${control("category", category)}
       ${control("cmid", BANK_MODULE_ID)}${control("courseid", COURSE_ID)}${control("returnurl", escaped(bankReturnUrl))}
@@ -259,8 +275,8 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
 
   const savedEntryOf = (values) => {
     const qtype = values.get("qtype") || "";
-    const answers = [0, 1, 2]
-      .map((index) => ({ text: values.get(`answer[${index}][text]`) || "", fraction: values.get(`fraction[${index}]`) || "", feedback: values.get(`feedback[${index}][text]`) || "" }));
+    const answers = (qtype === "multichoice" ? [0, 1, 2, 3, 4] : [0, 1, 2])
+      .map((index) => ({ text: values.get(qtype === "shortanswer" ? `answer[${index}]` : `answer[${index}][text]`) || "", fraction: values.get(`fraction[${index}]`) || "", feedback: values.get(`feedback[${index}][text]`) || "" }));
     return {
       id: String(state.nextEntryId++),
       qtype,
@@ -270,7 +286,7 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
       category: values.get("category") || "",
       ...(qtype === "truefalse"
         ? { correctanswer: values.get("correctanswer") || "", feedbacktrue: values.get("feedbacktrue[text]") || "", feedbackfalse: values.get("feedbackfalse[text]") || "" }
-        : { usecase: values.get("usecase") || "", answers }),
+        : { usecase: values.get("usecase") || "", single: values.get("single") || "", numbering: values.get("answernumbering") || "", answers }),
     };
   };
 
@@ -395,7 +411,7 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
     const beforeArguments = nativeRequests();
     for (const [args, label] of [
       [formArguments({ course_id: 3 }), "another course"],
-      [formArguments({ qtype: "multichoice" }), "an unsupported type"],
+      [formArguments({ qtype: "calculated" }), "an unsupported type"],
       [formArguments({ name: "x" }), "an unexpected field"],
       [{ course_id: 2, module_id: 21, category_id: 91, qtype: "truefalse" }, "a missing bank context"],
     ]) {
@@ -511,6 +527,7 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
       file_areas_empty: true,
       tags_empty: true,
       impact_scope: impactScope,
+      protected_settings_digest: form.data.protected_settings_digest,
       protected_setting_names: [
         "_qf__qtype_truefalse_edit_form", "category", "cmid", "courseid", "defaultmark",
         "feedbackfalse[format]", "feedbackfalse[itemid]", "feedbacktrue[format]", "feedbacktrue[itemid]",
@@ -610,6 +627,8 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
     assert.equal(shortCreated.data.case_sensitive, false);
     assert.deepEqual(shortCreated.data.answers, SHORT_ANSWER.answers.map((answer) => ({ text: answer.text, fraction: answer.fraction, feedback: answer.feedback })));
     assert.equal(shortCreated.data.later_updates, "held");
+    assert.equal(posts.at(-1).values.get("answer[0]"), SHORT_ANSWER.answers[0].text);
+    assert.equal(posts.at(-1).values.has("answer[0][text]"), false);
     assert.equal(state.entries.length, 3);
 
     // 11. A saved entry that does not match the approval is applied-or-unknown.
@@ -658,6 +677,7 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
       question_bank_context_id: 305,
       question_id: 402,
       question_name: TRUE_FALSE.name,
+      question_digest: plan.data.question_digest,
       qtype: "truefalse",
       question_status: "ready",
       quiz_slot_count: 2,
@@ -724,6 +744,100 @@ test("the Moodle Qbank route creates one new entry and one Quiz slot as two sepa
     });
     assert.equal(slotDispatches(), lostDispatchesBefore + 1);
     assert.equal(state.slots.length, 4, "the site kept the slot the browser could not confirm");
+
+    // Native Multiple choice can create either one-answer or multiple-answer questions.
+    const choiceBase = {
+      course_id: 2, module_id: 21, category_id: 91, question_bank_context_id: 305,
+      qtype: "multichoice", name: "Choice question", question_text: "Select the correct choices.",
+    };
+    for (const single of [true, false]) {
+      const choices = [
+        { text: "<p>First choice</p>", fraction: single ? "1.0" : "0.5", feedback: "First feedback." },
+        { text: "<p>Second choice</p>", fraction: single ? "0.0" : "0.5", feedback: "Second feedback." },
+        { text: "<p>Incorrect choice</p>", fraction: "-1.0", feedback: "Third feedback." },
+      ];
+      const choiceForm = await execute(operations.creationForm, formArguments({ qtype: "multichoice" }));
+      assert.equal(choiceForm.ok, true, JSON.stringify(choiceForm));
+      assert.deepEqual(choiceForm.data.single_options, ["0", "1"]);
+      assert.equal(choiceForm.data.answer_row_count, 5);
+      const countBefore = posts.length;
+      const choicesCreated = await execute(operations.create, { ...choiceBase, single, answers: choices, expected_digest: choiceForm.snapshot_digest });
+      assert.equal(choicesCreated.ok, true, JSON.stringify(choicesCreated));
+      assert.equal(posts.length, countBefore + 1);
+      assert.equal(choicesCreated.data.single, single);
+      assert.deepEqual(choicesCreated.data.answers, choices);
+      assert.equal(posts.at(-1).values.get("answer[0][text]"), choices[0].text);
+      assert.equal(posts.at(-1).values.get("correctfeedback[text]"), "Native default feedback.");
+      assert.equal(posts.at(-1).values.get("answernumbering"), "abc");
+      assert.deepEqual(posts.at(-1).values.getAll("shuffleanswers"), ["0", "1"]);
+      const choicePlan = await execute(operations.slotPlan, slotArguments({ question_id: choicesCreated.data.question_id }));
+      assert.equal(choicePlan.ok, true, JSON.stringify(choicePlan));
+      assert.equal(choicePlan.data.qtype, "multichoice");
+      const choiceSlot = await execute(operations.addSlot, slotArguments({ question_id: choicesCreated.data.question_id, expected_digest: choicePlan.snapshot_digest }));
+      assert.equal(choiceSlot.ok, true, JSON.stringify(choiceSlot));
+    }
+
+    const validChoices = [
+      { text: "First", fraction: "1.0", feedback: "" },
+      { text: "Second", fraction: "0.0", feedback: "" },
+    ];
+    const beforeInvalidChoices = nativeRequests();
+    for (const args of [
+      { single: true, answers: validChoices.slice(0, 1) },
+      { single: false, answers: validChoices.map((answer) => ({ ...answer, fraction: "0.5" })).concat({ text: "Third", fraction: "0.5", feedback: "" }) },
+      { single: true, answers: validChoices.map((answer) => ({ ...answer, fraction: "0.5" })) },
+      { single: true, answers: [{ ...validChoices[0], fraction: "1.1" }, validChoices[1]] },
+      { single: true, answers: [{ ...validChoices[0], text: '<img src="draftfile.php/x">' }, validChoices[1]] },
+    ]) {
+      const refused = await execute(operations.create, { ...choiceBase, ...args, expected_digest: "a".repeat(64) });
+      assert.equal(refused.error, "moodle_qbank_question_arguments_invalid", JSON.stringify(refused));
+      assert.equal(refused.sent, false);
+    }
+    assert.equal(nativeRequests(), beforeInvalidChoices);
+
+    // A changed protected default invalidates the reviewed form, even when field names stay identical.
+    const protectedForm = await execute(operations.creationForm, formArguments({ qtype: "multichoice" }));
+    state.numbering = "123";
+    const protectedPosts = posts.length;
+    const protectedDrift = await execute(operations.create, { ...choiceBase, single: true, answers: validChoices, expected_digest: protectedForm.snapshot_digest });
+    assert.equal(protectedDrift.error, "moodle_expected_digest_mismatch", JSON.stringify(protectedDrift));
+    assert.equal(posts.length, protectedPosts);
+    state.numbering = "abc";
+
+    // Moodle may render a saved fraction with fewer trailing zeroes.
+    const normalizationForm = await execute(operations.creationForm, formArguments({ qtype: "multichoice" }));
+    state.normalizeSavedFractions = true;
+    const normalized = await execute(operations.create, { ...choiceBase, single: true, answers: validChoices, expected_digest: normalizationForm.snapshot_digest });
+    assert.equal(normalized.ok, true, JSON.stringify(normalized));
+    assert.equal(normalized.data.answers[0].fraction, "1");
+    assert.equal(normalized.data.answers[1].fraction, "0");
+    state.normalizeSavedFractions = false;
+
+    // Native fractions must be offered by the reviewed form before any POST.
+    const fractionForm = await execute(operations.creationForm, formArguments({ qtype: "multichoice" }));
+    const fractionPosts = posts.length;
+    const absentFraction = await execute(operations.create, { ...choiceBase, single: false,
+      answers: [{ ...validChoices[0], fraction: "0.75" }, { ...validChoices[1], fraction: "0.25" }], expected_digest: fractionForm.snapshot_digest });
+    assert.equal(absentFraction.error, "moodle_qbank_question_content_unwritable", JSON.stringify(absentFraction));
+    assert.equal(posts.length, fractionPosts);
+
+    // Saved native defaults must survive the write, not only the preflight.
+    const savedDefaultForm = await execute(operations.creationForm, formArguments({ qtype: "multichoice" }));
+    state.savedNumberingOverride = "123";
+    const savedDefaultDrift = await execute(operations.create, { ...choiceBase, single: true, answers: validChoices, expected_digest: savedDefaultForm.snapshot_digest });
+    assert.equal(savedDefaultDrift.error, "moodle_qbank_question_create_not_verified", JSON.stringify(savedDefaultDrift));
+    assert.equal(savedDefaultDrift.outcomeUnknown, true);
+    assert.equal(posts.length, fractionPosts + 1);
+    state.savedNumberingOverride = "";
+
+    // The slot approval binds the full saved question, including text and answers.
+    const stablePlan = await execute(operations.slotPlan, slotArguments({ question_id: 403 }));
+    const entry = state.entries.find((entry) => entry.id === "403");
+    entry.questionText = "A different question after review.";
+    const stableDispatches = slotDispatches();
+    const changedEntry = await execute(operations.addSlot, slotArguments({ question_id: 403, expected_digest: stablePlan.snapshot_digest }));
+    assert.equal(changedEntry.error, "moodle_expected_digest_mismatch", JSON.stringify(changedEntry));
+    assert.equal(slotDispatches(), stableDispatches);
 
     // 17. Route and secret boundaries across the whole run.
     assert.equal(requests.some((entry) => /^\/mod\/quiz\/(?:view|attempt|review|report)\.php/.test(entry.pathname)), false, "no Quiz attempt or report route was opened");

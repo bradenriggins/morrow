@@ -35,7 +35,7 @@ const RICH_FILL_SLUGS = Object.freeze(["rich_fill_blank", "rich_fill", "rich_fil
 // bank at all — so an unread kind makes the rest of them undecidable. The limit
 // this leaves is real and visible in the reason token: a rich fill payload that
 // names its blanks some other way is refused here rather than by Canvas.
-const BLANK_KINDS = Object.freeze({ openentry: "openEntry", textinchoices: "TextInChoices", wordbank: "wordbank" });
+const BLANK_KINDS = Object.freeze({ openentry: "openEntry", dropdown: "TextInChoices", textinchoices: "TextInChoices", wordbank: "wordbank" });
 
 const INTERACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 // Comments, and tags whose attribute values may hold a ">" inside quotes. The
@@ -253,11 +253,26 @@ function matchingReason(interaction, scoring) {
 
 function numericReason(interaction, scoring) {
   const value = plainObject(scoring) ? scoring.value : undefined;
-  // `typeof true` is "boolean" in JavaScript, so a boolean cannot reach the
-  // number check here. The harvest names the boolean case because in Python,
-  // where the harvested validator ran, a boolean is a kind of integer and would
-  // have passed one.
-  if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value))) return "numeric_scoring_value_not_a_number";
+  if (Array.isArray(value)) {
+    // The public New Quiz item contract uses a list of typed numeric responses.
+    const ids = memberIds(value, "numeric_response_invalid", "numeric_response_invalid");
+    if (!Array.isArray(ids) || ids.length === 0) return "numeric_response_invalid";
+    const numeric = (number) => (typeof number === "number" || (typeof number === "string" && number.trim() !== ""))
+      && Number.isFinite(Number(number));
+    for (const response of value) {
+      if (response.type === "withinARange") {
+        if (!numeric(response.start) || !numeric(response.end) || Number(response.start) > Number(response.end)) return "numeric_response_invalid";
+      } else {
+        if (!numeric(response.value)) return "numeric_response_invalid";
+        if (response.type === "marginOfError") {
+          if (!numeric(response.margin) || Number(response.margin) < 0 || !["percent", "absolute"].includes(response.margin_type)) return "numeric_response_invalid";
+        } else if (response.type === "preciseResponse") {
+          if (!numeric(response.precision) || !Number.isInteger(Number(response.precision)) || Number(response.precision) < 0
+            || !["decimals", "significantDigits"].includes(response.precision_type)) return "numeric_response_invalid";
+        } else if (response.type !== "exactResponse") return "numeric_response_invalid";
+      }
+    }
+  } else if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value))) return "numeric_scoring_value_not_a_number";
   if (!plainObject(interaction)) return null;
   const units = interaction.units;
   if (units !== undefined && units !== null && !(typeof units === "string" && units.trim() !== "")) return "numeric_units_blank";
@@ -311,7 +326,7 @@ function textInChoicesReason(blank, row) {
   return correct !== "" && tokens.includes(correct) ? null : "rich_fill_text_in_choices_value_not_listed";
 }
 
-function wordBankReason(interaction, scoring, itemBody, ids) {
+function wordBankReason(interaction, scoring, itemBody, ids, wordBankIds) {
   if (!Array.isArray(interaction.word_bank_choices) || interaction.word_bank_choices.length < 2) return "rich_fill_word_bank_choices_too_few";
   const choiceIds = memberIds(interaction.word_bank_choices, "rich_fill_word_bank_choice_id_invalid", "rich_fill_word_bank_choice_id_duplicate");
   if (!Array.isArray(choiceIds)) return choiceIds;
@@ -322,12 +337,13 @@ function wordBankReason(interaction, scoring, itemBody, ids) {
   for (const blankId of ids) {
     const answer = rowAnswer(scoringRow(scoring, blankId));
     const value = asText(answer?.value);
-    if (value.trim() === "") return "rich_fill_blank_answer_missing";
-    // The learner sees the word bank; `blank_text` is what the blank shows when
-    // the answer is revealed, so it has to be that answer and not another word.
-    if (asText(answer.blank_text) !== value) return "rich_fill_blank_text_mismatch";
-    if (!choiceIds.includes(asText(answer.choice_id))) return "rich_fill_choice_id_unknown";
-    answers.push(value);
+    if (wordBankIds.includes(blankId)) {
+      if (value.trim() === "") return "rich_fill_blank_answer_missing";
+      // A word-bank blank must point at the same answer that it reveals.
+      if (asText(answer.blank_text) !== value) return "rich_fill_blank_text_mismatch";
+      if (!choiceIds.includes(asText(answer.choice_id))) return "rich_fill_choice_id_unknown";
+    }
+    answers.push(asText(answer?.blank_text) || value);
   }
   const markers = [...String(itemBody ?? "").matchAll(BLANK_MARKER)].map((match) => match[1] ?? match[2]);
   if (!sameIdSet([...new Set(markers)], ids)) return "rich_fill_body_blank_markers_mismatch";
@@ -352,12 +368,13 @@ function richFillReason(interaction, scoring, itemBody) {
   if (!Array.isArray(ids)) return ids;
   const kinds = blanks.map((blank, index) => blankKind(blank, scoringRow(scoring, ids[index])));
   if (kinds.includes("")) return "rich_fill_blank_kind_unreadable";
-  // A word bank is one shared list for the whole question. Mixing it with a
-  // typed or a listed blank leaves the other blanks pointing at nothing.
-  const wordBank = kinds.includes("wordbank");
-  if (wordBank && kinds.some((kind) => kind !== "wordbank")) return "rich_fill_word_bank_mixed_with_other_blanks";
-  if (wordBank) return wordBankReason(interaction, scoring, itemBody, ids);
+  const wordBankIds = ids.filter((_, index) => kinds[index] === "wordbank");
+  if (wordBankIds.length > 0) {
+    const reason = wordBankReason(interaction, scoring, itemBody, ids, wordBankIds);
+    if (reason) return reason;
+  }
   for (const [index, blank] of blanks.entries()) {
+    if (kinds[index] === "wordbank") continue;
     const row = scoringRow(scoring, ids[index]);
     const reason = kinds[index] === "openEntry" ? openEntryReason(blank, row) : textInChoicesReason(blank, row);
     if (reason) return reason;

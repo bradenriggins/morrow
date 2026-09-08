@@ -501,10 +501,9 @@ describe("Blackboard reachability across Morrow tool surfaces", () => {
       "blackboard_plan_content_dated_visibility",
       "blackboard_apply_reviewed_content_dated_visibility",
       "blackboard_verify_content_dated_visibility",
-      // The held course copy. It carries a capability block that is unavailable
-      // in every profile, so the Gateway keeps it out of the catalog and no
-      // surface answers under its name.
-      "blackboard_course_copy",
+      "blackboard_plan_course_copy",
+      "blackboard_apply_reviewed_course_copy",
+      "blackboard_verify_course_copy",
       "blackboard_plan_content_patch",
       "blackboard_apply_reviewed_content_patch",
       "blackboard_verify_content_patch",

@@ -2,7 +2,8 @@
  * The New Quizzes question payloads three copies of one rule set are checked
  * against, in one place so they cannot drift apart. Section 6 of
  * docs/research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md is the
- * source of the rules.
+ * source of the bank rules. The public Numeric and mixed-blank shapes follow
+ * https://developerdocs.instructure.com/services/canvas/resources/new_quiz_items.
  *
  * The three copies:
  * - `connector/extension/src/quiz-item-payload.js`, the module that holds them;
@@ -65,6 +66,20 @@ export function numeric(over = {}) {
   });
 }
 
+export function typedNumeric(over = {}) {
+  return numeric({
+    interaction_data: {},
+    scoring_algorithm: "Numeric",
+    scoring_data: { value: [
+      { id: "answer-1", type: "exactResponse", value: "32" },
+      { id: "answer-2", type: "marginOfError", value: "32", margin: "2", margin_type: "absolute" },
+      { id: "answer-3", type: "withinARange", start: "30", end: "34" },
+      { id: "answer-4", type: "preciseResponse", value: "32.00", precision: "2", precision_type: "decimals" },
+    ] },
+    ...over,
+  });
+}
+
 export const RICH_FILL_BODY = '<p>A cell makes ATP in the <span id="blank_b1"></span> and proteins on the <span id="blank_b2"></span>.</p>';
 
 export function richFill(over = {}) {
@@ -96,6 +111,30 @@ export function wordBank(over = {}) {
     interaction_data: { ...interaction, ...(over.interaction_data ?? {}) },
     scoring_data: { ...scoring, ...(over.scoring_data ?? {}) },
     ...Object.fromEntries(Object.entries(over).filter(([key]) => !["interaction_data", "scoring_data"].includes(key))),
+  });
+}
+
+export function mixedRichFill() {
+  return item({
+    interaction_type_slug: "rich-fill-blank",
+    item_body: '<p><span id="blank_b1"></span> carries <span id="blank_b2"></span> into the <span id="blank_b3"></span>.</p>',
+    interaction_data: {
+      blanks: [
+        { id: "b1", answer_type: "openEntry" },
+        { id: "b2", answer_type: "dropdown", choices: [{ id: "d1", item_body: "oxygen" }, { id: "d2", item_body: "water" }] },
+        { id: "b3", answer_type: "wordbank", choices: null },
+      ],
+      word_bank_choices: [{ id: "w1", item_body: "cell" }, { id: "w2", item_body: "nucleus" }],
+    },
+    scoring_algorithm: "MultipleMethods",
+    scoring_data: {
+      value: [
+        { id: "b1", scoring_algorithm: "TextInChoices", scoring_data: { value: ["Blood", "blood"], blank_text: "Blood" } },
+        { id: "b2", scoring_algorithm: "Equivalence", scoring_data: { value: "d1", blank_text: "oxygen" } },
+        { id: "b3", scoring_algorithm: "TextEquivalence", scoring_data: { value: "cell", blank_text: "cell", choice_id: "w1" } },
+      ],
+      working_item_body: "`Blood` carries `oxygen` into the `cell`.",
+    },
   });
 }
 
@@ -174,6 +213,10 @@ export const CASES = [
   { name: "bounds with nothing in them", item: numeric({ interaction_data: { dimensions: {} } }), reason: "numeric_dimensions_invalid" },
 
   // --- rich fill in the blank ----------------------------------------------
+  { name: "a public Numeric question with all four typed response forms", item: typedNumeric(), reason: null },
+  { name: "a typed numeric response with a boolean answer", item: typedNumeric({ scoring_data: { value: [{ id: "answer-1", type: "exactResponse", value: true }] } }), reason: "numeric_response_invalid" },
+  { name: "a typed numeric range with reversed bounds", item: typedNumeric({ scoring_data: { value: [{ id: "answer-1", type: "withinARange", start: "34", end: "30" }] } }), reason: "numeric_response_invalid" },
+  { name: "a public rich-fill question with typed, dropdown and word-bank blanks", item: mixedRichFill(), reason: null },
   { name: "two typed blanks with their answers", item: richFill(), reason: null },
   {
     name: "a typed blank whose answer is on its scoring row",
@@ -202,7 +245,7 @@ export const CASES = [
   {
     name: "a word bank blank beside a typed blank",
     item: wordBank({ interaction_data: { blanks: [{ id: "b1", answer_type: "wordbank" }, { id: "b2", answer_type: "openEntry", answers: ["ribosome"] }] } }),
-    reason: "rich_fill_word_bank_mixed_with_other_blanks",
+    reason: null,
   },
   { name: "a word bank holding one choice", item: wordBank({ interaction_data: { word_bank_choices: [{ id: "w1", item_body: "mitochondrion" }] } }), reason: "rich_fill_word_bank_choices_too_few" },
   { name: "two word bank choices under one id", item: wordBank({ interaction_data: { word_bank_choices: [{ id: "w1", item_body: "mitochondrion" }, { id: "w1", item_body: "ribosome" }] } }), reason: "rich_fill_word_bank_choice_id_duplicate" },

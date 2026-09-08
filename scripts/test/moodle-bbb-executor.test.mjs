@@ -38,6 +38,7 @@ const operations = Object.freeze({
   activity: { key: "moodle.form.course.modedit.bigbluebuttonbn.read.v1", toolName: "moodle_get_bigbluebuttonbn", provider: "moodle", readOnly: true },
   creationForm: { key: "moodle.form.course.modedit.bigbluebuttonbn.create.read.v1", toolName: "moodle_get_bigbluebuttonbn_creation_form", provider: "moodle", readOnly: true },
   create: { key: "moodle.form.course.modedit.bigbluebuttonbn.create.write.v1", toolName: "moodle_create_bigbluebuttonbn", provider: "moodle", readOnly: false },
+  update: { key: "moodle.form.course.modedit.bigbluebuttonbn.write.v1", toolName: "moodle_update_bigbluebuttonbn", provider: "moodle", readOnly: false },
 });
 
 function readBody(request) {
@@ -56,12 +57,14 @@ test("the Moodle BigBlueButton route is cataloged and wired, and reaches no meet
     "moodle.form.course.modedit.bigbluebuttonbn.create.read.v1",
     "moodle.form.course.modedit.bigbluebuttonbn.create.write.v1",
     "moodle.form.course.modedit.bigbluebuttonbn.read.v1",
+    "moodle.form.course.modedit.bigbluebuttonbn.write.v1",
   ]);
   const byTool = new Map(entries.map((entry) => [entry.toolName, entry]));
-  assert.deepEqual([...byTool.keys()].sort(), ["moodle_create_bigbluebuttonbn", "moodle_get_bigbluebuttonbn", "moodle_get_bigbluebuttonbn_creation_form"]);
+  assert.deepEqual([...byTool.keys()].sort(), ["moodle_create_bigbluebuttonbn", "moodle_get_bigbluebuttonbn", "moodle_get_bigbluebuttonbn_creation_form", "moodle_update_bigbluebuttonbn"]);
   assert.equal(byTool.get("moodle_get_bigbluebuttonbn").readOnly, true);
   assert.equal(byTool.get("moodle_get_bigbluebuttonbn_creation_form").readOnly, true);
   assert.equal(byTool.get("moodle_create_bigbluebuttonbn").readOnly, false);
+  assert.equal(byTool.get("moodle_update_bigbluebuttonbn").readOnly, false);
   assert.equal(byTool.get("moodle_create_bigbluebuttonbn").reviewTool, "moodle_get_bigbluebuttonbn_creation_form");
   for (const entry of entries) {
     assert.equal(entry.provider, "moodle", entry.toolName);
@@ -81,6 +84,11 @@ test("the Moodle BigBlueButton route is cataloged and wired, and reaches no meet
   assert.deepEqual(create.inputSchema.required.sort(), ["course_id", "expected_digest", "name", "opening_time", "section_id"]);
   assert.equal(create.inputSchema.additionalProperties, false);
   assert.equal(create.inputSchema.properties.name.maxLength, 64);
+  const update = byTool.get("moodle_update_bigbluebuttonbn");
+  assert.equal(update.reviewTool, "moodle_get_bigbluebuttonbn");
+  assert.deepEqual(update.inputSchema.required.sort(), ["course_id", "expected_digest", "module_id"]);
+  assert.deepEqual(Object.keys(update.inputSchema.properties).sort(), ["closing_time", "course_id", "expected_digest", "module_id", "name", "opening_time", "wait_for_moderator"]);
+  assert.deepEqual(update.inputSchema.dependencies, { closing_time: ["opening_time"] });
 
   const worker = readFileSync(new URL("connector/extension/src/service-worker.js", root), "utf8");
   assert.match(worker, /import \{ executeMoodleBigBlueButtonInPage \} from "\.\/moodle-bbb-executor\.js";/);
@@ -127,6 +135,7 @@ test("the Moodle BigBlueButton route reads and creates one hidden scheduled room
     activityView: "core",
     postOutcome: "saved",
     savedNameOverride: "",
+    savedUpdateNameOverride: "",
   };
   const requests = [];
   const posts = [];
@@ -260,9 +269,23 @@ test("the Moodle BigBlueButton route reads and creates one hidden scheduled room
     if (request.method === "POST" && url.pathname === "/course/modedit.php") {
       const values = new URLSearchParams(await readBody(request));
       posts.push({ pathname: url.pathname, search: url.search, values });
+      const update = values.get("update") || "";
       if (state.postOutcome === "validation") {
         response.writeHead(200, { "content-type": "text/html" });
-        response.end(creationForm());
+        response.end(state.instances[update] ? activityForm(update) : creationForm());
+        return;
+      }
+      if (state.instances[update] && values.get("add") === "") {
+        state.instances[update] = {
+          ...state.instances[update],
+          name: state.savedUpdateNameOverride || values.get("name") || "",
+          wait: values.getAll("wait").includes("1"),
+          opening: dateFromPost(values, "openingtime"),
+          closing: dateFromPost(values, "closingtime"),
+          guestallowed: values.getAll("guestallowed").includes("1"),
+        };
+        response.writeHead(303, { location: `/course/view.php?id=${COURSE_ID}` });
+        response.end();
         return;
       }
       state.instances[String(Number(NEW_MODULE_ID) + Object.keys(state.instances).length - 3)] = {
@@ -316,6 +339,9 @@ test("the Moodle BigBlueButton route reads and creates one hidden scheduled room
     const createArguments = (overrides = {}) => ({
       course_id: 2, section_id: 7, name: NEW_NAME, opening_time: APPROVED_OPENING, closing_time: APPROVED_CLOSING, expected_digest: "a".repeat(64), ...overrides,
     });
+    const updateArguments = (overrides = {}) => ({
+      course_id: 2, module_id: Number(LATER_MODULE_ID), name: "Week 10 live session", expected_digest: "a".repeat(64), ...overrides,
+    });
 
     // 1. Arguments are refused before any native request.
     const beforeArguments = sourceRequests();
@@ -336,6 +362,13 @@ test("the Moodle BigBlueButton route reads and creates one hidden scheduled room
       [operations.create, createArguments({ guestpassword: GUEST_PASSWORD })],
       [operations.create, createArguments({ participants: "[]" })],
       [operations.create, createArguments({ record: true })],
+      // An update must name one writable field. Closing time is only meaningful
+      // when it arrives with the new opening time it must follow.
+      [operations.update, { course_id: 2, module_id: Number(LATER_MODULE_ID), expected_digest: "a".repeat(64) }],
+      [operations.update, updateArguments({ name: " padded " })],
+      [operations.update, updateArguments({ name: undefined, closing_time: APPROVED_CLOSING })],
+      [operations.update, updateArguments({ opening_time: APPROVED_OPENING, closing_time: APPROVED_OPENING })],
+      [operations.update, updateArguments({ guestpassword: GUEST_PASSWORD })],
     ]) {
       const args_ = { ...args };
       for (const [name, value] of Object.entries(args_)) if (value === undefined) delete args_[name];
@@ -562,7 +595,80 @@ test("the Moodle BigBlueButton route reads and creates one hidden scheduled room
     assert.equal(boundedRoom.data.room_open_now, null);
     assert.deepEqual(await execute(operations.activity, { course_id: 2, module_id: 4 }), { ok: false, sent: false, status: 200, error: "moodle_bigbluebuttonbn_module_target_invalid" });
 
-    // 14. A lost response after the dispatch is applied-or-unknown, and never retried.
+    // 14. An update changes only the reviewed fields of a room whose native
+    // schedule proves it is closed. The native form preserves every other
+    // control, including the recording, presentation and participant controls.
+    const updateForm = await execute(operations.activity, { course_id: 2, module_id: Number(LATER_MODULE_ID) });
+    const updateBefore = posts.length;
+    const updated = await execute(operations.update, {
+      course_id: 2,
+      module_id: Number(LATER_MODULE_ID),
+      name: "Week 10 live session",
+      opening_time: APPROVED_OPENING,
+      closing_time: APPROVED_CLOSING,
+      wait_for_moderator: true,
+      expected_digest: updateForm.snapshot_digest,
+    });
+    assert.equal(updated.ok, true, JSON.stringify(updated));
+    assert.equal(updated.data.updated, true);
+    assert.equal(updated.data.name, "Week 10 live session");
+    assert.deepEqual(updated.data.schedule, { opening_time: APPROVED_OPENING, closing_time: APPROVED_CLOSING });
+    assert.equal(updated.data.room.wait_for_moderator, true);
+    assert.deepEqual(updated.verification, { schema: "morrow.browser-verification.v1", status: "verified" });
+    assert.equal(posts.length, updateBefore + 1);
+    const updatePost = posts.at(-1).values;
+    assert.equal(updatePost.get("update"), LATER_MODULE_ID);
+    assert.equal(updatePost.get("add"), "");
+    assert.equal(updatePost.get("name"), "Week 10 live session");
+    assert.deepEqual(dateFromPost(updatePost, "openingtime"), APPROVED_OPENING);
+    assert.deepEqual(dateFromPost(updatePost, "closingtime"), APPROVED_CLOSING);
+    assert.deepEqual(updatePost.getAll("wait"), ["1"]);
+    assert.equal(updatePost.get("record"), "1");
+    assert.equal(updatePost.get("participants"), JSON.stringify(DEFAULT_PARTICIPANTS));
+    assert.equal(updatePost.get("presentation"), PRESENTATION_DRAFT_ID);
+
+    // An open room, or one whose bounded schedule omits Moodle's site clock,
+    // is never changed. A frozen setting also stops before dispatch.
+    const openDigest = (await execute(operations.activity, { course_id: 2, module_id: Number(OPEN_MODULE_ID) })).snapshot_digest;
+    const boundedDigest = (await execute(operations.activity, { course_id: 2, module_id: Number(BOUNDED_MODULE_ID) })).snapshot_digest;
+    const blockedBefore = posts.length;
+    assert.deepEqual(await execute(operations.update, updateArguments({ module_id: Number(OPEN_MODULE_ID), expected_digest: openDigest })), {
+      ok: false, sent: false, status: 200, error: "moodle_bigbluebuttonbn_room_open_now",
+    });
+    assert.deepEqual(await execute(operations.update, updateArguments({ module_id: Number(BOUNDED_MODULE_ID), expected_digest: boundedDigest })), {
+      ok: false, sent: false, status: 200, error: "moodle_bigbluebuttonbn_room_open_now",
+    });
+    state.instances[LATER_MODULE_ID].opening = { year: 2026, month: 12, day: 1, hour: 9, minute: 0 };
+    state.instances[LATER_MODULE_ID].closing = null;
+    state.activityView = "frozen-wait";
+    const frozenUpdate = await execute(operations.activity, { course_id: 2, module_id: Number(LATER_MODULE_ID) });
+    assert.deepEqual(await execute(operations.update, updateArguments({ name: undefined, wait_for_moderator: false, expected_digest: frozenUpdate.snapshot_digest })), {
+      ok: false, sent: false, status: 200, error: "moodle_bigbluebuttonbn_setting_not_writable",
+    });
+    state.activityView = "core";
+    assert.equal(posts.length, blockedBefore);
+
+    // A saved value outside the reviewed update is not verified, and a lost
+    // response remains applied-or-unknown without a second POST.
+    const mismatchForm = await execute(operations.activity, { course_id: 2, module_id: Number(LATER_MODULE_ID) });
+    state.savedUpdateNameOverride = "Moodle rewrote the room";
+    assert.deepEqual(await execute(operations.update, updateArguments({ expected_digest: mismatchForm.snapshot_digest })), {
+      ok: false, sent: true, outcomeUnknown: true,
+      verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_bigbluebuttonbn_update_not_verified" },
+      error: "moodle_bigbluebuttonbn_update_not_verified",
+    });
+    state.savedUpdateNameOverride = "";
+    const lostUpdateForm = await execute(operations.activity, { course_id: 2, module_id: Number(LATER_MODULE_ID) });
+    const lostUpdateBefore = posts.length;
+    await loseNextResponse("/course/modedit.php", "POST");
+    assert.deepEqual(await execute(operations.update, updateArguments({ name: "Lost update response", expected_digest: lostUpdateForm.snapshot_digest })), {
+      ok: false, sent: true, outcomeUnknown: true,
+      verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_bigbluebuttonbn_update_unconfirmed" },
+      error: "moodle_bigbluebuttonbn_update_unconfirmed",
+    });
+    assert.equal(posts.length, lostUpdateBefore + 1);
+
+    // 15. A lost response after the dispatch is applied-or-unknown, and never retried.
     const lostForm = await execute(operations.creationForm, { course_id: 2, section_id: 7 });
     const lostBefore = posts.length;
     await loseNextResponse("/course/modedit.php", "POST");

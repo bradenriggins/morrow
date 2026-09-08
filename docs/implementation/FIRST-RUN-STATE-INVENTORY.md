@@ -419,9 +419,9 @@ stale name here.
 | `Try again` | Morrow app | `installer/renderer/renderer.js:220` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:78` |
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:401` |
-| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:428` |
-| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:428` |
-| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:428` |
+| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
+| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
+| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
 | `Connect Morrow` | Popup | `connector/extension/popup/popup.html:18`, `connector/extension/popup/popup-view.js:40` |
 | `Try again` | Popup | `connector/extension/popup/popup-view.js:39` |
 | `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:40` |
@@ -453,15 +453,15 @@ stale name here.
 | `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:142`, `connector/extension/settings/settings.js:718` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:151` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:152` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:814` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:814` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:814` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:814` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:814` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:821` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:821` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:801` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:803` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:666` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:834` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:831` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:833` |
 
 Names a person reads as landmarks rather than presses:
 

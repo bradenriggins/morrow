@@ -113,6 +113,11 @@ function resultSummary(value: JsonObject): string {
     return "Morrow changed when learners see the reviewed Blackboard item and read both dates back.";
   }
   if (value.schema === "morrow.blackboard.content-dates.comparator.v1") return "Morrow re-read when learners see the selected Blackboard content item.";
+  if (value.schema === "morrow.blackboard.course-copy.plan.v1") return "Morrow prepared one Blackboard course copy for review. Nothing was copied.";
+  if (value.schema === "morrow.blackboard.course-copy.readback.v1") {
+    return "Morrow copied the reviewed Blackboard course through its Learn task and read the copied course back from the completed task's location.";
+  }
+  if (value.schema === "morrow.blackboard.course-copy.comparator.v1") return "Morrow re-read the copied Blackboard course by its reviewed Course ID.";
   return "Morrow checked the Blackboard REST connection.";
 }
 

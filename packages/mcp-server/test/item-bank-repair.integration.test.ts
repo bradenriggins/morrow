@@ -137,11 +137,13 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
     const args = command.arguments ?? {};
     switch (command.toolName) {
       case "canvas_get_single_course_courses":
-        return { id: COURSE_ID, name: COURSE_NAME };
+        return { id: String(args.id), name: COURSE_NAME };
       // The learner privacy boundary this course is read behind. No question in
       // this bank names a learner, and this fixture course enrols none.
       case "canvas_list_users_in_course_users":
         return [];
+      case "canvas_item_bank_get_bank":
+        return { id: BANK_ID, title: "Cell biology bank" };
       case "canvas_item_bank_list_entries":
         return [...Object.values(CASES)].map((entry) => ({ id: entry.entryId, entry_type: "Item", entry_id: entry.itemId }));
       case "canvas_item_bank_list_shares":
@@ -150,9 +152,11 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
           { id: "2", entity_type: "course", entity_id: "88" },
         ];
       case "canvas_list_new_quizzes":
-        return [{ id: QUIZ_ID, title: "Cell transport quiz" }];
+        return [{ id: args.course_id === COURSE_ID ? QUIZ_ID : `8${args.course_id}`, course_id: args.course_id, title: "Cell transport quiz" }];
+      case "canvas_get_new_quiz":
+        return { id: args.assignment_id, course_id: args.course_id, title: "Cell transport quiz" };
       case "canvas_list_quiz_items":
-        return [{ id: "9001", entry_type: "BankEntry", bank_id: BANK_ID }];
+        return [{ id: "9001", course_id: args.course_id, quiz_id: args.assignment_id, entry_type: "BankEntry", bank_id: BANK_ID }];
       case "canvas_item_bank_get_entry": {
         const found = [...Object.values(CASES)].find((entry) => entry.entryId === args.bank_entry_id);
         return found ? { id: found.entryId, entry_type: "Item", entry_id: found.itemId } : null;
@@ -351,11 +355,12 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
 
     bridge = await connectBridgeTestClient({
       port, token: TOKEN, extensionId: EXTENSION_ID, catalogDigest,
-      bindings: [{
-        sourceBindingId: SOURCE_BINDING_ID, provider: "canvas", origin: ORIGIN, courseId: COURSE_ID,
+      bindings: [COURSE_ID, "77", "88"].map((id) => ({
+        sourceBindingId: id === COURSE_ID ? SOURCE_BINDING_ID : `canvas:course-${id}`,
+        provider: "canvas", origin: ORIGIN, courseId: id,
         courseName: COURSE_NAME, principalFingerprint: "c".repeat(64), sessionGeneration: 1,
         catalogDigest, editPolicyRevision: 0, editOptionsAvailable: true, runtimeVerified: true,
-      }],
+      })),
     });
     bridge.onCommand((command) => {
       if (command.kind === "invoke_write") {
@@ -399,11 +404,12 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
       schema: "morrow.canvas.item-bank.fan-out.v1",
       bank_id: BANK_ID, course_id: COURSE_ID, complete: true, unreachable: [], external_course_ids: ["77", "88"],
     });
-    // The quiz in the selected course that draws from this bank is a consumer,
-    // and so is each course the bank is shared into.
+    // Each course has its own bound quiz read, and every drawing quiz is a consumer.
     expect(record.consumers).toEqual([
       { course_id: COURSE_ID, entity_type: "quiz_use", entity_id: QUIZ_ID },
+      { course_id: "77", entity_type: "quiz_use", entity_id: "877" },
       { course_id: "77", entity_type: "shared_bank", entity_id: "77" },
+      { course_id: "88", entity_type: "quiz_use", entity_id: "888" },
       { course_id: "88", entity_type: "shared_bank", entity_id: "88" },
     ]);
     expect(text(complete)).toContain("course 77, course 88");

@@ -10,12 +10,12 @@
     "A write row names the tool that freezes and reviews the change and the tool that re-reads and compares it. Morrow sends one dispatch for each reviewed change."
   ],
   "counts": {
-    "tools": 69,
-    "reads": 55,
-    "writes": 14,
-    "private": 43,
-    "gatewayDispatchOnly": 28,
-    "entitlementUnknown": 66
+    "tools": 71,
+    "reads": 56,
+    "writes": 15,
+    "private": 45,
+    "gatewayDispatchOnly": 30,
+    "entitlementUnknown": 69
   },
   "tools": [
     {
@@ -916,17 +916,45 @@
     },
     {
       "module": "course-lifecycle",
-      "tool": "blackboard_course_copy",
+      "tool": "blackboard_plan_course_copy",
       "provider": "blackboard",
       "family": "course-copy",
-      "method": null,
-      "pathTemplate": null,
+      "method": "GET",
+      "pathTemplate": "/learn/api/public/v3/courses/{course_id}?fields=id,courseId,name,ultraStatus,closedComplete,availability",
       "access": "read",
-      "entitlement": "none",
+      "entitlement": "unknown",
       "reviewRoute": null,
       "readbackComparator": null,
       "private": true,
       "gatewayDispatchOnly": false
+    },
+    {
+      "module": "course-lifecycle",
+      "tool": "blackboard_apply_reviewed_course_copy",
+      "provider": "blackboard",
+      "family": "course-copy",
+      "method": "POST",
+      "pathTemplate": "/learn/api/public/v2/courses/{course_id}/copy",
+      "access": "write",
+      "entitlement": "unknown",
+      "reviewRoute": "blackboard_plan_course_copy",
+      "readbackComparator": "blackboard_verify_course_copy",
+      "private": true,
+      "gatewayDispatchOnly": true
+    },
+    {
+      "module": "course-lifecycle",
+      "tool": "blackboard_verify_course_copy",
+      "provider": "blackboard",
+      "family": "course-read",
+      "method": "GET",
+      "pathTemplate": "/learn/api/public/v1/courses/{course_id}/tasks/{task_id}",
+      "access": "read",
+      "entitlement": "unknown",
+      "reviewRoute": null,
+      "readbackComparator": null,
+      "private": true,
+      "gatewayDispatchOnly": true
     },
     {
       "module": "content-patch",

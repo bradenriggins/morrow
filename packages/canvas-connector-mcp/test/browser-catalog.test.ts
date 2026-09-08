@@ -48,6 +48,9 @@ describe("browser catalog capability metadata", () => {
     const replace = tool("moodle_replace_scorm_package");
     expect(replace.capability?.authority?.approvalClass).toBe("destructive");
     expect(replace.capability?.behavior?.irreversible).toBe(true);
+    const replaceH5p = tool("moodle_replace_h5pactivity_package");
+    expect(replaceH5p.capability?.authority?.approvalClass).toBe("destructive");
+    expect(replaceH5p.capability?.behavior?.irreversible).toBe(true);
     expect([...moodleTools.values()].filter((entry) => entry.annotations?.destructiveHint).map((entry) => entry.name).sort())
       .toEqual([
         "moodle_delete_activity",
@@ -58,6 +61,7 @@ describe("browser catalog capability metadata", () => {
         "moodle_delete_resource_file",
         "moodle_delete_section",
         "moodle_remove_quiz_slot",
+        "moodle_replace_h5pactivity_package",
         "moodle_replace_resource_file",
         "moodle_replace_scorm_package",
         "moodle_start_course_restore",

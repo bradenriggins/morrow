@@ -330,7 +330,9 @@ export const PRIVATE_SOURCE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "blackboard_plan_content_dated_visibility",
   "blackboard_apply_reviewed_content_dated_visibility",
   "blackboard_verify_content_dated_visibility",
-  "blackboard_course_copy",
+  "blackboard_plan_course_copy",
+  "blackboard_apply_reviewed_course_copy",
+  "blackboard_verify_course_copy",
 ]);
 
 export function isPrivateSourceTool(tool: Pick<CatalogTool, "upstreamName">): boolean {
@@ -652,6 +654,14 @@ function isBlackboardAttachment(mapping: CatalogTool): boolean {
   return isBlackboardApply(mapping) && mapping.upstreamName === BLACKBOARD_ATTACHMENT_APPLY_TOOL;
 }
 
+function isBlackboardCourseCopyVerify(mapping: CatalogTool): boolean {
+  return mapping.upstreamId === "blackboard-rest"
+    && mapping.upstreamName === "blackboard_verify_course_copy"
+    && mapping.annotations?.readOnlyHint === true
+    && mapping.capability?.provider === "blackboard"
+    && mapping.capability.route.backend === "lms-api";
+}
+
 function isBlackboardContentPatchPlan(mapping: CatalogTool): boolean {
   return mapping.upstreamId === "blackboard-rest"
     && mapping.upstreamName === BLACKBOARD_CONTENT_PATCH_PLAN_TOOL
@@ -914,6 +924,7 @@ function currentEditAuthorization(
   request: JsonObject,
   binding: JsonObject,
 ): EffectAuthorization {
+  if (Object.hasOwn(request, "morrow_new_quiz_settings_guard")) return REVIEW_AUTHORIZATION;
   const routing = legacyRouting(request);
   if (!routing.sourceBindingId
     || binding.sourceBindingId !== routing.sourceBindingId
@@ -1804,7 +1815,7 @@ export class GatewayRuntime {
         if ((kind === "scorm" || kind === "scorm_replacement") && !/\.zip$/i.test(locals[0]!.filename)) {
           throw new Error("A SCORM package file name must end in .zip.");
         }
-        if (kind === "h5p" && !/\.h5p$/i.test(locals[0]!.filename)) {
+        if ((kind === "h5p" || kind === "h5p_replacement") && !/\.h5p$/i.test(locals[0]!.filename)) {
           throw new Error("An H5P package file name must end in .h5p.");
         }
         options.signal?.throwIfAborted();
@@ -6939,7 +6950,10 @@ export class GatewayRuntime {
     if (!mapping || mapping.annotations?.readOnlyHint !== true) {
       return this.effectResult(operation, "verification_unsupported");
     }
-    const fresh = this.resolveResultArtifact(await this.callSourceOwned(mapping.publicName, operation.readback.arguments));
+    const readbackArguments = isBlackboardCourseCopyVerify(mapping) && operation.sourceTaskId?.startsWith("bbcopy:")
+      ? { ...operation.readback.arguments, task_reference: operation.sourceTaskId }
+      : operation.readback.arguments;
+    const fresh = this.resolveResultArtifact(await this.callSourceOwned(mapping.publicName, readbackArguments));
     if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
     const readbackDigest = sha256Json(resultComparable(fresh));
     const settled = this.effects.recordReadback(

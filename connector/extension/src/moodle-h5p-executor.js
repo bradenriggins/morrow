@@ -1,7 +1,8 @@
 /**
  * Moodle H5P activity (`mod_h5pactivity`): read the native settings form, read
  * the native creation form, create one hidden activity from one reviewed `.h5p`
- * package, and edit the bounded settings of an existing one.
+ * package, edit the bounded settings of an existing one, or replace the
+ * package of one hidden existing activity.
  *
  * Every route here is the native activity form `course/modedit.php`, Moodle's
  * own private draft area, and `pluginfile.php` for the saved package bytes.
@@ -67,6 +68,7 @@ export async function executeMoodleH5pInPage(rawInput) {
     "moodle.form.course.modedit.h5pactivity.read.v1": { toolName: "moodle_get_h5pactivity", readOnly: true, kind: "activity" },
     "moodle.form.course.modedit.h5pactivity.create.read.v1": { toolName: "moodle_get_h5pactivity_creation_form", readOnly: true, kind: "creation-form" },
     "moodle.form.course.modedit.h5pactivity.create.write.v1": { toolName: "moodle_create_h5pactivity", readOnly: false, kind: "create" },
+    "moodle.form.course.modedit.h5pactivity.package.replace.write.v1": { toolName: "moodle_replace_h5pactivity_package", readOnly: false, kind: "package" },
     "moodle.form.course.modedit.h5pactivity.write.v1": { toolName: "moodle_update_h5pactivity", readOnly: false, kind: "settings" },
   });
   const CREATION_KINDS = ["creation-form", "create"];
@@ -196,6 +198,18 @@ export async function executeMoodleH5pInPage(rawInput) {
       courseId,
       sectionId: id(value.section_id),
       name: value.name,
+      expectedDigest: value.expected_digest,
+      manifest: { filename: value.filename, size_bytes: value.size_bytes, sha256: value.sha256 },
+    };
+  };
+  const packageArguments = (value, courseId) => {
+    if (!exactKeys(value, ["course_id", "module_id", "filename", "size_bytes", "sha256", "expected_digest"])) return null;
+    if (id(value.course_id) !== courseId || !id(value.module_id) || !DIGEST.test(String(value.expected_digest || ""))) return null;
+    if (!validFilename(value.filename) || !Number.isSafeInteger(value.size_bytes) || value.size_bytes < 1
+      || value.size_bytes > MAX_PACKAGE_BYTES || !DIGEST.test(String(value.sha256 || ""))) return null;
+    return {
+      courseId,
+      moduleId: id(value.module_id),
       expectedDigest: value.expected_digest,
       manifest: { filename: value.filename, size_bytes: value.size_bytes, sha256: value.sha256 },
     };
@@ -965,6 +979,68 @@ export async function executeMoodleH5pInPage(rawInput) {
       verification: { schema: "morrow.browser-verification.v1", status: "verified" },
     };
   };
+  const runPackageReplacement = async (context, inputValue, args) => {
+    const before = await readActivity(context, args.courseId, args.moduleId);
+    if (!before.ok) return before;
+    if (before.snapshot_digest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", before.status);
+    if (before.data.visible) return failure("moodle_h5pactivity_activity_visible_refused", before.status);
+    const bytes = await exactPrivatePackage(inputValue, args.manifest);
+    if (!bytes) return failure("moodle_h5pactivity_package_attachment_invalid", before.status);
+    if (!h5pArchiveHasRootDefinition(bytes)) return failure("moodle_h5pactivity_package_definition_invalid", before.status);
+
+    const preflightContext = currentContext();
+    if (!sameContext(context, preflightContext) || !bindingValid(preflightContext, inputValue.binding)) return failure("moodle_binding_mismatch");
+    const form = await loadActivityForm(preflightContext, args.courseId, args.moduleId);
+    if (form.error) return failure(form.error, form.status);
+    if (form.snapshotDigest !== args.expectedDigest || form.action !== before.form.action) return failure("moodle_expected_digest_mismatch", form.status);
+    if (form.visible) return failure("moodle_h5pactivity_activity_visible_refused", form.status);
+    if (form.manager.maxBytes > 0 && args.manifest.size_bytes > form.manager.maxBytes) {
+      return failure("moodle_h5pactivity_package_exceeds_native_limit", form.status);
+    }
+    const changedNames = [PACKAGE_FIELD];
+    const beforeProtected = await protectedDigest(form.values, changedNames, null);
+    const removed = await draftFilesAjax(preflightContext, "delete", {
+      itemid: form.manager.itemId, filepath: "/", filename: form.packageFile.filename,
+    });
+    if (!removed || removed.filepath !== "/") return failure("moodle_h5pactivity_package_area_not_cleared", form.status);
+    const cleared = await readDraftListing(preflightContext, form.manager.itemId);
+    if (managerState(cleared) !== "empty") return failure("moodle_h5pactivity_package_area_not_cleared", form.status);
+    const uploaded = await uploadPackageDraft(preflightContext, form.manager, args.manifest, bytes);
+    if (uploaded.error) return failure(uploaded.error, uploaded.status ?? form.status);
+    const listing = await readDraftListing(preflightContext, form.manager.itemId);
+    const staged = packageFileFromListing(listing);
+    if (listingHasReference(listing) || !staged || staged.filename !== args.manifest.filename || staged.size_bytes !== args.manifest.size_bytes
+      || !await bytesMatch(uploaded.draftUrl, args.manifest)) return failure("moodle_h5pactivity_package_draft_mismatch", uploaded.status ?? form.status);
+
+    const sendContext = currentContext();
+    if (!sameContext(preflightContext, sendContext) || !bindingValid(sendContext, inputValue.binding)) return failure("moodle_binding_mismatch");
+    const posted = await postForm(sendContext, form, args.courseId, { [PACKAGE_FIELD]: form.manager.itemId });
+    if (posted.error) return failure(posted.error, form.status);
+    if (posted.rejected) return mismatch(posted.rejected, posted.status);
+    if (posted.unconfirmed) return unconfirmed(posted.unconfirmed, posted.status);
+    const after = await readActivity(sendContext, args.courseId, args.moduleId);
+    if (!after.ok) return unconfirmed("moodle_h5pactivity_readback_unconfirmed", posted.status);
+    const afterProtected = await protectedDigest(after.form.values, changedNames, null);
+    const matches = after.data.visible === false && after.data.package?.filename === args.manifest.filename
+      && after.data.package?.size_bytes === args.manifest.size_bytes
+      && afterProtected === beforeProtected
+      && await savedPackageBytesMatch(sendContext, after.form.manager.contextId, args.manifest);
+    const data = { ...after.data, package: { ...args.manifest }, protected_settings_digest: afterProtected, protected_setting_names: protectedNames(after.form.values, changedNames) };
+    if (!matches) {
+      return mismatch("moodle_h5pactivity_package_readback_mismatch", posted.status ?? after.status, {
+        data, targets: after.targets, snapshot_digest: after.snapshot_digest, error: "moodle_write_not_verified",
+      });
+    }
+    return {
+      ok: true,
+      sent: true,
+      status: posted.status ?? after.status,
+      data,
+      targets: after.targets,
+      snapshot_digest: after.snapshot_digest,
+      verification: { schema: "morrow.browser-verification.v1", status: "verified" },
+    };
+  };
 
   try {
     const context = currentContext();
@@ -974,7 +1050,7 @@ export async function executeMoodleH5pInPage(rawInput) {
     if (!definition) return failure("moodle_operation_refused");
     if (!bindingValid(context, input.binding)) return failure("moodle_binding_mismatch");
     const courseId = id(input.binding.courseId);
-    if (definition.kind !== "create" && input.privateAttachment !== undefined) return failure("moodle_h5pactivity_arguments_invalid");
+    if (definition.kind !== "create" && definition.kind !== "package" && input.privateAttachment !== undefined) return failure("moodle_h5pactivity_arguments_invalid");
     if (definition.readOnly) {
       const args = readArguments(input.arguments, courseId, CREATION_KINDS.includes(definition.kind));
       if (!args) return failure("moodle_h5pactivity_arguments_invalid");
@@ -988,6 +1064,10 @@ export async function executeMoodleH5pInPage(rawInput) {
     if (definition.kind === "settings") {
       const args = settingsArguments(input.arguments, courseId);
       return args ? await runUpdate(context, input, args) : failure("moodle_h5pactivity_arguments_invalid");
+    }
+    if (definition.kind === "package") {
+      const args = packageArguments(input.arguments, courseId);
+      return args ? await runPackageReplacement(context, input, args) : failure("moodle_h5pactivity_arguments_invalid");
     }
     const args = creationArguments(input.arguments, courseId);
     return args ? await runCreate(context, input, args) : failure("moodle_h5pactivity_arguments_invalid");
