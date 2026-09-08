@@ -1015,13 +1015,13 @@
     },
     {
       "path": "packages/client-config/src/cli.ts",
-      "sha256": "79adc64201295fea9768cf1fb52b2502a130d93a6321402cfc88f52783d0d86e",
+      "sha256": "2f9819fcba790af57b517b559f2821e5b84032155bc8afc4165c5e72778e21b4",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "packages/client-config/src/index.ts",
-      "sha256": "a6a49d97172a3b939474efafc9c8369e314187024a2fec5dce481260c069ccd9",
+      "sha256": "1d24d7c3cd7480a238ea02c9740b5fe0115e6f993a148c1cf68fe4e030a04b26",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
