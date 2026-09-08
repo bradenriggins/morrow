@@ -51,6 +51,11 @@ const COPY = {
     detail: "Morrow Bridge reported no reason for this one.",
     action: "Try again. If it continues, check that the Morrow app is running on this computer.",
   },
+  course_data_consent_required: {
+    title: "Course data use is not accepted",
+    detail: "Morrow Bridge does not connect to Morrow or read course data until you accept the course data disclosure.",
+    action: "Open the Morrow Bridge popup or setup guide, read the disclosure, then select Agree and continue if you accept it.",
+  },
   course_tab_missing: {
     title: "No signed-in course tab is open here",
     detail: "Morrow connects the signed-in Canvas or Moodle course that is open in front of you, and this Chrome window has none.",

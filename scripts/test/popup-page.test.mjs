@@ -50,6 +50,29 @@ function view(page) {
 
 after(clearExtensionGlobals);
 
+test("the popup requires one clear agreement before it reads connection or course state", async () => {
+  let accepted = false;
+  const page = await openPopup({
+    status: () => accepted ? connection() : { consentRequired: true },
+    handlers: { morrow_course_data_consent_accept: () => { accepted = true; return { accepted: true }; } },
+  });
+  assert.equal(page.hidden("#connection-content"), true);
+  assert.equal(page.hidden("#consent-action"), false);
+  assert.equal(page.text("#consent-action"), "Agree and continue");
+  assert.match(page.text("#consent-detail"), /will not connect to Morrow or read course data before you agree/);
+  assert.deepEqual(page.messages().map((message) => message.type), ["morrow_status"]);
+
+  await page.click("#consent-action");
+  assert.deepEqual(page.messages().map((message) => message.type), [
+    "morrow_status",
+    "morrow_course_data_consent_accept",
+    "morrow_status",
+  ]);
+  assert.equal(page.hidden("#consent-action"), true);
+  assert.equal(page.hidden("#connection-content"), false);
+  assert.equal(page.text("#status-value"), "Not connected");
+});
+
 test("before a course site is connected the popup names the state it is in", async () => {
   const states = [
     ["a status read that failed", () => ({ ok: false, code: "bridge_extension_unreachable", error: "bridge_extension_unreachable" }), {

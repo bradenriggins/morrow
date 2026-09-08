@@ -419,6 +419,7 @@ async function main() {
     setStage("open_local_pairing_page");
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/popup/popup.html`);
+    await popup.getByRole("button", { name: "Agree and continue", exact: true }).click();
     setStage("approve_local_pairing");
     await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
     const pairingPage = await waitFor(() => context.pages().find((page) => {

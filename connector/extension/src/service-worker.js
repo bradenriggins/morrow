@@ -1,4 +1,5 @@
 import { shouldOpenSetupOnInstall } from "../onboarding/onboarding-install.js";
+import { COURSE_DATA_CONSENT_KEY, COURSE_DATA_CONSENT_VALUE, hasCourseDataConsent } from "./course-data-consent.js";
 import { executeItemBankInPage } from "./item-bank-executor.js";
 import { ITEM_BANK_FRAME_HOST_PATTERN, itemBankFrameIds } from "./item-bank-frames.js";
 import { canClaimCourseConnectionIntent, canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl, validCourseConnectionIntent } from "./course-connection-intent.js";
@@ -640,6 +641,15 @@ async function storage() {
   return await chrome.storage.local.get(["token", "bindings", "pairing", "siteAnchors", "editPolicies", "editPolicyRevisions"]);
 }
 
+async function courseDataConsentAccepted() {
+  const saved = await chrome.storage.local.get(COURSE_DATA_CONSENT_KEY);
+  return hasCourseDataConsent(saved[COURSE_DATA_CONSENT_KEY]);
+}
+
+async function requireCourseDataConsent() {
+  if (!await courseDataConsentAccepted()) throw new Error("course_data_consent_required");
+}
+
 function discoveryArea() {
   return chrome.storage.session || chrome.storage.local;
 }
@@ -971,6 +981,7 @@ async function publishBindings() {
 // Chrome reports this when the tab closes and when it moves to another address. Either ends what a
 // kept match proved, so it is dropped before the state below it is published.
 async function canvasTabChanged(tabId) {
+  if (!await courseDataConsentAccepted()) return;
   forgetTabSiteAnchorVerifications(tabId);
   const { siteAnchors = [] } = await storage();
   if (storedAnchors(siteAnchors).some((anchor) => anchor.tabId === tabId)) await publishBindings();
@@ -996,7 +1007,7 @@ function settingsSender(sender) {
 function policyCode(error) {
   const code = String(error?.message || "");
   return /^(?:edit_policy|course_discovery|course_selection)_[a-z_]+$/.test(code)
-    || code === "binding_limit_reached" || code === "connector_catalog_invalid"
+    || code === "binding_limit_reached" || code === "connector_catalog_invalid" || code === "course_data_consent_required"
     ? code
     : "edit_policy_failed";
 }
@@ -1453,6 +1464,7 @@ async function saveCourseSelection(siteAnchorId, discoveryReceiptId, courseIds) 
 }
 
 async function connectBridge() {
+  if (!await courseDataConsentAccepted()) return;
   const stored = await storage();
   if (!stored.token || state.socket?.readyState === WebSocket.OPEN || state.socket?.readyState === WebSocket.CONNECTING) return;
   const api = await catalog();
@@ -3522,6 +3534,7 @@ async function requestPairing() {
 }
 
 async function pollPairing() {
+  if (!await courseDataConsentAccepted()) return;
   const { pairing } = await storage();
   if (!pairing?.statusUrl || !Number.isFinite(pairing.expiresAt) || Date.now() >= pairing.expiresAt) {
     const latest = await storage();
@@ -3623,6 +3636,7 @@ async function detectActiveCoursePlatform(requestedTabId) {
 }
 
 async function completePreparedCourseConnection({ intentId, addedOrigins, popupConfirmed = false, openCourseSelection = false } = {}) {
+  await requireCourseDataConsent();
   const pending = await preparedCourseConnection(intentId, { addedOrigins, popupConfirmed });
   if (!pending) return { completed: false };
   const intent = await queueStorageMutation(async () => {
@@ -3735,6 +3749,7 @@ function runtimeHealthy(connected) {
 }
 
 async function status() {
+  if (!await courseDataConsentAccepted()) return { consentRequired: true };
   const before = await storage();
   if (before.pairing?.status === "pending") await pollPairing();
   const stored = await storage();
@@ -3743,6 +3758,7 @@ async function status() {
   const connected = state.socket?.readyState === WebSocket.OPEN && state.generation > 0;
   const { firstCourseRead = null } = await chrome.storage.local.get("firstCourseRead");
   return {
+    consentRequired: false,
     paired: Boolean(stored.token),
     pairing: stored.pairing?.status === "pending",
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
@@ -3754,6 +3770,12 @@ async function status() {
     bindingCount: bindings.length,
     bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, lastSeenAt: binding.lastSeenAt })),
   };
+}
+
+async function acceptCourseDataConsent() {
+  await chrome.storage.local.set({ [COURSE_DATA_CONSENT_KEY]: COURSE_DATA_CONSENT_VALUE });
+  await connectBridge();
+  return { accepted: true };
 }
 
 async function openSetupGuide() {
@@ -3808,13 +3830,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, code, error: code });
       return false;
     }
-    Promise.resolve(settingsAction()).then((result) => sendResponse({ ok: true, result }), (error) => {
+    Promise.resolve(requireCourseDataConsent()).then(settingsAction).then((result) => sendResponse({ ok: true, result }), (error) => {
       const code = policyCode(error);
       sendResponse({ ok: false, code, error: code });
     });
     return true;
   }
-  const run = message?.type === "morrow_pair" ? requestPairing
+  const run = message?.type === "morrow_course_data_consent_accept" ? acceptCourseDataConsent
+    : message?.type === "morrow_pair" ? requestPairing
     : message?.type === "morrow_open_setup" ? openSetupGuide
       : message?.type === "morrow_detect_course_platform" ? () => detectActiveCoursePlatform(message.tabId)
       : message?.type === "morrow_connect_course_prepare" ? () => prepareCourseConnection(message.tabId)
@@ -3825,7 +3848,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         : message?.type === "morrow_disconnect" ? disconnectConnector
         : null;
   if (!run) return false;
-  Promise.resolve(run()).then((result) => sendResponse({ ok: true, result }), (error) => {
+  const consentExempt = message?.type === "morrow_course_data_consent_accept"
+    || message?.type === "morrow_status"
+    || message?.type === "morrow_open_setup"
+    || message?.type === "morrow_disconnect";
+  Promise.resolve(consentExempt ? undefined : requireCourseDataConsent()).then(run).then((result) => sendResponse({ ok: true, result }), (error) => {
     const code = messageCode(error);
     sendResponse({ ok: false, code, error: code });
   });
@@ -3837,9 +3864,22 @@ chrome.tabs.onRemoved.addListener((tabId) => { void canvasTabChanged(tabId); });
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
   if (change.url) void canvasTabChanged(tabId);
   if (change.status !== "complete" || !tab.url?.startsWith(httpUrl("/pair/"))) return;
-  void storage().then(({ pairing }) => {
+  void chrome.storage.local.get("pairing").then(({ pairing }) => {
     if (pairing?.approvalUrl === tab.url) return pollPairing();
   });
+});
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName !== "local" || !Object.hasOwn(changes || {}, COURSE_DATA_CONSENT_KEY)
+    || hasCourseDataConsent(changes[COURSE_DATA_CONSENT_KEY]?.newValue)) return;
+  anchorVerifications.clear();
+  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = null;
+  const socket = state.socket;
+  state.socket = null;
+  state.generation = 0;
+  state.accepted = null;
+  socket?.close(1000, "course_data_consent_removed");
+  void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
 });
 chrome.runtime.onStartup.addListener(() => { void pollPairing(); void connectBridge(); });
 chrome.runtime.onInstalled.addListener((details) => {

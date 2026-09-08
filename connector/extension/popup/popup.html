@@ -10,35 +10,39 @@
 <body>
   <main>
     <header class="brand"><span class="brand-wordmark" aria-label="Morrow Bridge"><img class="brand-mark" src="../brand/morrow-knot.svg" alt=""><span>morrow</span></span><span id="pulse" aria-hidden="true"></span></header>
-    <div class="connection-status">
-      <section class="status"><span id="status-label">Morrow</span><strong id="status-value">Checking…</strong></section>
-      <section class="status"><span id="course-label">Course</span><strong id="canvas-value">Checking…</strong></section>
-    </div>
-    <section id="account" class="account" hidden><span id="account-label">Selected course</span><strong id="account-origin"></strong><time id="account-last-checked"></time></section>
     <section class="data-disclosure" aria-labelledby="data-disclosure-title">
       <h2 id="data-disclosure-title">What Morrow Bridge can read</h2>
-      <p>After you connect a course, Morrow Bridge reads the Canvas or Moodle pages and course content needed for your requests. Course content can include names, email addresses, and messages. It sends the needed course details through the Morrow app on this computer to the assistant you choose. Your Chrome password and cookies stay in Chrome. <a href="https://meetmorrow.app/privacy" target="_blank" rel="noopener noreferrer">Privacy details</a></p>
+      <p>After you agree and connect a course, Morrow Bridge reads the Canvas or Moodle pages and course content needed for your requests. Course content can include names, email addresses, and messages. It sends the needed course details through the Morrow app on this computer to the assistant you choose. Your Chrome password and cookies stay in Chrome. <a href="https://meetmorrow.app/privacy" target="_blank" rel="noopener noreferrer">Privacy details</a></p>
     </section>
-    <button id="primary" type="button" disabled>Connect Morrow</button>
-    <button id="canvas-action" class="secondary" type="button" hidden>Check or switch course</button>
-    <button id="disconnect" class="secondary" type="button" hidden>Disconnect Morrow</button>
-    <p id="detail">Checking the connection…</p>
-    <section class="edit-access" aria-labelledby="edit-access-title"><h2 id="edit-access-title">Plan and Edit</h2><p><strong>Plan keeps changes ready for your review.</strong> Choose courses and the changes Morrow can make. You can return any course to Plan at once.</p><button id="editing-settings" class="secondary" type="button">Open Plan and Edit settings</button></section>
+    <p id="consent-detail">Select Agree and continue to accept this data use. Morrow Bridge will not connect to Morrow or read course data before you agree.</p>
+    <button id="consent-action" type="button">Agree and continue</button>
     <p id="error" role="alert" hidden></p>
-    <p id="notice" role="status" aria-live="polite" hidden></p>
-    <button id="setup-guide" class="help-link" type="button">Open setup guide</button>
-    <details class="help">
-      <summary>How to connect</summary>
-      <ol>
-        <li><strong>Choose your assistant in Morrow.</strong> Open the Morrow app and follow the action it shows.</li>
-        <li><strong>Finish Morrow Bridge setup.</strong> Add Morrow Bridge in Chrome, select <strong>Connect Morrow</strong>, and allow only the connection you started.</li>
-        <li><strong>Open and connect your course.</strong> Open a signed-in Canvas or Moodle course. Morrow Bridge detects the platform and shows <strong>Connect Canvas</strong> or <strong>Connect Moodle</strong>. Select that button, then choose courses in <strong>Plan and Edit settings</strong>.</li>
-      </ol>
-      <p>Chrome asks for access only to the Canvas or Moodle address you connect. If Canvas New Quizzes is open, it may also ask for access to that quiz address.</p>
-      <p>Disconnect Morrow stops this connection and removes that platform access. It does not sign you out or undo course changes.</p>
-      <p>Chrome works with one Morrow at a time. A second Morrow reports that another Morrow is already using this connection, and it starts without its course tools. Close the other Morrow, or use one Morrow for all your assistants.</p>
-    </details>
-    <footer>Canvas · Moodle<br>Uses the permissions available in your current course role.</footer>
+    <div id="connection-content" hidden>
+      <div class="connection-status">
+        <section class="status"><span id="status-label">Morrow</span><strong id="status-value">Checking…</strong></section>
+        <section class="status"><span id="course-label">Course</span><strong id="canvas-value">Checking…</strong></section>
+      </div>
+      <section id="account" class="account" hidden><span id="account-label">Selected course</span><strong id="account-origin"></strong><time id="account-last-checked"></time></section>
+      <button id="primary" type="button" disabled>Connect Morrow</button>
+      <button id="canvas-action" class="secondary" type="button" hidden>Check or switch course</button>
+      <button id="disconnect" class="secondary" type="button" hidden>Disconnect Morrow</button>
+      <p id="detail">Checking the connection…</p>
+      <section class="edit-access" aria-labelledby="edit-access-title"><h2 id="edit-access-title">Plan and Edit</h2><p><strong>Plan keeps changes ready for your review.</strong> Choose courses and the changes Morrow can make. You can return any course to Plan at once.</p><button id="editing-settings" class="secondary" type="button">Open Plan and Edit settings</button></section>
+      <p id="notice" role="status" aria-live="polite" hidden></p>
+      <button id="setup-guide" class="help-link" type="button">Open setup guide</button>
+      <details class="help">
+        <summary>How to connect</summary>
+        <ol>
+          <li><strong>Choose your assistant in Morrow.</strong> Open the Morrow app and follow the action it shows.</li>
+          <li><strong>Finish Morrow Bridge setup.</strong> Add Morrow Bridge in Chrome, review and accept the course data disclosure, select <strong>Connect Morrow</strong>, and allow only the connection you started.</li>
+          <li><strong>Open and connect your course.</strong> Open a signed-in Canvas or Moodle course. Morrow Bridge detects the platform and shows <strong>Connect Canvas</strong> or <strong>Connect Moodle</strong>. Select that button, then choose courses in <strong>Plan and Edit settings</strong>.</li>
+        </ol>
+        <p>Chrome asks for access only to the Canvas or Moodle address you connect. If Canvas New Quizzes is open, it may also ask for access to that quiz address.</p>
+        <p>Disconnect Morrow stops this connection and removes that platform access. It does not sign you out or undo course changes.</p>
+        <p>Chrome works with one Morrow at a time. A second Morrow reports that another Morrow is already using this connection, and it starts without its course tools. Close the other Morrow, or use one Morrow for all your assistants.</p>
+      </details>
+      <footer>Canvas · Moodle<br>Uses the permissions available in your current course role.</footer>
+    </div>
   </main>
   <script type="module" src="popup.js"></script>
 </body>

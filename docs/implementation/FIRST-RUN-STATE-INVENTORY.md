@@ -341,11 +341,11 @@ that has never read a course is not ready
 
 | Element | What it reports | Renders at |
 | --- | --- | --- |
-| `assistant-check` | The connection an assistant approved through Morrow. Morrow Bridge cannot see the assistant window itself, and the line says so | `connector/extension/onboarding/onboarding.html:29` |
-| `connection-check` | Whether Morrow Bridge holds an open connection to Morrow | `connector/extension/onboarding/onboarding.html:30` |
-| `runtime-check` | Whether the Morrow this connection reached is the same build as this extension. Morrow names the connector identity it accepted, and the status read compares it with this extension, this connector revision and this exact list of course actions (`connector/extension/src/service-worker.js:2467-2476`) | `connector/extension/onboarding/onboarding.html:31` |
-| `course-check` | How many selected courses are ready in this Chrome session | `connector/extension/onboarding/onboarding.html:32` |
-| `read-check` | The course of the last read that returned. The service worker records the course and the time after a read answers ok, and replaces the record when a read succeeds in a different course (`connector/extension/src/service-worker.js:2066-2082`) | `connector/extension/onboarding/onboarding.html:33` |
+| `assistant-check` | The connection an assistant approved through Morrow. Morrow Bridge cannot see the assistant window itself, and the line says so | `connector/extension/onboarding/onboarding.html:37` |
+| `connection-check` | Whether Morrow Bridge holds an open connection to Morrow | `connector/extension/onboarding/onboarding.html:38` |
+| `runtime-check` | Whether the Morrow this connection reached is the same build as this extension. Morrow names the connector identity it accepted, and the status read compares it with this extension, this connector revision and this exact list of course actions (`connector/extension/src/service-worker.js:2467-2476`) | `connector/extension/onboarding/onboarding.html:39` |
+| `course-check` | How many selected courses are ready in this Chrome session | `connector/extension/onboarding/onboarding.html:40` |
+| `read-check` | The course of the last read that returned. The service worker records the course and the time after a read answers ok, and replaces the record when a read succeeds in a different course (`connector/extension/src/service-worker.js:2066-2082`) | `connector/extension/onboarding/onboarding.html:41` |
 
 Every line the five checks can render:
 
@@ -506,7 +506,7 @@ stale name here.
 | `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
 | `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
 | `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
-| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:22`, `connector/extension/popup/popup-view.js:59` |
+| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:26`, `connector/extension/popup/popup-view.js:59` |
 | `Try again` | Popup | `connector/extension/popup/popup-view.js:56` |
 | `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:41` |
 | `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:61` |
@@ -514,14 +514,14 @@ stale name here.
 | `Open Canvas or Moodle` | Popup | `connector/extension/popup/popup-view.js:63` |
 | `Connect Canvas` | Popup | `connector/extension/popup/popup-view.js:106` |
 | `Connect Moodle` | Popup | `connector/extension/popup/popup-view.js:106` |
-| `Check or switch course` | Popup | `connector/extension/popup/popup.html:23` |
-| `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:24` |
-| `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:26` |
-| `Open setup guide` | Popup | `connector/extension/popup/popup.html:29` |
-| `How to connect` | Popup | `connector/extension/popup/popup.html:31` |
-| `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:19` |
-| `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:20` |
-| `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:43`, `connector/extension/onboarding/onboarding.html:43` |
+| `Check or switch course` | Popup | `connector/extension/popup/popup.html:27` |
+| `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:28` |
+| `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:30` |
+| `Open setup guide` | Popup | `connector/extension/popup/popup.html:32` |
+| `How to connect` | Popup | `connector/extension/popup/popup.html:34` |
+| `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:29` |
+| `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:30` |
+| `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:51`, `connector/extension/onboarding/onboarding.html:51` |
 | `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:30` |
 | `Find available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:41` |
 | `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:636` |

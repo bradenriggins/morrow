@@ -18,6 +18,9 @@ header .brand-wordmark { flex-basis: auto; }
 .data-disclosure h2 { margin: 0; font-size: 13px; font-weight: 700; line-height: 1.4; }
 .data-disclosure p { margin: 5px 0 0; color: var(--text-secondary); font-size: 11px; line-height: 1.5; }
 .data-disclosure a { font-weight: 650; }
+#consent-detail { margin: 0 0 10px; color: var(--text-secondary); font-size: 12px; line-height: 1.5; }
+#consent-action { margin-top: 0; }
+#connection-content { margin-top: 0; }
 button { width: 100%; margin-top: 8px; }
 #detail { margin: 14px 0; color: var(--text-secondary); font-size: 13px; line-height: 1.55; }
 #error { padding: 12px; border: 1px solid var(--danger); border-radius: 12px; background: color-mix(in srgb, var(--danger) 6%, var(--surface)); color: var(--danger); font-size: 13px; overflow-wrap: anywhere; }

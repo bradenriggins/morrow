@@ -64,6 +64,7 @@ function listener() {
  */
 function chromeFixture({ tabs = [], granted = [], moodleProbe = { ok: false }, canvasProbe = { ok: false } } = {}) {
   const local = new Map();
+  local.set("morrowCourseDataConsent", "morrow.course-data-consent.v1");
   const grantedOrigins = new Set(granted);
   const records = { scripts: [], tabMessages: [], removedPermissions: [], stored: [] };
   const area = {
@@ -92,7 +93,7 @@ function chromeFixture({ tabs = [], granted = [], moodleProbe = { ok: false }, c
       onStartup: listener(),
       onInstalled: listener(),
     },
-    storage: { local: area },
+    storage: { local: area, onChanged: listener() },
     management: { getSelf: async () => ({ id: EXTENSION_ID, version: "1.0.2", installType: "development" }) },
     alarms: { create: async () => {}, clear: async () => true, onAlarm: listener() },
     permissions: {

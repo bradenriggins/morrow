@@ -2,6 +2,9 @@ import { problemCode, problemText } from "../src/bridge-problem-copy.js";
 import { SETUP_CHECK_IDS, SETUP_MODE_KEY, setupGuideState, shouldRefreshForStorageChange } from "./onboarding-state.js";
 
 const guideMode = document.querySelector("#guide-mode");
+const consentAction = document.querySelector("#consent-action");
+const consentDetail = document.querySelector("#consent-detail");
+const setupContent = document.querySelector("#setup-content");
 const quickMode = document.querySelector("#quick-mode");
 const guidePanel = document.querySelector("#guide-panel");
 const quickPanel = document.querySelector("#quick-panel");
@@ -21,6 +24,7 @@ const error = document.querySelector("#error");
 const REFRESH_DELAY_MS = 250;
 let refreshTimer = null;
 let readGeneration = 0;
+let consentInFlight = false;
 
 // Every failure the service worker answers carries its own code, and this guide keeps that code as
 // the error it raises, so the page can name the state and the next action.
@@ -32,6 +36,12 @@ async function message(type, fields = {}) {
 
 // A null status means the status read failed. setupGuideState states that in every line it fills.
 function render(status) {
+  const consentRequired = status?.consentRequired === true;
+  consentAction.hidden = !consentRequired;
+  consentDetail.hidden = !consentRequired;
+  setupContent.hidden = consentRequired;
+  consentAction.disabled = consentInFlight;
+  if (consentRequired) return;
   const state = setupGuideState(status);
   statusDot.classList.toggle("ready", state.tone === "ready");
   statusDot.classList.toggle("waiting", state.tone === "waiting");
@@ -97,6 +107,21 @@ function scheduleRefresh() {
 
 guideMode.addEventListener("click", () => { void saveMode("guide"); });
 quickMode.addEventListener("click", () => { void saveMode("quick"); });
+consentAction.addEventListener("click", async () => {
+  if (consentInFlight) return;
+  consentInFlight = true;
+  consentAction.disabled = true;
+  try {
+    await message("morrow_course_data_consent_accept");
+    clearError();
+    await refresh();
+  } catch (cause) {
+    showError(cause);
+  } finally {
+    consentInFlight = false;
+    consentAction.disabled = false;
+  }
+});
 openSettings.addEventListener("click", () => { void chrome.runtime.openOptionsPage(); });
 quickOpenSettings.addEventListener("click", () => { void chrome.runtime.openOptionsPage(); });
 document.addEventListener("visibilitychange", () => { if (!document.hidden) scheduleRefresh(); });

@@ -169,6 +169,9 @@ function stubElement(text = "", hidden = false) {
 test("the popup answers a failed first status read with a retry, then clears it when the retry works", async () => {
   const nodes = {
     "#primary": stubElement("Connect Morrow"),
+    "#consent-action": stubElement("Agree and continue"),
+    "#consent-detail": stubElement("Select Agree and continue to accept this data use."),
+    "#connection-content": stubElement("", true),
     "#canvas-action": stubElement("Check or switch course", true),
     "#disconnect": stubElement("Disconnect Morrow", true),
     "#status-label": stubElement("Morrow"),

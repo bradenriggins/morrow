@@ -2,6 +2,9 @@ import { problemText } from "../src/bridge-problem-copy.js";
 import { canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, nextError, primaryLabel, runtimeNeedsReload, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
+const consentAction = document.querySelector("#consent-action");
+const consentDetail = document.querySelector("#consent-detail");
+const connectionContent = document.querySelector("#connection-content");
 const canvasAction = document.querySelector("#canvas-action");
 const disconnect = document.querySelector("#disconnect");
 const label = document.querySelector("#status-label");
@@ -39,6 +42,15 @@ function openCourseSelection() {
 
 function render(status) {
   current = status;
+  const consentRequired = status?.consentRequired === true;
+  consentAction.hidden = !consentRequired;
+  consentDetail.hidden = !consentRequired;
+  connectionContent.hidden = consentRequired;
+  consentAction.disabled = actionInFlight;
+  if (consentRequired) {
+    pulse.classList.remove("online");
+    return;
+  }
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const chooseCourses = canChooseCourses(status, binding, anchor);
@@ -78,6 +90,8 @@ function setLastChecked(lastSeenAt) {
 }
 
 function updateControls(status = current) {
+  consentAction.disabled = actionInFlight;
+  if (status?.consentRequired === true) return;
   const controls = controlState(status, { actionInFlight, detectedProvider });
   primary.disabled = controls.primaryDisabled;
   primary.setAttribute("aria-busy", String(controls.primaryBusy));
@@ -91,7 +105,7 @@ async function refresh() {
     const status = await message("morrow_status");
     if (generation !== readGeneration) return;
     detectedProvider = null;
-    if (status?.paired === true && status?.connected === true && !canChooseCourses(status)
+    if (status?.consentRequired !== true && status?.paired === true && status?.connected === true && !canChooseCourses(status)
       && currentBinding(status)?.runtimeVerified !== true) {
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       const result = await message("morrow_detect_course_platform", { tabId: tab?.id }).catch(() => null);
@@ -185,6 +199,22 @@ async function runAction(action, onSuccess = () => {}) {
 async function connectCanvasCourse() {
   return await authorizeActiveCanvasTab();
 }
+
+consentAction.addEventListener("click", async () => {
+  if (actionInFlight) return;
+  actionInFlight = true;
+  updateControls();
+  try {
+    await message("morrow_course_data_consent_accept");
+    reportSuccess("action");
+    await refresh();
+  } catch (cause) {
+    reportError("action", cause);
+  } finally {
+    actionInFlight = false;
+    updateControls();
+  }
+});
 
 primary.addEventListener("click", async () => {
   if (!current) {

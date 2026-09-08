@@ -298,6 +298,9 @@ function stubElement(text = "", hidden = false) {
 test("the setup guide answers a failed status read with an unknown checklist, then clears it", async () => {
   const nodes = {
     "#guide-mode": stubElement("Guide me"),
+    "#consent-action": stubElement("Agree and continue"),
+    "#consent-detail": stubElement("Select Agree and continue to accept this data use."),
+    "#setup-content": stubElement("", true),
     "#quick-mode": stubElement("Setup overview"),
     "#guide-panel": stubElement(),
     "#quick-panel": stubElement("", true),
