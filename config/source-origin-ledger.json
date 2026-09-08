@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "546e3fa911c776243003e36cc8a24f3d2d7c3fd6",
+  "candidateCommit": "0ef999184a6750980c1418ae979c491dfed44921",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -7596,14 +7596,14 @@
     },
     {
       "path": "scripts/test/website-content.test.mjs",
-      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "sourceCommit": "0ef999184a6750980c1418ae979c491dfed44921",
       "originalPath": "scripts/test/website-content.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "43125cae866c071c709aeb583b52abf1f179791841d0f3fec60891d94604feeb",
-      "afterDigest": "5569f7986136123f0078514d85caf0ab2b7b046945603113e87b3fc46d236b7f"
+      "beforeDigest": "5569f7986136123f0078514d85caf0ab2b7b046945603113e87b3fc46d236b7f",
+      "afterDigest": "ec91cb0810a77fd3aa9bcaca6821ef5f464a38ef14c4eb68087f8779cd42af19"
     },
     {
       "path": "scripts/test/zero-tolerance-receipt.test.mjs",
