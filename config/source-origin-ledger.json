@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "15947e50ae2c6dacea61ceaace83a6f2d9398388",
+  "candidateCommit": "d2cf847934fa69e5db45e609189facaafb0b1da8",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -38,14 +38,14 @@
     },
     {
       "path": ".github/workflows/desktop-release.yml",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "00af05148dc32355314acc12f775bdf66177cf55",
       "originalPath": ".github/workflows/desktop-release.yml",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "93cd4eff9c9ed6ffdfb559c9aac73b06311dd13dfd3a6768cf5c4ba1df981462"
+      "beforeDigest": "93cd4eff9c9ed6ffdfb559c9aac73b06311dd13dfd3a6768cf5c4ba1df981462",
+      "afterDigest": "a1d7c7cd8f5d1cc7e705542c603d78be634a320a16c54a74c37be1b7e60c7c8a"
     },
     {
       "path": ".github/workflows/windows-chatgpt-inventory.yml",
@@ -1864,14 +1864,14 @@
     },
     {
       "path": "installer/renderer/renderer.js",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "00af05148dc32355314acc12f775bdf66177cf55",
       "originalPath": "installer/renderer/renderer.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "a8675dcf7b88d3e5d0268681af47e0b275b2e174184ff33f436e7265f76a5a11",
-      "afterDigest": "d0c443d19a5b706a2b97277a9955f8dcf90318693f9299cc7d78ae1a0de1672b"
+      "beforeDigest": "d0c443d19a5b706a2b97277a9955f8dcf90318693f9299cc7d78ae1a0de1672b",
+      "afterDigest": "63c94e5ced0aaea48f6f2130bdf353e42c29a7d4ee09b6b64fb4f63f48b6cec3"
     },
     {
       "path": "installer/renderer/styles.css",
@@ -1930,14 +1930,14 @@
     },
     {
       "path": "installer/shared/claude-desktop.cjs",
-      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "sourceCommit": "00af05148dc32355314acc12f775bdf66177cf55",
       "originalPath": "installer/shared/claude-desktop.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "24474168467e7fc91d68b9bd3a0bf7b4e1d0bd152dbee8726182238d7b138bbd",
-      "afterDigest": "dba03d8d678f623d40f093b597560ac31120cae78b2c1e2ccd81ad8902393d8f"
+      "beforeDigest": "dba03d8d678f623d40f093b597560ac31120cae78b2c1e2ccd81ad8902393d8f",
+      "afterDigest": "4c63b50ef482c0b5c885da89235f4281515da79517fa5eb0f3a001ddfb6866e3"
     },
     {
       "path": "installer/shared/contract.cjs",
@@ -2084,14 +2084,14 @@
     },
     {
       "path": "installer/test/blackboard.test.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "00af05148dc32355314acc12f775bdf66177cf55",
       "originalPath": "installer/test/blackboard.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "9f5cf6e3dbdf812f626305f8120b816378c5d0fe4f73042e3e0f96da90624263"
+      "beforeDigest": "9f5cf6e3dbdf812f626305f8120b816378c5d0fe4f73042e3e0f96da90624263",
+      "afterDigest": "08cedda37582d9b04382ed8cd3c366f9f9a401b0a2e275edd29ef422354c7164"
     },
     {
       "path": "installer/test/bridge-coordination.test.cjs",
@@ -2117,25 +2117,25 @@
     },
     {
       "path": "installer/test/claude-desktop.test.cjs",
-      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "sourceCommit": "00af05148dc32355314acc12f775bdf66177cf55",
       "originalPath": "installer/test/claude-desktop.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "0a6c674146fe484f6da0edcda13b3311f5d8d8c21dd54331e2a14ddacf5f2665",
-      "afterDigest": "d00c2b2a94ee3883151871ad62c0ccbfcfc9373f10f90de5c31cdba4dc1cb9df"
+      "beforeDigest": "d00c2b2a94ee3883151871ad62c0ccbfcfc9373f10f90de5c31cdba4dc1cb9df",
+      "afterDigest": "c95e61b5b725df04a27298184f1293d084226b743e5a7f946c0cfacd0812ba26"
     },
     {
       "path": "installer/test/contract.test.cjs",
-      "sourceCommit": "ee9e76ccc840513fbb4a795a7df799bd1b5a5e5a",
+      "sourceCommit": "00af05148dc32355314acc12f775bdf66177cf55",
       "originalPath": "installer/test/contract.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "76423d35768c51953381ca9bf26618ba142682dcaf405b0433190c7c5270f1b2",
-      "afterDigest": "a86e2b4bc6af9e55070f021b7bee654286e48f175a492de96a4d0643b625c1c6"
+      "beforeDigest": "a86e2b4bc6af9e55070f021b7bee654286e48f175a492de96a4d0643b625c1c6",
+      "afterDigest": "d50f4a00cc0cbc06c19ac2976ae1082cfb79637d37a9cfb6f581aaae2935e1ed"
     },
     {
       "path": "installer/test/electron-builder-config.test.cjs",
@@ -2194,14 +2194,14 @@
     },
     {
       "path": "installer/test/renderer.test.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "00af05148dc32355314acc12f775bdf66177cf55",
       "originalPath": "installer/test/renderer.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "1f1e9467653c421391811ff83eaf8a41cb3a652dabd8bf0dd7b3e605bd5b4231"
+      "beforeDigest": "1f1e9467653c421391811ff83eaf8a41cb3a652dabd8bf0dd7b3e605bd5b4231",
+      "afterDigest": "6475f57b4f8ac79856007fcf0711a4591c61159e26977adab13b414a98ce22cf"
     },
     {
       "path": "installer/test/require-dependencies.cjs",
@@ -6930,14 +6930,14 @@
     },
     {
       "path": "scripts/test/desktop-release-workflow.test.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "00af05148dc32355314acc12f775bdf66177cf55",
       "originalPath": "scripts/test/desktop-release-workflow.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "5067eb714cac1fc6a5ece619205289a4c71e5c5234a54abea38a8de777ff5138"
+      "beforeDigest": "5067eb714cac1fc6a5ece619205289a4c71e5c5234a54abea38a8de777ff5138",
+      "afterDigest": "d5c392c766839988a1de6950c65079513f059a55301d3642554737ecdeb565a1"
     },
     {
       "path": "scripts/test/desktop-update-harness.test.mjs",
@@ -7667,14 +7667,14 @@
     },
     {
       "path": "scripts/test/website-content.test.mjs",
-      "sourceCommit": "15947e50ae2c6dacea61ceaace83a6f2d9398388",
+      "sourceCommit": "d2cf847934fa69e5db45e609189facaafb0b1da8",
       "originalPath": "scripts/test/website-content.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c5d76e2ac2e1c0951c395401c0158fff09fd7ad4641feb289741f9c7f0d7086a",
-      "afterDigest": "d3e400b673fa967abcdde54273e7208ca18c0c9ef36d24b6e44b4b03b530cc14"
+      "beforeDigest": "153b2917002e963b017440b4197d3cffa9e39c89aaf58c68b09018963ba36edb",
+      "afterDigest": "02ea3d33ecc299bdca2d9e61ef3ec7a71b90e0dbfce47a961ccf4c02db96c042"
     },
     {
       "path": "scripts/test/zero-tolerance-receipt.test.mjs",
