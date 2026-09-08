@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "01a6d8c83b7545f3d1080de5914b21353429dfc3",
+  "candidateCommit": "0927afa02e35094544e97b7912dc553b2d25dac8",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -236,14 +236,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "60089e77d52b2acfe280c38f227d032ae903e544",
+      "sourceCommit": "0927afa02e35094544e97b7912dc553b2d25dac8",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "12cb505324323969f9bb3dd454e2a27df027e75e779c2de692ca7ff488b18980",
-      "afterDigest": "9484034c739fb28bac5ea1946dfc64519ff6492c6ece8f6caee883a05b1f5cca"
+      "beforeDigest": "9484034c739fb28bac5ea1946dfc64519ff6492c6ece8f6caee883a05b1f5cca",
+      "afterDigest": "a6c522861b079e992337dc828d7a707d0ad5658f042f2d9c982dfe18780eb2ac"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -3203,16 +3203,17 @@
     },
     {
       "path": "packages/bridge-loopback/src/brand.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "1b8de6a42e472c964522986fcb332744e41b6081",
       "originalPath": "packages/bridge-loopback/src/brand.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [
+        "packages/bridge-loopback/test/brand.test.ts",
         "packages/bridge-loopback/test/server.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "bd00b84a60bdaed427491000510469dd8817f2b5699415f4e455ad2fd87d6f33",
-      "afterDigest": "c09d88186b91fb1723e247d374ba4ebf5484717b3a3b538e1b9f143dc5c41f6d"
+      "beforeDigest": "c09d88186b91fb1723e247d374ba4ebf5484717b3a3b538e1b9f143dc5c41f6d",
+      "afterDigest": "ae847e3ab34d31f9d34380cceeded10b70b3547632d070c0c864188bb6a1cad0"
     },
     {
       "path": "packages/bridge-loopback/src/index.ts",
@@ -3221,11 +3222,23 @@
       "ownership": "new",
       "dependencies": [],
       "testMapping": [
+        "packages/bridge-loopback/test/brand.test.ts",
         "packages/bridge-loopback/test/server.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "c83c82adb28bbf3a73f26869225c99102b5a6156d19e6faa7e2f47503dda3410",
       "afterDigest": "792ed2f8b0c7ab252e7b2ee3ef643554cdb41eefd893c5d05d1e32055beedc24"
+    },
+    {
+      "path": "packages/bridge-loopback/test/brand.test.ts",
+      "sourceCommit": "1b8de6a42e472c964522986fcb332744e41b6081",
+      "originalPath": "packages/bridge-loopback/test/brand.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "0755a3e48df002e13d93bf50c5f8e00a83628b7965ec9bf2e5f6c8d8363289b9"
     },
     {
       "path": "packages/bridge-loopback/test/server.test.ts",
