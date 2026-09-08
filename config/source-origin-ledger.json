@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "ee9e76ccc840513fbb4a795a7df799bd1b5a5e5a",
+  "candidateCommit": "6beda75798a7e0ea43cbf95fa384867feccc17ea",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -236,14 +236,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "546e3fa911c776243003e36cc8a24f3d2d7c3fd6",
+      "sourceCommit": "6beda75798a7e0ea43cbf95fa384867feccc17ea",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f9a128529307c5a6e49789aeec7fbadadc5d458d981b3978541493f9e4e2f4bc",
-      "afterDigest": "192c02f8602722fa153e91f92b3c912e6c0147fa0648669d5f8f3c5a07f7183f"
+      "beforeDigest": "192c02f8602722fa153e91f92b3c912e6c0147fa0648669d5f8f3c5a07f7183f",
+      "afterDigest": "b246244cca7bbc2b2d5cd1f8ad0a558a692ff3d76d3ca01f7296f3ea6bc031d1"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -1941,14 +1941,14 @@
     },
     {
       "path": "installer/shared/contract.cjs",
-      "sourceCommit": "1fd5cd230e40acac98e9e67ef014cfcd8620220a",
+      "sourceCommit": "81eff87bccb98fecfc4203b239826f30d38e35b4",
       "originalPath": "installer/shared/contract.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "87b166fd7d084af864554b829adc2ebb8243226681ea7a3786fc034ce4b80b29",
-      "afterDigest": "6df0fe3b7bb1fbefb096cea42b9ef715aeac22da44f4b19a52de29a5fc06b2c2"
+      "beforeDigest": "6df0fe3b7bb1fbefb096cea42b9ef715aeac22da44f4b19a52de29a5fc06b2c2",
+      "afterDigest": "a44afa280e818de0876ab480af97cdb7d20cb4907f1650ef9adecd3033486a18"
     },
     {
       "path": "installer/shared/electron-updater-adapter.cjs",
@@ -1963,14 +1963,14 @@
     },
     {
       "path": "installer/shared/installer-controller.cjs",
-      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "sourceCommit": "81eff87bccb98fecfc4203b239826f30d38e35b4",
       "originalPath": "installer/shared/installer-controller.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "64912e12c7f68f0d8fc2d967d6ff4c92288373791f591e70396620196de65924",
-      "afterDigest": "b295b59d09e2527704d52a0630719bf817f9341b1088edf5dec0f5499696f91e"
+      "beforeDigest": "b295b59d09e2527704d52a0630719bf817f9341b1088edf5dec0f5499696f91e",
+      "afterDigest": "b8b4fccc8817149ed17ff807fc4e5aa862046d50d697cb931d7247b12c264fc7"
     },
     {
       "path": "installer/shared/runtime-monitor.mjs",
@@ -2161,14 +2161,14 @@
     },
     {
       "path": "installer/test/installer-controller.test.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "81eff87bccb98fecfc4203b239826f30d38e35b4",
       "originalPath": "installer/test/installer-controller.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "d0f58cdbcfd8a4a316ff8589d9dc1b367db4fedc65ee1e232f70c4db844b9d6a"
+      "beforeDigest": "d0f58cdbcfd8a4a316ff8589d9dc1b367db4fedc65ee1e232f70c4db844b9d6a",
+      "afterDigest": "f1e5b9cd4eb037f928e382955f675ad0314f3b0cf23b7dfcbfac16ada92dae08"
     },
     {
       "path": "installer/test/main-lifecycle.test.cjs",
@@ -3529,7 +3529,7 @@
     },
     {
       "path": "packages/client-config/src/cli.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "81eff87bccb98fecfc4203b239826f30d38e35b4",
       "originalPath": "packages/client-config/src/cli.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3537,12 +3537,12 @@
         "packages/client-config/test/client-config.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b04da01b0417feb1fde0b306ff1c9953bafee6b18527e4d76d7c9c8d8d8ac419",
-      "afterDigest": "79adc64201295fea9768cf1fb52b2502a130d93a6321402cfc88f52783d0d86e"
+      "beforeDigest": "79adc64201295fea9768cf1fb52b2502a130d93a6321402cfc88f52783d0d86e",
+      "afterDigest": "2f9819fcba790af57b517b559f2821e5b84032155bc8afc4165c5e72778e21b4"
     },
     {
       "path": "packages/client-config/src/index.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "81eff87bccb98fecfc4203b239826f30d38e35b4",
       "originalPath": "packages/client-config/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3550,19 +3550,19 @@
         "packages/client-config/test/client-config.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "187445104cb56ab46b1de23e99e0e3e229ad80cb559a5f0b03a2db2fa4715c61",
-      "afterDigest": "a6a49d97172a3b939474efafc9c8369e314187024a2fec5dce481260c069ccd9"
+      "beforeDigest": "a6a49d97172a3b939474efafc9c8369e314187024a2fec5dce481260c069ccd9",
+      "afterDigest": "1d24d7c3cd7480a238ea02c9740b5fe0115e6f993a148c1cf68fe4e030a04b26"
     },
     {
       "path": "packages/client-config/test/client-config.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "81eff87bccb98fecfc4203b239826f30d38e35b4",
       "originalPath": "packages/client-config/test/client-config.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c95b7272d28466abf3268437c956ad51800023509b86c5f60bf25527af8eec8c",
-      "afterDigest": "1eddf7f4048ee390635b4f4c5e54d8c7a51d3f8ea6029ba13ccf44be8932b821"
+      "beforeDigest": "1eddf7f4048ee390635b4f4c5e54d8c7a51d3f8ea6029ba13ccf44be8932b821",
+      "afterDigest": "4bee68bf03e69e43b7b2953ce45267d5949deac6e41b64767add8e458205ef81"
     },
     {
       "path": "packages/client-config/tsconfig.json",
