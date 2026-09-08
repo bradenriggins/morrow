@@ -583,10 +583,14 @@ async function startMorrow() {
     trusted(event);
     try {
       noInput(input);
+    } catch (error) {
+      return failed(error);
+    }
+    try {
       await installer.reconcileBridgeRelease();
       return respond();
     } catch (error) {
-      return failed(error?.code ? error : errorDetails("bridge_check_failed"));
+      return failed(error?.code === "runtime_repair_required" ? error : errorDetails("bridge_check_failed"));
     }
   });
   ipcMain.handle("installer:check-for-updates", async (event, ...input) => {
