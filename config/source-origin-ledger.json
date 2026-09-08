@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+  "candidateCommit": "546e3fa911c776243003e36cc8a24f3d2d7c3fd6",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -104,25 +104,25 @@
     },
     {
       "path": "LIMITATIONS.md",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "LIMITATIONS.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "caae8b3622f6d2a22884a11bed415f46cb23c33fc48db4975e6ce011d10706cc",
-      "afterDigest": "5dbf0c0de9b73ad218b68fd241b93ac61fead7cefda462667802b9d734e6f106"
+      "beforeDigest": "5dbf0c0de9b73ad218b68fd241b93ac61fead7cefda462667802b9d734e6f106",
+      "afterDigest": "0374ef8f27e334d8f319a3e12662bbe2b185ce20ffdca92c895548d3360daca6"
     },
     {
       "path": "README.md",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "898f33f14a5e477bf7349f2c8f10eb91233cc331724927f255e5025bda6e66d3",
-      "afterDigest": "f7343c4cdec1b1570e229c105eb52c4dd45a94a55a5f2797720e3f4422185040"
+      "beforeDigest": "f7343c4cdec1b1570e229c105eb52c4dd45a94a55a5f2797720e3f4422185040",
+      "afterDigest": "212f22980843f1feacd7d8e1adaa766571a195da74c588db312d0f4f66bcab3f"
     },
     {
       "path": "SOURCE-ORIGIN.md",
@@ -148,36 +148,36 @@
     },
     {
       "path": "artifacts/blackboard/blackboard-rest-catalog.json",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "artifacts/blackboard/blackboard-rest-catalog.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "6d06e7c9efdc029730fb2342545207e809491c572f1bc50cff2f1b43ed0858a1"
+      "beforeDigest": "6d06e7c9efdc029730fb2342545207e809491c572f1bc50cff2f1b43ed0858a1",
+      "afterDigest": "4f492496b28da3b6668cdc874cdbd9c66d3594ec9dbdae19bb544a44633fc0f7"
     },
     {
       "path": "artifacts/canvas-api/canvas-admission-report.json",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "artifacts/canvas-api/canvas-admission-report.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "7b195442d3f7353888082a04c610561db7d00ee883b840f1e057365caafcd67e"
+      "beforeDigest": "7b195442d3f7353888082a04c610561db7d00ee883b840f1e057365caafcd67e",
+      "afterDigest": "f2b110f246215532b64ec23fa3fe5a770fb8e414ca11618193b4a2a7a4da9264"
     },
     {
       "path": "artifacts/canvas-api/canvas-api-catalog.json",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "artifacts/canvas-api/canvas-api-catalog.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "021d3d2bad0b587f2985dc241a44e7444ba2a6d2af461c1ef30f5242aec340d9",
-      "afterDigest": "201e996613b22d40b3b442a98a2db2ab23bfc77a9911cf45c9d1605374215c86"
+      "beforeDigest": "201e996613b22d40b3b442a98a2db2ab23bfc77a9911cf45c9d1605374215c86",
+      "afterDigest": "753324b85bf7e51022bda9e1c39ef045c5307226848cfea76a15acb9721da7d2"
     },
     {
       "path": "artifacts/catalogs/.gitkeep",
@@ -236,14 +236,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "546e3fa911c776243003e36cc8a24f3d2d7c3fd6",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "bfae41f07cb6e852ca701bf95328acc5a786aa05fb4bd25ebee511bcf839b68d",
-      "afterDigest": "f9a128529307c5a6e49789aeec7fbadadc5d458d981b3978541493f9e4e2f4bc"
+      "beforeDigest": "f9a128529307c5a6e49789aeec7fbadadc5d458d981b3978541493f9e4e2f4bc",
+      "afterDigest": "192c02f8602722fa153e91f92b3c912e6c0147fa0648669d5f8f3c5a07f7183f"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -313,14 +313,14 @@
     },
     {
       "path": "connector/extension/generated/canvas-api-catalog.json",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/generated/canvas-api-catalog.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "021d3d2bad0b587f2985dc241a44e7444ba2a6d2af461c1ef30f5242aec340d9",
-      "afterDigest": "201e996613b22d40b3b442a98a2db2ab23bfc77a9911cf45c9d1605374215c86"
+      "beforeDigest": "201e996613b22d40b3b442a98a2db2ab23bfc77a9911cf45c9d1605374215c86",
+      "afterDigest": "753324b85bf7e51022bda9e1c39ef045c5307226848cfea76a15acb9721da7d2"
     },
     {
       "path": "connector/extension/generated/canvas-browser-catalog.json",
@@ -368,14 +368,14 @@
     },
     {
       "path": "connector/extension/generated/moodle-browser-catalog.json",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/generated/moodle-browser-catalog.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c1aed11524accf2618a0ac9446ab6b2bc6ed965a8a94ddd7c0a0b07a6f224586",
-      "afterDigest": "cdac65c88b29b09699bcce18f5b89af8a7950fc6be4a5172dd5f4e0a71167d24"
+      "beforeDigest": "cdac65c88b29b09699bcce18f5b89af8a7950fc6be4a5172dd5f4e0a71167d24",
+      "afterDigest": "d17620f0c9f6f2aa4a2d0e6ce26235bc647d5ed18c7f68d36c5736597564c28b"
     },
     {
       "path": "connector/extension/manifest.json",
@@ -599,14 +599,14 @@
     },
     {
       "path": "connector/extension/src/canvas-content.js",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/src/canvas-content.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "76ac84094447b2d128d6eedf44ab140fa5e2cc758696f283dbe56c6093ade362",
-      "afterDigest": "3cde54de91d4c4fe695ada383e1999eb64c0cc39edd10e01ce20ae0443f83522"
+      "beforeDigest": "3cde54de91d4c4fe695ada383e1999eb64c0cc39edd10e01ce20ae0443f83522",
+      "afterDigest": "2264f3ce5d0e597c38a575ea7c7dbfdf28bcb6f11bd348f98c18ce28dcd21fbf"
     },
     {
       "path": "connector/extension/src/canvas-conversations.js",
@@ -709,14 +709,14 @@
     },
     {
       "path": "connector/extension/src/item-bank-executor.js",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/src/item-bank-executor.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "33dd003b84ae6b228b97ac9c4a1efa2702ff03d612fe70c50c64c5338880ad61",
-      "afterDigest": "f27d851ed7082de913bb6fc4f329ffcc58f401a90a92a215f307eb18c54e7fea"
+      "beforeDigest": "f27d851ed7082de913bb6fc4f329ffcc58f401a90a92a215f307eb18c54e7fea",
+      "afterDigest": "c725c4dcd7a75581fb56a8b9b3ffb8afa2d030803fb6aba702a8bfed5717b46e"
     },
     {
       "path": "connector/extension/src/item-bank-fan-out.js",
@@ -808,14 +808,14 @@
     },
     {
       "path": "connector/extension/src/moodle-bbb-executor.js",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/src/moodle-bbb-executor.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "a05fedbd90bbd573d2e15a1d22146717aaf102f05e417b444369a1608b970962"
+      "beforeDigest": "a05fedbd90bbd573d2e15a1d22146717aaf102f05e417b444369a1608b970962",
+      "afterDigest": "79219dd84a0db3eb75ddd235ae7def2c2bacff3270f814d4848ec11a65d25280"
     },
     {
       "path": "connector/extension/src/moodle-calendar-executor.js",
@@ -962,14 +962,14 @@
     },
     {
       "path": "connector/extension/src/moodle-h5p-executor.js",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/src/moodle-h5p-executor.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "deab6d592d367679e5bda76ebfdae5e9e834e2c19e8d6b8096eb2334e792b69e"
+      "beforeDigest": "deab6d592d367679e5bda76ebfdae5e9e834e2c19e8d6b8096eb2334e792b69e",
+      "afterDigest": "6f68a5196d9cdfa868f757de8b31bcc21701c196600b99ad9e0e544b4a2ee7e0"
     },
     {
       "path": "connector/extension/src/moodle-learner-submission-read.js",
@@ -1050,14 +1050,14 @@
     },
     {
       "path": "connector/extension/src/moodle-qbank-question-executor.js",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/src/moodle-qbank-question-executor.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "8dae5d148b06265e7c879740e81638cf967dc729c2f58adb0f2fbcadb61f46b2"
+      "beforeDigest": "8dae5d148b06265e7c879740e81638cf967dc729c2f58adb0f2fbcadb61f46b2",
+      "afterDigest": "6ba03fe3d51600ad5f0f029516ce482408ef6a71fb56b64fa754c9ea72a2494c"
     },
     {
       "path": "connector/extension/src/moodle-question-impact-read.js",
@@ -1215,25 +1215,25 @@
     },
     {
       "path": "connector/extension/src/quiz-item-payload.js",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/src/quiz-item-payload.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2aed443c38e91f784325686d7bfbea52318db15ea01b1e526a7bafb488ef923d",
-      "afterDigest": "6af60bb2a10b546f514b32742caad8baf7c74f197de9bdc43da334b5cbcbf3f4"
+      "beforeDigest": "6af60bb2a10b546f514b32742caad8baf7c74f197de9bdc43da334b5cbcbf3f4",
+      "afterDigest": "8234d811a03a42a14f1c804e757ad42f0ce5d428cde0f32c12a9a22e9b81b3c9"
     },
     {
       "path": "connector/extension/src/service-worker.js",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "connector/extension/src/service-worker.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "efd23b3ea94c71d10768d20c13ed3f07f8637dbd6f0b2440640fe1c3e940e60a",
-      "afterDigest": "f41a59251896ed7a6c0f3581edb3a4d0ff92d8425029cf600e2e6debcf43f02f"
+      "beforeDigest": "f41a59251896ed7a6c0f3581edb3a4d0ff92d8425029cf600e2e6debcf43f02f",
+      "afterDigest": "88d1520f64da6d4483184595f09c6c5a2b974445fd451e66d499022faabc591c"
     },
     {
       "path": "connector/extension/src/verification.js",
@@ -1292,14 +1292,14 @@
     },
     {
       "path": "docs/implementation/BLACKBOARD-REST-SCOPE.md",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "docs/implementation/BLACKBOARD-REST-SCOPE.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "80de20e43ce3b497331ef81291141fd2ebd5050a5f07847430cadc1150d475b3"
+      "beforeDigest": "80de20e43ce3b497331ef81291141fd2ebd5050a5f07847430cadc1150d475b3",
+      "afterDigest": "3afa0d5567a81017cc0b64dd88be6a2ac5953685ae82fb8e766b1803792faf6a"
     },
     {
       "path": "docs/implementation/BROWSER-POST-TRANSPORT-LIMIT.md",
@@ -1413,14 +1413,14 @@
     },
     {
       "path": "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "docs/implementation/FIRST-RUN-STATE-INVENTORY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cfc097a92ee7bdad25b00d34ca8577d5ac91915ddc4603faf916b8bcec4e7a0a",
-      "afterDigest": "ec0e6c5793db12184dd88a6884f9c158af2fe4b55e22ea64e7915b6dc3175fcb"
+      "beforeDigest": "ec0e6c5793db12184dd88a6884f9c158af2fe4b55e22ea64e7915b6dc3175fcb",
+      "afterDigest": "f3493decdfd8757b58c099332d9f7fe90248ec2176bc04737dfc4adec05b6d61"
     },
     {
       "path": "docs/implementation/ITEM-BANK-LIVE-PROOF-PLAN.md",
@@ -1457,25 +1457,25 @@
     },
     {
       "path": "docs/implementation/MOODLE-FULL-FUNCTIONALITY.md",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "docs/implementation/MOODLE-FULL-FUNCTIONALITY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "960e082d2b73f88366f496b5caff9adb69929d1557002e38bf6576d076b56fcd",
-      "afterDigest": "fff8917bfd2c0dd5edb371be4872d284ba1aeb74fd628969b99f87f3a08d419e"
+      "beforeDigest": "fff8917bfd2c0dd5edb371be4872d284ba1aeb74fd628969b99f87f3a08d419e",
+      "afterDigest": "81c9fa29cc88d2cb91335a7ebdf030811e6e5934c444fef1e2afed4b67ac3c6c"
     },
     {
       "path": "docs/implementation/MOODLE-LIVE-PROOF-CHECKLIST.md",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "docs/implementation/MOODLE-LIVE-PROOF-CHECKLIST.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "ce3f0f98d90bdf7815aa1abc3074344afe41aa8d79bfca26daae1feaf8c87694"
+      "beforeDigest": "ce3f0f98d90bdf7815aa1abc3074344afe41aa8d79bfca26daae1feaf8c87694",
+      "afterDigest": "8580b88b2a59e77516878757ea1085ea9034ed70b7aeb6c56f6d9e83bab79e3b"
     },
     {
       "path": "docs/implementation/MORROW-1.0-COMPLETION-GOAL.md",
@@ -1589,14 +1589,14 @@
     },
     {
       "path": "docs/implementation/THREE-LMS-BRIDGE-PARITY.md",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "docs/implementation/THREE-LMS-BRIDGE-PARITY.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "6060c77dfda4bc46f5f5714c43c8f4d9a951454df480273d3cf770297bbb445c",
-      "afterDigest": "5df6effc7d27d45df36551456667822d31e58142f823f0da2bf4fe79ad87457a"
+      "beforeDigest": "5df6effc7d27d45df36551456667822d31e58142f823f0da2bf4fe79ad87457a",
+      "afterDigest": "d5d097aab30369df65aa15c987bcce8bf59e559dd7cee0b45e722837f56f99b6"
     },
     {
       "path": "docs/implementation/EXAMPLE-WORKTREE.md",
@@ -1809,14 +1809,14 @@
     },
     {
       "path": "installer/main.cjs",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "installer/main.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "a0e024ab643fc97e40f991302157f19d8101c0b851068fe672952208bb7a6965",
-      "afterDigest": "0c13a48626e19b42f5e470d1d3d47464d7ec880b77d1641e6b92ffb36ec9be50"
+      "beforeDigest": "0c13a48626e19b42f5e470d1d3d47464d7ec880b77d1641e6b92ffb36ec9be50",
+      "afterDigest": "41b698d942f29b7b5b82fe5ed16c501568eb79dafb913817b7730295be74f7eb"
     },
     {
       "path": "installer/package.json",
@@ -1930,25 +1930,25 @@
     },
     {
       "path": "installer/shared/claude-desktop.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "installer/shared/claude-desktop.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "24474168467e7fc91d68b9bd3a0bf7b4e1d0bd152dbee8726182238d7b138bbd"
+      "beforeDigest": "24474168467e7fc91d68b9bd3a0bf7b4e1d0bd152dbee8726182238d7b138bbd",
+      "afterDigest": "dba03d8d678f623d40f093b597560ac31120cae78b2c1e2ccd81ad8902393d8f"
     },
     {
       "path": "installer/shared/contract.cjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "installer/shared/contract.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "beb4b76e05002c894cd51d62e3eff98b87c4441cad39e8d4f7c2a0a0e60946e4"
+      "beforeDigest": "beb4b76e05002c894cd51d62e3eff98b87c4441cad39e8d4f7c2a0a0e60946e4",
+      "afterDigest": "87b166fd7d084af864554b829adc2ebb8243226681ea7a3786fc034ce4b80b29"
     },
     {
       "path": "installer/shared/electron-updater-adapter.cjs",
@@ -1963,14 +1963,14 @@
     },
     {
       "path": "installer/shared/installer-controller.cjs",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "installer/shared/installer-controller.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "3e82a21a753f2b60d820646b07f263a6190bb1c69e73880e7c182971fb966910",
-      "afterDigest": "64912e12c7f68f0d8fc2d967d6ff4c92288373791f591e70396620196de65924"
+      "beforeDigest": "64912e12c7f68f0d8fc2d967d6ff4c92288373791f591e70396620196de65924",
+      "afterDigest": "b295b59d09e2527704d52a0630719bf817f9341b1088edf5dec0f5499696f91e"
     },
     {
       "path": "installer/shared/runtime-monitor.mjs",
@@ -2117,25 +2117,25 @@
     },
     {
       "path": "installer/test/claude-desktop.test.cjs",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "installer/test/claude-desktop.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "3907ab400e028dec1f3d6ee447b53a89adffcdecadb29aeb8db9cf7bb9651f41",
-      "afterDigest": "0a6c674146fe484f6da0edcda13b3311f5d8d8c21dd54331e2a14ddacf5f2665"
+      "beforeDigest": "0a6c674146fe484f6da0edcda13b3311f5d8d8c21dd54331e2a14ddacf5f2665",
+      "afterDigest": "d00c2b2a94ee3883151871ad62c0ccbfcfc9373f10f90de5c31cdba4dc1cb9df"
     },
     {
       "path": "installer/test/contract.test.cjs",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "installer/test/contract.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "75de226360b38c0cf493fbdbad872884d11edc06412e29fff9d83edf31977761",
-      "afterDigest": "f49f0b88c3042d43b87d4e389e481cff251cfccdbec537cbc01c83abbdffba33"
+      "beforeDigest": "f49f0b88c3042d43b87d4e389e481cff251cfccdbec537cbc01c83abbdffba33",
+      "afterDigest": "ea14a5ef031ae63ff2253501b2e9432466854c5bd14f148de9acfd5edd981e23"
     },
     {
       "path": "installer/test/electron-builder-config.test.cjs",
@@ -2647,7 +2647,7 @@
     },
     {
       "path": "packages/blackboard-learn-api/src/client.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/blackboard-learn-api/src/client.ts",
       "ownership": "new",
       "dependencies": [],
@@ -2656,8 +2656,8 @@
         "packages/blackboard-learn-api/test/blackboard-assignments.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "01ee7e98d96eee3a90a880845bfc03330bf692040cacb5c8497af2e577c9253c"
+      "beforeDigest": "01ee7e98d96eee3a90a880845bfc03330bf692040cacb5c8497af2e577c9253c",
+      "afterDigest": "96c480b857ec6904a6e990dca731b69f8243efdcb1adc0214477e4d6023cc803"
     },
     {
       "path": "packages/blackboard-learn-api/src/config.ts",
@@ -2787,7 +2787,7 @@
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/course-lifecycle.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/blackboard-learn-api/src/operations/course-lifecycle.ts",
       "ownership": "new",
       "dependencies": [],
@@ -2796,8 +2796,8 @@
         "packages/blackboard-learn-api/test/blackboard-assignments.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "2012b8c081447c5a4881bf8ab6c42ff06f64c5a685111692e2b0191826b648eb"
+      "beforeDigest": "2012b8c081447c5a4881bf8ab6c42ff06f64c5a685111692e2b0191826b648eb",
+      "afterDigest": "35603e553c9a37cd8e6914080a2d8f45ac3e6eae4e502fe6a529061b36fa6810"
     },
     {
       "path": "packages/blackboard-learn-api/src/operations/course-read.ts",
@@ -2955,7 +2955,7 @@
     },
     {
       "path": "packages/blackboard-learn-api/src/server.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/blackboard-learn-api/src/server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -2964,8 +2964,8 @@
         "packages/blackboard-learn-api/test/blackboard-assignments.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "58d6fe7ddf268025cd4f06cad6bce810a66e6f26e68bf70334de2594f749b237"
+      "beforeDigest": "58d6fe7ddf268025cd4f06cad6bce810a66e6f26e68bf70334de2594f749b237",
+      "afterDigest": "eedae6386795984e52ddff54f9265049dfaf53ad4d1a4eb5b96a2d7bf017e61e"
     },
     {
       "path": "packages/blackboard-learn-api/src/types.ts",
@@ -3016,14 +3016,14 @@
     },
     {
       "path": "packages/blackboard-learn-api/test/blackboard-course-lifecycle.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/blackboard-learn-api/test/blackboard-course-lifecycle.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "c6add1c4ff78e22cef934c3526fad180353cf35014ca3bf66593e79f56743698"
+      "beforeDigest": "c6add1c4ff78e22cef934c3526fad180353cf35014ca3bf66593e79f56743698",
+      "afterDigest": "55f229e9126db8fd986d143899b8bfedb49ca3c63f998bc208d6efd500c50f26"
     },
     {
       "path": "packages/blackboard-learn-api/test/blackboard-dispatch-state.test.ts",
@@ -3148,14 +3148,14 @@
     },
     {
       "path": "packages/blackboard-learn-api/test/blackboard-registry.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/blackboard-learn-api/test/blackboard-registry.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "a50598659b60c00fa238a70bb872a9b50b548313e5067be4306002a0e54c7855"
+      "beforeDigest": "a50598659b60c00fa238a70bb872a9b50b548313e5067be4306002a0e54c7855",
+      "afterDigest": "acd36aaf7985a531e58645c893f07bff1525cfd6a921d7f8ce355093172f05aa"
     },
     {
       "path": "packages/blackboard-learn-api/test/blackboard-transport.test.ts",
@@ -3216,7 +3216,7 @@
     },
     {
       "path": "packages/bridge-loopback/src/index.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/bridge-loopback/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3224,8 +3224,8 @@
         "packages/bridge-loopback/test/server.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f6ad12b2ccedf658930acc0c9d035a504668515d74b6d41a3a03009d1e30870b",
-      "afterDigest": "c83c82adb28bbf3a73f26869225c99102b5a6156d19e6faa7e2f47503dda3410"
+      "beforeDigest": "c83c82adb28bbf3a73f26869225c99102b5a6156d19e6faa7e2f47503dda3410",
+      "afterDigest": "792ed2f8b0c7ab252e7b2ee3ef643554cdb41eefd893c5d05d1e32055beedc24"
     },
     {
       "path": "packages/bridge-loopback/test/server.test.ts",
@@ -3262,7 +3262,7 @@
     },
     {
       "path": "packages/bridge-protocol/src/index.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/bridge-protocol/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3270,8 +3270,8 @@
         "packages/bridge-protocol/test/protocol.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ab234ef8d538894eeb1169d32f46aee8cd73dd2cacb7e75ad3778486ca4b512a",
-      "afterDigest": "8236c742ba6030ffb39709b6dc8517ac1d0f73ded8a74b0b26ee0d3e7668f4e6"
+      "beforeDigest": "8236c742ba6030ffb39709b6dc8517ac1d0f73ded8a74b0b26ee0d3e7668f4e6",
+      "afterDigest": "46278312713d7556f52dc1ce60009d55fd5b8c533e196dbfe0269610ae5317d1"
     },
     {
       "path": "packages/bridge-protocol/test/protocol.test.ts",
@@ -3308,7 +3308,7 @@
     },
     {
       "path": "packages/canvas-api-catalog/src/index.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/canvas-api-catalog/src/index.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3316,8 +3316,8 @@
         "packages/canvas-api-catalog/test/catalog.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "5a2d9e0f72c2eb1a42f5fef02c300e5ec2c42a02cc167ac194fcf9c551523fb5",
-      "afterDigest": "b1108280364220cf43e5e313df25aa9f743009397ed90e02248278966ca496b0"
+      "beforeDigest": "b1108280364220cf43e5e313df25aa9f743009397ed90e02248278966ca496b0",
+      "afterDigest": "340adbba036058cbdb3c16eb19c90ac72a3f9dd690d544232b5f4c376468ab98"
     },
     {
       "path": "packages/canvas-api-catalog/src/operation-admission.ts",
@@ -3360,14 +3360,14 @@
     },
     {
       "path": "packages/canvas-api-catalog/test/catalog.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/canvas-api-catalog/test/catalog.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "dc149f545e02a74bae6d494d3b5cdd5f90749830cf64983cc1918c090d788d7e",
-      "afterDigest": "fdd0bb06f4100301a95d462523c445d033779d7302415223ea1e6080fa4516ae"
+      "beforeDigest": "fdd0bb06f4100301a95d462523c445d033779d7302415223ea1e6080fa4516ae",
+      "afterDigest": "ec7ff9989f2b65e39fba02a9b56dcd2c0fca34abaed48ea5f4f27a9af71f6189"
     },
     {
       "path": "packages/canvas-api-catalog/tsconfig.json",
@@ -3435,7 +3435,7 @@
     },
     {
       "path": "packages/canvas-connector-mcp/src/runtime.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/canvas-connector-mcp/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3444,12 +3444,12 @@
         "packages/canvas-connector-mcp/test/runtime.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "6c2329027dd1205bbb872a07bfdc038f0abb33083a4741b9875971ac69221fd5",
-      "afterDigest": "35bfc58441e660148179d18d6577f010405982359ef26948689d6f0b7bbbccf2"
+      "beforeDigest": "35bfc58441e660148179d18d6577f010405982359ef26948689d6f0b7bbbccf2",
+      "afterDigest": "220d4a8d156b0df28f7825823f009679be6e004b910964f0a0e21fc2829b2968"
     },
     {
       "path": "packages/canvas-connector-mcp/src/server.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/canvas-connector-mcp/src/server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3458,19 +3458,19 @@
         "packages/canvas-connector-mcp/test/runtime.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "70e82e9057c484af7954b1b57ee6cea7fe065a4f672546cc204779d2fdbc6952",
-      "afterDigest": "675e7d40bcff029b88f0939702c724eca1792fb5712c448f80a5408904a2ff1c"
+      "beforeDigest": "675e7d40bcff029b88f0939702c724eca1792fb5712c448f80a5408904a2ff1c",
+      "afterDigest": "32cc8400844f8762409612d75fbf8bc0cc4c5b0581db93ac4531d2d860f0f76f"
     },
     {
       "path": "packages/canvas-connector-mcp/test/browser-catalog.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/canvas-connector-mcp/test/browser-catalog.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "e8ec209e42f266dc5982d0f5d3a6a802d85458344678b03b522f0264c8315496"
+      "beforeDigest": "e8ec209e42f266dc5982d0f5d3a6a802d85458344678b03b522f0264c8315496",
+      "afterDigest": "c382a19b725c98587773f5e69cc5dcd5d740c09431ab7224557ee4427c1c3e89"
     },
     {
       "path": "packages/canvas-connector-mcp/test/runtime.test.ts",
@@ -4009,7 +4009,7 @@
     },
     {
       "path": "packages/mcp-server/src/approval-server.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/src/approval-server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -4018,8 +4018,8 @@
         "packages/mcp-server/test/approval-context.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "c2381c240ded9894a108699df2648e440d3ba0ed9da3b5843c4a55bd8f6a0aeb",
-      "afterDigest": "8ec33506f7b829c18c8874fd63ef60bdfa50bb93cd4d3a1de8711e0062676354"
+      "beforeDigest": "8ec33506f7b829c18c8874fd63ef60bdfa50bb93cd4d3a1de8711e0062676354",
+      "afterDigest": "bf64ba32a086e41a66c107280f20c38eaca420672c5f6d91238a1f1e58a48e4e"
     },
     {
       "path": "packages/mcp-server/src/batch-recovery.ts",
@@ -4247,7 +4247,7 @@
     },
     {
       "path": "packages/mcp-server/src/full-server.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/src/full-server.ts",
       "ownership": "new",
       "dependencies": [],
@@ -4256,8 +4256,8 @@
         "packages/mcp-server/test/approval-context.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "4ac5d8b00a9e3e11dd7a72ce04d6ef751c35f25feab56e95fd75f1bd8c0687e1",
-      "afterDigest": "eb732393534efd6c57a1c2b08414c5552205177f88890b093dd6ac35c6a00f93"
+      "beforeDigest": "eb732393534efd6c57a1c2b08414c5552205177f88890b093dd6ac35c6a00f93",
+      "afterDigest": "253bc95ae2096f789763d69a75e5f3180900a261fb61d990c171e315fc747ec1"
     },
     {
       "path": "packages/mcp-server/src/index.ts",
@@ -4275,7 +4275,7 @@
     },
     {
       "path": "packages/mcp-server/src/item-bank-fan-out.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/src/item-bank-fan-out.ts",
       "ownership": "new",
       "dependencies": [],
@@ -4284,8 +4284,8 @@
         "packages/mcp-server/test/approval-context.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "b5403bff64bcfa86bdcbb88975f62ba5bef49b1ccef0b5b2d3abc50f17fa8ec8"
+      "beforeDigest": "b5403bff64bcfa86bdcbb88975f62ba5bef49b1ccef0b5b2d3abc50f17fa8ec8",
+      "afterDigest": "8b6a0113a758131d1b1461399cf79af286abb22cb3f26e0bb855546b4fbb9636"
     },
     {
       "path": "packages/mcp-server/src/item-bank-repair.ts",
@@ -4541,7 +4541,7 @@
     },
     {
       "path": "packages/mcp-server/src/moodle-resource-file.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/src/moodle-resource-file.ts",
       "ownership": "new",
       "dependencies": [],
@@ -4550,8 +4550,8 @@
         "packages/mcp-server/test/approval-context.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "69dc1b61b212398283f9635844b8a496351b466d14808475e2dc96a3e9f63b3c"
+      "beforeDigest": "69dc1b61b212398283f9635844b8a496351b466d14808475e2dc96a3e9f63b3c",
+      "afterDigest": "a883ecf94ea79c9d2426773302ea6b353d82184960239fefa27ded79664c9972"
     },
     {
       "path": "packages/mcp-server/src/moodle-scorm-reports.ts",
@@ -4608,6 +4608,20 @@
       "reviewer": "codex-plan-convergence-review",
       "beforeDigest": "5e3c2c0290fd988447d0ad139171faddf907802feb53ce1a472897e0db6ca68b",
       "afterDigest": "eec6297c8d0f62c4c5574410892e907cc557dd56f55656b081ca8ef049c8b58e"
+    },
+    {
+      "path": "packages/mcp-server/src/new-quiz-settings.ts",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "originalPath": "packages/mcp-server/src/new-quiz-settings.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [
+        "packages/mcp-server/test/activity-tools.test.ts",
+        "packages/mcp-server/test/approval-context.test.ts"
+      ],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "a3adba46bc30b2d206d8b6021faf4c2397ac2f0dd7e3d1cbfb19b5d0d49c3e0a"
     },
     {
       "path": "packages/mcp-server/src/operation-tools.ts",
@@ -4667,7 +4681,7 @@
     },
     {
       "path": "packages/mcp-server/src/quiz-item-payload.ts",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/src/quiz-item-payload.ts",
       "ownership": "new",
       "dependencies": [],
@@ -4676,8 +4690,8 @@
         "packages/mcp-server/test/approval-context.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "867f5a772861d96648c3bf3e6af7b2549c6120e16d828470970671086cdb17d9",
-      "afterDigest": "90b45f993663d8bffd0bdf6bfc7133d5a9b2dc147028f93f04116ff372a823cc"
+      "beforeDigest": "90b45f993663d8bffd0bdf6bfc7133d5a9b2dc147028f93f04116ff372a823cc",
+      "afterDigest": "0f6c58f66361afb40620f360ef7919eed8223dd2466fb4b8dbaaf9aed9a3e27c"
     },
     {
       "path": "packages/mcp-server/src/result-artifacts.ts",
@@ -4695,7 +4709,7 @@
     },
     {
       "path": "packages/mcp-server/src/runtime.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -4704,8 +4718,8 @@
         "packages/mcp-server/test/approval-context.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "7f95b9ad2ac050ce1d7648397ef071ab9ba9d83d14ffc5dcdbab0906fa229948",
-      "afterDigest": "c9df9c8f68de184da542c339e468a91a700a16153137dda1594732844e5236e1"
+      "beforeDigest": "c9df9c8f68de184da542c339e468a91a700a16153137dda1594732844e5236e1",
+      "afterDigest": "123774ef19fe1791824cb11ea7b29b42df3185f605e735ae0de1c3fdcc4d41d3"
     },
     {
       "path": "packages/mcp-server/src/sandbox-upstream.ts",
@@ -4815,14 +4829,14 @@
     },
     {
       "path": "packages/mcp-server/test/approval-page-copy.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/test/approval-page-copy.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "e6d8c80ed3c835bdf7bc01af3981089c43ab358aae85bce563d6a081711d4a23"
+      "beforeDigest": "e6d8c80ed3c835bdf7bc01af3981089c43ab358aae85bce563d6a081711d4a23",
+      "afterDigest": "9a1e74ef240256ae59f5fc831035a6df1faa0bc3d071d3ce01ad80787db93191"
     },
     {
       "path": "packages/mcp-server/test/approval-preview.test.ts",
@@ -4958,25 +4972,25 @@
     },
     {
       "path": "packages/mcp-server/test/blackboard-gateway.integration.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/test/blackboard-gateway.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "b961e72952b78e40b458e7ad7afa05228269bc324fa7b913d13e636ef631409b"
+      "beforeDigest": "b961e72952b78e40b458e7ad7afa05228269bc324fa7b913d13e636ef631409b",
+      "afterDigest": "6373d2fdc69d02f3fc31757729aad7ca80b4f470e4bc4743772ab25a897576ae"
     },
     {
       "path": "packages/mcp-server/test/blackboard-surface-reachability.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/test/blackboard-surface-reachability.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "9af800d2b46b49ce570c11444d0ff03ed278004c255864e119eaeb52f3dfc822"
+      "beforeDigest": "9af800d2b46b49ce570c11444d0ff03ed278004c255864e119eaeb52f3dfc822",
+      "afterDigest": "b2c380a6e1ce8d434f1ff23ec1655a5770565cd45b0b85d9f737c3e72b8718ac"
     },
     {
       "path": "packages/mcp-server/test/bridge-catalog-digest.test.ts",
@@ -5310,25 +5324,25 @@
     },
     {
       "path": "packages/mcp-server/test/item-bank-fan-out.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/test/item-bank-fan-out.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "29f24405a1d51dfb167c22f73f98b37269ad19f478cb0febbede373295faeac5"
+      "beforeDigest": "29f24405a1d51dfb167c22f73f98b37269ad19f478cb0febbede373295faeac5",
+      "afterDigest": "20de19c34aa0b38742b9df1727c69d7859d42e22a59e83df81fe627ff05c6499"
     },
     {
       "path": "packages/mcp-server/test/item-bank-repair.integration.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/test/item-bank-repair.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "d9929e706f21d8d1138f01c75030f9755674f497b5ba8d0e4a3d3a75bb7972b2"
+      "beforeDigest": "d9929e706f21d8d1138f01c75030f9755674f497b5ba8d0e4a3d3a75bb7972b2",
+      "afterDigest": "a68d3ad2acadfa61fe000fbda01776dfb72227995cf2c9165afe73748b671735"
     },
     {
       "path": "packages/mcp-server/test/item-bank-repair.test.ts",
@@ -5662,14 +5676,14 @@
     },
     {
       "path": "packages/mcp-server/test/moodle-resource-file.integration.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/test/moodle-resource-file.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "c20c275f6c8fffe31575175444fd0c0f9f35a6676f10b92790caad1931d1cc07"
+      "beforeDigest": "c20c275f6c8fffe31575175444fd0c0f9f35a6676f10b92790caad1931d1cc07",
+      "afterDigest": "e7664a9d900844e5eb01f40e8005947c381ad85571489e701e0ea554b4d51749"
     },
     {
       "path": "packages/mcp-server/test/moodle-resource-file.test.ts",
@@ -5760,15 +5774,26 @@
       "afterDigest": "0f231690acf23e59845cfa955f2dd2a31fc1d370467dbb3875d03a47cbc9165c"
     },
     {
+      "path": "packages/mcp-server/test/new-quiz-settings.test.ts",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
+      "originalPath": "packages/mcp-server/test/new-quiz-settings.test.ts",
+      "ownership": "new",
+      "dependencies": [],
+      "testMapping": [],
+      "reviewer": "codex-plan-convergence-review",
+      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "afterDigest": "1c0ac0c9d89d64737bdeeba65de07325c923818833a01ada5a3156320fa99af3"
+    },
+    {
       "path": "packages/mcp-server/test/operations.integration.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/test/operations.integration.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "fc648965def58e171b63416a5c17f5c3ac9c7596809732464fb448fdce534cbb",
-      "afterDigest": "fa41b1040ccdae5208e294fd63c816777a017a63d7d88f020b52801f4382e98d"
+      "beforeDigest": "fa41b1040ccdae5208e294fd63c816777a017a63d7d88f020b52801f4382e98d",
+      "afterDigest": "59e29dcfbc825f2dd222b8c079862fde12fe6cfff4fcb47dd4e695969292415b"
     },
     {
       "path": "packages/mcp-server/test/program-ledger.test.ts",
@@ -5827,14 +5852,14 @@
     },
     {
       "path": "packages/mcp-server/test/quiz-item-payload.test.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "packages/mcp-server/test/quiz-item-payload.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "2fb28dad78c1e1a4c2bb96d501440562be5d7d1ceff7f116d50522347df19d27"
+      "beforeDigest": "2fb28dad78c1e1a4c2bb96d501440562be5d7d1ceff7f116d50522347df19d27",
+      "afterDigest": "7ec41aaee6b087ecdbbbcce38e4ebb6fb06ceb24b6cf3c5eded9337f98d0e52d"
     },
     {
       "path": "packages/mcp-server/test/requested-by.test.ts",
@@ -6174,14 +6199,14 @@
     },
     {
       "path": "scripts/generate-canvas-api-catalog.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "scripts/generate-canvas-api-catalog.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "35874059f0c33af9e04be208729e014c1900812bf2d95d9cca26cbec8320984b",
-      "afterDigest": "9ab9cd26ecd36beb89d59b919b6485831fd823354e4e8885416cc191afbd97ef"
+      "beforeDigest": "9ab9cd26ecd36beb89d59b919b6485831fd823354e4e8885416cc191afbd97ef",
+      "afterDigest": "5732295b4d27e1ceb1f3c4dc458cc8fe7a0f1d8d3b72bf294ace8341c755d4b5"
     },
     {
       "path": "scripts/install-example-legacy-bridge.mjs",
@@ -6493,14 +6518,14 @@
     },
     {
       "path": "scripts/test/canvas-classic-quiz-answers.test.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "scripts/test/canvas-classic-quiz-answers.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "0b48473186c62bc17b268d8f95c24f9a4a6936c79af27f13784b118cb6f1d9fe"
+      "beforeDigest": "0b48473186c62bc17b268d8f95c24f9a4a6936c79af27f13784b118cb6f1d9fe",
+      "afterDigest": "20e25e14b9171f3d5e134ee9c2c9fbca328443c005056d4fb8d325fac3767113"
     },
     {
       "path": "scripts/test/canvas-classic-quiz-submission-read.test.mjs",
@@ -6680,14 +6705,14 @@
     },
     {
       "path": "scripts/test/canvas-new-quiz-write-contract.test.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "scripts/test/canvas-new-quiz-write-contract.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "ebdefc1c213ba65899c01ebec263ff89e178290a80e5dee2a44dad88902c602e"
+      "beforeDigest": "ebdefc1c213ba65899c01ebec263ff89e178290a80e5dee2a44dad88902c602e",
+      "afterDigest": "93580a2160adfce43f85f46a987bffd9282c81756269941fbbf9dcc76ea86f8f"
     },
     {
       "path": "scripts/test/canvas-operation-readback.test.mjs",
@@ -6966,14 +6991,14 @@
     },
     {
       "path": "scripts/test/lib/quiz-item-payload-cases.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "scripts/test/lib/quiz-item-payload-cases.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "9f5935842361eaa1f4b7e2173cf0bd6c88e8bc28aab919f1bf1bc7ba19be1510"
+      "beforeDigest": "9f5935842361eaa1f4b7e2173cf0bd6c88e8bc28aab919f1bf1bc7ba19be1510",
+      "afterDigest": "3c374b4b6835f5e84d87150308797482404a8a898ced06323a2e77e0d61d80df"
     },
     {
       "path": "scripts/test/lib/retired-claims.mjs",
@@ -7043,14 +7068,14 @@
     },
     {
       "path": "scripts/test/moodle-bbb-executor.test.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "scripts/test/moodle-bbb-executor.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "98e7af6fce55d269bfffe2d072bb5be37a7406c359b8022638d0cd229ebf7f61"
+      "beforeDigest": "98e7af6fce55d269bfffe2d072bb5be37a7406c359b8022638d0cd229ebf7f61",
+      "afterDigest": "2cfdcc044ef4bce9b23d75bfd1fa3adfb802d83e285ad568fe6847f5990b0497"
     },
     {
       "path": "scripts/test/moodle-browser-executor.test.mjs",
@@ -7208,14 +7233,14 @@
     },
     {
       "path": "scripts/test/moodle-h5p-executor.test.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "scripts/test/moodle-h5p-executor.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "11d6e4c49934a70e4ff29bb34b30d5ce0a2931d3c7dd678f7326e72efb4cac8c"
+      "beforeDigest": "11d6e4c49934a70e4ff29bb34b30d5ce0a2931d3c7dd678f7326e72efb4cac8c",
+      "afterDigest": "00234dbcc4ae3d369934a47645fad3faf295db19068a3742b9a7caca2852d5e3"
     },
     {
       "path": "scripts/test/moodle-learner-submission-read.test.mjs",
@@ -7307,14 +7332,14 @@
     },
     {
       "path": "scripts/test/moodle-qbank-question-executor.test.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "scripts/test/moodle-qbank-question-executor.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "583794b145d0287e8b577a94ee40692abd3863891169f999b6d3f7049dd050d8"
+      "beforeDigest": "583794b145d0287e8b577a94ee40692abd3863891169f999b6d3f7049dd050d8",
+      "afterDigest": "34fadf9ecd83cd9e6ad4d8b6491f8977606e70ceb2a0642d425b29a3881e5e31"
     },
     {
       "path": "scripts/test/moodle-question-impact-read.test.mjs",
@@ -7571,14 +7596,14 @@
     },
     {
       "path": "scripts/test/website-content.test.mjs",
-      "sourceCommit": "4ec18b737d8cfee9e73d38da15b9ab72c9eaf2df",
+      "sourceCommit": "b97ca4b6928fe6d11cfcee1ee6412132b75eb941",
       "originalPath": "scripts/test/website-content.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "dcbb117b81730b739fe5a29c4a047197297c520866505e786a0f0d84a98cd7f9",
-      "afterDigest": "7eb717ed265e676cc94b1dfe58cae53feb4bb512ccebc295c3884339336131c2"
+      "beforeDigest": "43125cae866c071c709aeb583b52abf1f179791841d0f3fec60891d94604feeb",
+      "afterDigest": "5569f7986136123f0078514d85caf0ab2b7b046945603113e87b3fc46d236b7f"
     },
     {
       "path": "scripts/test/zero-tolerance-receipt.test.mjs",
