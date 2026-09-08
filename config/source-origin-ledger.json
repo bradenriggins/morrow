@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "1fd5cd230e40acac98e9e67ef014cfcd8620220a",
+  "candidateCommit": "ee9e76ccc840513fbb4a795a7df799bd1b5a5e5a",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -1809,14 +1809,14 @@
     },
     {
       "path": "installer/main.cjs",
-      "sourceCommit": "1fd5cd230e40acac98e9e67ef014cfcd8620220a",
+      "sourceCommit": "ee9e76ccc840513fbb4a795a7df799bd1b5a5e5a",
       "originalPath": "installer/main.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "41b698d942f29b7b5b82fe5ed16c501568eb79dafb913817b7730295be74f7eb",
-      "afterDigest": "2ba1a2c20a126f42c1a6c8e2783aab7922a5d452b475a7143a858c766f3d8241"
+      "beforeDigest": "2ba1a2c20a126f42c1a6c8e2783aab7922a5d452b475a7143a858c766f3d8241",
+      "afterDigest": "304e3d32704c060e1f470bdf2fc6436aff526b8346196c0079b52e65f48f128c"
     },
     {
       "path": "installer/package.json",
@@ -2128,14 +2128,14 @@
     },
     {
       "path": "installer/test/contract.test.cjs",
-      "sourceCommit": "1fd5cd230e40acac98e9e67ef014cfcd8620220a",
+      "sourceCommit": "ee9e76ccc840513fbb4a795a7df799bd1b5a5e5a",
       "originalPath": "installer/test/contract.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ea14a5ef031ae63ff2253501b2e9432466854c5bd14f148de9acfd5edd981e23",
-      "afterDigest": "76423d35768c51953381ca9bf26618ba142682dcaf405b0433190c7c5270f1b2"
+      "beforeDigest": "76423d35768c51953381ca9bf26618ba142682dcaf405b0433190c7c5270f1b2",
+      "afterDigest": "a86e2b4bc6af9e55070f021b7bee654286e48f175a492de96a4d0643b625c1c6"
     },
     {
       "path": "installer/test/electron-builder-config.test.cjs",
