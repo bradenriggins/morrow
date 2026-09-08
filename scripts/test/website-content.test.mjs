@@ -569,6 +569,7 @@ test("the public claims keep the platform, permission, and review boundaries", {
   assert.match(build, /Proposed course changes wait for your review/, "a reader must keep the final decision");
   assert.doesNotMatch(privacy, /removes? (?:the )?student names|replaces each person/i, "the privacy page must not promise automatic anonymization");
   assert.match(privacy, /do not rely on Morrow to make sensitive content anonymous/, "the privacy limit must be clear");
+  assert.match(privacy, /Chrome Web Store User Data Policy, including the Limited Use requirements/, "the extension website must carry the Chrome Web Store Limited Use disclosure");
 });
 
 test("the site does not explain that its example course data is fictional", { skip }, () => {
@@ -1472,6 +1473,14 @@ test("the final website pass keeps role examples, broad media coverage, setup co
   const styles = readFileSync(new URL("styles.css", site), "utf8");
   assert.match(styles, /@media \(max-width: 920px\) \{[\s\S]*?\.course-capture \{ display: none; \}/);
   assert.doesNotMatch(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.course-capture img/);
+});
+
+test("the mobile footer keeps its three route groups side by side", { skip }, () => {
+  const styles = readFileSync(new URL("styles.css", site), "utf8");
+  assert.match(
+    styles,
+    /@media \(max-width: 600px\) \{[\s\S]*?\.site-footer > \.footer-links \{ grid-template-columns: \.94fr 1\.2fr \.86fr;/,
+  );
 });
 
 // --- Payload, caching, and the files that describe them ------------------------------------------
