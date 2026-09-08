@@ -693,6 +693,42 @@ test("repair rebuilds a Bridge folder that was removed and re-issues its active-
   assert.equal((await fs.readdir(path.join(stateDirectory, "Backups"))).length, 1, "a Bridge folder that verifies is kept");
 });
 
+test("repair replaces an older app-owned Bridge from the sealed release", async () => {
+  const root = await temporaryRoot();
+  const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor: RECORDING_MONITOR });
+  let bridgeReleaseSha256 = await writeBridgeRelease(root, "1.0.0");
+  const installer = controller(root, {
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+    trustedBridgeReleaseManifestSha256: () => bridgeReleaseSha256,
+    runCli: async (executable, argumentsValue) => {
+      if (argumentsValue[1] === "setup") {
+        await fs.mkdir(path.join(root, "UserData", "State"), { recursive: true });
+        await fs.writeFile(path.join(root, "UserData", "State", "morrow.upstreams.json"), "{}\n");
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    }
+  });
+  const stateDirectory = path.join(root, "UserData", "State");
+  const bridgeDirectory = path.join(root, "UserData", "Bridge");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
+  await installer.initializeBridgeAtStartup();
+  const before = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
+  assert.equal(before.extensionVersion, "1.0.0");
+
+  bridgeReleaseSha256 = await writeBridgeRelease(root, "1.0.1");
+  const state = await installer.repair();
+  const after = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
+  assert.equal(after.extensionVersion, "1.0.1");
+  assert.notEqual(after.activeFolderChallenge.challengeId, before.activeFolderChallenge.challengeId);
+  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src", "service-worker.js"), "utf8"), 'export const version = "1.0.1";\n');
+  assert.equal(state.bridge.folderReady, true);
+  assert.equal(state.bridge.loadedInChrome, "unknown");
+  const backups = await fs.readdir(path.join(stateDirectory, "Backups"));
+  assert.equal(backups.length, 1);
+  assert.deepEqual(JSON.parse(await fs.readFile(path.join(stateDirectory, "Backups", backups[0]), "utf8")), before);
+});
+
 test("state stops reporting a Bridge folder that was removed while Morrow stayed open", async () => {
   const root = await temporaryRoot();
   const { installer } = await repairableController(root);

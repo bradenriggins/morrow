@@ -1168,16 +1168,21 @@ class InstallerController {
 
   /**
    * Rebuilds the app-owned Bridge folder from the sealed release when the
-   * installed copy no longer matches its record, and re-issues the active-folder
-   * challenge so a Chrome that has this folder loaded must prove that again. The
-   * folder holds only the sealed release, so replacing an unusable copy removes
-   * nothing a person put there.
+   * installed copy no longer matches its record or is older than the copy the
+   * app ships. It re-issues the active-folder challenge so a Chrome that has
+   * this folder loaded must prove that again. The folder holds only the sealed
+   * release, so replacing it removes nothing a person put there.
    */
   async repairBridgeInstallation() {
     this.bridgeInitialization = null;
     this.bridgeInstallation = null;
-    const installed = await this.readBridgeInstallation().then((status) => status.installed === true, () => false);
-    if (!installed) {
+    const installed = await this.readBridgeInstallation().catch(() => null);
+    const packaged = await this.packagedBridgeRelease();
+    const installedVersion = parseChromeVersion(installed?.version);
+    const packagedVersion = parseChromeVersion(packaged.version);
+    const packagedIsNewer = Boolean(installedVersion && packagedVersion
+      && compareChromeVersions(packagedVersion, installedVersion) > 0);
+    if (installed?.installed !== true || packagedIsNewer) {
       await this.discardUnusableBridgeInstallation();
       return this.initializeBridgeAtStartup();
     }

@@ -69,7 +69,7 @@ const PUBLIC_ERRORS = Object.freeze({
   },
   bridge_check_failed: {
     message: "Morrow could not confirm Morrow Bridge.",
-    recovery: "Open Morrow Bridge in Chrome, select Connect Morrow, then return here and select Check Bridge."
+    recovery: "Select Repair Morrow, then load or reload the Bridge folder in Chrome and select Check Bridge."
   },
   blackboard_configuration_invalid: {
     message: "Morrow could not save the Blackboard connection.",

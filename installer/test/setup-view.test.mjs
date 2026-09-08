@@ -158,6 +158,7 @@ test("a ready Bridge folder that Chrome has not confirmed still asks for the Chr
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Add Morrow Bridge.");
   assert.match(view.body, /data-action="reveal-bridge-folder"/);
+  assert.match(view.body, /data-action="repair"/);
   assert.equal(statusSummary(current), "Set up Morrow Bridge in Chrome");
   assert.equal(step(current, "Bridge").status, "current");
 
