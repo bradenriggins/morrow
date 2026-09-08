@@ -86,11 +86,26 @@ function writeFixture() {
       { id: "course_material", sha256Before: "b".repeat(64), sha256After: "b".repeat(64), unchanged: true },
       { id: "assistant_configuration", sha256Before: "c".repeat(64), sha256After: "c".repeat(64), unchanged: true },
     ],
+    retention: {
+      exactAcrossUpgrade: [
+        { id: "course_material", sha256Before: "b".repeat(64), sha256After: "b".repeat(64), unchanged: true },
+        { id: "assistant_configuration", sha256Before: "c".repeat(64), sha256After: "c".repeat(64), unchanged: true },
+      ],
+      applicationStateExactAfterInstall: [
+        { id: "state_upstreams", sha256Before: "e".repeat(64), sha256After: "e".repeat(64), unchanged: true },
+        { id: "state_journal", sha256Before: "f".repeat(64), sha256After: "f".repeat(64), unchanged: true },
+      ],
+      applicationStateAfterRuntime: {
+        ids: ["state_upstreams", "state_journal"],
+        presentAfterUpgrade: true,
+        exactAcrossUninstall: true,
+      },
+    },
     statePresentAfterUpgrade: true,
     newApplication: {
       sha256: "d".repeat(64),
       fileVersion: "1.0.0",
-      productVersion: "1.0.0",
+      productVersion: "1.0.0.0",
       productName: "Morrow",
       companyName: "Braden Riggins",
       fileDescription: "Morrow",
@@ -193,6 +208,9 @@ test("native Windows upgrade evidence fails closed when any release boundary is 
     ["legacy descriptor state", (value) => { value.stateSecurity.before.descriptorAcl = "unavailable"; }],
     ["bounded legacy retry", (value) => { value.beforeReadiness.retryUsedIffColdNotReady = false; }],
     ["retained data", (value) => { value.retainedAfterUpgrade[0].unchanged = false; }],
+    ["application state after install", (value) => { value.retention.applicationStateExactAfterInstall[0].sha256After = "0".repeat(64); }],
+    ["application state after runtime", (value) => { value.retention.applicationStateAfterRuntime.exactAcrossUninstall = false; }],
+    ["exact application version", (value) => { value.newApplication.productVersion = "1.0.0"; }],
     ["unsigned application", (value) => { value.newApplication.signerCertificate = "CN=Unexpected"; }],
     ["complete uninstall", (value) => { value.uninstall.stateRetained = false; }],
   ];

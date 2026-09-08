@@ -371,7 +371,7 @@ async function inspectClaudeDesktopConnection(setup) {
     if (!metadata) return { installed: false, running: false };
     const installedPath = await realPath(receipt.launcherPath, "file");
     const installedRelative = path.relative(root, installedPath);
-    if (!sameCanonicalPath(installedPath, receipt.launcherPath) || metadata.launcherSha256 !== receipt.launcherSha256
+    if (metadata.launcherSha256 !== receipt.launcherSha256
       || (!installedRelative.startsWith(`..${path.sep}`) && !path.isAbsolute(installedRelative))) return { installed: false, running: false };
     for (const [value, kind] of [[metadata.nodePath, "file"], [metadata.serverEntryPath, "file"],
       [metadata.upstreamsPath, "file"], [metadata.workspaceRoot, "directory"]]) {

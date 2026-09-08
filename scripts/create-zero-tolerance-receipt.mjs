@@ -26,6 +26,8 @@ const PUBLISHED_WINDOWS_ARTIFACT = Object.freeze({
   source: "3720b76bfd5dc5d132627777be4034bf9ef0dae5",
   sha256: "2750cd7b6746fb7f6701a92920158691eb9ad787732826597f6de4c3ed0fadf1",
 });
+const IMMUTABLE_UPGRADE_RETENTION_IDS = Object.freeze(["course_material", "assistant_configuration"]);
+const MUTABLE_UPGRADE_STATE_IDS = Object.freeze(["state_upstreams", "state_journal"]);
 const checks = {
   unapproved_provider_writes: ["workspace-test.log", "connector-test.log"],
   out_of_scope_targets_accepted: ["workspace-test.log", "connector-test.log"],
@@ -93,6 +95,17 @@ function isWindowsAclSmokeReceipt(value) {
     && value.stateSecurity?.descriptor?.acl === PRIVATE_WINDOWS_ACL;
 }
 
+function isExactHashRetention(value, expectedIds) {
+  return Array.isArray(value)
+    && value.length === expectedIds.length
+    && value.every((entry) => typeof entry?.id === "string"
+      && expectedIds.includes(entry.id)
+      && /^[a-f0-9]{64}$/.test(entry?.sha256Before)
+      && entry.sha256After === entry.sha256Before
+      && entry.unchanged === true)
+    && new Set(value.map((entry) => entry.id)).size === expectedIds.length;
+}
+
 function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
   const beforeStateAcl = value?.stateSecurity?.before?.stateAcl;
   const beforeDescriptorAcl = value?.stateSecurity?.before?.descriptorAcl;
@@ -122,19 +135,16 @@ function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
     && value.stateSecurity?.after?.descriptorAcl === PRIVATE_WINDOWS_ACL
     && value.stateSecurity?.after?.acceptedAs === "private"
     && value.privateAclAfter === PRIVATE_WINDOWS_ACL
-    && Array.isArray(value.retainedAfterUpgrade)
-    && value.retainedAfterUpgrade.length === 2
-    && value.retainedAfterUpgrade.every((entry) => typeof entry?.id === "string"
-      && /^[a-f0-9]{64}$/.test(entry?.sha256Before)
-      && entry.sha256After === entry.sha256Before
-      && entry.unchanged === true)
-    && new Set(value.retainedAfterUpgrade.map((entry) => entry.id)).size === 2
-    && value.retainedAfterUpgrade.some((entry) => entry.id === "course_material")
-    && value.retainedAfterUpgrade.some((entry) => entry.id === "assistant_configuration")
+    && isExactHashRetention(value.retainedAfterUpgrade, IMMUTABLE_UPGRADE_RETENTION_IDS)
+    && isDeepStrictEqual(value.retention?.exactAcrossUpgrade, value.retainedAfterUpgrade)
+    && isExactHashRetention(value.retention?.applicationStateExactAfterInstall, MUTABLE_UPGRADE_STATE_IDS)
+    && isDeepStrictEqual(value.retention?.applicationStateAfterRuntime?.ids, MUTABLE_UPGRADE_STATE_IDS)
+    && value.retention?.applicationStateAfterRuntime?.presentAfterUpgrade === true
+    && value.retention?.applicationStateAfterRuntime?.exactAcrossUninstall === true
     && value.statePresentAfterUpgrade === true
     && /^[a-f0-9]{64}$/.test(value.newApplication?.sha256)
     && value.newApplication?.fileVersion === "1.0.0"
-    && value.newApplication?.productVersion === "1.0.0"
+    && value.newApplication?.productVersion === "1.0.0.0"
     && value.newApplication?.productName === "Morrow"
     && value.newApplication?.companyName === "Braden Riggins"
     && value.newApplication?.fileDescription === "Morrow"

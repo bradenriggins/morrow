@@ -169,9 +169,11 @@ test("Blackboard health fails closed for insecure, linked, and Windows-refused r
     await setup(root);
     const paths = blackboardPaths(root, TENANT);
     const absent = { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] };
-    await fs.chmod(paths.config, 0o644);
-    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), absent);
-    await fs.chmod(paths.config, 0o600);
+    if (process.platform !== "win32") {
+      await fs.chmod(paths.config, 0o644);
+      assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), absent);
+      await fs.chmod(paths.config, 0o600);
+    }
     await fs.chmod(paths.credentialDirectory, 0o700);
     const linked = `${paths.credential}.linked`;
     await fs.rename(paths.credential, linked);

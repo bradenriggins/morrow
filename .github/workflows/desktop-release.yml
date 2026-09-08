@@ -10,7 +10,7 @@ jobs:
   windows-installer:
     name: Windows x64 unsigned installer and installed-app smoke
     runs-on: windows-2022
-    timeout-minutes: 55
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -32,8 +32,13 @@ jobs:
       - name: Build Morrow packages
         run: pnpm build
 
-      - name: Test installer contracts
-        run: pnpm --dir installer --ignore-workspace test
+      - name: Test each installer contract file with a process limit
+        timeout-minutes: 23
+        run: pnpm --dir installer --ignore-workspace test:bounded:files
+
+      - name: Test the complete installer contract suite with a process limit
+        timeout-minutes: 7
+        run: pnpm --dir installer --ignore-workspace test:bounded:suite
 
       - name: Prepare isolated Windows payload and private artifact directory
         shell: pwsh
@@ -44,7 +49,17 @@ jobs:
           $artifactRoot = Join-Path $PWD "artifacts\desktop-windows-private-qa"
           if (Test-Path -LiteralPath $artifactRoot) { throw "Private QA artifact directory already exists: $artifactRoot" }
           New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
-          node scripts/package-mcp-bundle.mjs --target win32-x64 --prepare-desktop-payload $payload
+          $prepared = $false
+          for ($attempt = 1; $attempt -le 3; $attempt += 1) {
+            & node scripts/package-mcp-bundle.mjs --target win32-x64 --prepare-desktop-payload $payload
+            if ($LASTEXITCODE -eq 0) {
+              $prepared = $true
+              break
+            }
+            if (Test-Path -LiteralPath $payload) { throw "Desktop payload exists after failed preparation attempt ${attempt}: $payload" }
+            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
+          }
+          if (-not $prepared) { throw 'Desktop payload preparation failed after 3 attempts.' }
           "MORROW_DESKTOP_PAYLOAD=$payload" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MORROW_INSTALLER_OUTPUT=$installerOutput" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MORROW_WINDOWS_ARTIFACT_ROOT=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
@@ -69,12 +84,35 @@ jobs:
           Copy-Item -LiteralPath $installers[0].FullName -Destination $artifactInstaller
           "MORROW_WINDOWS_INSTALLER=$($installers[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Upgrade the exact published 3720 build and preserve its state
+        timeout-minutes: 32
+        shell: pwsh
+        run: |
+          $oldUrl = 'https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-win-x64.exe'
+          $oldSha256 = '2750cd7b6746fb7f6701a92920158691eb9ad787732826597f6de4c3ed0fadf1'
+          $oldSourceHead = '3720b76bfd5dc5d132627777be4034bf9ef0dae5'
+          $runId = [guid]::NewGuid().ToString('N')
+          $oldInstaller = Join-Path $env:RUNNER_TEMP "Morrow-1.0.0-published-3720b76b-$runId.exe"
+          Invoke-WebRequest -Uri $oldUrl -OutFile $oldInstaller
+          $downloadedHash = (Get-FileHash -LiteralPath $oldInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($downloadedHash -ne $oldSha256) { throw "The published installer hash is $downloadedHash, not the pinned value." }
+          $newSha256 = (Get-FileHash -LiteralPath $env:MORROW_WINDOWS_INSTALLER -Algorithm SHA256).Hash.ToLowerInvariant()
+          $newSourceHead = $env:GITHUB_SHA.ToLowerInvariant()
+          $installDir = Join-Path $env:RUNNER_TEMP "morrow-upgrade-install-$runId"
+          $stateDir = Join-Path $env:LOCALAPPDATA "MorrowUpgradeTest-$runId"
+          $receipt = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'upgrade.json'
+          & scripts/test/desktop-windows-upgrade.ps1 `
+            -OldInstaller $oldInstaller -OldSha256 $oldSha256 -OldSourceHead $oldSourceHead `
+            -NewInstaller $env:MORROW_WINDOWS_INSTALLER -NewSha256 $newSha256 -NewSourceHead $newSourceHead `
+            -InstallDirectory $installDir -StateDirectory $stateDir -Receipt $receipt
+
       - name: Install, start, damage and repair the sealed payload, uninstall, and check retained data
+        timeout-minutes: 30
         shell: pwsh
         run: |
           $runId = [guid]::NewGuid().ToString("N")
           $installDir = Join-Path $env:RUNNER_TEMP "morrow-install-$runId"
-          $receipt = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT "receipt.json"
+          $receipt = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT "smoke.json"
           node scripts/test/desktop-windows-smoke.mjs --installer $env:MORROW_WINDOWS_INSTALLER --install-dir $installDir --receipt $receipt
 
       - name: Upload private QA installer and sanitized smoke receipts

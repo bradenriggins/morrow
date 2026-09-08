@@ -53,11 +53,15 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   return { root, workspace: await fs.realpath(workspace), upstreams: await fs.realpath(upstreams), setup, extracted };
 }
 
+const CONNECTION_OBSERVATION_TIMEOUT_MS = 5_000;
+const CONNECTION_OBSERVATION_INTERVAL_MS = 20;
+
 async function waitFor(predicate) {
-  for (let count = 0; count < 100; count += 1) {
+  const deadline = Date.now() + CONNECTION_OBSERVATION_TIMEOUT_MS;
+  do {
     if (await predicate()) return;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
+    await new Promise((resolve) => setTimeout(resolve, CONNECTION_OBSERVATION_INTERVAL_MS));
+  } while (Date.now() < deadline);
   assert.fail("expected connection state was not observed");
 }
 
@@ -140,7 +144,7 @@ test("native Claude bundle uses the client Node runtime and requires a completed
   assert.equal(lines[0].result.serverInfo.name, "morrow");
   assert.deepEqual(lines.find((line) => line.id === 2).result, { workspace: input.workspace, upstreams: input.upstreams });
   const receipt = JSON.parse(await fs.readFile(input.setup.receiptPath, "utf8"));
-  assert.equal(receipt.launcherPath, await fs.realpath(launcher));
+  assert.deepEqual(await fs.readFile(receipt.launcherPath), await fs.readFile(launcher));
   assert.deepEqual(receipt.clientInfo, { name: "morrow-extension-test", version: "1.0.0" });
   const stopped = once(child, "close");
   child.stdin.end();

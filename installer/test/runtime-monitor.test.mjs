@@ -7,12 +7,26 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { hardenPrivateDirectory } from "../../packages/gateway-core/dist/private-file-access.js";
 import { createRuntimeMonitor } from "../shared/runtime-monitor.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const gatewayEntry = path.join(repository, "packages/mcp-server/dist/index.js");
 const fakeUpstream = path.join(repository, "packages/mcp-server/test/fixtures/fake-upstream.mjs");
 const sourcePackage = path.join(repository, "packages/mcp-server");
+
+async function privateTemporaryDirectory(prefix) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), prefix));
+  if (!hardenPrivateDirectory(directory)) {
+    await removeTemporaryDirectory(directory);
+    throw new Error("The runtime-monitor fixture directory could not be made private");
+  }
+  return directory;
+}
+
+async function removeTemporaryDirectory(directory) {
+  await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+}
 
 async function waitFor(predicate, detail) {
   for (let attempt = 0; attempt < 150; attempt += 1) {
@@ -303,15 +317,17 @@ async function bridgeOwnerEndpoint(workspaceRoot, journalPath) {
 
 test("uses one durable gateway owner instead of starting a connector", async (t) => {
   assert.equal(existsSync(gatewayEntry), true, "build packages/mcp-server before this test");
-  const directory = await mkdtemp(path.join(os.tmpdir(), "morrow-runtime-monitor-owner-"));
-  t.after(async () => { await rm(directory, { recursive: true, force: true }); });
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-owner-");
   const workspaceRoot = await realpath(directory);
   const configPath = await writeGatewayConfig(workspaceRoot);
   const journalPath = path.join(workspaceRoot, "gateway.sqlite3");
   const common = { nodePath: process.execPath, serverEntryPath: gatewayEntry, upstreamsPath: configPath, workspaceRoot, journalPath };
   const first = createRuntimeMonitor(common);
   const second = createRuntimeMonitor(common);
-  t.after(async () => { await Promise.all([first.close(), second.close()]); });
+  t.after(async () => {
+    await Promise.all([first.close(), second.close()]);
+    await removeTemporaryDirectory(directory);
+  });
 
   const firstSnapshot = await first.start();
   const ownerPath = path.join(directory, "gateway.sqlite3.local-owner.json");
@@ -349,7 +365,7 @@ test("uses one durable gateway owner instead of starting a connector", async (t)
 });
 
 test("uses only the held private owner lease for Bridge maintenance", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "morrow-runtime-monitor-bridge-"));
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-bridge-");
   const workspaceRoot = await realpath(directory);
   const journalPath = path.join(workspaceRoot, "gateway.sqlite3");
   const entry = await writeMockGateway(directory, path.dirname(gatewayEntry));
@@ -365,7 +381,7 @@ test("uses only the held private owner lease for Bridge maintenance", async (t) 
     await monitor.close();
     await endpoint.close();
     await rm(entry, { force: true });
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporaryDirectory(directory);
   });
 
   const status = await monitor.bridgeMaintenance({ action: "status" });
@@ -439,7 +455,7 @@ test("uses only the held private owner lease for Bridge maintenance", async (t) 
 });
 
 test("reports only sanitized verified runtime state and reconnects through public reads", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "morrow-runtime-monitor-mock-"));
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-mock-");
   const workspaceRoot = await realpath(directory);
   const log = path.join(directory, "calls.log");
   const entry = await writeMockGateway(directory);
@@ -447,17 +463,16 @@ test("reports only sanitized verified runtime state and reconnects through publi
   const originalLog = process.env.MORROW_RUNTIME_MONITOR_LOG;
   process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "good";
   process.env.MORROW_RUNTIME_MONITOR_LOG = log;
+  const monitor = createRuntimeMonitor({ nodePath: process.execPath, serverEntryPath: entry, upstreamsPath: path.join(workspaceRoot, "upstreams.json"), workspaceRoot, journalPath: path.join(workspaceRoot, "gateway.sqlite3") });
   t.after(async () => {
     if (originalMode === undefined) delete process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
     else process.env.MORROW_RUNTIME_MONITOR_FIXTURE = originalMode;
     if (originalLog === undefined) delete process.env.MORROW_RUNTIME_MONITOR_LOG;
     else process.env.MORROW_RUNTIME_MONITOR_LOG = originalLog;
+    await monitor.close();
     await rm(entry, { force: true });
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporaryDirectory(directory);
   });
-
-  const monitor = createRuntimeMonitor({ nodePath: process.execPath, serverEntryPath: entry, upstreamsPath: path.join(workspaceRoot, "upstreams.json"), workspaceRoot, journalPath: path.join(workspaceRoot, "gateway.sqlite3") });
-  t.after(() => monitor.close());
   const verified = await monitor.start();
   assert.deepEqual(verified, {
     schema: "morrow.installer-runtime.v1",
@@ -506,7 +521,7 @@ test("reports only sanitized verified runtime state and reconnects through publi
 });
 
 test("names and reads exactly one connected course while several courses are connected", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "morrow-runtime-monitor-multi-"));
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-multi-");
   const workspaceRoot = await realpath(directory);
   const log = path.join(directory, "calls.log");
   const entry = await writeMockGateway(directory);
@@ -522,7 +537,7 @@ test("names and reads exactly one connected course while several courses are con
     else process.env.MORROW_RUNTIME_MONITOR_LOG = originalLog;
     await monitor.close();
     await rm(entry, { force: true });
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporaryDirectory(directory);
   });
   const lines = async () => (await readFile(log, "utf8")).trim().split("\n");
 
@@ -595,7 +610,7 @@ test("names and reads exactly one connected course while several courses are con
 });
 
 test("refuses the first read when the course binding changed between selection and dispatch", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "morrow-runtime-monitor-shift-"));
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-shift-");
   const workspaceRoot = await realpath(directory);
   const log = path.join(directory, "calls.log");
   const entry = await writeMockGateway(directory);
@@ -611,7 +626,7 @@ test("refuses the first read when the course binding changed between selection a
     else process.env.MORROW_RUNTIME_MONITOR_LOG = originalLog;
     await monitor.close();
     await rm(entry, { force: true });
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporaryDirectory(directory);
   });
 
   const connected = await monitor.start();
@@ -635,7 +650,7 @@ test("refuses the first read when the course binding changed between selection a
 });
 
 test("retries only an observed transient gateway-not-ready state before reporting installer status", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "morrow-runtime-monitor-warming-"));
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-warming-");
   const workspaceRoot = await realpath(directory);
   const log = path.join(directory, "calls.log");
   const entry = await writeMockGateway(directory);
@@ -651,7 +666,7 @@ test("retries only an observed transient gateway-not-ready state before reportin
     else process.env.MORROW_RUNTIME_MONITOR_LOG = originalLog;
     await monitor.close();
     await rm(entry, { force: true });
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporaryDirectory(directory);
   });
 
   const snapshot = await monitor.start();
@@ -663,7 +678,7 @@ test("retries only an observed transient gateway-not-ready state before reportin
 });
 
 test("requires the MCP package version and digest the gateway reads from its own payload", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "morrow-runtime-monitor-mcp-binding-"));
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-mcp-binding-");
   const workspaceRoot = await realpath(directory);
   const payload = await writePayloadGateway(directory, mcpRuntimeManifestFixture("c".repeat(64)));
   const originalMode = process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
@@ -681,7 +696,7 @@ test("requires the MCP package version and digest the gateway reads from its own
     else process.env.MORROW_RUNTIME_MONITOR_FIXTURE = originalMode;
     await monitor.close();
     await rm(payload.root, { recursive: true, force: true });
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporaryDirectory(directory);
   });
 
   assert.equal((await monitor.start()).health.gatewayReady, true);
@@ -704,7 +719,7 @@ test("requires the MCP package version and digest the gateway reads from its own
 });
 
 test("emits a bounded test-only startup trace without private runtime details", async (t) => {
-  const directory = await mkdtemp(path.join(os.tmpdir(), "morrow-runtime-monitor-trace-"));
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-trace-");
   const workspaceRoot = await realpath(directory);
   const entry = await writeMockGateway(directory);
   const tracePath = path.join(workspaceRoot, "runtime-startup-trace.json");
@@ -719,7 +734,7 @@ test("emits a bounded test-only startup trace without private runtime details", 
   t.after(async () => {
     await monitor.close();
     await rm(entry, { force: true });
-    await rm(directory, { recursive: true, force: true });
+    await removeTemporaryDirectory(directory);
   });
 
   await monitor.start();

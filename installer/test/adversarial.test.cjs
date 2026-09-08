@@ -584,8 +584,12 @@ test("a Blackboard credential folder that is a link is refused, and no secret is
   const home = path.join(root, "Home");
   const elsewhere = path.join(root, "Elsewhere");
   await fs.mkdir(elsewhere, { recursive: true });
-  await fs.mkdir(path.join(home, ".morrow"), { recursive: true, mode: 0o700 });
-  const credentials = path.join(home, ".morrow", "credentials");
+  const morrowDirectory = path.join(home, ".morrow");
+  await fs.mkdir(morrowDirectory, { recursive: true, mode: 0o700 });
+  const privateFileAccess = await import(pathToFileURL(PRIVATE_FILE_ACCESS).href);
+  assert.equal(privateFileAccess.hardenPrivateDirectory(morrowDirectory, { trustedRoot: home }), true,
+    "the fixture's app-owned ancestor must be private before the adversarial link is added");
+  const credentials = path.join(morrowDirectory, "credentials");
   await fs.symlink(elsewhere, credentials, "dir");
 
   const connection = {

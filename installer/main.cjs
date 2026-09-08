@@ -215,25 +215,35 @@ function smokePosixMode(info) {
 
 function smokeWindowsAclClassification(candidate) {
   if (process.platform !== "win32") return "not_windows";
+  const systemRoot = process.env.SystemRoot || "C:\\Windows";
+  const executable = path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
   const encodedPath = Buffer.from(candidate, "utf16le").toString("base64");
   const script = [
     "$ErrorActionPreference = 'Stop'",
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
     `$target = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encodedPath}'))`,
     "$allowed = @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value, 'S-1-5-18', 'S-1-5-32-544')",
-    "$acl = Get-Acl -LiteralPath $target",
+    "$acl = if ([IO.Directory]::Exists($target)) { [IO.Directory]::GetAccessControl($target) } elseif ([IO.File]::Exists($target)) { [IO.File]::GetAccessControl($target) } else { throw 'Private path is unavailable' }",
     "try { $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value } catch { 'unresolved_identity'; exit 0 }",
     "if ($allowed -notcontains $owner) { 'untrusted_owner'; exit 0 }",
     "$sensitive = [Security.AccessControl.FileSystemRights]::ReadData -bor [Security.AccessControl.FileSystemRights]::ReadExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::ReadAttributes -bor [Security.AccessControl.FileSystemRights]::ReadPermissions -bor [Security.AccessControl.FileSystemRights]::ExecuteFile -bor [Security.AccessControl.FileSystemRights]::WriteData -bor [Security.AccessControl.FileSystemRights]::AppendData -bor [Security.AccessControl.FileSystemRights]::WriteExtendedAttributes -bor [Security.AccessControl.FileSystemRights]::WriteAttributes -bor [Security.AccessControl.FileSystemRights]::Delete -bor [Security.AccessControl.FileSystemRights]::DeleteSubdirectoriesAndFiles -bor [Security.AccessControl.FileSystemRights]::ChangePermissions -bor [Security.AccessControl.FileSystemRights]::TakeOwnership",
     "foreach ($rule in $acl.Access) { if ($rule.AccessControlType -ne [Security.AccessControl.AccessControlType]::Allow -or (($rule.FileSystemRights -band $sensitive) -eq 0)) { continue }; try { $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } catch { 'unresolved_identity'; exit 0 }; if ($allowed -notcontains $sid) { 'additional_principal_sensitive_access_allow'; exit 0 } }",
     "'current_user_system_admin_sensitive_access_only'"
   ].join("; ");
-  const result = spawnSync("powershell.exe", [
+  const result = spawnSync(executable, [
     "-NoLogo",
     "-NoProfile",
     "-NonInteractive",
     "-EncodedCommand",
     Buffer.from(script, "utf16le").toString("base64")
-  ], { encoding: "utf8", timeout: 5_000, maxBuffer: 4 * 1024, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] });
+  ], {
+    encoding: "utf8",
+    env: { ...process.env, PSModulePath: path.win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "Modules") },
+    timeout: 30_000,
+    maxBuffer: 4 * 1024,
+    windowsHide: true,
+    stdio: ["ignore", "pipe", "ignore"]
+  });
   if (result.status !== 0) return "unavailable";
   const value = String(result.stdout || "").trim();
   return SMOKE_ACL_CLASSIFICATIONS.has(value) ? value : "unavailable";

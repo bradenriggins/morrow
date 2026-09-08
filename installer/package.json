@@ -9,6 +9,8 @@
   "main": "main.cjs",
   "scripts": {
     "test": "node test/require-dependencies.cjs && node --test --test-concurrency=2 test/*.test.cjs test/*.test.mjs",
+    "test:bounded:files": "node test/run-bounded-tests.cjs --per-file",
+    "test:bounded:suite": "node test/run-bounded-tests.cjs --suite",
     "test:layout": "node test/renderer-layout.browser.mjs",
     "package:dir": "electron-builder --config electron-builder.config.cjs --dir --publish never",
     "package:mac": "electron-builder --config electron-builder.config.cjs --mac --arm64 --publish never",
