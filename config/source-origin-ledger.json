@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "a322a6ef5cb84108b6a1591d899729def009974c",
+  "candidateCommit": "2c1857b3f8b6fba28662e8792eccabafbbbda24c",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -7667,14 +7667,14 @@
     },
     {
       "path": "scripts/test/website-content.test.mjs",
-      "sourceCommit": "2c80c23aedd5ef384878d804e6b0219310c3aafc",
+      "sourceCommit": "2c1857b3f8b6fba28662e8792eccabafbbbda24c",
       "originalPath": "scripts/test/website-content.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b915288d956220eeda1e9937d788ec4ce2bd0bdffb86074d1e6f89be5066b58d",
-      "afterDigest": "d5423308b3b0958dbdc85aae3f24c827b08d805505c42f578a2651165bc7e5d2"
+      "beforeDigest": "d5423308b3b0958dbdc85aae3f24c827b08d805505c42f578a2651165bc7e5d2",
+      "afterDigest": "c5d76e2ac2e1c0951c395401c0158fff09fd7ad4641feb289741f9c7f0d7086a"
     },
     {
       "path": "scripts/test/zero-tolerance-receipt.test.mjs",
