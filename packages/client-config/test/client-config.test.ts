@@ -13,6 +13,7 @@ import {
   morrowClientConfigNotes,
   morrowClientConfigPath,
   writeClientConfigBundle,
+  writeLocalCanvasConfig,
 } from "../src/index.js";
 
 function fileContent(bundle: ReturnType<typeof buildClientConfigBundle>, path: string): string {
@@ -65,6 +66,77 @@ describe("buildClientConfigBundle", () => {
       .toBe(join(stateDirectory, "canvas-connector.json"));
     expect(config.operationJournal.path).toBe(join(stateDirectory, "morrow.sqlite3"));
     expect(config.privacy.learnerVaultPath).toBe(join(stateDirectory, "learner-vault.json"));
+  });
+
+  it("upgrades an unchanged generated local configuration and refuses a custom one", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-local-upgrade-"));
+    const repositoryRoot = join(directory, "current-app");
+    const oldRepositoryRoot = join(directory, "prior-app");
+    const stateDirectory = join(directory, "State");
+    const upstreamConfigPath = join(stateDirectory, "morrow.upstreams.json");
+    const oldNode = join(oldRepositoryRoot, "runtime", "node");
+    const currentNode = join(repositoryRoot, "runtime", "node");
+    try {
+      for (const relative of [
+        "packages/mcp-server/dist/index.js",
+        "packages/canvas-connector-mcp/dist/index.js",
+        "artifacts/canvas-api/canvas-api-catalog.json",
+        "connector/extension/manifest.json",
+      ]) {
+        const target = join(repositoryRoot, relative);
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, "fixture\n", "utf8");
+      }
+      await mkdir(stateDirectory, { recursive: true });
+      const canonicalStateDirectory = await realpath(stateDirectory);
+      await writeFile(
+        upstreamConfigPath,
+        `${JSON.stringify(buildLocalCanvasConfig(oldRepositoryRoot, oldNode, canonicalStateDirectory), null, 2)}\n`,
+        "utf8",
+      );
+
+      expect(writeLocalCanvasConfig({
+        repositoryRoot,
+        path: upstreamConfigPath,
+        nodeCommand: currentNode,
+        stateDirectory,
+        replaceGenerated: true,
+      })).toMatchObject({ changed: true, stateDirectory: canonicalStateDirectory });
+      expect(JSON.parse(await readFile(upstreamConfigPath, "utf8")))
+        .toEqual(buildLocalCanvasConfig(repositoryRoot, currentNode, canonicalStateDirectory));
+
+      const custom = buildLocalCanvasConfig(oldRepositoryRoot, oldNode, canonicalStateDirectory) as {
+        filters: { excludeNames: string[] };
+      };
+      custom.filters.excludeNames.push("custom_tool");
+      const customText = `${JSON.stringify(custom, null, 2)}\n`;
+      await writeFile(upstreamConfigPath, customText, "utf8");
+      expect(() => writeLocalCanvasConfig({
+        repositoryRoot,
+        path: upstreamConfigPath,
+        nodeCommand: currentNode,
+        stateDirectory,
+        replaceGenerated: true,
+      })).toThrow(/Refusing to replace existing Morrow configuration/);
+      expect(await readFile(upstreamConfigPath, "utf8")).toBe(customText);
+
+      await writeFile(
+        upstreamConfigPath,
+        `${JSON.stringify(buildLocalCanvasConfig(oldRepositoryRoot, oldNode, canonicalStateDirectory), null, 2)}\n`,
+        "utf8",
+      );
+      const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+      const upgraded = spawnSync(process.execPath, [
+        cliPath, "setup", "--json", "--replace-generated", "--repository", repositoryRoot,
+        "--upstreams", upstreamConfigPath, "--state-directory", stateDirectory, "--node", currentNode,
+      ], { encoding: "utf8" });
+      expect(upgraded.status).toBe(0);
+      expect(JSON.parse(upgraded.stdout)).toMatchObject({ changed: true, path: upstreamConfigPath });
+      expect(JSON.parse(await readFile(upstreamConfigPath, "utf8")))
+        .toEqual(buildLocalCanvasConfig(repositoryRoot, currentNode, canonicalStateDirectory));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("generates deterministic ChatGPT/Codex, Claude, Gemini, Cursor, and VS Code configurations", () => {

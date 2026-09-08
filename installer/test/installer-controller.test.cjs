@@ -669,6 +669,8 @@ test("repair rebuilds a Bridge folder that was removed and re-issues its active-
   assert.equal(state.runtime.status, "ready");
   assert.deepEqual(globalThis.__morrowRepairOrder, ["monitor", "closed", "monitor"]);
   assert.deepEqual(calls.map((entry) => entry[0]), ["setup"]);
+  assert.equal(calls[0].includes("--replace-generated"), true,
+    "repair allows the setup CLI to replace only an unchanged generated local settings file");
 
   const after = await bridgeRecord();
   assert.notEqual(after.activeFolderChallenge.challengeId, before.activeFolderChallenge.challengeId);

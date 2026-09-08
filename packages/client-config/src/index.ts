@@ -647,6 +647,8 @@ export function writeLocalCanvasConfig(input: {
   /** Existing durable directory for keys, journal, connector state, and learner vault. */
   readonly stateDirectory?: string;
   readonly force?: boolean;
+  /** Replace only an unchanged local settings file produced by this generator. */
+  readonly replaceGenerated?: boolean;
 }): LocalCanvasConfiguration {
   const repositoryRoot = exactAbsolutePath(input.repositoryRoot, "repositoryRoot");
   const path = input.path ? exactAbsolutePath(input.path, "configuration path") : resolve(repositoryRoot, "morrow.upstreams.json");
@@ -661,11 +663,26 @@ export function writeLocalCanvasConfig(input: {
     [resolve(extensionPath, "manifest.json"), "Chrome connector extension"],
   ] as const) assertRegularFile(candidate, label);
   const content = jsonFile(buildLocalCanvasConfig(repositoryRoot, input.nodeCommand, stateDirectory));
-  if (existsSync(path)) {
-    if (readFileSync(path, "utf8") === content) return { path, extensionPath, stateDirectory, changed: false };
-    if (input.force !== true) throw new Error(`Refusing to replace existing Morrow configuration at ${path}`);
+  const current = currentFileText(path);
+  if (current.exists) {
+    if (current.content === content) return { path, extensionPath, stateDirectory, changed: false };
+    let generated = false;
+    if (input.replaceGenerated === true) {
+      try {
+        const parsed = JSON.parse(current.content) as Record<string, unknown>;
+        const upstreams = Array.isArray(parsed?.upstreams) ? parsed.upstreams : [];
+        const upstream = upstreams.length === 1 && upstreams[0] && typeof upstreams[0] === "object" && !Array.isArray(upstreams[0])
+          ? upstreams[0] as Record<string, unknown>
+          : null;
+        generated = typeof upstream?.cwd === "string" && typeof upstream.command === "string"
+          && isDeepStrictEqual(parsed, buildLocalCanvasConfig(upstream.cwd, upstream.command, stateDirectory));
+      } catch {
+        generated = false;
+      }
+    }
+    if (input.force !== true && !generated) throw new Error(`Refusing to replace existing Morrow configuration at ${path}`);
   }
-  writePrivateText(path, content);
+  writePrivateText(path, content, current);
   return { path, extensionPath, stateDirectory, changed: true };
 }
 

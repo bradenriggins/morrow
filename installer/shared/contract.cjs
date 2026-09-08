@@ -41,7 +41,7 @@ const PUBLIC_ERRORS = Object.freeze({
   },
   existing_morrow_configuration: {
     message: "Morrow is already set up differently.",
-    recovery: "Your existing assistant settings were left unchanged. Review that setup before trying again."
+    recovery: "Morrow left the existing settings unchanged. Review that setup before trying again."
   },
   assistant_configuration_changed: {
     message: "That assistant's settings file changed after Morrow wrote it.",

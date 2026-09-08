@@ -806,7 +806,7 @@ class InstallerController {
       env: this.childEnvironment()
     });
     if (result.code !== 0) {
-      if (/Refusing to replace existing Morrow server/i.test(result.stderr)) throw errorDetails("existing_morrow_configuration");
+      if (/Refusing to replace existing Morrow (?:server|configuration)/i.test(result.stderr)) throw errorDetails("existing_morrow_configuration");
       throw errorDetails("setup_failed");
     }
   }
@@ -835,7 +835,7 @@ class InstallerController {
       await this.ensureRuntime();
       await this.executeCli([
         "setup", "--repository", this.paths.appRoot, "--upstreams", this.paths.upstreams, "--node", this.paths.node,
-        "--state-directory", this.paths.state, "--json"
+        "--state-directory", this.paths.state, "--replace-generated", "--json"
       ]);
     } catch (error) {
       if (error.code) throw error;
@@ -1168,7 +1168,7 @@ class InstallerController {
   async repairAssistantConfiguration(record) {
     await this.executeCli([
       "setup", "--repository", this.paths.appRoot, "--upstreams", this.paths.upstreams, "--node", this.paths.node,
-      "--state-directory", this.paths.state, "--json"
+      "--state-directory", this.paths.state, "--replace-generated", "--json"
     ]);
     const assistant = ASSISTANTS.find((candidate) => candidate.id === record.selectedAssistantId);
     if (!assistant || assistant.id === "claude-desktop") return;

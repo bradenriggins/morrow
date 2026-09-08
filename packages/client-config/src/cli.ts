@@ -24,6 +24,7 @@ interface SharedOptions extends ClientConfigBundleOptions {
   readonly clientProject?: string;
   readonly stateDirectory?: string;
   readonly force: boolean;
+  readonly replaceGenerated: boolean;
 }
 
 function usage(): string {
@@ -59,6 +60,7 @@ function usage(): string {
     "  --tool-timeout <sec>      Codex tool timeout. Defaults to 900.",
     "  --gemini-timeout <ms>     Gemini request timeout. Defaults to tool timeout in milliseconds.",
     "  --force                   Replace existing generated bundle files only.",
+    "  --replace-generated       Replace an unchanged Morrow-generated local settings file.",
     "  --json                    Emit machine-readable output where supported.",
     "  --help                    Show this help.",
     "",
@@ -214,6 +216,7 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
   let toolTimeoutSeconds: number | undefined;
   let geminiTimeoutMilliseconds: number | undefined;
   let force = false;
+  let replaceGenerated = false;
   let json = false;
 
   for (let index = 0; index < args.length; index += 1) {
@@ -224,6 +227,10 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
     }
     if (flag === "--force") {
       force = true;
+      continue;
+    }
+    if (flag === "--replace-generated") {
+      replaceGenerated = true;
       continue;
     }
     if (flag === "--json") {
@@ -264,6 +271,7 @@ function parseSharedOptions(args: readonly string[]): { readonly options: Shared
       ...(toolTimeoutSeconds !== undefined ? { toolTimeoutSeconds } : {}),
       ...(geminiTimeoutMilliseconds !== undefined ? { geminiTimeoutMilliseconds } : {}),
       force,
+      replaceGenerated,
     },
     json,
   };
@@ -277,6 +285,7 @@ function requireUpstreams(options: SharedOptions): ClientConfigBundleOptions {
   const {
     outputDirectory: _outputDirectory,
     force: _force,
+    replaceGenerated: _replaceGenerated,
     clientProject: _clientProject,
     stateDirectory: _stateDirectory,
     ...bundle
@@ -466,6 +475,7 @@ async function run(): Promise<void> {
       ...(options.nodeCommand ? { nodeCommand: options.nodeCommand } : {}),
       ...(options.stateDirectory ? { stateDirectory: options.stateDirectory } : {}),
       force: options.force,
+      replaceGenerated: options.replaceGenerated,
     });
     const result = {
       schema: "morrow.setup.v1",
