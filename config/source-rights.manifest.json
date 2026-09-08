@@ -27,7 +27,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "5b02630cb2871b41b359ef008e060ae10aea771091daad17fc1a8b56a8ca46e3",
+      "sha256": "55bd8be59688037c1e8a3a115ba0656ba965c8821cab0b74ac9d91efd962a0cd",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
@@ -157,49 +157,49 @@
     },
     {
       "path": "connector/extension/onboarding/onboarding-state.js",
-      "sha256": "67e9fd2efc7aa09d245812ce17d593931b69a993b1fda087036863835b2254a5",
+      "sha256": "835dcaa3bfa18c2e0a878a8bdf55d4962d01a4d11798b3201949b9f908c32a3b",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/onboarding/onboarding.css",
-      "sha256": "7b9fd00d73d81f58f06ee0477652391fdbbd7a9177a771c8355da402870d6e57",
+      "sha256": "cbba881d9104d2334d06dfa01f56f6bd5794bd7dd2d85a425f17179f6b55c1ec",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/onboarding/onboarding.html",
-      "sha256": "b22ae17b0e91986846422d765131f1d494164dd38f9f8d773e4654899a31a61c",
+      "sha256": "3a6ff1bd63dc00b7ad11b7350ad57dd332fe4dde9da8555a7c5863b558bda033",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/onboarding/onboarding.js",
-      "sha256": "f8bbc18e0792aa57ad4bc4540a260b35c01c9ccff3fd0fda372b8270fc72680f",
+      "sha256": "412530f03bf260de8c7cc9e0972bc262964c3d8327fa27a29c2d9a90095859d3",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/popup/popup-view.js",
-      "sha256": "5a4388d77782e84ba1a6a6aeea1f5e34778a6db8a4958fc06b6c424546697c5f",
+      "sha256": "339f2221024e64828a32a64f33153445c3d6548142a8645c2e84fe8f757ab81e",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/popup/popup.css",
-      "sha256": "45aff31b70e4e59c6a6f165b049f6087d5faf7f999f3438806777124ba7573a9",
+      "sha256": "92fb7c6df0379f3a27209f92bddb0fbac4946371b2786de905152c19ce8b162d",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/popup/popup.html",
-      "sha256": "a71b90f83757c0056ff9eb9d017d7d7e246400d350725cef50057146597cc580",
+      "sha256": "b624186c1f91ea7fd2b3d49890b76de7c4a5e415692d121f94a4823b505c1474",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/popup/popup.js",
-      "sha256": "4c7651518ae67ff13357cfa9cb2dd5b9aa1f6fbaf7d5b3717187920427e50eb7",
+      "sha256": "ea69f246cf1b597d1860f40ca0de18dc747b42579f7c2ee9b8e4904b0d2b2ae3",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
@@ -235,25 +235,25 @@
     },
     {
       "path": "connector/extension/settings/settings.html",
-      "sha256": "e4a14a1184fa64fc4942afaa90862ac60fc4b9fcd5b5cfab3fc9dff3f5743d9d",
+      "sha256": "349d404dbae26580c62bac17af684ff21677feae7d78380e407ab7d96526f7bf",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/settings/settings.js",
-      "sha256": "0e0f5b2a07e0e73f67df729b428d669378237541213d7205b3bb3936ccc448e9",
+      "sha256": "c0cf00dbf5ec100a463e4b42c674c71c7bf55c1ebc46cbee7f59bd540c4d9557",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/src/bridge-maintenance.js",
-      "sha256": "ffe24cf2c2ec81ef4bf3e28e734e0b2ce8d468a7d6c31eba36413dabb2890b5f",
+      "sha256": "651ae461b9a13b365f53a3ffab559cd233cedc4098215032ee370759ae4682a6",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
     {
       "path": "connector/extension/src/bridge-problem-copy.js",
-      "sha256": "4f1a2d44b947cd4f2cd807245e284c27a6f37ae98e05e950cacec710de594eb6",
+      "sha256": "3107df57db092b3b9d67cf1827f3c21c986cc5eaa13613e7876ab3b93ff62a6e",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
@@ -314,6 +314,12 @@
     {
       "path": "connector/extension/src/course-connection-intent.js",
       "sha256": "85251573afed35c14981ecb4879aebabdbadd8efe586f254c67f0a7e4dff461a",
+      "disposition": "direct_owned",
+      "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
+    },
+    {
+      "path": "connector/extension/src/course-data-consent.js",
+      "sha256": "824491ef6c20f0d8a3d8e2aae3a5b40b0c2d0dac6376595cf7a4a7ae18e71adf",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
@@ -607,7 +613,7 @@
     },
     {
       "path": "connector/extension/src/service-worker.js",
-      "sha256": "156371a2e0930392d59a7fff535f06813fddab1f8da72e6179439febc048bd8e",
+      "sha256": "54b7eddf64feb544f147f731fe5a6a957622a3f11921da49d91faf6f632798cf",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
@@ -901,7 +907,7 @@
     },
     {
       "path": "packages/bridge-loopback/src/index.ts",
-      "sha256": "792ed2f8b0c7ab252e7b2ee3ef643554cdb41eefd893c5d05d1e32055beedc24",
+      "sha256": "fc2bce4d776889ebbb77bfa477f4ef35ca83b153b7d917480c49f4545d5f53e7",
       "disposition": "adapted_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
@@ -1075,7 +1081,7 @@
     },
     {
       "path": "packages/gateway-core/src/private-file-access.ts",
-      "sha256": "0fc0b059148bb80db2070d5cfaccb30746445b5653d7e0d725c06157b871b1dd",
+      "sha256": "c74ff0fcf45d8cd3a5985428e5897b66b7842de64fff10451fc7e2e4cac9bfd6",
       "disposition": "adapted_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
@@ -1393,7 +1399,7 @@
     },
     {
       "path": "packages/mcp-server/src/morrow-runtime.ts",
-      "sha256": "26620860d470a0c26f94f3c61b7ca2aec7b34aafb7de6f1c98999cfa07ee3766",
+      "sha256": "a7891812c3dcdbc49f41e6ca9caa39c8d682f51f498fb15a257c0595058d7f9b",
       "disposition": "adapted_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
@@ -1573,7 +1579,7 @@
     },
     {
       "path": "scripts/package-mcp-bundle.mjs",
-      "sha256": "2a0dfc2c35af2e7c8c20b25996de368b8a0a0213722432ad39eb310a22323659",
+      "sha256": "f79f750a7f27f99aad87917bdaa1fe5bfebc7995486c553611488ca7d60458fc",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.0 publication; reviewer=Codex technical source review; source=HEAD"
     },
