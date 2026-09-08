@@ -652,13 +652,13 @@ test("/download gives each computer its exact v1.0.0 release link and plain inst
   }
 });
 
-test("the release download copy uses no em dash and keeps the homepage headline exact", { skip }, () => {
+test("the release download copy uses no em dash and keeps the direct homepage headline exact", { skip }, () => {
   for (const file of ["download.html", "how-it-works.html", "styles.css"]) {
     assert.doesNotMatch(readFileSync(new URL(file, site), "utf8"), /\u2014/, `${file} must not contain an em dash`);
   }
   assert.match(
     homePage(),
-    /<h1 id="hero-title">Connect your own ChatGPT and Claude to your Canvas, Moodle, and Blackboard courses\.<\/h1>/,
+    /<h1 id="hero-title">Morrow connects your own ChatGPT and Claude to the courses you manage\.<\/h1>/,
     "the homepage headline is approved copy and must remain exact",
   );
   assert.match(
@@ -670,6 +670,11 @@ test("the release download copy uses no em dash and keeps the homepage headline 
     homePage(),
     /Morrow starts in Plan, where each proposed change waits for you before it is saved\./,
     "the removed Plan sentence must not return to the homepage hero",
+  );
+  assert.match(
+    pageSource("styles.css"),
+    /\.hero h1 \{ font-size: clamp\(2rem, 8\.5vw, 2\.25rem\); \}/,
+    "the mobile homepage title must keep its balanced smaller size",
   );
 });
 
@@ -742,6 +747,42 @@ test("the GitHub header control and free and open source promise stay visible", 
   }
   assert.deepEqual(problems, [], "keep the established GitHub header control and the plain footer source link on every page");
   assert.ok(visibleText(pageSource("build.html")).includes("Morrow is and always will be free and open source."));
+
+  const heroCopy = pageSource("index.html").match(/<div class="hero-copy">([\s\S]*?)<ul class="hero-proof">/)?.[1] ?? "";
+  assert.match(
+    heroCopy,
+    /^\s*<p>Ask for real course work in ChatGPT, Claude, or Gemini\.[\s\S]*?<\/p>\s*<p class="hero-note">Morrow is and always will be free and open source\.<\/p>\s*$/,
+    "the homepage promise must follow the hero subtext and precede the proof list",
+  );
+
+  const valueItems = [...pageSource("index.html").matchAll(/<ul class="hero-proof">([\s\S]*?)<\/ul>/g)]
+    .flatMap((match) => [...match[1].matchAll(/<li>([\s\S]*?)<\/li>/g)].map((item) => visibleText(item[1])));
+  assert.deepEqual(valueItems, [
+    "Turn a syllabus, readings, and faculty notes into organized lessons, activities, and assessments.",
+    "Review an existing course for accessibility problems, missing instructions, inconsistent dates, and differences between sections.",
+    "See the exact pages, assignments, quizzes, discussions, or dates before Morrow saves any change.",
+    "After an approved change, see what changed, what stayed untouched, and what still needs you.",
+  ], "the homepage hero must lead with four concrete course-work results");
+});
+
+test("each marketing page starts with a direct Morrow action or result", { skip }, () => {
+  const expected = new Map([
+    ["features.html", "Morrow helps you build, review, and improve the courses you manage."],
+    ["for-curriculum-developers.html", "Morrow traces one learning outcome across your program."],
+    ["for-instructional-designers.html", "Morrow builds one course and helps you improve fourteen more."],
+    ["for-instructors.html", "Morrow checks all your course sections in one request."],
+    ["for-lms-admins.html", "Morrow compares every course section in one request."],
+    ["for-qa-teams.html", "Morrow finds repeated course problems and helps you fix the cause."],
+    ["for-teams.html", "Morrow helps your team coordinate work across a program."],
+    ["how-it-works.html", "Connect Morrow to your assistant and courses in six steps."],
+    ["remote.html", "Morrow keeps your course work moving from your phone."],
+  ]);
+
+  const actual = new Map([...expected.keys()].map((file) => {
+    const heading = pageSource(file).match(/<h1(?:\s[^>]*)?>([\s\S]*?)<\/h1>/)?.[1] ?? "";
+    return [file, visibleText(heading)];
+  }));
+  assert.deepEqual(actual, expected);
 });
 
 
