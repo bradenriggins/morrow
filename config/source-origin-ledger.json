@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "d6210ac11b01af8ccc462a3ebe69470118f07bb8",
+  "candidateCommit": "60089e77d52b2acfe280c38f227d032ae903e544",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -115,14 +115,14 @@
     },
     {
       "path": "README.md",
-      "sourceCommit": "36207499cd4f29d1b8f8a5d61d13b494e7381f89",
+      "sourceCommit": "6d6c044dcbfdb0cd715ec4ae73767732cbcbb8b8",
       "originalPath": "README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "212f22980843f1feacd7d8e1adaa766571a195da74c588db312d0f4f66bcab3f",
-      "afterDigest": "c9f86d726348e202dfec55ea8536ea8549e6220727069b345e670ea39648dfb3"
+      "beforeDigest": "c9f86d726348e202dfec55ea8536ea8549e6220727069b345e670ea39648dfb3",
+      "afterDigest": "5b02630cb2871b41b359ef008e060ae10aea771091daad17fc1a8b56a8ca46e3"
     },
     {
       "path": "SOURCE-ORIGIN.md",
@@ -236,14 +236,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "d6210ac11b01af8ccc462a3ebe69470118f07bb8",
+      "sourceCommit": "60089e77d52b2acfe280c38f227d032ae903e544",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "b246244cca7bbc2b2d5cd1f8ad0a558a692ff3d76d3ca01f7296f3ea6bc031d1",
-      "afterDigest": "12cb505324323969f9bb3dd454e2a27df027e75e779c2de692ca7ff488b18980"
+      "beforeDigest": "12cb505324323969f9bb3dd454e2a27df027e75e779c2de692ca7ff488b18980",
+      "afterDigest": "9484034c739fb28bac5ea1946dfc64519ff6492c6ece8f6caee883a05b1f5cca"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -379,14 +379,14 @@
     },
     {
       "path": "connector/extension/manifest.json",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "6d6c044dcbfdb0cd715ec4ae73767732cbcbb8b8",
       "originalPath": "connector/extension/manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cee8e8fc5f1a66cd33f7ebecc0a27f78fab8f924f8f6911b4783534ea5478224",
-      "afterDigest": "4411e66e933be9d3496700455778663a1e65d4899ce81914e2afc382583bbf6f"
+      "beforeDigest": "4411e66e933be9d3496700455778663a1e65d4899ce81914e2afc382583bbf6f",
+      "afterDigest": "963facac292622f9f2a69b43c172bb0fcf49d924f94b2f9f1e357ebde6b9436c"
     },
     {
       "path": "connector/extension/onboarding/onboarding-install.js",
@@ -6312,14 +6312,14 @@
     },
     {
       "path": "scripts/package-mcp-bundle.mjs",
-      "sourceCommit": "a2ce1a448c15b4e6d6dd684618d28cbedbf30bb1",
+      "sourceCommit": "6d6c044dcbfdb0cd715ec4ae73767732cbcbb8b8",
       "originalPath": "scripts/package-mcp-bundle.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "ed5abae5baef9c5ff7547fe2c2c554899ec71a21c504e19f5865568be7ae4df0",
-      "afterDigest": "87a29e647a1199a6eef6ee4db1d0e7d16348ac9386a3b358e256ace5f4510683"
+      "beforeDigest": "87a29e647a1199a6eef6ee4db1d0e7d16348ac9386a3b358e256ace5f4510683",
+      "afterDigest": "2a0dfc2c35af2e7c8c20b25996de368b8a0a0213722432ad39eb310a22323659"
     },
     {
       "path": "scripts/package-profile.mjs",
