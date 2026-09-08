@@ -662,6 +662,11 @@ test("the release download copy uses no em dash and keeps the homepage headline 
     /<h1 id="hero-title">Connect your own ChatGPT and Claude to your Canvas, Moodle, and Blackboard courses\.<\/h1>/,
     "the homepage headline is approved copy and must remain exact",
   );
+  assert.doesNotMatch(
+    homePage(),
+    /Morrow starts in Plan, where each proposed change waits for you before it is saved\./,
+    "the removed Plan sentence must not return to the homepage hero",
+  );
 });
 
 test("no product page tells the reader to type an address or run a command", { skip }, () => {
