@@ -3158,6 +3158,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
   let uploadDispatched = false;
   let uploadStatus;
   let uploadObserver;
+  let uploadHost;
   try {
     const execute = async (input) => {
       const [execution] = await chrome.scripting.executeScript({
@@ -3179,6 +3180,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
     }
     const uploadUrl = privateCanvasSignedUploadUrl(prepared.data.upload_url);
     if (!uploadUrl) return { ok: false, sent: false, error: "canvas_hot_spot_upload_url_refused" };
+    uploadHost = uploadUrl.hostname;
     uploadObserver = observeCanvasUploadConfirmation(uploadUrl, binding.origin, controller.signal, "PUT");
     if (!uploadObserver) return { ok: false, sent: false, error: "canvas_hot_spot_upload_observer_unavailable" };
     const bytes = Uint8Array.from(atob(privateAttachment.bytes_base64), (character) => character.charCodeAt(0));
@@ -3208,6 +3210,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
       return {
         ok: false, sent: true, outcomeUnknown: canvasWriteOutcomeUncertain(uploadStatus),
         ...(Number.isInteger(uploadStatus) ? { status: uploadStatus } : {}),
+        upload_host: uploadHost,
         error: observed.error || "canvas_hot_spot_upload_refused",
       };
     }
@@ -3253,6 +3256,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
         interaction_type_slug: "hot-spot",
         image_url: created.data.image_url,
         sha256: privateAttachment.manifest.sha256,
+        upload_host: uploadHost,
       },
     };
   } catch (error) {
@@ -3261,6 +3265,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
       sent: uploadDispatched,
       outcomeUnknown: uploadDispatched,
       ...(Number.isInteger(uploadStatus) ? { status: uploadStatus } : {}),
+      ...(uploadDispatched ? { upload_host: uploadHost } : {}),
       error: controller.signal.aborted ? "canvas_hot_spot_transfer_timeout" : "canvas_hot_spot_transfer_interrupted",
     };
   } finally {

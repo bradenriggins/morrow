@@ -17,6 +17,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     ? value
     : "";
   const sha256 = async (bytes) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const isOwnToken = (value) => /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(value);
   const failure = (error, sent = false, outcomeUnknown = false, status) => ({
     schema: "morrow.canvas-course-file-transfer.v1",
     ok: false,
@@ -259,6 +260,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       data: { course_id: Number(courseId), folder_id: Number(folderId), file: finalized.file, sha256: attachment.sha256 },
     };
   } catch (error) {
-    return failure(String(error?.message || error), uploadDispatched, uploadDispatched, uploadStatus);
+    const message = String(error?.message || error);
+    return failure(isOwnToken(message) ? message : "canvas_file_transfer_execution_failed", uploadDispatched, uploadDispatched, uploadStatus);
   }
 }

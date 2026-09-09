@@ -182,7 +182,7 @@ test("marks the effect unknown after a dispatched byte upload loses contact", as
     assert.equal(result.ok, false);
     assert.equal(result.sent, true);
     assert.equal(result.outcomeUnknown, true);
-    assert.equal(result.error, "storage connection lost");
+    assert.equal(result.error, "canvas_file_transfer_execution_failed");
     assert.equal(requests.length, 5);
   } finally {
     globalThis.fetch = priorFetch;

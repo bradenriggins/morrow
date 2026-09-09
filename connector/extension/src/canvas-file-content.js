@@ -14,6 +14,7 @@ export function canvasFileTextContentTypeSupported(value) {
  * needs must remain inside this lexical scope.
  */
 export async function executeCanvasCourseFileTextInPage(input) {
+  const isOwnToken = (value) => /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(value);
   const decimalId = (value) => {
     const id = String(value || "");
     return /^[1-9][0-9]*$/.test(id) ? id : "";
@@ -84,7 +85,8 @@ export async function executeCanvasCourseFileTextInPage(input) {
       ...(input.includeDownloadUrl === true ? { downloadUrl: canonicalDownloadUrl(file.url, canvasOrigin, fileId) } : {}),
     };
   } catch (error) {
-    return { ok: false, error: String(error?.message || error) };
+    const message = String(error?.message || error);
+    return { ok: false, error: isOwnToken(message) ? message : "canvas_file_text_execution_failed" };
   }
 }
 

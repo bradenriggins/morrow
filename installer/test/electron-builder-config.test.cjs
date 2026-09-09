@@ -47,7 +47,7 @@ const UPDATE_FEED = {
   feedId: "morrow-github-stable",
   provider: "github",
   owner: "example-owner",
-  repo: "morrow",
+  repo: "morrow-downloads",
   channel: "latest"
 };
 
@@ -221,7 +221,7 @@ test("the build publishes to, and looks for updates on, the GitHub stable feed",
   assert.deepEqual(config.publish, [{
     provider: "github",
     owner: "example-owner",
-    repo: "morrow",
+    repo: "morrow-downloads",
     channel: "latest",
     releaseType: "release"
   }]);

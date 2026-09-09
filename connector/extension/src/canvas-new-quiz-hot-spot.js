@@ -39,6 +39,7 @@ export function unsignedHotSpotImageUrl(value) {
  * worker can observe that cross-origin response.
  */
 export async function executeCanvasNewQuizHotSpotInPage(input) {
+  const isOwnToken = (value) => /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(value);
   const plainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   const decimalId = (value) => {
     const id = String(value ?? "");
@@ -299,8 +300,9 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
       },
     };
   } catch (error) {
+    const message = String(error?.message || error);
     return failure(
-      String(error?.message || error),
+      isOwnToken(message) ? message : "canvas_hot_spot_execution_failed",
       createDispatched,
       createDispatched && canvasWriteOutcomeUncertain(createStatus),
       createStatus,

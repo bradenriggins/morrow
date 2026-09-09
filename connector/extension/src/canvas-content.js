@@ -7,6 +7,12 @@
   // Total Canvas pages one resumed list sequence may read across every bounded call.
   const MAX_RESUMED_PAGES = 500;
   const MAX_DISCOVERED_COURSES = 100;
+  // Every deliberate error this connector throws leads with a lowercase,
+  // underscore-joined token (e.g. "canvas_x_y", optionally followed by free
+  // text). A genuine unexpected exception (a browser TypeError, a network
+  // failure, a JSON parse error) is an English sentence and never starts that
+  // way, so it is safe to replace anything else with a fixed token.
+  const MORROW_OWN_ERROR_TOKEN = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+/;
 
   /* BEGIN GENERATED NEW QUIZ ITEM PAYLOAD CONTRACT */
   // Generated from packages/mcp-server/src/quiz-item-payload.ts sha256:20807f46b8e445f6e2486011f575a4638e37227600efa5036afbbf5e6391a10c
@@ -3296,7 +3302,10 @@
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type === "morrow_canvas_probe") {
-      canvasProfile(true).then((profile) => sendResponse({ ok: true, profile }), (error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+      canvasProfile(true).then((profile) => sendResponse({ ok: true, profile }), (error) => {
+        const text = String(error?.message || error);
+        sendResponse({ ok: false, error: MORROW_OWN_ERROR_TOKEN.test(text) ? text : "canvas_probe_execution_failed" });
+      });
       return true;
     }
     if (message?.type === "morrow_canvas_execute") {
@@ -3305,17 +3314,26 @@
         return false;
       }
       executeCanvas(message.operation, message.arguments || {}, message.principalId, message.expiresAt, message.courseId)
-        .then((result) => sendResponse(result), (error) => sendResponse({ ok: false, sent: false, error: String(error?.message || error) }));
+        .then((result) => sendResponse(result), (error) => {
+          const text = String(error?.message || error);
+          sendResponse({ ok: false, sent: false, error: MORROW_OWN_ERROR_TOKEN.test(text) ? text : "canvas_operation_execution_failed" });
+        });
       return true;
     }
     if (message?.type === "morrow_canvas_list_courses") {
       Promise.all([canvasProfile(), listCourses(message.page)])
-        .then(([profile, result]) => sendResponse({ ok: true, profile, ...result }), (error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+        .then(([profile, result]) => sendResponse({ ok: true, profile, ...result }), (error) => {
+          const text = String(error?.message || error);
+          sendResponse({ ok: false, error: MORROW_OWN_ERROR_TOKEN.test(text) ? text : "canvas_list_courses_execution_failed" });
+        });
       return true;
     }
     if (message?.type === "morrow_canvas_check_course") {
       checkedCourse(message.courseId)
-        .then((result) => sendResponse({ ok: true, ...result }), (error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+        .then((result) => sendResponse({ ok: true, ...result }), (error) => {
+          const text = String(error?.message || error);
+          sendResponse({ ok: false, error: MORROW_OWN_ERROR_TOKEN.test(text) ? text : "canvas_check_course_execution_failed" });
+        });
       return true;
     }
     return false;

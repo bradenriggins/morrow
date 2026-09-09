@@ -19,7 +19,7 @@ const UPDATE_FEED = Object.freeze({
   id: "morrow-github-stable",
   provider: "github",
   owner: "example-owner",
-  repo: "morrow",
+  repo: "morrow-downloads",
   channel: "latest"
 });
 const TEST_ROOT_ARGUMENT = process.argv.find((value) => value.startsWith("--morrow-test-root="));
