@@ -470,7 +470,9 @@ describe("MorrowRuntime durable batches", () => {
     }
   // This integration starts the real connector child process and a WebSocket Bridge.
   // Full workspace concurrency can exceed Vitest's five-second default before its assertions run.
-  }, 15_000);
+  // A shared CI runner is slower than a dev machine under that same concurrency, so this needs
+  // more headroom than 15s gave locally.
+  }, 30_000);
 
   it("redacts learner identities at reachable MCP boundaries for exact multi-course bindings", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-mcp-privacy-boundary-"));

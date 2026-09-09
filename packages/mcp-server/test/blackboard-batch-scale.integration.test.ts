@@ -2,7 +2,7 @@ import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { createServer } from "node:https";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -88,7 +88,12 @@ interface BlackboardFixture {
 }
 
 async function createFixture(): Promise<BlackboardFixture> {
-  const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-batch-scale-"));
+  // Anchored under the real home directory, not the OS temp directory: the
+  // spawned blackboard-learn-api process's own home is faked to a subdirectory
+  // of this one, and its config-privacy check walks every real ancestor up to
+  // filesystem root, which fails under Linux's world-writable /tmp but not
+  // under a real home directory's private ancestor chain.
+  const directory = await mkdtemp(join(homedir(), ".morrow-blackboard-batch-scale-test-"));
   const certificate = await readFile(TEST_CERTIFICATE);
   const key = await readFile(TEST_KEY);
   const contents = new Map<string, JsonObject>();

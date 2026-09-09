@@ -1,7 +1,7 @@
 import { once } from "node:events";
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:https";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
@@ -77,7 +77,10 @@ async function createFixture(): Promise<{
   readonly counts: () => { readonly patch: number; readonly requests: readonly string[] };
   readonly close: () => Promise<void>;
 }> {
-  const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-gateway-"));
+  // Real home, not the OS temp dir: the spawned blackboard-learn-api
+  // process's config-privacy check walks every real ancestor to filesystem
+  // root, which fails under Linux's world-writable /tmp.
+  const directory = await mkdtemp(join(homedir(), ".morrow-blackboard-gateway-test-"));
   const certificate = await readFile(TEST_CERTIFICATE);
   const key = await readFile(TEST_KEY);
   const requests: string[] = [];
