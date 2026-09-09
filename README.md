@@ -1,5 +1,9 @@
 # Morrow
 
+[![CI](https://github.com/example-owner/morrow/actions/workflows/ci.yml/badge.svg)](https://github.com/example-owner/morrow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/example-owner/morrow)](LICENSE)
+[![Website](https://img.shields.io/badge/website-meetmorrow.app-1f6feb)](https://meetmorrow.app)
+
 Morrow connects the AI assistant you already use to your Canvas and Moodle courses, and to a configured Blackboard course.
 
 **Current state:** Morrow works with Canvas and Moodle through the signed-in Chrome connection and with Blackboard through the official Anthology Learn REST API; Canvas has selected live test-course proof, part of the Moodle catalog has been checked on a signed-in Moodle test course, and no live Blackboard tenant has been tested. Morrow works with the Canvas and Moodle courses your own signed-in account can open, and it acts only with that account's permissions. The test courses named in this file are Morrow's own verification evidence. They are not a rule about which of your courses you can connect. Of the 250 Moodle operations, 31 have been checked on a signed-in Moodle test course and the other 219 pass local browser fixtures only; the [Moodle capability surface](#moodle-capability-surface) lists both sets. A reviewed Moodle Resource upload takes one workspace file of at most 1 MiB. Moodle file support also replaces the file of a Resource, deletes one extra Resource file, adds up to 8 reviewed files of at most 1 MiB together to one Folder path, creates one empty subfolder, and replaces one hidden H5P package, each with browser-fixture proof only; it has no editor-attachment route. The assistant file planners stage Resource replacement, multiple Folder files, hidden SCORM replacement, and hidden H5P replacement for review. Blackboard needs an Anthology Learn REST application that a Blackboard administrator installs on your Learn site, and local credentials; Morrow then reads a connected Blackboard course and exposes 15 reviewed action planners for its supported REST changes. A planner sends no course write. Blackboard test and question authoring is not available through the public Learn REST API, and every Blackboard statement in this file is proved against local mocked-HTTPS fixtures only. See [current limits](LIMITATIONS.md).
@@ -495,7 +499,7 @@ pnpm morrow catalog stats --json
 
 The Canvas browser campaign uses Chrome for Testing with a temporary profile and a synthetic Canvas site. It validates extension pairing, site-scoped permission, account binding, Canvas reads and writes, a nested New Quiz request, fresh checks, replay refusal, restart, and disconnect revocation.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md), [WEEKEND-HANDOFF.md](WEEKEND-HANDOFF.md), [LIMITATIONS.md](LIMITATIONS.md), and [SOURCE-ORIGIN.md](SOURCE-ORIGIN.md).
+See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [SOURCE-ORIGIN.md](SOURCE-ORIGIN.md).
 
 ## Release status
 
