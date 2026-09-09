@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deriveBlackboardSourceBindingId } from "../src/binding.js";
 import { loadBlackboardLearnConfig } from "../src/config.js";
@@ -8,6 +8,13 @@ import { loadBlackboardLearnConfig } from "../src/config.js";
 const REVISION = "8c751fc3-ecf9-4558-b86b-d97a34e93295";
 const created: string[] = [];
 const originalHome = process.env.HOME;
+// The real home directory's ancestor chain is private on every platform this
+// project ships on. The OS temp directory's is not: Linux's /tmp is world
+// writable by design, so a fixture anchored there fails the same outside-home
+// ancestor walk production code correctly enforces. Anchoring ordinary
+// fixtures under the real home keeps them inside its bounded, symlink-checked
+// trust root instead, which is what "an ordinary saved configuration" means.
+const realHome = resolve(originalHome || homedir());
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
@@ -15,7 +22,7 @@ afterEach(async () => {
 });
 
 async function configuration(binding?: string): Promise<{ readonly path: string; readonly environment: NodeJS.ProcessEnv }> {
-  const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-config-"));
+  const directory = await mkdtemp(join(realHome, ".morrow-blackboard-config-test-"));
   created.push(directory);
   const path = join(directory, "blackboard.json");
   await writeFile(path, JSON.stringify({

@@ -1,6 +1,6 @@
 import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { deriveBlackboardSourceBindingId } from "../src/binding.js";
 import { BlackboardLearnClient } from "../src/client.js";
@@ -289,6 +289,12 @@ describe("Blackboard transport", () => {
 
 const configured: string[] = [];
 const originalHome = process.env.HOME;
+// Real home's ancestor chain is private on every platform this project ships
+// on; the OS temp directory's is not (Linux's /tmp is world writable by
+// design), so a test anchored there can trip the same outside-home ancestor
+// walk production code correctly enforces, for reasons the test isn't
+// actually about. Anchored fixtures below sit under real home instead.
+const realHome = resolve(originalHome || homedir());
 afterEach(async () => {
   if (originalHome === undefined) delete process.env.HOME;
   else process.env.HOME = originalHome;
@@ -329,7 +335,15 @@ describe("Blackboard configuration path", () => {
   });
 
   it("refuses a configured path outside the home directory that another account can write into", async () => {
-    const root = await mkdtemp(join(tmpdir(), "morrow-blackboard-outside-"));
+    // This test is about the shared directory's own permissions, not about
+    // where "home" is, so home is pointed elsewhere and root is anchored
+    // under the real home directory precisely so it stays outside that
+    // elsewhere-home while still having a genuinely private ancestor chain
+    // up to the real filesystem root on every platform.
+    const elsewhereHome = await mkdtemp(join(tmpdir(), "morrow-blackboard-unrelated-home-"));
+    configured.push(elsewhereHome);
+    process.env.HOME = elsewhereHome;
+    const root = await mkdtemp(join(realHome, ".morrow-blackboard-outside-test-"));
     configured.push(root);
     const shared = join(root, "shared");
     const nested = join(shared, "morrow");

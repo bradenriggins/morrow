@@ -488,14 +488,6 @@ export function boundProgramInventoryResult(
   return report;
 }
 
-/** @deprecated Use boundProgramInventoryResult for provider-neutral reports. */
-export function boundCanvasProgramInventoryResult(
-  value: JsonObject,
-  maximumBytes = INVENTORY_RESULT_BYTE_LIMIT,
-): JsonObject {
-  return boundProgramInventoryResult(value, maximumBytes);
-}
-
 function residualCoverage(): JsonObject[] {
   return [
     { category: "accessibility_manual_review", reason: "Saved-source checks cannot establish captions, transcripts, keyboard behavior, focus order, contrast, equations, learner rendering, or external-tool accessibility." },
@@ -1023,7 +1015,7 @@ export async function collectCanvasProgramInventory(
       : total + course.counters.unread_pages
   ), 0);
   const resumeAvailable = courses.some((course) => course.lists.some((entry) => entry.resume_available === true));
-  return boundCanvasProgramInventoryResult({
+  return boundProgramInventoryResult({
     schema: "morrow.course-inventory.v1",
     provider: "canvas",
     scope: "selected_program",

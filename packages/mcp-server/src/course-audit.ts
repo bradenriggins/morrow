@@ -6,7 +6,7 @@ import * as z from "zod/v4";
 import { canvasReadResult } from "./canvas-read.js";
 import { completeQuizItemPayloadReason, quizItemPayloadMessage } from "./quiz-item-payload.js";
 import { BLACKBOARD_CONTENT_PATCH_PLAN_NATIVE_TOOL, BLACKBOARD_CONTENT_PATCH_PLAN_TOOL } from "./blackboard-content-patch.js";
-import { pageMissingAltEvidence } from "./page-correction.js";
+import { canvasContentMissingAltEvidence } from "./page-correction.js";
 import type { CatalogSearchTool, GatewayRuntime } from "./runtime.js";
 
 const id = z.string().regex(/^[1-9][0-9]{0,18}$/);
@@ -712,7 +712,7 @@ function hasText(value: string | undefined): boolean {
  * Each list is capped at MAX_SOURCE_SIGNAL_ENTRIES and the cap is reported.
  */
 function htmlSignals(html: string): JsonObject {
-  const missingAltImages = pageMissingAltEvidence(html).map((image) => ({ image_index: image.imageIndex, image_src_sha256: image.imageSrcSha256 }));
+  const missingAltImages = canvasContentMissingAltEvidence(html).map((image) => ({ image_index: image.imageIndex, image_src_sha256: image.imageSrcSha256 }));
   const decorativeImagesWithAltText: JsonObject[] = [];
   const headingLevelJumps: JsonObject[] = [];
   const emptyHeadings: JsonObject[] = [];
@@ -747,7 +747,7 @@ function htmlSignals(html: string): JsonObject {
   const parser = new Parser({
     onopentag: (name, attributes, isImplied) => {
       // An image inside a template or foreign element is counted exactly as
-      // pageMissingAltEvidence counts it, so both signals share one image index.
+      // canvasContentMissingAltEvidence counts it, so both signals share one image index.
       const ignored = templateDepth > 0 || foreignDepth > 0;
       if (name === "template") templateDepth += 1;
       if (name === "svg" || name === "math") foreignDepth += 1;

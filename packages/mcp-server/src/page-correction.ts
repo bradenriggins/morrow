@@ -210,9 +210,6 @@ export function canvasContentMissingAltEvidence(body: string): readonly CanvasCo
   return evidence;
 }
 
-/** @deprecated Use canvasContentMissingAltEvidence for any Canvas HTML field. */
-export const pageMissingAltEvidence = canvasContentMissingAltEvidence;
-
 function exactId(value: unknown): string {
   if (typeof value === "number" && !Number.isSafeInteger(value)) throw new PageCorrectionError("The page identifier is not exact.");
   const id = String(value);
@@ -673,7 +670,7 @@ export async function planPageImageAltRepair(runtime: GatewayRuntime, value: z.i
     if (input.expected_body_sha256 !== current.bodySha256) {
       throw new PageCorrectionError("The Page body changed since this accessibility signal. Run the audit again before planning a repair.");
     }
-    const evidence = pageMissingAltEvidence(String(current.page.body)).find((candidate) => (
+    const evidence = canvasContentMissingAltEvidence(String(current.page.body)).find((candidate) => (
       candidate.imageIndex === input.image_index && candidate.imageSrcSha256 === input.image_src_sha256
     ));
     if (!evidence) {

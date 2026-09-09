@@ -1,7 +1,7 @@
 {
   "schema": "morrow.upstreams.v1",
   "profile": "private-full",
-  "disposition": "Development-only example. The example-legacy bridge is a development adaptation path for the donor Morrow extension. It is not part of the Morrow 1.0 product, no public release profile in config/release-profiles.json contains packages/legacy-bridge-mcp/, and it needs an external example-legacy donor checkout at revision 7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4. See docs/implementation/MORROW-LEGACY-BRIDGE.md.",
+  "disposition": "Development-only example. The example-legacy bridge is a development adaptation path for the donor Morrow extension. It is not part of the Morrow 1.0 product, no public release profile in config/release-profiles.json contains packages/legacy-bridge-mcp/, and it needs an external example-legacy donor checkout at revision 1111111111111111111111111111111111111111. See docs/implementation/MORROW-LEGACY-BRIDGE.md.",
   "sourcePolicy": {
     "requireAttestation": true
   },
@@ -10,16 +10,16 @@
       "id": "meridian",
       "label": "ExamplePlatform hermetic catalog",
       "kind": "meridian-ssh",
-      "host": "example-lms-vps",
-      "remoteRoot": "/tmp/morrow-meridian-donor-7cc052cf",
+      "host": "your-meridian-ssh-host",
+      "remoteRoot": "/tmp/morrow-meridian-donor-00000000",
       "serverPath": "scripts/team/mcp/meridian_server.py",
-      "repository": "example-owner/example-attestation-repo",
-      "revision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+      "repository": "your-org/your-meridian-repo",
+      "revision": "0000000000000000000000000000000000000000",
       "attestation": {
         "kind": "remote-git-ssh",
-        "host": "example-lms-vps",
-        "root": "/tmp/morrow-meridian-donor-7cc052cf",
-        "expectedRevision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+        "host": "your-meridian-ssh-host",
+        "root": "/tmp/morrow-meridian-donor-00000000",
+        "expectedRevision": "0000000000000000000000000000000000000000",
         "requireTrackedClean": true
       },
       "catalogTruth": {
@@ -47,11 +47,11 @@
       "args": ["--filter", "@morrow/legacy-bridge-mcp", "start"],
       "cwd": "${MORROW_NEW_REPO_ROOT}",
       "repository": "example-org/example-legacy-source",
-      "revision": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+      "revision": "1111111111111111111111111111111111111111",
       "attestation": {
         "kind": "local-git",
         "root": "${MORROW_LEGACY_ROOT}",
-        "expectedRevision": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+        "expectedRevision": "1111111111111111111111111111111111111111",
         "requireTrackedClean": true
       },
       "priority": 50,
@@ -59,7 +59,7 @@
       "enabled": true,
       "env": {
         "MORROW_LEGACY_CATALOG_PATH": "${MORROW_LEGACY_CATALOG_PATH}",
-        "MORROW_LEGACY_EXPECTED_REVISION": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
+        "MORROW_LEGACY_EXPECTED_REVISION": "1111111111111111111111111111111111111111",
         "MORROW_LEGACY_BRIDGE_TOKEN": "${MORROW_LEGACY_BRIDGE_TOKEN}",
         "MORROW_LEGACY_BRIDGE_PORT": "${MORROW_LEGACY_BRIDGE_PORT:-32145}",
         "MORROW_LEGACY_ALLOWED_EXTENSION_IDS": "${MORROW_LEGACY_ALLOWED_EXTENSION_IDS:-}"

@@ -6,16 +6,16 @@
     "id": "meridian",
     "label": "ExamplePlatform read-only runtime",
     "kind": "meridian-ssh",
-    "host": "example-lms-vps",
-    "remoteRoot": "/tmp/morrow-meridian-donor-7cc052cf",
+    "host": "your-meridian-ssh-host",
+    "remoteRoot": "/tmp/morrow-meridian-donor-00000000",
     "serverPath": "scripts/team/mcp/meridian_server.py",
-    "repository": "example-owner/example-attestation-repo",
-    "revision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+    "repository": "your-org/your-meridian-repo",
+    "revision": "0000000000000000000000000000000000000000",
     "attestation": {
       "kind": "remote-git-ssh",
-      "host": "example-lms-vps",
-      "root": "/tmp/morrow-meridian-donor-7cc052cf",
-      "expectedRevision": "7cc052cf2063e1f2492c0ac20aee41ee3a22a10f",
+      "host": "your-meridian-ssh-host",
+      "root": "/tmp/morrow-meridian-donor-00000000",
+      "expectedRevision": "0000000000000000000000000000000000000000",
       "requireTrackedClean": true
     },
     "catalogTruth": {
