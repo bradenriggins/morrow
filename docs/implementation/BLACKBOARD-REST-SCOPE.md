@@ -173,7 +173,7 @@ Reading the table:
   dropped after thirty days; an unresolved row is never dropped by age.
 - **An unconfirmed change holds the item it was sent to.** While a row is `sent`
   or `uncertain` with no fresh-read finding, Morrow refuses a new change to that
-  exact course and content item — at review time, so nobody is asked to approve a
+  exact course and content item at review time, so nobody is asked to approve a
   change Morrow would then refuse. `blackboard_unresolved_effects` lists those
   changes with the operation id, the phase, and the item to open. Only the
   fresh-read comparator releases one, and it is a read: it states what Blackboard

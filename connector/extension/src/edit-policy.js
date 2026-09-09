@@ -1,5 +1,4 @@
 import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "../generated/canvas-operation-admission.js";
-import { ITEM_BANK_GUARD_KIND, validItemBankGuard } from "./item-bank-guard.js";
 
 export const EDIT_PERMISSION_SCHEMA = "morrow.bridge.edit-permission.v1";
 export const EDIT_POLICY_SELECTION_LIMIT = 500;
@@ -17,8 +16,8 @@ const STRUCTURAL_EDIT_FIELDS = new Set([
   "course_id", "url_or_id", "id", "topic_id", "module_id", "section_id", "target_section_id", "assignment_id", "item_id", "quiz_id", "expected_digest",
   "chapter_id", "after_chapter_id", "category_id", "grade_item_id", "slot_id", "after_slot_id", "section_number", "section_name", "override_id",
   "page_id", "after_page_id", "expected_jump_changes", "expected_invalid_jumps",
-  "bank_id", "bank_entry_id", "user_id", "event_id",
-  "morrow_page_guard", "morrow_canvas_content_guard", "morrow_item_bank_guard"
+  "bank_id", "bank_entry_id", "quiz_entry_id", "expected_snapshot", "fan_out", "fan_out_receipt", "acknowledged_course_ids", "user_id", "event_id",
+  "morrow_page_guard", "morrow_canvas_content_guard", "morrow_item_bank_guard", "morrow_new_quiz_item_position_guard"
 ]);
 const EDIT_FIELD = /^[A-Za-z][A-Za-z0-9_]{0,159}$/;
 const EDIT_FIELD_GRANT_LIMIT = 8;
@@ -151,6 +150,16 @@ const CURATED_ROUTE_MISSING_REASON = "This repair needs Canvas routes the connec
 // Edit path, because each one rewrites one field and keeps every id.
 const NEW_QUIZ_ITEM_STRUCTURE_REVIEW_REASON = "Changing a New Quiz question in place can leave its old answers behind as blank ones, because New Quizzes matches answers by the ids the question already has. A change to the answers of a question needs the delete-then-add contract instead. The focused New Quiz image alternative-text repairs stay available.";
 const NEW_QUIZ_ITEM_UPDATE_TOOL = "canvas_update_quiz_item";
+// A Canvas Item Bank is shared machinery, the same hazard the Moodle Question
+// Bank reason above names. One change lands in every quiz, in every course,
+// that draws from the bank, and Canvas exposes no account-wide list of those
+// quizzes, so Morrow cannot show how far a change reaches. Every Item Bank
+// change therefore carries the observed courses it did find and the person's
+// acknowledgement of exactly those courses. That acknowledgement is evidence
+// for one change at one moment, so it cannot be given in advance as a standing
+// grant: the list changes between changes. The change itself is available, it
+// just asks each time.
+const ITEM_BANK_SHARED_IMPACT_REASON = "An Item Bank is shared between quizzes and can be shared between courses, and Canvas provides no complete list of everything that uses one. Morrow shows you the courses it did find and asks you to confirm them for each change, so this one is approved change by change rather than switched on in advance.";
 const VERIFICATION_CLAUSES = Object.freeze({
   student_grade_or_submission_state: "reading it back would open a student grade or submission",
   discussion_or_conversation_content: "reading it back would open student discussion or message content",
@@ -296,21 +305,6 @@ const CURATED_CATEGORY_SPECS = Object.freeze([
     ]),
   }),
   Object.freeze({
-    id: "canvas_item_bank_question_image_alt",
-    group: "Focused Canvas repairs",
-    label: "Add Canvas Item Bank question image alternative text",
-    description: "Add alternative text to one selected image without alternative text in one New Quizzes Item Bank question. It does not change the question, answers, points, or settings. This bank can be used by other courses. Morrow lists every course the bank reaches and asks you to confirm them before it sends the change.",
-    provider: "canvas",
-    // The in-frame repair reads GET /api/banks/{bank_id}/items/{item_id} before
-    // and after its one PATCH. Without that read in the connected catalog the
-    // saved question cannot be compared with the planned one, so the category
-    // is published for review instead of Edit.
-    requiresOperations: Object.freeze(["canvas_item_bank_update_item", "canvas_item_bank_get_item"]),
-    rules: Object.freeze([
-      Object.freeze({ provider: "canvas", operationKey: "ITEM_BANK PATCH /api/banks/{bank_id}/items/{item_id}", toolName: "canvas_item_bank_update_item", allowedChangedFields: Object.freeze([]), requiresItemBankGuard: true, itemBankGuardKind: ITEM_BANK_GUARD_KIND }),
-    ]),
-  }),
-  Object.freeze({
     id: "canvas_inbox_messages",
     group: "Focused Canvas repairs",
     label: "Send Canvas Inbox messages in this course",
@@ -378,10 +372,9 @@ function unchecked(reason) {
 }
 
 // Morrow checks a saved change through the route that applies it. Guarded Canvas content, Page
-// and Item Bank writes, the private Inbox route and every browser-catalog route read their own
-// saved state back, so only the generic Canvas API route depends on the shared readback
-// assessment. The Item Bank guard reads GET /api/banks/{bank_id}/items/{item_id} again after its
-// one PATCH, which is why the shared assessment, held for every Item Bank write, is not asked.
+// writes, the private Inbox route and every browser-catalog route read their own saved state back,
+// so only the generic Canvas API route depends on the shared readback assessment. The admitted
+// Item Bank quiz draw uses its frame-owned operation-specific readback.
 function operationVerification(operation, canvasReads, rule) {
   if (!operation) return unchecked();
   if (operationProvider(operation) !== "canvas") return CHECKED;
@@ -395,6 +388,7 @@ function operationAvailability(operation) {
   if (!provider || operation?.readOnly !== false) return { availability: "review", reviewReason: "This catalog entry is not a course Edit action." };
   if (provider === "canvas") {
     if (operation.toolName === NEW_QUIZ_ITEM_UPDATE_TOOL) return { availability: "review", reviewReason: NEW_QUIZ_ITEM_STRUCTURE_REVIEW_REASON };
+    if (operation.service === "item_bank") return { availability: "review", reviewReason: ITEM_BANK_SHARED_IMPACT_REASON };
     const admission = canvasWriteAdmission(operation);
     return admission.state === "admitted"
       ? { availability: "edit" }
@@ -698,13 +692,9 @@ export function changedFields(args) {
   return Object.keys(args || {}).filter((key) => !STRUCTURAL_EDIT_FIELDS.has(key)).sort();
 }
 
-// The one exemption from the Item Bank hold, and the only Edit path into an existing bank. The
-// Item Bank routes name a bank, never a course, so the guard is what carries the selected course,
-// the exact question the repair was planned against, and the fan-out record of every course the
-// bank reaches. It returns the accepted guard so a caller can check the course it names; every
-// other Item Bank write, and an update_item call without an accepted guard, stays held.
-export function guardedItemBankUpdate(operation, args) {
-  if (operation?.service !== "item_bank" || operation?.nickname !== "update_item") return null;
-  const guard = args?.morrow_item_bank_guard;
-  return validItemBankGuard(guard) ? guard : null;
+// Legacy callers used a separate guarded repair rule. Current Item Bank writes
+// use the ordinary exact operation rule plus an operation-scoped observed reach
+// acknowledgement in their required arguments.
+export function guardedItemBankUpdate() {
+  return null;
 }

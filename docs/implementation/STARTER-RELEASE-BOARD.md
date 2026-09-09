@@ -6,8 +6,8 @@ Updated: 2026-09-07
 consumer installation.** A person installing Morrow installs the Morrow desktop
 app (macOS Apple silicon disk image, Windows x64 installer) plus the Morrow
 Bridge Chrome extension; `README.md` describes that route under "The Morrow
-desktop app". Everything here — the source ZIP, `pnpm install`, `pnpm run
-setup`, and the `pnpm morrow mcp install` commands — is engineering evidence for
+desktop app". Everything here (the source ZIP, `pnpm install`, `pnpm run
+setup`, and the `pnpm morrow mcp install` commands) is engineering evidence for
 maintainers. Braden explicitly rejected this command-based route as the customer
 installation, and the "Recipient preview path" below is kept only as the record
 of what that route was.

@@ -1,5 +1,5 @@
 import { canonicalJson, isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
-import { LearnerRoster, LearnerVault, redactLearnerEgress, type LearnerIdentity, type LearnerScope } from "@morrow/gateway-core";
+import { LearnerRoster, LearnerVault, redactLearnerEgress, resolveLearnerTokens, type LearnerIdentity, type LearnerScope } from "@morrow/gateway-core";
 import { BlackboardLearnClient } from "./client.js";
 import { deriveBlackboardSourceBindingId } from "./binding.js";
 import { blackboardEffectGrantAccepted, type BlackboardEffectGrant } from "./effect-grant.js";
@@ -26,8 +26,8 @@ const FOLDER_HANDLER = "resource/x-bb-folder";
  * The provider fields Morrow freezes before a Blackboard PATCH and re-checks
  * after it. Public Blackboard documentation does not settle whether a PATCH
  * merges or replaces a nested object such as `availability`, so an unpatched
- * protected field that comes back changed — a reset `availability.adaptiveRelease`,
- * a moved `parentId` — has to fail the readback instead of being reported as
+ * protected field that comes back changed, such as a reset `availability.adaptiveRelease`
+ * or a moved `parentId`, has to fail the readback instead of being reported as
  * verified. docs/research/blackboard-recovery-contract.md:217-221
  */
 const PROTECTED_FIELDS: readonly (readonly string[])[] = [
@@ -176,10 +176,16 @@ function resolveMembership(entry: JsonObject, courseId: string): MembershipResol
   if (!isJsonObject(user)) return { state: "unresolvable", gap: "user_record_missing" };
   if (user.id !== entry.userId) return { state: "unresolvable", gap: "user_record_mismatch" };
   const name = isJsonObject(user.name)
-    ? [user.name.given, user.name.family].filter((part): part is string => typeof part === "string" && Boolean(part.trim())).join(" ")
+    ? [user.name.given, user.name.middle, user.name.family].filter((part): part is string => typeof part === "string" && Boolean(part.trim())).join(" ")
     : undefined;
   const email = isJsonObject(user.contact) && typeof user.contact.email === "string" ? user.contact.email : undefined;
   const loginId = typeof user.userName === "string" ? user.userName : undefined;
+  const aliases = new Set<string>();
+  for (const record of [user, isJsonObject(user.name) ? user.name : {}, isJsonObject(user.contact) ? user.contact : {}]) {
+    for (const key of ["given", "middle", "family", "firstName", "middleName", "lastName", "givenName", "familyName", "displayName", "preferredName", "fullName", "name", "userName", "externalId", "uuid", "studentId", "email", "emailAddress"]) {
+      if (typeof record[key] === "string" && record[key].trim()) aliases.add(record[key]);
+    }
+  }
   return {
     state: "resolved",
     identity: {
@@ -187,6 +193,7 @@ function resolveMembership(entry: JsonObject, courseId: string): MembershipResol
       ...(name ? { name } : {}),
       ...(email ? { email } : {}),
       ...(loginId ? { loginId } : {}),
+      aliases: [...aliases],
     },
   };
 }
@@ -337,7 +344,7 @@ function redactedField(value: unknown, roster: PreparedRoster, label: string): R
 /**
  * Copies the named provider text fields onto a result, each redacted against
  * this course's roster. An operation module in `src/operations/` that returns a
- * provider record this file has no projection for — a file attachment's name —
+ * provider record this file has no projection for, such as a file attachment's name,
  * writes its own projection with this, so every provider text that leaves
  * Morrow passes the same privacy boundary.
  */
@@ -417,6 +424,91 @@ export class BlackboardLearnRuntime {
       }
       this.tenants.set(tenant.id, tenant);
       this.clients.set(tenant.id, new BlackboardLearnClient(tenant, options.fetcher));
+    }
+  }
+
+  private publicRoster(input: Readonly<Record<string, unknown>>): PreparedRoster | undefined {
+    if (typeof input.tenant_id !== "string" || typeof input.source_binding_id !== "string" || typeof input.course_id !== "string") return undefined;
+    try {
+      const scope = this.resolveScope(input.tenant_id, input.source_binding_id, input.course_id);
+      const held = this.heldRosters.get(`${scope.tenant.id}\u0000${scope.courseId}`);
+      return held && held.tokenGeneration === scope.client.tokenGeneration && Date.now() - held.readAt < ROSTER_CACHE_MS ? held.roster : undefined;
+    } catch { return undefined; }
+  }
+
+  sanitizePublicValue(value: JsonObject, input: Readonly<Record<string, unknown>>): JsonObject {
+    const roster = this.publicRoster(input);
+    if (!roster) return value;
+    const contractFields = new Set([
+      "schema", "provider", "tenantId", "sourceBindingId", "courseId", "contentId",
+      "origin", "principalFingerprint", "sessionGeneration", "beforeDigest", "planDigest",
+      "status", "resultState", "code",
+    ]);
+    const contractContainers = new Set([
+      "account", "announcement", "announcements", "assignment", "assignments", "attempt", "attempts",
+      "availability", "before", "column", "columns", "content", "contents", "course", "courses",
+      "effect_scope", "effects", "file", "files", "grade", "grading", "group", "groups", "groupSet",
+      "groupSets", "learner", "learners", "limits", "membership", "memberships", "paging", "patch",
+      "problem", "request", "task", "verification",
+    ]);
+    const walk = (candidate: unknown, depth = 0, field?: string): unknown => {
+      if (depth > 12) throw new Error("privacy_output_depth_exceeded");
+      if (typeof candidate === "string" && field && contractFields.has(field)) return candidate;
+      if (typeof candidate === "string") return redactLearnerEgress(candidate, roster);
+      if (Array.isArray(candidate)) return candidate.map((entry) => walk(entry, depth + 1, field));
+      if (!isJsonObject(candidate)) return candidate;
+      const output: JsonObject = {};
+      const closedKeys = depth === 0 || (field !== undefined && contractContainers.has(field));
+      for (const [key, child] of Object.entries(candidate)) {
+        const safeKey = closedKeys ? key : String(redactLearnerEgress(key, roster));
+        if (Object.hasOwn(output, safeKey)) throw new Error("privacy_identity_key_collision");
+        Object.defineProperty(output, safeKey, { value: walk(child, depth + 1, closedKeys ? key : undefined), enumerable: true });
+      }
+      return output;
+    };
+    return walk(value) as JsonObject;
+  }
+
+  publicFailure(error: unknown, input: Readonly<Record<string, unknown>>): JsonObject {
+    const known = error instanceof BlackboardApiError;
+    let details: JsonObject = { message: "Morrow could not complete the Blackboard request. Private error details were withheld." };
+    if (known && this.publicRoster(input)) {
+      try {
+        details = this.sanitizePublicValue({ message: error.message, ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}) }, input);
+      } catch { /* Keep the fixed message when a diagnostic cannot be de-identified. */ }
+    }
+    return {
+      schema: "morrow.blackboard.result.v1",
+      ok: false,
+      ...(known ? { resultState: error.dispatchState } : {}),
+      problem: { code: known ? error.code : "blackboard_request_failed", ...details, ...(known && error.status ? { status: error.status } : {}) },
+    };
+  }
+
+  async resolvePublicInput(input: JsonObject, signal?: AbortSignal, allowLegacyReference = false): Promise<JsonObject> {
+    let { learner_reference, ...textInput } = input;
+    if (typeof learner_reference === "string" && /^learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(learner_reference)) {
+      if (!allowLegacyReference) throw new BlackboardApiError("blackboard_scope_binding_required", "Public learner references require readable labels.");
+      try {
+        const scope = this.resolveScope(String(input.tenant_id), String(input.source_binding_id), String(input.course_id));
+        const learnerScope = scopeFor(scope.tenant, scope.courseId);
+        learner_reference = this.learnerVault.tokenize(learnerScope, this.learnerVault.resolve(learnerScope, learner_reference));
+      } catch {
+        throw new BlackboardApiError("blackboard_scope_binding_required", "The stored learner reference does not resolve in this exact Blackboard course.");
+      }
+    }
+    const normalized = { ...textInput, ...(learner_reference === undefined ? {} : { learner_reference }) };
+    if (!/\bStudent A[1-9][0-9]*\b/u.test(JSON.stringify(textInput))) return normalized;
+    if (typeof input.tenant_id !== "string" || typeof input.source_binding_id !== "string" || typeof input.course_id !== "string") {
+      throw new BlackboardApiError("blackboard_scope_binding_required", "Readable learner labels need one exact Blackboard course connection.");
+    }
+    const scope = this.resolveScope(input.tenant_id, input.source_binding_id, input.course_id);
+    await this.verifyIdentity(scope, "read", signal);
+    const roster = await this.preparedRoster(scope, "read", { refresh: true }, signal);
+    try {
+      return { ...resolveLearnerTokens(textInput, this.learnerVault, roster.learnerScope, roster.learnerRoster), ...(learner_reference === undefined ? {} : { learner_reference }) } as JsonObject;
+    } catch {
+      throw new BlackboardApiError("blackboard_scope_binding_required", "A learner label does not resolve in this exact Blackboard course. Read the course roster again.");
     }
   }
 
@@ -999,8 +1091,8 @@ export class BlackboardLearnRuntime {
    * `applyReservedContentPatch`, which sent the change and holds that snapshot.
    *
    * This route prepares no roster and reads no course membership. It returns one
-   * boolean and the identifiers the Gateway already holds — no course text and
-   * no learner text — so there is nothing in its result to redact against a
+   * boolean and the identifiers the Gateway already holds. It includes no course text
+   * or learner text, so there is nothing in its result to redact against a
    * roster. It keeps the account check, because a credential that acts as
    * another Learn account is not evidence about this course. It carries no
    * `diagnostics` either: the Gateway freezes this exact payload when it plans

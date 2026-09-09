@@ -1,8 +1,11 @@
 import {
+  readSync,
   chmodSync,
+  closeSync,
   existsSync,
   lstatSync,
   mkdirSync,
+  openSync,
   renameSync,
   realpathSync,
   statSync,
@@ -10,6 +13,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
 import {
   isAbsolute,
@@ -108,6 +112,8 @@ export interface ClientConfigBundle {
 export interface WriteClientConfigBundleOptions extends ClientConfigBundleOptions {
   readonly outputDirectory: string;
   readonly force?: boolean;
+  /** How each written file is restricted. Defaults to this computer's platform. */
+  readonly restriction?: PrivateFileRestriction;
 }
 
 export interface InstallMorrowClientOptions extends ClientConfigBundleOptions {
@@ -559,8 +565,20 @@ function canonicalRegularFile(path: string, label: string): string {
 function exactExecutable(path: string, label: string): string {
   const absolute = exactAbsolutePath(path, label);
   const canonical = canonicalRegularFile(absolute, label);
-  if (process.platform !== "win32" && (statSync(canonical).mode & 0o111) === 0) {
-    throw new Error(`${label} is not executable: ${path}`);
+  if (process.platform !== "win32") {
+    if ((statSync(canonical).mode & 0o111) === 0) {
+      throw new Error(`${label} is not executable: ${path}`);
+    }
+  } else {
+    // Windows mode bits are synthetic: a non-PE file passes every permission
+    // check and fails later with a message that names no file. The first two
+    // bytes are checked here instead.
+    const magic = Buffer.alloc(2);
+    const handle = openSync(canonical, "r");
+    try { readSync(handle, magic, 0, 2, 0); } finally { closeSync(handle); }
+    if (magic.toString("ascii", 0, 2) !== "MZ") {
+      throw new Error(`${label} is not a Windows executable: ${path}`);
+    }
   }
   return absolute;
 }
@@ -588,22 +606,152 @@ function safeChmod(path: string, mode: number): void {
   try { chmodSync(path, mode); } catch { /* best effort on non-POSIX filesystems */ }
 }
 
+/**
+ * SYSTEM and the local Administrators group. Windows treats these two as
+ * present on every private path, so Morrow's own release gate counts a path
+ * private when nothing but them and the signed-in account has sensitive
+ * access. `smokeWindowsAclClassification` in installer/main.cjs reads exactly
+ * this rule, so a file restricted here is a file that gate calls private.
+ */
+const PRIVATE_WINDOWS_SIDS = Object.freeze(["S-1-5-18", "S-1-5-32-544"]);
+const RESTRICTED = "restricted";
+
+export interface PrivateFileRestrictionResult {
+  readonly status: number | null;
+  readonly stdout?: string;
+  readonly error?: Error;
+}
+
+export type PrivateFileRestrictionRunner = (
+  command: string,
+  args: readonly string[],
+) => PrivateFileRestrictionResult;
+
+/**
+ * How one private file is restricted. Both fields exist so the Windows path can
+ * be exercised where Windows is not: no computer running these tests can create
+ * a Windows access-control list, but every decision Morrow makes around one is
+ * still its own code and is still testable.
+ */
+export interface PrivateFileRestriction {
+  readonly platform?: string;
+  readonly run?: PrivateFileRestrictionRunner;
+}
+
+function defaultRestrictionRunner(command: string, args: readonly string[]): PrivateFileRestrictionResult {
+  const result = spawnSync(command, [...args], {
+    encoding: "utf8",
+    windowsHide: true,
+    timeout: 20_000,
+  });
+  return { status: result.status, stdout: result.stdout ?? "", error: result.error ?? undefined };
+}
+
+/**
+ * The Windows command that restricts one file to the signed-in account. The
+ * path travels as base64 UTF-16, so no quoting rule in any shell can change
+ * which file is restricted. The list is replaced rather than added to, and
+ * inheritance is turned off, so a project directory that other accounts can
+ * read cannot pass that access on to the file Morrow wrote inside it.
+ */
+export function windowsPrivateFileCommand(path: string): { readonly command: string; readonly args: readonly string[] } {
+  const systemRoot = process.env.SystemRoot || "C:\\Windows";
+  const encodedPath = Buffer.from(path, "utf16le").toString("base64");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
+    `$target = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encodedPath}'))`,
+    "if (-not [IO.File]::Exists($target)) { throw 'Private file is unavailable' }",
+    "$identity = [Security.Principal.WindowsIdentity]::GetCurrent().User",
+    "$acl = New-Object Security.AccessControl.FileSecurity",
+    "$acl.SetAccessRuleProtection($true, $false)",
+    `foreach ($sid in @($identity.Value, ${PRIVATE_WINDOWS_SIDS.map((sid) => `'${sid}'`).join(", ")})) { $acl.AddAccessRule((New-Object Security.AccessControl.FileSystemAccessRule((New-Object Security.Principal.SecurityIdentifier($sid)), 'FullControl', 'None', 'None', 'Allow'))) }`,
+    "[IO.File]::SetAccessControl($target, $acl)",
+    `'${RESTRICTED}'`,
+  ].join("; ");
+  return {
+    command: win32.join(systemRoot, "System32", "WindowsPowerShell", "v1.0", "powershell.exe"),
+    args: ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+  };
+}
+
+/**
+ * Restricts one file to the account running Morrow.
+ *
+ * POSIX permissions are the file mode, which the caller has already set, so
+ * this does nothing there and changes nothing about that path. Windows ignores
+ * the file mode completely: without this, a configuration Morrow wrote inside a
+ * project directory that other accounts can read is readable by those accounts,
+ * and Morrow would report a private write it did not perform.
+ *
+ * It throws when the restriction cannot be applied. Every caller applies it to
+ * a still-empty temporary file, before that file holds anything and before it
+ * replaces anything, so a refusal here leaves no Morrow-written content on the
+ * computer at all.
+ */
+export function restrictToCurrentAccount(path: string, restriction?: PrivateFileRestriction): void {
+  const platform = restriction?.platform ?? process.platform;
+  if (platform !== "win32") return;
+  const { command, args } = windowsPrivateFileCommand(path);
+  const run = restriction?.run ?? defaultRestrictionRunner;
+  let result: PrivateFileRestrictionResult;
+  try {
+    result = run(command, args);
+  } catch (error) {
+    throw new Error(`Refusing to write ${path} because Morrow could not restrict it to this Windows account: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (result.error || result.status !== 0 || String(result.stdout ?? "").trim() !== RESTRICTED) {
+    throw new Error(`Refusing to write ${path} because Morrow could not restrict it to this Windows account`);
+  }
+}
+
+/**
+ * Creates one file that no other account can read, then fills it. The file is
+ * created empty and restricted before a single byte of content reaches it, so
+ * a computer that cannot apply the restriction never holds an unprotected copy
+ * of what Morrow was about to write.
+ */
+function writeRestrictedFile(path: string, content: string, mode: number, restriction?: PrivateFileRestriction): void {
+  const handle = openSync(path, "wx", mode);
+  try {
+    restrictToCurrentAccount(path, restriction);
+    writeFileSync(handle, content, "utf8");
+  } finally {
+    closeSync(handle);
+  }
+  safeChmod(path, mode);
+}
+
 interface ExpectedFileText {
   readonly exists: boolean;
   readonly content: string;
 }
 
+// An assistant configuration file is a hand-edited JSON or TOML document. Four
+// MiB is far above any real one, so a file past this bound is not a
+// configuration any more: reading it whole would be the one unbounded read on
+// this surface, so it is refused instead.
+const MAX_CLIENT_CONFIG_BYTES = 4 * 1024 * 1024;
+
 function currentFileText(path: string): ExpectedFileText {
-  return existsSync(path)
-    ? { exists: true, content: readFileSync(path, "utf8") }
-    : { exists: false, content: "" };
+  if (!existsSync(path)) return { exists: false, content: "" };
+  const info = lstatSync(path);
+  if (!info.isFile() || info.size > MAX_CLIENT_CONFIG_BYTES) {
+    throw new Error(`Refusing to replace ${path} because it is not a regular file under 4 MiB`);
+  }
+  return { exists: true, content: readFileSync(path, "utf8") };
 }
 
 function sameFileText(left: ExpectedFileText, right: ExpectedFileText): boolean {
   return left.exists === right.exists && left.content === right.content;
 }
 
-function writePrivateText(path: string, content: string, expected?: ExpectedFileText): void {
+function writePrivateText(
+  path: string,
+  content: string,
+  expected?: ExpectedFileText,
+  restriction?: PrivateFileRestriction,
+): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   safeChmod(dirname(path), 0o700);
   if (expected && !sameFileText(currentFileText(path), expected)) {
@@ -611,16 +759,38 @@ function writePrivateText(path: string, content: string, expected?: ExpectedFile
   }
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
   try {
-    writeFileSync(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    safeChmod(temporary, 0o600);
+    writeRestrictedFile(temporary, content, 0o600, restriction);
     if (expected && !sameFileText(currentFileText(path), expected)) {
       throw new Error(`Refusing to replace ${path} because it changed during installation`);
     }
-    renameSync(temporary, path);
+    // The rename carries the file, and on Windows its restricted access list,
+    // onto the final path. A file that could not be restricted never gets here.
+    try {
+      renameSync(temporary, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EBUSY") {
+        throw new Error(`Refusing to replace ${path} because the assistant that uses it is running and holds it open. Close the assistant, then run the same command again.`);
+      }
+      throw error;
+    }
     safeChmod(path, 0o600);
   } finally {
     if (existsSync(temporary)) unlinkSync(temporary);
   }
+}
+
+/**
+ * Writes one local file the way Morrow writes every configuration file it owns:
+ * private to this account, replaced in one step, and refused outright when it
+ * cannot be made private. Exported so the refusal can be exercised for a
+ * platform this computer is not.
+ */
+export function writePrivateLocalFile(
+  pathValue: string,
+  content: string,
+  restriction?: PrivateFileRestriction,
+): void {
+  writePrivateText(exactAbsolutePath(pathValue, "path"), content, undefined, restriction);
 }
 
 export function buildLocalCanvasConfig(
@@ -852,7 +1022,7 @@ export function morrowClientConfigNotes(input: {
     return ["Codex reads a project .codex/config.toml only in a project you have marked trusted. The ChatGPT desktop app reads the user file, so for ChatGPT run this command again with --scope user."];
   }
   if (input.client === "claude-desktop" && platform === "win32") {
-    return ["This is the documented Windows location for Claude Desktop. Morrow has not confirmed a write here on a Windows computer. In Claude Desktop, open Settings, Developer, Edit Config, and check that Morrow is listed."];
+    return ["Morrow confirmed a write to this documented Windows location on a real Windows computer on 8 September 2026. In Claude Desktop, open Settings, Developer, Edit Config, and check that Morrow is listed."];
   }
   return [];
 }
@@ -1382,10 +1552,14 @@ export function writeClientConfigBundle(
   for (const entry of bundle.files) {
     const destination = resolve(outputDirectory, entry.path);
     const temporary = `${destination}.tmp-${process.pid}-${randomUUID()}`;
-    writeFileSync(temporary, entry.content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    safeChmod(temporary, 0o600);
-    renameSync(temporary, destination);
-    safeChmod(destination, entry.path === "install.posix.sh" ? 0o700 : 0o600);
+    const mode = entry.path === "install.posix.sh" ? 0o700 : 0o600;
+    try {
+      writeRestrictedFile(temporary, entry.content, mode, options.restriction);
+      renameSync(temporary, destination);
+      safeChmod(destination, mode);
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary);
+    }
   }
   return bundle;
 }

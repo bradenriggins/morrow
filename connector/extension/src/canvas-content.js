@@ -8,6 +8,1106 @@
   const MAX_RESUMED_PAGES = 500;
   const MAX_DISCOVERED_COURSES = 100;
 
+  /* BEGIN GENERATED NEW QUIZ ITEM PAYLOAD CONTRACT */
+  // Generated from packages/mcp-server/src/quiz-item-payload.ts sha256:20807f46b8e445f6e2486011f575a4638e37227600efa5036afbbf5e6391a10c
+  const NEW_QUIZ_ITEM_PAYLOAD_CONTRACT = (() => {
+    const MEDIA_ELEMENTS = ["img", "audio", "video"];
+    const MEDIA_SRC_PREFIXES = ["https://", "/courses/", "/api/v1/files/"];
+    const CHOICE_SLUGS = ["choice", "multiple_choice"];
+    const CHOICE_INTERACTION_TYPE_ID = 1;
+    const RICH_FILL_SLUGS = ["rich_fill_blank", "rich_fill", "rich_fill_in_the_blank"];
+    const BLANK_KINDS = { openentry: "openEntry", dropdown: "TextInChoices", textinchoices: "TextInChoices", wordbank: "wordbank" };
+    const INTERACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+    const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const TAG = /<!--[\s\S]*?-->|<(?:"[^"]*"|'[^']*'|[^'">])*>/g;
+    const TAG_NAME = /^<\s*(\/?)\s*([a-zA-Z][^\s/>]*)/;
+    const ATTRIBUTE = /^\s+([A-Za-z_:][-A-Za-z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/;
+    const RAW_TEXT = ["script", "style", "iframe", "object", "embed", "textarea", "title"];
+    const MEDIA_TAG = /<\s*(?:img|audio|video)\b/i;
+    const BLANK_MARKER = /id\s*=\s*(?:"blank_([^"]*)"|'blank_([^']*)')/g;
+    const MAX_DEPTH = 32;
+    function plainObject(value) {
+        return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    }
+    function scalar(value) {
+        return typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
+    }
+    function asText(value) {
+        return scalar(value) ? String(value) : "";
+    }
+    function normalizeSlug(value) {
+        return typeof value === "string" ? value.trim().toLowerCase().replaceAll(/[\s-]+/g, "_") : "";
+    }
+    function mediaElements(value) {
+        const elements = [];
+        let rawText = "";
+        for (const match of value.matchAll(TAG)) {
+            const tag = match[0];
+            if (tag.startsWith("<!--"))
+                continue;
+            const parsed = TAG_NAME.exec(tag);
+            if (!parsed)
+                continue;
+            const closing = parsed[1] === "/";
+            const name = (parsed[2] ?? "").toLowerCase();
+            if (rawText) {
+                if (closing && name === rawText)
+                    rawText = "";
+                continue;
+            }
+            if (RAW_TEXT.includes(name)) {
+                if (!closing && !tag.endsWith("/>"))
+                    rawText = name;
+                continue;
+            }
+            if (closing || !MEDIA_ELEMENTS.includes(name))
+                continue;
+            elements.push({ name, tag });
+        }
+        return { elements, open: rawText !== "" };
+    }
+    function tagAttributes(tag) {
+        const open = TAG_NAME.exec(tag);
+        if (!open || open[1] === "/" || !tag.endsWith(">"))
+            return null;
+        let rest = tag.slice(open[0].length, tag.length - (tag.endsWith("/>") ? 2 : 1));
+        const attributes = new Map();
+        while (rest.trim().length > 0) {
+            const match = ATTRIBUTE.exec(rest);
+            if (!match)
+                return null;
+            const name = (match[1] ?? "").toLowerCase();
+            if (attributes.has(name))
+                return null;
+            attributes.set(name, match[2] ?? match[3] ?? match[4] ?? "");
+            rest = rest.slice(match[0].length);
+        }
+        return attributes;
+    }
+    function stringMediaReason(value) {
+        if (!MEDIA_TAG.test(value))
+            return null;
+        const scan = mediaElements(value);
+        if (scan.open)
+            return "media_markup_unreadable";
+        for (const element of scan.elements) {
+            const attributes = tagAttributes(element.tag);
+            if (!attributes)
+                return "media_markup_unreadable";
+            if (element.name === "img" && !attributes.has("alt"))
+                return "media_image_alt_missing";
+            const source = attributes.get("src");
+            if (source !== undefined && !MEDIA_SRC_PREFIXES.some((prefix) => source.startsWith(prefix)))
+                return "media_src_unsupported";
+        }
+        return null;
+    }
+    function mediaReason(value, depth) {
+        if (depth > MAX_DEPTH)
+            return "payload_too_deep";
+        if (typeof value === "string")
+            return stringMediaReason(value);
+        if (Array.isArray(value)) {
+            for (const member of value) {
+                const reason = mediaReason(member, depth + 1);
+                if (reason)
+                    return reason;
+            }
+            return null;
+        }
+        if (plainObject(value)) {
+            for (const child of Object.values(value)) {
+                const reason = mediaReason(child, depth + 1);
+                if (reason)
+                    return reason;
+            }
+        }
+        return null;
+    }
+    function interactionKind(entry, item) {
+        const slug = normalizeSlug(entry.interaction_type_slug ?? item.interaction_type_slug);
+        const typeId = entry.interaction_type_id ?? item.interaction_type_id;
+        if (CHOICE_SLUGS.includes(slug))
+            return "choice";
+        if (slug === "matching")
+            return "matching";
+        if (slug === "numeric")
+            return "numeric";
+        if (RICH_FILL_SLUGS.includes(slug))
+            return "rich_fill";
+        if (!slug && Number(typeId) === CHOICE_INTERACTION_TYPE_ID)
+            return "choice";
+        return "";
+    }
+    function hasContent(value) {
+        if (!scalar(value))
+            return false;
+        const text = String(value);
+        return text.replaceAll(TAG, "").replaceAll("&nbsp;", " ").trim() !== "" || MEDIA_TAG.test(text);
+    }
+    function memberIds(rows, invalid, duplicate) {
+        const ids = [];
+        for (const row of rows) {
+            if (!plainObject(row))
+                return invalid;
+            const memberId = asText(row.id);
+            if (!INTERACTION_ID.test(memberId))
+                return invalid;
+            if (ids.includes(memberId))
+                return duplicate;
+            ids.push(memberId);
+        }
+        return ids;
+    }
+    function sameIdSet(left, right) {
+        return left.length === right.length && left.every((value) => right.includes(value));
+    }
+    function choiceReason(interaction, scoring) {
+        if (!plainObject(interaction) || !Array.isArray(interaction.choices))
+            return "choice_list_missing";
+        if (interaction.choices.length < 2)
+            return "choice_too_few";
+        const ids = memberIds(interaction.choices, "choice_id_invalid", "choice_id_duplicate");
+        if (!Array.isArray(ids))
+            return ids;
+        for (const choice of interaction.choices) {
+            const body = plainObject(choice) ? choice.item_body ?? choice.itemBody ?? choice.body : undefined;
+            if (!hasContent(body))
+                return "choice_body_blank";
+        }
+        const value = plainObject(scoring) ? scoring.value : undefined;
+        if (value === undefined || value === null)
+            return null;
+        const members = Array.isArray(value) ? value : [value];
+        if (members.length === 0)
+            return "choice_scoring_value_not_a_choice_id";
+        for (const member of members) {
+            if (!ids.includes(asText(member)))
+                return "choice_scoring_value_not_a_choice_id";
+        }
+        return null;
+    }
+    function matchingReason(interaction, scoring) {
+        if (!plainObject(interaction) || !Array.isArray(interaction.questions) || interaction.questions.length === 0)
+            return "matching_questions_missing";
+        const ids = memberIds(interaction.questions, "matching_question_id_invalid", "matching_question_id_duplicate");
+        if (!Array.isArray(ids))
+            return ids;
+        if (!plainObject(scoring))
+            return null;
+        if (!plainObject(scoring.value))
+            return "matching_scoring_value_not_an_object";
+        if (!sameIdSet(Object.keys(scoring.value), ids))
+            return "matching_scoring_value_keys_mismatch";
+        const editData = scoring.edit_data;
+        if (!plainObject(editData) || !Array.isArray(editData.matches))
+            return "matching_edit_data_matches_missing";
+        const matched = [];
+        for (const match of editData.matches) {
+            if (!plainObject(match))
+                return "matching_edit_data_matches_mismatch";
+            const questionId = asText(match.question_id ?? match.id);
+            if (!questionId || matched.includes(questionId))
+                return "matching_edit_data_matches_mismatch";
+            matched.push(questionId);
+        }
+        return sameIdSet(matched, ids) ? null : "matching_edit_data_matches_mismatch";
+    }
+    function numericReason(interaction, scoring) {
+        const value = plainObject(scoring) ? scoring.value : undefined;
+        if (Array.isArray(value)) {
+            const ids = memberIds(value, "numeric_response_invalid", "numeric_response_invalid");
+            if (!Array.isArray(ids) || ids.length === 0)
+                return "numeric_response_invalid";
+            const numeric = (number) => (typeof number === "number" || (typeof number === "string" && number.trim() !== ""))
+                && Number.isFinite(Number(number));
+            for (const response of value) {
+                if (!plainObject(response))
+                    return "numeric_response_invalid";
+                if (response.type === "withinARange") {
+                    if (!numeric(response.start) || !numeric(response.end) || Number(response.start) > Number(response.end))
+                        return "numeric_response_invalid";
+                }
+                else {
+                    if (!numeric(response.value))
+                        return "numeric_response_invalid";
+                    if (response.type === "marginOfError") {
+                        if (!numeric(response.margin) || Number(response.margin) < 0 || !["percent", "absolute"].includes(asText(response.margin_type)))
+                            return "numeric_response_invalid";
+                    }
+                    else if (response.type === "preciseResponse") {
+                        if (!numeric(response.precision) || !Number.isInteger(Number(response.precision)) || Number(response.precision) < 0
+                            || !["decimals", "significantDigits"].includes(asText(response.precision_type)))
+                            return "numeric_response_invalid";
+                    }
+                    else if (response.type !== "exactResponse")
+                        return "numeric_response_invalid";
+                }
+            }
+        }
+        else if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value)))
+            return "numeric_scoring_value_not_a_number";
+        if (!plainObject(interaction))
+            return null;
+        const units = interaction.units;
+        if (units !== undefined && units !== null && !(typeof units === "string" && units.trim() !== ""))
+            return "numeric_units_blank";
+        const dimensions = interaction.dimensions;
+        if (dimensions === undefined || dimensions === null)
+            return null;
+        if (!plainObject(dimensions) || Object.keys(dimensions).length === 0)
+            return "numeric_dimensions_invalid";
+        for (const bound of ["min", "max", "step"]) {
+            const held = dimensions[bound];
+            if (held === undefined || held === null)
+                continue;
+            if (typeof held !== "number" || !Number.isFinite(held))
+                return "numeric_dimensions_invalid";
+        }
+        if (typeof dimensions.min === "number" && typeof dimensions.max === "number" && dimensions.min > dimensions.max)
+            return "numeric_dimensions_min_above_max";
+        return null;
+    }
+    function scoringRow(scoring, blankId) {
+        const rows = plainObject(scoring) && Array.isArray(scoring.value) ? scoring.value : [];
+        return rows.find((row) => plainObject(row) && asText(row.id) === blankId) ?? null;
+    }
+    function rowAnswer(row) {
+        if (row && plainObject(row.scoring_data))
+            return row.scoring_data;
+        return plainObject(row) ? row : null;
+    }
+    function blankKind(blank, row) {
+        const named = normalizeSlug(blank.answer_type ?? blank.blank_type ?? blank.type ?? row?.scoring_algorithm);
+        return BLANK_KINDS[named.replaceAll("_", "")] ?? "";
+    }
+    function choiceTokens(choice) {
+        if (scalar(choice))
+            return [String(choice)];
+        if (!plainObject(choice))
+            return [];
+        return [choice.id, choice.item_body ?? choice.body ?? choice.value ?? choice.text].filter(scalar).map(String);
+    }
+    function openEntryReason(blank, row) {
+        const answer = blank.answers ?? rowAnswer(row)?.value;
+        const answers = Array.isArray(answer) ? answer : answer === undefined || answer === null ? [] : [answer];
+        if (answers.length === 0 || !answers.every((value) => scalar(value) && String(value).trim() !== ""))
+            return "rich_fill_open_entry_answers_missing";
+        return null;
+    }
+    function textInChoicesReason(blank, row) {
+        const listed = blank.choices ?? rowAnswer(row)?.choices;
+        if (!Array.isArray(listed) || listed.length < 2)
+            return "rich_fill_text_in_choices_too_few";
+        const tokens = listed.flatMap(choiceTokens);
+        const correct = asText(blank.value ?? rowAnswer(row)?.value);
+        return correct !== "" && tokens.includes(correct) ? null : "rich_fill_text_in_choices_value_not_listed";
+    }
+    function wordBankReason(interaction, scoring, itemBody, ids, wordBankIds) {
+        if (!Array.isArray(interaction.word_bank_choices) || interaction.word_bank_choices.length < 2)
+            return "rich_fill_word_bank_choices_too_few";
+        const choiceIds = memberIds(interaction.word_bank_choices, "rich_fill_word_bank_choice_id_invalid", "rich_fill_word_bank_choice_id_duplicate");
+        if (!Array.isArray(choiceIds))
+            return choiceIds;
+        if (!plainObject(scoring) || !Array.isArray(scoring.value))
+            return "rich_fill_scoring_ids_mismatch";
+        const scoredIds = memberIds(scoring.value, "rich_fill_scoring_ids_mismatch", "rich_fill_scoring_ids_mismatch");
+        if (!Array.isArray(scoredIds) || !sameIdSet(scoredIds, ids))
+            return "rich_fill_scoring_ids_mismatch";
+        const answers = [];
+        for (const blankId of ids) {
+            const answer = rowAnswer(scoringRow(scoring, blankId));
+            const value = asText(answer?.value);
+            if (wordBankIds.includes(blankId)) {
+                if (value.trim() === "")
+                    return "rich_fill_blank_answer_missing";
+                if (asText(answer?.blank_text) !== value)
+                    return "rich_fill_blank_text_mismatch";
+                if (!choiceIds.includes(asText(answer?.choice_id)))
+                    return "rich_fill_choice_id_unknown";
+            }
+            answers.push(asText(answer?.blank_text) || value);
+        }
+        const markers = [...String(itemBody ?? "").matchAll(BLANK_MARKER)].map((match) => match[1] ?? match[2] ?? "");
+        if (!sameIdSet([...new Set(markers)], ids))
+            return "rich_fill_body_blank_markers_mismatch";
+        const working = typeof scoring.working_item_body === "string" ? scoring.working_item_body : "";
+        let cursor = 0;
+        for (const answer of answers) {
+            const found = working.indexOf(`\`${answer}\``, cursor);
+            if (found < 0)
+                return "rich_fill_working_item_body_answers_out_of_order";
+            cursor = found + answer.length + 2;
+        }
+        return null;
+    }
+    function richFillReason(interaction, scoring, itemBody) {
+        const blanks = plainObject(interaction)
+            ? Array.isArray(interaction.blanks) ? interaction.blanks : Array.isArray(interaction.entries) ? interaction.entries : null
+            : null;
+        if (!blanks || blanks.length === 0 || !plainObject(interaction))
+            return "rich_fill_blanks_missing";
+        const ids = memberIds(blanks, "rich_fill_blank_id_invalid", "rich_fill_blank_id_duplicate");
+        if (!Array.isArray(ids))
+            return ids;
+        const kinds = blanks.map((blank, index) => plainObject(blank) ? blankKind(blank, scoringRow(scoring, ids[index] ?? "")) : "");
+        if (kinds.includes(""))
+            return "rich_fill_blank_kind_unreadable";
+        const wordBankIds = ids.filter((_, index) => kinds[index] === "wordbank");
+        if (wordBankIds.length > 0) {
+            const reason = wordBankReason(interaction, scoring, itemBody, ids, wordBankIds);
+            if (reason)
+                return reason;
+        }
+        for (const [index, blank] of blanks.entries()) {
+            if (!plainObject(blank))
+                return "rich_fill_blank_id_invalid";
+            if (kinds[index] === "wordbank")
+                continue;
+            const row = scoringRow(scoring, ids[index] ?? "");
+            const reason = kinds[index] === "openEntry" ? openEntryReason(blank, row) : textInChoicesReason(blank, row);
+            if (reason)
+                return reason;
+        }
+        return null;
+    }
+    function quizItemPayloadReason(item) {
+        if (!plainObject(item))
+            return "payload_not_an_object";
+        const entry = plainObject(item.entry) ? item.entry : item;
+        const media = mediaReason(item, 0);
+        if (media)
+            return media;
+        const kind = interactionKind(entry, item);
+        if (!kind)
+            return null;
+        const interaction = entry.interaction_data;
+        const scoring = entry.scoring_data;
+        if ((interaction === undefined || interaction === null) && (scoring === undefined || scoring === null))
+            return null;
+        if (kind === "choice")
+            return choiceReason(interaction, scoring);
+        if (kind === "matching")
+            return matchingReason(interaction, scoring);
+        if (kind === "numeric")
+            return numericReason(interaction, scoring);
+        return richFillReason(interaction, scoring, entry.item_body);
+    }
+    const CREATE_ALGORITHMS = Object.freeze({
+        "true-false": ["Equivalence"],
+        categorization: ["Categorization"],
+        matching: ["DeepEquals", "PartialDeep"],
+        "file-upload": ["None"],
+        formula: ["Numeric"],
+        ordering: ["DeepEquals"],
+        "rich-fill-blank": ["MultipleMethods"],
+        "hot-spot": ["HotSpot"],
+        choice: ["Equivalence", "VaryPointsByAnswer"],
+        "multi-answer": ["AllOrNothing", "PartialScore"],
+        numeric: ["Numeric"],
+        essay: ["None"],
+    });
+    function nonBlankString(value) {
+        return typeof value === "string" && value.trim() !== "";
+    }
+    function finiteNumeric(value) {
+        return (typeof value === "number" && Number.isFinite(value))
+            || (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)));
+    }
+    function keyedMembers(value, minimum, requireUuid = false) {
+        if (!plainObject(value))
+            return null;
+        const entries = Object.entries(value);
+        if (entries.length < minimum)
+            return null;
+        const rows = [];
+        for (const [key, row] of entries) {
+            if (!INTERACTION_ID.test(key) || (requireUuid && !UUID.test(key)) || !plainObject(row) || asText(row.id) !== key || !hasContent(row.item_body ?? row.itemBody))
+                return null;
+            rows.push(row);
+        }
+        return { ids: entries.map(([key]) => key), rows };
+    }
+    function exactScalarIds(value, allowed, requireAll) {
+        if (!Array.isArray(value) || value.length === 0)
+            return false;
+        const ids = value.map(asText);
+        if (ids.some((id) => !allowed.includes(id)) || new Set(ids).size !== ids.length)
+            return false;
+        return !requireAll || sameIdSet(ids, allowed);
+    }
+    function sequentialPositions(rows) {
+        return rows.every((row, index) => plainObject(row) && row.position === index + 1);
+    }
+    function onlyKeys(value, keys) {
+        return Object.keys(value).every((key) => keys.includes(key));
+    }
+    function shuffleGroup(properties, group) {
+        const rules = properties.shuffle_rules ?? properties.shuffleRules;
+        if (rules === undefined)
+            return undefined;
+        if (!plainObject(rules) || !onlyKeys(rules, [group]) || !plainObject(rules[group]))
+            return null;
+        return rules[group];
+    }
+    function choicePropertiesReason(properties, interaction, allowVaryPoints, algorithm) {
+        if (!onlyKeys(properties, ["shuffle_rules", "shuffleRules", "vary_points_by_answer", "varyPointsByAnswer"]))
+            return "create_properties_invalid";
+        const group = shuffleGroup(properties, "choices");
+        if (group === null)
+            return "create_properties_invalid";
+        if (group) {
+            if (!onlyKeys(group, ["to_lock", "toLock", "shuffled"]) || typeof group.shuffled !== "boolean")
+                return "create_properties_invalid";
+            const locks = group.to_lock ?? group.toLock;
+            const count = Array.isArray(interaction.choices) ? interaction.choices.length : 0;
+            if (locks !== undefined && (!Array.isArray(locks) || new Set(locks).size !== locks.length
+                || locks.some((index) => !Number.isSafeInteger(index) || Number(index) < 0 || Number(index) >= count)))
+                return "create_properties_invalid";
+        }
+        const vary = properties.vary_points_by_answer ?? properties.varyPointsByAnswer;
+        if (!allowVaryPoints && vary !== undefined)
+            return "create_properties_invalid";
+        if (vary !== undefined && typeof vary !== "boolean")
+            return "create_properties_invalid";
+        if (allowVaryPoints && vary !== undefined && (vary !== (algorithm === "VaryPointsByAnswer")))
+            return "create_properties_invalid";
+        return null;
+    }
+    function questionShufflePropertiesReason(properties) {
+        if (!onlyKeys(properties, ["shuffle_rules", "shuffleRules"]))
+            return "create_properties_invalid";
+        const group = shuffleGroup(properties, "questions");
+        if (group === null)
+            return "create_properties_invalid";
+        return group && (!onlyKeys(group, ["shuffled"]) || typeof group.shuffled !== "boolean") ? "create_properties_invalid" : null;
+    }
+    function orderingPropertiesReason(properties) {
+        if (!onlyKeys(properties, ["top_label", "bottom_label", "shuffle_rules", "include_labels", "display_answers_paragraph"]))
+            return "create_properties_invalid";
+        if (properties.shuffle_rules !== undefined && properties.shuffle_rules !== null)
+            return "create_properties_invalid";
+        for (const field of ["include_labels", "display_answers_paragraph"]) {
+            if (properties[field] !== undefined && typeof properties[field] !== "boolean")
+                return "create_properties_invalid";
+        }
+        for (const field of ["top_label", "bottom_label"]) {
+            if (properties[field] !== undefined && typeof properties[field] !== "string")
+                return "create_properties_invalid";
+        }
+        if (properties.include_labels === true && (!nonBlankString(properties.top_label) || !nonBlankString(properties.bottom_label)))
+            return "create_properties_invalid";
+        return null;
+    }
+    function richFillPropertiesReason(properties) {
+        if (!onlyKeys(properties, ["shuffle_rules", "shuffleRules"]))
+            return "create_properties_invalid";
+        const rules = properties.shuffle_rules ?? properties.shuffleRules;
+        if (rules === undefined)
+            return null;
+        if (!plainObject(rules) || !onlyKeys(rules, ["blanks"]) || !plainObject(rules.blanks)
+            || !onlyKeys(rules.blanks, ["children"]) || !plainObject(rules.blanks.children))
+            return "create_properties_invalid";
+        for (const [index, row] of Object.entries(rules.blanks.children)) {
+            if (!/^(?:0|[1-9][0-9]*)$/.test(index) || !plainObject(row) || !onlyKeys(row, ["children"]))
+                return "create_properties_invalid";
+            if (row.children === null)
+                continue;
+            if (!plainObject(row.children) || !onlyKeys(row.children, ["choices"]) || !plainObject(row.children.choices)
+                || !onlyKeys(row.children.choices, ["shuffled"]) || typeof row.children.choices.shuffled !== "boolean")
+                return "create_properties_invalid";
+        }
+        return null;
+    }
+    function questionPropertiesReason(slug, properties, interaction, algorithm) {
+        if (["true-false", "formula", "hot-spot", "numeric", "essay"].includes(slug)) {
+            return Object.keys(properties).length === 0 ? null : "create_properties_invalid";
+        }
+        if (slug === "categorization") {
+            const reason = questionShufflePropertiesReason(properties);
+            if (reason)
+                return reason;
+            const group = shuffleGroup(properties, "questions");
+            return group?.shuffled === true ? "create_properties_invalid" : null;
+        }
+        if (slug === "matching")
+            return questionShufflePropertiesReason(properties);
+        if (slug === "choice")
+            return choicePropertiesReason(properties, interaction, true, algorithm);
+        if (slug === "multi-answer")
+            return choicePropertiesReason(properties, interaction, false, algorithm);
+        if (slug === "ordering")
+            return orderingPropertiesReason(properties);
+        if (slug === "rich-fill-blank")
+            return richFillPropertiesReason(properties);
+        return null;
+    }
+    const CATEGORIZATION_INTERACTION_KEYS = ["categories", "distractors", "category_order"];
+    const CATEGORIZATION_SCORING_KEYS = ["score_method", "value"];
+    const CATEGORIZATION_SCORING_ROW_KEYS = ["id", "scoring_algorithm", "scoring_data"];
+    const MATCHING_INTERACTION_KEYS = ["questions", "answers"];
+    const MATCHING_SCORING_KEYS = ["value", "edit_data"];
+    const MATCHING_EDIT_DATA_KEYS = ["matches", "distractors"];
+    const MATCHING_MATCH_KEYS = ["answer_body", "question_id", "question_body", "id"];
+    function categorizationCreateReason(interaction, scoring) {
+        if (!onlyKeys(interaction, CATEGORIZATION_INTERACTION_KEYS))
+            return "categorization_structure_invalid";
+        if (!onlyKeys(scoring, CATEGORIZATION_SCORING_KEYS))
+            return "categorization_scoring_invalid";
+        if ((plainObject(interaction.categories) && Object.keys(interaction.categories).some((id) => !UUID.test(id)))
+            || (plainObject(interaction.distractors) && Object.keys(interaction.distractors).some((id) => !UUID.test(id))))
+            return "create_uuid_invalid";
+        const categories = keyedMembers(interaction.categories, 2, true);
+        const distractors = keyedMembers(interaction.distractors, 1, true);
+        if (!categories || !distractors)
+            return "categorization_structure_invalid";
+        if (!exactScalarIds(interaction.category_order, categories.ids, true))
+            return "categorization_structure_invalid";
+        if (scoring.score_method !== "all_or_nothing" || !Array.isArray(scoring.value) || scoring.value.length !== categories.ids.length)
+            return "categorization_scoring_invalid";
+        const seenCategories = [];
+        const assigned = new Set();
+        for (const row of scoring.value) {
+            if (!plainObject(row) || !onlyKeys(row, CATEGORIZATION_SCORING_ROW_KEYS)
+                || !categories.ids.includes(asText(row.id)) || seenCategories.includes(asText(row.id))
+                || row.scoring_algorithm !== "AllOrNothing" || !plainObject(row.scoring_data)
+                || !onlyKeys(row.scoring_data, ["value"])
+                || !Array.isArray(row.scoring_data.value))
+                return "categorization_scoring_invalid";
+            seenCategories.push(asText(row.id));
+            for (const answer of row.scoring_data.value) {
+                const id = asText(answer);
+                if (!distractors.ids.includes(id) || assigned.has(id))
+                    return "categorization_scoring_invalid";
+                assigned.add(id);
+            }
+        }
+        return sameIdSet(seenCategories, categories.ids) ? null : "categorization_scoring_invalid";
+    }
+    function matchingCreateReason(interaction, scoring) {
+        const baseReason = matchingReason(interaction, scoring);
+        if (baseReason)
+            return baseReason;
+        if (!onlyKeys(interaction, MATCHING_INTERACTION_KEYS) || !onlyKeys(scoring, MATCHING_SCORING_KEYS)
+            || (plainObject(scoring.edit_data) && !onlyKeys(scoring.edit_data, MATCHING_EDIT_DATA_KEYS))
+            || (plainObject(scoring.edit_data) && Array.isArray(scoring.edit_data.matches)
+                && scoring.edit_data.matches.some((match) => !plainObject(match) || !onlyKeys(match, MATCHING_MATCH_KEYS))))
+            return "matching_structure_invalid";
+        if (!Array.isArray(interaction.questions) || !Array.isArray(interaction.answers)
+            || interaction.answers.length === 0 || interaction.answers.some((answer) => !nonBlankString(answer))
+            || new Set(interaction.answers).size !== interaction.answers.length || !plainObject(scoring.value)
+            || !plainObject(scoring.edit_data) || !Array.isArray(scoring.edit_data.matches))
+            return "matching_structure_invalid";
+        const answers = interaction.answers;
+        const questionBodies = new Map();
+        for (const question of interaction.questions) {
+            if (!plainObject(question) || !hasContent(question.item_body))
+                return "matching_structure_invalid";
+            questionBodies.set(asText(question.id), asText(question.item_body));
+        }
+        const usedAnswers = new Set();
+        for (const [questionId, answer] of Object.entries(scoring.value)) {
+            if (!nonBlankString(answer) || !answers.includes(answer) || usedAnswers.has(answer))
+                return "matching_scoring_value_invalid";
+            usedAnswers.add(answer);
+            const match = scoring.edit_data.matches.find((candidate) => plainObject(candidate) && asText(candidate.question_id) === questionId);
+            if (!plainObject(match) || match.answer_body !== answer || match.question_body !== questionBodies.get(questionId))
+                return "matching_edit_data_values_mismatch";
+        }
+        const distractors = scoring.edit_data.distractors ?? [];
+        if (!Array.isArray(distractors) || distractors.some((answer) => !nonBlankString(answer))
+            || new Set(distractors).size !== distractors.length || distractors.some((answer) => usedAnswers.has(answer)))
+            return "matching_edit_data_values_mismatch";
+        return sameIdSet([...usedAnswers, ...distractors], answers) ? null : "matching_edit_data_values_mismatch";
+    }
+    function orderingCreateReason(interaction, scoring) {
+        if (plainObject(interaction.choices) && Object.keys(interaction.choices).some((id) => !UUID.test(id)))
+            return "create_uuid_invalid";
+        const choices = keyedMembers(interaction.choices, 2, true);
+        return choices && exactScalarIds(scoring.value, choices.ids, true) ? null : "ordering_structure_invalid";
+    }
+    const RICH_FILL_ALGORITHMS = Object.freeze(["TextCloseEnough", "TextContainsAnswer", "TextInChoices", "Equivalence", "TextEquivalence", "TextRegex"]);
+    function richFillCreateReason(interaction, scoring, itemBody) {
+        const baseReason = richFillReason(interaction, scoring, itemBody);
+        if (baseReason)
+            return baseReason;
+        if (!Array.isArray(interaction.blanks) || !Array.isArray(scoring.value) || !nonBlankString(scoring.working_item_body))
+            return "rich_fill_structure_invalid";
+        if (interaction.reuse_word_bank_choices !== undefined && typeof interaction.reuse_word_bank_choices !== "boolean")
+            return "rich_fill_structure_invalid";
+        const blankIds = interaction.blanks.map((blank) => plainObject(blank) ? asText(blank.id) : "");
+        const markers = [...itemBody.matchAll(BLANK_MARKER)].map((match) => match[1] ?? match[2] ?? "");
+        if (markers.length !== blankIds.length || !sameIdSet(markers, blankIds))
+            return "rich_fill_body_blank_markers_mismatch";
+        for (const blank of interaction.blanks) {
+            if (!plainObject(blank))
+                return "rich_fill_structure_invalid";
+            const row = scoringRow(scoring, asText(blank.id));
+            const data = rowAnswer(row);
+            const kind = blankKind(blank, row);
+            if (!row || !data || !RICH_FILL_ALGORITHMS.includes(asText(row.scoring_algorithm)) || !nonBlankString(data.blank_text))
+                return "rich_fill_scoring_row_invalid";
+            if (kind === "openEntry") {
+                const value = data.value;
+                if (row.scoring_algorithm === "TextInChoices") {
+                    if (!Array.isArray(value) || value.length === 0 || value.some((answer) => !nonBlankString(answer)) || !value.includes(data.blank_text))
+                        return "rich_fill_scoring_row_invalid";
+                }
+                else if (!nonBlankString(value))
+                    return "rich_fill_scoring_row_invalid";
+                if (row.scoring_algorithm === "TextCloseEnough"
+                    && (typeof data.ignore_case !== "boolean" || !Number.isSafeInteger(data.edit_distance) || Number(data.edit_distance) < 0))
+                    return "rich_fill_scoring_row_invalid";
+            }
+            else if (kind === "TextInChoices") {
+                if (row.scoring_algorithm !== "Equivalence" || !Array.isArray(blank.choices) || !sequentialPositions(blank.choices))
+                    return "rich_fill_scoring_row_invalid";
+                const choiceIds = blank.choices.map((choice) => plainObject(choice) ? asText(choice.id) : "");
+                if (!choiceIds.includes(asText(data.value)))
+                    return "rich_fill_scoring_row_invalid";
+            }
+            else if (kind === "wordbank") {
+                if (row.scoring_algorithm !== "TextEquivalence" || typeof interaction.reuse_word_bank_choices !== "boolean")
+                    return "rich_fill_scoring_row_invalid";
+            }
+        }
+        return null;
+    }
+    function trueFalseCreateReason(interaction, scoring) {
+        return nonBlankString(interaction.true_choice) && nonBlankString(interaction.false_choice)
+            && typeof scoring.value === "boolean" ? null : "true_false_structure_invalid";
+    }
+    function fileUploadCreateReason(interaction, scoring, properties) {
+        const count = Number(interaction.files_count);
+        if (!Number.isSafeInteger(count) || count < 1 || typeof interaction.restrict_count !== "boolean" || scoring.value !== "") {
+            return "file_upload_structure_invalid";
+        }
+        if (!onlyKeys(properties, ["allowed_types", "restrict_types"]))
+            return "create_properties_invalid";
+        if (properties.allowed_types !== undefined && typeof properties.allowed_types !== "string")
+            return "create_properties_invalid";
+        if (properties.restrict_types !== undefined && typeof properties.restrict_types !== "boolean")
+            return "create_properties_invalid";
+        if (properties.restrict_types === true && !nonBlankString(properties.allowed_types))
+            return "create_properties_invalid";
+        return null;
+    }
+    function formulaCreateReason(interaction, scoring) {
+        if (Object.keys(interaction).length !== 0 || !plainObject(scoring.value))
+            return "formula_structure_invalid";
+        const value = scoring.value;
+        if (!nonBlankString(value.formula) || !plainObject(value.numeric) || !Array.isArray(value.variables)
+            || value.variables.length === 0 || !Array.isArray(value.generated_solutions) || value.generated_solutions.length === 0) {
+            return "formula_structure_invalid";
+        }
+        const numeric = value.numeric;
+        if (numeric.type !== "marginOfError" || !finiteNumeric(numeric.margin)
+            || Number(numeric.margin) < 0 || !["absolute", "percent"].includes(asText(numeric.margin_type)))
+            return "formula_structure_invalid";
+        const variableNames = new Set();
+        for (const variable of value.variables) {
+            if (!plainObject(variable) || !nonBlankString(variable.name) || variableNames.has(variable.name)
+                || !finiteNumeric(variable.min) || !finiteNumeric(variable.max) || Number(variable.min) > Number(variable.max)
+                || !finiteNumeric(variable.precision) || !Number.isInteger(Number(variable.precision)) || Number(variable.precision) < 0)
+                return "formula_structure_invalid";
+            variableNames.add(variable.name);
+        }
+        if (!Number.isSafeInteger(Number(value.answer_count)) || Number(value.answer_count) !== value.generated_solutions.length)
+            return "formula_structure_invalid";
+        for (const solution of value.generated_solutions) {
+            if (!plainObject(solution) || !finiteNumeric(solution.output) || !Array.isArray(solution.inputs)
+                || solution.inputs.length !== variableNames.size)
+                return "formula_structure_invalid";
+            const names = new Set();
+            for (const input of solution.inputs) {
+                if (!plainObject(input) || !variableNames.has(asText(input.name)) || names.has(asText(input.name)) || !finiteNumeric(input.value))
+                    return "formula_structure_invalid";
+                names.add(asText(input.name));
+            }
+        }
+        return null;
+    }
+    function hotSpotCreateReason(interaction, scoring) {
+        if (!nonBlankString(interaction.image_url) || !plainObject(scoring.value))
+            return "hot_spot_structure_invalid";
+        try {
+            const url = new URL(interaction.image_url);
+            if (!["http:", "https:"].includes(url.protocol) || url.search || url.hash)
+                return "hot_spot_structure_invalid";
+        }
+        catch {
+            return "hot_spot_structure_invalid";
+        }
+        const value = scoring.value;
+        if (!["oval", "square", "polygon"].includes(asText(value.type)) || !Array.isArray(value.coordinates))
+            return "hot_spot_structure_invalid";
+        if (value.coordinates.length < (value.type === "polygon" ? 3 : 2))
+            return "hot_spot_structure_invalid";
+        return value.coordinates.every((point) => plainObject(point) && typeof point.x === "number" && Number.isFinite(point.x)
+            && point.x >= 0 && point.x <= 1 && typeof point.y === "number" && Number.isFinite(point.y) && point.y >= 0 && point.y <= 1)
+            ? null : "hot_spot_structure_invalid";
+    }
+    function essayCreateReason(interaction, scoring) {
+        if (!onlyKeys(interaction, ["rce", "essay", "word_count", "file_upload", "spell_check", "word_limit_max", "word_limit_min", "word_limit_enabled"]))
+            return "essay_structure_invalid";
+        for (const field of ["rce", "word_count", "file_upload", "spell_check", "word_limit_enabled"]) {
+            if (typeof interaction[field] !== "boolean")
+                return "essay_structure_invalid";
+        }
+        if (interaction.essay !== null || interaction.file_upload !== false)
+            return "essay_structure_invalid";
+        if (interaction.word_limit_enabled === true) {
+            if (!finiteNumeric(interaction.word_limit_min) || !finiteNumeric(interaction.word_limit_max)
+                || Number(interaction.word_limit_min) < 0 || Number(interaction.word_limit_min) > Number(interaction.word_limit_max))
+                return "essay_structure_invalid";
+        }
+        return typeof scoring.value === "string" ? null : "essay_structure_invalid";
+    }
+    function completeQuizItemPayloadReason(item) {
+        if (!plainObject(item))
+            return "payload_not_an_object";
+        const media = mediaReason(item, 0);
+        if (media)
+            return media;
+        if (item.entry_type !== "Item" || !plainObject(item.entry))
+            return "create_entry_type_invalid";
+        if (item.points_possible !== undefined && (typeof item.points_possible !== "number" || !Number.isFinite(item.points_possible) || item.points_possible <= 0)) {
+            return "create_points_not_positive";
+        }
+        if (item.position !== undefined && (!Number.isSafeInteger(item.position) || Number(item.position) < 1))
+            return "create_position_invalid";
+        const entry = item.entry;
+        if (!nonBlankString(entry.item_body))
+            return "create_item_body_missing";
+        if (entry.calculator_type !== undefined && !["none", "basic", "scientific"].includes(asText(entry.calculator_type)))
+            return "create_calculator_type_invalid";
+        const slug = entry.interaction_type_slug;
+        if (typeof slug !== "string" || !(slug in CREATE_ALGORITHMS))
+            return slug === "fill-blank" ? "create_deprecated_question_type" : "create_question_type_unsupported";
+        if (!plainObject(entry.interaction_data) || !plainObject(entry.scoring_data))
+            return "create_required_data_missing";
+        if (!CREATE_ALGORITHMS[slug]?.includes(asText(entry.scoring_algorithm)))
+            return "create_scoring_algorithm_invalid";
+        if (entry.properties !== undefined && !plainObject(entry.properties))
+            return "create_properties_invalid";
+        if (entry.answer_feedback !== undefined) {
+            if (slug !== "choice" || !plainObject(entry.answer_feedback))
+                return "create_answer_feedback_invalid";
+        }
+        const interaction = entry.interaction_data;
+        const scoring = entry.scoring_data;
+        const properties = plainObject(entry.properties) ? entry.properties : {};
+        const propertiesReason = questionPropertiesReason(slug, properties, interaction, entry.scoring_algorithm);
+        if (propertiesReason)
+            return propertiesReason;
+        if (entry.feedback !== undefined) {
+            if (!plainObject(entry.feedback) || !onlyKeys(entry.feedback, ["neutral", "correct", "incorrect"])
+                || Object.values(entry.feedback).some((value) => typeof value !== "string"))
+                return "create_feedback_invalid";
+        }
+        if (plainObject(entry.answer_feedback) && Object.values(entry.answer_feedback).some((value) => typeof value !== "string"))
+            return "create_answer_feedback_invalid";
+        if (slug === "choice" || slug === "multi-answer") {
+            const reason = choiceReason(interaction, scoring);
+            if (reason)
+                return reason;
+            const ids = memberIds(interaction.choices, "choice_id_invalid", "choice_id_duplicate");
+            if (!Array.isArray(ids))
+                return ids;
+            if (ids.some((id) => !UUID.test(id)))
+                return "create_uuid_invalid";
+            if (!sequentialPositions(interaction.choices))
+                return "create_choice_position_invalid";
+            if (slug === "multi-answer" && !exactScalarIds(scoring.value, ids, false))
+                return "multi_answer_scoring_invalid";
+            if (slug === "choice" && (Array.isArray(scoring.value) || !ids.includes(asText(scoring.value))))
+                return "choice_scoring_value_not_a_choice_id";
+            if (slug === "choice" && entry.scoring_algorithm === "VaryPointsByAnswer") {
+                if (!Array.isArray(scoring.values) || scoring.values.length !== ids.length)
+                    return "choice_vary_points_invalid";
+                const scored = new Set();
+                for (const row of scoring.values) {
+                    if (!plainObject(row) || !ids.includes(asText(row.value)) || scored.has(asText(row.value))
+                        || typeof row.points !== "number" || !Number.isFinite(row.points))
+                        return "choice_vary_points_invalid";
+                    scored.add(asText(row.value));
+                }
+            }
+            if (plainObject(entry.answer_feedback) && Object.keys(entry.answer_feedback).some((id) => !ids.includes(id)))
+                return "create_answer_feedback_invalid";
+            return null;
+        }
+        if (slug === "matching")
+            return matchingCreateReason(interaction, scoring);
+        if (slug === "numeric") {
+            if (Object.keys(interaction).length !== 0)
+                return "numeric_response_invalid";
+            const reason = numericReason(interaction, scoring);
+            return reason ?? (Array.isArray(scoring.value) && scoring.value.length > 0 ? null : "numeric_response_invalid");
+        }
+        if (slug === "rich-fill-blank") {
+            const reason = richFillCreateReason(interaction, scoring, entry.item_body);
+            if (reason)
+                return reason;
+            const blanks = Array.isArray(interaction.blanks) ? interaction.blanks : [];
+            const blankIds = memberIds(blanks, "rich_fill_blank_id_invalid", "rich_fill_blank_id_duplicate");
+            const scoringIds = Array.isArray(scoring.value) ? memberIds(scoring.value, "rich_fill_scoring_ids_mismatch", "rich_fill_scoring_ids_mismatch") : "";
+            if (!Array.isArray(blankIds) || blankIds.some((id) => !UUID.test(id)))
+                return "create_uuid_invalid";
+            const nestedChoiceIds = blanks.flatMap((blank) => plainObject(blank) && Array.isArray(blank.choices)
+                ? blank.choices.map((choice) => plainObject(choice) ? asText(choice.id) : "") : []);
+            const wordBankIds = Array.isArray(interaction.word_bank_choices)
+                ? interaction.word_bank_choices.map((choice) => plainObject(choice) ? asText(choice.id) : "") : [];
+            if ([...nestedChoiceIds, ...wordBankIds].some((id) => !UUID.test(id)))
+                return "create_uuid_invalid";
+            return Array.isArray(scoringIds) && sameIdSet(blankIds, scoringIds) ? null : "rich_fill_scoring_ids_mismatch";
+        }
+        if (slug === "true-false")
+            return trueFalseCreateReason(interaction, scoring);
+        if (slug === "categorization")
+            return categorizationCreateReason(interaction, scoring);
+        if (slug === "file-upload")
+            return fileUploadCreateReason(interaction, scoring, properties);
+        if (slug === "formula")
+            return formulaCreateReason(interaction, scoring);
+        if (slug === "ordering")
+            return orderingCreateReason(interaction, scoring);
+        if (slug === "hot-spot")
+            return hotSpotCreateReason(interaction, scoring);
+        return essayCreateReason(interaction, scoring);
+    }
+    const MESSAGES = {
+        payload_not_an_object: "The question has to be an object holding entry_type and entry.",
+        payload_too_deep: "This question nests deeper than Morrow reads, so Morrow could not check every image in it.",
+        media_markup_unreadable: "Morrow could not read the HTML of this question well enough to check its images. Look for an unclosed tag or an unclosed script block.",
+        media_image_alt_missing: "One image in this question has no alt attribute. Add alternative text that says what the image shows, or alt=\"\" if the image is decorative.",
+        media_src_unsupported: "One image, audio, or video in this question loads from an address Canvas does not serve. Use an https address, a /courses/ path, or an /api/v1/files/ path.",
+        choice_list_missing: "A multiple-choice question needs its choices in entry.interaction_data.choices.",
+        choice_too_few: "A multiple-choice question needs at least two choices.",
+        choice_id_duplicate: "Two choices in this question share one id. New Quizzes matches choices by id, so each choice needs its own.",
+        choice_id_invalid: "One choice in this question has no id Morrow can read.",
+        choice_body_blank: "One choice in this question has no text and no image in it.",
+        choice_scoring_value_not_a_choice_id: "The answer key names a choice this question does not have. Every value in entry.scoring_data has to be one of the choice ids.",
+        matching_questions_missing: "A matching question needs its prompts in entry.interaction_data.questions.",
+        matching_question_id_duplicate: "Two prompts in this matching question share one id.",
+        matching_question_id_invalid: "One prompt in this matching question has no id Morrow can read.",
+        matching_scoring_value_not_an_object: "The answer key of a matching question has to be an object keyed by prompt id.",
+        matching_scoring_value_keys_mismatch: "The answer key does not name exactly the prompts this matching question holds.",
+        matching_edit_data_matches_missing: "A matching question needs entry.scoring_data.edit_data.matches, covering every prompt.",
+        matching_edit_data_matches_mismatch: "The match list does not cover exactly the prompts this matching question holds, once each.",
+        numeric_scoring_value_not_a_number: "A numeric question needs a number as its answer.",
+        numeric_response_invalid: "A numeric response needs a unique id, a supported response type and valid numeric values for that type.",
+        numeric_units_blank: "The units on this numeric question are empty. Name the units or leave them out.",
+        numeric_dimensions_invalid: "The accepted range on this numeric question needs numbers for the values it names.",
+        numeric_dimensions_min_above_max: "The lowest accepted value on this numeric question is above the highest.",
+        rich_fill_blanks_missing: "A fill-in-the-blank question needs at least one blank in entry.interaction_data.",
+        rich_fill_blank_id_duplicate: "Two blanks in this question share one id.",
+        rich_fill_blank_id_invalid: "One blank in this question has no id Morrow can read.",
+        rich_fill_blank_kind_unreadable: "Morrow cannot tell what kind one blank is. Morrow reads a typed blank (openEntry), a listed-choice blank (dropdown or TextInChoices), and a word-bank blank.",
+        rich_fill_open_entry_answers_missing: "A typed blank needs at least one answer, and no answer may be empty.",
+        rich_fill_text_in_choices_too_few: "A listed-choice blank needs at least two choices.",
+        rich_fill_text_in_choices_value_not_listed: "The correct value of a listed-choice blank is not one of the choices it lists.",
+        rich_fill_word_bank_choices_too_few: "A word bank needs at least two choices.",
+        rich_fill_word_bank_choice_id_duplicate: "Two word-bank choices share one id.",
+        rich_fill_word_bank_choice_id_invalid: "One word-bank choice has no id Morrow can read.",
+        rich_fill_scoring_ids_mismatch: "The word-bank scoring does not name exactly the blanks this question holds.",
+        rich_fill_blank_answer_missing: "One word-bank blank has no answer.",
+        rich_fill_blank_text_mismatch: "One word-bank blank shows text that is not its own answer.",
+        rich_fill_choice_id_unknown: "One word-bank blank points at a choice that is not in the word bank.",
+        rich_fill_body_blank_markers_mismatch: "The question body does not mark exactly the blanks this question holds. Each blank needs id=\"blank_<id>\" in the body.",
+        rich_fill_working_item_body_answers_out_of_order: "The authoring copy of the body does not carry every answer in backticks in blank order.",
+        create_entry_type_invalid: "Canvas can create only a QuestionItem here. Set entry_type to Item and supply the complete entry object.",
+        create_points_not_positive: "When points_possible is present, it must be a positive number.",
+        create_position_invalid: "When position is present, it must be a positive whole number.",
+        create_item_body_missing: "A created question needs a non-empty entry.item_body.",
+        create_calculator_type_invalid: "entry.calculator_type must be none, basic, or scientific.",
+        create_deprecated_question_type: "Canvas marks fill-blank as deprecated. Create a rich-fill-blank question instead.",
+        create_question_type_unsupported: "entry.interaction_type_slug must name one of the 12 question types Canvas supports for create.",
+        create_required_data_missing: "A created question needs complete entry.interaction_data and entry.scoring_data objects.",
+        create_scoring_algorithm_invalid: "entry.scoring_algorithm does not match this New Quizzes question type.",
+        create_properties_invalid: "entry.properties must be an object when it is present.",
+        create_answer_feedback_invalid: "Only a choice question may carry answer_feedback, and each feedback key must name one of its choices.",
+        create_feedback_invalid: "entry.feedback may contain only text under neutral, correct, and incorrect.",
+        create_uuid_invalid: "This question type requires canonical UUID values for its generated category, response, choice, or blank ids.",
+        create_choice_position_invalid: "Each listed choice needs a one-based position that matches its order.",
+        multi_answer_scoring_invalid: "A multiple-answer key needs a non-empty list of unique choice ids from this question.",
+        choice_vary_points_invalid: "VaryPointsByAnswer scoring needs one finite point value for every choice id.",
+        true_false_structure_invalid: "A true-false question needs named true and false choices and a boolean correct value.",
+        categorization_structure_invalid: "A categorization question needs keyed categories and distractors with matching ids and a complete category order.",
+        categorization_scoring_invalid: "Categorization scoring must name every category once and assign each correct distractor id at most once.",
+        matching_structure_invalid: "A matching question needs unique answer text and a body for every prompt.",
+        matching_scoring_value_invalid: "Each matching answer key value must name one unique answer from interaction_data.answers.",
+        matching_edit_data_values_mismatch: "The matching edit data must reproduce each prompt and correct answer, and list every unused answer once as a distractor.",
+        file_upload_structure_invalid: "A file-upload question needs a positive file count, restriction flags, and an empty scoring value.",
+        formula_structure_invalid: "A formula question needs a formula, valid variables, numeric tolerance, and the declared number of generated solutions.",
+        ordering_structure_invalid: "An ordering question needs keyed choices with matching ids and a scoring list that contains every choice once.",
+        hot_spot_structure_invalid: "A hot-spot question needs an unsigned http or https image URL and valid normalized coordinates for its shape.",
+        rich_fill_structure_invalid: "A rich fill-in-the-blank question needs its complete blank list, working body, and word-bank reuse setting when it uses a word bank.",
+        rich_fill_scoring_row_invalid: "Each rich fill-in-the-blank scoring row must use a supported algorithm and complete data for its blank type.",
+        essay_structure_invalid: "An essay question has invalid response settings, word limits, or grading notes.",
+    };
+    const QUIZ_ITEM_PAYLOAD_REASONS = Object.freeze(Object.keys(MESSAGES));
+    function quizItemPayloadMessage(reason) {
+        return MESSAGES[reason] ?? `Morrow refused this question payload: ${reason}.`;
+    }
+    return Object.freeze({ completeQuizItemPayloadReason, quizItemPayloadMessage });
+  })();
+  /* END GENERATED NEW QUIZ ITEM PAYLOAD CONTRACT */
+
+  /**
+   * The relative media rule.
+   *
+   * A create is judged on its own: every image in it must say what it shows. A
+   * change to a question Canvas already holds is judged against that question
+   * instead. Adding alternative text to one image must not be refused because a
+   * different image in the same question still has none, which is exactly the
+   * repair this rule exists to allow.
+   *
+   * It is relative per element, never per finding code. A change that keeps one
+   * undescribed image and adds a second one carries the same code as the
+   * question it started from, so a code comparison would let the new one
+   * through. Findings are therefore matched by their exact element and counted:
+   * a second copy of the same offending element is still refused. A finding
+   * that names no element, which is unreadable markup or a payload deeper than
+   * this rule reads, matches nothing and is always refused.
+   *
+   * connector/extension/src/item-bank-guard.js holds the one implementation.
+   * Chrome evaluates this content script without module scope, so this copy
+   * lives here, and scripts/test/canvas-new-quiz-media-rule.test.mjs runs both
+   * over the same fixtures and fails if they disagree.
+   */
+  const NEW_QUIZ_MEDIA_RULE = (() => {
+    const MEDIA_ELEMENTS = ["img", "audio", "video"];
+    const MEDIA_SRC_PREFIXES = ["https://", "/courses/", "/api/v1/files/"];
+    const MEDIA_TAG = /<\s*(?:img|audio|video)\b/i;
+    const TAG = /<!--[\s\S]*?-->|<(?:"[^"]*"|'[^']*'|[^'">])*>/g;
+    const TAG_NAME = /^<\s*(\/?)\s*([a-zA-Z][^\s/>]*)/;
+    // The rule reads an unquoted attribute value as well, because it only
+    // counts elements and never rewrites one.
+    const MEDIA_ATTRIBUTE = /^\s+([A-Za-z_:][-A-Za-z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/;
+    const RAW_TEXT = ["script", "style", "iframe", "object", "embed", "textarea", "title"];
+    const MAX_DEPTH = 32;
+    const plain = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+
+    function mediaElements(value) {
+      const elements = [];
+      let rawText = "";
+      for (const match of value.matchAll(TAG)) {
+        const tag = match[0];
+        if (tag.startsWith("<!--")) continue;
+        const parsed = TAG_NAME.exec(tag);
+        if (!parsed) continue;
+        const closing = parsed[1] === "/";
+        const name = parsed[2].toLowerCase();
+        if (rawText) {
+          if (closing && name === rawText) rawText = "";
+          continue;
+        }
+        if (RAW_TEXT.includes(name)) {
+          if (!closing && !tag.endsWith("/>")) rawText = name;
+          continue;
+        }
+        if (closing || !MEDIA_ELEMENTS.includes(name)) continue;
+        elements.push({ name, tag });
+      }
+      return { elements, open: rawText !== "" };
+    }
+
+    function mediaTagAttributes(tag) {
+      const open = TAG_NAME.exec(tag);
+      if (!open || open[1] === "/" || !tag.endsWith(">")) return null;
+      let rest = tag.slice(open[0].length, tag.length - (tag.endsWith("/>") ? 2 : 1));
+      const attributes = new Map();
+      while (rest.trim().length > 0) {
+        const match = MEDIA_ATTRIBUTE.exec(rest);
+        if (!match) return null;
+        const name = match[1].toLowerCase();
+        if (attributes.has(name)) return null;
+        attributes.set(name, match[2] ?? match[3] ?? match[4] ?? "");
+        rest = rest.slice(match[0].length);
+      }
+      return attributes;
+    }
+
+    function stringMediaFindings(value, findings) {
+      if (!MEDIA_TAG.test(value)) return;
+      const scan = mediaElements(value);
+      if (scan.open) {
+        findings.push({ reason: "media_markup_unreadable", tag: "" });
+        return;
+      }
+      for (const element of scan.elements) {
+        const attributes = mediaTagAttributes(element.tag);
+        if (!attributes) {
+          findings.push({ reason: "media_markup_unreadable", tag: "" });
+          continue;
+        }
+        // Presence, not content: alt="" is how a decorative image is marked, and
+        // it is the author's answer rather than a missing one.
+        if (element.name === "img" && !attributes.has("alt")) findings.push({ reason: "media_image_alt_missing", tag: element.tag });
+        const source = attributes.get("src");
+        if (source !== undefined && !MEDIA_SRC_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+          findings.push({ reason: "media_src_unsupported", tag: element.tag });
+        }
+      }
+    }
+
+    function mediaFindings(value, depth = 0, findings = []) {
+      if (depth > MAX_DEPTH) {
+        findings.push({ reason: "payload_too_deep", tag: "" });
+        return findings;
+      }
+      if (typeof value === "string") stringMediaFindings(value, findings);
+      else if (Array.isArray(value)) for (const member of value) mediaFindings(member, depth + 1, findings);
+      else if (plain(value)) for (const child of Object.values(value)) mediaFindings(child, depth + 1, findings);
+      return findings;
+    }
+
+    function newMediaReason(proposed, stored) {
+      const held = new Map();
+      for (const finding of mediaFindings(stored)) {
+        if (!finding.tag) continue;
+        const key = `${finding.reason} ${finding.tag}`;
+        held.set(key, (held.get(key) || 0) + 1);
+      }
+      for (const finding of mediaFindings(proposed)) {
+        const key = `${finding.reason} ${finding.tag}`;
+        const count = finding.tag ? held.get(key) || 0 : 0;
+        if (count === 0) return finding.reason;
+        held.set(key, count - 1);
+      }
+      return null;
+    }
+
+    // The complete payload contract checks media before anything else and stops
+    // at the first problem, so a media problem the stored question already
+    // carries would hide every rule after it. Once newMediaReason has proved
+    // this change adds no media problem, every media problem left in it is one
+    // Canvas already holds. Replacing each of those elements with one that
+    // carries no problem lets the rest of the contract run unchanged. This copy
+    // is only ever validated; the payload sent to Canvas is never rewritten.
+    const HELD_MEDIA = '<img alt="" src="https://morrow.invalid/held-media">';
+
+    function withoutHeldMedia(value) {
+      const tags = [...new Set(mediaFindings(value).map((finding) => finding.tag).filter(Boolean))];
+      if (tags.length === 0) return value;
+      const replace = (node, depth) => {
+        if (depth > MAX_DEPTH) return node;
+        if (typeof node === "string") {
+          let text = node;
+          for (const tag of tags) text = text.split(tag).join(HELD_MEDIA);
+          return text;
+        }
+        if (Array.isArray(node)) return node.map((member) => replace(member, depth + 1));
+        if (plain(node)) return Object.fromEntries(Object.entries(node).map(([key, child]) => [key, replace(child, depth + 1)]));
+        return node;
+      };
+      return replace(value, 0);
+    }
+
+    return { mediaFindings, newMediaReason, withoutHeldMedia };
+  })();
+
   function currentCanvasCourseId() {
     const match = location.pathname.match(/(?:^|\/)courses\/([1-9][0-9]*)(?:\/|$)/);
     if (!match) throw new Error("canvas_course_context_missing");
@@ -981,10 +2081,10 @@
     if (await bodyDigest(stable(before.quiz_settings)) !== guard.current_quiz_settings_sha256) {
       throw new Error("new_quiz_settings_stale: These New Quiz settings changed in Canvas after they were read. No change was sent. Read the settings again and make a new change.");
     }
-    return mergeQuizSettings(before.quiz_settings, settings);
+    return { ...mergeQuizSettings(before.quiz_settings, settings), before: before.quiz_settings };
   }
 
-  async function verifyNewQuizSettingsChange(args, url, expectedSettings) {
+  async function verifyNewQuizSettingsChange(args, url, expectedSettings, previousSettings = null) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-settings" };
     let saved;
     try {
@@ -999,7 +2099,11 @@
     if (!plainObject(saved.quiz_settings)) {
       return { ...base, status: "unconfirmed", reason: "new_quiz_settings_readback_missing" };
     }
-    if (stable(saved.quiz_settings) !== stable(expectedSettings)) {
+    const savedSettings = stable(saved.quiz_settings);
+    if (savedSettings !== stable(expectedSettings)) {
+      if (plainObject(previousSettings) && savedSettings === stable(previousSettings)) {
+        return { ...base, status: "mismatch", reason: "new_quiz_settings_readback_no_effect" };
+      }
       return { ...base, status: "mismatch", reason: "new_quiz_settings_readback_mismatch" };
     }
     return { ...base, status: "verified", evidence: "complete_settings_reread_after_write" };
@@ -1013,8 +2117,19 @@
   // In-place updates retain every interaction id. Morrow has not verified
   // how structural edits merge on a live tenant, so structural changes use
   // separate reviewed delete and create operations.
-  const NEW_QUIZ_INTERACTION_ID_GROUPS = ["choices", "questions", "blanks", "entries"];
+  const NEW_QUIZ_INTERACTION_ID_GROUPS = [
+    "choices", "questions", "blanks", "entries", "categories", "distractors", "word_bank_choices",
+  ];
+  const NEW_QUIZ_ITEM_CREATE_KEY = "POST /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items#create_quiz_item";
   const NEW_QUIZ_ITEM_OPERATION_KEY = "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item";
+  const NEW_QUIZ_ITEM_DELETE_KEY = "DELETE /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#delete_quiz_item";
+  const NEW_QUIZ_CREATE_KEY = "POST /quiz/v1/courses/{course_id}/quizzes#create_new_quiz";
+  const NEW_QUIZ_DELETE_KEY = "DELETE /quiz/v1/courses/{course_id}/quizzes/{assignment_id}#delete_new_quiz";
+  const NEW_QUIZ_COURSE_ACCOMMODATIONS_KEY = "POST /quiz/v1/courses/{course_id}/accommodations#set_course_level_accommodations";
+  const NEW_QUIZ_QUIZ_ACCOMMODATIONS_KEY = "POST /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/accommodations#set_quiz_level_accommodations";
+  const NEW_QUIZ_REPORT_KEY = "POST /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/reports#create_quiz_report";
+  const NEW_QUIZ_ITEM_LIMIT = 10_000;
+  const NEW_QUIZ_ITEM_PAGE_LIMIT = 100;
 
   function newQuizMemberId(member) {
     if (!plainObject(member)) return null;
@@ -1028,7 +2143,14 @@
     const ids = {};
     if (!plainObject(interaction)) return ids;
     for (const group of NEW_QUIZ_INTERACTION_ID_GROUPS) {
-      if (Array.isArray(interaction[group])) ids[group] = interaction[group].map(newQuizMemberId);
+      const members = interaction[group];
+      if (Array.isArray(members)) {
+        ids[group] = members.map(newQuizMemberId);
+        continue;
+      }
+      if (plainObject(members)) {
+        ids[group] = Object.entries(members).map(([key, member]) => newQuizMemberId(member) === key ? key : null);
+      }
     }
     return ids;
   }
@@ -1049,26 +2171,535 @@
     return true;
   }
 
+  function validNewQuizPositionGuard(guard) {
+    return plainObject(guard) && Object.keys(guard).length === 4
+      && guard.kind === "new_quiz_item_position"
+      && typeof guard.before_item_ids_sha256 === "string" && /^[0-9a-f]{64}$/.test(guard.before_item_ids_sha256)
+      && typeof guard.expected_item_ids_sha256 === "string" && /^[0-9a-f]{64}$/.test(guard.expected_item_ids_sha256)
+      && Array.isArray(guard.expected_item_ids) && guard.expected_item_ids.length > 0 && guard.expected_item_ids.length <= NEW_QUIZ_ITEM_LIMIT
+      && guard.expected_item_ids.every((id) => pageId(id) !== null)
+      && new Set(guard.expected_item_ids.map(String)).size === guard.expected_item_ids.length;
+  }
+
+  function newQuizItemsListUrl(itemUrl) {
+    const listUrl = new URL(itemUrl);
+    if (/\/items\/[1-9][0-9]{0,18}$/.test(listUrl.pathname)) {
+      listUrl.pathname = listUrl.pathname.replace(/\/[1-9][0-9]{0,18}$/, "");
+    } else if (!/\/items$/.test(listUrl.pathname)) {
+      throw new Error("new_quiz_item_list_target_invalid");
+    }
+    listUrl.search = "";
+    listUrl.searchParams.set("per_page", String(NEW_QUIZ_ITEM_PAGE_LIMIT));
+    return listUrl;
+  }
+
+  function newQuizItemPayloadFromArguments(operation, args) {
+    const root = {};
+    let present = false;
+    for (const parameter of operation.parameters || []) {
+      const wireName = String(parameter.wireName || "");
+      if (parameter.location !== "form" || !wireName.startsWith("item[")) continue;
+      const value = args[parameter.inputName];
+      if (value === undefined) continue;
+      assignJsonValue(root, wireName, value);
+      present = true;
+    }
+    return present && plainObject(root.item) ? root.item : null;
+  }
+
+  function validNewQuizLifecycleGuard(guard, kind) {
+    if (!plainObject(guard) || guard.kind !== kind
+      || typeof guard.before_items_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(guard.before_items_sha256)) return false;
+    if (kind === "create") {
+      return Object.keys(guard).length === 3
+        && typeof guard.payload_sha256 === "string" && /^[0-9a-f]{64}$/.test(guard.payload_sha256);
+    }
+    return Object.keys(guard).length === 5
+      && typeof guard.target_item_sha256 === "string" && /^[0-9a-f]{64}$/.test(guard.target_item_sha256)
+      && pageId(guard.item_id) !== null && guard.entry_type === "Item";
+  }
+
+  async function checkNewQuizItemLifecycleSource(operation, args, url) {
+    const guard = args.morrow_new_quiz_item_lifecycle_guard;
+    const kind = operation.key === NEW_QUIZ_ITEM_CREATE_KEY ? "create"
+      : operation.key === NEW_QUIZ_ITEM_DELETE_KEY ? "delete" : "";
+    if (!kind) {
+      if (guard !== undefined) throw new Error("new_quiz_item_lifecycle_guard_refused: This operation is not a New Quiz item create or delete. No change was sent.");
+      return null;
+    }
+    if (!validNewQuizLifecycleGuard(guard, kind)) {
+      throw new Error(`new_quiz_item_lifecycle_guard_required: A New Quiz item ${kind} needs one complete fresh item list from the lifecycle planner. No change was sent.`);
+    }
+    const beforeItems = await newQuizItemMembership(url);
+    const before = beforeItems.map((item) => item.id);
+    if (await bodyDigest(stable(beforeItems)) !== guard.before_items_sha256) {
+      throw new Error("new_quiz_item_lifecycle_stale: The saved New Quiz item list changed after this operation was planned. No change was sent.");
+    }
+    const listUrl = newQuizItemsListUrl(url);
+    if (kind === "create") {
+      const payload = newQuizItemPayloadFromArguments(operation, args);
+      const reason = NEW_QUIZ_ITEM_PAYLOAD_CONTRACT.completeQuizItemPayloadReason(payload);
+      if (reason) throw new Error(`new_quiz_item_payload_invalid: ${NEW_QUIZ_ITEM_PAYLOAD_CONTRACT.quizItemPayloadMessage(reason)} No change was sent.`);
+      if (await bodyDigest(stable(payload)) !== guard.payload_sha256) {
+        throw new Error("new_quiz_item_lifecycle_guard_invalid: The reviewed question payload does not match this create. No change was sent.");
+      }
+      return { kind, before, listUrl, payload };
+    }
+    const itemId = pageId(args.item_id);
+    if (!itemId || itemId !== pageId(guard.item_id) || !before.includes(itemId)) {
+      throw new Error("new_quiz_item_lifecycle_guard_invalid: The reviewed item is not in the complete saved New Quiz item list. No change was sent.");
+    }
+    let item;
+    try {
+      item = await pageJson(url);
+    } catch {
+      throw new Error("new_quiz_item_read_failed: Morrow could not read the item before deleting it. No change was sent.");
+    }
+    if (await bodyDigest(stable(item)) !== guard.target_item_sha256) {
+      throw new Error("new_quiz_item_lifecycle_stale: The target New Quiz item changed after this operation was planned. No change was sent.");
+    }
+    if (!plainObject(item) || pageId(item.id) !== itemId || item.entry_type !== "Item"
+      || pageId(item.stimulus_quiz_entry_id) || item.entry_editable === false || item.immutable === true
+      || item.status !== "mutable") {
+      throw new Error("new_quiz_item_delete_dependency_unverified: This item is not an editable standalone question. No change was sent.");
+    }
+    return { kind, before, listUrl, itemId };
+  }
+
+  function requestedNewQuizItemShapeMatches(actual, expected) {
+    if (Array.isArray(expected)) {
+      return Array.isArray(actual) && actual.length === expected.length
+        && expected.every((value, index) => requestedNewQuizItemShapeMatches(actual[index], value));
+    }
+    if (plainObject(expected)) {
+      return plainObject(actual) && Object.entries(expected)
+        .every(([key, value]) => Object.hasOwn(actual, key) && requestedNewQuizItemShapeMatches(actual[key], value));
+    }
+    if (expected === null || typeof expected === "boolean") return actual === expected;
+    if ((typeof expected === "string" || typeof expected === "number")
+      && (typeof actual === "string" || typeof actual === "number")) return String(actual) === String(expected);
+    return actual === expected;
+  }
+
+  async function verifyNewQuizItemLifecycleChange(change, writeData) {
+    const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-item-lifecycle" };
+    try {
+      const after = (await newQuizItemMembership(change.listUrl)).map((item) => item.id);
+      if (change.kind === "delete") {
+        const expected = change.before.filter((id) => id !== change.itemId);
+        return after.length === expected.length && after.every((id, index) => id === expected[index])
+          ? { ...base, status: "verified", evidence: "complete_item_list_reread_after_delete" }
+          : { ...base, status: "mismatch", reason: "new_quiz_item_delete_readback_mismatch" };
+      }
+      const additions = after.filter((id) => !change.before.includes(id));
+      const removed = change.before.filter((id) => !after.includes(id));
+      if (after.length !== change.before.length + 1 || additions.length !== 1 || removed.length !== 0) {
+        return { ...base, status: "mismatch", reason: "new_quiz_item_create_membership_mismatch" };
+      }
+      const responseId = pageId(writeData?.id ?? writeData?.item?.id);
+      const itemId = additions[0];
+      if (responseId && responseId !== itemId) return { ...base, status: "mismatch", reason: "new_quiz_item_create_id_mismatch" };
+      const itemUrl = new URL(change.listUrl);
+      itemUrl.pathname = `${itemUrl.pathname}/${itemId}`;
+      itemUrl.search = "";
+      const saved = await pageJson(itemUrl);
+      if (!plainObject(saved) || pageId(saved.id) !== itemId || !requestedNewQuizItemShapeMatches(saved, change.payload)) {
+        return { ...base, status: "mismatch", reason: "new_quiz_item_create_readback_mismatch" };
+      }
+      return { ...base, status: "verified", evidence: "complete_item_list_and_created_item_reread" };
+    } catch {
+      return { ...base, status: "unconfirmed", reason: "new_quiz_item_lifecycle_readback_unavailable" };
+    }
+  }
+
+  function newQuizListUrl(url) {
+    const listUrl = new URL(url);
+    if (/\/quizzes\/[1-9][0-9]{0,18}$/.test(listUrl.pathname)) {
+      listUrl.pathname = listUrl.pathname.replace(/\/[1-9][0-9]{0,18}$/, "");
+    } else if (!/\/quizzes$/.test(listUrl.pathname)) {
+      throw new Error("new_quiz_list_target_invalid");
+    }
+    listUrl.search = "";
+    listUrl.searchParams.set("per_page", String(NEW_QUIZ_ITEM_PAGE_LIMIT));
+    return listUrl;
+  }
+
+  async function newQuizMembership(url) {
+    const requested = newQuizListUrl(url);
+    const ids = [];
+    let next = requested.href;
+    let pages = 0;
+    while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" } });
+      if (!response.ok) throw new Error("new_quiz_list_read_failed");
+      const rows = JSON.parse(await readBounded(response));
+      if (!Array.isArray(rows) || rows.length > NEW_QUIZ_ITEM_PAGE_LIMIT || ids.length + rows.length > NEW_QUIZ_ITEM_LIMIT) {
+        throw new Error("new_quiz_list_incomplete");
+      }
+      for (const row of rows) {
+        const id = plainObject(row) ? pageId(row.id) : null;
+        if (!id || ids.includes(id)) throw new Error("new_quiz_list_invalid");
+        ids.push(id);
+      }
+      pages += 1;
+      const links = linkHeaderUrls(response.headers.get("Link"), location.origin, requested.pathname, requested);
+      next = links.get("next")?.href || null;
+    }
+    if (next) throw new Error("new_quiz_list_incomplete");
+    return ids.sort((left, right) => left.length - right.length || (left < right ? -1 : left > right ? 1 : 0));
+  }
+
+  function newQuizPayloadFromArguments(operation, args) {
+    const root = {};
+    let present = false;
+    for (const parameter of operation.parameters || []) {
+      const wireName = String(parameter.wireName || "");
+      if (parameter.location !== "form" || !wireName.startsWith("quiz[")) continue;
+      const value = args[parameter.inputName];
+      if (value === undefined) continue;
+      assignJsonValue(root, wireName, value);
+      present = true;
+    }
+    return present && plainObject(root.quiz) ? root.quiz : {};
+  }
+
+  function validNewQuizGuard(guard, kind) {
+    if (!plainObject(guard) || guard.kind !== kind
+      || !Array.isArray(guard.before_quiz_ids) || guard.before_quiz_ids.length > NEW_QUIZ_ITEM_LIMIT
+      || guard.before_quiz_ids.some((id) => pageId(id) === null)
+      || new Set(guard.before_quiz_ids.map(String)).size !== guard.before_quiz_ids.length
+      || typeof guard.before_quiz_ids_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(guard.before_quiz_ids_sha256)) return false;
+    if (kind === "create") return Object.keys(guard).length === 4
+      && typeof guard.payload_sha256 === "string" && /^[0-9a-f]{64}$/.test(guard.payload_sha256);
+    return Object.keys(guard).length === 7
+      && typeof guard.target_quiz_sha256 === "string" && /^[0-9a-f]{64}$/.test(guard.target_quiz_sha256)
+      && typeof guard.target_items_sha256 === "string" && /^[0-9a-f]{64}$/.test(guard.target_items_sha256)
+      && typeof guard.target_assignment_sha256 === "string" && /^[0-9a-f]{64}$/.test(guard.target_assignment_sha256)
+      && pageId(guard.quiz_id) !== null;
+  }
+
+  async function checkNewQuizLifecycleSource(operation, args, url) {
+    const guard = args.morrow_new_quiz_lifecycle_guard;
+    const kind = operation.key === NEW_QUIZ_CREATE_KEY ? "create" : operation.key === NEW_QUIZ_DELETE_KEY ? "delete" : "";
+    if (!kind) {
+      if (guard !== undefined) throw new Error("new_quiz_lifecycle_guard_refused: This is not a New Quiz create or delete. No change was sent.");
+      return null;
+    }
+    if (!validNewQuizGuard(guard, kind)) throw new Error(`new_quiz_lifecycle_guard_required: A New Quiz ${kind} needs a reviewed complete course quiz list. No change was sent.`);
+    const before = await newQuizMembership(url);
+    if (await bodyDigest(stable(guard.before_quiz_ids.map(String))) !== guard.before_quiz_ids_sha256
+      || before.length !== guard.before_quiz_ids.length || before.some((id, index) => id !== String(guard.before_quiz_ids[index]))) {
+      throw new Error("new_quiz_lifecycle_stale: The course New Quiz list changed after review. No change was sent.");
+    }
+    const listUrl = newQuizListUrl(url);
+    if (kind === "create") {
+      const payload = newQuizPayloadFromArguments(operation, args);
+      if (await bodyDigest(stable(payload)) !== guard.payload_sha256) throw new Error("new_quiz_lifecycle_guard_invalid: The reviewed New Quiz payload changed. No change was sent.");
+      return { kind, before, listUrl, payload };
+    }
+    const quizId = pageId(args.assignment_id);
+    if (!quizId || quizId !== pageId(guard.quiz_id) || !before.includes(quizId)) throw new Error("new_quiz_lifecycle_target_changed: The reviewed New Quiz is not in the course list. No change was sent.");
+    const quiz = await pageJson(url);
+    if (!plainObject(quiz) || pageId(quiz.id) !== quizId || await bodyDigest(stable(quiz)) !== guard.target_quiz_sha256) {
+      throw new Error("new_quiz_lifecycle_stale: The New Quiz changed after review. No change was sent.");
+    }
+    const itemsUrl = new URL(`${url.pathname}/items`, url.origin);
+    const items = await completeNewQuizItemRecords(itemsUrl);
+    if (await bodyDigest(stable(items)) !== guard.target_items_sha256) {
+      throw new Error("new_quiz_lifecycle_stale: The New Quiz item list changed after review. No change was sent.");
+    }
+    const assignmentUrl = new URL(`/api/v1/courses/${args.course_id}/assignments/${quizId}`, url.origin);
+    const assignment = await pageJson(assignmentUrl);
+    if (!plainObject(assignment) || pageId(assignment.id) !== quizId
+      || (assignment.course_id !== undefined && pageId(assignment.course_id) !== pageId(args.course_id))
+      || assignment.has_submitted_submissions !== false || assignment.graded_submissions_exist !== false
+      || await bodyDigest(stable(assignment)) !== guard.target_assignment_sha256) {
+      throw new Error("new_quiz_lifecycle_stale: The linked Assignment changed or has student work. No change was sent.");
+    }
+    return { kind, before, listUrl, quizId };
+  }
+
+  async function verifyNewQuizLifecycleChange(change, writeData) {
+    const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-lifecycle" };
+    try {
+      const after = await newQuizMembership(change.listUrl);
+      if (change.kind === "delete") {
+        const expected = change.before.filter((id) => id !== change.quizId);
+        return after.length === expected.length && after.every((id, index) => id === expected[index])
+          ? { ...base, status: "verified", evidence: "complete_course_new_quiz_list_reread_after_delete" }
+          : { ...base, status: "mismatch", reason: "new_quiz_delete_readback_mismatch" };
+      }
+      const additions = after.filter((id) => !change.before.includes(id));
+      const removed = change.before.filter((id) => !after.includes(id));
+      if (after.length !== change.before.length + 1 || additions.length !== 1 || removed.length !== 0) {
+        return { ...base, status: "mismatch", reason: "new_quiz_create_membership_mismatch" };
+      }
+      const responseId = pageId(writeData?.id ?? writeData?.quiz?.id);
+      const quizId = additions[0];
+      if (responseId && responseId !== quizId) return { ...base, status: "mismatch", reason: "new_quiz_create_id_mismatch" };
+      const quizUrl = new URL(change.listUrl);
+      quizUrl.pathname = `${quizUrl.pathname}/${quizId}`;
+      quizUrl.search = "";
+      const saved = await pageJson(quizUrl);
+      if (!plainObject(saved) || pageId(saved.id) !== quizId || !requestedNewQuizItemShapeMatches(saved, change.payload)) {
+        return { ...base, status: "mismatch", reason: "new_quiz_create_readback_mismatch" };
+      }
+      return { ...base, status: "verified", evidence: "complete_course_quiz_list_and_created_quiz_reread" };
+    } catch {
+      return { ...base, status: "unconfirmed", reason: "new_quiz_lifecycle_readback_unavailable" };
+    }
+  }
+
+  function newQuizAccommodationRequest(operation, args) {
+    if (![NEW_QUIZ_COURSE_ACCOMMODATIONS_KEY, NEW_QUIZ_QUIZ_ACCOMMODATIONS_KEY].includes(operation.key)) return null;
+    const allowed = operation.key === NEW_QUIZ_COURSE_ACCOMMODATIONS_KEY
+      ? ["user_id", "extra_time", "apply_to_in_progress_quiz_sessions", "reduce_choices_enabled"]
+      : ["user_id", "extra_time", "extra_attempts", "reduce_choices_enabled"];
+    const value = {};
+    for (const name of allowed) if (args[name] !== undefined) value[name] = args[name];
+    const userId = pageId(value.user_id);
+    if (!userId) throw new Error("new_quiz_accommodation_user_invalid");
+    value.user_id = userId;
+    for (const name of ["extra_time", "extra_attempts"]) {
+      if (value[name] === undefined) continue;
+      const number = Number(value[name]);
+      if (!Number.isSafeInteger(number) || number < 0 || (name === "extra_time" && number > 10_080)) {
+        throw new Error("new_quiz_accommodation_value_invalid");
+      }
+      value[name] = number;
+    }
+    for (const name of ["apply_to_in_progress_quiz_sessions", "reduce_choices_enabled"]) {
+      if (value[name] !== undefined && typeof value[name] !== "boolean") throw new Error("new_quiz_accommodation_value_invalid");
+    }
+    return value;
+  }
+
+  function verifyNewQuizAccommodation(data, request) {
+    const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-accommodation-response" };
+    if (!plainObject(data) || !Array.isArray(data.successful) || !Array.isArray(data.failed)) {
+      return { ...base, status: "mismatch", reason: "new_quiz_accommodation_response_invalid" };
+    }
+    const successful = data.successful.filter((row) => plainObject(row) && pageId(row.user_id) === request.user_id);
+    const failed = data.failed.filter((row) => plainObject(row) && pageId(row.user_id) === request.user_id);
+    if (successful.length === 1 && failed.length === 0) {
+      return { ...base, status: "verified", evidence: "authoritative_per_user_accommodation_success" };
+    }
+    return { ...base, status: "mismatch", reason: failed.length > 0 ? "new_quiz_accommodation_provider_failed" : "new_quiz_accommodation_user_result_missing" };
+  }
+
+  function verifyNewQuizReport(data, args) {
+    const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-report-progress" };
+    const id = plainObject(data) ? pageId(data.id) : null;
+    const contextId = plainObject(data) ? pageId(data.context_id) : null;
+    let progressUrl;
+    try { progressUrl = new URL(String(data?.url || ""), location.origin); } catch { progressUrl = null; }
+    if (!id || contextId !== pageId(args.assignment_id) || data.context_type !== "Assignment"
+      || !["queued", "running", "completed", "failed"].includes(String(data.workflow_state))
+      || !progressUrl || progressUrl.origin !== location.origin || progressUrl.pathname !== `/api/v1/progress/${id}`) {
+      return { ...base, status: "mismatch", reason: "new_quiz_report_progress_invalid" };
+    }
+    if (data.workflow_state === "failed") return { ...base, status: "mismatch", reason: "new_quiz_report_failed" };
+    if (data.workflow_state === "completed") {
+      let artifact;
+      try { artifact = new URL(String(data.results?.url || ""), location.origin); } catch { artifact = null; }
+      if (!artifact || artifact.origin !== location.origin || !/^\/api\//.test(artifact.pathname)) {
+        return { ...base, status: "mismatch", reason: "new_quiz_report_artifact_invalid" };
+      }
+      return { ...base, status: "verified", evidence: "completed_progress_and_same_origin_report_artifact" };
+    }
+    return { ...base, status: "verified", evidence: "authoritative_assignment_bound_progress_receipt" };
+  }
+
+  async function checkNewQuizEffectGuard(operation, args, accommodation) {
+    const isAccommodation = [NEW_QUIZ_COURSE_ACCOMMODATIONS_KEY, NEW_QUIZ_QUIZ_ACCOMMODATIONS_KEY].includes(operation.key);
+    const isReport = operation.key === NEW_QUIZ_REPORT_KEY;
+    const guard = args.morrow_new_quiz_effect_guard;
+    if (!isAccommodation && !isReport) {
+      if (guard !== undefined) throw new Error("new_quiz_effect_guard_refused: This is not a New Quiz accommodation or report request. No change was sent.");
+      return null;
+    }
+    const kind = isReport ? "report" : "accommodation";
+    if (!plainObject(guard) || Object.keys(guard).length !== 2 || guard.kind !== kind
+      || typeof guard.payload_sha256 !== "string" || !/^[0-9a-f]{64}$/.test(guard.payload_sha256)) {
+      throw new Error(`new_quiz_effect_guard_required: This New Quiz ${kind} request needs an exact reviewed payload. No change was sent.`);
+    }
+    const payload = isReport
+      ? { report_type: args.quiz_report_report_type, format: args.quiz_report_format }
+      : accommodation;
+    if (!plainObject(payload) || await bodyDigest(stable(payload)) !== guard.payload_sha256) {
+      throw new Error("new_quiz_effect_guard_invalid: The New Quiz request changed after review. No change was sent.");
+    }
+    return { kind };
+  }
+
+  async function readNewQuizItemMembership(itemUrl, requireItemOnly) {
+    const requested = newQuizItemsListUrl(itemUrl);
+    const rows = [];
+    let next = requested.href;
+    let pages = 0;
+    while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" } });
+      if (!response.ok) throw new Error("new_quiz_item_position_list_read_failed");
+      const page = JSON.parse(await readBounded(response));
+      if (!Array.isArray(page) || page.length > NEW_QUIZ_ITEM_PAGE_LIMIT || rows.length + page.length > NEW_QUIZ_ITEM_LIMIT) {
+        throw new Error("new_quiz_item_position_list_incomplete");
+      }
+      rows.push(...page);
+      pages += 1;
+      const links = linkHeaderUrls(response.headers.get("Link"), location.origin, requested.pathname, requested);
+      next = links.get("next")?.href || null;
+    }
+    if (next) throw new Error("new_quiz_item_position_list_incomplete");
+    const positions = new Set();
+    const ids = new Set();
+    const positioned = [];
+    for (const row of rows) {
+      const id = plainObject(row) ? pageId(row.id) : null;
+      const position = plainObject(row) && Number.isSafeInteger(row.position) && row.position >= 1 ? row.position : null;
+      const entryType = plainObject(row) && typeof row.entry_type === "string" && row.entry_type.length <= 100
+        && row.entry_type.trim() === row.entry_type ? row.entry_type : "";
+      if (!id || !entryType || (requireItemOnly && entryType !== "Item") || position === null || ids.has(id) || positions.has(position)) {
+        throw new Error("new_quiz_item_position_list_invalid");
+      }
+      ids.add(id);
+      positions.add(position);
+      positioned.push({ id, position, entry_type: entryType });
+    }
+    return positioned.sort((left, right) => left.position - right.position);
+  }
+
+  async function newQuizItemMembership(itemUrl) {
+    return readNewQuizItemMembership(itemUrl, false);
+  }
+
+  async function completeNewQuizItemRecords(itemUrl) {
+    const requested = newQuizItemsListUrl(itemUrl);
+    const rows = [];
+    let next = requested.href;
+    let pages = 0;
+    while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" } });
+      if (!response.ok) throw new Error("new_quiz_item_list_read_failed");
+      const page = JSON.parse(await readBounded(response));
+      if (!Array.isArray(page) || page.length > NEW_QUIZ_ITEM_PAGE_LIMIT || rows.length + page.length > NEW_QUIZ_ITEM_LIMIT) {
+        throw new Error("new_quiz_item_list_incomplete");
+      }
+      rows.push(...page);
+      pages += 1;
+      const links = linkHeaderUrls(response.headers.get("Link"), location.origin, requested.pathname, requested);
+      next = links.get("next")?.href || null;
+    }
+    if (next) throw new Error("new_quiz_item_list_incomplete");
+    const ids = new Set();
+    for (const row of rows) {
+      const id = plainObject(row) ? pageId(row.id) : null;
+      if (!id || ids.has(id) || !Number.isSafeInteger(row.position) || row.position < 1) throw new Error("new_quiz_item_list_invalid");
+      ids.add(id);
+    }
+    return rows.sort((left, right) => left.position - right.position);
+  }
+
+  async function newQuizItemOrder(itemUrl) {
+    return (await readNewQuizItemMembership(itemUrl, true)).map((row) => row.id);
+  }
+
+  async function checkNewQuizItemPositionSource(operation, args, url) {
+    const guard = args.morrow_new_quiz_item_position_guard;
+    const changesPosition = operation.key === NEW_QUIZ_ITEM_OPERATION_KEY && args.item_position !== undefined;
+    if (!changesPosition) {
+      if (guard !== undefined) throw new Error("new_quiz_item_position_guard_refused: This change does not move a New Quiz item. No change was sent.");
+      return null;
+    }
+    if (!validNewQuizPositionGuard(guard)) throw new Error("new_quiz_item_position_guard_required: A New Quiz item move needs one complete current order and one exact expected order. No change was sent.");
+    const before = await newQuizItemOrder(url);
+    if (await bodyDigest(stable(before)) !== guard.before_item_ids_sha256) {
+      throw new Error("new_quiz_item_position_stale: The saved New Quiz item order changed after this move was planned. No change was sent.");
+    }
+    const expected = guard.expected_item_ids.map(String);
+    if (before.length !== expected.length || new Set(before).size !== new Set(expected).size || before.some((id) => !expected.includes(id))
+      || await bodyDigest(stable(expected)) !== guard.expected_item_ids_sha256) {
+      throw new Error("new_quiz_item_position_guard_invalid: The expected order is not an exact permutation of the current saved items. No change was sent.");
+    }
+    const itemId = pageId(args.item_id);
+    const requestedPosition = Number(args.item_position);
+    if (!itemId || !Number.isSafeInteger(requestedPosition) || requestedPosition < 1 || requestedPosition > expected.length
+      || expected[requestedPosition - 1] !== itemId) {
+      throw new Error("new_quiz_item_position_guard_invalid: The requested item position does not match the expected saved order. No change was sent.");
+    }
+    const item = await readEditableStandaloneNewQuizItem(args, url);
+    return { expected, url, item };
+  }
+
+  async function verifyNewQuizItemPositionChange(change) {
+    try {
+      const saved = await newQuizItemOrder(change.url);
+      if (saved.length !== change.expected.length || saved.some((id, index) => id !== change.expected[index])) {
+        return { schema: "morrow.browser-verification.v1", status: "mismatch", reason: "new_quiz_item_position_readback_mismatch" };
+      }
+      return { schema: "morrow.browser-verification.v1", status: "verified", evidence: "complete_new_quiz_item_order_reread_after_write" };
+    } catch {
+      return { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "new_quiz_item_position_readback_unavailable" };
+    }
+  }
+
   // Every in-place change to a New Quiz item's answer structure is checked
   // against the item Canvas holds now, whether a content guard prepared it or
   // not. A change to `scoring_data` takes the same read because that block is
   // the answer key, and it names the very ids this check protects.
-  async function checkNewQuizItemIds(operation, args, url) {
-    if (operation.key !== NEW_QUIZ_ITEM_OPERATION_KEY
-      || (args.item_entry_interaction_data === undefined && args.item_entry_scoring_data === undefined)) return false;
-    let before;
-    try {
-      before = await pageJson(url);
-    } catch {
-      throw new Error("new_quiz_item_read_failed: Morrow could not read this quiz question before changing it. No change was sent.");
+  function mergeNewQuizItemPatch(before, patch) {
+    const merged = { ...before, ...patch };
+    if (plainObject(patch.entry)) {
+      merged.entry = { ...(plainObject(before.entry) ? before.entry : {}), ...patch.entry };
+      if (plainObject(patch.entry.feedback)) {
+        merged.entry.feedback = { ...(plainObject(before.entry?.feedback) ? before.entry.feedback : {}), ...patch.entry.feedback };
+      }
+    }
+    return merged;
+  }
+
+  async function readEditableStandaloneNewQuizItem(args, url, current = null) {
+    let item = current;
+    if (!item) {
+      try {
+        item = await pageJson(url);
+      } catch {
+        throw new Error("new_quiz_item_read_failed: Morrow could not read this quiz question before changing it. No change was sent.");
+      }
     }
     const itemId = pageId(args.item_id);
-    if (!itemId || !plainObject(before) || pageId(before.id) !== itemId || before.entry_type !== "Item" || !plainObject(before.entry)) {
+    if (!itemId || !plainObject(item) || pageId(item.id) !== itemId || item.entry_type !== "Item") {
+      throw new Error("new_quiz_item_target_changed: This quiz question is not the standalone item Morrow expected. No change was sent.");
+    }
+    if (pageId(item.stimulus_quiz_entry_id) || item.entry_editable === false || item.immutable === true
+      || item.status !== "mutable") {
+      throw new Error("new_quiz_item_edit_dependency_unverified: This item is not an editable standalone question. No change was sent.");
+    }
+    return item;
+  }
+
+  async function checkNewQuizItemIds(operation, args, url, current = null) {
+    if (operation.key !== NEW_QUIZ_ITEM_OPERATION_KEY) return false;
+    const patch = newQuizItemPayloadFromArguments(operation, args);
+    if (!patch || Object.keys(patch).every((key) => key === "position")) return false;
+    const before = await readEditableStandaloneNewQuizItem(args, url, current);
+    const itemId = pageId(args.item_id);
+    if (!itemId || !plainObject(before.entry)) {
       throw new Error("new_quiz_item_target_changed: This quiz question does not report the answer structure Morrow has to preserve. No change was sent.");
     }
-    const after = args.item_entry_interaction_data === undefined
-      ? before
-      : { entry: { ...before.entry, interaction_data: args.item_entry_interaction_data } };
+    const after = mergeNewQuizItemPatch(before, patch);
+    // This is a change to a question Canvas already holds, so its media is
+    // judged against that question. Every media problem this change would add
+    // is refused, counted per element. Every rule that is not about media stays
+    // absolute, so the media problems this question arrived with cannot hide
+    // one of them.
+    const newMedia = NEW_QUIZ_MEDIA_RULE.newMediaReason(after, before);
+    if (newMedia) {
+      throw new Error(`new_quiz_item_payload_invalid: ${NEW_QUIZ_ITEM_PAYLOAD_CONTRACT.quizItemPayloadMessage(newMedia)} No change was sent.`);
+    }
+    const reason = NEW_QUIZ_ITEM_PAYLOAD_CONTRACT.completeQuizItemPayloadReason(NEW_QUIZ_MEDIA_RULE.withoutHeldMedia(after));
+    if (reason) {
+      throw new Error(`new_quiz_item_payload_invalid: ${NEW_QUIZ_ITEM_PAYLOAD_CONTRACT.quizItemPayloadMessage(reason)} No change was sent.`);
+    }
     if (!newQuizIdsPreserved(before, after)) {
       throw new Error("new_quiz_interaction_ids_changed: This change would give the answers in this quiz question new ids, and New Quizzes would keep the old ones as blank answers. No change was sent. Delete this question and add the replacement instead.");
     }
@@ -1390,6 +3021,12 @@
     await courseJson(exactCourseId);
     const assignmentDueDate = await checkAssignmentDueDateSource(operation, args, url, exactCourseId);
     let canvasContentChange = null;
+    let newQuizLifecycle = null;
+    let newQuizItemLifecycle = null;
+    let newQuizItemPosition = null;
+    const newQuizAccommodation = newQuizAccommodationRequest(operation, args);
+    const newQuizReport = operation.key === NEW_QUIZ_REPORT_KEY;
+    const newQuizEffect = await checkNewQuizEffectGuard(operation, args, newQuizAccommodation);
     if (assignmentDueDate) {
       const currentProfile = await canvasProfile();
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
@@ -1412,7 +3049,25 @@
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
       await courseJson(exactCourseId);
     }
-    if (await checkNewQuizItemIds(operation, args, url)) {
+    newQuizLifecycle = await checkNewQuizLifecycleSource(operation, args, url);
+    if (newQuizLifecycle) {
+      const currentProfile = await canvasProfile();
+      if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
+      await courseJson(exactCourseId);
+    }
+    newQuizItemLifecycle = await checkNewQuizItemLifecycleSource(operation, args, url);
+    if (newQuizItemLifecycle) {
+      const currentProfile = await canvasProfile();
+      if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
+      await courseJson(exactCourseId);
+    }
+    newQuizItemPosition = await checkNewQuizItemPositionSource(operation, args, url);
+    if (newQuizItemPosition) {
+      const currentProfile = await canvasProfile();
+      if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
+      await courseJson(exactCourseId);
+    }
+    if (await checkNewQuizItemIds(operation, args, url, newQuizItemPosition?.item || null)) {
       const currentProfile = await canvasProfile();
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
       await courseJson(exactCourseId);
@@ -1434,7 +3089,10 @@
       headers.set("X-Requested-With", "XMLHttpRequest");
       const bulkDates = bulkAssignmentDatesBody(operation, args);
       const containsFile = body.some(([parameter]) => String(parameter.schema?.format || "") === "binary");
-      if (bulkDates !== undefined) {
+      if (newQuizAccommodation) {
+        headers.set("Content-Type", "application/json;charset=UTF-8");
+        options.body = JSON.stringify([newQuizAccommodation]);
+      } else if (bulkDates !== undefined) {
         headers.set("Content-Type", "application/json;charset=UTF-8");
         options.body = JSON.stringify(bulkDates);
       } else if (containsFile) {
@@ -1480,6 +3138,56 @@
         }
         payload = parsePayload(await readBounded(response), response.headers.get("Content-Type"));
       } catch {
+        if (!isRead && newQuizEffect) {
+          return {
+            ok: false, sent: true, outcomeUnknown: true, error: "canvas_write_response_unknown",
+            verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: newQuizReport ? "new-quiz-report-progress" : "new-quiz-accommodation-response", reason: newQuizReport ? "progress_id_response_lost" : "provider_has_no_accommodation_read_route" },
+          };
+        }
+        if (!isRead && newQuizLifecycle) {
+          const verification = await verifyNewQuizLifecycleChange(newQuizLifecycle, null);
+          if (verification.status === "verified") {
+            return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: 0, data: null, verification };
+          }
+          return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_write_response_unknown", verification };
+        }
+        if (!isRead && newQuizItemLifecycle) {
+          const verification = await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, null);
+          if (verification.status === "verified") {
+            return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: 0, data: null, verification };
+          }
+          return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_write_response_unknown", verification };
+        }
+        if (!isRead && newQuizItemPosition) {
+          const verification = await verifyNewQuizItemPositionChange(newQuizItemPosition);
+          if (verification.status === "verified") {
+            return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: 0, data: null, verification };
+          }
+          return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_write_response_unknown", verification };
+        }
+        if (!isRead && newQuizSettings) {
+          const verification = await verifyNewQuizSettingsChange(args, url, newQuizSettings.merged, newQuizSettings.before);
+          if (verification.status === "verified") {
+            return {
+              ok: true,
+              sent: true,
+              outcomeUnknown: false,
+              recovered: true,
+              status: 0,
+              data: null,
+              newQuizSettingsPreserved: newQuizSettings.preserved,
+              verification,
+            };
+          }
+          return {
+            ok: false,
+            sent: true,
+            outcomeUnknown: true,
+            error: "canvas_write_response_unknown",
+            newQuizSettingsPreserved: newQuizSettings.preserved,
+            verification,
+          };
+        }
         return { ok: false, sent: true, outcomeUnknown: !isRead, error: isRead ? "canvas_read_failed" : "canvas_write_response_unknown" };
       }
       lastResponse = response;
@@ -1491,6 +3199,58 @@
         const outcomeUnknown = !(
           Number.isInteger(response.status) && response.status >= 400 && response.status < 500 && response.status !== 408 && response.status !== 429
         );
+        if (outcomeUnknown && newQuizEffect) {
+          return {
+            ok: false, sent: true, status: response.status, outcomeUnknown: true, error: payload, requestUrl: url.pathname,
+            verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: newQuizReport ? "new-quiz-report-progress" : "new-quiz-accommodation-response", reason: newQuizReport ? "progress_id_response_lost" : "provider_has_no_accommodation_read_route" },
+          };
+        }
+        if (outcomeUnknown && newQuizLifecycle) {
+          const verification = await verifyNewQuizLifecycleChange(newQuizLifecycle, payload);
+          if (verification.status === "verified") {
+            return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: response.status, data: payload, verification };
+          }
+          return { ok: false, sent: true, status: response.status, outcomeUnknown: true, error: payload, requestUrl: url.pathname, verification };
+        }
+        if (outcomeUnknown && newQuizItemLifecycle) {
+          const verification = await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, payload);
+          if (verification.status === "verified") {
+            return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: response.status, data: payload, verification };
+          }
+          return { ok: false, sent: true, status: response.status, outcomeUnknown: true, error: payload, requestUrl: url.pathname, verification };
+        }
+        if (outcomeUnknown && newQuizItemPosition) {
+          const verification = await verifyNewQuizItemPositionChange(newQuizItemPosition);
+          if (verification.status === "verified") {
+            return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: response.status, data: payload, verification };
+          }
+          return { ok: false, sent: true, status: response.status, outcomeUnknown: true, error: payload, requestUrl: url.pathname, verification };
+        }
+        if (outcomeUnknown && newQuizSettings) {
+          const verification = await verifyNewQuizSettingsChange(args, url, newQuizSettings.merged, newQuizSettings.before);
+          if (verification.status === "verified") {
+            return {
+              ok: true,
+              sent: true,
+              outcomeUnknown: false,
+              recovered: true,
+              status: response.status,
+              data: payload,
+              newQuizSettingsPreserved: newQuizSettings.preserved,
+              verification,
+            };
+          }
+          return {
+            ok: false,
+            sent: true,
+            status: response.status,
+            outcomeUnknown: true,
+            error: payload,
+            requestUrl: url.pathname,
+            newQuizSettingsPreserved: newQuizSettings.preserved,
+            verification,
+          };
+        }
         return { ok: false, sent: true, status: response.status, ...(isRead ? {} : { outcomeUnknown }), error: payload, requestUrl: url.pathname };
       }
       pages.push(payload);
@@ -1510,11 +3270,16 @@
       // current settings, so the person reads what was kept rather than trusting it.
       ...(newQuizSettings ? {
         newQuizSettingsPreserved: newQuizSettings.preserved,
-        verification: await verifyNewQuizSettingsChange(args, url, newQuizSettings.merged),
+        verification: await verifyNewQuizSettingsChange(args, url, newQuizSettings.merged, newQuizSettings.before),
       } : {}),
       ...(args.morrow_page_guard ? { verification: await verifyPageChange(args, url) } : {}),
       ...(canvasContentChange ? { verification: await verifyCanvasContentChange(args, url, exactCourseId) } : {}),
       ...(assignmentDueDate ? { verification: await verifyAssignmentDueDateChange(assignmentDueDate, url, exactCourseId) } : {}),
+      ...(newQuizAccommodation ? { verification: verifyNewQuizAccommodation(data, newQuizAccommodation) } : {}),
+      ...(newQuizReport ? { verification: verifyNewQuizReport(data, args) } : {}),
+      ...(newQuizLifecycle ? { verification: await verifyNewQuizLifecycleChange(newQuizLifecycle, data) } : {}),
+      ...(newQuizItemLifecycle ? { verification: await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, data) } : {}),
+      ...(newQuizItemPosition ? { verification: await verifyNewQuizItemPositionChange(newQuizItemPosition) } : {}),
       pageCount: pages.length,
       truncated: Boolean(next),
       // The resume envelope is returned only to a caller that asked to continue

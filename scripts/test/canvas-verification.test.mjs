@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
-import { evaluateBrowserReadback, planBrowserReadback } from "../../connector/extension/src/verification.js";
+import { canvasAdmissionReason, canvasExecutorOwnedReadback, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { evaluateBrowserReadback, planBrowserReadback, planCanvasRecoveryDescriptor } from "../../connector/extension/src/verification.js";
 
 const catalog = JSON.parse(readFileSync(new URL("../../artifacts/canvas-api/canvas-api-catalog.json", import.meta.url), "utf8"));
 const operation = (name) => {
@@ -249,130 +249,94 @@ test("the single course-nickname read stays bound to one course", () => {
   });
 });
 
-test("every Item Bank write has an exact successful fresh-readback proof", () => {
-  const cases = [
-    {
-      tool: "canvas_item_bank_create_bank",
-      args: { title: "Reusable anatomy" },
-      writeData: { id: "901" },
-      readTool: "canvas_item_bank_get_bank",
-      read: { ok: true, status: 200, data: { id: "901", title: "Reusable anatomy" } },
-    },
-    {
-      tool: "canvas_item_bank_archive_bank",
-      args: { bank_id: "901" },
-      writeData: {},
-      readTool: "canvas_item_bank_get_bank",
-      read: { ok: true, status: 200, data: { id: "901", archived: true } },
-    },
-    {
-      tool: "canvas_item_bank_attach_item",
-      args: { bank_id: "901", item_id: "501" },
-      writeData: { id: "701" },
-      readTool: "canvas_item_bank_list_entries",
-      read: { ok: true, status: 200, data: [{ id: "701", entry_id: "501", entry_type: "Item" }] },
-    },
-    // A created item is not a bank entry until attach_item runs, so the item route, keyed on the
-    // create response id, is the only comparator that can confirm either item write.
-    {
-      tool: "canvas_item_bank_create_item",
-      args: { bank_id: "901", item: { title: "Reusable question", interaction_type_slug: "essay" } },
-      writeData: { id: "502" },
-      readTool: "canvas_item_bank_get_item",
-      read: { ok: true, status: 200, data: { id: "502", title: "Reusable question", interaction_type_slug: "essay" } },
-    },
-    {
-      tool: "canvas_item_bank_update_item",
-      args: { bank_id: "901", item_id: "502", item: { title: "Revised question" } },
-      writeData: { id: "502" },
-      readTool: "canvas_item_bank_get_item",
-      read: { ok: true, status: 200, data: { id: "502", title: "Revised question" } },
-    },
-    {
-      tool: "canvas_item_bank_delete_entry",
-      args: { bank_id: "901", bank_entry_id: "701" },
-      writeData: {},
-      readTool: "canvas_item_bank_get_entry",
-      read: { ok: false, status: 404 },
-    },
-    {
-      tool: "canvas_item_bank_share_bank",
-      args: { bank_id: "901", entity_type: "Course", entity_id: "42" },
-      writeData: { id: "801" },
-      readTool: "canvas_item_bank_list_shares",
-      read: { ok: true, status: 200, data: [{ id: "801", entity_id: "42", entity_type: "Course" }] },
-    },
-  ];
+// Every Item Bank change is available, and every one of them is proved by the
+// Item Banks frame's own operation-specific reread in
+// connector/extension/src/item-bank-executor.js and
+// connector/extension/src/quiz-bank-draw-executor.js. The generic Canvas
+// planner cannot reach the private bank surface, so it owns neither the
+// readback nor the recovery descriptor for these changes.
+const QUIZ_DRAW_NICKNAMES = ["attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry"];
 
-  assert.equal(cases.length, catalog.operations.filter((candidate) => candidate.service === "item_bank" && !candidate.readOnly).length);
-  for (const entry of cases) {
-    verify(entry.tool, entry.args, entry.writeData, entry.read, entry.readTool);
+test("every Item Bank change is admitted with an executor-owned exact readback", () => {
+  const writes = catalog.operations.filter((candidate) => candidate.service === "item_bank" && !candidate.readOnly);
+  assert.equal(writes.length, 11);
+  for (const write of writes) {
+    assert.equal(canvasOperationAdmission(write).write.state, "admitted", write.toolName);
+    assert.deepEqual(canvasOperationAdmission(write).courseTarget, { kind: "course_path", argument: "course_id" }, write.toolName);
+    assert.deepEqual(canvasReadbackAssessment(catalog.operations, write), { state: "structurally_exact" }, write.toolName);
+    assert.equal(planCanvasRecoveryDescriptor(catalog.operations, write, {}, {}), null, write.toolName);
   }
 });
 
-test("Item Bank verification refuses mismatches and incomplete evidence", () => {
-  const create = planBrowserReadback(catalog.operations, operation("canvas_item_bank_create_bank"), { title: "Expected" }, { id: "901" });
-  assert.equal(evaluateBrowserReadback(create, { ok: true, status: 200, data: { id: "901", title: "Wrong" } }).status, "mismatch");
+/**
+ * The third readback state, held to evidence. A write in this tier has an exact
+ * readback that belongs to a reviewed executor rather than to the generic
+ * planner, and the product uses the executor's. That is only true because the
+ * executor really performs the reread, so this test walks every operation the
+ * contract names and finds it in the executor that owns it. A future admitted
+ * write cannot land in this tier by accident and dispatch with nothing
+ * checking it. Which routes the planner would also produce for these
+ * operations, and why the service worker drops them, is pinned separately in
+ * scripts/test/canvas-readback-scope.test.mjs.
+ */
+test("every executor-owned readback is a reread the owning executor really performs", () => {
+  const source = (path) => readFileSync(new URL(`../../connector/extension/src/${path}`, import.meta.url), "utf8");
+  const itemBankExecutor = source("item-bank-executor.js");
+  const quizBankExecutor = source("quiz-bank-draw-executor.js");
+  const worker = source("service-worker.js");
+  const owned = catalog.operations.filter((operation) => canvasExecutorOwnedReadback(operation));
+  assert.ok(owned.length > 0);
+  for (const operation of owned) {
+    // The contract may only name a write, and only one Morrow admits.
+    assert.equal(operation.readOnly, false, operation.toolName);
+    assert.equal(canvasOperationAdmission(operation).write.state, "admitted", operation.toolName);
+    assert.deepEqual(canvasReadbackAssessment(catalog.operations, operation), { state: "structurally_exact" }, operation.toolName);
+    if (operation.service === "item_bank") {
+      const executor = QUIZ_DRAW_NICKNAMES.includes(operation.nickname) ? quizBankExecutor : itemBankExecutor;
+      assert.ok(executor.includes(`operation.nickname === "${operation.nickname}"`), `${operation.toolName} has no readback branch in its executor`);
+      continue;
+    }
+    assert.ok(worker.includes(`"${operation.toolName}"`), `${operation.toolName} is not bound to a response evaluator in the service worker`);
+  }
+  // An Item Bank shape nobody wrote a reread for reports an unknown outcome, so
+  // a new nickname cannot inherit another shape's proof.
+  assert.match(itemBankExecutor, /verification = unconfirmed\("item_bank_readback_contract_missing"\)/);
+  // And the tier is not open-ended: a Canvas write outside these two families
+  // is judged by the planner like every other one.
+  const editAssignment = catalog.operations.find((operation) => operation.toolName === "canvas_edit_assignment");
+  assert.equal(canvasExecutorOwnedReadback(editAssignment), false);
+  assert.ok(planBrowserReadback(catalog.operations, editAssignment, { course_id: "42", id: "7" }, { id: "7" }));
+});
 
-  const share = planBrowserReadback(catalog.operations, operation("canvas_item_bank_share_bank"), {
-    bank_id: "901",
-    entity_type: "Course",
-    entity_id: "42",
-  }, { id: "801" });
-  assert.equal(evaluateBrowserReadback(share, { ok: true, status: 200, data: [] }).status, "mismatch");
-
-  const update = planBrowserReadback(catalog.operations, operation("canvas_item_bank_update_item"), {
-    bank_id: "901",
-    item_id: "502",
-    item: { title: "Revised" },
-  }, { id: "502" });
-  assert.equal(update.readOperation.toolName, "canvas_item_bank_get_item");
-  assert.deepEqual(update.arguments, { bank_id: "901", item_id: "502" });
-  assert.equal(share.targetField, "entity_id");
-  assert.equal(evaluateBrowserReadback(update, { ok: false, status: 503 }).status, "unconfirmed");
-
-  // The item route binds the identity, so the comparison is against the saved item's own fields.
-  assert.equal(evaluateBrowserReadback(update, { ok: true, status: 200, data: { id: "502", title: "Old title" } }).status, "mismatch");
-
-  const crossedShare = evaluateBrowserReadback(share, {
-    ok: true,
-    status: 200,
-    data: [
-      { entity_id: "42", entity_type: "User" },
-      { entity_id: "99", entity_type: "Course" },
-    ],
-  });
-  assert.equal(crossedShare.status, "mismatch");
-
-  assert.equal(evaluateBrowserReadback(update, {
-    ok: true,
-    status: 200,
-    data: [{ id: "502", entry_id: "701", item: { id: "502", title: "Revised" } }],
-  }).status, "mismatch");
-  assert.equal(evaluateBrowserReadback(share, {
-    ok: true,
-    status: 200,
-    data: [{ id: "42", entity_id: "99", entity_type: "Course" }],
-  }).status, "mismatch");
-
-  assert.equal(evaluateBrowserReadback({
-    strategy: "updated-resource",
-    readOperation: { toolName: "canvas_item_bank_get_bank" },
-    assertions: [],
-  }, { ok: true, status: 200, data: { id: "901" } }).status, "unconfirmed");
-
-  assert.equal(evaluateBrowserReadback({
-    strategy: "collection-omits-target",
-    targetId: "701",
-    readOperation: { toolName: "canvas_item_bank_list_entries" },
-    assertions: [],
-  }, { ok: true, status: 200, data: { entries: [] }, truncated: true }).status, "unconfirmed");
-  assert.equal(evaluateBrowserReadback({
-    strategy: "collection-omits-target",
-    targetId: "701",
-    readOperation: { toolName: "canvas_item_bank_list_entries" },
-    assertions: [],
-  }, { ok: true, status: 200, data: [] }).status, "verified");
+/**
+ * The duplicate stays held, and the sentence it shows names the provider fact
+ * that actually blocks it. Checked against the Canvas Assignment resource on
+ * 8 September 2026:
+ * https://developerdocs.instructure.com/services/canvas/resources/assignments
+ *
+ * The response shape is NOT the problem, and the reason must never say it is.
+ * `result_type` has one allowed value, `Quiz`; with the argument omitted "the
+ * response will be serialized into an assignment format" and the route
+ * "Returns an Assignment object". Two things do block it. Canvas documents no
+ * field on the copy that names it a New Quiz: the Assignment object documents
+ * `is_quiz_assignment`, whose name and description disagree with each other,
+ * and documents no `is_quiz_lti_assignment` at all. And Canvas documents no
+ * signal that the copy has finished: `workflow_state` is documented only as
+ * "String indicating what state this assignment is in", with `unpublished` as
+ * its one example value. A reread taken straight after the request could
+ * therefore describe a half-made copy, and Morrow would call it verified.
+ */
+test("the assignment duplicate stays held for the provider fact that blocks it", () => {
+  const duplicate = catalog.operations.find((operation) => operation.path === "/v1/courses/{course_id}/assignments/{assignment_id}/duplicate");
+  assert.ok(duplicate);
+  const admission = canvasOperationAdmission(duplicate).write;
+  assert.deepEqual(admission, { state: "held", reason: "duplicate_assignment_exact_readback_unavailable" });
+  const reason = canvasAdmissionReason(admission);
+  assert.match(reason, /does not say when a duplicated assignment has finished copying/);
+  assert.match(reason, /no documented field that names it as a New Quiz/);
+  // The retired belief. Canvas does document one response shape for the request
+  // Morrow would send, so this must not come back as the stated reason.
+  assert.doesNotMatch(reason, /different record types/);
 });
 
 test("readback proof binds to the exact declared target record", () => {

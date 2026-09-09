@@ -7,7 +7,7 @@ const catalog = parseCanvasApiCatalog(catalogJson);
 describe("Canvas API catalog", () => {
   it("covers the official surface plus the browser-session Item Banks contract", () => {
     expect(catalog.counts.officialOperations).toBeGreaterThanOrEqual(1_100);
-    expect(catalog.counts.itemBankOperations).toBe(13);
+    expect(catalog.counts.itemBankOperations).toBe(18);
     expect(catalog.counts.newQuizzesOperations).toBeGreaterThan(12);
     expect(new Set(catalog.operations.map((operation) => operation.toolName)).size).toBe(catalog.operations.length);
   });
@@ -225,11 +225,15 @@ describe("Canvas API catalog", () => {
     expect(read).toBeTruthy();
     expect(read!.readOnly).toBe(true);
     expect(canvasOperationAdmission(read!).write).toEqual({ state: "not_applicable" });
-    expect(operationArguments(read!, { bank_id: "901", item_id: "502" }).path).toBe("/api/banks/901/items/502");
+    expect(operationArguments(read!, { course_id: "42", bank_id: "901", item_id: "502" }).path).toBe("/api/banks/901/items/502");
+    expect(() => operationArguments(read!, { bank_id: "901", item_id: "502" })).toThrow("course_id is required");
+    expect(read!.parameters.map((parameter) => [parameter.inputName, parameter.location]))
+      .toEqual([["bank_id", "path"], ["course_id", "control"], ["item_id", "path"]]);
 
     const shares = catalog.operations.find((candidate) => candidate.toolName === "canvas_item_bank_list_shares");
     expect(shares!.parameters.map((parameter) => [parameter.inputName, parameter.location]))
-      .toEqual([["bank_id", "path"], ["page", "form"], ["per_page", "form"]]);
+      .toEqual([["bank_id", "path"], ["course_id", "control"]]);
+    expect(shares!.description).toContain("pagination is not established");
 
     const share = catalog.operations.find((candidate) => candidate.toolName === "canvas_item_bank_share_bank");
     expect(share!.inputSchema).toMatchObject({
@@ -241,65 +245,16 @@ describe("Canvas API catalog", () => {
     expect(share!.description).toContain("Only the course entity type and the read permission are verified.");
   });
 
-  // Every Item Bank write is held, so canvasReadbackAssessment answers "write_held" before it plans
-  // anything. These cases call the planner directly, which is the only way to read the plan an
-  // admitted Item Bank write would use.
-  it("compares an Item Bank item write against the saved item, not against the entry list", () => {
-    const update = catalog.operations.find((candidate) => candidate.toolName === "canvas_item_bank_update_item")!;
-    const create = catalog.operations.find((candidate) => candidate.toolName === "canvas_item_bank_create_item")!;
-    expect(canvasReadbackAssessment(catalog.operations, update)).toEqual({ state: "not_applicable", reason: "write_held" });
-
-    const item = { entry: { item_body: "<p>Which vessel carries oxygenated blood?</p>" } };
-    const saved = { id: "502", entry: { item_body: "<p>Which vessel carries oxygenated blood?</p>", position: 3 } };
-
-    const updatePlan = planBrowserReadback(catalog.operations, update, { bank_id: "901", item_id: "502", item }, { id: "502" });
-    expect(updatePlan?.readOperation.toolName).toBe("canvas_item_bank_get_item");
-    expect(updatePlan?.strategy).toBe("updated-resource");
-    expect(updatePlan?.arguments).toEqual({ bank_id: "901", item_id: "502" });
-    expect(updatePlan?.targetId).toBeUndefined();
-    expect(evaluateBrowserReadback(updatePlan, { ok: true, status: 200, data: saved }).status).toBe("verified");
-    expect(evaluateBrowserReadback(updatePlan, {
-      ok: true,
-      status: 200,
-      data: { id: "502", entry: { item_body: "<p>Unchanged.</p>" } },
-    }).status).toBe("mismatch");
-
-    const createPlan = planBrowserReadback(catalog.operations, create, { bank_id: "901", item }, { id: "502" });
-    expect(createPlan?.readOperation.toolName).toBe("canvas_item_bank_get_item");
-    expect(createPlan?.strategy).toBe("created-resource");
-    expect(createPlan?.arguments).toEqual({ bank_id: "901", item_id: "502" });
-    expect(createPlan?.targetId).toBe("502");
-    expect(createPlan?.targetField).toBe("id");
-    expect(evaluateBrowserReadback(createPlan, { ok: true, status: 200, data: saved }).status).toBe("verified");
-    // The create response carries the only identity the new item has. Without it there is no
-    // comparator, and the entry list cannot stand in: the item is not an entry until attach_item runs.
-    expect(planBrowserReadback(catalog.operations, create, { bank_id: "901", item }, {})).toBeNull();
-  });
-
-  it("keeps the Item Bank entry-list comparator only where a bank entry is what changed", () => {
+  it("admits every Item Bank write with exact readback metadata", () => {
     const writes = catalog.operations.filter((operation) => operation.service === "item_bank" && !operation.readOnly);
-    const planned = writes.map((operation) => [
-      operation.nickname,
-      planBrowserReadback(catalog.operations, operation, {
-        bank_id: "901",
-        item_id: "502",
-        bank_entry_id: "701",
-        entity_type: "course",
-        entity_id: "42",
-        title: "Cardiovascular anatomy",
-      }, { id: "801" })?.readOperation.nickname,
-    ]);
-    // attach_item and delete_entry change the bank's entry rows, so the entry routes are their exact
-    // comparators. No item write reads the entry list.
-    expect(Object.fromEntries(planned)).toEqual({
-      create_bank: "get_bank",
-      archive_bank: "get_bank",
-      attach_item: "list_entries",
-      create_item: "get_item",
-      update_item: "get_item",
-      delete_entry: "get_entry",
-      share_bank: "list_shares",
-    });
+    expect(writes).toHaveLength(11);
+    for (const operation of writes) {
+      expect(operation.inputSchema.required).toEqual(expect.arrayContaining(["course_id", "expected_snapshot"]));
+      const admission = canvasOperationAdmission(operation);
+      expect(admission.courseTarget, operation.toolName).toEqual({ kind: "course_path", argument: "course_id" });
+      expect(admission.write).toEqual({ state: "admitted" });
+      expect(canvasReadbackAssessment(catalog.operations, operation, admission)).toEqual({ state: "structurally_exact" });
+    }
   });
 
   it("derives public write availability from one admission contract", () => {
@@ -307,15 +262,9 @@ describe("Canvas API catalog", () => {
     expect(tools).toHaveLength(catalog.counts.totalOperations);
     const writes = catalog.operations.filter((operation) => !operation.readOnly);
     const held = writes.filter((operation) => canvasOperationAdmission(operation).write.state === "held");
-    // The Item Bank dependency holds are counted apart from the rest: they are not a missing course
-    // binding but an unproved effect on other courses. The question update carries its own reason
-    // for the same class of hold, so both stay outside this count.
-    const itemBankDependencyHolds = new Set(["item_bank_dependency_review_required", "item_bank_fan_out_and_guard_required"]);
-    const supportedButBlocked = held.filter((operation) => !itemBankDependencyHolds.has(String(canvasOperationAdmission(operation).write.reason)));
-    expect(held).toHaveLength(327);
-    expect(supportedButBlocked).toHaveLength(321);
-    expect(tools.filter((tool) => tool.capability?.profiles["public-canvas"].state !== "supported")).toHaveLength(327);
-    expect(tools.filter((tool) => tool.capability?.family === "new-quizzes-item-banks")).toHaveLength(13);
+    expect(held).toHaveLength(321);
+    expect(tools.filter((tool) => tool.capability?.profiles["public-canvas"].state !== "supported")).toHaveLength(321);
+    expect(tools.filter((tool) => tool.capability?.family === "new-quizzes-item-banks")).toHaveLength(18);
   });
 
   it("admits a direct course route and holds every other write target", () => {
@@ -323,6 +272,7 @@ describe("Canvas API catalog", () => {
     const nickname = catalog.operations.find((operation) => operation.toolName === "canvas_set_course_nickname");
     const createBank = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_create_bank");
     const existingBank = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_update_item");
+    const bankDraw = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_attach_bank_to_quiz");
     const bookmark = catalog.operations.find((operation) => operation.toolName === "canvas_update_bookmark");
     expect(canvasOperationAdmission(direct!)).toEqual({
       courseTarget: { kind: "course_path", argument: "id" },
@@ -332,32 +282,20 @@ describe("Canvas API catalog", () => {
       courseTarget: { kind: "self_path", resource: "course_nickname", argument: "course_id" },
       write: { state: "held", reason: "self_scope_not_supported" },
     });
-    expect(canvasOperationAdmission(createBank!)).toMatchObject({
-      courseTarget: { kind: "none" },
-      write: { state: "held", reason: "item_bank_account_scope_not_course_scope" },
-    });
-    expect(canvasOperationAdmission(existingBank!)).toMatchObject({
-      write: { state: "held", reason: "item_bank_fan_out_and_guard_required" },
-    });
+    expect(canvasOperationAdmission(createBank!)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, write: { state: "admitted" } });
+    expect(canvasOperationAdmission(existingBank!)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, write: { state: "admitted" } });
+    expect(canvasOperationAdmission(bankDraw!)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, write: { state: "admitted" } });
     expect(canvasOperationAdmission(bookmark!)).toEqual({
       courseTarget: { kind: "self_path", resource: "bookmark" },
       write: { state: "held", reason: "self_scope_not_supported" },
     });
   });
 
-  // Section 3.6 of docs/research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md: a bank
-  // archive needs an administrator environment flag, a complete dependency preflight, and fresh
-  // counts showing zero bank entries and zero uses. Morrow can establish none of those from the
-  // routes it has, so this write has no admitted state to reach in any catalog.
-  it("never admits an Item Bank archive", () => {
+  it("admits Item Bank archive through the guarded private executor", () => {
     const archive = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_archive_bank")!;
     expect(archive.risk).toBe("destructive");
-    expect(canvasOperationAdmission(archive).write).toEqual({ state: "held", reason: "item_bank_dependency_review_required" });
-    expect(canvasReadbackAssessment(catalog.operations, archive)).toEqual({ state: "not_applicable", reason: "write_held" });
-    // A direct course path is the one thing that admits a Canvas write. The Item Bank hold is
-    // decided before the course target is read, so even that cannot admit an archive.
-    expect(canvasOperationAdmission({ ...archive, path: "/v1/courses/{course_id}/banks/{bank_id}" }).write)
-      .toEqual({ state: "held", reason: "item_bank_dependency_review_required" });
+    expect(canvasOperationAdmission(archive)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, write: { state: "admitted" } });
+    expect(canvasReadbackAssessment(catalog.operations, archive)).toEqual({ state: "structurally_exact" });
   });
 
   it("holds every self-scoped bookmark and course-nickname write with one plain-language reason", () => {
@@ -453,7 +391,7 @@ describe("Canvas API catalog", () => {
     // This class admits nothing. It only names the hold that 117 writes already carried.
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
-    expect(admitted).toHaveLength(235);
+    expect(admitted).toHaveLength(245);
     expect(admitted.filter((operation) => accountRoute(operation.path))).toEqual([]);
     const heldForCourseScope = catalog.operations.filter((operation) => {
       const write = canvasOperationAdmission(operation).write;
@@ -479,9 +417,7 @@ describe("Canvas API catalog", () => {
       "account_authority_required",
       "course_scope_required",
       "cross_course_object_requires_resolution",
-      "item_bank_account_scope_not_course_scope",
-      "item_bank_dependency_review_required",
-      "item_bank_fan_out_and_guard_required",
+      "duplicate_assignment_exact_readback_unavailable",
       "learner_scope_requires_separate_authority",
       "multi_step_upload_requires_reviewed_transfer",
       "provider_contract_incomplete",
@@ -499,9 +435,7 @@ describe("Canvas API catalog", () => {
       "account_authority_required",
       "course_scope_required",
       "cross_course_object_requires_resolution",
-      "item_bank_account_scope_not_course_scope",
-      "item_bank_dependency_review_required",
-      "item_bank_fan_out_and_guard_required",
+      "duplicate_assignment_exact_readback_unavailable",
       "learner_scope_requires_separate_authority",
       "multi_step_upload_requires_reviewed_transfer",
       "provider_contract_incomplete",
@@ -528,9 +462,7 @@ describe("Canvas API catalog", () => {
       account_authority_required: 117,
       course_scope_required: 100,
       cross_course_object_requires_resolution: 48,
-      item_bank_account_scope_not_course_scope: 1,
-      item_bank_dependency_review_required: 5,
-      item_bank_fan_out_and_guard_required: 1,
+      duplicate_assignment_exact_readback_unavailable: 1,
       learner_scope_requires_separate_authority: 36,
       multi_step_upload_requires_reviewed_transfer: 4,
       provider_contract_incomplete: 9,
@@ -606,10 +538,9 @@ describe("Canvas API catalog", () => {
       "canvas_update_submission_s_what_if_score_and_calculate_grades",
     ]);
 
-    // The admitted set is pinned here as well. The only writes that ever left it are the four
-    // Canvas upload pre-flights, which the case below holds by name.
+    // The admitted set is pinned here as well. Any change needs a reviewed admission reason.
     expect(catalog.operations.filter((operation) => !operation.readOnly
-      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(235);
+      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(245);
   });
 
   // A Canvas file upload is three requests. The catalogued route is only the first one: it asks
@@ -1062,11 +993,11 @@ describe("Canvas API catalog", () => {
   it("derives structural readback metadata from the shared planner", () => {
     const admittedWrites = catalog.operations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "admitted");
     const assessments = admittedWrites.map((operation) => canvasReadbackAssessment(catalog.operations, operation));
-    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(63);
+    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(59);
     expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(23);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(0);
-    expect(admittedWrites).toHaveLength(235);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(149);
+    expect(admittedWrites).toHaveLength(245);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(163);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_delete_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
@@ -1088,7 +1019,7 @@ describe("Canvas API catalog", () => {
     expect(tools.find((tool) => tool.name === "canvas_bulk_update_assignment_dates")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_re_activate_enrollment")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis")?.capability?.behavior.supportsReadback).toBe(false);
-    expect(tools.find((tool) => tool.name === "canvas_set_course_level_accommodations")?.capability?.evidence?.readback).toMatchObject({ state: "blocked" });
+    expect(tools.find((tool) => tool.name === "canvas_set_course_level_accommodations")?.capability?.evidence?.readback).toMatchObject({ state: "known" });
   });
 
   it("refuses a readback whose read route is not the write target's own resource", () => {

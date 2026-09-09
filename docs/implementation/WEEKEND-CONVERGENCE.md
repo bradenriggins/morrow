@@ -11,7 +11,7 @@ The current standalone architecture does not, by itself, prove that all required
 | Plan requirement | Current implementation |
 |---|---|
 | One MCP server | `@morrow-lms/gateway` is the only client-facing server. |
-| Generated catalog | 1,118 official Canvas operations plus 13 explicit Item Bank operations. |
+| Generated catalog | 1,118 official Canvas operations plus 16 explicit Item Bank operations and one private course-file read. |
 | Explicit row disposition | Every row has route, profile, authority, privacy, risk, and evidence metadata. |
 | Governed reads and writes | All generated calls pass through the Morrow result and authority boundary. |
 | Restart-safe cross-course work | SQLite operation and batch journals retain child truth and uncertain effects. |
@@ -67,11 +67,11 @@ Official New Quizzes routes are generated from Canvas definitions. Every New Qui
 
 A change to `quiz_settings` never sends part of the block. The connector reads the quiz, refuses the change when the current settings differ from the digest the caller read them at, merges the requested change into the current settings at the leaf level, sends the complete block, and reports which keys it carried over. A quiz it cannot read stops the change; it is not a warning. A change to the title, instructions, dates, or points of a quiz touches no setting and reads nothing first.
 
-The Item Bank contract defines thirteen signed-browser operations. The in-page executor covers all methods, paths, queries, and bodies. It rejects a wrong origin, referrer, course, principal, token, path, catalog key, or unestablished bank-share scope before network dispatch. A bank write that answers with HTTP 408, 429, or any 5xx status is reported as an uncertain effect; only another 4xx status proves the provider refused the change. It strips secret-shaped keys from returned objects. The New Quizzes token stays in the frame's main world.
+The Item Bank contract defines sixteen signed-browser operations: seven reads and nine owner-write shapes. All nine writes stop before provider I/O. Bank creation lacks a proved recoverable create-and-course-associate transaction. Rename, archive, item create or update, item attach, entry removal, and course sharing lack complete downstream reach. The quiz bank draw lacks durable recovery after a browser worker or process interruption. Its admitted read requires the exact selected assignment, a fresh builder credential, one verified private quiz id, and numbered quiz-entry pages through an empty end page. Secret-shaped keys never leave the browser execution boundary.
 
-An item write is verified by reading that exact item and comparing the requested fields against the saved item. A created item is a standalone object until a separate attach makes it a bank entry, so the entry list cannot confirm a create, and it confirms only the writes that change entry rows. All seven Item Bank writes are held for a generic caller: five changes to an existing bank as `item_bank_dependency_review_required`, the bank question update as `item_bank_fan_out_and_guard_required`, and bank creation as `item_bank_account_scope_not_course_scope`, because a bank belongs to the Canvas account rather than to the selected course. The thirteen request contracts do not prove complete Item Bank support.
+`morrow_plan_item_bank_question_image_alt_repair` depends on the held generic item-update shape and stops before a bank read or PATCH. A standing Edit grant or acknowledgement of observed fan-out rows cannot override the hold. Stimuli and unresolved entries remain blocked.
 
-One repair for a question inside a bank is built and proved against fixtures. It adds alternative text to one selected image and changes nothing else. It refuses unless a complete fan-out record, no older than one hour, names every course the bank reaches and the person has acknowledged every course outside the selected one. It reads that exact question first and stops if one byte of it changed, resolves the bank entry to that same question, compares the interaction element ids so no answer is orphaned, sends exactly one request, and reads the question again. A readback it cannot make leaves the outcome unknown: the credential never leaves the frame, so no server-side call stands in for that read. The repair is reachable through one curated Edit category, `canvas_item_bank_question_image_alt`, and the planner `morrow_plan_item_bank_question_image_alt_repair`. Every other change to an existing bank is still held, and no live bank has answered any of these requests.
+The fan-out reader reports entry counts, observed share rows, and quiz uses from selected connected courses. Current share rows use a private context UUID, which Morrow cannot map to a numeric Canvas course id from proved data. It always stays incomplete because Canvas exposes no authoritative account-wide reverse lookup. It is review context and does not grant write authority. No live bank has answered any private route from this release.
 
 ## Batches
 
@@ -119,7 +119,7 @@ The page URL catalog parameter now accepts Canvas slugs and explicit `page_id:` 
 | Requirement | Evidence still required |
 |---|---|
 | Existing Morrow and ExamplePlatform workflow breadth, sections 2.4 and 5 | Source and execution parity for the required planners, course repair, projects, files, reports, evidence, workflows, and schedules. A larger API catalog does not satisfy this requirement. |
-| New Quizzes and Item Banks | Live question and bank operations, affected-course checks, scoring and ordering readback, and learner-access checks for each advertised workflow. Existing-bank mutation holds must be resolved before claiming full support. |
+| New Quizzes and Item Banks | Live question, bank, and quiz-draw operations; scoring and ordering readback; and learner-access checks for each advertised workflow. The private routes have local proof only. |
 | Actual Chrome connection, section 8 | Identify and test the new connector in the user's regular signed-in profile. The temporary test browser does not prove that installation. |
 | Live operation and batch path, sections 12.4 and 14 | Current disposable-target reads, plans, reviews, single sends, fresh comparisons, interruptions, corrections, and cleanup through the new MCP and connector. |
 | Client parity and installation, sections 14.7 and 17 | Complete the eleven-step scenario in each advertised client. Reproduce the candidate on an independent clean machine. |

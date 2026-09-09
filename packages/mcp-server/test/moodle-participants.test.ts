@@ -12,8 +12,8 @@ import {
 
 const CAPABILITIES = ["moodle/course:viewparticipants", "moodle/course:enrolreview"];
 const TOKENS = [
-  "learner_0f2b7c41-9a3d-4e51-8b6c-1d2e3f4a5b6c",
-  "learner_1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+  "Student A1",
+  "Student A2",
 ];
 const TABLE_PROOF = {
   method: "core_table_get_dynamic_table_content",
@@ -207,4 +207,11 @@ describe("Moodle participant enrolment projection", () => {
       learner: { learnerToken: TOKENS[0] },
     }, { courseId: 2 })).toThrow("moodle_participant_enrolment_invalid");
   });
+
+  it("refuses internal UUID tokens and noncanonical readable labels at public output", () => {
+    for (const learnerToken of ["learner_2f1a5b3c-9d4e-4f6a-8b7c-1d2e3f4a5b6c", "Student A01", "Student A0", "Student A1 or Student A2"]) {
+      expect(() => projectPublicMoodleCourseParticipants({ ...participantsBody, participants: [{ ...publicRows[0], learnerToken }, publicRows[1]] }, { courseId: 2 })).toThrow("moodle_course_participants_invalid");
+    }
+  });
+
 });

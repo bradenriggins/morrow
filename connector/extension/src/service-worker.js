@@ -1,13 +1,19 @@
 import { shouldOpenSetupOnInstall } from "../onboarding/onboarding-install.js";
 import { COURSE_DATA_CONSENT_KEY, COURSE_DATA_CONSENT_VALUE, hasCourseDataConsent } from "./course-data-consent.js";
 import { executeItemBankInPage } from "./item-bank-executor.js";
-import { ITEM_BANK_FRAME_HOST_PATTERN, itemBankFrameIds } from "./item-bank-frames.js";
+import { itemBankCredentialFromRequest, itemBankLaunchUrl, itemBankPermissionOrigins, usableItemBankCredential } from "./item-bank-credential.js";
+import { itemBankApiOriginForFrame, itemBankFrameIds } from "./item-bank-frames.js";
+import { executeQuizBankDrawInPage } from "./quiz-bank-draw-executor.js";
+import { completeQuizItemPayloadReason } from "./quiz-item-payload.js";
+import { itemBankMediaFindings } from "./item-bank-guard.js";
 import { canClaimCourseConnectionIntent, canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl, validCourseConnectionIntent } from "./course-connection-intent.js";
 import { MAX_FILE_TEXT_BYTES, canvasFileTextContentTypeSupported, executeCanvasCourseFileTextInPage } from "./canvas-file-content.js";
 import { CANVAS_FILE_SIGNALS_OPERATION_KEY, CANVAS_FILE_SIGNALS_SCHEMA, CANVAS_FILE_SIGNALS_TOOL_NAME, canvasCourseFileSignals, canvasFileSignalsContentTypeSupported } from "./canvas-file-signals.js";
 import { executeCanvasCourseFileTransferInPage } from "./canvas-file-transfer.js";
+import { executeCanvasNewQuizHotSpotInPage } from "./canvas-new-quiz-hot-spot.js";
 import { PRIVATE_CANVAS_CONVERSATION_OPERATION, PRIVATE_CANVAS_CONVERSATION_TOOL, canvasConversationOperationMatches, executeCanvasConversationInPage, normalizeCanvasConversationPrivatePayload } from "./canvas-conversations.js";
-import { bridgeWriteFailureCode } from "./canvas-write-outcome.js";
+import { problemCopy, problemText } from "./bridge-problem-copy.js";
+import { bridgeWriteFailureCode, canvasWriteOutcomeUncertain } from "./canvas-write-outcome.js";
 import { canvasOperationAdmission } from "../generated/canvas-operation-admission.js";
 import { CANVAS_MULTI_CONTEXT_REFUSAL, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "../generated/canvas-semantic-target.js";
 import { evaluateBrowserReadback, planBrowserReadback, planCanvasRecoveryDescriptor } from "./verification.js";
@@ -56,18 +62,48 @@ import { executeMoodleBackupInPage } from "./moodle-backup-executor.js";
 import { collectMoodleCourseParticipantRoster } from "./moodle-privacy.js";
 import { CONVERSATIONAL_EDIT_DURATION_MS, EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, SETTINGS_EDIT_DURATIONS, categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, validEditDuration, validEditPermission } from "./edit-policy.js";
 import { BridgeMaintenanceError, createBridgeMaintenance } from "./bridge-maintenance.js";
+import { serializeBridgeResult } from "./bridge-transport.js";
+import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
 import { MAX_RENDER_CHECK_SOURCE_CHARS, RENDER_CHECK_MESSAGE_TYPE, RENDER_CHECK_SCHEMA, renderCheckField } from "../render-check/render-check.js";
 
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
 const PROTOCOL_VERSION = 1;
 const RUNTIME_REVISION = "1.0.0-rc.2";
+const ITEM_BANK_CREDENTIAL_WAIT_MS = 45_000;
+const ITEM_BANK_ORIGIN_DISCOVERY_WAIT_MS = 20_000;
 const DISCOVERY_PAGE_LIMIT = 100;
 const BRIDGE_BINDING_LIMIT = 500;
 const USED_EFFECT_RECEIPT_LIMIT = 2_000;
 const DISCOVERY_TTL_MS = 5 * 60 * 1_000;
 const MAX_PRIVATE_FILE_BYTES = 1024 * 1024;
 const MAX_PRIVATE_FILE_BASE64_BYTES = 4 * Math.ceil(MAX_PRIVATE_FILE_BYTES / 3);
+
+// The private banks.build token is held only in this service worker. Canvas's
+// own Item Banks client sends it to quiz-api after each LTI launch. Capturing
+// that request binds the token to the exact tab, frame, API host, and private
+// context UUID without exposing it to the local Bridge protocol or storage.
+const itemBankCredentials = new Map();
+const pendingItemBankLaunches = new Map();
+const itemBankCredentialKey = (tabId, frameId) => `${tabId}:${frameId}`;
+chrome.webRequest?.onBeforeSendHeaders?.addListener((details) => {
+  const launch = pendingItemBankLaunches.get(details.tabId);
+  const credential = itemBankCredentialFromRequest(details, launch);
+  if (!credential || launch?.ambiguous === true) return;
+  const key = itemBankCredentialKey(credential.tabId, credential.frameId);
+  const prior = itemBankCredentials.get(key);
+  if ((launch.credentialKey && launch.credentialKey !== key)
+    || (prior && (prior.apiOrigin !== credential.apiOrigin || prior.contextUuid !== credential.contextUuid
+      || prior.token !== credential.token || prior.authType !== credential.authType))) {
+    launch.ambiguous = true;
+    for (const [candidateKey, candidate] of itemBankCredentials) {
+      if (candidate.tabId === details.tabId) itemBankCredentials.delete(candidateKey);
+    }
+    return;
+  }
+  launch.credentialKey = key;
+  if (!prior) itemBankCredentials.set(key, credential);
+}, { urls: ["https://*.instructure.com/api/banks*"] }, ["requestHeaders", "extraHeaders"]);
 const PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS = Object.freeze(["course_id", "section_id", "name", "filename", "size_bytes", "sha256", "expected_digest"]);
 const PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS = Object.freeze(["course_id", "module_id", "filename", "size_bytes", "sha256", "expected_digest"]);
 const PRIVATE_MOODLE_STAGED_FILE_OPERATIONS = Object.freeze([
@@ -91,6 +127,22 @@ const PRIVATE_CANVAS_COURSE_FILE_OPERATION = Object.freeze({
   readOnly: false,
   service: "canvas_file_transfer",
   path: "/v1/courses/{course_id}/folders/{folder_id}/files",
+});
+const PRIVATE_CANVAS_HOT_SPOT_TOOL = "canvas_create_new_quiz_hot_spot";
+const PRIVATE_CANVAS_HOT_SPOT_OPERATION_KEY = "canvas.private.new_quiz.hot_spot.create.v1";
+const PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS = [
+  "course_id", "assignment_id", "item", "before_items_sha256", "payload_sha256",
+  "filename", "size_bytes", "sha256", "content_type",
+];
+const PRIVATE_CANVAS_HOT_SPOT_CONTENT_TYPES = ["image/png", "image/jpeg", "image/gif"];
+const PRIVATE_CANVAS_HOT_SPOT_OPERATION = Object.freeze({
+  key: PRIVATE_CANVAS_HOT_SPOT_OPERATION_KEY,
+  toolName: PRIVATE_CANVAS_HOT_SPOT_TOOL,
+  provider: "canvas",
+  readOnly: false,
+  method: "POST",
+  service: "canvas_new_quiz_hot_spot",
+  path: "/quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items",
 });
 const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL = "morrow_private_moodle_find_enrolment_candidate";
 const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION_KEY = "moodle.private.enrolment_candidate.find.v1";
@@ -420,7 +472,7 @@ const CANVAS_CONTENT_GUARD_OPERATIONS = Object.freeze([
   Object.freeze({ kind: "new_quiz_answer_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
   Object.freeze({ kind: "new_quiz_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
 ]);
-const state = { socket: null, generation: 0, accepted: null, catalog: null, operations: new Map(), reconnectTimer: null, writeQueues: new Map(), storageQueue: Promise.resolve() };
+const state = { socket: null, generation: 0, accepted: null, catalog: null, operations: new Map(), reconnectTimer: null, writeQueues: new Map(), storageQueue: Promise.resolve(), privateChat: null, privateChatClosed: null };
 const canvasUploadObservers = new Map();
 // siteAnchorId -> the last course-site match, or the probe that is finding one now.
 const anchorVerifications = new Map();
@@ -557,7 +609,7 @@ async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentType
     }
     return { ok: true, sent: true, status: response.status, version: prepared.version, file: prepared.file, bytes, digest };
   } catch (error) {
-    return { ok: false, sent: false, error: controller.signal.aborted ? "canvas_file_content_timeout" : String(error?.message || error) };
+    return { ok: false, sent: false, error: controller.signal.aborted ? "canvas_file_content_timeout" : "canvas_file_content_interrupted" };
   } finally {
     clearTimeout(timeout);
   }
@@ -722,6 +774,21 @@ function privateCanvasCourseFileCommand(command) {
     : null;
 }
 
+function privateCanvasNewQuizHotSpotOperation(operation) {
+  return operation?.provider === "canvas"
+    && operation?.toolName === PRIVATE_CANVAS_HOT_SPOT_TOOL
+    && operation?.key === PRIVATE_CANVAS_HOT_SPOT_OPERATION_KEY
+    && operation?.service === "canvas_new_quiz_hot_spot";
+}
+
+function privateCanvasNewQuizHotSpotCommand(command) {
+  return command?.kind === "invoke_write"
+    && command?.toolName === PRIVATE_CANVAS_HOT_SPOT_TOOL
+    && command?.operationKey === PRIVATE_CANVAS_HOT_SPOT_OPERATION_KEY
+    ? PRIVATE_CANVAS_HOT_SPOT_OPERATION
+    : null;
+}
+
 function privateMoodleEnrolmentCandidateCommand(command) {
   return command?.kind === "invoke_read"
     && command?.toolName === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL
@@ -844,6 +911,32 @@ function privateCanvasAttachmentMatches(argumentsValue, attachment) {
     && argumentsValue.size_bytes === attachment.manifest.size_bytes
     && argumentsValue.sha256 === attachment.manifest.sha256
     && argumentsValue.content_type === attachment.content_type;
+}
+
+/**
+ * The reviewed Hot Spot arguments and the staged image are checked against each
+ * other here, before anything is read or sent. The question must still be the
+ * template a person approved, with no image URL of its own: Morrow puts the
+ * unsigned Canvas URL in only after Canvas confirms the upload.
+ */
+function privateCanvasHotSpotAttachmentMatches(argumentsValue, attachment) {
+  if (!argumentsValue || typeof argumentsValue !== "object" || Array.isArray(argumentsValue)
+    || Object.keys(argumentsValue).length !== PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS.length
+    || PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS.some((key) => !Object.hasOwn(argumentsValue, key))) return false;
+  const item = argumentsValue.item;
+  const entry = item && typeof item === "object" && !Array.isArray(item) ? item.entry : null;
+  const interaction = entry && typeof entry === "object" && !Array.isArray(entry) ? entry.interaction_data : null;
+  return decimalId(argumentsValue.course_id) !== "" && decimalId(argumentsValue.assignment_id) !== ""
+    && item?.entry_type === "Item" && entry?.interaction_type_slug === "hot-spot"
+    && Boolean(interaction) && typeof interaction === "object" && !Array.isArray(interaction)
+    && !Object.hasOwn(interaction, "image_url")
+    && typeof argumentsValue.before_items_sha256 === "string" && /^[a-f0-9]{64}$/.test(argumentsValue.before_items_sha256)
+    && typeof argumentsValue.payload_sha256 === "string" && /^[a-f0-9]{64}$/.test(argumentsValue.payload_sha256)
+    && argumentsValue.filename === attachment.manifest.filename
+    && argumentsValue.size_bytes === attachment.manifest.size_bytes
+    && argumentsValue.sha256 === attachment.manifest.sha256
+    && argumentsValue.content_type === attachment.content_type
+    && PRIVATE_CANVAS_HOT_SPOT_CONTENT_TYPES.includes(argumentsValue.content_type);
 }
 
 function anchorForBinding(binding, anchors) {
@@ -1045,7 +1138,198 @@ async function editPolicyStatus() {
       ...(staleEditPermission ? { staleEditPermission: editPermissionSummary(staleEditPermission) } : {}),
     };
   }));
-  return { catalogDigest: api.catalogDigest, bindingLimit: BRIDGE_BINDING_LIMIT, editDurations: SETTINGS_EDIT_DURATIONS, siteAnchors, bindings };
+  return {
+    catalogDigest: api.catalogDigest,
+    bindingLimit: BRIDGE_BINDING_LIMIT,
+    editDurations: SETTINGS_EDIT_DURATIONS,
+    siteAnchors,
+    bindings,
+    privateChat: privateChatStatus(),
+  };
+}
+
+function privateChatStatus() {
+  const chat = state.privateChat;
+  return {
+    schema: "morrow.private-chat.status.v1",
+    transportAvailable: Boolean(chat?.pending),
+    waitingForMessage: Boolean(chat?.pending),
+    clients: chat ? [{
+      id: chat.sessionId,
+      name: chat.assistantName,
+      protocolVersion: "2026-07-28",
+      sampling: true,
+      pushSampling: false,
+    }] : [],
+    messages: chat ? chat.messages.map((message) => ({ ...message })) : [],
+    ...(chat?.sourceBindingId ? { sourceBindingId: chat.sourceBindingId, courseId: chat.courseId } : {}),
+    code: chat?.pending ? "private_chat_ready" : "private_chat_start_required",
+  };
+}
+
+function notifyPrivateChatChanged() {
+  void chrome.runtime.sendMessage({ type: "morrow_private_chat_changed" }).catch(() => undefined);
+}
+
+function clearPrivateChat({ answerPending = false, rememberClosed = false } = {}) {
+  const chat = state.privateChat;
+  if (!chat) {
+    if (!rememberClosed) state.privateChatClosed = null;
+    return;
+  }
+  state.privateChatClosed = rememberClosed
+    ? { sessionId: chat.sessionId, assistantName: chat.assistantName, expiresAt: Date.now() + 10 * 60_000 }
+    : null;
+  if (chat.timer) clearTimeout(chat.timer);
+  if (answerPending && chat.pending) {
+    sendResult(chat.pending, true, { schema: "morrow.private-chat.exchange.v1", status: "closed" }, null);
+  }
+  chat.messages.splice(0, chat.messages.length);
+  for (const id of Object.keys(chat.labelsById || {})) delete chat.labelsById[id];
+  state.privateChat = null;
+  notifyPrivateChatChanged();
+}
+
+function privateChatCommandInput(command) {
+  const value = command?.arguments;
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || Object.keys(value).some((key) => !["schema", "sessionId", "assistantName", "action", "assistantReply", "sourceBindingId", "courseId"].includes(key))
+    || value.schema !== "morrow.private-chat.exchange.v1"
+    || typeof value.sessionId !== "string" || !/^[A-Za-z0-9_.:@-]{8,160}$/.test(value.sessionId)
+    || typeof value.assistantName !== "string" || !value.assistantName.trim() || value.assistantName.length > 200
+    || !["listen", "reply_and_listen"].includes(value.action)) return null;
+  const reply = value.assistantReply;
+  const hasScope = typeof value.sourceBindingId === "string" && /^[A-Za-z0-9_.:@-]{1,160}$/.test(value.sourceBindingId)
+    && typeof value.courseId === "string" && /^[1-9][0-9]{0,18}$/.test(value.courseId);
+  if (value.action === "listen") {
+    if (reply !== undefined || value.sourceBindingId !== undefined || value.courseId !== undefined) return null;
+  } else if (!hasScope || typeof reply !== "string" || !reply.trim() || reply.length > 100_000) return null;
+  return {
+    sessionId: value.sessionId,
+    assistantName: value.assistantName.trim(),
+    action: value.action,
+    ...(reply === undefined ? {} : { assistantReply: reply }),
+    ...(hasScope ? { sourceBindingId: value.sourceBindingId, courseId: value.courseId } : {}),
+  };
+}
+
+async function handlePrivateChatExchange(command) {
+  const input = privateChatCommandInput(command);
+  if (!input || command.generation !== state.generation || !Number.isSafeInteger(command.expiresAt) || command.expiresAt <= Date.now()) {
+    sendResult(command, false, null, problem("private_chat_exchange_invalid", "Morrow could not validate this Private Chat exchange.", false));
+    return;
+  }
+  const closed = state.privateChatClosed;
+  if (closed && closed.expiresAt <= Date.now()) state.privateChatClosed = null;
+  if (input.action === "reply_and_listen" && !state.privateChat && closed?.sessionId === input.sessionId
+    && closed.assistantName === input.assistantName && closed.expiresAt > Date.now()) {
+    state.privateChatClosed = null;
+    sendResult(command, true, { schema: "morrow.private-chat.exchange.v1", status: "closed" }, null);
+    return;
+  }
+  let chat = state.privateChat;
+  if (input.action === "listen") {
+    if (chat && (chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName)) {
+      sendResult(command, false, null, problem("private_chat_busy", "Another Private Chat is already open.", true));
+      return;
+    }
+    state.privateChatClosed = null;
+    if (!chat) chat = state.privateChat = { sessionId: input.sessionId, assistantName: input.assistantName, messages: [], labelsById: {}, pending: null, timer: null };
+  } else {
+    if (!chat || chat.sessionId !== input.sessionId || chat.assistantName !== input.assistantName
+      || chat.sourceBindingId !== input.sourceBindingId || chat.courseId !== input.courseId || chat.pending) {
+      sendResult(command, false, null, problem("private_chat_scope_changed", "The Private Chat assistant or course changed.", false));
+      return;
+    }
+    chat.messages.push({ role: "assistant", text: input.assistantReply });
+  }
+  if (chat.pending) {
+    sendResult(command, false, null, problem("private_chat_exchange_pending", "Private Chat is already waiting for a message.", true));
+    return;
+  }
+  chat.pending = command;
+  chat.timer = setTimeout(() => {
+    if (state.privateChat !== chat || chat.pending !== command) return;
+    chat.pending = null;
+    chat.timer = null;
+    sendResult(command, false, null, problem("private_chat_wait_expired", "Private Chat stopped waiting before a message was sent.", true));
+    clearPrivateChat();
+  }, Math.max(1, command.expiresAt - Date.now()));
+  notifyPrivateChatChanged();
+}
+
+async function privateChatRoster(binding, expiresAt) {
+  await catalog();
+  if (binding.provider === "moodle") {
+    const operation = state.operations.get("moodle_get_course_participant_roster");
+    if (!operation) throw new Error("private_chat_roster_unavailable");
+    const result = await executeOperation(binding, operation, { course_id: binding.courseId }, expiresAt);
+    const roster = result?.data;
+    if (!result?.ok || result.truncated !== false || roster?.schema !== "morrow.moodle-course-roster.v1"
+      || roster.complete !== true || roster.status !== "complete" || roster.sourceBindingId !== binding.sourceBindingId
+      || roster.courseId !== binding.courseId) throw new Error("private_chat_roster_incomplete");
+    return sourceProtectedRoster(roster.identities);
+  }
+  const currentOperation = state.operations.get("canvas_list_users_in_course_users");
+  const historyOperation = state.operations.get("canvas_list_enrollments_courses");
+  if (!currentOperation || !historyOperation) throw new Error("private_chat_roster_unavailable");
+  const current = await executeOperation(binding, currentOperation, {
+    course_id: binding.courseId,
+    include: ["enrollments", "uuid"],
+    enrollment_type: ["student"],
+    enrollment_state: ["active", "invited", "rejected", "completed", "inactive"],
+    morrow_max_pages: 50,
+  }, expiresAt);
+  const history = await executeOperation(binding, historyOperation, {
+    course_id: binding.courseId,
+    type: ["StudentEnrollment"], state: ["deleted"], include: ["uuid"], morrow_max_pages: 50,
+  }, expiresAt);
+  if (!current?.ok || current.truncated !== false || !Array.isArray(current.data)
+    || !history?.ok || history.truncated !== false || !Array.isArray(history.data)) throw new Error("private_chat_roster_incomplete");
+  return canvasProtectedRoster(current.data, history.data, binding.courseId);
+}
+
+async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifiers) {
+  const chat = state.privateChat;
+  const command = chat?.pending;
+  if (!chat || !command) throw new Error("private_chat_start_required");
+  if (typeof sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(sourceBindingId)
+    || typeof text !== "string" || !text.trim() || text.length > 100_000
+    || !Array.isArray(assertedIdentifiers) || assertedIdentifiers.length < 1 || assertedIdentifiers.length > 100
+    || assertedIdentifiers.some((value) => typeof value !== "string" || !value.trim() || value.length > 500)) {
+    throw new Error("private_chat_message_invalid");
+  }
+  const binding = await bindingFor(sourceBindingId, { fresh: true });
+  if (!binding?.runtimeVerified || !/^[1-9][0-9]{0,18}$/.test(String(binding.courseId))) throw new Error("private_chat_course_unavailable");
+  if (chat.sourceBindingId && (chat.sourceBindingId !== binding.sourceBindingId || chat.courseId !== binding.courseId)) {
+    throw new Error("private_chat_scope_change_refused");
+  }
+  const roster = await privateChatRoster(binding, Math.min(command.expiresAt, Date.now() + 60_000));
+  const protectedRequest = protectLocalRequest({
+    sourceBindingId: binding.sourceBindingId,
+    courseId: binding.courseId,
+    text,
+    assertedIdentifiers,
+    roster,
+    rosterComplete: true,
+    rosterFreshAt: Date.now(),
+    labelsById: chat.labelsById,
+  });
+  const protectedText = protectedRequest.protectedText;
+  if (state.privateChat !== chat || chat.pending !== command || command.expiresAt <= Date.now()) throw new Error("private_chat_exchange_changed");
+  chat.sourceBindingId = binding.sourceBindingId;
+  chat.courseId = binding.courseId;
+  chat.labelsById = protectedRequest.labelsById;
+  chat.messages.push({ role: "user", text: protectedText });
+  if (chat.timer) clearTimeout(chat.timer);
+  chat.timer = null;
+  chat.pending = null;
+  sendResult(command, true, {
+    schema: "morrow.private-chat.exchange.v1", status: "message",
+    sessionId: chat.sessionId, sourceBindingId: chat.sourceBindingId, courseId: chat.courseId, protectedText,
+  }, null);
+  notifyPrivateChatChanged();
+  return { status: "sent" };
 }
 
 function editPermissionSummary(permission) {
@@ -1470,22 +1754,39 @@ async function connectBridge() {
   const api = await catalog();
   const socket = new WebSocket(bridgeUrl());
   state.socket = socket;
-  socket.onopen = async () => socket.send(JSON.stringify({
-    schema: "morrow.bridge.hello.v1",
-    protocolVersion: PROTOCOL_VERSION,
-    token: stored.token,
-    extensionId: chrome.runtime.id,
-    runtimeRevision: RUNTIME_REVISION,
-    catalogDigest: api.catalogDigest,
-    bindings: await publicBindings(),
-    sentAt: Date.now(),
-  }));
+  socket.onopen = () => {
+    void (async () => {
+      const bindings = await publicBindings();
+      if (state.socket !== socket || socket.readyState !== WebSocket.OPEN) return;
+      socket.send(JSON.stringify({
+        schema: "morrow.bridge.hello.v1",
+        protocolVersion: PROTOCOL_VERSION,
+        token: stored.token,
+        extensionId: chrome.runtime.id,
+        runtimeRevision: RUNTIME_REVISION,
+        catalogDigest: api.catalogDigest,
+        bindings,
+        sentAt: Date.now(),
+      }));
+    })().catch(() => {
+      if (state.socket === socket) socket.close(1011, "hello_failed");
+    });
+  };
   socket.onmessage = (event) => {
-    const message = JSON.parse(event.data);
+    if (state.socket !== socket) return;
+    let message;
+    try {
+      message = JSON.parse(event.data);
+    } catch {
+      socket.close(4400, "invalid_message");
+      return;
+    }
     void handleBridgeMessage(message).then(() => {
       if (message?.schema === "morrow.bridge.ready.v1" && state.socket === socket) {
         void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
       }
+    }).catch(() => {
+      if (state.socket === socket) socket.close(1011, "message_failed");
     });
   };
   socket.onclose = (event) => {
@@ -1493,6 +1794,7 @@ async function connectBridge() {
     state.socket = null;
     state.generation = 0;
     state.accepted = null;
+    clearPrivateChat();
     void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
     if (event.code === 4403) {
       if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
@@ -1544,16 +1846,7 @@ function withoutPrivateAttachment(value) {
 
 function sendResult(command, ok, result, failure) {
   if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
-  state.socket.send(JSON.stringify({
-    schema: "morrow.bridge.result.v1",
-    protocolVersion: PROTOCOL_VERSION,
-    requestId: command.requestId,
-    operationId: command.operationId,
-    generation: command.generation,
-    ok,
-    ...(ok ? { result } : { ...(result ? { result } : {}), problem: failure }),
-    completedAt: Date.now(),
-  }));
+  state.socket.send(serializeBridgeResult(command, ok, result, failure));
 }
 
 async function bindingFor(id, { fresh = false } = {}) {
@@ -1623,7 +1916,7 @@ async function executeCanvas(binding, operation, args, expiresAt) {
       courseId: binding.courseId,
     }, { frameId: 0 });
   } catch (error) {
-    return { ok: false, sent, outcomeUnknown: sent && !operation.readOnly, error: sent && !operation.readOnly ? "canvas_write_response_unknown" : String(error?.message || error) };
+    return { ok: false, sent, outcomeUnknown: sent && !operation.readOnly, error: sent && !operation.readOnly ? "canvas_write_response_unknown" : "canvas_read_interrupted" };
   }
 }
 
@@ -1679,36 +1972,278 @@ async function executeCanvasConversation(binding, operation, privateConversation
   return result;
 }
 
-async function executeItemBank(binding, operation, args) {
+function clearItemBankCredentialsForTab(tabId) {
+  pendingItemBankLaunches.delete(tabId);
+  for (const [key, credential] of itemBankCredentials) {
+    if (credential.tabId === tabId) itemBankCredentials.delete(key);
+  }
+}
+
+async function freshItemBankContext(binding) {
+  const tab = await chrome.tabs.get(binding.tabId).catch(() => null);
+  const launchUrl = itemBankLaunchUrl(tab?.url, binding.origin, binding.courseId);
+  if (!launchUrl) return { error: "item_bank_launch_context_required" };
+  const launchedAt = Date.now();
+  const launchNonce = crypto.randomUUID();
+  const launchTab = await chrome.tabs.create({ active: false, windowId: tab.windowId }).catch(() => null);
+  if (!Number.isInteger(launchTab?.id)) return { error: "item_bank_launch_failed" };
+  const launchTabId = launchTab.id;
+  pendingItemBankLaunches.set(launchTabId, { tabId: launchTabId, canvasLocalContextId: binding.courseId, launchUrl, launchNonce, launchedAt });
   try {
-    // Only the Item Banks frame holds the credential this executor needs, so
-    // the probe never reaches any other frame and never carries the item
-    // payload. Both would hand a third-party frame on the same Canvas page the
-    // question body, the principal, and the course before any guard ran.
-    const frames = await chrome.webNavigation.getAllFrames({ tabId: binding.tabId }).catch(() => []);
-    const candidates = itemBankFrameIds(frames);
-    if (candidates.length === 0) return { ok: false, sent: false, error: "item_bank_context_not_established" };
-    const rows = await chrome.scripting.executeScript({
-      target: { tabId: binding.tabId, frameIds: candidates },
+    await chrome.tabs.update(launchTabId, { url: launchUrl });
+  } catch {
+    clearItemBankCredentialsForTab(launchTabId);
+    return { tabId: launchTabId, error: "item_bank_launch_failed" };
+  }
+  const deadline = launchedAt + ITEM_BANK_CREDENTIAL_WAIT_MS;
+  while (Date.now() < deadline) {
+    const launch = pendingItemBankLaunches.get(launchTabId);
+    if (launch?.ambiguous === true) return { tabId: launchTabId, error: "item_bank_context_ambiguous" };
+    const frames = await chrome.webNavigation.getAllFrames({ tabId: launchTabId }).catch(() => []);
+    const frameIds = itemBankFrameIds(frames);
+    if (frameIds.length > 1) return { tabId: launchTabId, error: "item_bank_context_ambiguous" };
+    const requiredOrigins = itemBankPermissionOrigins(frames, binding.origin);
+    if (frameIds.length === 1 && requiredOrigins.length !== 2) {
+      return { tabId: launchTabId, error: "item_bank_context_ambiguous" };
+    }
+    if (requiredOrigins.length === 2 && !await chrome.permissions.contains({ origins: requiredOrigins })) {
+      return { tabId: launchTabId, error: "item_bank_quiz_origin_access_required" };
+    }
+    const usable = [];
+    for (const frameId of frameIds) {
+      const frame = frames.find((candidate) => candidate.frameId === frameId);
+      const apiOrigin = itemBankApiOriginForFrame(frame?.url);
+      const credential = usableItemBankCredential(
+        itemBankCredentials.get(itemBankCredentialKey(launchTabId, frameId)),
+        { tabId: launchTabId, frameId, apiOrigin, canvasLocalContextId: binding.courseId, launchUrl, launchNonce, launchedAt },
+      );
+      if (credential) usable.push({ frameId, credential });
+    }
+    if (usable.length === 1) return { tabId: launchTabId, ...usable[0] };
+    if (usable.length > 1) return { tabId: launchTabId, error: "item_bank_context_ambiguous" };
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  clearItemBankCredentialsForTab(launchTabId);
+  return { tabId: launchTabId, error: "item_bank_credential_not_captured" };
+}
+
+/**
+ * The same payload with every media element a finding names replaced by one
+ * that carries no problem. It exists so the payload contract's media pass
+ * cannot hide the rules after it when a media problem is judged elsewhere. It
+ * is only ever validated: nothing rewritten here is sent to Canvas.
+ */
+const HELD_MEDIA_ELEMENT = '<img alt="" src="https://morrow.invalid/held-media">';
+const HELD_MEDIA_MAX_DEPTH = 32;
+
+function withoutMediaElements(value, findings) {
+  const tags = [...new Set(findings.map((finding) => finding.tag).filter(Boolean))];
+  if (tags.length === 0) return value;
+  const replace = (node, depth) => {
+    if (depth > HELD_MEDIA_MAX_DEPTH) return node;
+    if (typeof node === "string") {
+      let text = node;
+      for (const tag of tags) text = text.split(tag).join(HELD_MEDIA_ELEMENT);
+      return text;
+    }
+    if (Array.isArray(node)) return node.map((member) => replace(member, depth + 1));
+    if (node && typeof node === "object") {
+      return Object.fromEntries(Object.entries(node).map(([key, child]) => [key, replace(child, depth + 1)]));
+    }
+    return node;
+  };
+  return replace(value, 0);
+}
+
+async function executeItemBank(binding, operation, args) {
+  let context;
+  try {
+    let payloadContractSha256;
+    if (["create_item", "update_item"].includes(operation.nickname)) {
+      const item = args?.item && typeof args.item === "object" && !Array.isArray(args.item) && args.item.item
+        ? args.item.item : args?.item;
+      // A create is judged on its own, so every media problem in it refuses
+      // here. A change to a question the bank already holds is judged against
+      // that question, and this worker does not hold it: only the Item Banks
+      // frame reads the stored question immediately before the write, so the
+      // frame decides which media problems the change would add. A finding that
+      // names no element still refuses here, because unreadable markup can
+      // never be matched against a stored element.
+      const findings = itemBankMediaFindings(item);
+      const absolute = operation.nickname === "create_item" ? findings[0] : findings.find((finding) => !finding.tag);
+      if (absolute) return { ok: false, sent: false, error: `item_bank_payload_${absolute.reason}` };
+      // The payload contract checks media first and stops at the first problem,
+      // so a deferred media problem would hide every rule after it. The
+      // contract therefore runs over a copy with the media elements replaced by
+      // one that carries no problem: every rule that is not about media keeps
+      // refusing here exactly as before. Only this copy is validated; the
+      // payload sent to Canvas is never rewritten.
+      const reason = completeQuizItemPayloadReason(withoutMediaElements(item, findings));
+      if (reason) return { ok: false, sent: false, error: `item_bank_payload_${reason}` };
+      payloadContractSha256 = await sha256(stableJson(args.item));
+    }
+    // Reload the exact course Item Banks launch for every operation. The prior
+    // credential is cleared first, and only a quiz-api request observed after
+    // this launch can authorize the read. The request payload is injected only
+    // after one exact frame has proved its principal and numeric course.
+    context = await freshItemBankContext(binding);
+    if (context.error) return { ok: false, sent: false, error: context.error };
+    const [probe] = await chrome.scripting.executeScript({
+      target: { tabId: context.tabId, frameIds: [context.frameId] },
       world: "MAIN",
       func: executeItemBankInPage,
       args: [{ operation, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true }],
     });
-    const matches = rows.filter((row) => row.result?.matched === true);
-    if (matches.length !== 1) return { ok: false, sent: false, error: matches.length ? "item_bank_context_ambiguous" : "item_bank_context_not_established" };
+    if (probe?.result?.matched !== true) return { ok: false, sent: false, error: "item_bank_context_not_established" };
     try {
       const [execution] = await chrome.scripting.executeScript({
-        target: { tabId: binding.tabId, frameIds: [matches[0].frameId] },
+        target: { tabId: context.tabId, frameIds: [context.frameId] },
         world: "MAIN",
         func: executeItemBankInPage,
-        args: [{ operation, arguments: args, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId }],
+        args: [{
+          operation,
+          arguments: args,
+          principalId: binding.principalId,
+          canvasOrigin: binding.origin,
+          courseId: binding.courseId,
+          credential: {
+            apiOrigin: context.credential.apiOrigin,
+            token: context.credential.token,
+            authType: context.credential.authType,
+            contextUuid: context.credential.contextUuid,
+            canvasLocalContextId: context.credential.canvasLocalContextId,
+            launchUrl: context.credential.launchUrl,
+            launchNonce: context.credential.launchNonce,
+            launchedAt: context.credential.launchedAt,
+            capturedAt: context.credential.capturedAt,
+          },
+          ...(payloadContractSha256 ? { payloadContractSha256 } : {}),
+        }],
       });
       return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "item_bank_result_missing" };
     } catch {
       return { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "item_bank_execution_interrupted" };
     }
-  } catch (error) {
-    return { ok: false, sent: false, error: String(error?.message || error) };
+  } catch {
+    return { ok: false, sent: false, error: "item_bank_execution_failed" };
+  } finally {
+    if (Number.isInteger(context?.tabId)) {
+      clearItemBankCredentialsForTab(context.tabId);
+      await chrome.tabs.remove(context.tabId).catch(() => {});
+    }
+  }
+}
+
+async function freshQuizBankBuilderContext(binding, assignmentId, operation, args, verifiedBankSha256) {
+  const tab = await chrome.tabs.get(binding.tabId).catch(() => null);
+  let currentUrl;
+  try { currentUrl = new URL(tab?.url || ""); } catch { currentUrl = null; }
+  if (!currentUrl || currentUrl.origin !== binding.origin
+    || currentUrl.pathname.match(/^\/courses\/([1-9][0-9]{0,18})(?:\/|$)/)?.[1] !== binding.courseId) {
+    return { error: "quiz_bank_launch_context_required" };
+  }
+  const launchUrl = `${binding.origin}/courses/${binding.courseId}/assignments/${assignmentId}?display=borderless`;
+  const launchTab = await chrome.tabs.create({ active: false, windowId: tab.windowId }).catch(() => null);
+  if (!Number.isInteger(launchTab?.id)) return { error: "quiz_bank_launch_failed" };
+  const tabId = launchTab.id;
+  try {
+    await chrome.tabs.update(tabId, { url: launchUrl });
+  } catch {
+    return { tabId, error: "quiz_bank_launch_failed" };
+  }
+  const deadline = Date.now() + ITEM_BANK_CREDENTIAL_WAIT_MS;
+  while (Date.now() < deadline) {
+    const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
+    const frameIds = itemBankFrameIds(frames);
+    if (frameIds.length > 1) return { tabId, error: "quiz_bank_builder_context_ambiguous" };
+    const requiredOrigins = itemBankPermissionOrigins(frames, binding.origin);
+    if (frameIds.length === 1 && requiredOrigins.length !== 2) {
+      return { tabId, error: "quiz_bank_builder_context_ambiguous" };
+    }
+    if (requiredOrigins.length === 2 && !await chrome.permissions.contains({ origins: requiredOrigins })) {
+      return { tabId, error: "item_bank_quiz_origin_access_required" };
+    }
+    if (frameIds.length === 1) {
+      try {
+        const [probe] = await chrome.scripting.executeScript({
+          target: { tabId, frameIds },
+          world: "MAIN",
+          func: executeQuizBankDrawInPage,
+          args: [{
+            operation,
+            arguments: args,
+            canvasOrigin: binding.origin,
+            courseId: binding.courseId,
+            assignmentId,
+            contextOnly: true,
+          }],
+        });
+        if (probe?.result?.matched === true && probe.result.ok === true) {
+          return { tabId, frameId: frameIds[0], launchUrl, verifiedBankSha256 };
+        }
+        if (probe?.result?.matched === true && !["quiz_bank_builder_credential_unavailable", "quiz_bank_builder_context_ambiguous"].includes(probe.result.error)) {
+          return { tabId, error: probe.result.error || "quiz_bank_builder_context_unverified" };
+        }
+      } catch {}
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return { tabId, error: "quiz_bank_builder_credential_unavailable" };
+}
+
+async function executeQuizBankDraw(binding, operation, args) {
+  const assignmentId = decimalId(args?.assignment_id);
+  if (!assignmentId || String(args?.course_id) !== binding.courseId) {
+    return { ok: false, sent: false, error: "quiz_bank_course_assignment_mismatch" };
+  }
+  let verifiedBankSha256;
+  let verifiedEntrySha256;
+  if (!operation.readOnly) {
+    const api = await catalog();
+    const getBank = api.operations.find((candidate) => candidate.toolName === "canvas_item_bank_get_bank");
+    if (!getBank || !decimalId(args?.bank_id)) return { ok: false, sent: false, error: "quiz_bank_bank_contract_missing" };
+    const bank = await executeItemBank(binding, getBank, { course_id: binding.courseId, bank_id: String(args.bank_id) });
+    if (!bank?.ok || typeof bank.snapshotSha256 !== "string") {
+      return { ok: false, sent: false, error: "quiz_bank_bank_unreadable" };
+    }
+    verifiedBankSha256 = bank.snapshotSha256;
+    if (operation.nickname === "attach_bank_entry_to_quiz" || decimalId(args?.bank_entry_id)) {
+      const getEntry = api.operations.find((candidate) => candidate.toolName === "canvas_item_bank_get_entry");
+      if (!getEntry || !decimalId(args?.bank_entry_id)) return { ok: false, sent: false, error: "quiz_bank_entry_contract_missing" };
+      const entry = await executeItemBank(binding, getEntry, {
+        course_id: binding.courseId,
+        bank_id: String(args.bank_id),
+        bank_entry_id: String(args.bank_entry_id),
+      });
+      if (!entry?.ok || typeof entry.snapshotSha256 !== "string") {
+        return { ok: false, sent: false, error: "quiz_bank_entry_unreadable" };
+      }
+      verifiedEntrySha256 = entry.snapshotSha256;
+    }
+  }
+  let context;
+  try {
+    context = await freshQuizBankBuilderContext(binding, assignmentId, operation, args, verifiedBankSha256);
+    if (context.error) return { ok: false, sent: false, error: context.error };
+    const [execution] = await chrome.scripting.executeScript({
+      target: { tabId: context.tabId, frameIds: [context.frameId] },
+      world: "MAIN",
+      func: executeQuizBankDrawInPage,
+      args: [{
+        operation,
+        arguments: args,
+        canvasOrigin: binding.origin,
+        courseId: binding.courseId,
+        assignmentId,
+        verifiedBankSha256,
+        verifiedEntrySha256,
+      }],
+    });
+    return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "quiz_bank_result_missing" };
+  } catch {
+    return { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "quiz_bank_execution_interrupted" };
+  } finally {
+    if (Number.isInteger(context?.tabId)) await chrome.tabs.remove(context.tabId).catch(() => {});
   }
 }
 
@@ -2467,6 +3002,10 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
     if (!privateAttachment) return { ok: false, sent: false, error: "canvas_private_attachment_required" };
     return await executeCanvasCourseFileTransfer(binding, args, expiresAt, privateAttachment);
   }
+  if (privateCanvasNewQuizHotSpotOperation(operation)) {
+    if (!privateAttachment) return { ok: false, sent: false, error: "canvas_private_attachment_required" };
+    return await executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, privateAttachment);
+  }
   if (operation.service === "course_file_content") {
     return await executeCanvasCourseFileText(binding, operation, args, expiresAt);
   }
@@ -2474,7 +3013,9 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
     return await executeCanvasConversation(binding, operation, privateConversation, expiresAt);
   }
   return operation.service === "item_bank"
-    ? await executeItemBank(binding, operation, args)
+    ? ["list_quiz_draws", "attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry"].includes(operation.nickname)
+      ? await executeQuizBankDraw(binding, operation, args)
+      : await executeItemBank(binding, operation, args)
     : await executeCanvas(binding, operation, args, expiresAt);
 }
 
@@ -2512,7 +3053,7 @@ function canvasUploadObserverPatterns(uploadUrl) {
   return uploadUrl.href === prefix ? [uploadUrl.href] : [uploadUrl.href, prefix];
 }
 
-function observeCanvasUploadConfirmation(uploadUrl, canvasOrigin, signal) {
+function observeCanvasUploadConfirmation(uploadUrl, canvasOrigin, signal, method = "POST") {
   const expectedUrl = uploadUrl.href;
   if (canvasUploadObservers.has(expectedUrl)) return null;
   let resolve;
@@ -2528,7 +3069,7 @@ function observeCanvasUploadConfirmation(uploadUrl, canvasOrigin, signal) {
     resolve(value);
   };
   const beforeRequest = (details) => {
-    if (details.url !== expectedUrl || details.method !== "POST") return;
+    if (details.url !== expectedUrl || details.method !== method) return;
     if (requestId && requestId !== details.requestId) {
       finish({ error: "canvas_file_upload_request_ambiguous" });
       return;
@@ -2536,7 +3077,7 @@ function observeCanvasUploadConfirmation(uploadUrl, canvasOrigin, signal) {
     requestId = details.requestId;
   };
   const listener = (details) => {
-    if (details.url !== expectedUrl || details.method !== "POST" || !requestId || details.requestId !== requestId) return;
+    if (details.url !== expectedUrl || details.method !== method || !requestId || details.requestId !== requestId) return;
     const location = (details.responseHeaders || []).find((header) => String(header.name).toLowerCase() === "location")?.value;
     finish({
       status: Number.isInteger(details.statusCode) ? details.statusCode : undefined,
@@ -2561,6 +3102,171 @@ function observeCanvasUploadConfirmation(uploadUrl, canvasOrigin, signal) {
   signal.addEventListener("abort", abort, { once: true });
   canvasUploadObservers.set(expectedUrl, observer);
   return observer;
+}
+
+/**
+ * The signed URL Canvas answered the media upload request with. It is used to
+ * send the bytes and then, with its query string removed, as the image URL the
+ * created question carries. Its signature never leaves this worker.
+ */
+function privateCanvasSignedUploadUrl(value) {
+  if (typeof value !== "string" || value.length < 1 || value.length > 8192) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  return url.protocol === "https:" && !url.username && !url.password && url.hostname ? url : null;
+}
+
+/**
+ * One reviewed New Quizzes Hot Spot question, sent once.
+ *
+ * Canvas splits this into three requests that only work in order. The page reads
+ * the current course, quiz and complete saved question list and asks Canvas for
+ * one signed upload URL. This worker sends the reviewed bytes to that URL with
+ * one PUT, and watches that exact request so it learns the real response even
+ * when the upload host answers opaquely. Only a confirmed upload lets the page
+ * create the question, with the same URL minus its query string, and reread what
+ * Canvas saved. A watch that ends without confirming refuses the create even
+ * when the worker's own read of the PUT looked like a success, and because the
+ * bytes may have reached the host anyway, that success-looking read leaves the
+ * outcome unknown.
+ *
+ * Nothing here is sent twice. Once the create is dispatched, an ending that does
+ * not prove a refusal is reported as an unknown outcome, and Morrow never
+ * repeats an unknown outcome.
+ */
+/**
+ * What a person reads when a reviewed Hot Spot does not complete.
+ *
+ * A state Morrow can explain keeps its own words, because those words name the
+ * one step that person takes next. Course file access is the state that matters
+ * here: it is a Chrome permission, so the Gateway cannot see it while it is
+ * preparing the question and only this worker learns it is off. Everything else
+ * names the step that did not complete.
+ */
+function hotSpotFailureMessage(error) {
+  return problemCopy(error).known ? problemText(error) : "Canvas could not complete the reviewed Hot Spot question.";
+}
+
+async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, privateAttachment) {
+  if (!await courseFileStorageAccessEnabled()) return { ok: false, sent: false, error: "canvas_file_storage_access_required" };
+  const deadline = Math.min(
+    Number.isSafeInteger(expiresAt) && expiresAt > Date.now() ? expiresAt : Date.now() + COURSE_FILE_READ_TIMEOUT_MS,
+    Date.now() + COURSE_FILE_READ_TIMEOUT_MS,
+  );
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
+  let uploadDispatched = false;
+  let uploadStatus;
+  let uploadObserver;
+  try {
+    const execute = async (input) => {
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasNewQuizHotSpotInPage,
+        args: [input],
+      });
+      return execution?.result || null;
+    };
+    const base = {
+      binding: { origin: binding.origin, courseId: binding.courseId, principalId: binding.principalId },
+      assignmentId: String(args.assignment_id),
+      beforeItemsSha256: args.before_items_sha256,
+    };
+    const prepared = await execute({ ...base, mode: "initialize" });
+    if (prepared?.ok !== true || prepared?.sent !== false || !prepared.data
+      || String(prepared.data.course_id) !== binding.courseId
+      || String(prepared.data.assignment_id) !== String(args.assignment_id)) {
+      return { ok: false, sent: false, error: prepared?.error || "canvas_hot_spot_upload_init_invalid" };
+    }
+    const uploadUrl = privateCanvasSignedUploadUrl(prepared.data.upload_url);
+    if (!uploadUrl) return { ok: false, sent: false, error: "canvas_hot_spot_upload_url_refused" };
+    uploadObserver = observeCanvasUploadConfirmation(uploadUrl, binding.origin, controller.signal, "PUT");
+    if (!uploadObserver) return { ok: false, sent: false, error: "canvas_hot_spot_upload_observer_unavailable" };
+    const bytes = Uint8Array.from(atob(privateAttachment.bytes_base64), (character) => character.charCodeAt(0));
+    if (bytes.byteLength !== privateAttachment.manifest.size_bytes
+      || await sha256Bytes(bytes) !== privateAttachment.manifest.sha256) {
+      return { ok: false, sent: false, error: "canvas_private_attachment_invalid" };
+    }
+    uploadDispatched = true;
+    const upload = await fetch(uploadUrl, {
+      method: "PUT",
+      headers: { "Content-Type": privateAttachment.content_type },
+      credentials: "omit",
+      cache: "no-store",
+      redirect: "manual",
+      referrerPolicy: "no-referrer",
+      signal: controller.signal,
+      body: bytes,
+    });
+    const observed = await uploadObserver.result;
+    uploadStatus = Number.isInteger(observed.status) ? observed.status : upload.status;
+    // An observer error is the confirmation channel reporting that it confirmed
+    // nothing. It disqualifies the upload even when this worker's own fetch read
+    // a 2xx.
+    if (observed.error || !(Number.isInteger(uploadStatus) && uploadStatus >= 200 && uploadStatus < 300)) {
+      // No question exists yet, so this ending is about the image alone. It is
+      // still never repeated on its own: Morrow reports it and stops.
+      return {
+        ok: false, sent: true, outcomeUnknown: canvasWriteOutcomeUncertain(uploadStatus),
+        ...(Number.isInteger(uploadStatus) ? { status: uploadStatus } : {}),
+        error: observed.error || "canvas_hot_spot_upload_refused",
+      };
+    }
+    const created = await execute({
+      ...base,
+      mode: "complete",
+      upload_url: uploadUrl.href,
+      item: args.item,
+      payloadSha256: args.payload_sha256,
+      expiresAt: deadline,
+    });
+    if (!created) return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_hot_spot_create_interrupted" };
+    if (created.ok !== true) {
+      return {
+        ok: false,
+        // The page reports a refusal it made before the create as not sent. The
+        // question does not exist, so a fresh review may plan it again.
+        sent: created.sent === true,
+        outcomeUnknown: created.sent === true && created.outcomeUnknown !== false,
+        ...(Number.isInteger(created.status) ? { status: created.status } : {}),
+        ...(created.verification ? { verification: created.verification } : {}),
+        error: created.error || "canvas_hot_spot_create_invalid",
+      };
+    }
+    if (created.verification?.status !== "verified" || !created.data
+      || String(created.data.course_id) !== binding.courseId
+      || String(created.data.assignment_id) !== String(args.assignment_id)
+      || !decimalId(created.data.item_id)) {
+      return { ok: false, sent: true, outcomeUnknown: true, status: created.status, error: "canvas_hot_spot_create_unverified" };
+    }
+    return {
+      schema: "morrow.canvas-new-quiz-hot-spot.v1",
+      ok: true,
+      sent: true,
+      outcomeUnknown: false,
+      ...(Number.isInteger(created.status) ? { status: created.status } : {}),
+      verification: created.verification,
+      data: {
+        course_id: binding.courseId,
+        assignment_id: String(args.assignment_id),
+        item_id: String(created.data.item_id),
+        item_count: created.data.item_count,
+        interaction_type_slug: "hot-spot",
+        image_url: created.data.image_url,
+        sha256: privateAttachment.manifest.sha256,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      sent: uploadDispatched,
+      outcomeUnknown: uploadDispatched,
+      ...(Number.isInteger(uploadStatus) ? { status: uploadStatus } : {}),
+      error: controller.signal.aborted ? "canvas_hot_spot_transfer_timeout" : "canvas_hot_spot_transfer_interrupted",
+    };
+  } finally {
+    uploadObserver?.close();
+    clearTimeout(timeout);
+  }
 }
 
 async function executeCanvasCourseFileTransfer(binding, args, expiresAt, privateAttachment) {
@@ -2662,7 +3368,7 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       sent: uploadDispatched,
       outcomeUnknown: uploadDispatched,
       ...(Number.isInteger(uploadStatus) ? { status: uploadStatus } : {}),
-      error: controller.signal.aborted ? "canvas_file_transfer_timeout" : String(error?.message || error),
+      error: controller.signal.aborted ? "canvas_file_transfer_timeout" : "canvas_file_transfer_interrupted",
     };
   } finally {
     uploadObserver?.close();
@@ -2681,6 +3387,9 @@ async function editScopeProblem(command, binding, operation) {
   const authorization = command.outerGrant?.authorization;
   if (!authorization || authorization.kind === "review") return null;
   if (Object.hasOwn(command.arguments || {}, "morrow_new_quiz_settings_guard")) return problem("new_quiz_settings_review_required", "New Quiz settings need review for this exact change.", true);
+  if (Object.hasOwn(command.arguments || {}, "morrow_new_quiz_lifecycle_guard")) return problem("new_quiz_lifecycle_review_required", "A New Quiz create or delete needs review for this exact course and quiz state.", true);
+  if (Object.hasOwn(command.arguments || {}, "morrow_new_quiz_effect_guard")) return problem("new_quiz_effect_review_required", "A New Quiz accommodation or report request needs review for this exact target and payload.", true);
+  if (Object.hasOwn(command.arguments || {}, "morrow_new_quiz_item_position_guard")) return problem("new_quiz_item_position_review_required", "A New Quiz item move needs review for this exact order.", true);
   if (authorization.kind !== "edit_scope") return problem("edit_policy_authorization_invalid", "The Edit permission evidence is invalid.", false);
   const api = await catalog();
   const stored = await storage();
@@ -2820,18 +3529,9 @@ async function commandContext(command) {
     return { failure: problem("stale_bridge_command", "The bridge command is stale.", false) };
   }
   const operation = state.operations.get(command.toolName) || privateCanvasCourseFileCommand(command)
-    || privateMoodleEnrolmentCandidateCommand(command);
+    || privateCanvasNewQuizHotSpotCommand(command) || privateMoodleEnrolmentCandidateCommand(command);
   if (!operation || operation.key !== command.operationKey || operation.readOnly !== (command.kind === "invoke_read")) {
     return { failure: problem("operation_catalog_mismatch", "The command does not match the connector catalog.", false) };
-  }
-  // One Item Bank write has an Edit path: the guarded image alternative-text repair, which carries
-  // a fresh reading of the exact question and the acknowledged list of every course the bank
-  // reaches. Every other Item Bank write, and this one without an accepted guard, stays held.
-  if (operation.service === "item_bank" && !operation.readOnly && operation.nickname !== "create_bank"
-    && !guardedItemBankUpdate(operation, command.arguments)) {
-    return { failure: operation.nickname === "update_item"
-      ? problem("item_bank_fan_out_and_guard_required", "Morrow changes one Item Bank question only through its focused image alternative-text repair, with the current question read again and every course the bank reaches confirmed first.", false)
-      : problem("item_bank_dependency_review_required", "Changes to an existing Item Bank require a complete dependency and affected-course review. This release cannot yet establish that evidence.", false) };
   }
   // A change always probes the course site again here, so the reading immediately before a write is
   // never one kept for an earlier request.
@@ -2851,7 +3551,8 @@ async function commandContext(command) {
   const policyFailure = await editScopeProblem(command, binding, operation);
   if (policyFailure) return { failure: policyFailure };
   const privateMoodleFile = privateMoodleStagedFileOperation(operation);
-  const privateCanvasFile = privateCanvasCourseFileOperation(operation);
+  const privateCanvasHotSpot = privateCanvasNewQuizHotSpotOperation(operation);
+  const privateCanvasFile = privateCanvasCourseFileOperation(operation) || privateCanvasHotSpot;
   if (!privateMoodleFile && !privateCanvasFile && (command.privateAttachment !== undefined || command.privateAttachments !== undefined)) {
     return { failure: problem("private_attachment_refused", "A private file attachment is only accepted for one exact reviewed course-file change.", false) };
   }
@@ -2863,7 +3564,9 @@ async function commandContext(command) {
     || (privateMoodleFile?.attachmentMode === "multiple" && (command.privateAttachments === undefined || command.privateAttachment !== undefined))
     || (privateCanvasFile && command.privateAttachment === undefined)) {
     return { failure: privateCanvasFile
-      ? problem("canvas_private_attachment_required", "This Canvas course-file change needs its staged private file attachment.", true)
+      ? problem("canvas_private_attachment_required", privateCanvasHotSpot
+        ? "This Hot Spot question needs its staged private image."
+        : "This Canvas course-file change needs its staged private file attachment.", true)
       : problem("moodle_private_attachment_required", "This Moodle staged-file change needs its staged private file attachment.", true) };
   }
   const privateAttachment = privateCanvasFile
@@ -2878,17 +3581,23 @@ async function commandContext(command) {
     || (privateMoodleFile?.attachmentMode === "multiple" && !privateAttachments)
     || (privateCanvasFile && !privateAttachment)) {
     return { failure: privateCanvasFile
-      ? problem("canvas_private_attachment_invalid", "The staged private Canvas file attachment could not be verified.", false)
+      ? problem("canvas_private_attachment_invalid", privateCanvasHotSpot
+        ? "The staged private Hot Spot image could not be verified."
+        : "The staged private Canvas file attachment could not be verified.", false)
       : problem("moodle_private_attachment_invalid", "The staged private file attachment could not be verified.", false) };
   }
-  const matches = privateCanvasFile
+  const matches = privateCanvasHotSpot
+    ? privateCanvasHotSpotAttachmentMatches(command.arguments, privateAttachment)
+    : privateCanvasFile
     ? privateCanvasAttachmentMatches(command.arguments, privateAttachment)
     : privateMoodleFile.attachmentMode === "multiple"
       ? privateMoodleAttachmentsMatch(command.arguments, privateAttachments, privateMoodleFile.argumentNames)
       : privateMoodleAttachmentMatches(command.arguments, privateAttachment, privateMoodleFile.argumentNames);
   if (!matches) {
     return { failure: privateCanvasFile
-      ? problem("canvas_private_attachment_mismatch", "The staged private file does not match this exact Canvas course and folder.", false)
+      ? problem("canvas_private_attachment_mismatch", privateCanvasHotSpot
+        ? "The staged private image does not match this exact reviewed Hot Spot question."
+        : "The staged private file does not match this exact Canvas course and folder.", false)
       : problem("moodle_private_attachment_mismatch", "The staged private file does not match this exact Moodle staged-file change.", false) };
   }
   return { binding, operation, ...(privateAttachment ? { privateAttachment } : {}), ...(privateAttachments ? { privateAttachments } : {}) };
@@ -3177,6 +3886,8 @@ function genericCanvasWriteReadback(command, operation, privateConversation) {
     && !command.arguments?.morrow_canvas_content_guard
     && !command.arguments?.morrow_page_guard
     && !command.arguments?.morrow_new_quiz_settings_guard
+    && !command.arguments?.morrow_new_quiz_lifecycle_guard
+    && !command.arguments?.morrow_new_quiz_item_position_guard
     && !privateConversation
     && !privateCanvasCourseFileOperation(operation)
     && !isCanvasOperationReadback(operation);
@@ -3185,7 +3896,95 @@ function genericCanvasWriteReadback(command, operation, privateConversation) {
 // The read-only comparator Morrow keeps with the operation record. It carries
 // the catalog route, its id arguments and the approved field values, so an
 // unresolved change can be checked later without ever being sent again.
-function canvasRecoveryDescriptor(operation, args, writeData) {
+async function itemBankRecoveryDescriptor(operation, args, result) {
+  if (operation.service !== "item_bank" || operation.readOnly) return null;
+  const exactId = (value) => /^[1-9][0-9]{0,18}$/.test(String(value || "")) ? String(value) : "";
+  const courseId = exactId(args.course_id);
+  const bankId = exactId(args.bank_id);
+  const assignmentId = exactId(args.assignment_id);
+  const targetId = exactId(result?.verification?.targetId);
+  const expected = args.expected_snapshot && typeof args.expected_snapshot === "object" && !Array.isArray(args.expected_snapshot)
+    ? args.expected_snapshot : {};
+  const read = (readTool, argumentsValue, extra = {}) => ({ readTool, arguments: argumentsValue, ...extra });
+  const assertion = (inputName, paths, expectedValue) => ({ inputName, paths, expected: expectedValue });
+  const descriptor = (strategy, writeMethod, assertions, extra) => ({
+    schema: "morrow.canvas-recovery-descriptor.v1", strategy, writeMethod, assertions, ...extra,
+  });
+  const preconditionSnapshotSha256 = String(expected.entries_sha256 || expected.shares_sha256
+    || expected.banks_sha256 || expected.quiz_entries_sha256 || "");
+  if (operation.nickname === "rename_bank" && courseId && bankId) {
+    return descriptor("updated-resource", operation.method, [assertion("title", [["title"]], String(args.title))], {
+      read: read("canvas_item_bank_get_bank", { course_id: courseId, bank_id: bankId }, { targetId: bankId }),
+    });
+  }
+  const recoveryItemId = operation.nickname === "update_item" ? exactId(args.item_id) : targetId;
+  if (["update_item", "create_item"].includes(operation.nickname) && courseId && bankId && recoveryItemId) {
+    const item = args.item && typeof args.item === "object" && !Array.isArray(args.item) && args.item.item
+      ? args.item.item : args.item;
+    const hashedAssertions = [];
+    const walk = async (value, path = []) => {
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        for (const key of Object.keys(value).sort()) await walk(value[key], [...path, key]);
+      } else {
+        hashedAssertions.push({ paths: [path, ["item", ...path]], expectedSha256: await sha256(stableJson(value)) });
+      }
+    };
+    await walk(item);
+    return descriptor("updated-resource", operation.method, [], {
+      read: read("canvas_item_bank_get_item", { course_id: courseId, bank_id: bankId, item_id: recoveryItemId }, { targetId: recoveryItemId }),
+      hashedAssertions,
+    });
+  }
+  if (operation.nickname === "archive_bank" && courseId && bankId) {
+    return descriptor("collection-omits-target", operation.method, [], {
+      read: read("canvas_item_bank_list_banks", { course_id: courseId }, { targetId: bankId, targetField: "id" }),
+    });
+  }
+  if (operation.nickname === "delete_entry" && courseId && bankId && exactId(args.bank_entry_id)) {
+    return descriptor("collection-omits-target", operation.method, [], {
+      read: read("canvas_item_bank_list_entries", { course_id: courseId, bank_id: bankId }, { targetId: String(args.bank_entry_id), targetField: "id" }),
+    });
+  }
+  if (operation.nickname === "delete_quiz_bank_entry" && courseId && assignmentId && exactId(args.quiz_entry_id)) {
+    return descriptor("collection-omits-target", operation.method, [], {
+      read: read("canvas_item_bank_list_quiz_draws", { course_id: courseId, assignment_id: assignmentId }, { targetId: String(args.quiz_entry_id), targetField: "id" }),
+    });
+  }
+  let collection;
+  let assertions = [];
+  let strategy = "collection-contains-target";
+  if (operation.nickname === "create_bank" && courseId) {
+    collection = read("canvas_item_bank_list_banks", { course_id: courseId });
+    assertions = [assertion("title", [["title"]], String(args.title)), assertion("language", [["language"]], String(args.language || "en"))];
+  } else if (operation.nickname === "attach_item" && courseId && bankId) {
+    collection = read("canvas_item_bank_list_entries", { course_id: courseId, bank_id: bankId });
+    assertions = [assertion("entry_type", [["entry_type"]], "Item"), assertion("entry_id", [["entry_id"]], String(args.item_id))];
+  } else if (operation.nickname === "share_bank" && courseId && bankId) {
+    collection = read("canvas_item_bank_list_shares", { course_id: courseId, bank_id: bankId });
+    assertions = [assertion("entity_id", [["entity_id"], ["entityId"]], String(args.entity_id)), assertion("entity_type", [["entity_type"], ["entityType"]], "course"), assertion("permission", [["permission"]], "read")];
+    strategy = "observed-collection-contains-target";
+  } else if (["attach_bank_to_quiz", "attach_bank_entry_to_quiz"].includes(operation.nickname) && courseId && assignmentId) {
+    collection = read("canvas_item_bank_list_quiz_draws", { course_id: courseId, assignment_id: assignmentId });
+    assertions = operation.nickname === "attach_bank_to_quiz"
+      ? [assertion("entry_type", [["entry_type"], ["quiz_entry", "entry_type"]], "Bank"), assertion("entry_id", [["entry_id"], ["quiz_entry", "entry_id"]], bankId), assertion("position", [["position"], ["quiz_entry", "position"]], Number(args.position)), assertion("points_possible", [["points_possible"], ["quiz_entry", "points_possible"]], Number(args.points_per_item)), assertion("sample_num", [["properties", "sample_num"], ["quiz_entry", "properties", "sample_num"]], Number(args.pick_count))]
+      : [assertion("entry_type", [["entry_type"], ["quiz_entry", "entry_type"]], "BankEntry"), assertion("entry_id", [["entry_id"], ["quiz_entry", "entry_id"]], String(args.bank_entry_id)), assertion("position", [["position"], ["quiz_entry", "position"]], Number(args.position)), assertion("points_possible", [["points_possible"], ["quiz_entry", "points_possible"]], Number(args.points_per_item))];
+  }
+  if (!collection || assertions.length === 0) return null;
+  return descriptor(strategy, operation.method, assertions, {
+    collection,
+    ...(/^[0-9a-f]{64}$/.test(preconditionSnapshotSha256) ? { preconditionSnapshotSha256 } : {}),
+  });
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
+  return JSON.stringify(value === undefined ? null : value);
+}
+
+async function canvasRecoveryDescriptor(operation, args, writeData, result) {
+  const itemBank = await itemBankRecoveryDescriptor(operation, args, result);
+  if (itemBank) return itemBank;
   try {
     return planCanvasRecoveryDescriptor(
       [...state.operations.values()].filter((entry) => entry.provider === "canvas"),
@@ -3300,7 +4099,9 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       !Number.isInteger(result.status)
       || (operation.provider === "moodle" && result.verification?.status !== "verified" && result.error !== "moodle_form_validation_failed")
     ));
-    const message = privateCanvasCourseFileOperation(operation)
+    const message = privateCanvasNewQuizHotSpotOperation(operation)
+      ? hotSpotFailureMessage(result?.error)
+      : privateCanvasCourseFileOperation(operation)
       ? "Canvas could not complete the staged file change."
       : privateAttachment || privateAttachments
         ? "Moodle could not complete the staged file change."
@@ -3311,7 +4112,7 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
     // comparator is retained here too. Only the arguments are available; a create
     // keeps the parent-collection read that can still show a duplicate.
     const unresolvedDescriptor = unknown && genericCanvasWriteReadback(command, operation, privateConversation)
-      ? canvasRecoveryDescriptor(operation, command.arguments || {}, undefined)
+      ? await canvasRecoveryDescriptor(operation, command.arguments || {}, undefined, result)
       : null;
     // The status decides the code here rather than the page result's own
     // outcome field, because an in-page executor runs in a world the site can
@@ -3338,21 +4139,26 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
     const guardedCanvasContent = command.arguments?.morrow_canvas_content_guard;
     const guardedPage = command.arguments?.morrow_page_guard;
     const guardedNewQuizSettings = command.arguments?.morrow_new_quiz_settings_guard;
-    // A guarded Item Bank repair reads the question again inside the Item Banks
-    // frame, because only that frame holds the credential the read needs. Its
-    // own answer is the verification; no second route can produce one.
-    const guardedItemBank = operation.service === "item_bank" && command.arguments?.morrow_item_bank_guard !== undefined;
+    const guardedNewQuizLifecycle = command.arguments?.morrow_new_quiz_lifecycle_guard;
+    const guardedNewQuizItemLifecycle = command.arguments?.morrow_new_quiz_item_lifecycle_guard;
+    const guardedNewQuizItemPosition = command.arguments?.morrow_new_quiz_item_position_guard;
+    const newQuizResponseBound = [
+      "canvas_set_course_level_accommodations",
+      "canvas_set_quiz_level_accommodations",
+      "canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post",
+    ].includes(operation.toolName);
+    const guardedItemBank = operation.service === "item_bank";
     const dueDateOnlyAssignment = operation.provider === "canvas" && operation.toolName === "canvas_edit_assignment"
       && Object.hasOwn(command.arguments || {}, "assignment_due_at")
       && Object.keys(command.arguments || {}).every((field) => ["course_id", "id", "assignment_due_at"].includes(field));
     const namedCanvasReadback = operation.provider === "canvas" && isCanvasOperationReadback(operation);
-    const semanticReadback = Boolean(semantic) && !guardedCanvasContent && !guardedPage && !guardedNewQuizSettings && !privateConversation && !namedCanvasReadback;
+    const semanticReadback = Boolean(semantic) && !guardedCanvasContent && !guardedPage && !guardedNewQuizSettings && !guardedNewQuizLifecycle && !guardedNewQuizItemLifecycle && !guardedNewQuizItemPosition && !privateConversation && !namedCanvasReadback;
     const namedPlan = namedCanvasReadback
       ? planCanvasOperationReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data)
       : null;
-    const plan = guardedCanvasContent || guardedPage || guardedNewQuizSettings || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
+    const plan = guardedCanvasContent || guardedPage || guardedNewQuizSettings || guardedNewQuizLifecycle || guardedNewQuizItemLifecycle || guardedNewQuizItemPosition || newQuizResponseBound || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
     readDescriptor = genericCanvasWriteReadback(command, operation, privateConversation)
-      ? canvasRecoveryDescriptor(operation, command.arguments || {}, result.data)
+      ? await canvasRecoveryDescriptor(operation, command.arguments || {}, result.data, result)
       : null;
     if (operation.provider === "moodle") {
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_verification_missing" };
@@ -3362,6 +4168,14 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "page_verification_missing" };
     } else if (guardedNewQuizSettings) {
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "new_quiz_settings_verification_missing" };
+    } else if (guardedNewQuizLifecycle) {
+      verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "new_quiz_lifecycle_verification_missing" };
+    } else if (guardedNewQuizItemLifecycle) {
+      verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "new_quiz_item_lifecycle_verification_missing" };
+    } else if (guardedNewQuizItemPosition) {
+      verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "new_quiz_item_position_verification_missing" };
+    } else if (newQuizResponseBound) {
+      verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "new_quiz_response_verification_missing" };
     } else if (guardedItemBank) {
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "item_bank_verification_missing" };
     } else if (dueDateOnlyAssignment) {
@@ -3505,6 +4319,7 @@ async function handleBridgeMessage(message) {
   if (message?.schema === "morrow.bridge.command.v1") {
     if (message.kind === "edit_policy_set") await handleEditPolicySet(message);
     else if (message.kind === "edit_policy_options_get") await handleEditPolicyOptionsGet(message);
+    else if (message.kind === "private_chat_exchange") await handlePrivateChatExchange(message);
     else if (message.kind === "bridge_maintenance") await handleBridgeMaintenance(message);
     else await handleCommand(message);
   }
@@ -3578,13 +4393,41 @@ async function permissionOrigins(tabId, tabUrl) {
   };
   const origins = new Set([permissionPattern(tabUrl)]);
   const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
-  for (const frame of frames || []) {
-    try {
-      const url = new URL(frame.url);
-      if (ITEM_BANK_FRAME_HOST_PATTERN.test(url.hostname)) origins.add(permissionPattern(url.href));
-    } catch {}
-  }
+  for (const origin of itemBankPermissionOrigins(frames, new URL(tabUrl).origin)) origins.add(origin);
   return [...origins];
+}
+
+async function discoverItemBankPermissionOrigins(tab) {
+  let canvas;
+  try {
+    canvas = new URL(tab?.url || "");
+  } catch {
+    return [];
+  }
+  if (canvas.protocol !== "https:" || !/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/i.test(canvas.hostname)) return [];
+  const launchUrl = itemBankLaunchUrl(canvas.href, canvas.origin);
+  if (!launchUrl) return [];
+  const launchTab = await chrome.tabs.create({
+    active: false,
+    ...(Number.isInteger(tab.windowId) ? { windowId: tab.windowId } : {}),
+  }).catch(() => null);
+  if (!Number.isInteger(launchTab?.id)) return [];
+  try {
+    const launched = await chrome.tabs.update(launchTab.id, { url: launchUrl }).catch(() => null);
+    if (!launched) return [];
+    const deadline = Date.now() + ITEM_BANK_ORIGIN_DISCOVERY_WAIT_MS;
+    while (Date.now() < deadline) {
+      const frames = await chrome.webNavigation.getAllFrames({ tabId: launchTab.id }).catch(() => []);
+      const frameIds = itemBankFrameIds(frames);
+      const origins = itemBankPermissionOrigins(frames, canvas.origin);
+      if (frameIds.length > 1) return [];
+      if (frameIds.length === 1) return origins.length === 2 ? origins : [];
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return [];
+  } finally {
+    await chrome.tabs.remove(launchTab.id).catch(() => {});
+  }
 }
 
 async function preparedCourseConnection(intentId, { addedOrigins, popupConfirmed = false } = {}) {
@@ -3604,6 +4447,9 @@ async function prepareCourseConnection(requestedTabId) {
   const url = normalizeCourseConnectionUrl(tab?.url);
   if (!tab?.id || !url) throw new Error("course_tab_missing");
   const origins = await permissionOrigins(tab.id, tab.url);
+  for (const origin of await discoverItemBankPermissionOrigins(tab)) {
+    if (!origins.includes(origin)) origins.push(origin);
+  }
   const preGrantedOrigins = [];
   for (const origin of origins) {
     if (await chrome.permissions.contains({ origins: [origin] })) preGrantedOrigins.push(origin);
@@ -3784,7 +4630,10 @@ async function openSetupGuide() {
 }
 
 async function disconnectConnector() {
+  clearPrivateChat({ answerPending: true });
   anchorVerifications.clear();
+  itemBankCredentials.clear();
+  pendingItemBankLaunches.clear();
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;
   const socket = state.socket;
@@ -3823,6 +4672,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           : message?.type === "morrow_course_discovery_start" ? () => startCourseDiscovery(message.siteAnchorId)
             : message?.type === "morrow_course_discovery_more" ? () => continueCourseDiscovery(message.siteAnchorId, message.discoveryReceiptId)
               : message?.type === "morrow_course_selection_save" ? () => saveCourseSelection(message.siteAnchorId, message.discoveryReceiptId, message.courseIds)
+                : message?.type === "morrow_private_chat_send" ? () => submitPrivateChatMessage(message.sourceBindingId, message.text, message.assertedIdentifiers)
+                  : message?.type === "morrow_private_chat_close" ? () => { clearPrivateChat({ answerPending: true, rememberClosed: true }); return { status: "closed" }; }
         : null;
   if (settingsAction) {
     if (!settingsSender(sender)) {
@@ -3860,13 +4711,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 chrome.permissions.onAdded.addListener((permissions) => { void completePreparedCourseConnection({ addedOrigins: permissions.origins, openCourseSelection: true }).catch(() => {}); });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "morrow-pairing") void pollPairing(); });
-chrome.tabs.onRemoved.addListener((tabId) => { void canvasTabChanged(tabId); });
+chrome.tabs.onRemoved.addListener((tabId) => {
+  clearItemBankCredentialsForTab(tabId);
+  void canvasTabChanged(tabId);
+});
 chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
-  if (change.url) void canvasTabChanged(tabId);
+  if (change.url) {
+    const pending = pendingItemBankLaunches.get(tabId);
+    const expected = pending?.launchUrl || [...itemBankCredentials.values()].find((credential) => credential.tabId === tabId)?.launchUrl;
+    if (!expected || change.url !== expected) clearItemBankCredentialsForTab(tabId);
+    void canvasTabChanged(tabId);
+  }
   if (change.status !== "complete" || !tab.url?.startsWith(httpUrl("/pair/"))) return;
   void chrome.storage.local.get("pairing").then(({ pairing }) => {
     if (pairing?.approvalUrl === tab.url) return pollPairing();
   });
+});
+chrome.webNavigation?.onCommitted?.addListener((details) => {
+  if (!Number.isInteger(details?.tabId) || details.tabId < 0 || !Number.isInteger(details?.frameId) || details.frameId <= 0) return;
+  itemBankCredentials.delete(itemBankCredentialKey(details.tabId, details.frameId));
 });
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !Object.hasOwn(changes || {}, COURSE_DATA_CONSENT_KEY)

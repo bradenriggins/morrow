@@ -1,8 +1,11 @@
-import { McpServer, fromJsonSchema } from "@modelcontextprotocol/server";
+import { McpServer, fromJsonSchema as validateJsonSchema } from "@modelcontextprotocol/server";
 import { augmentBridgeInputSchema } from "@morrow/bridge-protocol";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
+import { SourceMcpPrivacyBoundary, sourcePrivacyInputSchema } from "@morrow/gateway-core";
 import type { LegacyBridgeRuntime } from "./runtime.js";
+const fromJsonSchema = (schema: JsonObject) => validateJsonSchema(sourcePrivacyInputSchema(schema));
+
 
 function toolResult(value: JsonObject): {
   content: { type: "text"; text: string }[];
@@ -32,10 +35,25 @@ function toolMeta(runtime: LegacyBridgeRuntime, sourceToolName: string): Record<
   };
 }
 
-export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime): McpServer {
+export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime, options: { readonly internalSourceCapability?: string; readonly learnerVaultPath?: string } = {}): McpServer {
   const server = new McpServer({ name: "example-legacy-bridge", version: "1.0.0" });
+  const privacy = new SourceMcpPrivacyBoundary({
+    source: "legacy-bridge-mcp",
+    internalSourceCapability: options.internalSourceCapability,
+    learnerVaultPath: options.learnerVaultPath,
+    bindings: () => runtime.bindings(),
+    acceptsCourseRequest: (name, args, binding) => runtime.acceptsPublicPrivacyScope(name, args, binding),
+    loadRoster: (binding) => runtime.privacyRoster(binding),
+  });
+  const registerTool: typeof server.registerTool = ((...registration: Parameters<typeof server.registerTool>) => {
+    const [name, config, callback] = registration;
+    return server.registerTool(name, config, async (args, ctx) => await privacy.invoke(name,
+      isJsonObject(args) ? args : {}, ctx.mcpReq._meta,
+      async (resolved) => callback(resolved, ctx)) as Awaited<ReturnType<typeof callback>>);
+  }) as typeof server.registerTool;
 
-  server.registerTool(
+
+  registerTool(
     "morrow_legacy_bridge_health",
     {
       description: "Report the local Morrow legacy bridge, source catalog, and live extension connection state.",
@@ -45,7 +63,7 @@ export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime): McpSe
     async () => toolResult(runtime.health() as unknown as JsonObject),
   );
 
-  server.registerTool(
+  registerTool(
     "morrow_legacy_bindings",
     {
       description: "List the currently connected, runtime-verified Canvas source bindings visible to the local Morrow legacy extension.",
@@ -59,7 +77,7 @@ export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime): McpSe
     }),
   );
 
-  server.registerTool(
+  registerTool(
     "morrow_legacy_task_get",
     {
       description: "Inspect one previously staged Morrow legacy task. This tool cannot approve, deny, resume, undo, or otherwise change the task.",
@@ -73,7 +91,7 @@ export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime): McpSe
   );
 
   for (const tool of runtime.catalog.tools) {
-    server.registerTool(
+    registerTool(
       tool.name,
       {
         ...(tool.title ? { title: tool.title } : {}),

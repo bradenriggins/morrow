@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { loadLegacyBridgeConfig } from "./config.js";
 import { LegacyBridgeRuntime } from "./runtime.js";
@@ -23,4 +25,5 @@ process.once("exit", () => {
   if (!closing) void runtime.close();
 });
 
-await serveStdio(() => createLegacyBridgeMcpServer(runtime));
+await serveStdio(() => createLegacyBridgeMcpServer(runtime, { internalSourceCapability: process.env.MORROW_INTERNAL_SOURCE_CAPABILITY,
+  learnerVaultPath: join(homedir(), ".morrow", "source-learner-vault.legacy.json") }));

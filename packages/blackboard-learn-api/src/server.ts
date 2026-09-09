@@ -1,5 +1,6 @@
+import * as z from "zod/v4";
 import { McpServer } from "@modelcontextprotocol/server";
-import type { JsonObject } from "@morrow/contracts";
+import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { BlackboardApiError } from "./types.js";
 import { BLACKBOARD_TOOL_DEFINITIONS } from "./operations/index.js";
 import type { BlackboardLearnRuntime } from "./runtime.js";
@@ -132,7 +133,7 @@ function toolResult(value: JsonObject) {
 /** The one Blackboard payload written after a PATCH request has left Morrow. */
 const CONTENT_PATCH_READBACK_SCHEMA = "morrow.blackboard.content-patch.readback.v1";
 
-async function execute(action: () => Promise<JsonObject>) {
+async function execute(runtime: BlackboardLearnRuntime, input: JsonObject, action: () => Promise<JsonObject>) {
   try {
     const value = await action();
     // Morrow's operation journal takes the first execution-state marker it finds
@@ -143,25 +144,15 @@ async function execute(action: () => Promise<JsonObject>) {
     // they send no provider change, and the Gateway freezes the exact
     // verification comparator payload when it plans the operation, so a new
     // field there would break that frozen comparison.
-    return toolResult(value.schema === CONTENT_PATCH_READBACK_SCHEMA ? { ...value, resultState: "applied" } : value);
+    try {
+      return toolResult(runtime.sanitizePublicValue(value.schema === CONTENT_PATCH_READBACK_SCHEMA ? { ...value, resultState: "applied" } : value, input));
+    } catch {
+      throw new BlackboardApiError("blackboard_response_incomplete", "Morrow could not remove every learner identity from the Blackboard result.", undefined,
+        value.resultState === "applied" || String(value.schema).endsWith(".readback.v1") ? "applied_or_unknown" : "not_sent");
+    }
   }
   catch (error) {
-    const known = error instanceof BlackboardApiError;
-    return toolResult({
-      schema: "morrow.blackboard.result.v1",
-      ok: false,
-      // Morrow's operation journal reads this marker to decide whether a failed
-      // Blackboard call may have changed the course. A failure Morrow cannot
-      // classify carries no marker, so the Gateway keeps its safe assumption
-      // that the change may have landed.
-      ...(known ? { resultState: error.dispatchState } : {}),
-      problem: {
-        code: known ? error.code : "blackboard_request_failed",
-        message: known ? error.message : "Morrow could not complete the Blackboard request.",
-        ...(known && error.status ? { status: error.status } : {}),
-        ...(known && error.diagnostics ? { diagnostics: error.diagnostics } : {}),
-      },
-    });
+    return toolResult(runtime.publicFailure(error, input));
   }
 }
 
@@ -175,13 +166,19 @@ export function createBlackboardLearnMcpServer(
     // catalog. GatewayRuntime starts this server with them only after it holds
     // a durable reservation, and then adds a signed, one-use effect grant.
     if (tool.gatewayDispatchOnly && !options.includePrivateDispatch) continue;
+    const inputSchema = tool.gatewayDispatchOnly && tool.inputSchema instanceof z.ZodObject && tool.inputSchema.shape.learner_reference
+      ? tool.inputSchema.safeExtend({ learner_reference: z.string().regex(/^(?:Student A[1-9][0-9]*|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/u) })
+      : tool.inputSchema;
     server.registerTool(tool.name, {
       title: tool.title,
       description: tool.description,
-      inputSchema: tool.inputSchema,
+      inputSchema,
       annotations: tool.annotations,
       ...(tool.capability ? { _meta: { "io.morrow/capability": tool.capability } } : {}),
-    }, async (input, context) => execute(() => tool.run(runtime, input, context.mcpReq.signal)));
+    }, async (input, context) => {
+      const request = isJsonObject(input) ? input : {};
+      return execute(runtime, request, async () => tool.run(runtime, await runtime.resolvePublicInput(request, context.mcpReq.signal, tool.gatewayDispatchOnly), context.mcpReq.signal));
+    });
   }
   return server;
 }

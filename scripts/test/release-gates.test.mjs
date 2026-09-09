@@ -28,7 +28,7 @@ import { HARNESSES, harnessReceipt, planHarnesses, runHarness } from "../run-bro
 
 /**
  * The browser gate the release reads. `pnpm test:browser` runs the harnesses that `pnpm check`
- * cannot — Chromium, a person answering a Chrome permission prompt, native Windows — and writes the
+ * cannot (Chromium, a person answering a Chrome permission prompt, and native Windows) and writes the
  * receipt these helpers build here, so the tests below check the receipt the runner actually writes.
  */
 const HARNESS_BY_ID = new Map(HARNESSES.map((harness) => [harness.id, harness]));

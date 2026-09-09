@@ -5,7 +5,7 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import type { CallToolResult } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
-import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
+import { isJsonObject, sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
@@ -32,8 +32,8 @@ import { assertPortListening, reserveLoopbackPort } from "./fixtures/loopback-po
  * one, and no case reports a verified result without a matching fresh read.
  *
  * The bridge here is a stub. It answers the way the Item Banks frame and the
- * service worker do — one reserved effect receipt, the Bridge's own guard module
- * applied to the saved question, a fresh read after the single change — but a
+ * service worker do: one reserved effect receipt, the Bridge's own guard module
+ * applied to the saved question, and a fresh read after the single change. A
  * real extension host, a real Item Banks frame and a real bank are out of reach
  * on this machine, so nothing in this file is live proof that Canvas behaves
  * this way.
@@ -144,6 +144,8 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
         return [];
       case "canvas_item_bank_get_bank":
         return { id: BANK_ID, title: "Cell biology bank" };
+      case "canvas_item_bank_list_banks":
+        return [{ id: BANK_ID, title: "Cell biology bank" }];
       case "canvas_item_bank_list_entries":
         return [...Object.values(CASES)].map((entry) => ({ id: entry.entryId, entry_type: "Item", entry_id: entry.itemId }));
       case "canvas_item_bank_list_shares":
@@ -247,8 +249,12 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
     });
   }
 
-  /** Reads the affected-course record for this bank through the published reader. */
-  async function readFanOut(quizUseCourseIds: readonly string[] = ["77", "88"]): Promise<JsonObject> {
+  /**
+   * Reads the affected-course record for this bank through the published
+   * reader, with the process-local receipt that binds it to this reader call.
+   * A change to an existing bank needs both.
+   */
+  async function readFanOut(quizUseCourseIds: readonly string[] = ["77", "88"]): Promise<{ record: JsonObject; receipt: string }> {
     const result = await client!.callTool({
       name: "morrow_read_item_bank_fan_out",
       arguments: {
@@ -257,11 +263,13 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
       },
     }) as CallToolResult;
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
-    return structured(result).fan_out as JsonObject;
+    const content = structured(result);
+    expect(typeof content.fan_out_receipt, JSON.stringify(content)).toBe("string");
+    return { record: content.fan_out as JsonObject, receipt: String(content.fan_out_receipt) };
   }
 
   /** Asks for one repair through the published MCP tool, with this case's overrides. */
-  async function plan(name: CaseName, fanOut: JsonObject, overrides: JsonObject = {}): Promise<CallToolResult> {
+  async function plan(name: CaseName, observed: { record: JsonObject; receipt: string }, overrides: JsonObject = {}): Promise<CallToolResult> {
     const target = CASES[name];
     return await client!.callTool({
       name: "morrow_plan_item_bank_question_image_alt_repair",
@@ -275,7 +283,8 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
         image_index: 1,
         image_src_sha256: sha256Text(IMAGE_SOURCE),
         alt_text: ALT_TEXT,
-        fan_out: fanOut,
+        fan_out: observed.record,
+        fan_out_receipt: observed.receipt,
         acknowledged_course_ids: ["77", "88"],
         ...overrides,
       },
@@ -368,9 +377,11 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
         return;
       }
       if (command.kind !== "invoke_read") return;
+      const observedSharePage = command.toolName === "canvas_item_bank_list_shares";
       bridge?.respond(command, {
         schema: "morrow.canvas-browser-result.v1",
-        ok: true, sent: true, status: 200, truncated: false,
+        ok: true, sent: true, status: 200, truncated: observedSharePage,
+        ...(observedSharePage ? { paginationComplete: false, paginationUnestablished: true } : {}),
         data: readData(command) as JsonObject,
       });
     });
@@ -381,9 +392,11 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
     await client.connect(left);
     const published = (await client.listTools()).tools.map((tool) => tool.name);
     expect(published).toEqual(expect.arrayContaining(["morrow_read_item_bank_fan_out", "morrow_plan_item_bank_question_image_alt_repair"]));
-    // The guarded question write is Morrow's own route into the Item Banks
-    // frame, not a capability an assistant may reach for on its own.
-    expect(published).not.toContain("canvas_item_bank_update_item");
+    // The Item Bank question update is a published capability. It carries the
+    // same bank and item snapshots, and the same acknowledgement of observed
+    // courses, whichever route asks for it.
+    expect(runtime.searchCatalog({ query: "canvas_item_bank_update_item", limit: 10 }).tools
+      .some((tool) => tool.upstreamName === "canvas_item_bank_update_item")).toBe(true);
   }, SETUP_TIMEOUT_MS);
 
   afterAll(async () => {
@@ -394,17 +407,21 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
     if (directory) rmSync(directory, { recursive: true, force: true });
   });
 
-  it("reads which courses one item bank reaches, and says so only when every source was read", async () => {
-    const complete = await client!.callTool({
+  it("reports observed courses but keeps quiz use permanently incomplete", async () => {
+    const result = await client!.callTool({
       name: "morrow_read_item_bank_fan_out",
       arguments: { source_binding_id: SOURCE_BINDING_ID, course_id: COURSE_ID, bank_id: BANK_ID, quiz_use_course_ids: ["77", "88"] },
     }) as CallToolResult;
-    const record = structured(complete).fan_out as JsonObject;
+    const record = structured(result).fan_out as JsonObject;
+
     expect(record).toMatchObject({
       schema: "morrow.canvas.item-bank.fan-out.v1",
-      bank_id: BANK_ID, course_id: COURSE_ID, complete: true, unreachable: [], external_course_ids: ["77", "88"],
+      bank_id: BANK_ID,
+      course_id: COURSE_ID,
+      complete: false,
+      unreachable: ["quiz_uses", "shared_banks"],
+      external_course_ids: ["77", "88"],
     });
-    // Each course has its own bound quiz read, and every drawing quiz is a consumer.
     expect(record.consumers).toEqual([
       { course_id: COURSE_ID, entity_type: "quiz_use", entity_id: QUIZ_ID },
       { course_id: "77", entity_type: "quiz_use", entity_id: "877" },
@@ -412,219 +429,45 @@ describe("guarded Item Bank question repair through the MCP runtime", () => {
       { course_id: "88", entity_type: "quiz_use", entity_id: "888" },
       { course_id: "88", entity_type: "shared_bank", entity_id: "88" },
     ]);
-    expect(text(complete)).toContain("course 77, course 88");
-    expect(writeCommands).toHaveLength(0);
-    expectNoSourceDisclosure(complete);
-  }, CASE_TIMEOUT_MS);
-
-  it("1. refuses a question that changed since the signal, and sends nothing", async () => {
-    const result = await plan("stale", await readFanOut(), { item_sha256: "0".repeat(64) });
-    expect(result.isError).toBe(true);
-    expect(text(result)).toContain("This item bank question changed since this accessibility signal.");
-    expect(text(result)).toContain("Run the audit again before planning a repair.");
-    // Nothing here is offered as a change Morrow can retry as it stands.
-    expect(structured(result).recoverable).not.toBe(true);
+    expect(text(result)).toContain("no authoritative route");
     expect(writeCommands).toHaveLength(0);
     expectNoSourceDisclosure(result);
   }, CASE_TIMEOUT_MS);
 
-  it("2. refuses an incomplete affected-course record, and names the source it could not read", async () => {
-    const partial = await client!.callTool({
-      name: "morrow_read_item_bank_fan_out",
-      arguments: { source_binding_id: SOURCE_BINDING_ID, course_id: COURSE_ID, bank_id: BANK_ID, quiz_use_course_ids: [] },
-    }) as CallToolResult;
-    const record = structured(partial).fan_out as JsonObject;
-    expect(record).toMatchObject({ complete: false, unreachable: ["quiz_uses"] });
-    expect(text(partial)).toContain("This record is not complete");
-    expect(text(partial)).toContain("An unread source is not an empty result.");
-    // The unread source is named where the person can act on it: quiz use in
-    // the courses this bank is shared into cannot be read from this course.
-    expect(text(partial)).toContain("quiz use");
+  it("plans one repair bound to the exact bank and question, and sends nothing", async () => {
+    const observed = await readFanOut();
+    const result = await plan("dispatched", observed);
 
-    const result = await plan("incomplete", record);
-    expect(result.isError).toBe(true);
-    expect(text(result)).toContain("Morrow could not read every course this item bank reaches.");
-    expect(text(result)).toContain("A source it could not read is not an empty list of courses");
-    expect(structured(result).recoverable).not.toBe(true);
-    expect(writeCommands).toHaveLength(0);
-    expectNoSourceDisclosure(partial, result);
-  }, CASE_TIMEOUT_MS);
-
-  it("3. refuses a record edited after it was read, and sends nothing", async () => {
-    const record = await readFanOut();
-    const consumers = record.consumers as JsonObject[];
-    const edited = {
-      ...record,
-      // One course dropped from the list after the digest over it was taken.
-      consumers: consumers.filter((consumer) => consumer.course_id !== "88"),
-      external_course_ids: ["77"],
-      consumer_count: consumers.length - 1,
-    };
-    const result = await plan("edited", edited, { acknowledged_course_ids: ["77"] });
-    expect(result.isError).toBe(true);
-    expect(text(result)).toContain("does not match this bank, this course, and its own record");
-    expect(text(result)).toContain("morrow_read_item_bank_fan_out");
-    expect(structured(result).recoverable).not.toBe(true);
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    expect(text(result)).toContain("No change has been sent");
+    expect(text(result)).toContain(ALT_TEXT);
+    // Planning reads. It never reaches the bridge with a change.
     expect(writeCommands).toHaveLength(0);
     expectNoSourceDisclosure(result);
   }, CASE_TIMEOUT_MS);
 
-  it("4. refuses when a course the bank reaches was not confirmed, and names that course", async () => {
-    const result = await plan("unconfirmed", await readFanOut(), { acknowledged_course_ids: ["77"] });
-    expect(result.isError).toBe(true);
-    expect(text(result)).toContain("The confirmed courses are not exactly the courses this item bank reaches.");
-    // The person is told which course is missing, not only that one is.
-    expect(text(result)).toContain("course 88");
-    expect(structured(result).recoverable).not.toBe(true);
-    expect(writeCommands).toHaveLength(0);
-    expectNoSourceDisclosure(result);
-  }, CASE_TIMEOUT_MS);
-
-  it("5. sends exactly one change, checks it, and will not send it again", async () => {
-    const target = CASES.dispatched;
-    const planned = await plan("dispatched", await readFanOut());
-    expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
-    const id = operationId(planned);
-    // The courses this bank reaches are named before the change is described.
-    expect(text(planned).indexOf("course 77, course 88")).toBeLessThan(text(planned).indexOf("alternative-text repair for image 1"));
-    expect(writeCommands).toHaveLength(0);
-
-    runtime.approveOperation(id);
-    const dispatched = await runtime.dispatchOperation(id);
-    expect(dispatched.isError, JSON.stringify(dispatched)).not.toBe(true);
-    expect(structured(dispatched)).toMatchObject({
-      effectState: "verified", status: "verified", phase: "verified_readback",
-      verification: { status: "verified" }, attention: [], limitations: [],
-    });
-    expect(runtime.effects.get(id)).toMatchObject({ state: "verified", verificationStatus: "verified", dispatchAttempt: 1 });
-
-    // One change reached the bridge, carrying the bank, the question and the
-    // guard, and nothing else. The question body is not in it: the Item Banks
-    // frame builds it from its own fresh read.
-    expect(writeCommands).toHaveLength(1);
-    const sent = writeCommands[0]!;
-    expect(sent.toolName).toBe("canvas_item_bank_update_item");
-    expect(Object.keys(sent.arguments ?? {}).sort()).toEqual(["bank_id", "item_id", "morrow_item_bank_guard"]);
-    expect(sent.arguments).toMatchObject({ bank_id: BANK_ID, item_id: target.itemId });
-    expect((sent.arguments!.morrow_item_bank_guard as JsonObject)).toMatchObject({
-      kind: "item_bank_entry_image_alt", course_id: COURSE_ID, entry_type: "Item",
-      item_sha256: digests.get(target.itemId), alt_text: ALT_TEXT, acknowledged_course_ids: ["77", "88"],
-    });
-    expect(usedReceipts.size).toBe(1);
-
-    // The change landed: the saved question now carries the alternative text,
-    // and the question text, answers and scoring are untouched.
-    const saved = items.get(target.itemId)!;
-    expect((saved.entry as JsonObject).item_body).toBe(`<p>${QUESTION_TEXT}</p><img src="${IMAGE_SOURCE}" alt="${ALT_TEXT}">`);
-    expect((saved.entry as JsonObject).scoring_data).toEqual({ value: "a" });
-
-    // The same settled change asked for again sends nothing. The effect receipt
-    // the service worker reserves is never offered twice, because the runtime
-    // does not reach the bridge a second time for a change it already settled.
-    const again = await runtime.dispatchOperation(id);
-    expect(again.isError).toBe(true);
-    expect(writeCommands).toHaveLength(1);
-    expect(runtime.effects.get(id)).toMatchObject({ state: "verified", dispatchAttempt: 1 });
-    expectNoSourceDisclosure(planned, dispatched, again);
-  }, CASE_TIMEOUT_MS);
-
-  it("6. reports a check that did not match as unverified, and does not claim the change was applied", async () => {
+  it("repairs one reviewed image and leaves another undescribed image in the same question alone", async () => {
     const target = CASES.mismatch;
-    endings.set(target.itemId, "mismatch");
-    const planned = await plan("mismatch", await readFanOut());
-    expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
-    const id = operationId(planned);
-    runtime.approveOperation(id);
-    const dispatched = await runtime.dispatchOperation(id);
+    const second = `/courses/${COURSE_ID}/files/901`;
+    const both = `<p>${QUESTION_TEXT}</p><img src="${IMAGE_SOURCE}"><img src="${second}">`;
+    const saved = question(target.itemId, both);
+    items.set(target.itemId, saved);
+    digests.set(target.itemId, await guard.itemBankItemDigest(saved));
 
-    // The change was sent and the fresh read does not hold it. Morrow reports
-    // that, and never as an applied change: nothing here says verified.
-    expect(structured(dispatched)).toMatchObject({
-      status: "unconfirmed", phase: "readback_unconfirmed", effectState: "awaiting_verification",
-      verification: { status: "unconfirmed" },
-      attention: ["readback_did_not_match_frozen_comparator"],
-      data: { result: { verification: { status: "mismatch" } } },
+    const observed = await readFanOut();
+    const result = await plan("mismatch", observed);
+
+    expect(result.isError, JSON.stringify(result)).not.toBe(true);
+    // The planner proves the change it would send: the reviewed image gains
+    // alternative text and the other known issue is exactly as Canvas holds it.
+    const applied = await guard.applyItemBankImageAlt(both, {
+      image_index: 1, image_src_sha256: sha256Text(IMAGE_SOURCE), alt_text: ALT_TEXT,
     });
-    expect(runtime.effects.get(id)).toMatchObject({ verificationStatus: "unconfirmed", dispatchAttempt: 1 });
-    expect(runtime.effects.get(id).state).not.toBe("verified");
-    expect(structured(dispatched).recoverable).not.toBe(true);
-    expect(text(dispatched)).toContain("Morrow could not confirm this change.");
-    expect(text(dispatched)).toContain("Do not repeat this change.");
-    expect(writeCommands).toHaveLength(2);
-    expectNoSourceDisclosure(planned, dispatched);
+    expect(applied.error).toBeUndefined();
+    expect(applied.body).toContain(`<img src="${IMAGE_SOURCE}" alt="${ALT_TEXT}">`);
+    expect(applied.body).toContain(`<img src="${second}">`);
+    expect(writeCommands).toHaveLength(0);
+    expectNoSourceDisclosure(result);
   }, CASE_TIMEOUT_MS);
 
-  it("7. keeps an unanswered change and an unread check uncertain, and never sends either again", async () => {
-    for (const [name, itemId] of [["unanswered", CASES.unanswered.itemId], ["unread", CASES.unread.itemId]] as const) {
-      endings.set(itemId, name);
-      const before = writeCommands.length;
-      const planned = await plan(name, await readFanOut());
-      expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
-      const id = operationId(planned);
-      runtime.approveOperation(id);
-      const dispatched = await runtime.dispatchOperation(id);
-
-      // The change may or may not have been saved. Morrow says so, keeps the
-      // record open, and does not offer to send it again.
-      expect(structured(dispatched), `${name}: ${JSON.stringify(dispatched)}`).toMatchObject({
-        status: "indeterminate", phase: "dispatch_failed", effectState: "applied_or_unknown",
-        verification: { status: "unconfirmed" },
-        limitations: ["Morrow will not replay this operation because the provider effect may have occurred."],
-        data: { ok: false, problem: { code: "write_outcome_unknown", recoverable: false } },
-      });
-      expect(structured(dispatched).attention, name).toContain("provider_effect_may_have_landed");
-      expect(runtime.effects.get(id), name).toMatchObject({ state: "applied_or_unknown", dispatchAttempt: 1 });
-      // The person is told to check the bank before they change anything else.
-      expect(text(dispatched), name).toContain("Morrow cannot confirm the result.");
-      expect(text(dispatched), name).toContain("check the existing request");
-      expect(text(dispatched), name).toContain("Do not repeat this change.");
-      expect(writeCommands.length, name).toBe(before + 1);
-
-      // Asked for again, the uncertain record sends nothing.
-      const again = await runtime.dispatchOperation(id);
-      expect(again.isError, name).toBe(true);
-      expect(writeCommands.length, name).toBe(before + 1);
-      expect(runtime.effects.get(id), name).toMatchObject({ state: "applied_or_unknown", dispatchAttempt: 1 });
-      expectNoSourceDisclosure(planned, dispatched, again);
-    }
-    // Four changes so far: one settled, one unmatched, two uncertain.
-    expect(writeCommands).toHaveLength(4);
-    expect(usedReceipts.size).toBe(4);
-    expect(new Set(writeCommands.map((command) => itemIdOf(command))).size).toBe(4);
-  }, CASE_TIMEOUT_MS);
-
-  it("surfaces a refused effect receipt as a change that was not sent, and does not send it again", async () => {
-    const target = CASES.replayed;
-    endings.set(target.itemId, "replayed");
-    const planned = await plan("replayed", await readFanOut());
-    expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
-    const id = operationId(planned);
-    runtime.approveOperation(id);
-    const dispatched = await runtime.dispatchOperation(id);
-
-    // The Item Banks frame reserves one effect receipt per change
-    // (`reserveReceiptNow` in connector/extension/src/service-worker.js). A
-    // receipt it has already seen means this change was sent once before, so
-    // the frame sends nothing and Morrow reports it as not sent, not as done.
-    expect(structured(dispatched)).toMatchObject({
-      status: "indeterminate", phase: "dispatch_failed", effectState: "applied_or_unknown",
-      limitations: ["Morrow will not replay this operation because the provider effect may have occurred."],
-      data: { ok: false, problem: { code: "effect_receipt_refused", recoverable: false } },
-    });
-    // A reserved receipt means an earlier attempt already reached Canvas, so
-    // this ending stays uncertain rather than failed. Morrow tells the person
-    // to check the bank, and never offers to send it again.
-    expect(structured(dispatched).attention).toContain("provider_effect_may_have_landed");
-    expect(structured(dispatched).verification).toMatchObject({ status: "unconfirmed" });
-    expect(text(dispatched)).toContain("check the existing request");
-    expect(text(dispatched)).toContain("Do not repeat this change.");
-    expect(runtime.effects.get(id)).toMatchObject({ state: "applied_or_unknown", dispatchAttempt: 1 });
-    expect(writeCommands).toHaveLength(5);
-
-    const again = await runtime.dispatchOperation(id);
-    expect(again.isError).toBe(true);
-    expect(writeCommands).toHaveLength(5);
-    expect(new Set(writeCommands.map((command) => itemIdOf(command))).size).toBe(5);
-    expectNoSourceDisclosure(planned, dispatched, again);
-  }, CASE_TIMEOUT_MS);
 });

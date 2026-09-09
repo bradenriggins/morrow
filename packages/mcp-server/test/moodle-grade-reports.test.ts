@@ -8,7 +8,7 @@ import {
 } from "../src/moodle-grade-reports.js";
 
 const CAPABILITIES = ["gradereport/grader:view", "moodle/grade:viewall"];
-const LEARNER_TOKEN = "learner_0f2b7c41-9a3d-4e51-8b6c-1d2e3f4a5b6c";
+const LEARNER_TOKEN = "Student A1";
 
 const quizItem = {
   item_id: 200,

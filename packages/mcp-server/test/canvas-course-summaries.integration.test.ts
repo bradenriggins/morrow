@@ -118,6 +118,17 @@ function configuration(root: string, directory: string, port: number) {
 }
 
 function result(command: BridgeCommand, override?: JsonObject): JsonObject {
+  if (command.toolName === "canvas_list_users_in_course_users") {
+    expect(String(command.arguments.course_id)).toBe("2");
+    expect(command.arguments).toMatchObject({
+      include: ["enrollments", "uuid"], enrollment_type: ["student"],
+      enrollment_state: ["active", "invited", "rejected", "completed", "inactive"], morrow_max_pages: 50,
+    });
+    return {
+      schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200, truncated: false,
+      data: [{ id: 91, name: "Jane Canvas", email: "jane@example.edu" }],
+    };
+  }
   const summary = SUMMARIES[command.toolName];
   if (!summary || command.operationKey !== OPERATIONS[command.toolName]) {
     throw new Error(`unexpected source tool ${command.toolName}`);
@@ -152,6 +163,16 @@ describe("Canvas course-summary Full MCP exposure", () => {
         expect(gateway.capabilityGet(name)).toMatchObject({ descriptor: { canonicalName: name, behavior: { readOnly: true } } });
       }
 
+      const roster = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_list_users_in_course_users", arguments: {
+        course_id: "2", include: ["enrollments", "uuid"], enrollment_type: ["student"],
+        enrollment_state: ["active", "invited", "rejected", "completed", "inactive"], morrow_max_pages: 50,
+        _morrow: { source_binding_id: SOURCE_BINDING_ID },
+      } } });
+      const rosterText = JSON.stringify(roster);
+      expect(roster.isError, rosterText).not.toBe(true);
+      expect(rosterText).toMatch(/Student A[1-9][0-9]*/);
+      for (const privateValue of ["Jane Canvas", "jane@example.edu", '"id":91']) expect(rosterText).not.toContain(privateValue);
+
       const assignment = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_assignment_submission_summary", arguments: { course_id: 2, assignment_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const assignmentText = JSON.stringify(assignment);
       expect(assignment.isError, assignmentText).not.toBe(true);
@@ -185,9 +206,10 @@ describe("Canvas course-summary Full MCP exposure", () => {
           expect(text, `result leaked ${privateValue}`).not.toContain(privateValue);
         }
       }
-      expect(commands.map((command) => command.toolName)).toEqual([
+      expect(commands.map((command) => command.toolName).filter((name) => name !== "canvas_list_users_in_course_users")).toEqual([
         "canvas_get_assignment_submission_summary", "canvas_get_course_gradebook_summary", "canvas_get_course_activity_summary",
       ]);
+      expect(commands.filter((command) => command.toolName === "canvas_list_users_in_course_users")).toHaveLength(6);
 
       // A distribution thinner than the minimum bucket population is refused at
       // this boundary too, so a source that skipped suppression cannot publish
@@ -219,7 +241,8 @@ describe("Canvas course-summary Full MCP exposure", () => {
 
       const disallowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_course_gradebook_summary", arguments: { course_id: 2, _morrow: { source_binding_id: "canvas:wrong-course" } } } });
       expect(disallowed.isError).toBe(true);
-      expect(commands).toHaveLength(5);
+      expect(commands.map((command) => command.toolName).filter((name) => name !== "canvas_list_users_in_course_users")).toHaveLength(5);
+      expect(commands.filter((command) => command.toolName === "canvas_list_users_in_course_users")).toHaveLength(8);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

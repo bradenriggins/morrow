@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { BRIDGE_SOURCE_FILES } from "../package-mcp-bundle.mjs";
 
 const root = new URL("../../", import.meta.url);
 const manifest = JSON.parse(readFileSync(new URL("connector/extension/manifest.json", root), "utf8"));
@@ -12,6 +13,13 @@ const extensionReadbackPlan = readFileSync(new URL("connector/extension/generate
 const extensionAdmission = readFileSync(new URL("connector/extension/generated/canvas-operation-admission.js", root), "utf8");
 const extensionSemanticTarget = readFileSync(new URL("connector/extension/generated/canvas-semantic-target.js", root), "utf8");
 const worker = readFileSync(new URL("connector/extension/src/service-worker.js", root), "utf8");
+
+test("the Bridge release includes the Item Bank credential module", () => {
+  assert.match(worker, /from "\.\/item-bank-credential\.js"/);
+  assert.match(worker, /from "\.\/quiz-bank-draw-executor\.js"/);
+  assert.ok(BRIDGE_SOURCE_FILES.includes("src/item-bank-credential.js"));
+  assert.ok(BRIDGE_SOURCE_FILES.includes("src/quiz-bank-draw-executor.js"));
+});
 
 /** The exact top-level function of that name, taken from the shipped service worker and run here. */
 function workerFunction(name) {
@@ -84,9 +92,9 @@ test("Canvas connector package has a stable least-privilege identity and exact g
   assert.match(extensionSemanticTarget, /export function canvasSemanticCourseTarget/);
   assert.doesNotMatch(extensionSemanticTarget, /\bnode:|\brequire\s*\(/);
   const parsed = JSON.parse(catalog);
-  assert.equal(parsed.counts.totalOperations, 1132);
-  assert.equal(parsed.counts.newQuizzesOperations, 27);
-  assert.equal(parsed.counts.itemBankOperations, 13);
+  assert.equal(parsed.counts.totalOperations, 1137);
+  assert.equal(parsed.counts.newQuizzesOperations, 32);
+  assert.equal(parsed.counts.itemBankOperations, 18);
   assert.equal(parsed.counts.courseFileContentOperations, 1);
   assert.deepEqual(parsed.operations.find((operation) => operation.toolName === "canvas_read_course_file_text"), {
     key: "CANVAS_COURSE_FILE_TEXT GET /v1/courses/{course_id}/files/{file_id}/text",

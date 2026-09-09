@@ -38,6 +38,30 @@ const {
 
 const BRIDGE_EXTENSION_ID = "abeloclekioohahgedmjcdbpllfjfhko";
 
+/**
+ * The two Chrome routes setup can ask a person to take for Morrow Bridge.
+ * `developer_temporary` is the temporary unpacked route Morrow uses until the
+ * Chrome Web Store listing is live; `available` is the Store route. The build
+ * chooses it once, in installer/electron-builder.config.cjs, and the installed
+ * app reads it from its own packaged build metadata, so publishing the Store
+ * listing flips the route with a rebuilt package and no new installer logic.
+ *
+ * The route decides only which instructions setup shows. It grants nothing: the
+ * Bridge identity, active-folder, and pairing checks are the same on both.
+ */
+const BRIDGE_DELIVERY_MODES = Object.freeze(["available", "developer_temporary"]);
+const DEFAULT_BRIDGE_DELIVERY = "developer_temporary";
+
+/**
+ * The delivery route this installation may claim. A missing, misspelled, or
+ * otherwise unrecognised value keeps the temporary route: it is the route that
+ * works without a Store listing, so an unreadable flag never sends a person to
+ * a Chrome Web Store page that may not exist.
+ */
+function bridgeDeliveryMode(value) {
+  return BRIDGE_DELIVERY_MODES.includes(value) ? value : DEFAULT_BRIDGE_DELIVERY;
+}
+
 // How long one assistant detection answer is reused. Setup reads its state on
 // every window focus, and detection reaches the file system and, on Windows,
 // PowerShell. Selecting Check status asks again straight away.
@@ -45,7 +69,7 @@ const ASSISTANT_DETECTION_TTL_MS = 60_000;
 
 /** The state Morrow reports when it cannot read its own installer record. */
 function repairRequiredState() {
-  return installerState({ lifecycle: "repair_required", assistants: [], selectedAssistantId: null, workspaceSelected: false, runtimeStatus: "repair_required", bridgeDelivery: "developer_temporary", bridgeFolderReady: false, bridgeLoadedInChrome: false, bridgePaired: "unknown", courseSite: "unknown", runtimeVerifiedCourseCount: 0, selectedCourseName: null });
+  return installerState({ lifecycle: "repair_required", assistants: [], selectedAssistantId: null, workspaceSelected: false, runtimeStatus: "repair_required", bridgeDelivery: DEFAULT_BRIDGE_DELIVERY, bridgeFolderReady: false, bridgeLoadedInChrome: false, bridgePaired: "unknown", courseSite: "unknown", runtimeVerifiedCourseCount: 0, selectedCourseName: null });
 }
 
 function unobservedRuntime() {
@@ -59,6 +83,17 @@ function unobservedRuntime() {
 
 function fileHash(content) {
   return crypto.createHash("sha256").update(content).digest("hex");
+}
+
+// A configured assistant file is read back for verification, removal, and the
+// state display. Four MiB is far above any real one; a larger file is refused
+// as unreadable rather than read whole.
+const ASSISTANT_CONFIG_READ_LIMIT = 4 * 1024 * 1024;
+
+async function readConfigurationFile(file) {
+  const info = await fs.lstat(file).then((value) => value, () => null);
+  if (!info || !info.isFile() || info.isSymbolicLink() || info.size > ASSISTANT_CONFIG_READ_LIMIT) return null;
+  return fs.readFile(file);
 }
 
 function sameBridgeChallenge(record, response) {
@@ -281,7 +316,9 @@ class InstallerController {
     this.isTestMode = deps.isTestMode === true;
     this.productVersion = deps.productVersion;
     this.trustedBridgeReleaseManifestSha256 = deps.trustedBridgeReleaseManifestSha256;
+    this.bridgeDelivery = bridgeDeliveryMode(deps.bridgeDelivery);
     this.trustedMcpRuntimeManifestSha256 = deps.trustedMcpRuntimeManifestSha256;
+    this.trustedMcpRuntimeNodeSha256 = deps.trustedMcpRuntimeNodeSha256 || (() => null);
     this.detectAssistant = deps.detectAssistant;
     this.runCli = deps.runCli || run;
     this.updateSnapshot = deps.updateSnapshot || (() => null);
@@ -300,6 +337,7 @@ class InstallerController {
     this.mcpRuntimeVerification = null;
     this.privateFileAccess = null;
     this.privateFileAccessModule = null;
+    this.gatewayCoreModuleImport = null;
     this.blackboardClientModule = null;
     this.discoverBlackboardConnection = deps.discoverBlackboardConnection || ((input) => this.readBlackboardConnection(input));
     this.repairInProgress = null;
@@ -370,10 +408,17 @@ class InstallerController {
     return this.privateFileAccess;
   }
 
+  async gatewayCoreModule() {
+    if (!this.gatewayCoreModuleImport) {
+      this.gatewayCoreModuleImport = import(pathToFileURL(path.join(this.paths.appRoot, "node_modules", "@morrow", "gateway-core", "dist", "index.js")).href);
+    }
+    return this.gatewayCoreModuleImport;
+  }
+
   async privateFileAccessModuleForPayload() {
     if (!this.privateFileAccessModule) {
       await this.ensureRuntime();
-      this.privateFileAccessModule = import(pathToFileURL(path.join(this.paths.appRoot, "node_modules", "@morrow", "gateway-core", "dist", "index.js")).href);
+      this.privateFileAccessModule = await this.gatewayCoreModule();
     }
     return this.privateFileAccessModule;
   }
@@ -625,8 +670,10 @@ class InstallerController {
     if (!await isComplete(this.paths.payload)) throw errorDetails("runtime_repair_required");
     const expectedManifestSha256 = this.trustedMcpRuntimeManifestSha256();
     if (!expectedManifestSha256) throw errorDetails("runtime_repair_required");
+    const expectedNodeSha256 = this.trustedMcpRuntimeNodeSha256();
+    if (!expectedNodeSha256) throw errorDetails("runtime_repair_required");
     if (!this.mcpRuntimeVerification) {
-      this.mcpRuntimeVerification = verifyMcpRuntime(this.paths.payload, expectedManifestSha256)
+      this.mcpRuntimeVerification = verifyMcpRuntime(this.paths.payload, expectedManifestSha256, expectedNodeSha256)
         .then((binding) => {
           if (!binding) throw errorDetails("runtime_repair_required");
           return binding;
@@ -638,6 +685,23 @@ class InstallerController {
       throw error;
     }
     await mkdirPrivate(this.paths.state);
+    // State holds the journal, the upstreams, and the backups. POSIX proves it
+    // with the mode mkdirPrivate set; Windows ignores that mode, so the same
+    // gateway module the Blackboard credentials use replaces the directory's
+    // access list with this account, SYSTEM, and Administrators. A directory
+    // that cannot be proven private asks for repair instead of serving reads.
+    if (this.platform === "win32") {
+      const gatewayCore = await this.gatewayCoreModule();
+      if (typeof gatewayCore.hardenPrivateDirectory !== "function"
+        || typeof gatewayCore.privateDirectoryAccessAccepted !== "function") throw errorDetails("runtime_repair_required");
+      if (gatewayCore.hardenPrivateDirectory(this.paths.state, { trustedRoot: this.paths.userData }) !== true
+        || gatewayCore.privateDirectoryAccessAccepted(this.paths.state, { trustedRoot: this.paths.userData }) !== true) {
+        throw errorDetails("runtime_repair_required");
+      }
+    } else {
+      const info = await fs.lstat(this.paths.state);
+      if (!info.isDirectory() || info.isSymbolicLink() || (info.mode & 0o077) !== 0) throw errorDetails("runtime_repair_required");
+    }
     return this.paths;
   }
 
@@ -941,7 +1005,8 @@ class InstallerController {
       }
       argumentsValue.push("--json");
       await this.executeCli(argumentsValue);
-      const content = await fs.readFile(target);
+      const content = await readConfigurationFile(target);
+      if (!content) throw errorDetails("assistant_configuration_changed");
       installedConfigurationSha256 = fileHash(content);
       const entry = { target, sha256: installedConfigurationSha256 };
       if (options.updateRecord !== false) {
@@ -977,12 +1042,16 @@ class InstallerController {
   async removeClientConfiguration(assistant, entry) {
     const target = entry?.target;
     if (typeof target !== "string" || !path.isAbsolute(target) || typeof entry.sha256 !== "string") throw errorDetails("setup_failed");
-    const content = await fs.readFile(target).catch((error) => {
-      if (error?.code === "ENOENT") return null;
-      throw errorDetails("setup_failed");
-    });
-    // The file is gone, so no Morrow entry of this installation is in it.
-    if (content === null) return;
+    const content = await readConfigurationFile(target);
+    // The file is gone, so no Morrow entry of this installation is in it. A
+    // file Morrow cannot read whole is left exactly as it is and reported.
+    if (content === null) {
+      if (!await exists(target)) return;
+      throw {
+        ...errorDetails("assistant_configuration_changed"),
+        recovery: `Morrow left ${target} exactly as it is. Open it, remove the morrow entry yourself, then select Check status.`
+      };
+    }
     if (fileHash(content) !== entry.sha256) {
       throw {
         ...errorDetails("assistant_configuration_changed"),
@@ -1005,13 +1074,26 @@ class InstallerController {
     const temporary = `${target}.tmp-${crypto.randomUUID()}`;
     try {
       await fs.writeFile(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
-      const current = await fs.readFile(target).then(fileHash, () => null);
+      // The file this replaces was restricted to this Windows account when it
+      // was written. The replacement carries the person's other configuration
+      // entries, so it is restricted the same way before the rename, by the
+      // same module that restricts every other client configuration write. A
+      // restriction that cannot be applied refuses the write, so the file is
+      // never replaced with a copy other accounts could read.
+      if (this.platform === "win32") await this.restrictFileToThisAccount(temporary);
+      const current = await readConfigurationFile(target).then((value) => value === null ? null : fileHash(value));
       if (current !== expectedSha256) throw errorDetails("assistant_configuration_changed");
       await fs.rename(temporary, target);
       if (this.platform !== "win32") await fs.chmod(target, 0o600);
     } finally {
       await fs.rm(temporary, { force: true }).catch(() => {});
     }
+  }
+
+  async restrictFileToThisAccount(file) {
+    const module = await import(pathToFileURL(path.join(this.paths.appRoot, "packages", "client-config", "dist", "index.js")).href);
+    if (typeof module.restrictToCurrentAccount !== "function") throw errorDetails("setup_failed");
+    module.restrictToCurrentAccount(file);
   }
 
   /**
@@ -1229,7 +1311,7 @@ class InstallerController {
     if (!entry || typeof entry.sha256 !== "string") return;
     const configured = configuredProject(assistant, this.home, entry.target);
     if (!configured) return;
-    const current = await fs.readFile(entry.target).then(fileHash, () => null);
+    const current = await readConfigurationFile(entry.target).then((value) => value === null ? null : fileHash(value));
     if (current !== null && current !== entry.sha256) throw errorDetails("existing_morrow_configuration");
     const materials = await this.effectiveWorkspace(record);
     if (!materials) throw errorDetails("workspace_required");
@@ -1541,8 +1623,8 @@ class InstallerController {
       const claude = assistant.id === "claude-desktop" && entry
         ? await inspectClaudeDesktopConnection(entry)
         : null;
-      const present = claude ? claude.installed === true : entry && typeof entry.target === "string" && typeof entry.sha256 === "string" && await exists(entry.target)
-        ? fileHash(await fs.readFile(entry.target)) === entry.sha256
+      const present = claude ? claude.installed === true : entry && typeof entry.target === "string" && typeof entry.sha256 === "string"
+        ? await readConfigurationFile(entry.target).then((value) => value !== null && fileHash(value) === entry.sha256)
         : false;
       return {
         ...assistant,
@@ -1595,7 +1677,7 @@ class InstallerController {
       workspaceSelected: record.materialsFolder !== undefined,
       materialsFolder: materials,
       runtimeStatus: currentRuntimeStatus,
-      bridgeDelivery: "developer_temporary",
+      bridgeDelivery: this.bridgeDelivery,
       bridgeFolderReady: bridgeInstallation?.installed === true,
       bridgeLoadedInChrome: await this.bridgeLoadedInChrome(bridgeInstallation, runtime),
       bridgeManualChromeReloadRequired: bridgeInstallation?.manualChromeReloadRequired === true,
@@ -1636,4 +1718,4 @@ function createInstallerController(deps) {
   return new InstallerController(deps);
 }
 
-module.exports = { createInstallerController, detectAssistant, errorDetails, processAlive, readCommandOutput, readMacApplicationBundleIdentifier, repairRequiredState };
+module.exports = { bridgeDeliveryMode, clientConfigTarget, createInstallerController, detectAssistant, errorDetails, processAlive, readCommandOutput, readMacApplicationBundleIdentifier, repairRequiredState };

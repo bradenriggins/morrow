@@ -43,35 +43,21 @@ ExamplePlatform was inspected read-only through `ssh example-lms-vps`. The check
 Use these contracts:
 
 - New Quiz assignments, settings, and items use `/api/quiz/v1/...`.
-- Item Banks use the private `/api/banks/...` surface inside a course-bound Item Banks LTI session.
-- Acquire and use the `banks.build` credential only inside the exact authenticated Item Banks frame. Never move it into extension storage, the bridge protocol, MCP output, logs, or client configuration.
-- Existing-bank mutations require a fresh, complete affected-course fan-out and acknowledgement of every external course. Full bank deletion remains unavailable.
+- Item Bank management uses the private `/api/banks/...` surface inside a course-bound Item Banks LTI session.
+- Acquire and use the private Item Banks credential only inside the exact authenticated Item Banks frame. Never move it into extension storage, the bridge protocol, MCP output, logs, or client configuration.
+- A quiz bank draw also uses the exact selected assignment's builder launch and keeps its builder credential inside that frame.
 
-At this freeze Morrow had a 12-operation Item Bank catalog, an in-frame executor, and a frame matcher. The catalog now holds 13: the item read `canvas_item_bank_get_item` was added, because it is the comparator an item write needs. Current admission correctly holds existing-bank mutations because complete dependency and fan-out proof is missing. The next implementation must:
+The 7 September guarded-write plan in this handoff is superseded by the 8 September complete-contract audit and builder-credential follow-up.
 
-1. Adapt the ExamplePlatform `/api/banks` read and update contracts into the existing in-frame executor.
-2. Bind the selected course, bank, entry, editable body, source digest, and complete affected-course fan-out in the plan.
-3. Add one exact Edit category and matching admission rule.
-4. Fresh-read the entry and fan-out before one dispatch. Fresh-read both after it.
-5. Mark an uncertain result non-retryable.
-6. Test stale source, incomplete or changed fan-out, one dispatch, readback mismatch, and uncertain-write refusal.
-7. Update the audit planner so supported New Quiz items and Item Bank entries produce the right repair plans.
+### Current boundary on 8 September 2026
 
-### What of those seven steps stands, on 7 September 2026 in this checkout
+1. **Seven reads are implemented and need live proof.** Six use the Item Banks frame. The seventh lists complete quiz entries and bank draws through the exact selected assignment's builder frame.
+2. **The fan-out reader records entry counts, observed share rows, and selected-course quiz uses.** Current share rows carry a private context UUID that Morrow cannot map to a numeric Canvas course id from proved data. Its record always has `complete: false`. It is review context and never an authority grant or write precondition.
+3. **All nine owner-write shapes are held before provider I/O.** Bank creation lacks a recoverable course-association transaction. Existing-bank changes lack complete downstream reach. The random bank draw lacks durable interruption recovery.
+4. **The image alternative-text planner depends on the held complete-item update.** It stops before a bank read or PATCH.
+5. **The attended live plan covers all 16 operations but authorizes no provider write under the current audit assignment.** Local fixtures prove contract behavior only. No Morrow-connected tenant has proved the private Item Banks or builder routes.
 
-Every command below ran here on 7 September 2026. No step has a live result: no Morrow-connected Canvas tenant has answered `/api/banks`, so each one below is a local fixture result and the Item Banks surface stays live-unverified.
-
-1. **Adapt the read and update contracts — implemented, needs a live result.** `connector/extension/src/item-bank-executor.js` carries the routes, bodies and status rules of the harvested contract, including `GET /api/banks/{bank_id}/items/{item_id}`; `connector/extension/src/item-bank-frames.js` selects the one Item Banks frame and drops a lookalike host. `node --test scripts/test/canvas-item-bank-executor.test.mjs scripts/test/canvas-item-bank-frames.test.mjs scripts/test/canvas-item-bank-guard.test.mjs scripts/test/canvas-item-bank-fan-out.test.mjs` — 52 of 52 pass. Those fixtures are Morrow's own: where the credential sits, what the routes answer, and how long the frame lives are unproven against Canvas.
-2. **Bind the plan to the course, bank, entry, body digest and affected-course record — implemented, needs a live result.** `packages/mcp-server/src/item-bank-fan-out.ts` builds the `morrow.canvas.item-bank.fan-out.v1` record from the bank entries, the bank shares, and the New Quizzes items of the connected course, plus the quizzes of any other course that was enumerated and supplied to it; `packages/mcp-server/src/item-bank-repair.ts` freezes that record with the course, bank, entry, item, body digest, image index and image source digest into one guard. `pnpm --dir packages/mcp-server exec vitest run test/item-bank-fan-out.test.ts test/item-bank-repair.test.ts` — 25 of 25 pass. The record can be complete only when every course the bank reaches has been enumerated: Canvas exposes no route that lists the quizzes drawing from a bank, and Morrow cannot read another course through the connection it is on, so a bank reaching a course nobody enumerated is recorded unread and the repair refuses.
-3. **One Edit category and its admission rule — complete.** `connector/extension/src/edit-policy.js` publishes exactly one, `canvas_item_bank_question_image_alt`, and `packages/canvas-api-catalog/src/operation-admission.ts` holds the question update as `item_bank_fan_out_and_guard_required`. `pnpm --dir packages/canvas-api-catalog exec vitest run` — 24 of 24 pass, pinning the hold reason for all seven writes. `node --test scripts/test/bridge-settings-contract.test.mjs` — 25 of 25 pass, including that this category is the only Edit path into a bank, that it is withdrawn if the catalog loses the read its guard compares against, that only an accepted guard passes the hold, and that an archive can never be granted Edit access.
-4. **Fresh reads around one dispatch — implemented for the question, partial for the rest, needs a live result.** The in-frame guard reads the question, reads the whole bank entry and requires it to name that exact question, checks the affected-course record and its one-hour age limit, sends one PATCH, then reads the question again and compares the body, every interaction id, and the rest of the protected state. It does not read the entry or that record again after the write, so a bank whose reach changed while the change was in flight is not detected. Proof: `scripts/test/canvas-item-bank-guard.test.mjs` cases "one guarded repair reads the question, sends one PATCH, and reads it again" and "a readback that does not match the question Morrow sent is never reported as verified".
-5. **An uncertain result is non-retryable — the rule is complete, the provider behaviour that triggers it is unobserved.** A 408, a 429, any 5xx, a lost response, and a readback that cannot be made all leave the write uncertain and never repeated; a 4xx other than 408 and 429 is a refusal that saved nothing. Proof: `scripts/test/canvas-item-bank-executor.test.mjs` case "Item Bank writes stay uncertain on 408, 429, and 5xx while reads never claim uncertainty", and `scripts/test/canvas-item-bank-guard.test.mjs` cases "a readback that cannot be made leaves the outcome unknown and sends nothing more" and "a refused PATCH is known, and an uncertain one is never repeated or read back as success". No real 5xx and no collapsed frame has been seen.
-6. **The five refusal tests — complete.** `pnpm --dir packages/mcp-server exec vitest run test/item-bank-repair.integration.test.ts` — 9 of 9 pass through a real MCP client against the connector fixture: a stale question, an incomplete record, a record edited after it was read, an unconfirmed course the bank reaches, one dispatch that is checked and never repeated, a check that did not match, and an unanswered change that stays uncertain.
-7. **Audit planner — complete.** `packages/mcp-server/src/course-audit.ts` returns `morrow_plan_item_bank_question_image_alt_repair` for a bank entry that names a readable question, `blocked_unresolved_entry` for a row that names none, and `blocked_current_contract` for a `Stimulus` and every other entry type; New Quiz items keep their own planner and their supported-field list. `pnpm --dir packages/mcp-server exec vitest run test/course-audit.test.ts test/new-quiz-item-image-alt.test.ts` — 17 of 17 pass.
-
-Steps 3, 6 and 7 are statements about Morrow, and the commands above prove them. Steps 1, 2, 4 and 5 are statements about Canvas. A passing fixture is not that evidence, so they stay open until the Item Banks frame is observed on a real course. [ITEM-BANK-LIVE-PROOF-PLAN.md](ITEM-BANK-LIVE-PROOF-PLAN.md) names the exact observations that close each of them, and the frame observation of its step 1 is the one that decides the rest.
-
-Review the exact harvested New Quiz item contract before adding Stimulus repair. The correction establishes that the API source exists. It does not by itself prove that every Stimulus field has a complete preservation and dependency contract.
+Review the exact harvested New Quiz item contract before adding Stimulus repair. The correction establishes that an API source exists. It does not prove that every Stimulus field has a complete preservation and dependency contract.
 
 ## Verification
 
@@ -81,16 +67,16 @@ Every line below names the command that produced it and the date it ran. A numbe
 
 Build once first: `pnpm -r --if-present build`.
 
-- `pnpm --dir installer --ignore-workspace test` — 165 of 165 pass.
-- `node --test installer/test/runtime-monitor.test.mjs` — 6 of 6 pass.
-- `pnpm --dir packages/gateway-core exec vitest run` — 59 of 59 pass in 9 files.
-- `pnpm --dir packages/blackboard-learn-api exec vitest run` — 93 of 93 pass in 10 files.
-- `pnpm --dir packages/mcp-server exec vitest run test/blackboard-gateway.integration.test.ts test/blackboard-dispatch-state.integration.test.ts test/blackboard-approval-review.test.ts test/blackboard-course-audit.test.ts test/blackboard-egress-scope.test.ts test/blackboard-surface-reachability.test.ts` — 18 of 18 pass in 6 files.
-- `pnpm --dir packages/mcp-server exec vitest run test/canvas-classic-quiz-submissions.test.ts test/canvas-classic-quiz-submissions.integration.test.ts` — 3 of 3 pass. `node --test scripts/test/canvas-classic-quiz-submission-read.test.mjs` — 2 of 2 pass.
-- `pnpm --dir packages/mcp-server exec vitest run test/moodle-scorm-reports.test.ts test/moodle-scorm-reports.integration.test.ts` — 6 of 6 pass. `node --test scripts/test/moodle-scorm-executor.test.mjs scripts/test/moodle-scorm-report-read.test.mjs` — 4 of 4 pass. The generated Moodle browser catalog now holds 116 operations, 7 of them SCORM.
-- `pnpm --dir packages/mcp-server exec vitest run test/moodle-forum-activity-summaries.test.ts test/moodle-forum-activity-summaries.integration.test.ts` — 4 of 4 pass. `node --test scripts/test/moodle-forum-activity-summary-read.test.mjs` — 2 of 2 pass.
-- `pnpm --dir packages/mcp-server exec vitest run test/canvas-connector.integration.test.ts test/local-owner.integration.test.ts test/program-scale.integration.test.ts test/batch.integration.test.ts` — 44 of 45 pass; the run took 57 s and 55 s on two attempts. The one failure is `test/batch.integration.test.ts` > "removes an audit target whose exact identifier would change during learner redaction". The course inventory now adds a `syllabus` target to every course, and that test still expects `audit_children: []`. The redacted Page identifier the test was written to catch is still removed.
-- `pnpm --dir packages/mcp-server exec vitest run test/multi-client.integration.test.ts test/activity-tools.test.ts test/batch-progress.test.ts test/requested-by.test.ts test/batch-window-scheduler.test.ts` — 36 of 36 pass in 5 files. `test/multi-client.integration.test.ts` runs two real `morrow-mcp` child processes, from two project folders and under two reported client names, through one local owner and one Bridge fixture.
+- `pnpm --dir installer --ignore-workspace test`: 165 of 165 pass.
+- `node --test installer/test/runtime-monitor.test.mjs`: 6 of 6 pass.
+- `pnpm --dir packages/gateway-core exec vitest run`: 59 of 59 pass in 9 files.
+- `pnpm --dir packages/blackboard-learn-api exec vitest run`: 93 of 93 pass in 10 files.
+- `pnpm --dir packages/mcp-server exec vitest run test/blackboard-gateway.integration.test.ts test/blackboard-dispatch-state.integration.test.ts test/blackboard-approval-review.test.ts test/blackboard-course-audit.test.ts test/blackboard-egress-scope.test.ts test/blackboard-surface-reachability.test.ts`: 18 of 18 pass in 6 files.
+- `pnpm --dir packages/mcp-server exec vitest run test/canvas-classic-quiz-submissions.test.ts test/canvas-classic-quiz-submissions.integration.test.ts`: 3 of 3 pass. `node --test scripts/test/canvas-classic-quiz-submission-read.test.mjs`: 2 of 2 pass.
+- `pnpm --dir packages/mcp-server exec vitest run test/moodle-scorm-reports.test.ts test/moodle-scorm-reports.integration.test.ts`: 6 of 6 pass. `node --test scripts/test/moodle-scorm-executor.test.mjs scripts/test/moodle-scorm-report-read.test.mjs`: 4 of 4 pass. The generated Moodle browser catalog now holds 116 operations, 7 of them SCORM.
+- `pnpm --dir packages/mcp-server exec vitest run test/moodle-forum-activity-summaries.test.ts test/moodle-forum-activity-summaries.integration.test.ts`: 4 of 4 pass. `node --test scripts/test/moodle-forum-activity-summary-read.test.mjs`: 2 of 2 pass.
+- `pnpm --dir packages/mcp-server exec vitest run test/canvas-connector.integration.test.ts test/local-owner.integration.test.ts test/program-scale.integration.test.ts test/batch.integration.test.ts`: 44 of 45 pass; the run took 57 s and 55 s on two attempts. The one failure is `test/batch.integration.test.ts` > "removes an audit target whose exact identifier would change during learner redaction". The course inventory now adds a `syllabus` target to every course, and that test still expects `audit_children: []`. The redacted Page identifier the test was written to catch is still removed.
+- `pnpm --dir packages/mcp-server exec vitest run test/multi-client.integration.test.ts test/activity-tools.test.ts test/batch-progress.test.ts test/requested-by.test.ts test/batch-window-scheduler.test.ts`: 36 of 36 pass in 5 files. `test/multi-client.integration.test.ts` runs two real `morrow-mcp` child processes, from two project folders and under two reported client names, through one local owner and one Bridge fixture.
 
 `pnpm check` was not run in this checkout. It cannot pass while the one failure above stands, because `packages/mcp-server` is inside `pnpm -r --if-present test`.
 
@@ -166,7 +152,7 @@ Do not delete them as cleanup. Inspect provenance and rights before using any of
 1. Fetch `codex/example-worktree` and read this file, [MORROW-REMAINING-WORK.md](MORROW-REMAINING-WORK.md), and the current source before changing it.
 2. Re-run `pnpm check` if the branch tip or dependencies changed.
 3. Rebuild the sealed payload and complete native Mac and Windows install, update, rollback, repair, and uninstall proof.
-4. Implement New Quiz and Item Bank repairs from the harvested ExamplePlatform contracts. Keep the complete fan-out and in-frame credential boundary.
+4. Use the 8 September 16-operation Item Bank contract. Keep fan-out results labeled as observed and incomplete, and do not treat local fixture proof as live provider proof.
 5. Integrate the isolated Moodle Forum activity summary, then continue the explicit Canvas, Moodle, Blackboard, scale, and phone blockers.
 6. Recheck public claims against authoritative saved results before any release or publication.
 

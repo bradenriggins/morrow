@@ -10,7 +10,7 @@ Canvas and Moodle retain the browser connection model. The later Blackboard clar
 
 The user then made the Moodle scope explicit: “ALL MOODLE FUNCTIONALITY BUILT IN. JUST LIKE CANVAS.” The earlier 30-operation package is an intermediate result. It is not the completion target. A missing implementation or test account remains unfinished work; it does not remove that function from the target.
 
-The complete core module, question-type, and cross-cutting work list is in [MOODLE-FULL-FUNCTIONALITY.md](MOODLE-FULL-FUNCTIONALITY.md). The Canvas audit also found incomplete workflows behind its larger catalog: seven Item Bank writes are held for a generic caller and only one of them, adding alternative text to a bank question, has a guarded Edit path that no live Canvas tenant has run, and general file uploads do not yet complete saved-byte verification. Those limits remain part of the parity assessment.
+The complete core module, question-type, and cross-cutting work list is in [MOODLE-FULL-FUNCTIONALITY.md](MOODLE-FULL-FUNCTIONALITY.md). The Canvas audit also found incomplete workflows behind its larger catalog: Item Banks expose seven reads and nine owner-write shapes. All nine writes are held before provider I/O. The selected-quiz bank draw lacks durable interruption recovery. Duplicate, standalone item deletion, stimuli, move or copy, tags, QTI import, broader share management, and account administration remain absent. Those limits remain part of the parity assessment.
 
 ## Scope and acceptance
 

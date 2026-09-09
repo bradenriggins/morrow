@@ -1,4 +1,5 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -73,7 +74,7 @@ describe("privacy output boundary", () => {
     }, learnerPrivacy(vault));
 
     expect(result.structuredContent).toMatchObject({
-      learner: { learnerToken: expect.stringMatching(/^learner_/), grade: "A" },
+      learner: { learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/), grade: "A" },
     });
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
     expect(JSON.stringify(result)).not.toContain("ada@example.test");
@@ -156,6 +157,60 @@ describe("privacy output boundary", () => {
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
+  });
+
+  it("migrates existing encrypted UUID mappings to stable readable labels across restarts", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-learner-vault-migration-"));
+    const path = join(directory, "vault.json");
+    try {
+      const original = new LearnerVault(path);
+      original.tokenize(scope, { id: "17", name: "Ada Lovelace" });
+      const envelope = JSON.parse(readFileSync(path, "utf8"));
+      const key = Buffer.from(readFileSync(`${path}.key`, "utf8").trim(), "base64url");
+      const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(envelope.iv, "base64url"));
+      decipher.setAuthTag(Buffer.from(envelope.tag, "base64url"));
+      const entries = JSON.parse(Buffer.concat([decipher.update(Buffer.from(envelope.ciphertext, "base64url")), decipher.final()]).toString("utf8"));
+      const oldToken = entries[0].token;
+      delete entries[0].label;
+      const iv = randomBytes(12);
+      const cipher = createCipheriv("aes-256-gcm", key, iv);
+      const ciphertext = Buffer.concat([cipher.update(JSON.stringify(entries)), cipher.final()]);
+      writeFileSync(path, JSON.stringify({ ...envelope, iv: iv.toString("base64url"), ciphertext: ciphertext.toString("base64url"), tag: cipher.getAuthTag().toString("base64url") }));
+      const migrated = new LearnerVault(path);
+      expect(migrated.tokenize(scope, { id: "17" })).toBe("Student A1");
+      expect(migrated.resolve(scope, oldToken).id).toBe("17");
+      expect(migrated.resolve(scope, "Student A1").name).toBe("Ada Lovelace");
+      expect(migrated.tokenize(scope, { id: "18", name: "Rowan Clarke" })).toBe("Student A2");
+      const restarted = new LearnerVault(path);
+      expect(restarted.resolve(scope, "Student A1").id).toBe("17");
+      expect(restarted.resolve(scope, "Student A2").id).toBe("18");
+    } finally { rmSync(directory, { recursive: true, force: true }); }
+  });
+
+  it("refuses malformed and conflicting encrypted legacy vault records at load time", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-invalid-learner-vault-"));
+    const path = join(directory, "vault.json");
+    const token = "learner_11111111-1111-4111-8111-111111111111";
+    const otherToken = "learner_22222222-2222-4222-8222-222222222222";
+    const record = { token, scope, identity: { id: "17", name: "Michaela Adams" } };
+    const cases = [
+      [{ ...record, token: "learner_bad" }],
+      [record, { ...record, scope: { ...scope, course: "43" }, identity: { id: "18" } }],
+      [record, { ...record, token: otherToken }],
+      [record, { ...record, token: otherToken, identity: { id: "17", name: "Different Person" } }],
+      [{ ...record, label: "Student A1" }, { ...record, token: otherToken, label: "Student A1", identity: { id: "18" } }],
+    ];
+    try {
+      const key = randomBytes(32);
+      writeFileSync(`${path}.key`, key.toString("base64url"));
+      for (const entries of cases) {
+        const iv = randomBytes(12);
+        const cipher = createCipheriv("aes-256-gcm", key, iv);
+        const ciphertext = Buffer.concat([cipher.update(JSON.stringify(entries)), cipher.final()]);
+        writeFileSync(path, JSON.stringify({ schema: "morrow.learner-vault.v1", iv: iv.toString("base64url"), ciphertext: ciphertext.toString("base64url"), tag: cipher.getAuthTag().toString("base64url") }));
+        expect(() => new LearnerVault(path)).toThrow(/learner vault/);
+      }
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 
   it("requires a complete exact-scope roster before learner output can leave the gateway", () => {
@@ -294,11 +349,12 @@ describe("privacy output boundary", () => {
     const first = redactKnownLearnerText("Ada Lovelace and Rowan Clarke", { learnerRoster, learnerVault: vault, learnerScope: scope });
     const second = redactKnownLearnerText("Ada Lovelace and Rowan Clarke", { learnerRoster, learnerVault: vault, learnerScope: otherScope });
 
-    expect(first).toMatch(/^learner_/);
+    expect(first).toMatch(/^Student A[1-9][0-9]*/);
     expect(first).toContain("Rowan Clarke");
     expect(second).toContain("Ada Lovelace");
-    expect(second).toMatch(/learner_[\w-]+$/);
-    expect(vault.tokenize(scope, { id: "17" })).not.toBe(vault.tokenize(otherScope, { id: "17" }));
+    expect(second).toMatch(/Student A[1-9][0-9]*$/);
+    expect(vault.resolve(otherScope, vault.tokenize(otherScope, { id: "17" })).id).toBe("17");
+    expect(vault.tokenize(scope, { id: "17" })).toBe("Student A1");
   });
 
   it("applies roster aliases at the content boundary before learner free text is returned", () => {
@@ -311,7 +367,7 @@ describe("privacy output boundary", () => {
     });
 
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
-    expect(result.content[0]).toMatchObject({ text: expect.stringMatching(/learner_[\w-]+/) });
+    expect(result.content[0]).toMatchObject({ text: expect.stringMatching(/Student A[1-9][0-9]*/) });
   });
 
   it("redacts a native envelope without dropping its schema or instructional context", () => {
@@ -342,7 +398,7 @@ describe("privacy output boundary", () => {
     expect(serialized).toContain("True/False");
     expect(serialized).toContain("A. Stratum corneum");
     expect(serialized).toContain("Options: A. Probe, B. Mirror, C. Cotton pliers, D. Explorer");
-    expect(serialized).toMatch(/learner_[\w-]+/);
+    expect(serialized).toMatch(/Student A[1-9][0-9]*/);
     expect(serialized).not.toContain("Jane Doe");
     expect(serialized).not.toContain("C. Zarate");
     expect(serialized).not.toContain("D. Quintero");
@@ -376,10 +432,10 @@ describe("privacy output boundary", () => {
 
     expect(result.structuredContent).toMatchObject({
       course: { id: "42", name: "Biology" },
-      learner: { learnerToken: expect.stringMatching(/^learner_/), grade: "A" },
-      enrollments: [{ learnerToken: expect.stringMatching(/^learner_/), role: "StudentEnrollment" }],
-      submissions: [{ learnerToken: expect.stringMatching(/^learner_/), score: 9, comment: expect.stringMatching(/^learner_/) }],
-      grades: [{ learnerToken: expect.stringMatching(/^learner_/), current_grade: "A" }],
+      learner: { learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/), grade: "A" },
+      enrollments: [{ learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/), role: "StudentEnrollment" }],
+      submissions: [{ learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/), score: 9, comment: expect.stringMatching(/^Student A[1-9][0-9]*/) }],
+      grades: [{ learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/), current_grade: "A" }],
     });
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
     expect(JSON.stringify(result)).not.toContain("ada@example.test");
@@ -396,7 +452,7 @@ describe("privacy output boundary", () => {
     });
 
     expect(result.structuredContent).toMatchObject({
-      learners: [{ learnerToken: expect.stringMatching(/^learner_/), grade: "A" }],
+      learners: [{ learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/), grade: "A" }],
     });
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
     expect(JSON.stringify(result)).not.toContain("ada@example.test");
@@ -428,7 +484,7 @@ describe("privacy output boundary", () => {
     });
     expect(result.structuredContent).toMatchObject({
       course: { id: "42", name: "Biology", workflow_state: "available" },
-      user: { learnerToken: expect.stringMatching(/^learner_/), role: "Teacher" },
+      user: { learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/), role: "Teacher" },
     });
     expect(JSON.stringify(result)).not.toContain("never-return-this");
     expect(JSON.stringify(result)).not.toContain("Ada Lovelace");
@@ -460,6 +516,138 @@ describe("privacy output boundary", () => {
     expect(serialized).not.toContain("Ada Lovelace");
     expect(serialized).not.toContain("custom_learner_id");
     expect(serialized).not.toContain('"17"');
-    expect(serialized).toMatch(/learner_[\w-]+ submitted work/);
+    expect(serialized).toMatch(/Student A[1-9][0-9]* submitted work/);
+  });
+});
+
+describe("complete roster structured identity regression", () => {
+  const person = {
+    id: "9001", name: "Jane Alexandra Doe", email: "jane@example.test", loginId: "jdoe",
+    sisUserId: "SIS-9081", aliases: ["Doe, Jane Alexandra", "Janie", "jane.integration", "Jane", "Doe"],
+  };
+  function context(course = "42") {
+    const learnerRoster = new LearnerRoster();
+    const learnerScope = { ...scope, course };
+    learnerRoster.register(learnerScope, [person]);
+    return { learnerRoster, learnerScope, learnerVault: new LearnerVault(":memory:") };
+  }
+  it("removes aliases, profile fields, participant IDs and identifiers in report keys", () => {
+    const ctx = context();
+    const output = redactLearnerEgress({
+      report: [{ id: "9001", name: person.name, grade: "A", sortable_name: person.aliases[0], short_name: "Janie", integration_id: "jane.integration", pronouns: "she/her", profile: { city: "Private Town" } }],
+      authors: [{ id: "9001", name: person.name, score: 99 }],
+      participants: [{ id: "9001", name: person.name }],
+      byStudent: { "9001": { status: "submitted" } },
+      debug: { "SIS-9081": "Janie used jane.integration and jdoe" },
+      participant_ids: ["9001"], author_id: "9001",
+    }, ctx);
+    const serialized = JSON.stringify(output);
+    for (const privateValue of [person.id, person.name, person.email, person.loginId, person.sisUserId, ...person.aliases, "she/her", "Private Town"]) expect(serialized).not.toContain(privateValue);
+    expect(serialized).toContain('"grade":"A"');
+    expect(serialized).toContain('"score":99');
+  });
+  it("refuses unknown generic learner reports and ambiguous keyed projections", () => {
+    const ctx = context();
+    expect(() => redactLearnerEgress({ rows: [{ id: "9002", name: "Unknown Person", grade: 90 }] }, ctx)).toThrow("learner_roster_identity_unavailable");
+    expect(() => redactLearnerEgress({ byStudent: { Janie: 90, "Jane Alexandra Doe": 91 } }, ctx)).toThrow("privacy_identity_key_collision");
+  });
+  it("redacts JSON embedded in MCP text and refuses unknown nested learners", () => {
+    const ctx = context();
+    const output = redactLearnerEgress({ content: [{ type: "text", text: JSON.stringify({ users: [{ id: "9001", name: person.name, integration_id: "jane.integration" }] }) }] }, ctx);
+    expect(JSON.stringify(output)).not.toContain("9001");
+    expect(JSON.stringify(output)).not.toContain(person.name);
+    expect(() => redactLearnerEgress(JSON.stringify({ users: [{ id: "unknown", name: "Unknown Person" }] }), ctx)).toThrow("learner_roster_identity_unavailable");
+  });
+  it("isolates course tokens and refuses expired or duplicate roster snapshots", () => {
+    const ctx = context();
+    const other = { ...context("43"), learnerVault: ctx.learnerVault };
+    expect(redactKnownLearnerText("Janie", ctx)).toBe("Student A1");
+    expect(redactKnownLearnerText("Janie", other)).toBe("Student A1");
+    expect(() => ctx.learnerVault.resolve({ ...scope, course: "44" }, "Student A1")).toThrow();
+    expect(() => ctx.learnerRoster.register(ctx.learnerScope, [person, person])).toThrow();
+    const originalNow = Date.now;
+    const future = originalNow() + 60_001;
+    try {
+      Date.now = () => future;
+      expect(() => redactLearnerEgress({ status: "complete" }, ctx)).toThrow("learner_roster_scope_unavailable");
+    } finally { Date.now = originalNow; }
+  });
+});
+
+describe("bidirectional roster dictionary", () => {
+  it("replaces unique given names everywhere and never resolves an ambiguous given name", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [{ id: "501", name: "Michaela Adams" }, { id: "502", name: "Alex Smith" }, { id: "503", name: "Alex Jones" }]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const token = redactKnownLearnerText("Michaela Adams", ctx);
+    expect(redactKnownLearnerText("Michaela wrote a message. Adams replied.", ctx)).toBe(`${token} wrote a message. Adams replied.`);
+    expect(redactKnownLearnerText("Alex replied.", ctx)).toBe("[learner] replied.");
+    expect(redactLearnerEgress({ outer: [{ body: "Michaela Adams replied to Michaela.", nested: { Michaela: "Alex replied." } }] }, ctx))
+      .toEqual({ outer: [{ body: `${token} replied to ${token}.`, nested: { [token]: "[learner] replied." } }] });
+    const request = resolveLearnerTokens({ user_id: token, body: `Hello ${token}.`, nested: { [token]: "selected" } }, ctx.learnerVault, scope, roster);
+    expect(request).toEqual({ user_id: "501", body: "Hello Michaela Adams.", nested: { "501": "selected" } });
+    roster.register(scope, []);
+    expect(() => resolveLearnerTokens({ body: `Hello ${token}.` }, ctx.learnerVault, scope, roster)).toThrow("learner_roster_identity_unavailable");
+  });
+  it("replaces numeric identity values without changing typed course IDs or grades", () => {
+    const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const output = redactLearnerEgress({ references: [17], course_id: 17, course: { id: 17 }, score: 17, user: { id: 17, name: "Ada Lovelace" } }, ctx) as Record<string, unknown>;
+    expect(output.references).toEqual([expect.stringMatching(/^Student A[1-9][0-9]*/)]);
+    expect(output.course_id).toBe(17); expect(output.course).toEqual({ id: 17 }); expect(output.score).toBe(17);
+    expect(() => redactLearnerEgress({ content: [{ type: "image", data: Buffer.from("Ada Lovelace").toString("base64") }] }, ctx)).toThrow("privacy_opaque_artifact_refused");
+  });
+
+  it("preserves structural identifiers while redacting learner text", () => {
+    const roster = new LearnerRoster();
+    roster.register(scope, [{ id: "learner-canvas:a:101", name: "Canvas A Learner 101" }]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    const output = redactLearnerEgress({
+      source_binding_id: "canvas:a:101",
+      sourceBindingId: "canvas:a:101",
+      course_id: "101",
+      courseId: "101",
+      childId: "audit:canvas:a:101",
+      operationId: "op:canvas:a:101",
+      operationKey: "canvas:a:101",
+      body: "Canvas A Learner 101 replied.",
+    }, ctx);
+    expect(output).toEqual({
+      source_binding_id: "canvas:a:101",
+      sourceBindingId: "canvas:a:101",
+      course_id: "101",
+      courseId: "101",
+      childId: "audit:canvas:a:101",
+      operationId: "op:canvas:a:101",
+      operationKey: "canvas:a:101",
+      body: "Student A1 replied.",
+    });
+  });
+});
+
+describe("readable learner labels survive a restart", () => {
+  it("keeps the saved course dictionary stable and resolves only the selected course", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-readable-labels-"));
+    try {
+      const path = join(directory, "learners.json");
+      const first = new LearnerVault(path);
+      expect(first.tokenize(scope, { id: "17", name: "Michaela Adams" })).toBe("Student A1");
+      expect(first.tokenize(scope, { id: "18", name: "Jamie Reed" })).toBe("Student A2");
+      const other = { ...scope, course: "43" };
+      expect(first.tokenize(other, { id: "29", name: "Taylor Lane" })).toBe("Student A1");
+      const reloaded = new LearnerVault(path);
+      expect(reloaded.tokenize(scope, { id: "18", name: "Jamie Reed" })).toBe("Student A2");
+      expect(reloaded.tokenize(scope, { id: "17", name: "Michaela Adams" })).toBe("Student A1");
+      expect(reloaded.resolve(scope, "Student A1").id).toBe("17");
+      expect(reloaded.resolve(other, "Student A1").id).toBe("29");
+      expect(() => reloaded.resolve(other, "Student A2")).toThrow();
+      expect(() => reloaded.resolve({ ...scope, principal: "different" }, "Student A1")).toThrow();
+      const stored = readFileSync(path, "utf8");
+      for (const value of ["Michaela", "Jamie", "Taylor", "Student A1"]) expect(stored).not.toContain(value);
+      const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Michaela Adams" }, { id: "18", name: "Jamie Reed" }]);
+      const ctx = { learnerRoster: roster, learnerVault: reloaded, learnerScope: scope };
+      expect(redactLearnerEgress({ text: "Student A1 replied to Michaela." }, ctx)).toEqual({ text: "Student A1 replied to Student A1." });
+      expect(resolveLearnerTokens({ recipients: ["Student A1", "Student A2"], body: "Hello Student A1." }, reloaded, scope, roster)).toEqual({ recipients: ["17", "18"], body: "Hello Michaela Adams." });
+    } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 });

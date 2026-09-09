@@ -67,7 +67,7 @@ async function connectedFullSurface() {
 describe("MORROW_SERVER_INSTRUCTIONS", () => {
   it("states the product boundary and the non-replay rule early", () => {
     expect(MORROW_SERVER_INSTRUCTIONS.length).toBeGreaterThan(500);
-    expect(MORROW_SERVER_INSTRUCTIONS.length).toBeLessThan(3_800);
+    expect(MORROW_SERVER_INSTRUCTIONS.length).toBeLessThan(4_000);
     const opening = MORROW_SERVER_INSTRUCTIONS.slice(0, 512);
     expect(opening).toContain("local LMS operations layer");
     expect(opening).toContain("operation evidence");
@@ -86,23 +86,18 @@ describe("MORROW_SERVER_INSTRUCTIONS", () => {
     expect(MORROW_SERVER_INSTRUCTIONS).toContain("Do not ask for credentials, tokens, cookies, or passwords");
   });
 
-  // The four rules an assistant gets wrong without being told: the three quiz
-  // surfaces are separate, a bank change reaches other courses, a structural
-  // New Quiz item change is a delete and an add, and an uncertain Item Bank
-  // result is never retried.
-  it("carries the four New Quizzes and Item Banks rules", () => {
+  it("carries the New Quizzes and snapshot-bound Item Banks rules", () => {
     expect(MORROW_SERVER_INSTRUCTIONS).toContain(
       "New Quizzes, Item Banks, and Classic Quizzes are three different surfaces; an id from one names nothing in another.",
     );
     expect(MORROW_SERVER_INSTRUCTIONS).toContain(
-      "An Item Bank question can reach other courses, so run morrow_read_item_bank_fan_out first and confirm every course it names before morrow_plan_item_bank_question_image_alt_repair.",
+      "morrow_read_item_bank_fan_out reports observed uses only and is not an authority grant.",
     );
     expect(MORROW_SERVER_INSTRUCTIONS).toContain(
-      "A structural New Quiz item change is a delete and an add, not an edit; morrow_plan_new_quiz_item_replacement plans that pair, and the pair is not atomic.",
+      "A structural New Quiz item change is a delete and an add; morrow_plan_new_quiz_item_replacement plans that pair, and the pair is not atomic.",
     );
-    expect(MORROW_SERVER_INSTRUCTIONS).toContain(
-      "Never retry an Item Bank write with an uncertain result; read the bank and its saved operation instead.",
-    );
+    expect(MORROW_SERVER_INSTRUCTIONS).toContain("Item Bank owner operations require the selected course");
+    expect(MORROW_SERVER_INSTRUCTIONS).toContain("operation-specific readback");
   });
 });
 
@@ -129,19 +124,15 @@ describe("Full Morrow tool surface", () => {
     const { tools } = await connectedFullSurface();
     const description = (name: string) => tools.find((tool) => tool.name === name)?.description ?? "";
     expect(description("canvas_item_bank_create_item")).toContain(
-      "The item is not in the bank until attach_item names it",
+      "This creates a standalone item. A separately reviewed attach_item operation adds it to the bank entries.",
     );
     expect(description("canvas_item_bank_create_item")).toContain(
-      "its absence there is not evidence that nothing was created",
+      "A lost response cannot be reconciled without an item id because this private service exposes no standalone-item listing route.",
     );
     expect(description("canvas_item_bank_delete_entry")).toContain(
-      "This removes the entry's association with the bank. It does not delete the item and it does not delete the bank.",
+      "This removes the entry's association with the bank. It does not delete the standalone item object or the bank.",
     );
-    expect(description("canvas_item_bank_archive_bank")).toContain(
-      "Morrow does not send this.",
-    );
-    expect(description("canvas_item_bank_archive_bank")).toContain(
-      "stays held in every configuration",
-    );
+    expect(description("canvas_item_bank_archive_bank")).toContain("Delete one exact New Quizzes item bank");
+    expect(description("canvas_item_bank_archive_bank")).toContain("saved-state result is bank absence");
   });
 });

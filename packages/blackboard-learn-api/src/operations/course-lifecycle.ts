@@ -33,8 +33,8 @@ const ADAPTIVE_RELEASE_FIELD = "adaptiveRelease";
  * The two course windows Morrow reviews. `Continuous` is a course open from the
  * moment it is available until a person closes it. `DateRange` is a course open
  * between one exact start and one exact end. Anthology's course schema carries
- * other duration values — a term, and a fixed number of days from each learner's
- * enrolment — and Morrow sends neither: both decide when learners reach a course
+ * other duration values: a term, and a fixed number of days from each learner's
+ * enrolment. Morrow sends neither because both decide when learners reach a course
  * from a record Morrow has not read.
  */
 const DURATION_CONTINUOUS = "Continuous";
@@ -305,8 +305,8 @@ interface ReviewedCourseAvailability {
 
 /**
  * A course change sets whether the course is available, the window it is open
- * in, or both. Everything else about a course — its name, its id, whether it is
- * closed and complete — is refused here, before any request.
+ * in, or both. Everything else about a course, including its name, its id, and whether it is
+ * closed and complete, is refused here, before any request.
  */
 function reviewedCourseAvailability(input: CourseAvailabilityInput): ReviewedCourseAvailability {
   const range = input.duration_type === DURATION_RANGE;
@@ -348,7 +348,7 @@ function reviewedCourseAvailability(input: CourseAvailabilityInput): ReviewedCou
 /**
  * The exact request one approved course dispatch sends: the reviewed values and
  * nothing else. Morrow does not send back a value it was not asked to change,
- * so a course whose window it cannot model — a term, a fixed number of days —
+ * so a course whose window it cannot model, such as a term or a fixed number of days,
  * can still be made available or unavailable. Whether this site keeps that
  * window while it applies the change is what the readback below checks.
  */
@@ -1117,8 +1117,8 @@ async function applyReviewedCourseCopy(
 
 /**
  * The Gateway's fresh-read comparator for one reviewed course copy. It runs
- * before the copy as well as after it — the Gateway freezes its comparator
- * while it plans the operation — so a destination course Blackboard does not
+ * before the copy as well as after it. The Gateway freezes its comparator
+ * while it plans the operation, so a destination course Blackboard does not
  * hold yet is `verified: false`, not a failure.
  */
 async function verifyCourseCopy(
@@ -1222,9 +1222,9 @@ function dispatchCapability(family: string, sourceExport: string): SourceCapabil
  *
  * Three reviewed changes: whether the course is available and the window it is
  * open in, the two dated-visibility dates on one document, and one course copy.
- * Each is the three routes every Morrow provider change is — the plan an
+ * Each uses the three routes for every Morrow provider change: the plan an
  * instructor reviews, the dispatch the Gateway makes once against a signed
- * one-use effect grant, and the fresh-read comparator — and each freezes every
+ * one-use effect grant, and the fresh-read comparator. Each freezes every
  * protected value of the record it reads, so a course somebody else renamed
  * between review and dispatch is refused before anything is sent.
  *
@@ -1310,7 +1310,7 @@ export const blackboardCourseLifecycleModule: BlackboardOperationModule = {
     blackboardTool({
       name: "blackboard_plan_content_dated_visibility",
       title: "Plan when learners see one Blackboard item",
-      description: `Prepare the two dates that decide when learners see one Blackboard Learn content item — its ${ADAPTIVE_START} and ${ADAPTIVE_END} — for Morrow review. The plan states the whole window the item ends up with, so what is approved is what learners get. Send one date to change it and leave the other out to keep it, or send null to clear one. Morrow sets these dates on one ${DOCUMENT_HANDLER}, not on a folder and not on the Ultra document wrapper. This tool changes nothing.`,
+      description: `Prepare the two dates that decide when learners see one Blackboard Learn content item, its ${ADAPTIVE_START} and ${ADAPTIVE_END}, for Morrow review. The plan states the whole window the item ends up with, so what is approved is what learners get. Send one date to change it and leave the other out to keep it, or send null to clear one. Morrow sets these dates on one ${DOCUMENT_HANDLER}, not on a folder and not on the Ultra document wrapper. This tool changes nothing.`,
       private: true,
       gatewayDispatchOnly: false,
       inputSchema: contentDatesInput,

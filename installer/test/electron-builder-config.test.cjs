@@ -76,6 +76,12 @@ async function preparedPayload(t, { bridgeRelease = BRIDGE_RELEASE_MANIFEST, pac
     await fs.writeFile(path.join(appDirectory, "bridge-release", "manifest.json"), bridgeRelease, "utf8");
   }
   await fs.writeFile(path.join(appDirectory, "mcp-runtime-manifest.json"), MCP_RUNTIME_MANIFEST, "utf8");
+  const nodePath = process.platform === "win32"
+    ? path.join(payload, "runtime", "node", "node.exe")
+    : path.join(payload, "runtime", "node", "bin", "node");
+  await fs.mkdir(path.dirname(nodePath), { recursive: true });
+  await fs.writeFile(nodePath, "morrow-node-runtime-fixture");
+  const nodeSha256 = sha256("morrow-node-runtime-fixture");
   const binding = packageInput === undefined
     ? {
       schema: "morrow.desktop-package-input.v1",
@@ -86,7 +92,8 @@ async function preparedPayload(t, { bridgeRelease = BRIDGE_RELEASE_MANIFEST, pac
   return {
     payload,
     bridgeReleaseSha256: bridgeRelease === null ? null : sha256(bridgeRelease),
-    mcpRuntimeSha256: sha256(MCP_RUNTIME_MANIFEST)
+    mcpRuntimeSha256: sha256(MCP_RUNTIME_MANIFEST),
+    nodeSha256
   };
 }
 
@@ -96,9 +103,10 @@ async function preparedPayload(t, { bridgeRelease = BRIDGE_RELEASE_MANIFEST, pac
  * refusal and the stable signed build are both read here whatever version the
  * checkout currently carries. Every change is undone before returning.
  */
-function loadConfig({ payload, signedRelease = false, version = null }) {
+function loadConfig({ payload, signedRelease = false, version = null, chromeStoreLive = null }) {
   const previousPayload = process.env.MORROW_INSTALLER_PAYLOAD;
   const previousSigned = process.env.MORROW_SIGNED_RELEASE;
+  const previousStore = process.env.MORROW_CHROME_STORE_LIVE;
   const manifest = require(manifestPath);
   const manifestModule = require.cache[manifestPath];
   const previousManifest = manifestModule.exports;
@@ -106,6 +114,8 @@ function loadConfig({ payload, signedRelease = false, version = null }) {
   else process.env.MORROW_INSTALLER_PAYLOAD = payload;
   if (signedRelease) process.env.MORROW_SIGNED_RELEASE = "1";
   else delete process.env.MORROW_SIGNED_RELEASE;
+  if (chromeStoreLive === null) delete process.env.MORROW_CHROME_STORE_LIVE;
+  else process.env.MORROW_CHROME_STORE_LIVE = chromeStoreLive;
   if (version !== null) manifestModule.exports = { ...manifest, version };
   delete require.cache[configPath];
   try {
@@ -117,11 +127,13 @@ function loadConfig({ payload, signedRelease = false, version = null }) {
     else process.env.MORROW_INSTALLER_PAYLOAD = previousPayload;
     if (previousSigned === undefined) delete process.env.MORROW_SIGNED_RELEASE;
     else process.env.MORROW_SIGNED_RELEASE = previousSigned;
+    if (previousStore === undefined) delete process.env.MORROW_CHROME_STORE_LIVE;
+    else process.env.MORROW_CHROME_STORE_LIVE = previousStore;
   }
 }
 
 test("the packaged application is the installer source, sealed, with a fixed file allowlist", async (t) => {
-  const { payload, bridgeReleaseSha256, mcpRuntimeSha256 } = await preparedPayload(t);
+  const { payload, bridgeReleaseSha256, mcpRuntimeSha256, nodeSha256 } = await preparedPayload(t);
   const config = loadConfig({ payload });
   assert.equal(config.directories.app, installerRoot);
   assert.equal(config.directories.buildResources, "assets");
@@ -130,6 +142,7 @@ test("the packaged application is the installer source, sealed, with a fixed fil
   assert.deepEqual(config.extraResources, [{ from: payload, to: "MorrowPayload", filter: ["**/*"] }]);
   assert.equal(config.extraMetadata.morrow.bridgeRelease.manifestSha256, bridgeReleaseSha256);
   assert.equal(config.extraMetadata.morrow.mcpRuntime.manifestSha256, mcpRuntimeSha256);
+  assert.equal(config.extraMetadata.morrow.mcpRuntime.nodeSha256, nodeSha256);
 });
 
 test("the build is identified as Morrow and its artifacts name the version, platform and architecture", async (t) => {
@@ -176,6 +189,30 @@ test("a signed release refuses a prerelease version", async (t) => {
     () => loadConfig({ payload, signedRelease: true, version: "1.0.0-rc.1" }),
     { message: "A signed Morrow release must use a stable SemVer version." }
   );
+});
+
+/**
+ * The Chrome route the packaged app will show. installer/main.cjs hands
+ * extraMetadata.morrow.bridgeDelivery to the installer controller, which keeps
+ * the temporary unpacked route for anything it cannot recognise, so only a
+ * build made with MORROW_CHROME_STORE_LIVE=1 may send a person to the Store.
+ */
+test("a build sends people to the Chrome Web Store only when it is built for a live listing", async (t) => {
+  const { payload } = await preparedPayload(t);
+  assert.equal(loadConfig({ payload }).extraMetadata.morrow.bridgeDelivery, "developer_temporary");
+  assert.equal(loadConfig({ payload, chromeStoreLive: "1" }).extraMetadata.morrow.bridgeDelivery, "available");
+  for (const value of ["0", "", "true", "yes", "available"]) {
+    assert.equal(
+      loadConfig({ payload, chromeStoreLive: value }).extraMetadata.morrow.bridgeDelivery,
+      "developer_temporary",
+      `MORROW_CHROME_STORE_LIVE=${JSON.stringify(value)} is not a live Store listing`,
+    );
+  }
+  // The Store route is independent of signing: an unsigned build of a published
+  // listing still points at the Store, and a signed build of an unpublished one
+  // still points at the temporary route.
+  assert.equal(loadConfig({ payload, signedRelease: true, version: "1.0.0" }).extraMetadata.morrow.bridgeDelivery, "developer_temporary");
+  assert.equal(loadConfig({ payload, chromeStoreLive: "1" }).forceCodeSigning, false);
 });
 
 test("the build publishes to, and looks for updates on, the GitHub stable feed", async (t) => {

@@ -2,7 +2,7 @@ import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Json, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
 import { canvasReadResult } from "./canvas-read.js";
-import { quizItemPayloadMessage, quizItemPayloadReason } from "./quiz-item-payload.js";
+import { completeQuizItemPayloadReason, quizItemPayloadMessage } from "./quiz-item-payload.js";
 import type { GatewayRuntime } from "./runtime.js";
 
 /**
@@ -42,6 +42,7 @@ const createInputSchema = z.strictObject({
   course_id: canvasId,
   quiz_id: canvasId.describe("The Canvas assignment ID of the New Quiz."),
   item: itemPayload.describe("The complete new question, in the shape Canvas returns one: entry_type, entry, and optional points_possible and position."),
+  material_path: z.string().min(11).max(4096).optional().describe("For a Hot Spot only, a PNG, JPEG, or GIF in this assistant's project materials folder. Do not supply interaction_data.image_url; Morrow obtains the reviewed upload URL during the one approved operation."),
   requested_item_id: canvasId.optional().describe("An item id you want to reuse. Morrow refuses it when the quiz still holds it. Canvas assigns the id of a created question."),
 });
 
@@ -64,7 +65,7 @@ export type NewQuizItemCreateInput = z.infer<typeof createInputSchema>;
 export type NewQuizItemReplacementInput = z.infer<typeof replacementInputSchema>;
 export type NewQuizItemDeleteInput = z.infer<typeof deleteInputSchema>;
 
-type LifecycleRuntime = Pick<GatewayRuntime, "searchCatalog" | "capabilityGet" | "callSourceOwned" | "resultPage">;
+type LifecycleRuntime = Pick<GatewayRuntime, "searchCatalog" | "capabilityGet" | "callSourceOwned" | "resultPage" | "planCanvasNewQuizHotSpotCreate">;
 
 const CREATE_TOOL = "canvas_create_quiz_item";
 const DELETE_TOOL = "canvas_delete_quiz_item";
@@ -98,12 +99,26 @@ const CREATE_ARGUMENT_FIELDS = Object.freeze([
 /** Paths this planner walks into instead of sending whole. */
 const CREATE_CONTAINER_PATHS = Object.freeze(new Set(["entry", "entry.feedback"]));
 const CARRIED_PATHS = Object.freeze(new Set(CREATE_ARGUMENT_FIELDS.map((field) => field.path.join("."))));
-/** Canvas assigns these. The new-id consequence covers them, so they are never reported as lost. */
-const PROVIDER_ASSIGNED_PATHS = Object.freeze(new Set(["id", "entry.id"]));
+/**
+ * Canvas assigns these. The new-id consequence covers them, so they are never reported as lost.
+ *
+ * Every one of them is a field the documented objects say Canvas fills in and the create route has
+ * no parameter for: the QuizItem's `status` and `entry_editable` ("used internally, no need to
+ * set"), its `stimulus_quiz_entry_id`, and its `properties` ("currently only populated by items
+ * with a BankItem entry"); and the QuestionItem's own `id`, `created_at` and `updated_at`. Canvas
+ * returns them on every saved question, so a replacement that refused them could never replace a
+ * real question. A caller who supplies one is still refused: `checkCallerFields` reads this same
+ * set. Source: https://developerdocs.instructure.com/services/canvas/resources/new_quiz_items
+ */
+const PROVIDER_ASSIGNED_PATHS = Object.freeze(new Set([
+  "id", "entry.id", "status", "entry_editable", "immutable", "created_at", "updated_at",
+  "stimulus_quiz_entry_id", "properties", "entry.created_at", "entry.updated_at",
+]));
 
 const LIMITS = Object.freeze([
   "Morrow never plans an in-place structural change to a New Quiz question. The provider's handling of newly generated interaction IDs is not verified by Morrow on a live Canvas course.",
   "Morrow has not run a New Quiz question create, delete, or delete-then-add against a live Canvas course. These routes remain live-unverified.",
+  "This plan does not regrade completed submissions. Regrading is a separate SpeedGrader action. Canvas documents no regrade for Essay or File Upload questions, and Categorization regrading can change points but not correct answers.",
   "This plan is exact for the moment Morrow read the quiz. Read the quiz again before you send anything if another person may have changed it.",
 ]);
 
@@ -178,13 +193,32 @@ export function newQuizItemMembership(rows: unknown): readonly NewQuizMembership
     if (positions.has(position)) refuse(`Canvas listed two questions at position ${position}. Morrow will not plan against a question list with a repeated position.`);
     ids.add(id);
     positions.add(position);
-    items.push({ id, position, entryType: text(row.entry_type, ""), title: itemTitle(row, `Question ${position}`) });
+    const entryType = typeof row.entry_type === "string" && row.entry_type.length <= 100 && row.entry_type.trim() === row.entry_type
+      ? row.entry_type : "";
+    if (!entryType) refuse(`Canvas returned question ${id} with no exact entry type. Morrow will not plan against this list.`);
+    items.push({ id, position, entryType, title: itemTitle(row, `Question ${position}`) });
   }
   return items.sort((left, right) => left.position - right.position);
 }
 
 function membershipItem(membership: readonly NewQuizMembershipItem[], itemId: string): NewQuizMembershipItem | undefined {
   return membership.find((candidate) => candidate.id === itemId);
+}
+
+function membershipSnapshot(membership: readonly NewQuizMembershipItem[]): readonly JsonObject[] {
+  return membership.map((item) => ({ id: item.id, position: item.position, entry_type: item.entryType }));
+}
+
+/** The membership Canvas returns after deleting one item and renumbering every later item. */
+function membershipAfterDelete(
+  membership: readonly NewQuizMembershipItem[],
+  itemId: string,
+): readonly NewQuizMembershipItem[] {
+  const deleted = membershipItem(membership, itemId);
+  if (!deleted) return membership;
+  return membership
+    .filter((item) => item.id !== itemId)
+    .map((item) => item.position > deleted.position ? { ...item, position: item.position - 1 } : item);
 }
 
 function valueAtPath(item: JsonObject, path: readonly string[]): unknown {
@@ -196,8 +230,16 @@ function valueAtPath(item: JsonObject, path: readonly string[]): unknown {
   return current;
 }
 
-/** Every leaf path in the question that the create route cannot carry to Canvas. */
-function uncarriedPaths(item: JsonObject, prefix: readonly string[] = []): readonly string[] {
+/**
+ * Every leaf path in the question that the create route cannot carry to Canvas.
+ *
+ * `nullContainerIsEmpty` separates the two callers. On a question READ from Canvas, a container
+ * Canvas returned as null holds no leaf to carry, and the documented QuestionItem returns
+ * `"feedback": null` whenever a question has no feedback, so that is not a lost field. On a
+ * question the CALLER supplied, a null container is ambiguous between "no feedback" and "clear the
+ * feedback", so it stays refused rather than being read as either one.
+ */
+function uncarriedPaths(item: JsonObject, prefix: readonly string[] = [], nullContainerIsEmpty = false): readonly string[] {
   const paths: string[] = [];
   for (const key of Object.keys(item).sort()) {
     const path = [...prefix, key];
@@ -205,8 +247,8 @@ function uncarriedPaths(item: JsonObject, prefix: readonly string[] = []): reado
     if (PROVIDER_ASSIGNED_PATHS.has(dotted)) continue;
     const value = item[key];
     if (CREATE_CONTAINER_PATHS.has(dotted)) {
-      if (isJsonObject(value)) paths.push(...uncarriedPaths(value, path));
-      else paths.push(dotted);
+      if (isJsonObject(value)) paths.push(...uncarriedPaths(value, path, nullContainerIsEmpty));
+      else if (!(nullContainerIsEmpty && value === null)) paths.push(dotted);
       continue;
     }
     if (!CARRIED_PATHS.has(dotted)) paths.push(dotted);
@@ -214,12 +256,30 @@ function uncarriedPaths(item: JsonObject, prefix: readonly string[] = []): reado
   return paths;
 }
 
+/**
+ * The create parameters the New Quiz Items API does not mark Required. Canvas returns each of them
+ * as `null` on a saved question that does not use it, and null is not a value the create route can
+ * carry, so a null one is dropped exactly as an absent one is. A Required field that reads back as
+ * null is never dropped: it is carried through and refused by the question contract, because a
+ * question with no body or no scoring data is a question Morrow must not silently rebuild.
+ */
+const OPTIONAL_CREATE_PATHS = Object.freeze(new Set([
+  "position", "points_possible", "entry.title", "entry.calculator_type",
+  "entry.properties", "entry.answer_feedback",
+]));
+
 /** The question with every path the create route cannot carry removed. */
 function carriedItem(item: JsonObject): JsonObject {
   const carried: JsonObject = {};
   for (const field of CREATE_ARGUMENT_FIELDS) {
     const value = valueAtPath(item, field.path);
     if (value === undefined) continue;
+    const dotted = field.path.join(".");
+    if (value === null && OPTIONAL_CREATE_PATHS.has(dotted)) continue;
+    // Canvas documents answer_feedback as "only available on 'choice' question types". A saved
+    // question of another type carries it empty, which is no feedback at all, so it is dropped
+    // rather than sent to a route that refuses it. A non-empty one still reaches the contract.
+    if (dotted === "entry.answer_feedback" && isJsonObject(value) && Object.keys(value).length === 0) continue;
     let target = carried;
     for (const key of field.path.slice(0, -1)) {
       const existing = target[key];
@@ -234,12 +294,8 @@ function carriedItem(item: JsonObject): JsonObject {
 
 /**
  * The create-route arguments for one question. `checkCreatablePayload` has
- * already read `interaction_data` and `scoring_data` with the shape rules in
- * `quiz-item-payload.ts`, which check the four interaction shapes Morrow can
- * read and pass every other one through. An earlier hard allowlist made
- * ExamplePlatform refuse eight legitimate Canvas question types before Canvas ever saw
- * them, proven on 29 August 2026, so a check that cannot read a shape must not
- * forbid it. Canvas stays the authority on its own question schema.
+ * already read the complete payload against the documented contract for all 12
+ * question types Canvas supports on this route.
  */
 function createArguments(item: JsonObject, target: { readonly courseId: string; readonly quizId: string; readonly sourceBindingId: string }): JsonObject {
   const args: JsonObject = { course_id: target.courseId, assignment_id: target.quizId };
@@ -253,18 +309,54 @@ function createArguments(item: JsonObject, target: { readonly courseId: string; 
     // Canvas takes the question number as digits. A position Morrow cannot read
     // as a whole number is left out here and refused by the payload check.
     const position = exactPosition(value);
-    if (position > 0) args[field.argument] = String(position);
+    if (position > 0) args[field.argument] = position;
   }
   args._morrow = { source_binding_id: target.sourceBindingId };
   return args;
 }
 
+function guardedCreateArguments(
+  item: JsonObject,
+  target: { readonly courseId: string; readonly quizId: string; readonly sourceBindingId: string },
+  beforeItems: readonly NewQuizMembershipItem[],
+): JsonObject {
+  const args = createArguments(item, target);
+  const payload = carriedItem(item);
+  if (payload.position !== undefined) payload.position = exactPosition(payload.position);
+  args.morrow_new_quiz_item_lifecycle_guard = {
+    kind: "create",
+    before_items_sha256: sha256Json(membershipSnapshot(beforeItems)),
+    payload_sha256: sha256Json(payload),
+  };
+  return args;
+}
+
+function guardedDeleteArguments(
+  input: { readonly course_id: string; readonly quiz_id: string; readonly source_binding_id: string },
+  itemId: string,
+  beforeItems: readonly NewQuizMembershipItem[],
+  targetItem: JsonObject,
+): JsonObject {
+  return {
+    course_id: input.course_id,
+    assignment_id: input.quiz_id,
+    item_id: itemId,
+    morrow_new_quiz_item_lifecycle_guard: {
+      kind: "delete",
+      before_items_sha256: sha256Json(membershipSnapshot(beforeItems)),
+      target_item_sha256: sha256Json(targetItem),
+      item_id: itemId,
+      entry_type: "Item",
+    },
+    _morrow: { source_binding_id: input.source_binding_id },
+  };
+}
+
 /** The fields the create route needs, checked before a plan claims Canvas can accept it. */
-function checkCreatablePayload(item: JsonObject): void {
+function checkCreatablePayload(item: JsonObject, allowMissingHotSpotImage = false): void {
   const entry = isJsonObject(item.entry) ? item.entry : refuse("The question needs an entry object with its body, type, and scoring.");
   const entryType = item.entry_type;
-  if (typeof entryType !== "string" || !entryType.trim()) refuse("The question needs an entry_type. A New Quiz question item uses \"Item\".");
-  if (entryType === "Stimulus") refuse("Canvas creates question items only. It does not create a Stimulus through this route.");
+  if (entryType !== "Item") refuse("The question needs entry_type \"Item\". Canvas does not create StimulusItem, BankItem, BankEntry, or another entry type through this route.");
   for (const field of ["item_body", "interaction_type_slug", "scoring_algorithm"] as const) {
     const value = entry[field];
     if (typeof value !== "string" || !value.trim()) refuse(`The question needs a non-empty entry.${field}.`);
@@ -284,25 +376,58 @@ function checkCreatablePayload(item: JsonObject): void {
     if (entry[field] !== undefined && typeof entry[field] !== "string") refuse(`entry.${field} must be text.`);
   }
   const points = item.points_possible;
-  if (points !== undefined && (typeof points !== "number" || !Number.isFinite(points) || points < 0)) {
-    refuse("points_possible must be a number of at least 0.");
+  if (points !== undefined && (typeof points !== "number" || !Number.isFinite(points) || points <= 0)) {
+    refuse("points_possible must be a number greater than 0.");
   }
   if (item.position !== undefined && exactPosition(item.position) === 0) refuse("position must be a whole number of at least 1.");
-  // The shape rules from section 6 of the harvested contract. They check the
-  // four interaction shapes Morrow can read and pass every other one through to
-  // Canvas, and they check the images and media of all of them. A question
-  // Morrow plans is a question a person will read, so an image with no
-  // alternative text is refused before the plan exists rather than repaired
-  // afterwards.
-  const payloadReason = quizItemPayloadReason(item);
+  // Complete creates and replacements fail closed against the documented
+  // shape and scoring contract for every creatable question type. Partial
+  // in-place PATCH checks use the separate partial validator.
+  const checkedItem = allowMissingHotSpotImage && entry.interaction_type_slug === "hot-spot"
+    && isJsonObject(entry.interaction_data) && !Object.hasOwn(entry.interaction_data, "image_url")
+    ? { ...item, entry: { ...entry, interaction_data: { ...entry.interaction_data, image_url: "https://morrow.invalid/reviewed-hot-spot-image" } } }
+    : item;
+  const payloadReason = completeQuizItemPayloadReason(checkedItem);
   if (payloadReason) refuse(quizItemPayloadMessage(payloadReason));
+}
+
+export interface PreparedNewQuizHotSpotCreate {
+  readonly input: NewQuizItemCreateInput & { readonly material_path: string };
+  readonly item: JsonObject;
+  readonly courseName: string;
+  readonly quizTitle: string;
+  readonly membership: readonly NewQuizMembershipItem[];
+  /** The complete saved question list as it was read, frozen for the dispatch guard. */
+  readonly beforeItemsSha256: string;
+  readonly readAt: string;
+}
+
+/** Read and validate the complete non-media part before private bytes are staged. */
+export async function prepareNewQuizHotSpotCreate(
+  runtime: LifecycleRuntime,
+  value: NewQuizItemCreateInput,
+  signal: AbortSignal,
+): Promise<PreparedNewQuizHotSpotCreate> {
+  const input = createInputSchema.parse(value);
+  const entry = isJsonObject(input.item.entry) ? input.item.entry : {};
+  const interaction = isJsonObject(entry.interaction_data) ? entry.interaction_data : {};
+  if (entry.interaction_type_slug !== "hot-spot") refuse("material_path is accepted only for a Hot Spot question.");
+  if (!input.material_path) refuse("A Hot Spot question needs material_path for its reviewed PNG, JPEG, or GIF image.");
+  if (Object.hasOwn(interaction, "image_url")) refuse("Do not supply interaction_data.image_url for a Hot Spot. Morrow obtains the exact unsigned URL from Canvas after the reviewed byte upload.");
+  if (input.requested_item_id) refuse("A reviewed Hot Spot upload cannot request a provider item id. Canvas assigns the created question id.");
+  checkCallerFields(input.item, "question");
+  checkCreatablePayload(input.item, true);
+  const context = await readQuizContext(runtime, input, [], signal);
+  return { input: input as NewQuizItemCreateInput & { readonly material_path: string }, item: structuredClone(input.item) as JsonObject,
+    courseName: context.courseName, quizTitle: context.quizTitle, membership: context.membership,
+    beforeItemsSha256: sha256Json(membershipSnapshot(context.membership)), readAt: context.readAt };
 }
 
 /** A caller field the create route cannot carry would be dropped without a trace, so it is refused. */
 function checkCallerFields(item: JsonObject, label: string): void {
-  const entry = isJsonObject(item.entry) ? item.entry : {};
-  if (item.id !== undefined || entry.id !== undefined) {
-    refuse("Canvas assigns the ids of a created question. Remove id from the question you supplied.");
+  const providerAssigned = [...PROVIDER_ASSIGNED_PATHS].filter((path) => valueAtPath(item, path.split(".")) !== undefined).sort();
+  if (providerAssigned.length > 0) {
+    refuse(`Canvas assigns these ${label} fields. Remove them from the question you supplied: ${providerAssigned.join(", ")}.`);
   }
   const dropped = uncarriedPaths(item);
   if (dropped.length > 0) {
@@ -324,7 +449,7 @@ interface MergedItem {
  */
 function mergeItem(existing: JsonObject, requested: JsonObject, position: number): MergedItem {
   const preserved: string[] = [];
-  const notCarried = uncarriedPaths(existing);
+  const notCarried = uncarriedPaths(existing, [], true);
   const current = carriedItem(existing);
   if (current.position === undefined) current.position = position;
   const merged: JsonObject = {};
@@ -465,11 +590,20 @@ function result(report: JsonObject, lines: readonly string[]): CallToolResult {
   return { content: [{ type: "text", text: [...lines, ...LIMITS].join("\n\n") }], structuredContent: report };
 }
 
-export async function planNewQuizItemCreate(runtime: LifecycleRuntime, value: NewQuizItemCreateInput, callerSignal?: AbortSignal): Promise<CallToolResult> {
+export async function planNewQuizItemCreate(
+  runtime: LifecycleRuntime,
+  value: NewQuizItemCreateInput,
+  callerSignal?: AbortSignal,
+  workspaceRoot?: string,
+): Promise<CallToolResult> {
   const input = createInputSchema.parse(value);
   const timeout = AbortSignal.timeout(60_000);
   const signal = callerSignal ? AbortSignal.any([callerSignal, timeout]) : timeout;
   try {
+    const entry = isJsonObject(input.item.entry) ? input.item.entry : {};
+    if (input.material_path !== undefined || entry.interaction_type_slug === "hot-spot") {
+      return await runtime.planCanvasNewQuizHotSpotCreate(input, { signal, workspaceRoot }) as CallToolResult;
+    }
     checkCallerFields(input.item, "question");
     checkCreatablePayload(input.item);
     const context = await readQuizContext(runtime, input, [CREATE_TOOL], signal);
@@ -479,7 +613,11 @@ export async function planNewQuizItemCreate(runtime: LifecycleRuntime, value: Ne
     const operations: readonly PlannedOperation[] = [{
       step: 1,
       tool: context.writeTool(CREATE_TOOL),
-      arguments: createArguments(input.item, { courseId: input.course_id, quizId: input.quiz_id, sourceBindingId: input.source_binding_id }),
+      arguments: guardedCreateArguments(
+        input.item,
+        { courseId: input.course_id, quizId: input.quiz_id, sourceBindingId: input.source_binding_id },
+        context.membership,
+      ),
       readback: readback(input.course_id, input.quiz_id, null, "present"),
     }];
     const warnings = [
@@ -530,6 +668,18 @@ export async function planNewQuizItemReplacement(runtime: LifecycleRuntime, valu
     }
     const existing = await context.readItem(input.item_id);
     const { merged, preserved, notCarried } = mergeItem(existing, input.item, listed.position);
+    if (exactId(existing.stimulus_quiz_entry_id)) {
+      refuse(`Question ${input.item_id} belongs to stimulus ${exactId(existing.stimulus_quiz_entry_id)}. Morrow cannot preserve that relationship through delete and create, so it planned nothing.`);
+    }
+    if (existing.status !== "mutable" && existing.status !== "immutable") {
+      refuse(`Question ${input.item_id} has an unsupported provider status, so Morrow cannot prove that replacement is safe.`);
+    }
+    if (existing.status === "immutable" || existing.entry_editable === false || existing.immutable === true) {
+      refuse(`Question ${input.item_id} is not editable. Morrow will not delete it to work around that provider state.`);
+    }
+    if (notCarried.length > 0) {
+      refuse(`Canvas cannot carry these fields of the current question through the replacement create route, so Morrow planned nothing: ${notCarried.join(", ")}.`);
+    }
     checkCreatablePayload(merged);
     const target = { courseId: input.course_id, quizId: input.quiz_id, sourceBindingId: input.source_binding_id };
     if (sha256Json(createArguments(merged, target)) === sha256Json(createArguments(carriedItem(existing), target))) {
@@ -539,18 +689,17 @@ export async function planNewQuizItemReplacement(runtime: LifecycleRuntime, valu
       {
         step: 1,
         tool: context.writeTool(DELETE_TOOL),
-        arguments: {
-          course_id: input.course_id,
-          assignment_id: input.quiz_id,
-          item_id: input.item_id,
-          _morrow: { source_binding_id: input.source_binding_id },
-        },
+        arguments: guardedDeleteArguments(input, input.item_id, context.membership, existing),
         readback: readback(input.course_id, input.quiz_id, input.item_id, "absent"),
       },
       {
         step: 2,
         tool: context.writeTool(CREATE_TOOL),
-        arguments: createArguments(merged, target),
+        arguments: guardedCreateArguments(
+          merged,
+          target,
+          membershipAfterDelete(context.membership, input.item_id),
+        ),
         readback: readback(input.course_id, input.quiz_id, null, "present"),
       },
     ];
@@ -560,9 +709,6 @@ export async function planNewQuizItemReplacement(runtime: LifecycleRuntime, valu
       "Morrow plans a delete and an add here, never an in-place change, because New Quizzes matches the parts of a question by the ids it already holds.",
       `The add asks Canvas for position ${exactPosition(merged.position) || listed.position}. Read the question list again afterwards to confirm the order.`,
       UNCERTAIN_RESULT_WARNING,
-      ...(notCarried.length > 0
-        ? [`The create route cannot carry these fields of the current question, so the replacement will not have them: ${notCarried.join(", ")}.`]
-        : []),
     ];
     const report: JsonObject = {
       schema: NEW_QUIZ_ITEM_LIFECYCLE_PLAN_SCHEMA,
@@ -623,19 +769,23 @@ export async function planNewQuizItemDelete(runtime: LifecycleRuntime, value: Ne
         `Morrow planned nothing and sent nothing. The saved question list is the authority, and it names ${context.membership.length} ${context.membership.length === 1 ? "item" : "items"}, none of them this id.`,
       ]);
     }
-    if (listed.entryType === "Stimulus") {
-      refuse(`Item ${input.item_id} is a Stimulus. Morrow has no evidence of what happens to the questions bound to a Stimulus when it is deleted, so it plans nothing here.`);
+    if (listed.entryType !== "Item") {
+      refuse(`Item ${input.item_id} has entry type ${listed.entryType || "unknown"}, not Item. Morrow has no evidence of what deleting that entry type does to its dependencies, so it plans nothing here.`);
     }
     const existing = await context.readItem(input.item_id);
+    if (exactId(existing.stimulus_quiz_entry_id)) {
+      refuse(`Question ${input.item_id} belongs to stimulus ${exactId(existing.stimulus_quiz_entry_id)}. Morrow cannot prove that deleting it preserves the stimulus structure, so it planned nothing.`);
+    }
+    if (existing.status !== "mutable" && existing.status !== "immutable") {
+      refuse(`Question ${input.item_id} has an unsupported provider status, so Morrow cannot prove that removal is safe.`);
+    }
+    if (existing.status === "immutable" || existing.entry_editable === false || existing.immutable === true) {
+      refuse(`Question ${input.item_id} is not editable. Morrow will not delete it to work around that provider state.`);
+    }
     const operations: readonly PlannedOperation[] = [{
       step: 1,
       tool: context.writeTool(DELETE_TOOL),
-      arguments: {
-        course_id: input.course_id,
-        assignment_id: input.quiz_id,
-        item_id: input.item_id,
-        _morrow: { source_binding_id: input.source_binding_id },
-      },
+      arguments: guardedDeleteArguments(input, input.item_id, context.membership, existing),
       readback: readback(input.course_id, input.quiz_id, input.item_id, "absent"),
     }];
     const warnings = [
@@ -669,13 +819,13 @@ export async function planNewQuizItemDelete(runtime: LifecycleRuntime, value: Ne
   }
 }
 
-export function registerNewQuizItemLifecycleTools(server: McpServer, runtime: GatewayRuntime): void {
+export function registerNewQuizItemLifecycleTools(server: McpServer, runtime: GatewayRuntime, workspaceRoot?: string): void {
   server.registerTool("morrow_plan_new_quiz_item_create", {
     title: "Review a new New Quiz question",
-    description: "Plan one new question for an existing Canvas New Quiz. Morrow reads the course, the quiz, and the saved question list, checks the fields the Canvas create route carries, and refuses an item id the quiz still holds. It refuses an image with no alt attribute, a media source Canvas does not serve, and, for a multiple-choice, matching, numeric, or fill-in-the-blank question, answer data that breaks a rule it can read; every other question type is passed to Canvas, which stays the authority on its own schema. It returns one planned create with its readback. Canvas assigns the id of the new question. No Canvas change is made or scheduled while planning, and no local check establishes that Canvas will accept the question.",
+    description: "Plan one new question for an existing Canvas New Quiz. Morrow reads the course, quiz, and complete saved question list, then checks the documented shape, scoring references, feedback, properties, and media rules for all 12 creatable question types. For a Hot Spot, supply material_path and omit image_url. Morrow stages the bounded reviewed image and creates one approval-bound operation that gets Canvas's signed upload URL, sends the exact bytes once, confirms the PUT response, creates the item with the unsigned URL, and rereads the complete item and membership. Canvas assigns the question id. No Canvas request is sent while planning.",
     inputSchema: createInputSchema,
-    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
-  }, (input, context) => planNewQuizItemCreate(runtime, input, context.mcpReq.signal));
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+  }, (input, context) => planNewQuizItemCreate(runtime, input, context.mcpReq.signal, workspaceRoot));
   server.registerTool("morrow_plan_new_quiz_item_replacement", {
     title: "Review a New Quiz question replacement",
     description: "Plan a structural change to one Canvas New Quiz question as a delete and an add, never as an in-place change. New Quizzes matches the parts of a question by the ids it already holds, so an in-place change that renumbers them leaves blank leftover answers behind. Morrow reads the current question, keeps every field left out of the request, checks the merged question the same way a create is checked, and returns two operations in a fixed order. The two are not atomic: if the delete succeeds and the add fails, the quiz holds one fewer question and the saved question list is the authority. The replacement gets a new item id. No Canvas change is made or scheduled while planning.",

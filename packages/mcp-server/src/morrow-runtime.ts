@@ -905,9 +905,14 @@ export class MorrowRuntime {
       try {
         const inspected = await this.gateway.callSourceOwned("morrow_canvas_connector_health", {});
         const structured = isJsonObject(inspected.structuredContent) ? inspected.structuredContent : {};
-        connectorRuntime = structured.schema === "morrow.canvas-connector.health.v1"
-          ? structured
-          : isJsonObject(structured.data) ? structured.data : null;
+        // The source-owned call returns the connector's result envelope, whose
+        // result carries the connector's own health answer.
+        const candidate = structured.schema === "morrow.canvas-connector.result.v1" && isJsonObject(structured.result)
+          ? structured.result
+          : structured;
+        connectorRuntime = candidate.schema === "morrow.canvas-connector.health.v1"
+          ? candidate
+          : isJsonObject(candidate.data) ? candidate.data : null;
       } catch {
         connectorRuntime = null;
       }

@@ -29,8 +29,8 @@
  *    the browser can read: the live state lives on the BigBlueButton server,
  *    and the only Moodle route that reports it (`mod_bigbluebuttonbn_meeting_info`)
  *    asks that server. This route never asks. So Morrow uses the strongest
- *    signal the form itself carries — Moodle's own `instance::is_currently_open()`
- *    rule over the `openingtime` and `closingtime` controls — and fails closed:
+ *    signal the form itself carries: Moodle's own `instance::is_currently_open()`
+ *    rule over the `openingtime` and `closingtime` controls. It fails closed:
  *    a create whose approved schedule would leave the room open at the site's
  *    own current time is refused before anything is sent, and a saved activity
  *    whose form gives no readable site clock reports `room_open_now: null`

@@ -288,13 +288,9 @@ describe("Blackboard memberships and users", () => {
       { name: "blackboard_plan_membership_patch", arguments: { learner_reference: studentId, patch } },
     ];
     for (const { name, arguments: args } of addressed as readonly { name: string; arguments: JsonObject }[]) {
-      const refused = structured(await fixture.call(name, args));
-      expect(refused, name).toMatchObject({
-        ok: false,
-        resultState: "not_sent",
-        problem: { code: "blackboard_scope_binding_required" },
-      });
-      expect(String(problem(refused).message)).toContain("does not accept a Blackboard user id");
+      const refused = await fixture.call(name, args);
+      expect(refused, name).toMatchObject({ isError: true });
+      expect(JSON.stringify(refused)).not.toContain(studentId);
     }
     // A request Morrow cannot honour costs the tenant no request at all.
     expect(fixture.requests()).toEqual([]);
@@ -303,10 +299,10 @@ describe("Blackboard memberships and users", () => {
   it("refuses a reference this server did not mint for this course, and sends nothing", async () => {
     const fixture = await harness();
     const refused = structured(await fixture.call("blackboard_read_course_membership", {
-      learner_reference: "learner_2f1a5b3c-9d4e-4f6a-8b7c-1d2e3f4a5b6c",
+      learner_reference: "Student A999",
     }));
     expect(refused).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_scope_binding_required" } });
-    expect(String(problem(refused).message)).toContain("does not hold this protected learner reference");
+    expect(String(problem(refused).message)).toContain("Private error details were withheld");
     expect(fixture.requests()).toEqual([]);
   });
 
@@ -333,10 +329,9 @@ describe("Blackboard memberships and users", () => {
 
   it("refuses when one person holds more than one membership of the course", async () => {
     const fixture = await harness({ duplicateMembership: true });
-    const reference = await studentReference(fixture);
-    const refused = structured(await fixture.call("blackboard_read_course_membership", { learner_reference: reference }));
-    expect(refused).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_membership_mismatch" } });
-    expect(String(problem(refused).message)).toContain("more than one membership");
+    const refused = structured(await fixture.call("blackboard_course_roster_summary"));
+    expect(refused).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_response_incomplete" } });
+    expect(refused).not.toHaveProperty("learners");
   });
 
   it("reads the account this connection acts as, with no name and no contact details", async () => {
@@ -346,7 +341,7 @@ describe("Blackboard memberships and users", () => {
       schema: "morrow.blackboard.integration-account.v1",
       ok: true,
       courseId,
-      account: { id: principalId, availability: "Yes" },
+      account: { id: expect.stringMatching(/^Student A[1-9][0-9]*$/), availability: "Yes" },
       status: "api_configured_live_untested",
     });
     expect(fixture.requests()).toContain(`GET ${accountPath}`);
@@ -513,7 +508,7 @@ describe("Blackboard memberships and users", () => {
     ];
     for (const candidate of unsupported) {
       const refused = structured(await fixture.call("blackboard_plan_membership_patch", {
-        learner_reference: "learner_2f1a5b3c-9d4e-4f6a-8b7c-1d2e3f4a5b6c",
+        learner_reference: "Student A999",
         patch: candidate,
       }));
       expect(refused, JSON.stringify(candidate)).toMatchObject({

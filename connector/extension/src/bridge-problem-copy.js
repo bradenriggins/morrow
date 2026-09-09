@@ -250,6 +250,11 @@ const COPY = {
     detail: "Morrow sent nothing. A Canvas content repair is sent only with the exact content it was prepared from.",
     action: "Ask your assistant to read the page again and prepare the repair from what it reads.",
   },
+  canvas_hot_spot_upload_refused: {
+    title: "Morrow could not confirm the image upload",
+    detail: "The reviewed image bytes reached the upload host before the question step failed. Canvas exposes no way to withdraw them, so an unused image may remain in this course's media storage.",
+    action: "Nothing was saved for the question. Review the change again to retry, or leave the image out of the question.",
+  },
   write_outcome_unknown: {
     title: "Morrow could not confirm what this change saved",
     detail: "The change was sent, and Morrow could not read back whether the course saved it.",
@@ -277,7 +282,7 @@ const COPY = {
   },
   canvas_file_storage_access_required: {
     title: "Course file access is off",
-    detail: "Morrow reads course file content only while course file access is on, and it is off.",
+    detail: "Morrow reads course file content, and sends a reviewed image to a course, only while course file access is on, and it is off.",
     action: "Open Plan and Edit settings, then turn on course file access.",
   },
 };

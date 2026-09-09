@@ -37,60 +37,43 @@ the two curated New Quiz repairs stay the only Edit path to a question. The
 connector refuses any renumbering PATCH on its own as well, guarded or not
 ([`connector/extension/src/new-quiz-item-guard.js`](../../connector/extension/src/new-quiz-item-guard.js)).
 
-## The one Item Bank Edit path
+## Item Bank writes
 
-`canvas_item_bank_question_image_alt` is the only curated category that reaches
-an existing New Quizzes Item Bank. Its single rule names
-`ITEM_BANK PATCH /api/banks/{bank_id}/items/{item_id}`, grants no changed field,
-and carries two more rule fields: `requiresItemBankGuard: true` and
-`itemBankGuardKind: "item_bank_entry_image_alt"`. `exactRule` carries them into
-the saved permission exactly as it carries the Canvas content guard fields, and
-`ruleIdentity` separates rules by the Item Bank guard kind as well, so two guard
-kinds on the same route can never merge into one rule.
+The catalog publishes nine Item Bank owner-write shapes as course-bound Edit
+categories: bank create, rename, and delete; item create and complete-item
+update; item attach and entry removal; one exact course read-share; and one
+random bank draw attached to one exact New Quiz. `canvasOperationAdmission`
+holds all nine. It holds bank creation because the provider
+creates an account-owned bank without a proved recoverable course-association
+transaction. It holds the other seven bank-management shapes because Morrow
+cannot prove complete downstream reach. It holds the quiz bank draw because no
+durable assignment-bound recovery descriptor survives a browser worker or
+process interruption. All nine holds occur before provider I/O. A standing Edit
+grant cannot override them.
 
-Everything else about an Item Bank stays `review`. `canvasOperationAdmission`
-holds all seven Item Bank writes and now gives three separate reasons:
+The quiz bank-draw read has a second credential boundary. Morrow opens the exact
+selected New Quiz assignment, obtains its assignment-bound builder credential,
+derives and verifies the private quiz id, and reads numbered quiz-entry pages
+through a required empty end page. A page or row bound stops the read. The
+cataloged write shape remains review-only until durable recovery exists.
 
-| Write | Held reason |
-|---|---|
-| `update_item` | `item_bank_fan_out_and_guard_required` |
-| `create_bank` | `item_bank_account_scope_not_course_scope` |
-| `archive_bank`, `attach_item`, `create_item`, `delete_entry`, `share_bank` | `item_bank_dependency_review_required` |
+`morrow_plan_item_bank_question_image_alt_repair` depends on the held
+complete-item update. It therefore stops before any bank read or PATCH.
+`morrow_read_item_bank_fan_out` remains review context. Its incomplete result is
+never an authority grant or a write precondition.
 
-`create_bank` has its own reason because the in-frame session does prove one
-course. What it cannot do is confine the bank: a bank belongs to the Canvas
-account, so a bank Morrow creates does not stay inside the selected course.
-
-`archive_bank` can never become Edit-available. Section 3.6 of the
-[New Quizzes and Item Banks contract](../research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md)
-requires an administrator environment flag, a complete dependency preflight, and
-fresh counts showing zero bank entries and zero uses before an archive. Morrow
-can establish none of those from the routes it has.
-`packages/canvas-api-catalog/test/catalog.test.ts` and
-`scripts/test/bridge-settings-contract.test.mjs` both assert that hold.
-
-Three enforcement sites let the guarded question repair past the Item Bank hold,
-and only that one:
+Three enforcement sites apply the Item Bank contract independently:
 [`packages/canvas-api-catalog/src/operation-admission.ts`](../../packages/canvas-api-catalog/src/operation-admission.ts)
-(the reason the settings page and the assistant repeat),
+(the published course target and write hold),
 [`connector/extension/src/service-worker.js`](../../connector/extension/src/service-worker.js)
-(`guardedItemBankUpdate` from `edit-policy.js`, which also proves the guard names
-the selected course) and
+(the exact frame and credential boundary), and
 [`packages/canvas-connector-mcp/src/runtime.ts`](../../packages/canvas-connector-mcp/src/runtime.ts)
-(the same exemption at its own boundary). A call with no accepted guard is
-refused at all three.
+(the MCP course binding). The page executors own the pre-I/O hold and the read
+pagination and secret-sanitization checks.
 
-**Live-unverified, and one open limit.** No Edit grant has been exercised against
-a real Item Banks frame. The guard travels as an ordinary
-`morrow_item_bank_guard` argument, not as a `_morrow` control:
-`splitBridgeCallArguments` in
-[`packages/bridge-protocol/src/index.ts`](../../packages/bridge-protocol/src/index.ts)
-accepts a fixed set of `_morrow` fields that has no Item Bank entry. So a caller
-can compose a guard. That cannot produce a wrong write: the extension refuses a
-guard that names another course, and the frame re-reads the exact question and
-refuses any guard whose digest does not match before it sends anything. It does
-mean the fan-out record inside a composed guard is checked only for internal
-consistency at that point.
+**Live-unverified surface.** Local tests prove all seven reads and all nine
+pre-I/O write holds. No Morrow-connected Canvas tenant has answered these private
+routes, so none has live provider proof.
 
 ## Published shape
 
@@ -144,25 +127,16 @@ a granted Moodle Book chapter edit permits `content` and `title` only, and the
 settings page no longer offers `chapter_id` or `category_id` as something Edit
 access can change.
 
+The structural list also includes `expected_snapshot`. Snapshot digests are
+preconditions, not editable provider fields, so a category never presents them
+as something the person can grant. The category still grants only the payload
+fields, while the executor independently requires the exact snapshot object.
+
 Two files hold this same list and must agree:
 [`connector/extension/src/edit-policy.js`](../../connector/extension/src/edit-policy.js)
-(the grant and the service-worker check) and
-[`packages/bridge-protocol/src/index.ts`](../../packages/bridge-protocol/src/index.ts)
-(`matchesBridgeEditPermission`). A name present in only one of them refuses a
-granted write or silently returns it to review.
+and [`packages/bridge-protocol/src/index.ts`](../../packages/bridge-protocol/src/index.ts).
 [`packages/mcp-server/src/runtime.ts`](../../packages/mcp-server/src/runtime.ts)
-(`browserEditFields`) reaches the same result from a shorter list, because it
-also drops every path parameter named in the operation key. It does not yet know
-the Item Bank guard, so a plan that carries `morrow_item_bank_guard` as an
-ordinary argument is returned for review there rather than authorized.
-`morrow_plan_item_bank_question_image_alt_repair`
-([`packages/mcp-server/src/item-bank-repair.ts`](../../packages/mcp-server/src/item-bank-repair.ts))
-now produces that plan, so the Item Bank category can be granted and the
-connector will accept the guarded call. Every such plan still asks a person to
-approve it. To close that, `browserEditFields` must drop the guard name and the
-same function must require `requiresItemBankGuard` to match a guard that is
-present and valid. Dropping the name alone would authorize an unguarded question
-update at that boundary.
+applies the same rule when it derives changed fields for Edit authority.
 
 ## Capped grants
 

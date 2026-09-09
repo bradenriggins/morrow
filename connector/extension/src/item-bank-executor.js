@@ -2,24 +2,15 @@ export async function executeItemBankInPage(input) {
   const MAX_BYTES = 2 * 1024 * 1024;
   const hostPattern = /^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i;
   const apiHostPattern = /^[^.]+\.quiz-api(?:-[^.]+)*\.instructure\.com$/i;
-  const id = (value) => /^[1-9][0-9]*$/.test(String(value || "")) ? String(value) : "";
+  const id = (value) => /^[1-9][0-9]{0,18}$/.test(String(value || "")) ? String(value) : "";
   const json = (storage, key) => {
     try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; }
   };
   const currentUser = json(sessionStorage, "current_user") || json(localStorage, "current_user");
   const principalId = id(currentUser?.current_user?.id ?? currentUser?.id ?? globalThis.ENV?.current_user_id);
   if (!principalId || principalId !== input.principalId) return { matched: false };
-  const token = sessionStorage.getItem("banks.build_token") || "";
-  if (token.length < 51 || token.length > 8192) return { matched: false };
   const currentHost = location.hostname.toLowerCase();
-  let apiHost = hostPattern.test(currentHost) ? currentHost.replace(".quiz-lti", ".quiz-api") : "";
-  if (!apiHost) {
-    const backend = sessionStorage.getItem("backend_url") || localStorage.getItem("backend_url") || "";
-    try {
-      const host = new URL(backend).hostname.toLowerCase();
-      apiHost = hostPattern.test(host) ? host.replace(".quiz-lti", ".quiz-api") : "";
-    } catch {}
-  }
+  const apiHost = hostPattern.test(currentHost) ? currentHost.replace(".quiz-lti", ".quiz-api") : "";
   if (!apiHostPattern.test(apiHost)) return { matched: false };
   let canvasUrl;
   let referrerUrl;
@@ -33,17 +24,30 @@ export async function executeItemBankInPage(input) {
   const canvasHost = canvasUrl.hostname.toLowerCase();
   const standardTenant = canvasHost.match(/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/i)?.[1]?.toLowerCase();
   if (standardTenant && apiHost.split(".")[0] !== standardTenant) return { matched: false };
-  const courseClaims = [];
-  const referrerCourse = referrerUrl.pathname.match(/\/courses\/([1-9][0-9]*)(?:\/|$)/)?.[1];
-  if (referrerCourse) courseClaims.push(referrerCourse);
-  const scope = json(sessionStorage, "item_banks_scope") || json(localStorage, "item_banks_scope");
-  for (const key of ["course_id", "courseId", "context_id", "contextId"]) {
-    const claim = id(scope?.[key]);
-    if (claim) courseClaims.push(claim);
-  }
-  if (!input.courseId || courseClaims.length === 0 || courseClaims.some((value) => value !== input.courseId)) return { matched: false };
+  const referrerCourse = referrerUrl.pathname.match(/^\/courses\/([1-9][0-9]*)\/external_tools\/54065\/?$/)?.[1];
+  if (!input.courseId || referrerCourse !== input.courseId) return { matched: false };
   const operation = input.operation;
   if (!operation || operation.service !== "item_bank" || !["GET", "POST", "PATCH", "DELETE"].includes(operation.method)) return { matched: false };
+  const operationContracts = {
+    list_banks: ["GET", "/api/banks"],
+    get_bank: ["GET", "/api/banks/{bank_id}"],
+    list_entries: ["GET", "/api/banks/{bank_id}/bank_entries"],
+    get_entry: ["GET", "/api/banks/{bank_id}/bank_entries/{bank_entry_id}"],
+    list_shares: ["GET", "/api/banks/{bank_id}/shared_banks"],
+    create_bank: ["POST", "/api/banks"],
+    rename_bank: ["PATCH", "/api/banks/{bank_id}"],
+    archive_bank: ["DELETE", "/api/banks/{bank_id}"],
+    attach_item: ["POST", "/api/banks/{bank_id}/bank_entries"],
+    create_item: ["POST", "/api/banks/{bank_id}/items"],
+    get_item: ["GET", "/api/banks/{bank_id}/items/{item_id}"],
+    update_item: ["PATCH", "/api/banks/{bank_id}/items/{item_id}"],
+    delete_entry: ["DELETE", "/api/banks/{bank_id}/bank_entries/{bank_entry_id}"],
+    share_bank: ["POST", "/api/banks/{bank_id}/shared_banks"],
+  };
+  const contract = operationContracts[operation.nickname];
+  if (!contract || operation.method !== contract[0] || operation.path !== contract[1]) {
+    return { matched: true, ok: false, sent: false, error: "item_bank_operation_contract_mismatch" };
+  }
   // The frame probe carries the binding and the operation shape, never the
   // arguments, so nothing above this line may read input.arguments. A probe
   // that needed the payload would disclose it to every candidate frame before
@@ -51,154 +55,194 @@ export async function executeItemBankInPage(input) {
   if (input.contextOnly === true) return { matched: true, ok: true, sent: false };
   const itemBankGuard = input.arguments?.morrow_item_bank_guard;
   const guardedUpdate = itemBankGuard !== undefined && operation.nickname === "update_item";
-  // A guard on any other route would be carried and never checked, and an
-  // unchecked guard is an approval nobody honoured, so it is refused.
   if (itemBankGuard !== undefined && !guardedUpdate) return { matched: true, ok: false, sent: false, error: "item_bank_guard_refused" };
-  if (operation.nickname === "list_banks" && input.arguments?.course_id !== undefined) {
-    const requestedCourse = id(input.arguments.course_id);
-    if (!requestedCourse || requestedCourse !== input.courseId) {
-      return { matched: true, ok: false, sent: false, error: "item_bank_course_mismatch" };
-    }
+  const credential = input.credential;
+  const token = typeof credential?.token === "string" ? credential.token : "";
+  const contextUuid = typeof credential?.contextUuid === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(credential.contextUuid)
+    ? credential.contextUuid : "";
+  const launchedAt = Number(credential?.launchedAt);
+  const capturedAt = Number(credential?.capturedAt);
+  if (!credential || credential.apiOrigin !== `https://${apiHost}` || credential.authType !== "Signature"
+    || credential.canvasLocalContextId !== input.courseId || credential.launchUrl !== referrerUrl.href
+    || typeof credential.launchNonce !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(credential.launchNonce)
+    || token.length < 51 || token.length > 8192 || !contextUuid
+    || !Number.isFinite(launchedAt) || !Number.isFinite(capturedAt) || capturedAt < launchedAt
+    || capturedAt - launchedAt > 45_000 || capturedAt > Date.now() || Date.now() - capturedAt > 10 * 60 * 1_000) {
+    return { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" };
+  }
+  const requestedCourse = id(input.arguments?.course_id ?? itemBankGuard?.course_id);
+  if (!requestedCourse) return { matched: true, ok: false, sent: false, error: "course_id is required" };
+  if (requestedCourse !== input.courseId) {
+    return { matched: true, ok: false, sent: false, error: "item_bank_course_mismatch" };
   }
   let path = operation.path;
   const query = new URLSearchParams();
   const formValues = {};
   for (const parameter of operation.parameters) {
-    // A guarded repair never carries a question payload. The one it sends is
-    // built below from the question this frame reads back from the bank.
-    if (guardedUpdate && parameter.inputName === "item") continue;
-    const value = input.arguments?.[parameter.inputName];
+    // A legacy guarded request carries its question, its snapshots and its
+    // observed-reach disclosure inside the frozen guard, never as separate
+    // arguments. The guard check below refuses any top-level argument other
+    // than the two target ids and the guard itself.
+    if (guardedUpdate && ["item", "expected_snapshot", "fan_out", "fan_out_receipt", "acknowledged_course_ids"].includes(parameter.inputName)) continue;
+    const value = guardedUpdate && parameter.inputName === "course_id"
+      ? itemBankGuard.course_id
+      : input.arguments?.[parameter.inputName];
     if (value === undefined || value === null || value === "") {
       if (parameter.required) return { matched: true, ok: false, sent: false, error: `${parameter.inputName} is required` };
       continue;
     }
     if (parameter.location === "path") path = path.replace(`{${parameter.wireName}}`, encodeURIComponent(String(value)));
-    else if (parameter.location === "query" || operation.method === "GET") query.append(parameter.wireName, String(value));
+    else if (parameter.location === "control") continue;
+    else if (parameter.location === "query" || operation.method === "GET") {
+      query.append(parameter.wireName, operation.nickname === "list_banks" && parameter.inputName === "course_id" ? contextUuid : String(value));
+    }
     else formValues[parameter.wireName] = value;
   }
   if (!/^\/api\/banks(?:[/?#]|$)/.test(path) || path.includes("://") || path.split(/[?#]/)[0].split("/").includes("..") || /\{[^}]+\}/.test(path)) {
     return { matched: true, ok: false, sent: false, error: "item_bank_path_refused" };
   }
+  // The media rule, over every string the payload carries. It reports every
+  // offending element with the exact tag that carries it, not just the first
+  // reason, so an update can be judged against the question already stored:
+  // repairing one image must never be refused because a different image in the
+  // same question still needs work. A finding with no tag names no element, so
+  // it can never be matched against a stored one and always refuses.
+  const MEDIA_ELEMENTS = ["img", "audio", "video"];
+  const MEDIA_SRC_PREFIXES = ["https://", "/courses/", "/api/v1/files/"];
+  const MEDIA_TAG = /<\s*(?:img|audio|video)\b/i;
+  const TAG = /<!--[\s\S]*?-->|<(?:"[^"]*"|'[^']*'|[^'">])*>/g;
+  const TAG_NAME = /^<\s*(\/?)\s*([a-zA-Z][^\s/>]*)/;
+  const ATTRIBUTE = /^\s+([A-Za-z_:][-A-Za-z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/;
+  const RAW_TEXT = ["script", "style", "iframe", "object", "embed", "textarea", "title"];
+  const MAX_DEPTH = 32;
+  const plainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const mediaElements = (value) => {
+    const elements = [];
+    let rawText = "";
+    for (const match of value.matchAll(TAG)) {
+      const tag = match[0];
+      if (tag.startsWith("<!--")) continue;
+      const parsed = TAG_NAME.exec(tag);
+      if (!parsed) continue;
+      const closing = parsed[1] === "/";
+      const name = parsed[2].toLowerCase();
+      if (rawText) {
+        if (closing && name === rawText) rawText = "";
+        continue;
+      }
+      if (RAW_TEXT.includes(name)) {
+        if (!closing && !tag.endsWith("/>")) rawText = name;
+        continue;
+      }
+      if (closing || !MEDIA_ELEMENTS.includes(name)) continue;
+      elements.push({ name, tag });
+    }
+    return { elements, open: rawText !== "" };
+  };
+  const tagAttributes = (tag) => {
+    const open = TAG_NAME.exec(tag);
+    if (!open || open[1] === "/" || !tag.endsWith(">")) return null;
+    let rest = tag.slice(open[0].length, tag.length - (tag.endsWith("/>") ? 2 : 1));
+    const attributes = new Map();
+    while (rest.trim().length > 0) {
+      const match = ATTRIBUTE.exec(rest);
+      if (!match) return null;
+      const name = match[1].toLowerCase();
+      if (attributes.has(name)) return null;
+      attributes.set(name, match[2] ?? match[3] ?? match[4] ?? "");
+      rest = rest.slice(match[0].length);
+    }
+    return attributes;
+  };
+  const stringMediaFindings = (value, findings) => {
+    if (!MEDIA_TAG.test(value)) return;
+    const scan = mediaElements(value);
+    // Markup this scan could not read names no element, so it can never be
+    // matched against a stored one and always refuses.
+    if (scan.open) {
+      findings.push({ reason: "media_markup_unreadable", tag: "" });
+      return;
+    }
+    for (const element of scan.elements) {
+      const attributes = tagAttributes(element.tag);
+      if (!attributes) {
+        findings.push({ reason: "media_markup_unreadable", tag: "" });
+        continue;
+      }
+      // Presence, not content: alt="" is how a decorative image is marked, and
+      // it is the author's answer rather than a missing one. The finding names
+      // the exact element that carries it, so a problem the question already
+      // has can never excuse a second one or a different one.
+      if (element.name === "img" && !attributes.has("alt")) findings.push({ reason: "media_image_alt_missing", tag: element.tag });
+      const source = attributes.get("src");
+      if (source !== undefined && !MEDIA_SRC_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+        findings.push({ reason: "media_src_unsupported", tag: element.tag });
+      }
+    }
+  };
+  const mediaFindings = (value, depth, findings) => {
+    if (depth > MAX_DEPTH) {
+      // Depth is a property of the payload, not of one element, so it names
+      // nothing a stored question could already carry.
+      findings.push({ reason: "payload_too_deep", tag: "" });
+      return findings;
+    }
+    if (typeof value === "string") stringMediaFindings(value, findings);
+    else if (Array.isArray(value)) for (const member of value) mediaFindings(member, depth + 1, findings);
+    else if (plainObject(value)) for (const child of Object.values(value)) mediaFindings(child, depth + 1, findings);
+    return findings;
+  };
+  // The first media problem the proposed question carries that the stored
+  // question does not already carry. The match is per element and counted,
+  // never per code: one undescribed image in the stored question excuses that
+  // one image and nothing else, so a second copy of it and any different
+  // undescribed image are both refused.
+  const newMediaReason = (proposed, stored) => {
+    const held = new Map();
+    for (const finding of mediaFindings(stored, 0, [])) {
+      if (!finding.tag) continue;
+      const key = `${finding.reason}\u0000${finding.tag}`;
+      held.set(key, (held.get(key) || 0) + 1);
+    }
+    for (const finding of mediaFindings(proposed, 0, [])) {
+      const key = `${finding.reason}\u0000${finding.tag}`;
+      const count = finding.tag ? held.get(key) || 0 : 0;
+      if (count === 0) return finding.reason;
+      held.set(key, count - 1);
+    }
+    return null;
+  };
+  let updateMediaCheck = false;
   let body;
-  if (operation.nickname === "create_bank") body = { bank: { title: String(formValues.title), language: "en" } };
+  if (operation.nickname === "create_bank") body = { bank: { title: String(formValues.title), language: String(formValues.language || "en") } };
+  else if (operation.nickname === "rename_bank") body = { bank: { title: String(formValues.title) } };
   else if (operation.nickname === "attach_item") body = { bank_entry: { bank_id: String(input.arguments.bank_id), entry_type: "Item", entry_id: String(formValues.item_id) } };
   else if (operation.nickname === "share_bank") {
     // Only a course share with read permission is established. Every other
     // scope is unverified, so Morrow refuses it instead of sending it.
     if (String(formValues.entity_type) !== "course") return { matched: true, ok: false, sent: false, error: "item_bank_share_scope_unsupported" };
+    if (formValues.permission !== undefined && String(formValues.permission) !== "read") return { matched: true, ok: false, sent: false, error: "item_bank_share_permission_unsupported" };
     body = { shared_bank: { entity_id: String(formValues.entity_id), entityType: String(formValues.entity_type), bank_id: String(input.arguments.bank_id), permission: "read" } };
   }
   else if (!guardedUpdate && (operation.nickname === "create_item" || operation.nickname === "update_item")) {
     body = formValues.item && typeof formValues.item === "object" && !Array.isArray(formValues.item) && Object.hasOwn(formValues.item, "item")
       ? formValues.item
       : { item: formValues.item };
-    // A bank question is shared machinery: a malformed one reaches every course
-    // that draws from the bank, and a picture with no alternative text reaches
-    // every learner who cannot see it. Four interaction shapes are checked and
-    // every other type passes through to Canvas, which is the authority on its
-    // own schema. The guarded repair above is deliberately not checked here: it
-    // sends the question the bank already holds with one alt attribute added,
-    // so a defect that question already carries would block the accessibility
-    // fix without changing anything.
-    //
-    // Every rule below is copied from
-    // connector/extension/src/quiz-item-payload.js, because Chrome injects this
-    // function without its module scope.
-    // scripts/test/canvas-quiz-item-payload.test.mjs runs both copies over the
-    // same payloads and fails if one of them disagrees.
+    // The service worker validates all supported question shapes before it opens
+    // this frame. It issues payloadContractSha256 for that exact outer item.
+    // The checks below add in-frame defense for the four most complex shapes.
+    // The digest check after them is the trust boundary for every supported
+    // shape and rejects a missing, changed, or caller-supplied certificate.
     const payloadReason = (() => {
-      const MEDIA_ELEMENTS = ["img", "audio", "video"];
-      const MEDIA_SRC_PREFIXES = ["https://", "/courses/", "/api/v1/files/"];
       const CHOICE_SLUGS = ["choice", "multiple_choice"];
       const CHOICE_INTERACTION_TYPE_ID = 1;
       const RICH_FILL_SLUGS = ["rich_fill_blank", "rich_fill", "rich_fill_in_the_blank"];
       const BLANK_KINDS = { openentry: "openEntry", dropdown: "TextInChoices", textinchoices: "TextInChoices", wordbank: "wordbank" };
       const INTERACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
-      const TAG = /<!--[\s\S]*?-->|<(?:"[^"]*"|'[^']*'|[^'">])*>/g;
-      const TAG_NAME = /^<\s*(\/?)\s*([a-zA-Z][^\s/>]*)/;
-      const ATTRIBUTE = /^\s+([A-Za-z_:][-A-Za-z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/;
-      const RAW_TEXT = ["script", "style", "iframe", "object", "embed", "textarea", "title"];
-      const MEDIA_TAG = /<\s*(?:img|audio|video)\b/i;
       const BLANK_MARKER = /id\s*=\s*(?:"blank_([^"]*)"|'blank_([^']*)')/g;
-      const MAX_DEPTH = 32;
-
-      const plainObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
       const scalar = (value) => typeof value === "string" || (typeof value === "number" && Number.isFinite(value));
       const asText = (value) => scalar(value) ? String(value) : "";
       const normalizeSlug = (value) => typeof value === "string" ? value.trim().toLowerCase().replaceAll(/[\s-]+/g, "_") : "";
-
-      const mediaElements = (value) => {
-        const elements = [];
-        let rawText = "";
-        for (const match of value.matchAll(TAG)) {
-          const tag = match[0];
-          if (tag.startsWith("<!--")) continue;
-          const parsed = TAG_NAME.exec(tag);
-          if (!parsed) continue;
-          const closing = parsed[1] === "/";
-          const name = parsed[2].toLowerCase();
-          if (rawText) {
-            if (closing && name === rawText) rawText = "";
-            continue;
-          }
-          if (RAW_TEXT.includes(name)) {
-            if (!closing && !tag.endsWith("/>")) rawText = name;
-            continue;
-          }
-          if (closing || !MEDIA_ELEMENTS.includes(name)) continue;
-          elements.push({ name, tag });
-        }
-        return { elements, open: rawText !== "" };
-      };
-
-      const tagAttributes = (tag) => {
-        const open = TAG_NAME.exec(tag);
-        if (!open || open[1] === "/" || !tag.endsWith(">")) return null;
-        let rest = tag.slice(open[0].length, tag.length - (tag.endsWith("/>") ? 2 : 1));
-        const attributes = new Map();
-        while (rest.trim().length > 0) {
-          const match = ATTRIBUTE.exec(rest);
-          if (!match) return null;
-          const name = match[1].toLowerCase();
-          if (attributes.has(name)) return null;
-          attributes.set(name, match[2] ?? match[3] ?? match[4] ?? "");
-          rest = rest.slice(match[0].length);
-        }
-        return attributes;
-      };
-
-      const stringMediaReason = (value) => {
-        if (!MEDIA_TAG.test(value)) return null;
-        const scan = mediaElements(value);
-        if (scan.open) return "media_markup_unreadable";
-        for (const element of scan.elements) {
-          const attributes = tagAttributes(element.tag);
-          if (!attributes) return "media_markup_unreadable";
-          if (element.name === "img" && !attributes.has("alt")) return "media_image_alt_missing";
-          const source = attributes.get("src");
-          if (source !== undefined && !MEDIA_SRC_PREFIXES.some((prefix) => source.startsWith(prefix))) return "media_src_unsupported";
-        }
-        return null;
-      };
-
-      const mediaReason = (value, depth) => {
-        if (depth > MAX_DEPTH) return "payload_too_deep";
-        if (typeof value === "string") return stringMediaReason(value);
-        if (Array.isArray(value)) {
-          for (const member of value) {
-            const reason = mediaReason(member, depth + 1);
-            if (reason) return reason;
-          }
-          return null;
-        }
-        if (plainObject(value)) {
-          for (const child of Object.values(value)) {
-            const reason = mediaReason(child, depth + 1);
-            if (reason) return reason;
-          }
-        }
-        return null;
-      };
 
       const interactionKind = (entry, payload) => {
         const slug = normalizeSlug(entry.interaction_type_slug ?? payload.interaction_type_slug);
@@ -396,8 +440,6 @@ export async function executeItemBankInPage(input) {
       const payload = body.item;
       if (!plainObject(payload)) return "payload_not_an_object";
       const entry = plainObject(payload.entry) ? payload.entry : payload;
-      const media = mediaReason(payload, 0);
-      if (media) return media;
       const kind = interactionKind(entry, payload);
       if (!kind) return null;
       const interaction = entry.interaction_data;
@@ -408,7 +450,14 @@ export async function executeItemBankInPage(input) {
       if (kind === "numeric") return numericReason(interaction, scoring);
       return richFillReason(interaction, scoring, entry.item_body);
     })();
+    // A create has no stored question to compare against, so every media
+    // finding refuses here. An update is judged after the fresh pre-write read
+    // below, against the exact question Canvas holds right now.
+    const findings = mediaFindings(body.item, 0, []);
+    const absolute = operation.nickname === "create_item" ? findings[0] : findings.find((finding) => !finding.tag);
+    if (absolute) return { matched: true, ok: false, sent: false, error: `item_bank_payload_${absolute.reason}` };
     if (payloadReason) return { matched: true, ok: false, sent: false, error: `item_bank_payload_${payloadReason}` };
+    updateMediaCheck = operation.nickname === "update_item" && findings.length > 0;
   }
   else if (Object.keys(formValues).length) body = formValues;
   const headers = { Accept: "application/json", Authorization: token, AuthType: "Signature" };
@@ -446,26 +495,392 @@ export async function executeItemBankInPage(input) {
       return { unreadable: true };
     }
   };
+  // Two private values reach this frame from the captured launch rather than
+  // from the person: the credential token and the LTI context UUID. Neither may
+  // travel back inside provider data. The context UUID is sent as the
+  // `course_id` query claim on every bank list read, so a tenant that echoes the
+  // request back into a bank row would return it. No fixture pins what Canvas
+  // echoes and no live run has settled it, so this is not conditional on having
+  // seen the leak. Both values are non-empty here: an unusable credential
+  // returned `item_bank_credential_unavailable` above.
+  const privateText = (value) => value.split(token).join("[redacted]").split(contextUuid).join("[redacted]");
   const sanitize = (value, depth = 0) => {
     if (depth > 24) return null;
     if (Array.isArray(value)) return value.slice(0, 10_000).map((entry) => sanitize(entry, depth + 1));
-    if (!value || typeof value !== "object") return typeof value === "string" ? value.split(token).join("[redacted]") : value;
+    if (!value || typeof value !== "object") return typeof value === "string" ? privateText(value) : value;
     const output = {};
     for (const [key, child] of Object.entries(value)) {
-      // The guard carries the approved alternative text and the fan-out record
-      // of every course this bank reaches. It is evidence for the change, not
-      // part of the answer, so it never travels back in a result.
+      // A legacy guard is private control data, so it never travels back in a result.
       if (/(?:authorization|bearer|token|secret|credential|cookie|csrf)/i.test(key) || /^morrow_.*guard$/i.test(key)) continue;
       output[key] = sanitize(child, depth + 1);
     }
     return output;
   };
+  const stable = (value) => Array.isArray(value)
+    ? `[${value.map(stable).join(",")}]`
+    : value && typeof value === "object"
+      ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`
+      : JSON.stringify(value === undefined ? null : value);
+  const digest = async (value) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stable(value)))), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  // Canvas pins no one key casing for a share row, and Morrow's own share
+  // request body at the branch below mixes them, so the casing a tenant answers
+  // with is the tenant's. Every reader of a share row in this file uses this one
+  // pair. The two readers are the pre-write duplicate check and the post-write
+  // readback of the same write: a reader quietly stricter than its twin compares
+  // against "undefined" and reports a share Canvas did create as unconfirmed,
+  // which is a working operation that looks broken. The gateway readers of the
+  // same rows, packages/mcp-server/src/item-bank-fan-out.ts and
+  // packages/mcp-server/src/course-inventory.ts, accept both casings too.
+  const shareEntityId = (row) => String(row?.entity_id ?? row?.entityId ?? "");
+  const shareEntityType = (row) => String(row?.entity_type ?? row?.entityType ?? "");
+  // A legacy guarded repair carries no caller-supplied question. Its
+  // certificate is the guard's own item and protected-state digests, checked
+  // against a fresh read further down.
+  if (!guardedUpdate && ["create_item", "update_item"].includes(operation.nickname)
+    && (!/^[0-9a-f]{64}$/.test(String(input.payloadContractSha256 || ""))
+      || input.payloadContractSha256 !== await digest(input.arguments?.item))) {
+    return { matched: true, ok: false, sent: false, error: "item_bank_payload_contract_unverified" };
+  }
+  const validObservedFanOut = async (record, bank, course, acknowledged) => {
+    const plain = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    const compareText = (left, right) => left < right ? -1 : left > right ? 1 : 0;
+    const compareIds = (left, right) => left.length === right.length ? compareText(left, right) : left.length - right.length;
+    if (!plain(record)) return "missing_record";
+    if (record.schema !== "morrow.canvas.item-bank.fan-out.v1") return "wrong_schema";
+    if (String(record.bank_id || "") !== bank) return "bank_mismatch";
+    if (String(record.course_id || "") !== course) return "course_mismatch";
+    // The same unread-source rule as connector/extension/src/item-bank-fan-out.js:
+    // a source that is missing, unfinished, or named unreachable was not walked
+    // to its end. scripts/test/canvas-item-bank-fan-out.test.mjs runs
+    // its copy and this executor copy over the same records.
+    const asName = (value) => typeof value === "string" ? value : typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+    const sources = ["bank_entries", "shared_banks", "quiz_uses"];
+    const exhausted = new Map();
+    for (const row of Array.isArray(record.sources) ? record.sources : []) {
+      const name = asName(row?.name);
+      exhausted.set(name, exhausted.has(name) ? false : row?.exhausted === true);
+    }
+    const declared = Array.isArray(record.unreachable) ? record.unreachable.map(asName) : [...sources];
+    const unread = [...new Set([...declared, ...sources.filter((name) => exhausted.get(name) !== true)])].filter(Boolean);
+    if (record.complete !== false || unread.length === 0) return "authoritative_reach_claim_refused";
+    if (!Array.isArray(record.consumers)) return "consumers_invalid";
+    const consumers = [];
+    const seen = new Set();
+    for (const value of record.consumers) {
+      if (!plain(value)) return "consumers_invalid";
+      const consumer = { course_id: String(value.course_id || ""), entity_type: String(value.entity_type || ""), entity_id: String(value.entity_id || "") };
+      if (!/^[1-9][0-9]*$/.test(consumer.course_id) || !/^[a-z][a-z0-9_]{0,63}$/.test(consumer.entity_type)
+        || !/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(consumer.entity_id)) return "consumers_invalid";
+      const key = `${consumer.course_id} ${consumer.entity_type} ${consumer.entity_id}`;
+      if (seen.has(key)) return "consumers_invalid";
+      seen.add(key);
+      consumers.push(consumer);
+    }
+    consumers.sort((left, right) => compareIds(left.course_id, right.course_id)
+      || compareText(left.entity_type, right.entity_type) || compareText(left.entity_id, right.entity_id));
+    if (record.consumer_count !== consumers.length) return "consumer_count_mismatch";
+    if (!/^[0-9a-f]{64}$/.test(String(record.consumers_sha256 || "")) || record.consumers_sha256 !== await digest(consumers)) return "consumers_digest_mismatch";
+    const established = Date.parse(String(record.established_at || ""));
+    if (!/(?:Z|[+-][0-9]{2}:?[0-9]{2})$/i.test(String(record.established_at || "")) || !Number.isFinite(established)) return "established_at_unreadable";
+    if (established > Date.now()) return "record_from_future";
+    if (Date.now() - established > 60 * 60 * 1_000) return "record_too_old";
+    const external = [...new Set(consumers.map((value) => value.course_id))].filter((value) => value !== course).sort(compareIds);
+    if (!Array.isArray(record.external_course_ids) || stable(record.external_course_ids) !== stable(external)) return "external_course_ids_mismatch";
+    if (!Array.isArray(acknowledged) || !acknowledged.every((value) => /^[1-9][0-9]*$/.test(String(value)))
+      || stable(acknowledged.map(String).sort(compareIds)) !== stable(external)) return "acknowledgement_mismatch";
+    return null;
+  };
+  const verifyCourseAssociation = async () => {
+    const requestedBank = id(input.arguments?.bank_id);
+    if (!requestedBank) return { matched: true, ok: false, sent: false, error: "bank_id is required" };
+    let associated = false;
+    let exhausted = false;
+    for (let page = 1; page <= 25; page += 1) {
+      let response;
+      try {
+        const associationQuery = new URLSearchParams({ course_id: contextUuid, page: String(page), per_page: "100" });
+        response = await fetch(`https://${apiHost}/api/banks?${associationQuery}`, {
+          method: "GET", headers, credentials: "omit", redirect: "error",
+        });
+      } catch {
+        return { matched: true, ok: false, sent: false, outcomeUnknown: false, error: "item_bank_course_association_unreadable" };
+      }
+      const read = await boundedResponseText(response);
+      if (!response.ok || read.unreadable || read.oversize) {
+        return { matched: true, ok: false, sent: false, status: response.status, outcomeUnknown: false, error: "item_bank_course_association_unreadable" };
+      }
+      let rows;
+      try { rows = read.text ? JSON.parse(read.text) : null; } catch { rows = null; }
+      if (!Array.isArray(rows) || rows.some((row) => !row || typeof row !== "object" || Array.isArray(row) || !id(row.id))) {
+        return { matched: true, ok: false, sent: false, status: response.status, outcomeUnknown: false, error: "item_bank_course_association_unreadable" };
+      }
+      if (rows.some((row) => id(row.id) === requestedBank)) {
+        associated = true;
+        break;
+      }
+      if (rows.length === 0) {
+        exhausted = true;
+        break;
+      }
+    }
+    if (associated) return null;
+    return exhausted
+      ? { matched: true, ok: false, sent: false, error: "item_bank_course_association_unverified" }
+      : { matched: true, ok: false, sent: false, outcomeUnknown: false, error: "item_bank_course_association_unreadable" };
+  };
+  const bankSpecific = !["list_banks", "create_bank"].includes(operation.nickname);
+  if (bankSpecific && !guardedUpdate) {
+    const associationRefusal = await verifyCourseAssociation();
+    if (associationRefusal) return associationRefusal;
+  }
+  if (operation.method !== "GET" && !guardedUpdate) {
+    if (operation.nickname !== "create_bank") {
+      const fanOutReason = await validObservedFanOut(input.arguments?.fan_out, String(input.arguments?.bank_id || ""), input.courseId, input.arguments?.acknowledged_course_ids);
+      if (fanOutReason) return { matched: true, ok: false, sent: false, error: `item_bank_fan_out_${fanOutReason}` };
+    }
+    const request = async (method, requestPath, requestBody) => {
+      let response;
+      try {
+        response = await fetch(`https://${apiHost}${requestPath}`, {
+          method,
+          headers: requestBody === undefined ? headers : { ...headers, "Content-Type": "application/json" },
+          credentials: "omit",
+          redirect: "error",
+          ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }),
+        });
+      } catch {
+        return { transport: true };
+      }
+      const read = await boundedResponseText(response);
+      if (read.unreadable) return { transport: true, status: response.status };
+      if (read.oversize) return { oversize: true, status: response.status };
+      let data = null;
+      let parsed = true;
+      try { data = read.text ? JSON.parse(read.text) : null; } catch { data = read.text; parsed = false; }
+      return { ok: response.ok, status: response.status, data, parsed };
+    };
+    const readableObject = (result) => Boolean(result?.ok) && result.parsed === true
+      && Boolean(result.data) && typeof result.data === "object" && !Array.isArray(result.data);
+    const readObject = async (requestPath) => await request("GET", requestPath);
+    const readList = async (requestPath, baseQuery = {}) => {
+      const rows = [];
+      for (let page = 1; page <= 25; page += 1) {
+        const listQuery = new URLSearchParams({ ...baseQuery, page: String(page), per_page: "100" });
+        const result = await request("GET", `${requestPath}?${listQuery}`);
+        if (!result.ok || result.parsed !== true || !Array.isArray(result.data)) return { error: result };
+        if (result.data.length === 0) return { rows };
+        rows.push(...result.data);
+      }
+      return { error: { capped: true } };
+    };
+    const readObservedList = async (requestPath) => {
+      // Canvas share pagination is not established. This reads one unpaged
+      // response, so every digest and duplicate check built from it covers
+      // the rows observed, never a complete share list.
+      const result = await request("GET", requestPath);
+      return result.ok && result.parsed === true && Array.isArray(result.data) ? { rows: result.data } : { error: result };
+    };
+    const plain = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
+    const snapshot = input.arguments?.expected_snapshot;
+    const snapshotKeys = ["banks_sha256", "bank_sha256", "item_sha256", "entries_sha256", "entry_sha256", "shares_sha256"];
+    const requiredSnapshots = {
+      create_bank: ["banks_sha256"],
+      rename_bank: ["bank_sha256"],
+      archive_bank: ["bank_sha256", "entries_sha256", "shares_sha256"],
+      attach_item: ["bank_sha256", "item_sha256", "entries_sha256"],
+      create_item: ["bank_sha256"],
+      update_item: ["bank_sha256", "item_sha256"],
+      delete_entry: ["bank_sha256", "entry_sha256", "entries_sha256"],
+      share_bank: ["bank_sha256", "shares_sha256"],
+    }[operation.nickname] || [];
+    const validDigest = (value) => typeof value === "string" && /^[0-9a-f]{64}$/.test(value);
+    if (!plain(snapshot) || Object.keys(snapshot).some((key) => !snapshotKeys.includes(key))
+      || requiredSnapshots.some((key) => !validDigest(snapshot[key]))) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_invalid" };
+    }
+    const preflight = {};
+    const before = {};
+    const bankId = id(input.arguments?.bank_id);
+    const itemId = id(input.arguments?.item_id);
+    const entryId = id(input.arguments?.bank_entry_id);
+    if (snapshot.banks_sha256) {
+      const list = await readList("/api/banks", { course_id: contextUuid });
+      if (list.error) return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_unreadable" };
+      before.banks = sanitize(list.rows);
+      preflight.banks_sha256 = await digest(before.banks);
+    }
+    if (snapshot.bank_sha256) {
+      const result = await readObject(`/api/banks/${encodeURIComponent(bankId)}`);
+      if (!readableObject(result)) return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_unreadable" };
+      before.bank = sanitize(result.data);
+      preflight.bank_sha256 = await digest(before.bank);
+    }
+    if (snapshot.item_sha256) {
+      const result = await readObject(`/api/banks/${encodeURIComponent(bankId)}/items/${encodeURIComponent(itemId)}`);
+      if (!readableObject(result)) return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_unreadable" };
+      before.item = sanitize(result.data);
+      preflight.item_sha256 = await digest(before.item);
+    }
+    if (snapshot.entries_sha256) {
+      const list = await readList(`/api/banks/${encodeURIComponent(bankId)}/bank_entries`);
+      if (list.error) return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_unreadable" };
+      before.entries = sanitize(list.rows);
+      preflight.entries_sha256 = await digest(before.entries);
+    }
+    if (snapshot.entry_sha256) {
+      const result = await readObject(`/api/banks/${encodeURIComponent(bankId)}/bank_entries/${encodeURIComponent(entryId)}`);
+      if (!readableObject(result)) return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_unreadable" };
+      before.entry = sanitize(result.data);
+      preflight.entry_sha256 = await digest(before.entry);
+    }
+    if (snapshot.shares_sha256) {
+      // The pinned digest covers the share rows one unpaged read observed,
+      // not a complete share list: the same caveat the read tool reports.
+      const list = await readObservedList(`/api/banks/${encodeURIComponent(bankId)}/shared_banks`);
+      if (list.error) return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_unreadable" };
+      before.shares = sanitize(list.rows);
+      preflight.shares_sha256 = await digest(before.shares);
+    }
+    // Every digest the reviewer sent is compared, not only the required ones. A
+    // reviewer who pins more state than the minimum gets that state honoured.
+    if (Object.keys(snapshot).some((key) => preflight[key] !== snapshot[key])) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_snapshot_changed" };
+    }
+    // The one media judgement that needs both questions: the reviewed payload
+    // against the exact stored question this write is pinned to. A problem the
+    // question already has stays the question's; a problem this change would
+    // add stops the write before dispatch.
+    if (updateMediaCheck) {
+      const stored = plain(before.item) ? before.item : null;
+      const added = stored === null ? "media_image_alt_missing" : newMediaReason(body.item, stored);
+      if (added) return { matched: true, ok: false, sent: false, error: `item_bank_payload_${added}` };
+    }
+    if (operation.nickname === "create_bank" && (before.banks || []).some((row) => String(row?.title) === String(formValues.title)
+      && String(row?.language || "en") === String(formValues.language || "en"))) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_create_recovery_ambiguous" };
+    }
+    if (operation.nickname === "attach_item" && (before.entries || []).some((row) => String(row?.entry_type) === "Item"
+      && String(row?.entry_id) === String(formValues.item_id))) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_item_already_attached" };
+    }
+    if (operation.nickname === "share_bank" && (before.shares || []).some((row) => shareEntityId(row) === String(formValues.entity_id)
+      && shareEntityType(row) === "course" && String(row?.permission) === "read")) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_share_already_present" };
+    }
+
+    const written = await request(operation.method, path, body);
+    const clearRefusal = Number.isInteger(written.status) && written.status >= 400 && written.status < 500 && written.status !== 408 && written.status !== 429;
+    if (clearRefusal) return { matched: true, ok: false, sent: true, status: written.status, data: sanitize(written.data), apiHost, outcomeUnknown: false };
+
+    const base = { schema: "morrow.browser-verification.v1", strategy: `item-bank-${operation.nickname}-readback` };
+    const unconfirmed = (reason = "item_bank_readback_unavailable") => ({ ...base, status: "unconfirmed", reason });
+    const mismatch = (reason) => ({ ...base, status: "mismatch", reason });
+    const subset = (actual, expected) => {
+      if (Array.isArray(expected)) return Array.isArray(actual) && actual.length === expected.length && expected.every((value, index) => subset(actual[index], value));
+      if (plain(expected)) return plain(actual) && Object.entries(expected).every(([key, value]) => subset(actual[key], value));
+      return Object.is(actual, expected);
+    };
+    let verification;
+    try {
+      if (operation.nickname === "create_bank") {
+        const created = plain(written.data?.bank) ? written.data.bank : written.data;
+        // The only identity Morrow accepts for the bank it just created is an id
+        // Canvas returned. A title and a language are a label a person chose, not
+        // an identity: when this response carries no id, relisting the course and
+        // taking the one new row that matches cannot say which row is Morrow's.
+        // Another person creating the same title in the same course inside this
+        // window, or the same person retrying in the Canvas UI after Morrow
+        // appeared to fail, leaves a row Morrow did not create, and the readback
+        // below would confirm its title, language and course association, all of
+        // which match by construction, and report it verified with its id as the
+        // target for every later operation. A create that cannot name its own
+        // result says so instead of guessing. `create_item` answers the same
+        // question the same way.
+        const createdId = id(created?.id);
+        const saved = createdId ? await readObject(`/api/banks/${createdId}`) : null;
+        const associated = createdId ? await readList("/api/banks", { course_id: contextUuid }) : null;
+        verification = !createdId ? unconfirmed("created_bank_id_not_returned")
+          : !readableObject(saved) || !associated || associated.error ? unconfirmed()
+          : String(saved.data.title) !== String(formValues.title) ? mismatch("created_bank_title_did_not_match")
+            : String(saved.data.language) !== String(formValues.language || "en") ? mismatch("created_bank_language_did_not_match")
+              : !associated.rows.some((row) => id(row?.id) === createdId) ? mismatch("created_bank_course_association_not_found")
+                : { ...base, status: "verified", evidence: "created_bank_fields_and_selected_course_association_reread", targetId: createdId };
+      } else if (operation.nickname === "rename_bank") {
+        const saved = await readObject(path);
+        verification = !readableObject(saved) ? unconfirmed()
+          : String(saved.data.title) === String(formValues.title) ? { ...base, status: "verified", evidence: "renamed_bank_reread" }
+            : mismatch("renamed_bank_title_did_not_match");
+      } else if (operation.nickname === "archive_bank") {
+        const saved = await readObject(path);
+        const list = await readList("/api/banks", { course_id: contextUuid });
+        verification = saved?.status === 404 && !list.error && !list.rows.some((row) => id(row?.id) === bankId)
+          ? { ...base, status: "verified", evidence: "bank_absent_from_exact_read_and_course_bank_list" }
+          : saved?.transport || list.error ? unconfirmed() : mismatch("bank_still_present_after_delete");
+      } else if (operation.nickname === "create_item") {
+        const created = plain(written.data?.item) ? written.data.item : written.data;
+        const createdId = id(created?.id);
+        const saved = createdId ? await readObject(`/api/banks/${bankId}/items/${createdId}`) : null;
+        const expected = plain(body?.item) ? body.item : null;
+        verification = !createdId || !readableObject(saved) ? unconfirmed()
+          : expected && (subset(saved.data, expected) || subset(saved.data.item, expected))
+            ? { ...base, status: "verified", evidence: "created_item_reread_by_returned_id", targetId: createdId }
+            : mismatch("created_item_did_not_match_payload");
+      } else if (operation.nickname === "update_item") {
+        const saved = await readObject(path);
+        const expected = plain(body?.item) ? body.item : null;
+        verification = !readableObject(saved) ? unconfirmed()
+          : expected && (subset(saved.data, expected) || subset(saved.data.item, expected))
+            ? { ...base, status: "verified", evidence: "updated_item_reread" }
+            : mismatch("updated_item_did_not_match_payload");
+      } else if (operation.nickname === "attach_item") {
+        const created = plain(written.data?.bank_entry) ? written.data.bank_entry : written.data;
+        let createdId = id(created?.id);
+        if (!createdId) {
+          const listed = await readList(`/api/banks/${bankId}/bank_entries`);
+          const beforeIds = new Set((before.entries || []).map((row) => id(row?.id)).filter(Boolean));
+          const candidates = listed.error ? [] : listed.rows.filter((row) => !beforeIds.has(id(row?.id))
+            && String(row?.entry_type) === "Item" && String(row?.entry_id) === String(formValues.item_id));
+          if (candidates.length === 1) createdId = id(candidates[0]?.id);
+        }
+        const saved = createdId ? await readObject(`/api/banks/${bankId}/bank_entries/${createdId}`) : null;
+        verification = !createdId || !readableObject(saved) ? unconfirmed()
+          : String(saved.data.entry_type) === "Item" && String(saved.data.entry_id) === String(formValues.item_id)
+            ? { ...base, status: "verified", evidence: "attached_entry_reread_by_returned_id", targetId: createdId }
+            : mismatch("attached_entry_did_not_match_item");
+      } else if (operation.nickname === "delete_entry") {
+        const saved = await readObject(path);
+        const list = await readList(`/api/banks/${bankId}/bank_entries`);
+        verification = saved?.status === 404 && !list.error && !list.rows.some((row) => id(row?.id) === entryId)
+          ? { ...base, status: "verified", evidence: "entry_absent_from_exact_read_and_bank_entry_list" }
+          : saved?.transport || list.error ? unconfirmed() : mismatch("bank_entry_still_present_after_delete");
+      } else if (operation.nickname === "share_bank") {
+        const list = await readObservedList(`/api/banks/${bankId}/shared_banks`);
+        verification = list.error ? unconfirmed()
+          : list.rows.some((row) => shareEntityId(row) === String(formValues.entity_id)
+            && shareEntityType(row) === "course" && String(row?.permission) === "read")
+            ? { ...base, status: "verified", evidence: "exact_course_read_share_found" }
+            : mismatch("course_read_share_not_found");
+      } else {
+        verification = unconfirmed("item_bank_readback_contract_missing");
+      }
+    } catch {
+      verification = unconfirmed();
+    }
+    return {
+      matched: true,
+      ok: verification.status === "verified",
+      sent: true,
+      ...(Number.isInteger(written.status) ? { status: written.status } : {}),
+      apiHost,
+      outcomeUnknown: verification.status !== "verified",
+      verification,
+      ...(!written.ok && verification.status !== "verified" ? { error: written.oversize ? "item_bank_response_too_large" : "item_bank_request_failed" } : {}),
+    };
+  }
   if (guardedUpdate) {
-    // One guarded Item Bank question repair: read the question, change one
-    // image's alternative text, send exactly one PATCH, read the question
-    // again. Nothing is sent until every check below passes, and nothing is
-    // ever sent twice — a repeat on a shared bank would reach every course
-    // that draws from it.
+    // Defensive validation for a legacy guarded accessibility repair. Current
+    // generic updates carry the same observed reach acknowledgement at the top
+    // level, while this older shape retains it inside the frozen guard.
     //
     // Every rule here is copied from connector/extension/src/item-bank-guard.js
     // and connector/extension/src/item-bank-fan-out.js, because Chrome injects
@@ -556,7 +971,7 @@ export async function executeItemBankInPage(input) {
       if (record.schema !== FAN_OUT_SCHEMA) return "wrong_schema";
       if (record.bank_id !== bank) return "bank_mismatch";
       if (record.course_id !== course) return "course_mismatch";
-      if (record.complete !== true || unreadSources(record).length > 0) return "incomplete_unread_source_is_not_an_empty_fan_out";
+      if (record.complete !== false || unreadSources(record).length === 0) return "authoritative_reach_claim_refused";
       const consumers = normalizeConsumers(record.consumers);
       if (consumers === null) return "consumers_invalid";
       if (record.consumer_count !== consumers.length) return "consumer_count_mismatch";
@@ -612,6 +1027,10 @@ export async function executeItemBankInPage(input) {
       }
       return false;
     };
+    const entryMatchesTarget = (entry, bankEntryId, bankId, itemId) => plain(entry)
+      && String(entry.id ?? "") === bankEntryId
+      && (entry.bank_id === undefined || String(entry.bank_id) === bankId)
+      && entryLinksItem(entry, itemId);
 
     const contentImages = (value) => {
       const images = [];
@@ -716,6 +1135,8 @@ export async function executeItemBankInPage(input) {
     }
     const fanOutReason = await validFanOut(guard.fan_out, guard.bank_id, guard.course_id, guard.acknowledged_course_ids, Date.now());
     if (fanOutReason) return refuse(`item_bank_fan_out_${fanOutReason}`);
+    const associationRefusal = await verifyCourseAssociation();
+    if (associationRefusal) return associationRefusal;
     const entryPath = `/api/banks/${encodeURIComponent(guard.bank_id)}/bank_entries/${encodeURIComponent(guard.bank_entry_id)}`;
     if (!/^\/api\/banks(?:[/?#]|$)/.test(entryPath) || entryPath.includes("://") || entryPath.split("/").includes("..")) return refuse("item_bank_path_refused");
 
@@ -751,14 +1172,19 @@ export async function executeItemBankInPage(input) {
     const readItem = await request("GET", path);
     if (!readable(readItem)) return refuse("item_bank_source_unavailable");
     const current = readItem.data;
-    if (await digest(stable(current)) !== guard.item_sha256) return refuse("item_bank_source_changed");
+    // Every Item Bank read Morrow returns is sanitized, so the only digest a
+    // reviewer can hold is the digest of the sanitized question. Compare that
+    // same form here. The change Morrow sends is still the whole question
+    // Canvas returned, with one image body replaced.
+    if (await digest(stable(sanitize(current))) !== guard.item_sha256) return refuse("item_bank_source_changed");
     if (current.entry_type !== "Item" || String(current.id) !== guard.item_id
       || !plain(current.entry) || typeof current.entry.item_body !== "string") return refuse("item_bank_item_shape_unsupported");
 
     // Resolve the bank entry itself. A list row is not an item, so the entry is
     // read whole and must name this exact question.
     const readEntry = await request("GET", entryPath);
-    if (!readable(readEntry) || !entryLinksItem(readEntry.data, guard.item_id)) return refuse("item_bank_entry_unresolved");
+    if (!readable(readEntry)
+      || !entryMatchesTarget(readEntry.data, guard.bank_entry_id, guard.bank_id, guard.item_id)) return refuse("item_bank_entry_unresolved");
 
     const applied = await applyImageAlt(current.entry.item_body, guard);
     if (applied.error) return refuse(applied.error);
@@ -774,7 +1200,7 @@ export async function executeItemBankInPage(input) {
     if (currentIds === null || proposedIds === null) return refuse("item_bank_interaction_ids_unreadable");
     if (!sameList(currentIds, proposedIds)) return refuse("item_bank_interaction_ids_changed");
 
-    const proposedProtected = protectedState(proposed);
+    const proposedProtected = protectedState(sanitize(proposed));
     if (proposedProtected === null || await digest(stable(proposedProtected)) !== guard.protected_state_sha256) return refuse("item_bank_protected_state_changed");
 
     // One dispatch. No loop, no in-frame retry: a repeat could apply the change
@@ -809,7 +1235,7 @@ export async function executeItemBankInPage(input) {
       if (saved.entry_type !== "Item" || String(saved.id) !== guard.item_id || !plain(saved.entry) || typeof saved.entry.item_body !== "string") return mismatch("saved_item_did_not_match_target");
       const savedIds = interactionIds(saved);
       if (savedIds === null || !sameList(savedIds, proposedIds)) return mismatch("item_bank_interaction_ids_changed");
-      const savedProtected = protectedState(saved);
+      const savedProtected = protectedState(sanitize(saved));
       if (savedProtected === null || await digest(stable(savedProtected)) !== guard.protected_state_sha256) return mismatch("saved_protected_state_did_not_match");
       if (savedBodySha256 !== expectedBodySha256) return mismatch("saved_item_body_did_not_match");
       if (!await imageAltPresent(savedBody, guard)) return mismatch("saved_image_alt_reaudit_did_not_match");
@@ -825,17 +1251,23 @@ export async function executeItemBankInPage(input) {
     // the outcome, so none of that content travels back out of the frame.
     return {
       matched: true,
-      ok: true,
+      ok: verification.status === "verified",
       sent: true,
       status: written.status,
       apiHost,
-      outcomeUnknown: verification.status === "unconfirmed",
+      outcomeUnknown: verification.status !== "verified",
       verification,
     };
   }
-  const pageParameter = operation.method === "GET" && ["list_banks", "list_entries", "list_shares"].includes(operation.nickname)
+  const pageParameter = operation.method === "GET" && ["list_banks", "list_entries"].includes(operation.nickname)
     ? operation.parameters.find((parameter) => parameter.inputName === "page")
     : null;
+  // The pre-write snapshot reads every bank list with per_page=100. A read that
+  // paged differently would cover a different set of rows at scale and its
+  // snapshotSha256 could never match the digest the frame recomputes, so both
+  // sides use one page size unless the caller names its own.
+  const perPageParameter = pageParameter ? operation.parameters.find((parameter) => parameter.inputName === "per_page") : null;
+  if (perPageParameter && !query.has(perPageParameter.wireName)) query.set(perPageParameter.wireName, "100");
   const requestedStartPage = Number(query.get(pageParameter?.wireName || "") || 1);
   const startPage = Number.isInteger(requestedStartPage) && requestedStartPage > 0 ? requestedStartPage : 1;
   const requestedMaxPages = Number(input.arguments?.morrow_max_pages || 25);
@@ -874,7 +1306,9 @@ export async function executeItemBankInPage(input) {
     truncated = offset + 1 === maxPages;
   }
   const collection = pages.length === 1 ? pages[0] : pages.flatMap((page) => Array.isArray(page) ? page : [page]);
+  const safeCollection = sanitize(collection);
   const collectionRead = operation.method === "GET" && ["list_banks", "list_entries", "list_shares"].includes(operation.nickname);
+  const sharePaginationUnestablished = operation.nickname === "list_shares";
   const dataTruncated = collectionRead && Array.isArray(collection) && collection.length > 10_000;
   const collectionShapeUnknown = collectionRead && pages.some((page) => !Array.isArray(page));
   return {
@@ -882,12 +1316,14 @@ export async function executeItemBankInPage(input) {
     ok: true,
     sent: true,
     status,
-    data: sanitize(collection),
+    data: safeCollection,
+    snapshotSha256: await digest(safeCollection),
     apiHost,
     outcomeUnknown: false,
     ...(collectionRead ? {
       ...(pageParameter ? { pageCount: pages.length } : {}),
-      truncated: truncated || dataTruncated || collectionShapeUnknown,
-    } : {}),
+      truncated: truncated || dataTruncated || collectionShapeUnknown || sharePaginationUnestablished,
+      ...(sharePaginationUnestablished ? { paginationComplete: false, paginationUnestablished: true } : {}),
+    } : operation.method === "GET" ? { truncated: false } : {}),
   };
 }

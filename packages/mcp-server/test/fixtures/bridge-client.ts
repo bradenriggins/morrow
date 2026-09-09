@@ -54,6 +54,8 @@ export class BridgeTimeoutError extends Error {
 }
 
 export interface BridgeTestClientOptions {
+  /** Synthetic datasets have no deleted enrollments unless this fixture overrides them. False routes history to onCommand. */
+  readonly deletedEnrollmentHistory?: false | ((command: BridgeCommand) => JsonObject);
   readonly port: number;
   readonly token: string;
   readonly extensionId: string;
@@ -92,7 +94,7 @@ export class BridgeTestClient {
   private closeInfo: BridgeCloseInfo | null = null;
   private socketError: Error | null = null;
 
-  constructor(readonly socket: WebSocket, private readonly timeoutMs: number) {
+  constructor(readonly socket: WebSocket, private readonly timeoutMs: number, private readonly deletedEnrollmentHistory?: false | ((command: BridgeCommand) => JsonObject)) {
     socket.on("message", (raw) => this.receive(raw.toString()));
     socket.on("error", (error: Error) => {
       this.socketError = new Error(`the bridge socket failed: ${error.message}`);
@@ -254,6 +256,15 @@ export class BridgeTestClient {
         waiter.settle(command);
         continue;
       }
+      if (this.deletedEnrollmentHistory !== false && command.kind === "invoke_read"
+        && command.toolName === "canvas_list_enrollments_courses" && Array.isArray(command.arguments.state)
+        && command.arguments.state.length === 1 && command.arguments.state[0] === "deleted") {
+        this.commands.shift();
+        this.respond(command, this.deletedEnrollmentHistory ? this.deletedEnrollmentHistory(command) : {
+          schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200, truncated: false, pageCount: 1, data: [],
+        });
+        continue;
+      }
       if (this.handlers.size === 0) return;
       this.commands.shift();
       for (const handler of this.handlers) handler(command);
@@ -309,7 +320,7 @@ export async function connectBridgeTestClient(options: BridgeTestClientOptions):
   const socket = new WebSocket(`ws://127.0.0.1:${options.port}${BRIDGE_PATH}`, {
     origin: options.origin ?? `chrome-extension://${options.extensionId}`,
   });
-  const client = new BridgeTestClient(socket, options.timeoutMs ?? BRIDGE_TEST_WAIT_MS);
+  const client = new BridgeTestClient(socket, options.timeoutMs ?? BRIDGE_TEST_WAIT_MS, options.deletedEnrollmentHistory);
   try {
     await client.opened();
     socket.send(serializeBridgeMessage({

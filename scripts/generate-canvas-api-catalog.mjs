@@ -39,7 +39,7 @@ function ascii(left, right) {
 }
 
 function cleanText(value, maximum = 4_000) {
-  return String(value || "").replace(/\s+/g, " ").trim().slice(0, maximum);
+  return String(value || "").replace(/\u2014/g, ":").replace(/\s+/g, " ").trim().slice(0, maximum);
 }
 
 function safeName(value) {
@@ -225,12 +225,51 @@ function classicQuizAnswersParameter(parameter) {
 // https://developerdocs.instructure.com/services/canvas/resources/new_quizzes
 function newQuizSettingsParameter(parameter) {
   if (parameter.location !== "form") return parameter;
+  const allowed = new Map([
+    ["quiz_report[report_type]", ["student_analysis", "item_analysis"]],
+    ["quiz_report[format]", ["csv", "json"]],
+    ["quiz[grading_type]", ["pass_fail", "percent", "letter_grade", "gpa_scale", "points"]],
+    ["quiz[quiz_settings][calculator_type]", [null, "none", "basic", "scientific"]],
+    ["quiz[quiz_settings][multiple_attempts][score_to_keep]", ["average", "first", "highest", "latest"]],
+    ["quiz[quiz_settings][one_at_a_time_type]", ["none", "question"]],
+    ["quiz[quiz_settings][result_view_settings][display_item_response_qualifier]", ["always", "once_per_attempt", "after_last_attempt", "once_after_last_attempt"]],
+    ["quiz[quiz_settings][result_view_settings][display_item_response_correctness_qualifier]", ["always", "after_last_attempt"]],
+    ["item[entry_type]", ["Item"]],
+    ["item[entry][calculator_type]", ["none", "basic", "scientific"]],
+    ["item[entry][interaction_type_slug]", ["multi-answer", "matching", "categorization", "file-upload", "formula", "ordering", "rich-fill-blank", "hot-spot", "choice", "numeric", "true-false", "essay"]],
+  ]);
+  if (["extra_time", "extra_attempts"].includes(parameter.wireName)) {
+    const maximum = parameter.wireName === "extra_time" ? { maximum: 10_080 } : {};
+    return { ...parameter, schema: { description: parameter.schema.description, type: "integer", minimum: 0, ...maximum } };
+  }
+  const positive = new Set([
+    "quiz[points_possible]",
+    "quiz[quiz_settings][session_time_limit_in_seconds]",
+    "quiz[quiz_settings][multiple_attempts][max_attempts]",
+    "quiz[quiz_settings][multiple_attempts][cooling_period_seconds]",
+    "item[points_possible]",
+  ]);
+  if (parameter.wireName === "item[position]") {
+    const { pattern: _pattern, ...positionSchema } = parameter.schema;
+    return { ...parameter, schema: { ...positionSchema, type: "integer", exclusiveMinimum: 0 } };
+  }
+  const dateTimes = new Set([
+    "quiz[due_at]", "quiz[lock_at]", "quiz[unlock_at]",
+    "quiz[quiz_settings][result_view_settings][show_item_responses_at]",
+    "quiz[quiz_settings][result_view_settings][hide_item_responses_at]",
+    "quiz[quiz_settings][result_view_settings][show_item_response_correctness_at]",
+    "quiz[quiz_settings][result_view_settings][hide_item_response_correctness_at]",
+  ]);
   const nullable = new Set([
     "quiz[quiz_settings][calculator_type]",
     "quiz[quiz_settings][student_access_code]",
     "quiz[quiz_settings][session_time_limit_in_seconds]",
     "quiz[quiz_settings][multiple_attempts][max_attempts]",
     "quiz[quiz_settings][multiple_attempts][cooling_period_seconds]",
+    "quiz[quiz_settings][result_view_settings][show_item_responses_at]",
+    "quiz[quiz_settings][result_view_settings][hide_item_responses_at]",
+    "quiz[quiz_settings][result_view_settings][show_item_response_correctness_at]",
+    "quiz[quiz_settings][result_view_settings][hide_item_response_correctness_at]",
   ]);
   if (["quiz[quiz_settings][filters][ips]", "quiz[quiz_settings][filters][ips][]"].includes(parameter.wireName)) {
     return {
@@ -242,9 +281,12 @@ function newQuizSettingsParameter(parameter) {
       },
     };
   }
-  return nullable.has(parameter.wireName)
-    ? { ...parameter, schema: { ...parameter.schema, type: [parameter.schema.type, "null"] } }
-    : parameter;
+  let schema = parameter.schema;
+  if (nullable.has(parameter.wireName)) schema = { ...schema, type: [schema.type, "null"] };
+  if (allowed.has(parameter.wireName)) schema = { ...schema, enum: [...allowed.get(parameter.wireName)] };
+  if (positive.has(parameter.wireName)) schema = { ...schema, exclusiveMinimum: 0 };
+  if (dateTimes.has(parameter.wireName)) schema = { ...schema, format: "date-time" };
+  return schema === parameter.schema ? parameter : { ...parameter, schema };
 }
 
 function createModuleItemInputSchema(parameters) {
@@ -382,7 +424,9 @@ function itemBankOperation({ name, method, path, summary, parameters, destructiv
       : parameter
   ));
   return {
-    key: `ITEM_BANK ${method} ${path}`,
+    // Several verified Item Bank actions share one private route. The nickname
+    // keeps every operation addressable in admission and recovery tables.
+    key: `ITEM_BANK ${method} ${path}#${name}`,
     toolName: `canvas_item_bank_${name}`,
     source: "morrow-clean-browser-session-contract",
     service: "item_bank",
@@ -405,22 +449,42 @@ function itemBankOperation({ name, method, path, summary, parameters, destructiv
 const id = (name, required = true) => ({ paramType: "path", name, type: "string", format: "int64", required });
 const form = (name, type = "string", required = false) => ({ paramType: "form", name, type, required });
 const enumForm = (name, values, required = false) => ({ paramType: "form", name, type: "string", enum: values, required });
+const controlId = (name) => ({ paramType: "control", name, type: "string", format: "int64", required: true });
+const itemBankSnapshot = () => ({ paramType: "control", name: "expected_snapshot", type: "object", required: true });
+const itemBankFanOut = () => ({
+  paramType: "control", name: "fan_out", type: "object", required: true,
+  description: "Fresh observed Item Bank reach record from morrow_read_item_bank_fan_out. It reports observed courses and unread sources and does not claim account-wide completeness.",
+});
+const itemBankAcknowledgement = () => ({
+  paramType: "control", name: "acknowledged_course_ids", type: "string[]", required: true,
+  description: "Exact sorted list of observed external numeric Canvas course ids in fan_out.external_course_ids. An empty observed list requires an empty array.",
+});
+const itemBankFanOutReceipt = () => ({
+  paramType: "control", name: "fan_out_receipt", type: "string", required: true,
+  description: "Process-local receipt proving the exact fan_out record came from morrow_read_item_bank_fan_out for this selected course connection.",
+});
+const itemBankImpact = () => [itemBankFanOut(), itemBankFanOutReceipt(), itemBankAcknowledgement()];
 
 function itemBankOperations() {
   return [
-    itemBankOperation({ name: "list_banks", method: "GET", path: "/api/banks", summary: "List New Quizzes item banks.", parameters: [form("course_id"), form("page", "integer"), form("per_page", "integer")] }),
-    itemBankOperation({ name: "get_bank", method: "GET", path: "/api/banks/{bank_id}", summary: "Get one New Quizzes item bank.", parameters: [id("bank_id")] }),
-    itemBankOperation({ name: "list_entries", method: "GET", path: "/api/banks/{bank_id}/bank_entries", summary: "List entries in one New Quizzes item bank.", parameters: [id("bank_id"), form("page", "integer"), form("per_page", "integer")] }),
-    itemBankOperation({ name: "get_entry", method: "GET", path: "/api/banks/{bank_id}/bank_entries/{bank_entry_id}", summary: "Get one New Quizzes item-bank entry.", parameters: [id("bank_id"), id("bank_entry_id")] }),
-    itemBankOperation({ name: "list_shares", method: "GET", path: "/api/banks/{bank_id}/shared_banks", summary: "List the contexts that can use one New Quizzes item bank.", parameters: [id("bank_id"), form("page", "integer"), form("per_page", "integer")] }),
-    itemBankOperation({ name: "create_bank", method: "POST", path: "/api/banks", summary: "Create a New Quizzes item bank.", parameters: [form("title", "string", true)] }),
-    itemBankOperation({ name: "archive_bank", method: "DELETE", path: "/api/banks/{bank_id}", summary: "Archive a New Quizzes item bank.", parameters: [id("bank_id")], destructive: true, note: "Morrow does not send this. An archive needs administrator authority and fresh counts showing zero bank entries and zero uses, and Morrow can establish none of that, so this operation stays held in every configuration. Archive a bank in Canvas instead." }),
-    itemBankOperation({ name: "attach_item", method: "POST", path: "/api/banks/{bank_id}/bank_entries", summary: "Attach an existing New Quizzes item to an item bank.", parameters: [id("bank_id"), form("item_id", "string", true)] }),
-    itemBankOperation({ name: "create_item", method: "POST", path: "/api/banks/{bank_id}/items", summary: "Create a New Quizzes item inside an item bank.", parameters: [id("bank_id"), form("item", "object", true)], note: "This creates a standalone item. The item is not in the bank until attach_item names it, so a bank-entry list read straight after this create cannot confirm it and its absence there is not evidence that nothing was created." }),
-    itemBankOperation({ name: "get_item", method: "GET", path: "/api/banks/{bank_id}/items/{item_id}", summary: "Get one New Quizzes item-bank item.", parameters: [id("bank_id"), id("item_id")] }),
-    itemBankOperation({ name: "update_item", method: "PATCH", path: "/api/banks/{bank_id}/items/{item_id}", summary: "Update a New Quizzes item-bank item.", parameters: [id("bank_id"), id("item_id"), form("item", "object", true)] }),
-    itemBankOperation({ name: "delete_entry", method: "DELETE", path: "/api/banks/{bank_id}/bank_entries/{bank_entry_id}", summary: "Delete an entry from a New Quizzes item bank.", parameters: [id("bank_id"), id("bank_entry_id")], destructive: true, note: "This removes the entry's association with the bank. It does not delete the item and it does not delete the bank." }),
-    itemBankOperation({ name: "share_bank", method: "POST", path: "/api/banks/{bank_id}/shared_banks", summary: "Share a New Quizzes item bank with one exact Canvas context.", parameters: [id("bank_id"), enumForm("entity_type", ["course"], true), form("entity_id", "string", true), enumForm("permission", ["read"])], note: "Only the course entity type and the read permission are verified. Morrow refuses any other share scope before it sends the request." }),
+    itemBankOperation({ name: "list_banks", method: "GET", path: "/api/banks", summary: "List New Quizzes item banks associated with one selected course.", parameters: [form("course_id", "string", true), form("page", "integer"), form("per_page", "integer")] }),
+    itemBankOperation({ name: "get_bank", method: "GET", path: "/api/banks/{bank_id}", summary: "Get one New Quizzes item bank associated with the selected course.", parameters: [id("bank_id"), controlId("course_id")] }),
+    itemBankOperation({ name: "list_entries", method: "GET", path: "/api/banks/{bank_id}/bank_entries", summary: "List entries in one New Quizzes item bank associated with the selected course.", parameters: [id("bank_id"), controlId("course_id"), form("page", "integer"), form("per_page", "integer")] }),
+    itemBankOperation({ name: "get_entry", method: "GET", path: "/api/banks/{bank_id}/bank_entries/{bank_entry_id}", summary: "Get one entry from a New Quizzes item bank associated with the selected course.", parameters: [id("bank_id"), id("bank_entry_id"), controlId("course_id")] }),
+    itemBankOperation({ name: "list_shares", method: "GET", path: "/api/banks/{bank_id}/shared_banks", summary: "Read one observed page of contexts that can use one New Quizzes item bank associated with the selected course.", parameters: [id("bank_id"), controlId("course_id")], note: "Canvas Item Bank share pagination is not established. This read makes one unpaged request and always reports the collection as incomplete." }),
+    itemBankOperation({ name: "create_bank", method: "POST", path: "/api/banks", summary: "Create a New Quizzes item bank.", parameters: [controlId("course_id"), form("title", "string", true), form("language", "string"), itemBankSnapshot()] }),
+    itemBankOperation({ name: "rename_bank", method: "PATCH", path: "/api/banks/{bank_id}", summary: "Rename a New Quizzes item bank.", parameters: [id("bank_id"), controlId("course_id"), form("title", "string", true), itemBankSnapshot(), ...itemBankImpact()] }),
+    itemBankOperation({ name: "archive_bank", method: "DELETE", path: "/api/banks/{bank_id}", summary: "Delete one exact New Quizzes item bank.", parameters: [id("bank_id"), controlId("course_id"), itemBankSnapshot(), ...itemBankImpact()], destructive: true, note: "The retained tool name uses archive for compatibility, but ExamplePlatform's proven route is DELETE and its saved-state result is bank absence. The review shows observed downstream courses and unread reach sources." }),
+    itemBankOperation({ name: "attach_item", method: "POST", path: "/api/banks/{bank_id}/bank_entries", summary: "Attach an existing New Quizzes item to an item bank.", parameters: [id("bank_id"), controlId("course_id"), form("item_id", "string", true), itemBankSnapshot(), ...itemBankImpact()] }),
+    itemBankOperation({ name: "create_item", method: "POST", path: "/api/banks/{bank_id}/items", summary: "Create a standalone New Quizzes item for an item bank.", parameters: [id("bank_id"), controlId("course_id"), form("item", "object", true), itemBankSnapshot(), ...itemBankImpact()], note: "This creates a standalone item. A separately reviewed attach_item operation adds it to the bank entries. The response id is read back exactly. A lost response cannot be reconciled without an item id because this private service exposes no standalone-item listing route." }),
+    itemBankOperation({ name: "get_item", method: "GET", path: "/api/banks/{bank_id}/items/{item_id}", summary: "Get one item from a New Quizzes item bank associated with the selected course.", parameters: [id("bank_id"), id("item_id"), controlId("course_id")] }),
+    itemBankOperation({ name: "update_item", method: "PATCH", path: "/api/banks/{bank_id}/items/{item_id}", summary: "Update a New Quizzes item-bank item.", parameters: [id("bank_id"), id("item_id"), controlId("course_id"), form("item", "object", true), itemBankSnapshot(), ...itemBankImpact()] }),
+    itemBankOperation({ name: "delete_entry", method: "DELETE", path: "/api/banks/{bank_id}/bank_entries/{bank_entry_id}", summary: "Delete an entry from a New Quizzes item bank.", parameters: [id("bank_id"), id("bank_entry_id"), controlId("course_id"), itemBankSnapshot(), ...itemBankImpact()], destructive: true, note: "This removes the entry's association with the bank. It does not delete the standalone item object or the bank." }),
+    itemBankOperation({ name: "share_bank", method: "POST", path: "/api/banks/{bank_id}/shared_banks", summary: "Share a New Quizzes item bank with one exact Canvas course.", parameters: [id("bank_id"), controlId("course_id"), enumForm("entity_type", ["course"], true), form("entity_id", "string", true), enumForm("permission", ["read"]), itemBankSnapshot(), ...itemBankImpact()], note: "Only the course entity type and the read permission are verified. Share update and removal stay absent because no exact route contract is established." }),
+    itemBankOperation({ name: "list_quiz_draws", method: "GET", path: "/api/quizzes/{builder_quiz_id}/quiz_entries", summary: "List the Item Bank draw groups in one exact New Quiz assignment.", parameters: [controlId("course_id"), controlId("assignment_id")], note: "Morrow derives the private quiz id from the selected assignment's fresh New Quiz builder launch. The assignment-bound builder credential remains inside that frame." }),
+    itemBankOperation({ name: "attach_bank_to_quiz", method: "POST", path: "/api/quizzes/{builder_quiz_id}/quiz_entries", summary: "Attach an Item Bank to one exact New Quiz as a random draw or as every item in the bank.", parameters: [controlId("course_id"), controlId("assignment_id"), form("bank_id", "string", true), form("pick_count", "integer"), form("points_per_item", "number", true), form("position", "integer", true), itemBankSnapshot(), ...itemBankImpact()], note: "Morrow derives the private quiz id from the selected assignment's fresh New Quiz builder launch. The fixed Bank payload sets the source bank, points per item, and position. A pick count sets the random draw size as ItemProperties sample_num. Omitting it sends the documented all-items value, sample_num null, and the readback requires that exact saved value." }),
+    itemBankOperation({ name: "attach_bank_entry_to_quiz", method: "POST", path: "/api/quizzes/{builder_quiz_id}/quiz_entries", summary: "Attach one exact Item Bank entry to one exact New Quiz.", parameters: [controlId("course_id"), controlId("assignment_id"), form("bank_id", "string", true), form("bank_entry_id", "string", true), form("points_per_item", "number", true), form("position", "integer", true), itemBankSnapshot(), ...itemBankImpact()], note: "The fixed BankEntry payload names the exact bank-entry row, points, and position. Morrow verifies that row in the selected bank before opening the assignment-bound builder." }),
+    itemBankOperation({ name: "delete_quiz_bank_entry", method: "DELETE", path: "/api/quizzes/{builder_quiz_id}/quiz_entries/{quiz_entry_id}", summary: "Remove one exact Item Bank draw or BankEntry row from one exact New Quiz.", parameters: [controlId("course_id"), controlId("assignment_id"), form("bank_id", "string", true), form("bank_entry_id", "string"), id("quiz_entry_id"), itemBankSnapshot(), ...itemBankImpact()], destructive: true, note: "ExamplePlatform production automation uses this exact builder route and verifies an empty re-list after clearing a quiz. Morrow still requires attended disposable-tenant proof. The complete pre-write list binds the exact row; a BankEntry row also requires its exact bank entry snapshot." }),
   ];
 }
 

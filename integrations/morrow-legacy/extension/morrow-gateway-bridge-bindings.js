@@ -80,6 +80,7 @@ export function resolveMorrowBridgeBinding(sourceBindingId, input = {}) {
         'The requested Morrow source binding is unavailable or no longer unique.',
       );
     }
+    resolveMorrowBridgeCourseId(input, exact[0]);
     return exact[0];
   }
   const courseIds = courseIdsFromArguments(input);
@@ -219,5 +220,10 @@ export function buildMorrowBridgeInputPreview(input = {}) {
 }
 
 export function resolveMorrowBridgeCourseId(input, binding) {
-  return courseIdsFromArguments(input)[0] || bindingCourseId(binding);
+  const requested = courseIdsFromArguments(input);
+  const bound = bindingCourseId(binding);
+  if (!bound || requested.length > 1 || (requested.length === 1 && requested[0] !== bound)) {
+    throw bridgeError('bridge_course_scope_mismatch', 'The request must match one exact bound course.');
+  }
+  return bound;
 }

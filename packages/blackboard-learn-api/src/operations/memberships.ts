@@ -18,7 +18,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
  * one of these and by nothing else, so a caller cannot name a Blackboard account
  * Morrow has not tokenized for this exact course.
  */
-const LEARNER_REFERENCE = /^learner_[A-Za-z0-9_-]{1,160}$/;
+const LEARNER_REFERENCE = /^Student A[1-9][0-9]*$/;
 
 /**
  * One Blackboard course role id, such as `Instructor`, `Student`, or a role an
@@ -85,7 +85,7 @@ const EVIDENCE = {
  * reference is minted inside this server, for this course, so the Gateway holds
  * no entry for it and a field of that name would never reach this source.
  */
-const learnerReferenceInput = z.string().min(1).max(200);
+const learnerReferenceInput = z.string().regex(LEARNER_REFERENCE).max(200);
 
 const membershipScopeInput = scopeInput.extend({ learner_reference: learnerReferenceInput });
 const membershipPatchInput = membershipScopeInput.extend({ patch: patchInput });
@@ -118,7 +118,7 @@ function reviewedReference(value: string): string {
   if (!LEARNER_REFERENCE.test(value)) {
     throw new BlackboardApiError(
       "blackboard_scope_binding_required",
-      "Name the person by the protected reference Morrow returned for them in this Blackboard course (learner_…). Morrow does not accept a Blackboard user id here.",
+      "Name the person by the protected reference Morrow returned for them in this Blackboard course (for example, Student A1). Morrow does not accept a Blackboard user id here.",
     );
   }
   return value;
@@ -189,7 +189,7 @@ function membershipFieldsMatch(record: JsonObject, patch: JsonObject): boolean {
 
 /**
  * A membership change sets a course role, availability, or both. Everything
- * else — the person, the course, the membership record, the enrolment itself —
+ * else, including the person, the course, the membership record, and the enrolment itself,
  * is refused here, before any request.
  */
 function reviewedPatch(value: unknown): JsonObject {
@@ -616,7 +616,7 @@ export const blackboardMembershipsModule: BlackboardOperationModule = {
     blackboardTool({
       name: "blackboard_read_course_membership",
       title: "Read one Blackboard course membership",
-      description: "Read one person's membership of the selected Blackboard Learn course: their course role and whether the membership is available. Name the person by the protected reference the Blackboard roster read returned for them (learner_…); this tool does not accept a Blackboard user id.",
+      description: "Read one person's membership of the selected Blackboard Learn course: their course role and whether the membership is available. Name the person by the protected reference the Blackboard roster read returned for them (for example, Student A1); this tool does not accept a Blackboard user id.",
       private: false,
       gatewayDispatchOnly: false,
       inputSchema: membershipScopeInput,
@@ -654,7 +654,7 @@ export const blackboardMembershipsModule: BlackboardOperationModule = {
     blackboardTool({
       name: "blackboard_plan_membership_patch",
       title: "Plan one Blackboard course membership change",
-      description: "Prepare one change to a person's Blackboard course role, their membership availability, or both, for Morrow review. Name the person by the protected reference the Blackboard roster read returned for them (learner_…). This tool does not send a Blackboard PATCH request, and it never adds a person to a course or removes one.",
+      description: "Prepare one change to a person's Blackboard course role, their membership availability, or both, for Morrow review. Name the person by the protected reference the Blackboard roster read returned for them (for example, Student A1). This tool does not send a Blackboard PATCH request, and it never adds a person to a course or removes one.",
       private: true,
       gatewayDispatchOnly: false,
       inputSchema: membershipPatchInput,

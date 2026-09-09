@@ -4,7 +4,9 @@
 // Chrome injects canvas-content.js as a classic script, so that file keeps
 // a second copy. canvas-new-quiz-item-guard.test.mjs checks both copies.
 
-export const NEW_QUIZ_INTERACTION_ID_GROUPS = Object.freeze(["choices", "questions", "blanks", "entries"]);
+export const NEW_QUIZ_INTERACTION_ID_GROUPS = Object.freeze([
+  "choices", "questions", "blanks", "entries", "categories", "distractors", "word_bank_choices",
+]);
 
 function plainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -33,7 +35,14 @@ export function newQuizInteractionIds(item) {
   const ids = {};
   if (!plainObject(interaction)) return ids;
   for (const group of NEW_QUIZ_INTERACTION_ID_GROUPS) {
-    if (Array.isArray(interaction[group])) ids[group] = interaction[group].map(memberId);
+    const members = interaction[group];
+    if (Array.isArray(members)) {
+      ids[group] = members.map(memberId);
+      continue;
+    }
+    if (plainObject(members)) {
+      ids[group] = Object.entries(members).map(([key, member]) => memberId(member) === key ? key : null);
+    }
   }
   return ids;
 }

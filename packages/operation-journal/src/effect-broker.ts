@@ -886,10 +886,10 @@ export class ProviderEffectBroker {
   }
 
   /**
-   * Keeps the connector's read-only comparator with the operation record after
-   * the write was sent. It is written once, never replaces an existing one, and
-   * only for a record that has actually dispatched, so a later check reads the
-   * route the connector itself chose at the time of the change.
+   * Keeps the connector's read-only comparator with the operation record once
+   * dispatch is reserved. It is written once and never replaces an existing
+   * one. Persisting it before the transport call lets a later process reconcile
+   * a response that was lost with the process.
    */
   recordConnectorReadDescriptor(operationIdValue: string, descriptorValue: unknown): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
@@ -897,7 +897,7 @@ export class ProviderEffectBroker {
     return this.transaction(() => {
       const current = this.get(operationId);
       if (current.connectorReadDescriptor || current.dispatchAttempt < 1) return current;
-      if (!UNRESOLVED_STATES.includes(current.state)) return current;
+      if (current.state !== "dispatching" && !UNRESOLVED_STATES.includes(current.state)) return current;
       this.database.prepare(`
         UPDATE provider_effect_operations
         SET connector_read_descriptor_json=?, updated_at=? WHERE operation_id=?

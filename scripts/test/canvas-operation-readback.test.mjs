@@ -8,7 +8,7 @@ import {
   isCanvasOperationReadback,
   planCanvasOperationReadback,
 } from "../../connector/extension/src/canvas-operation-readback.js";
-import { evaluateBrowserReadback, planBrowserReadback } from "../../connector/extension/generated/canvas-readback-plan.js";
+import { planBrowserReadback } from "../../connector/extension/generated/canvas-readback-plan.js";
 
 const catalog = JSON.parse(readFileSync(new URL("../../artifacts/canvas-api/canvas-api-catalog.json", import.meta.url), "utf8"));
 const catalogOperation = (name) => {
@@ -135,62 +135,26 @@ test("refuses reactivation when the write response cannot bind the same enrollme
   assert.equal(isCanvasOperationReadback(operations[0]), false);
 });
 
-// The extension carries a generated copy of the shared planner. These cases hold that copy to the
-// same Item Bank contract the package tests hold the source to.
-test("the generated planner reads the exact Item Bank item after an item write", () => {
-  const item = { entry: { item_body: "<p>Which vessel carries oxygenated blood?</p>" } };
-  const saved = { id: "502", entry: { item_body: "<p>Which vessel carries oxygenated blood?</p>", position: 3 } };
-
-  const update = planBrowserReadback(catalog.operations, catalogOperation("canvas_item_bank_update_item"), {
-    bank_id: "901",
-    item_id: "502",
-    item,
-  }, { id: "502" });
-  assert.equal(update.readOperation.toolName, "canvas_item_bank_get_item");
-  assert.equal(update.strategy, "updated-resource");
-  assert.deepEqual(update.arguments, { bank_id: "901", item_id: "502" });
-  assert.equal(update.targetId, undefined);
-  assert.equal(evaluateBrowserReadback(update, { ok: true, status: 200, data: saved }).status, "verified");
-  assert.equal(evaluateBrowserReadback(update, {
-    ok: true,
-    status: 200,
-    data: { id: "502", entry: { item_body: "<p>Unchanged.</p>" } },
-  }).status, "mismatch");
-  assert.equal(evaluateBrowserReadback(update, { ok: false, status: 503 }).status, "unconfirmed");
-
-  const create = planBrowserReadback(catalog.operations, catalogOperation("canvas_item_bank_create_item"), {
-    bank_id: "901",
-    item,
-  }, { id: "502" });
-  assert.equal(create.readOperation.toolName, "canvas_item_bank_get_item");
-  assert.equal(create.strategy, "created-resource");
-  assert.deepEqual(create.arguments, { bank_id: "901", item_id: "502" });
-  assert.equal(create.targetId, "502");
-  assert.equal(create.targetField, "id");
-  assert.equal(evaluateBrowserReadback(create, { ok: true, status: 200, data: saved }).status, "verified");
-  // A created item is not a bank entry until attach_item runs, so the create response id is the only
-  // identity the readback can address. Without it there is no plan and the write stays unconfirmed.
-  assert.equal(planBrowserReadback(catalog.operations, catalogOperation("canvas_item_bank_create_item"), { bank_id: "901", item }, {}), null);
-});
-
-test("the generated planner keeps the Item Bank entry list for entry writes only", () => {
-  const planned = catalog.operations
-    .filter((operation) => operation.service === "item_bank" && !operation.readOnly)
-    .map((operation) => [operation.nickname, planBrowserReadback(catalog.operations, operation, {
-      bank_id: "901",
-      item_id: "502",
-      bank_entry_id: "701",
-      entity_type: "course",
-      entity_id: "42",
-      title: "Cardiovascular anatomy",
-    }, { id: "801" })?.readOperation.nickname]);
-  assert.deepEqual(Object.fromEntries(planned), {
-    create_bank: "get_bank",
-    archive_bank: "get_bank",
-    attach_item: "list_entries",
-    create_item: "get_item",
-    update_item: "get_item",
-    delete_entry: "get_entry",
-    share_bank: "list_shares",
-  });
+// Every Item Bank change is proved by the Item Banks frame's own reread, in
+// connector/extension/src/item-bank-executor.js and
+// connector/extension/src/quiz-bank-draw-executor.js. The private /api/banks
+// surface answers only inside that frame, so no readback Morrow runs outside it
+// could reach the changed object. The service worker therefore never asks the
+// generic planner about an Item Bank operation, and no Item Bank write has a
+// named Canvas readback either.
+test("no Item Bank change takes a Canvas readback route outside its own frame", () => {
+  const writes = catalog.operations.filter((operation) => operation.service === "item_bank" && !operation.readOnly);
+  assert.equal(writes.length, 11);
+  for (const write of writes) {
+    assert.equal(isCanvasOperationReadback(write), false, write.toolName);
+    assert.equal(planCanvasOperationReadback(catalog.operations, write, { course_id: "42", bank_id: "901" }, { id: "801" }), null, write.toolName);
+  }
+  // The one line that keeps the generic planner out. If it is removed, a plan
+  // that cannot reach the private bank surface would start deciding whether an
+  // Item Bank change is verified.
+  const worker = readFileSync(new URL("../../connector/extension/src/service-worker.js", import.meta.url), "utf8");
+  assert.match(worker, /const guardedItemBank = operation\.service === "item_bank";/);
+  const selection = worker.slice(worker.indexOf("const plan = guardedCanvasContent"), worker.indexOf("planBrowserReadback(", worker.indexOf("const plan = guardedCanvasContent")));
+  assert.match(selection, /guardedItemBank/, "the readback selection no longer excludes Item Bank operations");
+  assert.match(selection, /\?\s*null\s*:\s*$/, "the excluded branch no longer resolves to no plan");
 });

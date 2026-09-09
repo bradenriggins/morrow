@@ -576,7 +576,7 @@ describe("MorrowRuntime durable batches", () => {
       expect(inventoryText).not.toContain("Rowan Clarke");
       expect(inventoryText).toContain("inventory-41");
       expect(inventoryText).toContain("inventory-43");
-      expect(inventoryText).toMatch(/learner_[\w-]+/);
+      expect(inventoryText).toMatch(/Student A[1-9][0-9]*/);
 
       const compact = await client.callTool({
         name: "morrow_capability_read",
@@ -594,7 +594,7 @@ describe("MorrowRuntime durable batches", () => {
       expect(compactText).not.toContain("Jane Doe");
       expect(compactText).not.toContain("jane.doe@example.edu");
       expect(compactText).toContain("private-audit-body-41");
-      expect(compactText).toMatch(/learner_[\w-]+/);
+      expect(compactText).toMatch(/Student A[1-9][0-9]*/);
 
       const large = await client.callTool({
         name: "morrow_capability_read",
@@ -620,7 +620,7 @@ describe("MorrowRuntime durable batches", () => {
       expect(largePage.isError, largePageText).not.toBe(true);
       expect(largePageText).not.toContain("Jane Doe");
       expect(largePageText).not.toContain("jane.doe@example.edu");
-      expect(largePageText).toMatch(/learner_[\w-]+/);
+      expect(largePageText).toMatch(/Student A[1-9][0-9]*/);
 
       const planned = await second.gateway.planOperationWithCurrentEditPermission("canvas_update_create_page_courses", {
         course_id: "41",
@@ -635,7 +635,7 @@ describe("MorrowRuntime durable batches", () => {
       }, {}, { bound: false, toolName: "morrow_operations_recent" });
       const collectionText = JSON.stringify(collectionEgress);
       expect(collectionText).not.toContain("Jane Doe");
-      expect(collectionText).toMatch(/learner_[\w-]+/);
+      expect(collectionText).toMatch(/Student A[1-9][0-9]*/);
       for (const request of [
         { name: "morrow_operation_get", arguments: { operation_id: operationId }, expectLearnerToken: true },
         { name: "morrow_operation_list", arguments: { limit: 10 }, expectLearnerToken: true },
@@ -647,7 +647,7 @@ describe("MorrowRuntime durable batches", () => {
         expect(result.isError, serialized).not.toBe(true);
         expect(serialized).not.toContain("Jane Doe");
         expect(serialized).not.toContain("jane.doe@example.edu");
-        if (request.expectLearnerToken) expect(serialized).toMatch(/learner_[\w-]+/);
+        if (request.expectLearnerToken) expect(serialized).toMatch(/Student A[1-9][0-9]*/);
       }
     } finally {
       await client?.close();
@@ -1269,7 +1269,7 @@ describe("MorrowRuntime durable batches", () => {
       expect(text).not.toContain("Student 1000");
       expect(maximumRosterInFlight).toBeGreaterThan(1);
       expect(maximumRosterInFlight).toBeLessThanOrEqual(4);
-      expect(callSourceOwned.mock.calls.filter(([tool]) => tool === "morrow_browser_bindings")).toHaveLength(1);
+      expect(callSourceOwned.mock.calls.filter(([tool]) => tool === "morrow_browser_bindings")).toHaveLength(courses.length + 1);
       expect(callSourceOwned.mock.calls.filter(([tool]) => tool === "canvas_list_users_in_course_users")).toHaveLength(100);
 
       const refused = await runtime.gateway.redactMcpEgress({
@@ -1599,13 +1599,12 @@ describe("MorrowRuntime durable batches", () => {
       });
       const firstSerialized = JSON.stringify(firstCourseReport.nativeAuditReport);
       const secondSerialized = JSON.stringify(secondCourseReport.nativeAuditReport);
-      const firstToken = /learner_[\w-]+/.exec(firstSerialized)?.[0];
-      const secondToken = /learner_[\w-]+/.exec(secondSerialized)?.[0];
+      const firstToken = /Student A[1-9][0-9]*/.exec(firstSerialized)?.[0];
+      const secondToken = /Student A[1-9][0-9]*/.exec(secondSerialized)?.[0];
       expect(firstSerialized).not.toContain("Jane Doe");
       expect(secondSerialized).not.toContain("Rowan Clarke");
-      expect(firstToken).toBeTruthy();
-      expect(secondToken).toBeTruthy();
-      expect(firstToken).not.toBe(secondToken);
+      expect(firstToken).toBe("Student A1");
+      expect(secondToken).toBe("Student A1");
       const laterCourseId = courseIds.at(-1)!;
       const selectedPage = second.batchResultsPage({
         batchId,

@@ -292,6 +292,11 @@ function trustedMcpRuntimeManifestSha256() {
   return typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest) ? digest : null;
 }
 
+function trustedMcpRuntimeNodeSha256() {
+  const digest = BUILD_METADATA.mcpRuntime?.nodeSha256;
+  return typeof digest === "string" && /^[0-9a-f]{64}$/.test(digest) ? digest : null;
+}
+
 function fixedPayloadRoot() {
   const seed = app.isPackaged
     ? path.join(process.resourcesPath, "MorrowPayload")
@@ -423,8 +428,8 @@ function noInput(input) {
  * setup page shows what Morrow has now, and falls back to the fixed repair
  * state when that read itself fails. An error that carries a code is forwarded
  * to the strict result contract, which emits only the fixed public details for
- * that code; an error the contract refuses — a code outside the public list,
- * such as an MCP -32603 — and an error with no code each collapse to the fixed
+ * that code; an error the contract refuses: a code outside the public list,
+ * such as an MCP -32603: and an error with no code each collapse to the fixed
  * setup_failed details, so no internal message or path ever reaches the
  * renderer.
  */
@@ -510,6 +515,10 @@ async function startMorrow() {
     productVersion: PRODUCT_VERSION,
     trustedBridgeReleaseManifestSha256,
     trustedMcpRuntimeManifestSha256,
+    trustedMcpRuntimeNodeSha256,
+    // The Chrome route this build was packaged for. An unreadable or absent
+    // value keeps the temporary unpacked route; see bridgeDeliveryMode().
+    bridgeDelivery: BUILD_METADATA.bridgeDelivery,
     detectAssistant,
     updateSnapshot: () => updateController?.snapshot()
   });

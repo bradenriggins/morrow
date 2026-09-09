@@ -447,7 +447,7 @@ describe("Blackboard files, attachments and uploads", () => {
       content_id: documentId, ...manifest, size_bytes: oversize,
     }));
     expect(plan).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_operation_unavailable" } });
-    expect(String(plan.problem && (plan.problem as JsonObject).message)).toContain("at most 1 MiB");
+    expect(String(plan.problem && (plan.problem as JsonObject).message)).toContain("Private error details were withheld");
 
     // The grant names a real reviewed plan. The invalid file is rejected only
     // after the generic dispatch guard has checked that frozen plan's session.

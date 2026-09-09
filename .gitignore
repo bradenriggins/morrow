@@ -17,7 +17,6 @@ output/
 .DS_Store
 Thumbs.db
 launch/
-website/
 .agents/
 .codex/
 .gemini/

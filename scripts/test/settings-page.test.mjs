@@ -294,7 +294,7 @@ test("an options response that is not runtime verified moves the course to site 
 test("an action published for review only carries its reason and no Edit control", async () => {
   const page = await openEditStage([CHECKED_ACTION, REVIEW_ONLY_ACTION]);
   const reviewOnly = page.queryAll("#category-list .category-option").find((option) => option.classList.contains("review-only"));
-  assert.equal(reviewOnly.querySelector("strong").textContent, `Review only — ${REVIEW_ONLY_ACTION.label}`);
+  assert.equal(reviewOnly.querySelector("strong").textContent, `Review only: ${REVIEW_ONLY_ACTION.label}`);
   assert.equal(reviewOnly.querySelector("small").textContent, `${REVIEW_ONLY_ACTION.description} ${REVIEW_ONLY_ACTION.reviewReason}`);
   assert.equal(reviewOnly.querySelector("input"), null);
   assert.equal(page.queryAll(`#category-list input[value="${REVIEW_ONLY_ACTION.id}"]`).length, 0);
@@ -304,7 +304,7 @@ test("an action published for review only carries its reason and no Edit control
 test("the action search and the checked-only filter change which actions a person can choose", async () => {
   const page = await openEditStage([CHECKED_ACTION, UNCHECKED_ACTION, REVIEW_ONLY_ACTION]);
   assert.deepEqual(listedActions(page).sort(),
-    [`Review only — ${REVIEW_ONLY_ACTION.label}`, UNCHECKED_ACTION.label, CHECKED_ACTION.label].sort());
+    [`Review only: ${REVIEW_ONLY_ACTION.label}`, UNCHECKED_ACTION.label, CHECKED_ACTION.label].sort());
 
   await page.type("#action-filter", "favorite");
   assert.deepEqual(listedActions(page), [UNCHECKED_ACTION.label]);

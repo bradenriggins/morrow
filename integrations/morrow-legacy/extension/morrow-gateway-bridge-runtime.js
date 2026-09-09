@@ -1,3 +1,4 @@
+import { canvasGetPaginated } from './providers/canvas/client.js';
 import {
   TOOL_DEFINITIONS,
   executeTool,
@@ -79,10 +80,33 @@ function admittedCapability(toolName, expectedWrite) {
 
 async function invokeRead(command) {
   const toolName = String(command.toolName || '').trim();
-  admittedCapability(toolName, false);
+  if (toolName !== 'morrow_legacy_private_roster') admittedCapability(toolName, false);
   const input = exactCommandInput(command);
   const binding = resolveMorrowBridgeBinding(String(command.sourceBindingId || '').trim(), input);
   const { runtime } = await buildMorrowBridgeCommandRuntime(binding);
+  if (toolName === 'morrow_legacy_private_roster') {
+    if (command.operationKey !== 'legacy:privacy_roster') throw bridgeError('bridge_read_not_admitted', 'The roster read is private.');
+    const courseId = resolveMorrowBridgeCourseId(input, binding);
+    if (!courseId) throw bridgeError('bridge_course_scope_unavailable', 'An exact course is required.');
+    const roster = await canvasGetPaginated(
+      `/courses/${courseId}/users?enrollment_type[]=student&enrollment_state[]=active&enrollment_state[]=invited&enrollment_state[]=rejected&enrollment_state[]=completed&enrollment_state[]=inactive&include[]=uuid`,
+      runtime.cookieHeader || '', 50, { ...runtime, transientRetryLimit: 0 },
+    );
+    if (!Array.isArray(roster) || roster._truncated || roster.truncated || roster.incomplete
+      || Date.now() >= Number(command.expiresAt)) throw bridgeError('learner_roster_result_incomplete', 'A complete current roster is required.');
+    const deletedEnrollments = await canvasGetPaginated(
+      `/courses/${courseId}/enrollments?type[]=StudentEnrollment&state[]=deleted`,
+      runtime.cookieHeader || '', 50, { ...runtime, transientRetryLimit: 0 },
+    );
+    if (!Array.isArray(deletedEnrollments) || deletedEnrollments._truncated || deletedEnrollments.truncated || deletedEnrollments.incomplete
+      || Date.now() >= Number(command.expiresAt)) throw bridgeError('learner_roster_result_incomplete', 'A complete enrollment history is required.');
+    const current = resolveMorrowBridgeBinding(String(command.sourceBindingId || '').trim(), input);
+    if (current.sessionId !== binding.sessionId || current.authorityEpoch !== binding.authorityEpoch) {
+      throw bridgeError('learner_roster_binding_unavailable', 'The course session changed.');
+    }
+    return { schema: 'morrow.legacy-course-roster.v1', courseId: String(courseId), sourceBindingId: String(binding.bindingId), complete: true, historyComplete: true, identities: roster, deletedEnrollments };
+  }
+
   const adminHandler = ADMIN_TOOL_HANDLERS[toolName];
   let result;
   if (typeof adminHandler === 'function') {
@@ -170,6 +194,8 @@ async function stageWrite(command) {
 }
 
 async function taskGet(command) {
+  const binding = resolveMorrowBridgeBinding(String(command.sourceBindingId || '').trim(), {});
+  const courseId = resolveMorrowBridgeCourseId({}, binding);
   const active = await getMorrowBridgeActiveConversation();
   if (!active.conversation || !active.conversationId) {
     throw bridgeError(
@@ -192,6 +218,13 @@ async function taskGet(command) {
       'The requested task belongs to a different Morrow conversation.',
     );
   }
+  const origin = new URL(String(binding.canvasBase || binding.canvasUrl || binding.origin)).origin;
+  if (String(task.sessionId || '') !== String(binding.sessionId || '') || !Array.isArray(task.operations) || !task.operations.length
+    || task.operations.some((operation) => {
+      const source = operation?.sourceRef;
+      if (source?.provider !== 'canvas' || String(source.locator?.courseId || '') !== String(courseId)) return true;
+      try { return new URL(String(source.locator?.canvasBase || '')).origin !== origin; } catch { return true; }
+    })) throw bridgeError('bridge_task_scope_mismatch', 'The task does not belong to this exact current course session.');
   return projectMorrowBridgeTask(task);
 }
 

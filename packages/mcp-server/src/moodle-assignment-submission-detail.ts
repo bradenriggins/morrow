@@ -25,7 +25,7 @@ const SUBMISSION_STATUSES = ["new", "reopened", "draft", "submitted"] as const;
  */
 const WORKFLOW_STATES = ["notmarked", "inmarking", "readyforreview", "inreview", "readyforrelease", "released"] as const;
 const GRADING_STATUSES = ["graded", "notgraded", ...WORKFLOW_STATES] as const;
-const LEARNER_TOKEN = /^learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const LEARNER_TOKEN = /^Student A[1-9][0-9]*$/u;
 const TEXT = /^[^\u0000-\u001f\u007f]{1,255}$/u;
 
 type SubmissionStatus = (typeof SUBMISSION_STATUSES)[number];

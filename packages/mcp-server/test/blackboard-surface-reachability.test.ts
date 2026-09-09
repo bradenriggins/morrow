@@ -197,7 +197,7 @@ async function expectLearnerReferenceRead(
   const data = isJsonObject(roster.data) ? roster.data : roster;
   expect(data, name).toMatchObject({ schema: "morrow.blackboard.roster-summary.v1" });
   const learner = Array.isArray(data.learners) ? data.learners.find((entry) => isJsonObject(entry) && entry.courseRoleId === "Student") : null;
-  expect(learner).toMatchObject({ learnerToken: expect.stringMatching(/^learner_/) });
+  expect(learner).toMatchObject({ learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*$/) });
   const read = await call(name, {
     ...scope,
     learner_reference: isJsonObject(learner) ? learner.learnerToken : "",
@@ -206,7 +206,7 @@ async function expectLearnerReferenceRead(
   expect(isJsonObject(read) ? read.isError : true, `${name}: ${JSON.stringify(read)}`).not.toBe(true);
   expect(JSON.stringify(read)).not.toContain("Jane Doe");
   expect(JSON.stringify(read)).not.toContain("jane.doe@example.edu");
-  const refused = await call(name, { ...scope, learner_reference: "learner_00000000-0000-4000-8000-000000000000" });
+  const refused = await call(name, { ...scope, learner_reference: "Student A999" });
   expect(isJsonObject(refused) ? refused.isError : undefined, `${name}: ${JSON.stringify(refused)}`).toBe(true);
 }
 
@@ -717,9 +717,9 @@ describe("Blackboard reachability across Morrow tool surfaces", () => {
     };
     const referenced = projectOutput({
       content: [{ type: "text", text: "Two people are enrolled." }],
-      structuredContent: { schema: "morrow.blackboard.roster-summary.v1", learners: [{ learnerToken: "lt_1", courseRoleId: "Student" }] },
+      structuredContent: { schema: "morrow.blackboard.roster-summary.v1", learners: [{ learnerToken: "Student A1", courseRoleId: "Student" }] },
     }, { descriptor, learnerBoundary: "source" });
-    expect(referenced).toMatchObject({ structuredContent: { learners: [{ learnerToken: "lt_1", courseRoleId: "Student" }] } });
+    expect(referenced).toMatchObject({ structuredContent: { learners: [{ learnerToken: "Student A1", courseRoleId: "Student" }] } });
 
     const leaked = projectOutput({
       content: [{ type: "text", text: "One person is enrolled." }],

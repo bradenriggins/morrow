@@ -31,13 +31,13 @@ export const PROGRAM_LEDGER_GUIDANCE = `# Program accessibility ledger
 
 ## Final states
 
-- \`repaired_and_verified\` — the repair operation record is verified and its re-audit returned complete evidence with no remaining source signal.
-- \`manually_checked\` — a person recorded their own manual check of this target. It is that person's statement, not Morrow evidence.
-- \`not_applicable_with_evidence\` — the target was read and the HTML source-signal checks do not apply to it, for example a plain-text file.
-- \`unread\` — Morrow did not read this target's content. An incomplete source list, an absent audit result, and a body over the complete-evidence limit all land here.
-- \`blocked\` — the target has an explicit block reason, an audit failure code, an unavailable provider, or an unresolved provider effect.
-- \`held\` — the target has a source signal and its remediation route is held.
-- \`evidence_ready_pending_review\` — evidence exists and a person must review it. A read with no source signal lands here. It is never a pass.
+- \`repaired_and_verified\`: the repair operation record is verified and its re-audit returned complete evidence with no remaining source signal.
+- \`manually_checked\`: a person recorded their own manual check of this target. It is that person's statement, not Morrow evidence.
+- \`not_applicable_with_evidence\`: the target was read and the HTML source-signal checks do not apply to it, for example a plain-text file.
+- \`unread\`: Morrow did not read this target's content. An incomplete source list, an absent audit result, and a body over the complete-evidence limit all land here.
+- \`blocked\`: the target has an explicit block reason, an audit failure code, an unavailable provider, or an unresolved provider effect.
+- \`held\`: the target has a source signal and its remediation route is held.
+- \`evidence_ready_pending_review\`: evidence exists and a person must review it. A read with no source signal lands here. It is never a pass.
 
 ## Derivation order
 

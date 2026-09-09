@@ -492,7 +492,10 @@ describe("Canvas course inventory", () => {
     });
     expect(object(object(entry.discovery).course_association_evidence)).not.toHaveProperty("share_list_limit");
     expect(course.coverage_gaps).not.toEqual(expect.arrayContaining([expect.objectContaining({ code: "item_bank_shares_unread" })]));
-    expect(calls.find((call) => call.name === "canvas_item_bank_list_shares")?.arguments).toMatchObject({ bank_id: "19", per_page: 100 });
+    expect(calls.find((call) => call.name === "canvas_item_bank_list_shares")?.arguments)
+      .toMatchObject({ course_id: "42", bank_id: "19", per_page: 100 });
+    expect(calls.find((call) => call.name === "canvas_item_bank_list_entries")?.arguments)
+      .toMatchObject({ course_id: "42", bank_id: "19" });
   });
 
   it("names the other courses an Item Bank reaches when no share row names the selected course", async () => {
@@ -513,6 +516,37 @@ describe("Canvas course inventory", () => {
         },
       },
     });
+    expect(course.coverage_gaps).not.toEqual(expect.arrayContaining([expect.objectContaining({ code: "item_bank_shares_unread" })]));
+  });
+
+  /*
+   * Canvas pins no one key casing for a share row, and the two tests above cover
+   * the snake_case answer. This is the inventory reader of that row;
+   * packages/mcp-server/src/item-bank-fan-out.ts and
+   * connector/extension/src/item-bank-executor.js read the same rows under the
+   * same tolerance. A reader stricter than its twins drops a course the bank
+   * really reaches, so both the association and the shared-course list go quiet.
+   */
+  it("associates an Item Bank from a share row answered in camelCase", async () => {
+    const { runtime } = fixture({
+      shares: [{ id: "80", entityType: "course", entityId: "42" }, { id: "81", entityType: "Course", entityId: "77" }],
+    });
+    const report = object(await collectCanvasProgramInventory(runtime, selection));
+    expect(report).toMatchObject({ coverage: { status: "supported_inventory_complete", complete: true } });
+    const course = (report.courses as JsonObject[])[0]!;
+    const entry = itemBankEntry(course);
+    expect(entry).toMatchObject({
+      discovery: {
+        course_association: "observed_by_bank_share",
+        course_association_evidence: {
+          bank_list_course_id: "42",
+          share_list_state: "observed",
+          shared_course_ids: ["42", "77"],
+          shared_course_count: 2,
+        },
+      },
+    });
+    expect(object(object(entry.discovery).course_association_evidence)).not.toHaveProperty("share_list_limit");
     expect(course.coverage_gaps).not.toEqual(expect.arrayContaining([expect.objectContaining({ code: "item_bank_shares_unread" })]));
   });
 

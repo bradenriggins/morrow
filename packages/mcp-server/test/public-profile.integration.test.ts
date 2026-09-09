@@ -81,7 +81,7 @@ function publicConfig(input: {
         root: input.root,
         expectedRevision: input.revision,
         requireTrackedClean: true,
-        expectedToolCount: 5,
+        expectedToolCount: 6,
       },
       priority: 100,
       required: true,
@@ -175,6 +175,16 @@ describe("public-canvas runtime profile", () => {
           upstreamName: "connect_hidden",
           reason: "held_provider",
         },
+        {
+          upstreamId: "meridian",
+          upstreamName: "morrow_browser_edit_policy_set",
+          reason: "excluded_name",
+        },
+        {
+          upstreamId: "meridian",
+          upstreamName: "morrow_private_chat_exchange",
+          reason: "excluded_name",
+        },
       ]));
 
       const health = runtime.health();
@@ -183,7 +193,7 @@ describe("public-canvas runtime profile", () => {
         profile: "public-canvas",
         publicToolCount: 1,
         collisionCount: 0,
-        excludedToolCount: 4,
+        excludedToolCount: 5,
         publicationPolicy: {
           applied: true,
           profile: "public-canvas",
@@ -194,8 +204,8 @@ describe("public-canvas runtime profile", () => {
         sources: [{
           id: "meridian",
           connected: true,
-          toolCount: 5,
-          expectedToolCount: 5,
+          toolCount: 6,
+          expectedToolCount: 6,
           catalogAttested: true,
           sourceAttestation: {
             verified: true,

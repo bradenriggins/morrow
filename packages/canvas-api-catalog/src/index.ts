@@ -11,7 +11,7 @@ export type { CanvasSemanticContextInputState, CanvasSemanticCourseCollectionSta
 
 export type CanvasApiService = "canvas" | "item_bank" | "course_file_content";
 export type CanvasApiRisk = "read" | "write" | "sensitive_write" | "destructive";
-export type CanvasParameterLocation = "path" | "query" | "form";
+export type CanvasParameterLocation = "path" | "query" | "form" | "control";
 
 export interface CanvasApiParameter {
   readonly inputName: string;
@@ -253,6 +253,8 @@ export function operationArguments(operation: CanvasApiOperation, input: JsonObj
     }
     if (parameter.location === "path") {
       path = path.replace(`{${parameter.wireName}}`, encodeURIComponent(String(value)));
+    } else if (parameter.location === "control") {
+      continue;
     } else if (parameter.location === "query") {
       query.push([parameter.wireName, value]);
     } else {

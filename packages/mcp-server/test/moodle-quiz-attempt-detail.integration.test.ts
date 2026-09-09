@@ -136,7 +136,7 @@ function result(command: BridgeCommand, digest: string): JsonObject {
 }
 
 describe("Moodle Quiz attempt, manual grading and regrade Full MCP exposure", () => {
-  it("tokenizes the one named learner, refuses an unknown identity, and keeps both aggregates learner-free", async () => {
+  it("refuses retained learner attempts and grading reports before source reads", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-quiz-attempt-detail-integration-")); const port = await availablePort();
     const digest = browserCatalogDigest(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
@@ -154,86 +154,17 @@ describe("Moodle Quiz attempt, manual grading and regrade Full MCP exposure", ()
       for (const tool of ["moodle_get_quiz_attempt", "moodle_get_quiz_manual_grading_queue", "moodle_get_quiz_regrade_report"]) {
         expect(gateway.capabilityGet(tool)).toMatchObject({ descriptor: { canonicalName: tool, behavior: { readOnly: true } } });
       }
-      const rosterReads = () => commands.filter((command) => command.toolName === "moodle_get_course_participant_roster").length;
-
-      const record = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_quiz_attempt", arguments: { course_id: 2, module_id: 8, attempt_id: 41, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      const recordText = JSON.stringify(record);
-      expect(record.isError, recordText).not.toBe(true);
-      for (const privateValue of ["Jane Moodle", "jane@example.edu", PRIVATE_RESPONSE, "user_id"]) {
-        expect(recordText, `the attempt record leaked ${privateValue}`).not.toContain(privateValue);
+      const beforeHistory = commands.length;
+      for (const tool of ["moodle_get_quiz_attempt", "moodle_get_quiz_manual_grading_queue", "moodle_get_quiz_regrade_report"]) {
+        const args = tool === "moodle_get_quiz_attempt" ? { course_id: 2, module_id: 8, attempt_id: 41 } : { course_id: 2, module_id: 8 };
+        const denied = await client.callTool({ name: "morrow_capability_read", arguments: {
+          name: tool, arguments: { ...args, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
+        } });
+        expect(denied.isError, JSON.stringify(denied)).toBe(true);
+        expect(denied.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
+        for (const identity of ["Jane Moodle", "jane@example.edu", "learnerToken", "user_id"]) expect(JSON.stringify(denied)).not.toContain(identity);
       }
-      expect(record.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_quiz_attempt",
-        data: {
-          learner: { learnerToken: expect.stringMatching(/^learner_/) },
-          attempt_id: 41, state: "finished", slot_count: 2,
-          slots: [
-            { slot: 1, state: "correct", mark: 1, regraded: false },
-            { slot: 2, state: "requiresgrading", mark: null, regraded: false },
-          ],
-          proof: { route: "/mod/quiz/report.php?mode=overview", avoided_routes: AVOIDED_ROUTES, records_learner_state: false },
-        },
-      });
-      // The one named learner is projected through the complete course roster.
-      expect(rosterReads()).toBeGreaterThan(0);
-
-      const unknown = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_quiz_attempt", arguments: { course_id: 2, module_id: 8, attempt_id: 99, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      expect(unknown.isError).toBe(true);
-      expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "learner_roster_identity_unavailable" } });
-      const unknownText = JSON.stringify(unknown);
-      for (const privateValue of ["Jane Moodle", PRIVATE_RESPONSE, "\"99\""]) {
-        expect(unknownText, `the refusal leaked ${privateValue}`).not.toContain(privateValue);
-      }
-
-      const beforeQueue = rosterReads();
-      const queue = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_quiz_manual_grading_queue", arguments: { course_id: 2, module_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      const queueText = JSON.stringify(queue);
-      expect(queue.isError, queueText).not.toBe(true);
-      for (const privateValue of ["Jane Moodle", PRIVATE_RESPONSE, "user_id", "learnerToken"]) {
-        expect(queueText, `the grading queue leaked ${privateValue}`).not.toContain(privateValue);
-      }
-      expect(queue.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_quiz_manual_grading_queue",
-        data: {
-          question_count: 2, needs_grading_count: 3, manually_graded_count: 3, response_count: 7,
-          questions: [
-            { slot: 2, question_id: 55, needs_grading: 3, manually_graded: 1, total: 5 },
-            { slot: 4, question_id: 57, needs_grading: 0, manually_graded: 2, total: 2 },
-          ],
-          proof: { required_capability: "mod/quiz:grade", includes_automatically_graded: false },
-        },
-      });
-      // An aggregate read names nobody, so it needs no roster.
-      expect(rosterReads()).toBe(beforeQueue);
-
-      const regrade = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_quiz_regrade_report", arguments: { course_id: 2, module_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      const regradeText = JSON.stringify(regrade);
-      expect(regrade.isError, regradeText).not.toBe(true);
-      for (const privateValue of ["Jane Moodle", "user_id", "learnerToken"]) {
-        expect(regradeText, `the regrade report leaked ${privateValue}`).not.toContain(privateValue);
-      }
-      expect(regrade.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_quiz_regrade_report",
-        data: {
-          regraded_attempt_count: 2, commit_pending: true,
-          proof: { regrade_capability_marker: "onlyregraded_filter", sesskey_sent: false, regrade_parameter_sent: false },
-        },
-      });
-      expect(rosterReads()).toBe(beforeQueue);
-
-      const mismatch = await gateway.call("moodle_get_quiz_attempt", { course_id: 2, module_id: 9, attempt_id: 41, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
-      const mismatchText = JSON.stringify(mismatch);
-      expect(mismatchText).toContain("moodle_quiz_attempt_invalid");
-      for (const privateValue of ["Jane Moodle", PRIVATE_RESPONSE]) {
-        expect(mismatchText).not.toContain(privateValue);
-      }
-
-      expect([...new Set(commands.map((command) => command.toolName))].sort()).toEqual([
-        "moodle_get_course_participant_roster",
-        "moodle_get_quiz_attempt",
-        "moodle_get_quiz_manual_grading_queue",
-        "moodle_get_quiz_regrade_report",
-      ]);
+      expect(commands.slice(beforeHistory).every((command) => command.toolName === "moodle_get_course_participant_roster")).toBe(true);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

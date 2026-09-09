@@ -326,7 +326,7 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
   /**
    * One page of the participants table, parsed twice over: once into exactly
    * the projection `moodle_get_course_participants` returns, which is what the
-   * digest covers, and once into the write anchors Moodle rendered beside it —
+   * digest covers, and once into the write anchors Moodle rendered beside it.
    * the user enrolment IDs of its own action links and the role control's own
    * item, value and options.
    */

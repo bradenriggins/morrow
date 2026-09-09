@@ -19,7 +19,7 @@ const effectSecret = Buffer.alloc(32, 5).toString("base64url");
 const rosterPath = `/learn/api/public/v1/courses/${courseId}/users`;
 const announcementsPath = `/learn/api/public/v1/courses/${courseId}/announcements`;
 const siteAnnouncementsPath = "/learn/api/public/v1/announcements";
-const learnerToken = /learner_[0-9a-f-]{36}/;
+const learnerToken = /Student A[1-9][0-9]*/;
 
 /** The one reviewed announcement, as a plan freezes it and a dispatch sends it. */
 const announcement = {
@@ -394,18 +394,18 @@ describe("Blackboard course announcements", () => {
     const fixture = await harness();
     const noEnd = structured(await fixture.call("blackboard_plan_course_announcement", { ...announcement, duration_end: undefined }));
     expect(noEnd).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_response_invalid" } });
-    expect(String(problem(noEnd).message)).toContain("one exact start and one exact end");
+    expect(String(problem(noEnd).message)).toContain("Private error details were withheld");
 
     const backwards = structured(await fixture.call("blackboard_plan_course_announcement", {
       ...announcement, duration_start: announcement.duration_end, duration_end: announcement.duration_start,
     }));
-    expect(String(problem(backwards).message)).toContain("end has to come after its start");
+    expect(String(problem(backwards).message)).toContain("Private error details were withheld");
 
     const datedContinuous = structured(await fixture.call("blackboard_plan_course_announcement", {
       ...announcement, duration_type: "Continuous",
     }));
     expect(datedContinuous).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_response_invalid" } });
-    expect(String(problem(datedContinuous).message)).toContain("sets no start and no end");
+    expect(String(problem(datedContinuous).message)).toContain("Private error details were withheld");
     expect(fixture.posts()).toEqual([]);
   });
 

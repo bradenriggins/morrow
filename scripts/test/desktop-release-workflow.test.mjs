@@ -163,7 +163,7 @@ test("the Windows job runs each installer test file and the full suite under exp
 
 test("the Windows job upgrades the exact published 3720 artifact before its final smoke", () => {
   const job = jobs(release).get("windows-installer");
-  const oldUrl = "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-win-x64.exe";
+  const oldUrl = "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-win-x64-3720b76b-baseline.exe";
   const oldSha256 = "2750cd7b6746fb7f6701a92920158691eb9ad787732826597f6de4c3ed0fadf1";
   const oldSourceHead = "3720b76bfd5dc5d132627777be4034bf9ef0dae5";
   const upgradeHarness = "scripts/test/desktop-windows-upgrade.ps1";

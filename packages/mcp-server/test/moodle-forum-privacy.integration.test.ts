@@ -69,7 +69,7 @@ function result(command: BridgeCommand, digest: string): JsonObject {
 }
 
 describe("Moodle Forum public learner privacy", () => {
-  it("routes the public Forum capability through the complete roster and refuses unknown authors", async () => {
+  it("fails closed without dispatching learner-authored history when Moodle has no complete historical identity dictionary", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-forum-privacy-")); const port = await availablePort();
     const digest = browserCatalogDigest(root); const runtime = await GatewayRuntime.connect(configuration(root, directory, port));
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
@@ -85,17 +85,22 @@ describe("Moodle Forum public learner privacy", () => {
       client = new Client({ name: "morrow-moodle-forum-privacy", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } }); await client.connect(left);
       expect(runtime.capabilityGet("moodle_get_forum_posts")).toMatchObject({ descriptor: { canonicalName: "moodle_get_forum_posts", behavior: { readOnly: true } } });
       const read = async (forumModuleId: number) => await client!.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_forum_posts", arguments: { course_id: 2, forum_module_id: forumModuleId, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      const allowed = await read(71); const allowedText = JSON.stringify(allowed);
-      expect(allowed.isError, allowedText).not.toBe(true);
-      expect(allowedText).not.toContain("Student Name"); expect(allowedText).not.toContain("Course Teacher"); expect(allowedText).not.toContain('"id":"7"'); expect(allowedText).not.toContain('"id":"3"');
-      expect(allowed.structuredContent).toMatchObject({ schema: "morrow.result.v1", tool: "moodle_get_forum_posts", data: { result: { data: { posts: [{ author: { learnerToken: expect.any(String) }, subject: expect.any(String), message: expect.any(String) }, { author: { learnerToken: expect.any(String) } }] } } } });
-      const unknown = await read(72);
-      expect(unknown.isError).toBe(true); expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "learner_roster_identity_unavailable" } }); expect(JSON.stringify(unknown)).not.toContain("Unknown Student");
+      for (const forumModuleId of [71, 72]) {
+        const denied = await read(forumModuleId);
+        expect(denied.isError).toBe(true);
+        expect(denied.structuredContent).toMatchObject({
+          schema: "morrow.problem.v1",
+          code: "privacy_moodle_history_dictionary_unavailable",
+        });
+        expect(JSON.stringify(denied)).not.toContain("Student Name");
+        expect(JSON.stringify(denied)).not.toContain("Unknown Student");
+      }
       const forumDispatches = () => commands.filter((command) => command.toolName === "moodle_get_forum_posts");
       const beforeInvalid = forumDispatches().length;
       const invalid = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_forum_posts", arguments: { course_id: 2, forum_module_id: 71, extra: true, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       expect(invalid.isError).toBe(true); expect(forumDispatches()).toHaveLength(beforeInvalid);
-      expect(forumDispatches().map((command) => command.arguments.forum_module_id)).toEqual([71, 72]);
+      expect(forumDispatches()).toEqual([]);
+      expect(commands.every((command) => command.toolName === "moodle_get_course_participant_roster")).toBe(true);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

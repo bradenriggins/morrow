@@ -7,7 +7,7 @@ export const CANVAS_CONVERSATION_TRANSFER_TOOL = "canvas_send_private_conversati
 export const CANVAS_CONVERSATION_TRANSFER_OPERATION = "canvas.private.conversation.send.v1";
 
 const courseId = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-const learnerToken = z.string().regex(/^learner_[A-Za-z0-9_-]{1,160}$/);
+const learnerToken = z.string().regex(/^Student A[1-9][0-9]*$/);
 const recipientContext = z.string().regex(/^(course|section|group)_[1-9][0-9]{0,18}(?:_(students|teachers|tas|observers|designers))?$/);
 const recipients = z.array(learnerToken).max(5_000).optional();
 const recipientContexts = z.array(recipientContext).max(5_000).optional();
@@ -29,7 +29,7 @@ const createInputSchema = z.strictObject({
   const tokens = value.recipient_tokens || [];
   const contexts = value.recipient_contexts || [];
   if (tokens.length + contexts.length === 0) {
-    context.addIssue({ code: "custom", message: "A new Canvas Inbox conversation needs at least one learner token or current-course recipient context." });
+    context.addIssue({ code: "custom", message: "A new Canvas Inbox conversation needs at least one learner label or current-course recipient context." });
   }
   if (new Set(tokens).size !== tokens.length || new Set(contexts).size !== contexts.length) {
     context.addIssue({ code: "custom", message: "Conversation recipients must be unique." });
@@ -90,7 +90,7 @@ export function canvasConversationPlan(input: CanvasConversationInput) {
 export function registerCanvasConversationTool(server: McpServer, runtime: GatewayRuntime): void {
   server.registerTool("morrow_plan_canvas_conversation", {
     title: "Prepare a Canvas Inbox message for review",
-    description: "Prepare one Canvas Inbox conversation or reply in one selected course. Use current opaque learner tokens from that course or one Canvas course, section, or group recipient context. Morrow resolves recipients only at dispatch under a fresh course binding. It freezes the message, action, course, current session, and recipient references for review. No Canvas message is sent while planning.",
+    description: "Prepare one Canvas Inbox conversation or reply in one selected course. Use current readable learner labels (for example, Student A1) from that course or one Canvas course, section, or group recipient context. Morrow resolves recipients only at dispatch under a fresh course binding. It freezes the message, action, course, current session, and recipient references for review. No Canvas message is sent while planning.",
     inputSchema: canvasConversationInputSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async (value, context) => {
@@ -101,7 +101,7 @@ export function registerCanvasConversationTool(server: McpServer, runtime: Gatew
       content: [{
         type: "text",
         text: input.action === "create"
-          ? "Morrow prepared a Canvas Inbox message for review. No Canvas message has been sent. Before dispatch, Morrow will refresh the selected course connection and recipient roster, resolve only the approved opaque learner tokens, send once, and read the resulting conversation back."
+          ? "Morrow prepared a Canvas Inbox message for review. No Canvas message has been sent. Before dispatch, Morrow will refresh the selected course connection and recipient roster, resolve only the approved learner labels, send once, and read the resulting conversation back."
           : "Morrow prepared a Canvas Inbox reply for review. No Canvas message has been sent. Before dispatch, Morrow will refresh the selected course connection and recipient roster, read the target conversation, send once, and read the resulting conversation back.",
       }],
     };

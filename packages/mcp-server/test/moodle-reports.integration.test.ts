@@ -164,7 +164,7 @@ function result(command: BridgeCommand, digest: string): JsonObject {
 }
 
 describe("Moodle course-report Full MCP exposure", () => {
-  it("returns aggregates by default, tokenizes the named participation report, and lets no identity, IP address or user agent out", async () => {
+  it("refuses retained learner reports before source reads and preserves the course dates report", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-reports-integration-")); const port = await availablePort();
     const digest = browserCatalogDigest(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
@@ -193,34 +193,14 @@ describe("Moodle course-report Full MCP exposure", () => {
       });
       const leaked = ["raw_rows", PRIVATE_IP, PRIVATE_AGENT, PRIVATE_NAME, PRIVATE_EMAIL, PRIVATE_DESCRIPTION, "useragent", "\"ip\""];
 
-      const activity = await read("moodle_get_course_activity_report", { course_id: 2 });
-      const activityText = JSON.stringify(activity);
-      expect(activity.isError, activityText).not.toBe(true);
-      for (const value of leaked) expect(activityText, `the activity report leaked ${value}`).not.toContain(value);
-      expect(activity.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_course_activity_report",
-        data: { total_view_count: 12, activities: [{ module_id: 77, view_count: 12 }, { module_id: 78, view_count: null }] },
-      });
-
-      const completion = await read("moodle_get_course_completion_report", { course_id: 2 });
-      const completionText = JSON.stringify(completion);
-      expect(completion.isError, completionText).not.toBe(true);
-      for (const value of leaked) expect(completionText, `the completion report leaked ${value}`).not.toContain(value);
-      expect(completion.structuredContent).toMatchObject({
-        data: { participant_count: 3, activities: [{ module_id: 77, complete_count: 2, incomplete_count: 1 }] },
-      });
-
-      const log = await read("moodle_get_course_log_summary", { course_id: 2 });
-      const logText = JSON.stringify(log);
-      expect(log.isError, logText).not.toBe(true);
-      for (const value of leaked) expect(logText, `the log summary leaked ${value}`).not.toContain(value);
-      expect(log.structuredContent).toMatchObject({
-        data: {
-          entry_count: 4,
-          origin_counts: { web: 2, ws: 1 },
-          proof: { omitted_columns: ["time", "user", "related_user", "component", "event_name", "description", "ip_address", "user_agent"] },
-        },
-      });
+      const beforeHistory = commands.length;
+      for (const name of ["moodle_get_course_activity_report", "moodle_get_course_completion_report", "moodle_get_course_log_summary", "moodle_get_course_participation_report"]) {
+        const denied = await read(name, name === "moodle_get_course_participation_report" ? { course_id: 2, module_id: 77, action: "view", since_days: 30 } : { course_id: 2 });
+        expect(denied.isError, JSON.stringify(denied)).toBe(true);
+        expect(denied.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
+        for (const value of leaked) expect(JSON.stringify(denied)).not.toContain(value);
+      }
+      expect(commands.slice(beforeHistory).every((command) => command.toolName === "moodle_get_course_participant_roster")).toBe(true);
 
       const dates = await read("moodle_get_course_dates_report", { course_id: 2, year: 2026, month: 9, months: 2 });
       const datesText = JSON.stringify(dates);
@@ -234,51 +214,6 @@ describe("Moodle course-report Full MCP exposure", () => {
         },
       });
 
-      // The default participation report names nobody, and reads no roster.
-      const beforeAggregate = commands.length;
-      const aggregate = await read("moodle_get_course_participation_report", { course_id: 2, module_id: 77, action: "view", since_days: 30 });
-      const aggregateText = JSON.stringify(aggregate);
-      expect(aggregate.isError, aggregateText).not.toBe(true);
-      for (const value of [...leaked, "learnerToken", "user_id"]) {
-        expect(aggregateText, `the aggregate participation report leaked ${value}`).not.toContain(value);
-      }
-      expect(aggregate.structuredContent).toMatchObject({ data: { includes_participants: false, participants: [] } });
-      expect(commands.slice(beforeAggregate).map((command) => command.toolName)).toEqual(["moodle_get_course_participation_report"]);
-
-      // Asking for the people it counted is its own request, and every identity
-      // comes back as a vault token the roster resolved.
-      const named = await read("moodle_get_course_participation_report", { course_id: 2, module_id: 77, action: "view", since_days: 30, include_participants: true });
-      const namedText = JSON.stringify(named);
-      expect(named.isError, namedText).not.toBe(true);
-      for (const value of leaked) expect(namedText, `the named participation report leaked ${value}`).not.toContain(value);
-      expect(namedText).not.toContain("\"user_id\"");
-      expect(named.structuredContent).toMatchObject({
-        data: {
-          includes_participants: true,
-          participants: [
-            { learnerToken: expect.stringMatching(/^learner_/), action_count: 3 },
-            { learnerToken: expect.stringMatching(/^learner_/), action_count: 0 },
-          ],
-        },
-      });
-
-      // One person the complete roster cannot place in this course fails the
-      // whole report closed. No count for anybody is returned.
-      const unknown = await read("moodle_get_course_participation_report", { course_id: 2, module_id: 78, action: "view", since_days: 30, include_participants: true });
-      const unknownText = JSON.stringify(unknown);
-      expect(unknown.isError).toBe(true);
-      expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "learner_roster_identity_unavailable" } });
-      for (const value of [...leaked, "action_count", "\"99\""]) {
-        expect(unknownText, `the refusal leaked ${value}`).not.toContain(value);
-      }
-
-      // A browser result that names another course is refused before it is
-      // projected, and the refusal carries none of the page's raw values.
-      activityCourseId = 5;
-      const mismatch = await gateway.call("moodle_get_course_activity_report", { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
-      const mismatchText = JSON.stringify(mismatch);
-      expect(mismatchText).toContain("moodle_course_activity_report_invalid");
-      for (const value of leaked) expect(mismatchText, `the refusal leaked ${value}`).not.toContain(value);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

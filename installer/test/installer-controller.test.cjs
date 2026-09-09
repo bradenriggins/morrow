@@ -6,7 +6,8 @@ const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { createInstallerController, readCommandOutput, readMacApplicationBundleIdentifier } = require("../shared/installer-controller.cjs");
+const { pathToFileURL } = require("node:url");
+const { bridgeDeliveryMode, createInstallerController, readCommandOutput, readMacApplicationBundleIdentifier } = require("../shared/installer-controller.cjs");
 const { freshRecord } = require("../shared/state-policy.cjs");
 
 function sha256(content) {
@@ -20,6 +21,17 @@ async function temporaryRoot() {
   await fs.mkdir(path.join(root, "Payload"), { recursive: true });
   test.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
+}
+
+function nodeRuntimePinFor(root) {
+  const nodePath = process.platform === "win32"
+    ? path.join(root, "Payload", "runtime", "node", "node.exe")
+    : path.join(root, "Payload", "runtime", "node", "bin", "node");
+  try {
+    return crypto.createHash("sha256").update(require("node:fs").readFileSync(nodePath)).digest("hex");
+  } catch {
+    return null;
+  }
 }
 
 function controller(root, overrides = {}) {
@@ -37,7 +49,11 @@ function controller(root, overrides = {}) {
     trustedMcpRuntimeManifestSha256: () => null,
     detectAssistant: async () => false,
     runCli: async () => ({ code: 0, stdout: "", stderr: "" }),
-    ...overrides
+    ...(
+      overrides.trustedMcpRuntimeManifestSha256 && !overrides.trustedMcpRuntimeNodeSha256
+        ? { ...overrides, trustedMcpRuntimeNodeSha256: () => nodeRuntimePinFor(root) }
+        : overrides
+    )
   });
 }
 
@@ -143,7 +159,20 @@ test("ensureRuntime refuses an incomplete payload and an unbound runtime digest"
   const wrongDigest = controller(root, { trustedMcpRuntimeManifestSha256: () => "b".repeat(64) });
   await assert.rejects(() => wrongDigest.ensureRuntime(), (error) => error.code === "runtime_repair_required");
 
-  const verified = controller(root, { trustedMcpRuntimeManifestSha256: () => manifestSha256 });
+  const nodePath = process.platform === "win32"
+    ? path.join(root, "Payload", "runtime", "node", "node.exe")
+    : path.join(root, "Payload", "runtime", "node", "bin", "node");
+  const nodeSha256 = crypto.createHash("sha256").update(await fs.readFile(nodePath)).digest("hex");
+  const missingNodePin = controller(root, {
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+    trustedMcpRuntimeNodeSha256: () => null
+  });
+  await assert.rejects(() => missingNodePin.ensureRuntime(), (error) => error.code === "runtime_repair_required");
+
+  const verified = controller(root, {
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+    trustedMcpRuntimeNodeSha256: () => nodeSha256
+  });
   const paths = await verified.ensureRuntime();
   assert.equal(paths.payload, path.join(root, "Payload"));
   assert.equal((await fs.stat(paths.state)).isDirectory(), true);
@@ -187,6 +216,85 @@ test("the macOS bundle identifier is read while the rest of the app keeps runnin
   assert.deepEqual(order, ["other work", "identifier"]);
 
   assert.equal(await readMacApplicationBundleIdentifier(path.join(root, "Missing.app")), null);
+});
+
+/**
+ * The Chrome route the packaged build chose. Setup shows the Chrome Web Store
+ * steps only for a build that was packaged after the listing went live, so this
+ * value has to survive from the build metadata to the state the renderer reads,
+ * and anything Morrow cannot recognise has to land on the temporary route that
+ * always works.
+ */
+test("the Bridge delivery route comes from the build, and an unusable value keeps the temporary route", async () => {
+  assert.equal(bridgeDeliveryMode("available"), "available");
+  assert.equal(bridgeDeliveryMode("developer_temporary"), "developer_temporary");
+  for (const value of [undefined, null, "", "unavailable", "Available", "store", 1, true, {}, ["available"]]) {
+    assert.equal(bridgeDeliveryMode(value), "developer_temporary", `${JSON.stringify(value) ?? "undefined"} is not a delivery route`);
+  }
+});
+
+test("state() reports the Chrome Web Store route only when the build selected it", async () => {
+  const root = await temporaryRoot();
+  assert.equal((await controller(root, { bridgeDelivery: "available" }).state()).bridge.delivery, "available");
+  assert.equal((await controller(root, { bridgeDelivery: "developer_temporary" }).state()).bridge.delivery, "developer_temporary");
+  // A build with no delivery metadata at all, and a build whose metadata says
+  // something Morrow does not know, both keep the temporary Chrome steps.
+  assert.equal((await controller(root).state()).bridge.delivery, "developer_temporary");
+  assert.equal((await controller(root, { bridgeDelivery: "chrome_web_store" }).state()).bridge.delivery, "developer_temporary");
+  assert.equal((await controller(root, { bridgeDelivery: null }).state()).bridge.delivery, "developer_temporary");
+});
+
+test("the Chrome Web Store route changes no Bridge identity or pairing check", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root, { bridgeDelivery: "available" });
+  const installation = bridgeInstallation();
+  const answering = (answer) => ({ bridgeMaintenance: async () => answer });
+  const foreign = answering({ ...bridgeStatusAnswer(installation.activeFolderChallenge), extensionId: "a".repeat(32) });
+  await assert.rejects(() => installer.currentBridgeStatus(installation, foreign), /identity is unconfirmed/);
+  const otherFolder = answering(bridgeStatusAnswer({ ...installation.activeFolderChallenge, nonce: "nonce-fedcba9876543210" }));
+  await assert.rejects(() => installer.currentBridgeStatus(installation, otherFolder), /active folder is unconfirmed/);
+
+  installer.runtimeMonitor = otherFolder;
+  assert.equal(
+    await installer.bridgeLoadedInChrome(installation, { health: { ...READY_HEALTH } }),
+    "unknown",
+    "the Store route never accepts an unpacked Bridge that answered another folder's challenge",
+  );
+});
+
+/**
+ * The packaged Node runtime is the one payload file Morrow cannot check the
+ * same way on both platforms: `exactExecutable` in packages/client-config skips
+ * its executable-bit check on Windows, so a damaged runtime there is not caught
+ * where it is caught here. What must hold on both is that a payload missing its
+ * runtime is reported as an app that needs repair, with the repair action on
+ * screen, rather than as a setup step that quietly fails later.
+ */
+test("a payload whose Node runtime is gone asks for repair instead of failing later", async () => {
+  const root = await temporaryRoot();
+  const manifestSha256 = await completePayload(root);
+  const nodePath2 = process.platform === "win32"
+    ? path.join(root, "Payload", "runtime", "node", "node.exe")
+    : path.join(root, "Payload", "runtime", "node", "bin", "node");
+  const nodeSha256_2 = crypto.createHash("sha256").update(await fs.readFile(nodePath2)).digest("hex");
+  const trusted = {
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+    trustedMcpRuntimeNodeSha256: () => nodeSha256_2
+  };
+  const ready = await controller(root, trusted).state();
+  assert.notEqual(ready.lifecycle, "repair_required", "the complete payload must start out usable");
+
+  const node = process.platform === "win32"
+    ? path.join(root, "Payload", "runtime", "node", "node.exe")
+    : path.join(root, "Payload", "runtime", "node", "bin", "node");
+  await fs.rm(node);
+  const damaged = await controller(root, trusted).state();
+  assert.equal(damaged.lifecycle, "repair_required");
+  assert.equal(damaged.runtime.status, "repair_required");
+  // Repair is a real action on that screen, so the person is told what to do.
+  const { actionView } = await import(pathToFileURL(path.join(__dirname, "..", "shared", "setup-view.mjs")).href);
+  const view = actionView(damaged);
+  assert.equal(view.body.includes('data-action="repair"'), true, "the repair state offers no repair action");
 });
 
 test("state() reports the repair lifecycle when the installer record cannot be read", async () => {

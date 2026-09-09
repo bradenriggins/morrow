@@ -526,7 +526,7 @@ export async function loadGatewayConfig(
   const path = resolve(workingDirectory, configuredPath || "morrow.upstreams.json");
 
   if (existsSync(path)) {
-    const raw = JSON.parse(await readFile(path, "utf8")) as unknown;
+    const raw = JSON.parse((await readFile(path, "utf8")).replace(/^\uFEFF/, "")) as unknown;
     const parsed = parseGatewayConfig(raw, environment);
     const config: GatewayConfig = {
       ...parsed,

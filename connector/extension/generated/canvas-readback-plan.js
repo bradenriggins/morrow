@@ -57,18 +57,6 @@ const EXACT_READBACKS = Object.freeze({
     create_quiz_item: { read: "get_quiz_item", dynamic: { item_id: "id" }, targetField: "id", strategy: "created-resource" },
     update_quiz_item: { read: "get_quiz_item", strategy: "updated-resource" },
     delete_quiz_item: { read: "get_quiz_item", strategy: "deleted-resource" },
-    create_bank: { read: "get_bank", dynamic: { bank_id: "id" }, targetField: "id", strategy: "created-resource" },
-    archive_bank: { read: "get_bank", strategy: "deleted-or-archived-resource" },
-    attach_item: { read: "list_entries", targetArgument: "item_id", targetField: "entry_id", strategy: "collection-contains-target", ignoredAssertions: ["item_id"] },
-    // Creating a bank item is the first of two phases. POST /api/banks/{bank_id}/items creates a
-    // standalone item; it becomes a bank entry only after a separate POST to
-    // /api/banks/{bank_id}/bank_entries names it. The entry list therefore cannot confirm the create,
-    // and a missing entry row is not evidence that nothing was created. The created item itself is the
-    // only comparator; attach_item above carries the entry-list check for the second phase.
-    create_item: { read: "get_item", dynamic: { item_id: "id" }, targetField: "id", strategy: "created-resource", bodyAssertions: ["item"] },
-    update_item: { read: "get_item", strategy: "updated-resource", bodyAssertions: ["item"] },
-    delete_entry: { read: "get_entry", strategy: "deleted-resource" },
-    share_bank: { read: "list_shares", targetArgument: "entity_id", targetField: "entity_id", strategy: "collection-contains-target" },
     update_custom_gradebook_column: {
         read: "list_custom_gradebook_columns",
         fixedArguments: { include_hidden: "true" },
@@ -457,8 +445,8 @@ export function readbackFieldValue(record, field) {
     return fieldValue(record, field);
 }
 // A retained descriptor is a route plus its id arguments plus the exact field
-// values the reviewer already approved. Anything larger than one short field —
-// a page body, a discussion message, a long free-text answer — is not retained,
+// values the reviewer already approved. Anything larger than one short field,
+// such as a page body, a discussion message, or a long free-text answer, is not retained,
 // and the whole descriptor is dropped rather than silently weakened, because an
 // unchecked assertion would let a later re-check report a postcondition it never
 // proved.

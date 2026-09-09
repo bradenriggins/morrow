@@ -33,9 +33,20 @@ function settingsDigest(quizSettings) {
  * Runs the real content script the way Chrome runs it: the file is evaluated as
  * a classic script against these page globals, so the request the test reads is
  * the request Canvas would receive. `quiz` answers the New Quiz read the
- * settings guard makes; `quizStatus` makes that read fail.
+ * settings guard makes; `quizStatus` makes that read fail. `writeError` models
+ * a lost response, and `writeStatus` models an uncertain HTTP result.
  */
-async function sendCanvas(toolName, args, { quiz = null, quizStatus = 200, savedQuiz = quiz, savedQuizStatus = 200 } = {}) {
+async function sendCanvas(toolName, args, {
+  quiz = null,
+  quizStatus = 200,
+  savedQuiz = quiz,
+  savedQuizStatus = 200,
+  writeError = null,
+  writeStatus = 200,
+  // Path-keyed reads, for a create whose list read and created-quiz read are different routes.
+  routes = null,
+  writeData = { id: QUIZ_ID },
+} = {}) {
   const keys = ["location", "document", "fetch", "chrome", "__morrowCanvasConnectorInstalled"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const operation = catalogOperation(toolName);
@@ -55,12 +66,18 @@ async function sendCanvas(toolName, args, { quiz = null, quizStatus = 200, saved
         contentType: options.headers?.get?.("Content-Type") ?? null,
         body: options.body ?? null,
       });
+      const afterWrite = requests.slice(0, -1).some((request) => request.method !== "GET");
       if (method === "GET") {
-        const afterWrite = requests.some((request) => request.method !== "GET");
+        if (routes) {
+          const answer = routes[url.pathname];
+          if (answer === undefined) return jsonResponse({ errors: [{ message: "no route" }] }, 404);
+          return jsonResponse(typeof answer === "function" ? answer(afterWrite) : answer);
+        }
         const status = afterWrite ? savedQuizStatus : quizStatus;
         return status === 200 ? jsonResponse(afterWrite ? savedQuiz : quiz) : jsonResponse({ errors: [{ message: "no" }] }, status);
       }
-      return jsonResponse({ id: QUIZ_ID });
+      if (writeError) throw writeError;
+      return jsonResponse(writeStatus === 200 ? writeData : { errors: [{ message: "uncertain" }] }, writeStatus);
     },
     chrome: { runtime: { onMessage: { addListener: (listener) => listeners.push(listener) } } },
     __morrowCanvasConnectorInstalled: undefined,
@@ -162,14 +179,46 @@ function guard(quizSettings = CURRENT_SETTINGS) {
   return { morrow_new_quiz_settings_guard: { current_quiz_settings_sha256: settingsDigest(quizSettings) } };
 }
 
-test("every New Quizzes POST and PATCH sends a JSON body, and nothing else does", async () => {
+/** The one encoding every Morrow digest is taken over. Copied from connector/extension/src/edit-policy.js. */
+function stable(value) {
+  if (Array.isArray(value)) return `[${value.map(stable).join(",")}]`;
+  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}`;
+  return JSON.stringify(value === undefined ? null : value);
+}
+
+function digest(value) {
+  return createHash("sha256").update(stable(value)).digest("hex");
+}
+
+/**
+ * The guard `morrow_plan_new_quiz_create` produces: the complete current course
+ * quiz list and the reviewed payload. A create without it sends nothing.
+ */
+function lifecycleGuard(beforeQuizIds, payload) {
+  return {
+    morrow_new_quiz_lifecycle_guard: {
+      kind: "create",
+      before_quiz_ids: beforeQuizIds,
+      before_quiz_ids_sha256: digest(beforeQuizIds.map(String)),
+      payload_sha256: digest(payload),
+    },
+  };
+}
+
+test("every New Quizzes POST and PATCH uses JSON, and direct execution covers only routes without a specialized planner", async () => {
   const newQuizWrites = CATALOG.operations.filter((operation) => operation.family === "new-quizzes"
     && ["POST", "PATCH"].includes(operation.method));
   assert.equal(newQuizWrites.length, 7, "the New Quizzes write surface changed");
   for (const entry of newQuizWrites) {
     const operation = catalogOperation(entry.toolName);
     assert.equal(newQuizUsesJsonBody(operation), true, entry.toolName);
+    if (entry.toolName !== "canvas_update_single_quiz") continue;
     const { args, sent } = writeArguments(operation);
+    if (entry.toolName === "canvas_update_quiz_item") {
+      delete args.item_position;
+      const positionIndex = sent.findIndex(([wireName]) => wireName === "item[position]");
+      if (positionIndex >= 0) sent.splice(positionIndex, 1);
+    }
     // An in-place New Quiz item change reads the item first so that it can keep
     // every interaction id. connector/extension/src/new-quiz-item-guard.js holds
     // that rule and scripts/test/canvas-new-quiz-item-guard.test.mjs proves it,
@@ -288,27 +337,71 @@ test("New Quiz writes preserve IP ranges, null resets and empty instructions", a
     session_time_limit_in_seconds: null,
     multiple_attempts: { max_attempts: null, cooling_period_seconds: null },
   };
-  for (const toolName of ["canvas_create_new_quiz", "canvas_update_single_quiz"]) {
-    const update = toolName === "canvas_update_single_quiz";
-    const { result, requests } = await sendCanvas(toolName, {
-      course_id: COURSE_ID,
-      ...(update ? { assignment_id: QUIZ_ID, ...guard() } : {}),
-      quiz_instructions: "",
-      quiz_quiz_settings_filters_ips: requested.filters.ips,
-      quiz_quiz_settings_student_access_code: null,
-      quiz_quiz_settings_session_time_limit_in_seconds: null,
-      quiz_quiz_settings_multiple_attempts_max_attempts: null,
-      quiz_quiz_settings_multiple_attempts_cooling_period_seconds: null,
-    }, { quiz: NEW_QUIZ, savedQuiz: { ...NEW_QUIZ, quiz_settings: mergeQuizSettings(CURRENT_SETTINGS, requested).merged } });
-    assert.equal(result.ok, true);
-    if (update) assert.equal(result.verification.status, "verified");
-    const write = requests.find((request) => request.method !== "GET");
-    assert.ok(write);
-    assert.deepEqual(JSON.parse(write.body), { quiz: {
-      instructions: "",
-      quiz_settings: update ? mergeQuizSettings(CURRENT_SETTINGS, requested).merged : requested,
-    } });
-  }
+  const settingsArguments = {
+    quiz_instructions: "",
+    quiz_quiz_settings_filters_ips: requested.filters.ips,
+    quiz_quiz_settings_student_access_code: null,
+    quiz_quiz_settings_session_time_limit_in_seconds: null,
+    quiz_quiz_settings_multiple_attempts_max_attempts: null,
+    quiz_quiz_settings_multiple_attempts_cooling_period_seconds: null,
+  };
+
+  // An update merges the reviewed change into the complete saved block.
+  const { result: updated, requests: updateRequests } = await sendCanvas("canvas_update_single_quiz", {
+    course_id: COURSE_ID, assignment_id: QUIZ_ID, ...guard(), ...settingsArguments,
+  }, { quiz: NEW_QUIZ, savedQuiz: { ...NEW_QUIZ, quiz_settings: mergeQuizSettings(CURRENT_SETTINGS, requested).merged } });
+  assert.equal(updated.ok, true, JSON.stringify(updated));
+  assert.equal(updated.verification.status, "verified");
+  const update = updateRequests.find((request) => request.method !== "GET");
+  assert.ok(update);
+  assert.deepEqual(JSON.parse(update.body), {
+    quiz: { instructions: "", quiz_settings: mergeQuizSettings(CURRENT_SETTINGS, requested).merged },
+  });
+
+  // A create has no saved block to merge into, so it sends exactly the reviewed payload. The
+  // lifecycle guard carries the complete current course quiz list and that payload's digest.
+  const CREATED_ID = "90";
+  const listPath = `/api/quiz/v1/courses/${COURSE_ID}/quizzes`;
+  const createPayload = { instructions: "", quiz_settings: requested };
+  const createdQuiz = { id: CREATED_ID, ...createPayload };
+  const createArguments = { course_id: COURSE_ID, ...settingsArguments };
+  const createRoutes = {
+    [listPath]: (afterWrite) => afterWrite ? [{ id: QUIZ_ID }, { id: CREATED_ID }] : [{ id: QUIZ_ID }],
+    [`${listPath}/${CREATED_ID}`]: createdQuiz,
+  };
+  const { result: created, requests: createRequests } = await sendCanvas("canvas_create_new_quiz", {
+    ...createArguments, ...lifecycleGuard([QUIZ_ID], createPayload),
+  }, { routes: createRoutes, writeData: createdQuiz });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  assert.equal(created.verification.status, "verified");
+  assert.equal(created.verification.evidence, "complete_course_quiz_list_and_created_quiz_reread");
+  const create = createRequests.find((request) => request.method === "POST");
+  assert.ok(create);
+  assert.deepEqual(JSON.parse(create.body), { quiz: createPayload });
+  assert.equal(createRequests.filter((request) => request.method !== "GET").length, 1);
+
+  // A create with no reviewed complete quiz list sends nothing.
+  const bare = await sendCanvas("canvas_create_new_quiz", createArguments, { routes: createRoutes });
+  assert.equal(bare.result.ok, false);
+  assert.equal(bare.result.sent, false);
+  assert.match(bare.result.error, /^new_quiz_lifecycle_guard_required:/);
+  assert.deepEqual(bare.requests, []);
+
+  // A create whose reviewed payload no longer matches its arguments sends nothing.
+  const drifted = await sendCanvas("canvas_create_new_quiz", {
+    ...createArguments, ...lifecycleGuard([QUIZ_ID], { ...createPayload, instructions: "Read first." }),
+  }, { routes: createRoutes });
+  assert.equal(drifted.result.sent, false);
+  assert.match(drifted.result.error, /^new_quiz_lifecycle_guard_invalid:/);
+  assert.deepEqual(drifted.requests.filter((request) => request.method !== "GET"), []);
+
+  // A create whose course quiz list moved after review sends nothing.
+  const stale = await sendCanvas("canvas_create_new_quiz", {
+    ...createArguments, ...lifecycleGuard([QUIZ_ID, "78"], createPayload),
+  }, { routes: createRoutes });
+  assert.equal(stale.result.sent, false);
+  assert.match(stale.result.error, /^new_quiz_lifecycle_stale:/);
+  assert.deepEqual(stale.requests.filter((request) => request.method !== "GET"), []);
 
   const { result, requests } = await sendCanvas("canvas_update_single_quiz", {
     course_id: COURSE_ID, assignment_id: QUIZ_ID, quiz_quiz_settings_student_access_code: null,
@@ -337,6 +430,50 @@ test("the settings check rejects changed protected settings and cannot confirm a
   assert.equal(result.sent, false);
   assert.match(result.error, /^new_quiz_settings_target_changed:/);
   assert.equal(requests.filter((request) => request.method === "PATCH").length, 0);
+});
+
+test("an uncertain settings response is recovered only by an exact complete-settings reread", async () => {
+  const args = { course_id: COURSE_ID, assignment_id: QUIZ_ID, quiz_quiz_settings_shuffle_answers: true, ...guard() };
+  const merged = mergeQuizSettings(CURRENT_SETTINGS, { shuffle_answers: true });
+  const exact = { ...NEW_QUIZ, quiz_settings: merged.merged };
+  const mismatch = { ...NEW_QUIZ, quiz_settings: { ...merged.merged, shuffle_questions: true } };
+  const uncertainWrites = [
+    { name: "network exception", writeError: new TypeError("response lost"), expectedStatus: 0 },
+    { name: "HTTP 408", writeStatus: 408, expectedStatus: 408 },
+    { name: "HTTP 429", writeStatus: 429, expectedStatus: 429 },
+    { name: "HTTP 500", writeStatus: 500, expectedStatus: 500 },
+    { name: "HTTP 503", writeStatus: 503, expectedStatus: 503 },
+  ];
+  const readbacks = [
+    { name: "exact match", savedQuiz: exact, expectedOk: true, expectedStatus: "verified", expectedReason: undefined },
+    { name: "no effect", savedQuiz: NEW_QUIZ, expectedOk: false, expectedStatus: "mismatch", expectedReason: "new_quiz_settings_readback_no_effect" },
+    { name: "mismatch", savedQuiz: mismatch, expectedOk: false, expectedStatus: "mismatch", expectedReason: "new_quiz_settings_readback_mismatch" },
+    { name: "unreadable", savedQuiz: exact, savedQuizStatus: 403, expectedOk: false, expectedStatus: "unconfirmed", expectedReason: "new_quiz_settings_readback_unavailable" },
+  ];
+
+  for (const uncertainWrite of uncertainWrites) {
+    for (const readback of readbacks) {
+      const { result, requests } = await sendCanvas("canvas_update_single_quiz", args, {
+        quiz: NEW_QUIZ,
+        ...uncertainWrite,
+        ...readback,
+      });
+      assert.equal(result.ok, readback.expectedOk, `${uncertainWrite.name}: ${readback.name}`);
+      assert.equal(result.sent, true, `${uncertainWrite.name}: ${readback.name}`);
+      assert.equal(result.outcomeUnknown, !readback.expectedOk, `${uncertainWrite.name}: ${readback.name}`);
+      assert.equal(result.recovered, readback.expectedOk ? true : undefined, `${uncertainWrite.name}: ${readback.name}`);
+      assert.equal(
+        result.status,
+        uncertainWrite.writeError && !readback.expectedOk ? undefined : uncertainWrite.expectedStatus,
+        `${uncertainWrite.name}: ${readback.name}`,
+      );
+      assert.equal(result.verification.status, readback.expectedStatus, `${uncertainWrite.name}: ${readback.name}`);
+      assert.equal(result.verification.reason, readback.expectedReason, `${uncertainWrite.name}: ${readback.name}`);
+      assert.deepEqual(result.newQuizSettingsPreserved, merged.preserved, `${uncertainWrite.name}: ${readback.name}`);
+      assert.deepEqual(requests.map((request) => request.method), ["GET", "PATCH", "GET"], `${uncertainWrite.name}: ${readback.name}`);
+      assert.equal(requests.filter((request) => request.method === "PATCH").length, 1, `${uncertainWrite.name}: ${readback.name}`);
+    }
+  }
 });
 
 test("a title, instructions, date or points change needs no settings guard and reads no quiz", async () => {
@@ -418,4 +555,82 @@ test("the settings digest is taken over a stable encoding, so key order never ma
   );
   assert.equal(newQuizSettingsDigestSource({ a: 1 }), '{"a":1}');
   assert.equal(newQuizSettingsDigestSource(null), "{}");
+});
+
+// The three values a New Quizzes write is easiest to get wrong, each pinned on
+// its own. They are one test above, bundled with everything else a settings
+// change does; these separate them so a failure names which of the three broke.
+//
+// Absent, null and empty are three different instructions to Canvas. Absent
+// means "leave this alone". Null means "clear it". Empty means "this is now
+// empty". A writer that folds any two of them together either discards an edit
+// a person made or leaves a setting switched on after they cleared it, and the
+// person is told the opposite of what Canvas holds.
+
+test("an IP filter a settings change does not name survives that change", async () => {
+  // The reviewed change turns shuffling on and says nothing about filters.
+  const { result, requests } = await sendCanvas("canvas_update_single_quiz", {
+    course_id: COURSE_ID,
+    assignment_id: QUIZ_ID,
+    quiz_quiz_settings_shuffle_answers: true,
+    ...guard(),
+  }, {
+    quiz: NEW_QUIZ,
+    savedQuiz: { ...NEW_QUIZ, quiz_settings: mergeQuizSettings(CURRENT_SETTINGS, { shuffle_answers: true }).merged },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const write = requests.find((request) => request.method === "PATCH");
+  assert.ok(write, "the settings change was never sent");
+  const sent = JSON.parse(write.body).quiz.quiz_settings;
+  assert.deepEqual(sent.filters, { ips: ["10.0.0.1"] }, "the stored IP filter was dropped");
+  assert.equal(sent.shuffle_answers, true);
+  assert.ok(result.newQuizSettingsPreserved.includes("filters.ips"), "the kept IP filter was not reported");
+});
+
+test("a cleared setting reaches Canvas as null, and is never dropped as if it were absent", async () => {
+  const requested = { student_access_code: null, session_time_limit_in_seconds: null };
+  const { result, requests } = await sendCanvas("canvas_update_single_quiz", {
+    course_id: COURSE_ID,
+    assignment_id: QUIZ_ID,
+    quiz_quiz_settings_student_access_code: null,
+    quiz_quiz_settings_session_time_limit_in_seconds: null,
+    ...guard(),
+  }, {
+    quiz: NEW_QUIZ,
+    savedQuiz: { ...NEW_QUIZ, quiz_settings: mergeQuizSettings(CURRENT_SETTINGS, requested).merged },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const write = requests.find((request) => request.method === "PATCH");
+  assert.ok(write, "the reset was never sent");
+  const sent = JSON.parse(write.body).quiz.quiz_settings;
+  // Present and null, not missing: Canvas is told to clear both.
+  assert.ok(Object.hasOwn(sent, "student_access_code"), "the access code reset was dropped");
+  assert.equal(sent.student_access_code, null);
+  assert.ok(Object.hasOwn(sent, "session_time_limit_in_seconds"), "the time limit reset was dropped");
+  assert.equal(sent.session_time_limit_in_seconds, null);
+  // A cleared value is a change, so it is never reported as a value Morrow kept.
+  assert.equal(result.newQuizSettingsPreserved.includes("session_time_limit_in_seconds"), false);
+});
+
+test("empty instructions are sent as empty, and are never treated as absent", async () => {
+  const { result, requests } = await sendCanvas("canvas_update_single_quiz", {
+    course_id: COURSE_ID,
+    assignment_id: QUIZ_ID,
+    quiz_instructions: "",
+  }, { quiz: NEW_QUIZ, savedQuiz: NEW_QUIZ });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const write = requests.find((request) => request.method === "PATCH");
+  assert.ok(write, "the emptied instructions were never sent");
+  const sent = JSON.parse(write.body).quiz;
+  assert.ok(Object.hasOwn(sent, "instructions"), "the emptied instructions were dropped");
+  assert.equal(sent.instructions, "");
+});
+
+test("a Canvas REST write still drops an empty value, so only New Quizzes keeps one", async () => {
+  // The same empty value on a Canvas REST route is absent, which is what that
+  // API means by it. Only the /quiz/v1/ JSON routes preserve null and empty.
+  const restOperation = catalogOperation("canvas_edit_assignment");
+  const empty = restOperation.parameters.find((parameter) => parameter.inputName === "assignment_name");
+  assert.ok(empty, "canvas_edit_assignment no longer carries assignment_name");
+  assert.equal(newQuizUsesJsonBody(restOperation), false);
 });

@@ -28,6 +28,7 @@ export interface UpstreamSupervisionOptions {
 }
 
 export interface StdioUpstreamOptions {
+  readonly internalSourceCapability?: string;
   readonly id: string;
   readonly label: string;
   readonly command: string;
@@ -237,6 +238,7 @@ export class StdioMcpUpstream {
       env: {
         ...getDefaultEnvironment(),
         ...(this.options.env ?? {}),
+        ...(this.options.internalSourceCapability ? { MORROW_INTERNAL_SOURCE_CAPABILITY: this.options.internalSourceCapability } : {}),
       },
       ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
       maxBufferSize: UPSTREAM_MAX_BUFFER_SIZE,
@@ -361,6 +363,7 @@ export class StdioMcpUpstream {
       return await client.callTool({
         name: normalizeToolName(name),
         arguments: { ...args },
+        ...(this.options.internalSourceCapability ? { _meta: { "io.morrow/internal-source-capability": this.options.internalSourceCapability } } : {}),
       }, options.signal ? { signal: options.signal } : {});
     } catch (error) {
       if (this.client === client || options.signal?.aborted) throw error;
@@ -372,6 +375,7 @@ export class StdioMcpUpstream {
       return retryClient.callTool({
         name: normalizeToolName(name),
         arguments: { ...args },
+        ...(this.options.internalSourceCapability ? { _meta: { "io.morrow/internal-source-capability": this.options.internalSourceCapability } } : {}),
       }, options.signal ? { signal: options.signal } : {});
     }
   }

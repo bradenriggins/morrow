@@ -3,12 +3,12 @@ import { once } from "node:events";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { deriveBlackboardSourceBindingId } from "../src/binding.js";
 import { BlackboardLearnRuntime } from "../src/runtime.js";
 import { createBlackboardLearnMcpServer } from "../src/server.js";
 import { signBlackboardEffectGrant } from "../src/effect-grant.js";
-import type { BlackboardTenant } from "../src/types.js";
+import { BlackboardApiError, type BlackboardTenant } from "../src/types.js";
 
 const courseId = "_22_1";
 const contentId = "_33_1";
@@ -27,6 +27,15 @@ const instructorMembership: JsonObject = {
 const studentMembership: JsonObject = {
   id: "_membership_3", courseId, userId: studentId, courseRoleId: "Student", availability: { available: "Yes" },
   user: { id: studentId, name: { given: "Jane", family: "Doe" }, contact: { email: "jane.doe@example.edu" }, userName: "jane.doe" },
+};
+const structuralAliasMembership: JsonObject = {
+  ...studentMembership,
+  user: {
+    id: studentId,
+    name: { given: "Blackboard Learner", family: "101" },
+    contact: { email: "blackboard.learner-101@example.edu" },
+    userName: "blackboard.learner-101",
+  },
 };
 
 let close: (() => Promise<void>) | undefined;
@@ -170,6 +179,9 @@ async function harness(options: {
     return { principal_fingerprint: current.principalFingerprint, session_generation: current.sessionGeneration };
   };
   return {
+    runtime,
+    scope,
+    privateContent: () => content,
     counts: () => ({ patchCount, rosterRequests, courseReadCount }),
     read: async () => structured(await client.callTool({ name: "blackboard_read_course", arguments: scope })),
     listContents: async () => structured(await client.callTool({ name: "blackboard_list_course_contents", arguments: scope })),
@@ -201,8 +213,8 @@ describe("Blackboard privacy boundary", () => {
       resultState: "not_sent",
       problem: { code: "blackboard_response_incomplete" },
     });
-    expect(problemMessage(read)).toContain("did not build a complete learner roster");
-    expect(problemMessage(read)).toContain("exceeded the safe limit");
+    expect(problemMessage(read)).toContain("Private error details were withheld");
+    expect(problemMessage(read)).toContain("Private error details were withheld");
     // The refusal replaces the result: no course text and no withheld marker.
     expect(read.course).toBeUndefined();
     expect(JSON.stringify(read)).not.toContain("Withheld");
@@ -210,7 +222,7 @@ describe("Blackboard privacy boundary", () => {
 
     const plan = await fixture.plan({ title: "Reviewed title" });
     expect(plan).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_response_incomplete" } });
-    expect(problemMessage(plan)).toContain("changed nothing in it");
+    expect(problemMessage(plan)).toContain("Private error details were withheld");
     expect(fixture.counts().patchCount).toBe(0);
   });
 
@@ -224,8 +236,8 @@ describe("Blackboard privacy boundary", () => {
       resultState: "not_sent",
       problem: { code: "blackboard_response_incomplete" },
     });
-    expect(problemMessage(read)).toContain("Of 2 course memberships Blackboard returned, 1 came back with no expanded user record");
-    expect(problemMessage(read)).toContain("disabled or deleted account");
+    expect(problemMessage(read)).toContain("Private error details were withheld");
+    expect(problemMessage(read)).toContain("Private error details were withheld");
     // The instructor on the same roster is not named by the refusal.
     expect(JSON.stringify(read)).not.toContain("Ada");
     expect(missing.counts().courseReadCount).toBe(0);
@@ -236,7 +248,7 @@ describe("Blackboard privacy boundary", () => {
     });
     const mismatch = await mismatched.read();
     expect(mismatch).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_response_incomplete" } });
-    expect(problemMessage(mismatch)).toContain("came back with an expanded user record for a different account");
+    expect(problemMessage(mismatch)).toContain("Private error details were withheld");
     expect(mismatched.counts().courseReadCount).toBe(0);
   });
 
@@ -275,32 +287,97 @@ describe("Blackboard privacy boundary", () => {
         expect(serialized).not.toContain(identity);
       }
     }
-    expect(JSON.stringify(read)).toContain("learner_");
-    expect(JSON.stringify(contents)).toContain("learner_");
+    expect(JSON.stringify(read)).toContain("Student A");
+    expect(JSON.stringify(contents)).toContain("Student A");
     expect(read).toMatchObject({ course: { id: courseId, courseId: "BIO-101" } });
     const learners = Array.isArray(roster.learners) ? roster.learners : [];
     expect(roster.count).toBe(2);
     expect(learners.map((learner) => (isJsonObject(learner) ? learner.courseRoleId : undefined))).toEqual(["Instructor", "Student"]);
     const tokens = learners.map((learner) => (isJsonObject(learner) && typeof learner.learnerToken === "string" ? learner.learnerToken : ""));
-    expect(tokens.every((token) => /^learner_[0-9a-f-]{36}$/.test(token))).toBe(true);
+    expect(tokens.every((token) => /^Student A[1-9][0-9]*$/.test(token))).toBe(true);
     expect(new Set(tokens).size).toBe(2);
   });
 
-  it("reports a readback it cannot redact as applied or unknown, never as not sent", async () => {
+  it("refuses an unrostered identity in a planned patch before any write", async () => {
     const fixture = await harness();
-    // Reviewed course text that names an address no one on this roster holds.
-    const patch = { description: "Ask the registrar at registrar@example.edu." };
-    const plan = await fixture.plan(patch);
-    expect(plan).toMatchObject({ ok: true, reviewRequired: true });
-    const applied = await fixture.apply(patch, String(plan.planDigest), "effect:00000000-0000-4000-8000-000000000011");
-    expect(applied).toMatchObject({
-      ok: false,
-      // The PATCH left Morrow, so this refusal states what reached Blackboard.
-      resultState: "applied_or_unknown",
-      problem: { code: "blackboard_response_incomplete" },
+    const plan = await fixture.plan({ description: "Ask the registrar at registrar@example.edu." });
+    expect(plan).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_response_incomplete" } });
+    expect(JSON.stringify(plan)).not.toContain("registrar@example.edu");
+    expect(fixture.counts().patchCount).toBe(0);
+  });
+
+  it("redacts name variants and UUID aliases in course text, messages, and diagnostics", async () => {
+    const uuid = "12345678-abcd-4000-8000-123456789abc";
+    const fixture = await harness({
+      memberships: [{ ...studentMembership, user: { ...(studentMembership.user as JsonObject), name: { given: "Jane", middle: "Marie", family: "Doe" }, displayName: "Janie", uuid, externalId: "EXT-JANE-42" } }],
+      course: { id: courseId, courseId: "BIO-101", name: "Biology", description: `Jane Marie Doe, Jane, Marie, Doe, Janie, ${uuid}, EXT-JANE-42 replied.` },
     });
-    expect(problemMessage(applied)).toContain("could not remove every learner identity from the Blackboard content description");
-    expect(JSON.stringify(applied)).not.toContain("registrar@example.edu");
+    const read = await fixture.read();
+    expect(read.ok).toBe(true);
+    expect(JSON.stringify(read)).toContain("Student A1");
+    for (const identity of ["Jane", "Marie", "Doe", "Janie", uuid, "EXT-JANE-42"]) expect(JSON.stringify(read)).not.toContain(identity);
+    vi.spyOn(fixture.runtime, "readCourse").mockRejectedValue(new BlackboardApiError("blackboard_request_failed", "Jane Marie Doe could not save this comment.", 500, "applied_or_unknown", { "retry-after": `Jane ${uuid}` }));
+    const failed = await fixture.read();
+    expect(failed).toMatchObject({ resultState: "applied_or_unknown", problem: { code: "blackboard_request_failed", status: 500, message: "Student A1 could not save this comment.", diagnostics: { "retry-after": "Student A1 Student A1" } } });
+    for (const identity of ["Jane", "Marie", "Doe", uuid]) expect(JSON.stringify(failed)).not.toContain(identity);
+  });
+
+  it("redacts nested learner-alias keys without changing Blackboard contract keys or values", async () => {
+    const fixture = await harness({ memberships: [structuralAliasMembership] });
+    await fixture.roster();
+    const sanitized = fixture.runtime.sanitizePublicValue({
+      schema: "morrow.blackboard.content-patch.plan.v1",
+      provider: "blackboard",
+      sourceBindingId: fixture.scope.source_binding_id,
+      nested: { "Blackboard Learner 101": { [studentId]: { "blackboard.learner-101": "kept" } } },
+      dynamic: { provider: "Blackboard Learner 101" },
+    }, fixture.scope);
+    expect(sanitized).toEqual({
+      schema: "morrow.blackboard.content-patch.plan.v1",
+      provider: "blackboard",
+      sourceBindingId: fixture.scope.source_binding_id,
+      nested: { "Student A1": { "Student A1": { "Student A1": "kept" } } },
+      dynamic: { provider: "Student A1" },
+    });
+  });
+
+  it("refuses nested learner-alias keys that collapse to the same readable label", async () => {
+    const fixture = await harness({ memberships: [structuralAliasMembership] });
+    await fixture.roster();
+    expect(() => fixture.runtime.sanitizePublicValue({
+      schema: "morrow.blackboard.result.v1",
+      nested: {
+        "Blackboard Learner 101": "first",
+        "blackboard.learner-101@example.edu": "second",
+      },
+    }, fixture.scope)).toThrow("privacy_identity_key_collision");
+  });
+
+  it("withholds provider error text when the exact roster is unavailable", async () => {
+    const fixture = await harness();
+    vi.spyOn(fixture.runtime, "readCourse").mockRejectedValue(new BlackboardApiError("blackboard_request_failed", "Jane Doe is unavailable", 500, "not_sent", { "retry-after": "jane.doe@example.edu" }));
+    const failed = await fixture.read();
+    expect(failed).toMatchObject({ resultState: "not_sent", problem: { code: "blackboard_request_failed", status: 500 } });
+    expect(JSON.stringify(failed)).not.toContain("Jane");
+    expect(JSON.stringify(failed)).not.toContain("@example.edu");
+    expect(failed.problem).not.toHaveProperty("diagnostics");
+  });
+
+  it("restores a reviewed text label inside Blackboard and keeps public plans and readback readable", async () => {
+    const fixture = await harness();
+    const roster = await fixture.roster();
+    const students = roster.learners as JsonObject[];
+    const label = String(students.find((entry) => entry.courseRoleId === "Student")!.learnerToken);
+    const patch = { description: `Message for ${label}.` };
+    const plan = await fixture.plan(patch);
+    expect(plan).toMatchObject({ ok: true, patch });
+    expect(JSON.stringify(plan)).not.toContain("Jane");
+    const applied = await fixture.apply(patch, String(plan.planDigest), "effect:00000000-0000-4000-8000-000000000012");
+    expect(applied).toMatchObject({ ok: true, resultState: "applied", content: { description: `Message for ${label}.` } });
+    expect(fixture.privateContent().description).toBe("Message for Jane Doe.");
+    expect(fixture.counts().patchCount).toBe(1);
+    const unknown = await fixture.plan({ description: "Message for Student A999." });
+    expect(unknown).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_scope_binding_required" } });
     expect(fixture.counts().patchCount).toBe(1);
   });
 

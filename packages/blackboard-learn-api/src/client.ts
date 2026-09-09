@@ -180,7 +180,7 @@ export class BlackboardLearnClient {
 
   /**
    * Rises with each new access token. State a caller holds against one
-   * credential — a prepared course roster — belongs to that credential only, so
+   * credential, such as a prepared course roster, belongs to that credential only, so
    * this number is what a caller compares before it reuses that state.
    */
   get tokenGeneration(): number {

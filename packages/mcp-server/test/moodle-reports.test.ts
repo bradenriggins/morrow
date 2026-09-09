@@ -15,8 +15,8 @@ import {
 } from "../src/moodle-reports.js";
 
 const COURSE = { courseId: 2 };
-const LEARNER_TOKEN = "learner_0f2b7c41-9a3d-4e51-8b6c-1d2e3f4a5b6c";
-const SECOND_TOKEN = "learner_1f2b7c41-9a3d-4e51-8b6c-1d2e3f4a5b6d";
+const LEARNER_TOKEN = "Student A1";
+const SECOND_TOKEN = "Student A2";
 
 const activityReport = {
   schema: MOODLE_COURSE_ACTIVITY_REPORT_SCHEMA,

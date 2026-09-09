@@ -18,7 +18,7 @@ const EXTENSION_ID = "abeloclekioohahgedmjcdbpllfjfhko";
 const ROOT = resolve(import.meta.dirname, "../..");
 const EXTENSION = resolve(ROOT, "connector/extension");
 const OUTPUT = resolve(ROOT, "output/playwright/canvas-connector");
-const LONG_COURSE_NAME = "Synthetic Course 501 — Advanced Human Biology: Molecular Foundations, Clinical Connections, and Evidence-Based Practice";
+const LONG_COURSE_NAME = "Synthetic Course 501: Advanced Human Biology: Molecular Foundations, Clinical Connections, and Evidence-Based Practice";
 const FILE_TEXT = "\uFEFFbounded Canvas file bytes";
 const FILE_TRANSFER_BYTES = Buffer.from("reviewed Canvas course file bytes\n", "utf8");
 /**
@@ -791,7 +791,7 @@ function startCanvas(directory) {
           && entry.interaction_data.choices.every((choice) => choice && typeof choice === "object" && typeof choice.id === "string" && typeof choice.item_body === "string")) {
           quizItem = { ...quizItem, entry: { ...quizItem.entry, interaction_data: entry.interaction_data } };
         } else if (entry.answer_feedback && typeof entry.answer_feedback === "object" && !Array.isArray(entry.answer_feedback)
-          && Object.keys(entry.answer_feedback).length === 1 && typeof entry.answer_feedback.choice_a === "string") {
+          && Object.keys(entry.answer_feedback).length === 1 && typeof Object.values(entry.answer_feedback)[0] === "string") {
           quizItem = { ...quizItem, entry: { ...quizItem.entry, answer_feedback: entry.answer_feedback } };
         } else if (entry.feedback && typeof entry.feedback === "object" && !Array.isArray(entry.feedback)
           && Object.keys(entry.feedback).length === 1 && typeof entry.feedback.correct === "string") {
@@ -804,6 +804,9 @@ function startCanvas(directory) {
         json(200, quizItem);
       });
       return;
+    }
+    if (url.pathname === "/api/quiz/v1/courses/42/quizzes/77/items" && request.method === "GET") {
+      return json(200, quizItem ? [{ id: "145", position: 1, entry_type: quizItem.entry_type }] : []);
     }
     if (url.pathname === "/api/quiz/v1/courses/42/quizzes/77/items" && request.method === "POST") {
       if (request.headers["x-csrf-token"] !== "synthetic+csrf/=" || !String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
@@ -819,7 +822,16 @@ function startCanvas(directory) {
         assert.deepEqual(body, {
           item: {
             entry: {
-              interaction_data: { word_limit_enabled: true, word_limit: 250 },
+              interaction_data: {
+                rce: true,
+                essay: null,
+                word_count: true,
+                file_upload: false,
+                spell_check: true,
+                word_limit_enabled: true,
+                word_limit_min: "0",
+                word_limit_max: "250",
+              },
               interaction_type_slug: "essay",
               item_body: "<p>Explain the result.</p>",
               scoring_algorithm: "None",
@@ -831,7 +843,7 @@ function startCanvas(directory) {
           },
         });
         quizItemWrites += 1;
-        quizItem = { id: "145", ...body.item };
+        quizItem = { id: "145", ...body.item, status: "mutable", entry_editable: true };
         json(201, quizItem);
       });
       return;
@@ -1053,7 +1065,7 @@ const batchSnapshot = () => ({
   ],
 });
 const largeBatchSnapshot = () => ({ batch: { state: "planned" }, expiresAt: approvalSnapshot.approvalExpiresAt,
-  children: Array.from({ length: 40 }, (_, index) => ({ operation: { ...approvalSnapshot, operationId: `op:bulk-${index + 1}`, plan: { ...approvalSnapshot.plan, arguments: { ...approvalSnapshot.plan.arguments, item_entry_title: `Blood and circulation — question ${index + 1}` } } } })),
+  children: Array.from({ length: 40 }, (_, index) => ({ operation: { ...approvalSnapshot, operationId: `op:bulk-${index + 1}`, plan: { ...approvalSnapshot.plan, arguments: { ...approvalSnapshot.plan.arguments, item_entry_title: `Blood and circulation: question ${index + 1}` } } } })),
 });
 const mixedBatchSnapshot = () => ({ batch: { state: "planned" }, expiresAt: approvalSnapshot.approvalExpiresAt, children: [
   { operation: { ...approvalSnapshot, operationId: "op:assignment-preview", plan: { ...approvalSnapshot.plan, tool: "canvas_create_assignment", arguments: { course_id: "42", assignment_name: "Patient education plan", assignment_description: "<h3>Your task</h3><p>Write a clear explanation of <strong>oxygen transport</strong> for a patient.</p><ul><li>Use plain language.</li><li>Include one example.</li></ul>", assignment_due_at: "2026-09-08T17:00:00Z", assignment_points_possible: 0, assignment_published: false } } } },
@@ -1516,6 +1528,12 @@ try {
   assert.match(binding.sourceBindingId, /^canvas:[0-9a-f]{20}:g1:c42$/);
   assert.match(binding43.sourceBindingId, /^canvas:[0-9a-f]{20}:g1:c43$/);
   assert.match(binding501.sourceBindingId, /^canvas:[0-9a-f]{20}:g1:c501$/);
+  const waitForPublishedEditPermission = (matches, message) => waitFor(async () => {
+    const permission = (await runtime.editOptions(binding.sourceBindingId)).editPermission;
+    if (!permission || !matches(permission)) return null;
+    const published = runtime.bindings().find((entry) => entry.sourceBindingId === binding.sourceBindingId)?.editPermission;
+    return published?.scopeDigest === permission.scopeDigest && published?.revision === permission.revision ? permission : null;
+  }, message);
   assert.equal(binding.origin, new URL(canvasUrl).origin);
   assert.equal(binding.courseName, "Introduction to Human Biology");
   assert.equal(binding43.courseName, "Synthetic Human Anatomy");
@@ -1911,10 +1929,10 @@ try {
   await settings.setViewportSize({ width: 900, height: 760 });
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const editPermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_page_content" ? value.editPermission : null;
-  }, "saved Edit permission was not published");
+  const editPermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_page_content",
+    "saved Edit permission was not published",
+  );
   assert.deepEqual(editPermission.enabledCategories, ["canvas_page_content"]);
   assert.deepEqual(editPermission.rules, [{ operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "page_text" }]);
   const originalPolicy = await settings.evaluate(async (sourceBindingId) => {
@@ -2097,10 +2115,44 @@ try {
     item_entry_title: "Evidence question",
     item_entry_item_body: "<p>Explain the result.</p>",
     item_entry_interaction_type_slug: "essay",
-    item_entry_interaction_data: { word_limit_enabled: true, word_limit: 250 },
+    item_entry_interaction_data: {
+      rce: true,
+      essay: null,
+      word_count: true,
+      file_upload: false,
+      spell_check: true,
+      word_limit_enabled: true,
+      word_limit_min: "0",
+      word_limit_max: "250",
+    },
     item_entry_scoring_algorithm: "None",
     item_entry_scoring_data: { value: "" },
     item_points_possible: 5,
+    morrow_new_quiz_item_lifecycle_guard: {
+      kind: "create",
+      before_items_sha256: createHash("sha256").update(stable([])).digest("hex"),
+      payload_sha256: createHash("sha256").update(stable({
+        entry: {
+          interaction_data: {
+            rce: true,
+            essay: null,
+            word_count: true,
+            file_upload: false,
+            spell_check: true,
+            word_limit_enabled: true,
+            word_limit_min: "0",
+            word_limit_max: "250",
+          },
+          interaction_type_slug: "essay",
+          item_body: "<p>Explain the result.</p>",
+          scoring_algorithm: "None",
+          scoring_data: { value: "" },
+          title: "Evidence question",
+        },
+        entry_type: "Item",
+        points_possible: 5,
+      })).digest("hex"),
+    },
     _morrow: {
       source_binding_id: binding.sourceBindingId,
       operation_id: "operation:new-quiz-item-browser-test",
@@ -2568,10 +2620,10 @@ try {
   await settings.getByRole("checkbox", { name: "Add Canvas Page image alternative text" }).check();
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const altPermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_page_image_alt" ? value.editPermission : null;
-  }, "saved image alternative-text Edit permission was not published");
+  const altPermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_page_image_alt",
+    "saved image alternative-text Edit permission was not published",
+  );
   assert.deepEqual(altPermission.rules, [{ operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses", toolName: "canvas_update_create_page_courses", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "page_image_alt" }]);
   const altBefore = canvas.lesson();
   const imageSource = "/courses/42/files/9?value=a>b&part=opaque";
@@ -2675,10 +2727,10 @@ try {
   await settings.getByRole("checkbox", { name: "Add Canvas Assignment image alternative text" }).check();
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const assignmentAltPermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_assignment_image_alt" ? value.editPermission : null;
-  }, "saved Assignment image alternative-text Edit permission was not published");
+  const assignmentAltPermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_assignment_image_alt",
+    "saved Assignment image alternative-text Edit permission was not published",
+  );
   assert.deepEqual(assignmentAltPermission.rules, [{ operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment", toolName: "canvas_edit_assignment", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "assignment_image_alt" }]);
   const assignmentBefore = canvas.assignment();
   const assignmentImageSource = "/courses/42/files/10";
@@ -2723,10 +2775,10 @@ try {
   await settings.getByRole("checkbox", { name: "Add Canvas Discussion image alternative text" }).check();
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const discussionAltPermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_discussion_image_alt" ? value.editPermission : null;
-  }, "saved Discussion image alternative-text Edit permission was not published");
+  const discussionAltPermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_discussion_image_alt",
+    "saved Discussion image alternative-text Edit permission was not published",
+  );
   assert.deepEqual(discussionAltPermission.rules, [{ operationKey: "PUT /v1/courses/{course_id}/discussion_topics/{topic_id}#update_topic_courses", toolName: "canvas_update_topic_courses", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "discussion_image_alt" }]);
   const discussionBefore = canvas.discussion();
   const discussionImageSource = "/courses/42/files/11";
@@ -2775,10 +2827,10 @@ try {
   await settings.getByRole("checkbox", { name: "Add Canvas Classic Quiz description image alternative text" }).check();
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const classicQuizDescriptionPermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_classic_quiz_description_image_alt" ? value.editPermission : null;
-  }, "saved Classic Quiz description image alternative-text Edit permission was not published");
+  const classicQuizDescriptionPermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_classic_quiz_description_image_alt",
+    "saved Classic Quiz description image alternative-text Edit permission was not published",
+  );
   assert.deepEqual(classicQuizDescriptionPermission.rules, [{ operationKey: "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz", toolName: "canvas_edit_quiz", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "classic_quiz_description_image_alt" }]);
   const classicQuizBefore = canvas.classicQuiz();
   const classicQuizImageSource = "/courses/42/files/16";
@@ -2823,10 +2875,10 @@ try {
   await settings.getByRole("checkbox", { name: "Add Canvas Classic Quiz question image alternative text" }).check();
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const classicQuestionPermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_classic_quiz_question_image_alt" ? value.editPermission : null;
-  }, "saved Classic Quiz question image alternative-text Edit permission was not published");
+  const classicQuestionPermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_classic_quiz_question_image_alt",
+    "saved Classic Quiz question image alternative-text Edit permission was not published",
+  );
   assert.deepEqual(classicQuestionPermission.rules, [{ operationKey: "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}#update_existing_quiz_question", toolName: "canvas_update_existing_quiz_question", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "classic_quiz_question_image_alt" }]);
   const classicQuestionGuard = (record, image, alt, { questionId = "301", answer } = {}) => {
     const body = answer ? record.answers.find((entry) => entry.id === answer.id)[answer.field] : record.question_text;
@@ -2903,10 +2955,10 @@ try {
   await settings.getByRole("checkbox", { name: "Add Canvas New Quiz item image alternative text" }).check();
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const newQuizItemAltPermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_new_quiz_item_image_alt" ? value.editPermission : null;
-  }, "saved New Quiz item image alternative-text Edit permission was not published");
+  const newQuizItemAltPermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_new_quiz_item_image_alt",
+    "saved New Quiz item image alternative-text Edit permission was not published",
+  );
   assert.deepEqual(newQuizItemAltPermission.rules, [{ operationKey: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item", toolName: "canvas_update_quiz_item", allowedChangedFields: [], requiresCanvasContentGuard: true, canvasContentGuardKind: "new_quiz_item_image_alt" }]);
   const newQuizItemBefore = canvas.quizItem();
   assert.ok(newQuizItemBefore?.entry?.item_body);
@@ -2954,10 +3006,10 @@ try {
   await settings.getByRole("checkbox", { name: "Add Canvas New Quiz choice and feedback image alternative text" }).check();
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const newQuizNestedPermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_new_quiz_nested_image_alt" ? value.editPermission : null;
-  }, "saved New Quiz nested alternative-text Edit permission was not published");
+  const newQuizNestedPermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_new_quiz_nested_image_alt",
+    "saved New Quiz nested alternative-text Edit permission was not published",
+  );
   await waitFor(() => runtime.bindings().find((entry) => entry.sourceBindingId === binding.sourceBindingId)?.editPermission?.scopeDigest === newQuizNestedPermission.scopeDigest,
     "saved New Quiz nested alternative-text Edit permission did not reach the connected binding");
   assert.deepEqual(newQuizNestedPermission.rules, [
@@ -2968,6 +3020,8 @@ try {
   const nestedChoiceImage = '<p>Cell membrane</p><img src="/courses/42/files/13">';
   const nestedAnswerFeedbackImage = '<p>Review the membrane.</p><img src="/courses/42/files/14">';
   const nestedQuestionFeedbackImage = '<p>Correct response.</p><img src="/courses/42/files/15">';
+  const nestedChoiceA = "11111111-1111-4111-8111-111111111111";
+  const nestedChoiceB = "22222222-2222-4222-8222-222222222222";
   const nestedItem = {
     ...canvas.quizItem(),
     entry: {
@@ -2975,19 +3029,19 @@ try {
       interaction_type_slug: "choice",
       interaction_data: {
         choices: [
-          { id: "choice_a", item_body: nestedChoiceImage },
-          { id: "choice_b", item_body: "<p>Nucleus</p>" },
+          { id: nestedChoiceA, position: 1, item_body: nestedChoiceImage },
+          { id: nestedChoiceB, position: 2, item_body: "<p>Nucleus</p>" },
         ],
       },
       scoring_algorithm: "Equivalence",
-      scoring_data: { value: "choice_a", weight: 1 },
-      answer_feedback: { choice_a: nestedAnswerFeedbackImage },
-      feedback: { correct: nestedQuestionFeedbackImage, incorrect: "<p>Review the diagram.</p>", neutral: "<p>Consider each choice.</p>" },
+      scoring_data: { value: nestedChoiceA, weight: 1 },
+      answer_feedback: { [nestedChoiceA]: "<p>Review the membrane.</p>" },
+      feedback: { correct: "<p>Correct response.</p>", incorrect: "<p>Review the diagram.</p>", neutral: "<p>Consider each choice.</p>" },
     },
   };
   canvas.setQuizItem(nestedItem);
   const nestedChoiceGuard = {
-    kind: "new_quiz_choice_image_alt", course_id: "42", assignment_id: "77", item_id: "145", choice_id: "choice_a",
+    kind: "new_quiz_choice_image_alt", course_id: "42", assignment_id: "77", item_id: "145", choice_id: nestedChoiceA,
     body_sha256: createHash("sha256").update(nestedChoiceImage).digest("hex"),
     protected_state_sha256: newQuizItemProtectedStateDigest(nestedItem, (entry) => { delete entry.interaction_data.choices[0].item_body; }),
     image_index: 1, image_start: nestedChoiceImage.indexOf("<img"), image_end: nestedChoiceImage.length - 1,
@@ -3012,11 +3066,18 @@ try {
   assert.deepEqual(canvas.quizItem().entry.scoring_data, nestedItem.entry.scoring_data);
   assert.equal(canvas.quizItemWrites(), 3);
 
+  canvas.setQuizItem({
+    ...canvas.quizItem(),
+    entry: {
+      ...canvas.quizItem().entry,
+      answer_feedback: { ...canvas.quizItem().entry.answer_feedback, [nestedChoiceA]: nestedAnswerFeedbackImage },
+    },
+  });
   const answerFeedbackBefore = canvas.quizItem();
   const nestedAnswerFeedbackGuard = {
-    kind: "new_quiz_answer_feedback_image_alt", course_id: "42", assignment_id: "77", item_id: "145", choice_id: "choice_a",
+    kind: "new_quiz_answer_feedback_image_alt", course_id: "42", assignment_id: "77", item_id: "145", choice_id: nestedChoiceA,
     body_sha256: createHash("sha256").update(nestedAnswerFeedbackImage).digest("hex"),
-    protected_state_sha256: newQuizItemProtectedStateDigest(answerFeedbackBefore, (entry) => { delete entry.answer_feedback.choice_a; }),
+    protected_state_sha256: newQuizItemProtectedStateDigest(answerFeedbackBefore, (entry) => { delete entry.answer_feedback[nestedChoiceA]; }),
     image_index: 1, image_start: nestedAnswerFeedbackImage.indexOf("<img"), image_end: nestedAnswerFeedbackImage.length - 1,
     image_tag_sha256: createHash("sha256").update('<img src="/courses/42/files/14">').digest("hex"),
     image_src_sha256: createHash("sha256").update("/courses/42/files/14").digest("hex"),
@@ -3033,10 +3094,17 @@ try {
   const nestedAnswerFeedbackWrite = await runtime.call("canvas_update_quiz_item", nestedAnswerFeedbackArgs);
   assert.equal(nestedAnswerFeedbackWrite.ok, true, JSON.stringify(nestedAnswerFeedbackWrite));
   assert.equal(nestedAnswerFeedbackWrite.result.verification.status, "verified", JSON.stringify(nestedAnswerFeedbackWrite));
-  assert.equal(canvas.quizItem().entry.answer_feedback.choice_a, '<p>Review the membrane.</p><img src="/courses/42/files/14" alt="Cell membrane review">');
+  assert.equal(canvas.quizItem().entry.answer_feedback[nestedChoiceA], '<p>Review the membrane.</p><img src="/courses/42/files/14" alt="Cell membrane review">');
   assert.deepEqual(canvas.quizItem().entry.scoring_data, nestedItem.entry.scoring_data);
   assert.equal(canvas.quizItemWrites(), 4);
 
+  canvas.setQuizItem({
+    ...canvas.quizItem(),
+    entry: {
+      ...canvas.quizItem().entry,
+      feedback: { ...canvas.quizItem().entry.feedback, correct: nestedQuestionFeedbackImage },
+    },
+  });
   const questionFeedbackBefore = canvas.quizItem();
   const nestedQuestionFeedbackGuard = {
     kind: "new_quiz_feedback_image_alt", course_id: "42", assignment_id: "77", item_id: "145", feedback_type: "correct",
@@ -3064,7 +3132,7 @@ try {
   assert.deepEqual(canvas.quizItem().entry.scoring_data, nestedItem.entry.scoring_data);
   assert.equal(canvas.quizItemWrites(), 5);
 
-  canvas.setQuizItem({ ...canvas.quizItem(), entry: { ...canvas.quizItem().entry, scoring_data: { value: "choice_b", weight: 1 } } });
+  canvas.setQuizItem({ ...canvas.quizItem(), entry: { ...canvas.quizItem().entry, scoring_data: { value: nestedChoiceB, weight: 1 } } });
   const staleNestedQuestionFeedback = await runtime.call("canvas_update_quiz_item", {
     ...nestedQuestionFeedbackArgs,
     _morrow: { ...nestedQuestionFeedbackArgs._morrow, outer_grant: { ...grant, effect_receipt_id: "effect:new-quiz-question-feedback-image-alt-stale", authorization: { kind: "edit_scope", policy_digest: newQuizNestedPermission.scopeDigest, policy_revision: newQuizNestedPermission.revision } } },
@@ -3079,10 +3147,10 @@ try {
   await settings.getByRole("checkbox", { name: "Change Canvas Assignment due date" }).check();
   await settings.getByRole("button", { name: "Save Edit access" }).click();
   await settings.getByText(/Edit access saved for 1 course/).first().waitFor();
-  const settingsDuePermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return value.editPermission?.enabledCategories?.join(",") === "canvas_assignment_due_date" ? value.editPermission : null;
-  }, "saved Assignment due-date Edit permission was not published");
+  const settingsDuePermission = await waitForPublishedEditPermission(
+    (permission) => permission.enabledCategories?.join(",") === "canvas_assignment_due_date",
+    "saved Assignment due-date Edit permission was not published",
+  );
   assert.ok(settingsDuePermission.expiresAt > Date.now() + 59 * 60 * 1_000);
   const conversationalStartedAt = Date.now();
   const conversationalSet = await runtime.editPolicySet({
@@ -3094,10 +3162,10 @@ try {
     }],
   });
   assert.equal(conversationalSet.ok, true, JSON.stringify(conversationalSet));
-  const duePermission = await waitFor(async () => {
-    const value = await runtime.editOptions(binding.sourceBindingId);
-    return Number.isSafeInteger(value.editPermission?.expiresAt) ? value.editPermission : null;
-  }, "temporary Assignment due-date Edit permission was not published");
+  const duePermission = await waitForPublishedEditPermission(
+    (permission) => Number.isSafeInteger(permission.expiresAt),
+    "temporary Assignment due-date Edit permission was not published",
+  );
   assert.equal(duePermission.revision, settingsDuePermission.revision + 1);
   assert.ok(duePermission.expiresAt > conversationalStartedAt + 29 * 60 * 1_000);
   assert.ok(duePermission.expiresAt <= conversationalStartedAt + 30 * 60 * 1_000 + 1_000);

@@ -780,7 +780,7 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
     const displayedRequest = blackboardCourseCopy
       ? { source_course_id: request.course_id, destination_course_id: request.destination_course_id }
       : request;
-    const hiddenFields = ["expected_digest", "expected_connection", "tenant_id", "source_binding_id", "expected_plan_digest", "morrow_new_quiz_settings_guard", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id"] : []), ...targets.map((item) => item.field)];
+    const hiddenFields = ["expected_digest", "expected_connection", "tenant_id", "source_binding_id", "expected_plan_digest", "morrow_new_quiz_settings_guard", "morrow_new_quiz_lifecycle_guard", "morrow_new_quiz_effect_guard", "morrow_new_quiz_item_position_guard", ...(missingNames ? ["course_id", "assignment_id", "quiz_id", "content_id", "connection_id", "target_section_id"] : []), ...targets.map((item) => item.field)];
     const guardedImageAlt = ["image_alt", "page_image_alt", "assignment_image_alt", "discussion_image_alt"].includes(String(pageGuard.kind));
     const guardedText = ["text", "page_text"].includes(String(pageGuard.kind));
     const changes = blackboardPatch

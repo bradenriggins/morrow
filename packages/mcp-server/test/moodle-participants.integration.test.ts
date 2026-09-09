@@ -205,7 +205,7 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
         schema: "morrow.result.v1", tool: "morrow_find_moodle_enrolment_candidate",
         data: {
           schema: "morrow.moodle-enrolment-candidate.v1", course_id: 2,
-          candidate_token: expect.stringMatching(/^learner_/),
+          candidate_token: expect.stringMatching(/^Student A[1-9][0-9]*$/),
           match: { kind: "exact_native_query", candidate_count: 1 },
           proof: { dispatch_count: 0, read_request_count: 2, candidate_limit: 100 },
         },
@@ -248,8 +248,8 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
         data: {
           participant_count: 2,
           participants: [
-            { learnerToken: expect.stringMatching(/^learner_/), roles: ["Student"], enrolment_methods: ["Manual enrolments"] },
-            { learnerToken: expect.stringMatching(/^learner_/), roles: ["Non-editing teacher"], enrolment_methods: ["Manual enrolments", "Cohort sync"] },
+            { learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*$/), roles: ["Student"], enrolment_methods: ["Manual enrolments"] },
+            { learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*$/), roles: ["Non-editing teacher"], enrolment_methods: ["Manual enrolments", "Cohort sync"] },
           ],
           proof: { required_capabilities: CAPABILITIES, total_rows: 2 },
         },
@@ -296,7 +296,7 @@ describe("Moodle participant and enrolment Full MCP exposure", () => {
       expect(sourceEnrolment?.arguments).toMatchObject({ course_id: 2, user_id: 7 });
       expect(sourceEnrolment?.arguments).not.toHaveProperty("learner_token");
 
-      const unknown = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_participant_enrolment", arguments: { course_id: 2, learner_token: `learner_${"a".repeat(64)}`, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const unknown = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_participant_enrolment", arguments: { course_id: 2, learner_token: "Student A999", _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const unknownText = JSON.stringify(unknown);
       expect(unknown.isError).toBe(true);
       expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1" } });

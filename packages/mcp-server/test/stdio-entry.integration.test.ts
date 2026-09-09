@@ -63,6 +63,7 @@ describe("Morrow stdio entry", () => {
       expect(listed.tools.some((tool) => tool.name === "canvas_page_get")).toBe(true);
       expect(listed.tools.some((tool) => tool.name === "morrow_browser_edit_policy_set")).toBe(false);
       expect(listed.tools.some((tool) => tool.name === "morrow_bridge_maintenance")).toBe(false);
+      expect(listed.tools.some((tool) => tool.name === "morrow_private_chat_exchange")).toBe(false);
       expect(listed.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining([
         "morrow_catalog_search",
         "morrow_capability_get",

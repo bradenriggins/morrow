@@ -21,8 +21,8 @@
 // same fixtures and fails if they disagree.
 //
 // Live-unverified: no Morrow-connected tenant has answered
-// GET /api/banks/{bank_id}/items/{item_id}. The item shape used here — `id`,
-// `entry_type: "Item"`, `entry.item_body`, `entry.interaction_data` — is the
+// GET /api/banks/{bank_id}/items/{item_id}. The item shape used here (`id`,
+// `entry_type: "Item"`, `entry.item_body`, `entry.interaction_data`) is the
 // New Quizzes item shape the harvest describes, and it stays unproven against a
 // real bank.
 
@@ -169,6 +169,13 @@ export function itemBankEntryLinksItem(entry, itemId) {
   return false;
 }
 
+export function itemBankEntryMatchesTarget(entry, bankEntryId, bankId, itemId) {
+  return plain(entry)
+    && String(entry.id ?? "") === bankEntryId
+    && (entry.bank_id === undefined || String(entry.bank_id) === bankId)
+    && itemBankEntryLinksItem(entry, itemId);
+}
+
 // Every <img> the repair may count, in document order, with the exact byte
 // range of its tag. `open` reports markup this scan did not finish reading, so
 // an unclosed <script> or <svg> refuses the repair instead of miscounting it.
@@ -283,4 +290,155 @@ export async function itemBankImageAltPresent(body, guard) {
   if (!attributes || attributes.get("alt") !== escapeItemBankAlt(guard.alt_text)) return false;
   const source = attributes.get("src");
   return typeof source === "string" && await digest(source) === guard.image_src_sha256;
+}
+
+
+// The media rule, as findings rather than one reason.
+//
+// `connector/extension/src/item-bank-executor.js` copies this into the function
+// Chrome injects, and scripts/test/canvas-item-bank-guard.test.mjs runs both
+// copies over the same fixtures. The rule itself is the shared New Quiz media
+// rule from packages/mcp-server/src/quiz-item-payload.ts: every image names its
+// alternative text, and every media source is one Canvas can serve.
+//
+// It reports every offending element with the exact tag that carries it,
+// because a change to an existing question has to be judged against that
+// question. Adding alternative text to one image must not be refused because a
+// different image in the same question still has none. A finding with an empty
+// tag names no element, so it can never be matched against a stored one.
+const MEDIA_ELEMENTS = Object.freeze(["img", "audio", "video"]);
+const MEDIA_SRC_PREFIXES = Object.freeze(["https://", "/courses/", "/api/v1/files/"]);
+const MEDIA_TAG = /<\s*(?:img|audio|video)\b/i;
+// The media rule reads an unquoted attribute value as well, because it only
+// counts elements and never rewrites one.
+const MEDIA_ATTRIBUTE = /^\s+([A-Za-z_:][-A-Za-z0-9_:.]*)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/;
+const MEDIA_MAX_DEPTH = 32;
+
+function mediaElements(value) {
+  const elements = [];
+  let rawText = "";
+  for (const match of value.matchAll(TAG)) {
+    const tag = match[0];
+    if (tag.startsWith("<!--")) continue;
+    const parsed = TAG_NAME.exec(tag);
+    if (!parsed) continue;
+    const closing = parsed[1] === "/";
+    const name = parsed[2].toLowerCase();
+    if (rawText) {
+      if (closing && name === rawText) rawText = "";
+      continue;
+    }
+    if (RAW_TEXT.includes(name)) {
+      if (!closing && !tag.endsWith("/>")) rawText = name;
+      continue;
+    }
+    if (closing || !MEDIA_ELEMENTS.includes(name)) continue;
+    elements.push({ name, tag });
+  }
+  return { elements, open: rawText !== "" };
+}
+
+function mediaTagAttributes(tag) {
+  const open = TAG_NAME.exec(tag);
+  if (!open || open[1] === "/" || !tag.endsWith(">")) return null;
+  let rest = tag.slice(open[0].length, tag.length - (tag.endsWith("/>") ? 2 : 1));
+  const attributes = new Map();
+  while (rest.trim().length > 0) {
+    const match = MEDIA_ATTRIBUTE.exec(rest);
+    if (!match) return null;
+    const name = match[1].toLowerCase();
+    if (attributes.has(name)) return null;
+    attributes.set(name, match[2] ?? match[3] ?? match[4] ?? "");
+    rest = rest.slice(match[0].length);
+  }
+  return attributes;
+}
+
+function stringMediaFindings(value, findings) {
+  if (!MEDIA_TAG.test(value)) return;
+  const scan = mediaElements(value);
+  // Markup this scan could not read names no element, so it can never be
+  // matched against a stored one and always refuses.
+  if (scan.open) {
+    findings.push({ reason: "media_markup_unreadable", tag: "" });
+    return;
+  }
+  for (const element of scan.elements) {
+    const attributes = mediaTagAttributes(element.tag);
+    if (!attributes) {
+      findings.push({ reason: "media_markup_unreadable", tag: "" });
+      continue;
+    }
+    // Presence, not content: alt="" is how a decorative image is marked, and it
+    // is the author's answer rather than a missing one. The finding names the
+    // exact element that carries it, so a problem the question already has can
+    // never excuse a second one or a different one.
+    if (element.name === "img" && !attributes.has("alt")) findings.push({ reason: "media_image_alt_missing", tag: element.tag });
+    const source = attributes.get("src");
+    if (source !== undefined && !MEDIA_SRC_PREFIXES.some((prefix) => source.startsWith(prefix))) {
+      findings.push({ reason: "media_src_unsupported", tag: element.tag });
+    }
+  }
+}
+
+/**
+ * Every media problem one question payload carries, in document order, as
+ * `{ reason, tag }`. `tag` is the exact element text that carries the problem,
+ * and it is empty for a problem that names no element, which can never be
+ * matched against a stored one.
+ */
+export function itemBankMediaFindings(value, depth = 0, findings = []) {
+  if (depth > MEDIA_MAX_DEPTH) {
+    findings.push({ reason: "payload_too_deep", tag: "" });
+    return findings;
+  }
+  if (typeof value === "string") stringMediaFindings(value, findings);
+  else if (Array.isArray(value)) for (const member of value) itemBankMediaFindings(member, depth + 1, findings);
+  else if (plain(value)) for (const child of Object.values(value)) itemBankMediaFindings(child, depth + 1, findings);
+  return findings;
+}
+
+/** Every refusal code `itemBankNewMediaReason` can return. */
+export const ITEM_BANK_MEDIA_REASONS = Object.freeze([
+  "media_image_alt_missing", "media_src_unsupported", "media_markup_unreadable", "payload_too_deep",
+]);
+
+/**
+ * The one media verdict for a New Quizzes question payload, for a bank question
+ * and for a question held directly in a quiz.
+ *
+ * `proposed` is the complete item object about to be sent. `stored` is the
+ * complete item object a fresh provider read returned a moment ago; pass null
+ * or undefined for a create, which has no stored question and is judged
+ * absolutely.
+ *
+ * Returns null when the payload may be sent, or one code from
+ * `ITEM_BANK_MEDIA_REASONS`. The caller names it in its own layer's form:
+ * `item_bank_payload_<code>` in the Item Banks frame,
+ * `new_quiz_item_payload_invalid` in the Canvas content script.
+ *
+ * On an update the match is per element and counted, never per code. Every
+ * undescribed image in `proposed` is permitted only when the identical element
+ * is also undescribed in `stored`, and never more often than `stored` holds it.
+ * So a question that already has one undescribed image never excuses a second
+ * copy of it, and never excuses a different undescribed image. An unsupported
+ * media source is matched the same way. Markup the scan cannot read names no
+ * element and always refuses.
+ *
+ * Pure: no fetch, no DOM, no clock, no module-scope state, and it never throws.
+ */
+export function itemBankNewMediaReason(proposed, stored) {
+  const held = new Map();
+  for (const finding of itemBankMediaFindings(stored)) {
+    if (!finding.tag) continue;
+    const key = `${finding.reason} ${finding.tag}`;
+    held.set(key, (held.get(key) || 0) + 1);
+  }
+  for (const finding of itemBankMediaFindings(proposed)) {
+    const key = `${finding.reason} ${finding.tag}`;
+    const count = finding.tag ? held.get(key) || 0 : 0;
+    if (count === 0) return finding.reason;
+    held.set(key, count - 1);
+  }
+  return null;
 }

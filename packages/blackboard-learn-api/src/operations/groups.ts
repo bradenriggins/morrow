@@ -67,7 +67,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
  * a person by one of these and by nothing else, so a caller cannot name a
  * Blackboard account Morrow has not tokenized for this exact course.
  */
-const LEARNER_REFERENCE = /^learner_[A-Za-z0-9_-]{1,160}$/;
+const LEARNER_REFERENCE = /^Student A[1-9][0-9]*$/;
 
 /** One short provider value as it may leave Morrow, such as `Yes`. */
 const PROVIDER_VALUE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
@@ -136,7 +136,7 @@ const EVIDENCE = {
  * reference is minted inside this server, for this course, so the Gateway holds
  * no entry for it and a field of that name would never reach this source.
  */
-const learnerReferenceInput = z.string().min(1).max(200);
+const learnerReferenceInput = z.string().regex(LEARNER_REFERENCE).max(200);
 
 const groupIdInput = z.string().regex(BLACKBOARD_ID);
 
@@ -353,7 +353,7 @@ async function readGroup(
 
 /**
  * One group as this module returns it. The group name and description are
- * provider text — a group can be named after a person — so they leave through
+ * provider text. A group can be named after a person, so they leave through
  * the same privacy boundary as every other Blackboard text.
  */
 function safeGroup(record: JsonObject, roster: PreparedRoster): JsonObject {
@@ -443,8 +443,8 @@ function groupFieldsMatch(record: JsonObject, patch: JsonObject): boolean {
 
 /**
  * A group change sets the group's name, its description, whether it is
- * available, or any combination of those three. Everything else — the group set
- * it belongs to, its enrolment rules, the group itself — is refused here, before
+ * available, or any combination of those three. Everything else, including the group set
+ * it belongs to, its enrolment rules, and the group itself, is refused here, before
  * any request.
  */
 function reviewedPatch(value: unknown): JsonObject {
@@ -550,7 +550,7 @@ function reviewedAccount(
   if (!LEARNER_REFERENCE.test(input.learner_reference)) {
     throw new BlackboardApiError(
       "blackboard_scope_binding_required",
-      "Name the person by the protected reference Morrow returned for them in this Blackboard course (learner_…). Morrow does not accept a Blackboard user id here.",
+      "Name the person by the protected reference Morrow returned for them in this Blackboard course (for example, Student A1). Morrow does not accept a Blackboard user id here.",
     );
   }
   return {
@@ -1671,7 +1671,7 @@ export const blackboardGroupsModule: BlackboardOperationModule = {
     blackboardTool({
       name: "blackboard_plan_group_membership",
       title: "Plan putting one person into a Blackboard group",
-      description: "Prepare putting one person into one group of the selected Blackboard Learn course, for Morrow review. Name the person by the protected reference the Blackboard roster read returned for them (learner_…); this tool does not accept a Blackboard user id. It refuses a person who is already in the group, and it sends no Blackboard request.",
+      description: "Prepare putting one person into one group of the selected Blackboard Learn course, for Morrow review. Name the person by the protected reference the Blackboard roster read returned for them (for example, Student A1); this tool does not accept a Blackboard user id. It refuses a person who is already in the group, and it sends no Blackboard request.",
       private: true,
       gatewayDispatchOnly: false,
       inputSchema: groupMembershipInput,
@@ -1744,7 +1744,7 @@ export const blackboardGroupsModule: BlackboardOperationModule = {
     blackboardTool({
       name: "blackboard_plan_group_membership_removal",
       title: "Plan taking one person out of a Blackboard group",
-      description: "Prepare taking one person out of one group of the selected Blackboard Learn course, for Morrow review. Name the person by the protected reference the Blackboard roster read returned for them (learner_…); this tool does not accept a Blackboard user id. Taking a person out of a group can take their access to that group's content and to work the group shares. It refuses a person who is not in the group, it does not remove anyone from the course, and it sends no Blackboard request.",
+      description: "Prepare taking one person out of one group of the selected Blackboard Learn course, for Morrow review. Name the person by the protected reference the Blackboard roster read returned for them (for example, Student A1); this tool does not accept a Blackboard user id. Taking a person out of a group can take their access to that group's content and to work the group shares. It refuses a person who is not in the group, it does not remove anyone from the course, and it sends no Blackboard request.",
       private: true,
       gatewayDispatchOnly: false,
       inputSchema: groupMembershipInput,

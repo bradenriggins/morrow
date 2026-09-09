@@ -25,7 +25,7 @@ const USER_LIMIT = 1_000_000;
 const ROLE_LIMIT = 20;
 const ENROLMENT_LIMIT = 20;
 const LABEL_MAX = 200;
-const LEARNER_TOKEN = /^learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const LEARNER_TOKEN = /^Student A[1-9][0-9]*$/u;
 const INSTANT = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z$/u;
 
 export type MoodleCourseParticipantSource = Readonly<{

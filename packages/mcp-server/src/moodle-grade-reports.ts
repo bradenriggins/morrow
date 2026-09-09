@@ -23,7 +23,7 @@ const PERCENT_SOURCES = ["percentage_display", "range_row"] as const;
 /** The exact reasons the browser can state instead of a statistic. */
 const STATISTICS_UNAVAILABLE = ["unreadable_cells", "no_graded_values", "grade_values_not_numeric"] as const;
 const STATES = ["graded", "ungraded", "unreadable"] as const;
-const LEARNER_TOKEN = /^learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const LEARNER_TOKEN = /^Student A[1-9][0-9]*$/u;
 
 type GradeItemKind = (typeof KINDS)[number];
 type GradeBucket = (typeof BUCKETS)[number];

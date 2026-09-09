@@ -228,6 +228,7 @@ async function bridgeOwnerEndpoint(workspaceRoot, journalPath) {
   const calls = [];
   let malformed = false;
   let storeStatus = false;
+  let statusOverride = null;
   const proof = () => ({
     schema: "morrow.bridge.active-folder-proof.v1",
     extensionId,
@@ -237,6 +238,7 @@ async function bridgeOwnerEndpoint(workspaceRoot, journalPath) {
     challengeSha256: "d".repeat(64),
   });
   const resultFor = (control) => {
+    if (control.action === "status" && statusOverride !== null) return statusOverride;
     if (malformed) return { schema: "morrow.bridge.update-status.v1" };
     if (control.action === "status") return storeStatus
       ? { schema: "morrow.bridge.update-status.v1", extensionId, manifestVersion: "1.0.3", installType: "normal", quiescent: false, activeFolderProof: null }
@@ -311,6 +313,10 @@ async function bridgeOwnerEndpoint(workspaceRoot, journalPath) {
     calls,
     malformed: () => { malformed = true; },
     useStoreStatus: () => { storeStatus = true; },
+    proof,
+    // Answers one exact status result, whatever the fixture would otherwise
+    // return, so the status shapes the monitor must refuse can be read back.
+    setStatus: (value) => { malformed = false; statusOverride = value; },
     async close() {
       await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     },
@@ -464,6 +470,28 @@ test("uses only the held private owner lease for Bridge maintenance", async (t) 
     schema: "morrow.installer-maintenance.v1", action: "release", status: "released",
   });
   await assert.rejects(monitor.bridgeMaintenance({ action: "readback" }), /lease is not held/);
+
+  // A Chrome Web Store Bridge may answer exactly one status shape: install type
+  // "normal" carrying no active-folder proof. A Store install that claims a
+  // proof it cannot have, a development install that omits the proof it must
+  // have, and any install type Morrow does not know are all refused here, so
+  // "normal" never becomes a way past the active-folder check.
+  const storeShape = {
+    schema: "morrow.bridge.update-status.v1",
+    extensionId: endpoint.extensionId,
+    manifestVersion: endpoint.manifestVersion,
+    installType: "normal",
+    quiescent: false,
+    activeFolderProof: null,
+  };
+  endpoint.setStatus({ ...storeShape, activeFolderProof: endpoint.proof() });
+  await assert.rejects(monitor.bridgeMaintenance({ action: "status" }), /Bridge maintenance result is invalid/);
+  endpoint.setStatus({ ...storeShape, installType: "development" });
+  await assert.rejects(monitor.bridgeMaintenance({ action: "status" }), /Bridge maintenance result is invalid/);
+  endpoint.setStatus({ ...storeShape, installType: "chrome_web_store" });
+  await assert.rejects(monitor.bridgeMaintenance({ action: "status" }), /Bridge maintenance result is invalid/);
+  endpoint.setStatus(storeShape);
+  assert.deepEqual(await monitor.bridgeMaintenance({ action: "status" }), storeShape);
 });
 
 test("reports only sanitized verified runtime state and reconnects through public reads", async (t) => {

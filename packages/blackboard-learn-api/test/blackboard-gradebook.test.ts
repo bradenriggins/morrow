@@ -82,7 +82,7 @@ function attempt(id: string, userId: string, overrides: JsonObject = {}): JsonOb
     modified: "2026-09-21T08:30:00.000Z",
     exempt: false,
     studentSubmission: submission,
-    studentComments: `Sorry this is late — ${studentEmail}`,
+    studentComments: `Sorry this is late. ${studentEmail}`,
     feedback,
     ...overrides,
   };
@@ -488,13 +488,9 @@ describe("Blackboard gradebook columns and attempts", () => {
       { name: "blackboard_plan_gradebook_grade_patch", arguments: { learner_reference: studentId, patch: gradePatch } },
     ];
     for (const { name, arguments: args } of addressed) {
-      const refused = structured(await fixture.call(name, args));
-      expect(refused, name).toMatchObject({
-        ok: false,
-        resultState: "not_sent",
-        problem: { code: "blackboard_scope_binding_required" },
-      });
-      expect(String(problem(refused).message)).toContain("does not accept a Blackboard user id");
+      const refused = await fixture.call(name, args);
+      expect(refused, name).toMatchObject({ isError: true });
+      expect(JSON.stringify(refused)).not.toContain(studentId);
     }
     // A request Morrow cannot honour costs the tenant no request at all.
     expect(fixture.requests()).toEqual([]);
@@ -704,7 +700,7 @@ describe("Blackboard gradebook columns and attempts", () => {
 
   it("refuses a change to anything but the reviewed fields, before any request", async () => {
     const fixture = await harness();
-    const reference = "learner_2f1a5b3c-9d4e-4f6a-8b7c-1d2e3f4a5b6c";
+    const reference = "Student A999";
     const columns: readonly JsonObject[] = [
       {},
       { grading: { type: "Manual" } },

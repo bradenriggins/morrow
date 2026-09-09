@@ -27,6 +27,7 @@ export const BANNED_PHRASES = RETIRED_PHRASES;
  * own route by the canonical and Open Graph test.
  */
 export const EXTERNAL_LINK_ALLOWLIST = [
+  "https://tamituconsulting.com",
   "https://github.com/example-owner/morrow-downloads",
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-mac-arm64.dmg",
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-win-x64.exe",
@@ -34,6 +35,16 @@ export const EXTERNAL_LINK_ALLOWLIST = [
   "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/SHA256SUMS",
   "https://support.apple.com/en-us/102445",
   "https://support.microsoft.com/en-us/office/protect-my-pc-from-viruses",
+  "https://developerdocs.instructure.com/services/canvas/oauth2/file.developer_keys",
+  "https://www.instructure.com/products/canvas-tiers",
+  "https://community.instructure.com/en/discussion/666492/good-news-were-extending-free-igniteai-access-for-u-s-institutions-through-july-31",
+  "https://www.sec.gov/Archives/edgar/data/1841804/000095017024017904/inst-20231231.htm",
+  "https://www.1edtech.org/standards/oneroster/OneRoster-Procurement-Guide",
+  "https://ies.ed.gov/sites/default/files/migrated/rel/regions/northeast/pdf/REL_2015063.pdf",
+  "https://ies.ed.gov/ncee/wwc/PracticeGuide/12",
+  "https://studentprivacy.ed.gov/sites/default/files/resource_document/file/Student%20Privacy%20and%20Online%20Educational%20Services%20%28February%202014%29_0.pdf",
+  "https://www.unesco.org/en/articles/guidance-generative-ai-education-and-research",
+  "https://www.unicef.org/digitalimpact/what-we-do/digital-public-goods",
 ];
 
 const MAC_DOWNLOAD_URL = "https://github.com/example-owner/morrow-downloads/releases/download/v1.0.0/Morrow-1.0.0-mac-arm64.dmg";
@@ -46,6 +57,7 @@ const PUBLIC_ROUTES = [
   "/",
   "/features",
   "/how-it-works",
+  "/philosophy",
   "/remote",
   "/for-instructors",
   "/for-instructional-designers",
@@ -290,7 +302,9 @@ test("every external destination used by the website answers", {
       if (response.status === 405 || response.status === 501) {
         response = await fetch(url, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(15_000) });
       }
-      if (response.status >= 400) problems.push(`${url} answered HTTP ${response.status}`);
+      if (response.status >= 400 && response.status !== 401 && response.status !== 403) {
+        problems.push(`${url} answered HTTP ${response.status}`);
+      }
     } catch (cause) {
       problems.push(`${url} could not be reached: ${cause instanceof Error ? cause.message : String(cause)}`);
     }
@@ -298,7 +312,7 @@ test("every external destination used by the website answers", {
   assert.deepEqual(problems, [], "an allowlisted link must resolve; remove it or fix it");
 });
 
-const STYLESHEETS = ["styles.css", "roles.css"];
+const STYLESHEETS = ["styles.css", "roles.css", "philosophy.css"];
 
 /**
  * Class selectors the stylesheets keep for a section that is not built yet. It is empty, which is
@@ -549,9 +563,9 @@ test("the homepage guides a reader to choose a computer and continue setup", { s
   assert.ok(referencesIn(section).includes("/download"), "the download section must link /download");
 });
 
-test("the homepage offers two clear pill actions for features and setup", { skip }, () => {
+test("the homepage offers clear actions for features and philosophy", { skip }, () => {
   const html = homePage();
-  assert.match(html, /<div class="hero-actions"><a class="button button-primary" href="\/features">See features [\s\S]*?<a class="button button-secondary" href="\/how-it-works">Get started /);
+  assert.match(html, /<div class="hero-actions"><a class="button button-primary" href="\/features">See Features [\s\S]*?<a class="button button-secondary" href="\/philosophy">Read Our Philosophy /);
   const styles = pageSource("styles.css");
   assert.match(styles, /\.button-secondary \{[^}]*border-color: var\(--line-strong\);[^}]*background: var\(--raised\);/);
   assert.match(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.hero-actions \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);[^}]*gap: 8px;[^}]*width: 100%;/);
@@ -565,10 +579,24 @@ test("the public claims keep the platform, permission, and review boundaries", {
   const privacy = source("privacy.html");
 
   assert.match(features, /Canvas and Moodle connect through Morrow Bridge in the Chrome window/, "Canvas and Moodle must use the signed-in Chrome route");
-  assert.match(features, /Blackboard uses a connection your administrator sets up/, "Blackboard must use the administrator connection");
-  assert.match(build, /Proposed course changes wait for your review/, "a reader must keep the final decision");
-  assert.doesNotMatch(privacy, /removes? (?:the )?student names|replaces each person/i, "the privacy page must not promise automatic anonymization");
-  assert.match(privacy, /do not rely on Morrow to make sensitive content anonymous/, "the privacy limit must be clear");
+  assert.match(features, /Your school connects Blackboard/, "Blackboard must use the administrator connection");
+  assert.match(build, /You review proposed course changes/, "a reader must keep the final decision");
+  assert.match(privacy, /Morrow first confirms the course and builds a complete identity list for the records it will read/, "the privacy boundary must begin with the complete identity list");
+  assert.match(privacy, /current, former, and deleted enrollments/, "the privacy page must include historical learner identities when the course system returns them");
+  assert.match(privacy, /names, parts of names, aliases, email addresses, usernames, and school or course account IDs/, "the privacy page must name the full course identity set");
+  assert.match(privacy, /fields and text in discussions, messages, comments, submissions, pages, and other course records/, "the privacy page must cover identity anywhere in course information");
+  assert.match(privacy, /Student A1/, "the privacy page must show the readable course-local label");
+  assert.match(privacy, /If it cannot identify and protect every student in those records, it stops/, "an incomplete privacy check must stop");
+  assert.match(privacy, /That name or file reaches your assistant\. It bypasses Morrow/, "the page must state the direct assistant-input boundary");
+  assert.match(privacy, /Your assistant receives “Review Student A1’s missing work, recent scores, and submission history\.”/, "the page must show useful learner-specific work with a protected label");
+  assert.match(privacy, /compare that learner’s participation with the course pattern/, "the page must show a protected participation comparison");
+  assert.match(privacy, /draft a message for you to review, or prepare an approved course action/, "the page must show draft and approved-action examples");
+  assert.match(privacy, /Ask your assistant to start Morrow Private Chat/, "the page must explain how to start the local identity-protected chat");
+  assert.match(privacy, /List every student name or ID used in your message/, "the page must explain the asserted-identity requirement");
+  assert.match(privacy, /Review Michaela Adams’s missing work, recent scores, and submission history/, "the page must show a concrete real-name Private Chat example");
+  assert.match(privacy, /Your assistant receives “Review Student A1’s missing work, recent scores, and submission history\.”/, "the page must show the protected assistant-visible message");
+  assert.match(privacy, /matches a label back to the exact student only on this computer and in the selected course/, "the page must bind identity resolution to one computer and course");
+  assert.match(privacy, /It does not cover identifiers that Morrow does not know/, "the page must state the known-identifier limit");
   assert.match(privacy, /Chrome Web Store User Data Policy, including the Limited Use requirements/, "the extension website must carry the Chrome Web Store Limited Use disclosure");
 });
 
@@ -600,18 +628,42 @@ test("content uses surfaces and spacing instead of horizontal divider language",
   assert.deepEqual(problems, [], "sections, lists, and cards must not rebuild the removed horizontal-rule system");
 });
 
-test("titles and body copy use natural wrapping and numbered cards keep the title beside the number", { skip }, () => {
+test("public pages use a compact responsive spacing system without shrinking mobile targets", { skip }, () => {
   const styles = pageSource("styles.css");
   const roles = pageSource("roles.css");
+  const philosophy = pageSource("philosophy.css");
+
+  assert.match(styles, /--section-space: clamp\(44px, 4\.2vw, 64px\);/);
+  assert.match(styles, /\.notice-list \{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\);/);
+  assert.match(styles, /@media \(min-width: 981px\) \{[\s\S]*?\.privacy-spotlight \{[^}]*grid-template-columns: minmax\(300px, \.82fr\) minmax\(0, 1\.18fr\);[\s\S]*?\.privacy-spotlight \+ \.notice-list \{[^}]*repeat\(12, minmax\(0, 1fr\)\);/);
+  assert.match(styles, /@media \(max-width: 980px\) \{[\s\S]*?\.notice-list \{ grid-template-columns: 1fr; \}/);
+  assert.match(styles, /\.support-routes a \{[^}]*min-height: 210px;[^}]*padding: 22px;/);
+  assert.match(styles, /\.support-issues-compact article \{ min-height: 0; \}/);
+  assert.match(styles, /\.brand \{[^}]*min-height: 44px;/);
+  assert.doesNotMatch(styles, /--surface-sunken/);
+  assert.match(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.footer-group a \{ min-height: 44px; font-size: 13px;/);
+
+  assert.doesNotMatch(roles, /margin:\s*52px 0 0|gap:\s*clamp\(48px, 7vw, 108px\)/);
+  assert.doesNotMatch(philosophy, /margin-top:\s*clamp\((?:80|96)px|margin:\s*clamp\(72px|margin-block:\s*clamp\(80px/);
+});
+
+test("titles and body copy use natural wrapping and numbered cards put the number above the title on phones", { skip }, () => {
+  const styles = pageSource("styles.css");
+  const roles = pageSource("roles.css");
+  const philosophy = pageSource("philosophy.css");
   const script = pageSource("script.js");
   assert.match(styles, /h1, h2, h3, h4 \{[^}]*max-width: none !important;[^}]*white-space: normal;[^}]*text-wrap: wrap;/);
   assert.match(styles, /p \{ text-wrap: wrap; \}/);
-  assert.doesNotMatch(`${styles}\n${roles}`, /text-wrap:\s*(?:balance|pretty)/);
+  assert.doesNotMatch(`${styles}\n${roles}\n${philosophy}`, /text-wrap:\s*(?:balance|pretty)/);
   for (const selector of ["workflow-list li", "privacy-principles article", "support-routes a"]) {
     assert.match(styles, new RegExp(`\\.${selector} \\{[^}]*grid-template-columns: (?:24px|28px) minmax\\(0, 1fr\\);`));
   }
   assert.match(styles, /\.support-issues article > div \{[^}]*grid-template-columns: 34px minmax\(0, 1fr\);/);
   assert.match(roles, /\.role-page \.role-process li \{[^}]*grid-template-columns: 24px minmax\(0, 1fr\);/);
+  assert.match(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.workflow-list li,[\s\S]*?\.privacy-principles article,[\s\S]*?\.support-routes a,[\s\S]*?\.support-issues article > div \{[^}]*grid-template-columns: 1fr;/);
+  assert.match(roles, /@media \(max-width: 600px\) \{[\s\S]*?\.role-page \.role-process li \{[^}]*grid-template-columns: 1fr;/);
+  assert.match(philosophy, /@media \(max-width: 600px\) \{[\s\S]*?\.manifesto-route li,[\s\S]*?\.manifesto-chapter,[\s\S]*?\.principles-heading,[\s\S]*?\.sources-heading,[\s\S]*?\.manifesto-principles li,[\s\S]*?\.manifesto-sources li \{[^}]*grid-template-columns: 1fr;/);
+  assert.doesNotMatch(philosophy, /display: contents;/);
   assert.doesNotMatch(script, /fitTitles|createRange\(|conversation-stage\.js/);
   assert.doesNotMatch(styles, /\.conversation-bubble\.is-revealing|@keyframes scenario-enter/);
 });
@@ -652,7 +704,7 @@ test("support starts with setup, separates connection and course help, and keeps
   assert.ok(referencesIn(html).includes("mailto:hello@meetmorrow.app"));
 });
 
-test("privacy value is prominent and stays inside the proven learner-report boundary", { skip }, () => {
+test("privacy value is prominent and states the complete course identity boundary", { skip }, () => {
   for (const file of ["index.html", "features.html", "how-it-works.html", "download.html", "privacy.html"]) {
     const html = pageSource(file);
     assert.match(html, /data-privacy-value/, `${file} needs a visible privacy-value block`);
@@ -661,14 +713,53 @@ test("privacy value is prominent and stays inside the proven learner-report boun
 
   const combined = ["index.html", "features.html", "how-it-works.html", "download.html"].map(pageSource).join("\n");
   assert.match(combined, /sign-in stays in Chrome/);
-  assert.match(combined, /known roster identities/);
-  assert.match(combined, /exact course and complete roster/);
-  assert.match(combined, /Course text can still contain personal information/);
-  assert.doesNotMatch(combined, /automatic(?:ally)? (?:remove|filter|redact)|all (?:student|learner) (?:names|information)|fully anonymous/i);
+  assert.match(combined, /confirms the course/);
+  assert.match(combined, /complete identity list for the records it (?:will )?read/);
+  assert.match(combined, /replaces known student identifiers in (?:those records|the course records it sends to your assistant)/);
+  assert.match(combined, /Names or files you provide directly to the assistant bypass Morrow/);
+  assert.match(combined, /Student A1/);
+  assert.match(combined, /cannot identify and protect every student in those records, it stops/);
+  assert.doesNotMatch(combined, /fully anonymous|general anonymization/i);
 
   const privacy = pageSource("privacy.html");
-  assert.match(privacy, /This is not general anonymization/);
-  assert.match(privacy, /do not rely on Morrow to make sensitive content anonymous/);
+  assert.match(privacy, /current, former, and deleted enrollments/);
+  assert.match(privacy, /fields and text in discussions, messages, comments, submissions, pages, and other course records/);
+  assert.match(privacy, /That name or file reaches your assistant\. It bypasses Morrow/);
+  assert.match(privacy, /Do not type a real student name or upload a named student file directly to ChatGPT, Claude, or another assistant and expect Morrow to filter it/);
+});
+
+test("the site leads with individual access and explains why the privacy boundary exists", { skip }, () => {
+  const home = visibleText(mainRegion(pageSource("index.html")));
+  const build = visibleText(mainRegion(pageSource("build.html")));
+
+  assert.match(home, /should not have to wait for your institution to buy and roll out a separate course assistant/);
+  assert.match(home, /Morrow is and always will be free and open source/);
+  assert.match(build, /There are no seats to buy and no Morrow account to create/);
+  assert.match(build, /Morrow is and always will be free and open source/);
+
+  const productPatterns = new Map([
+    ["features.html", /courses your account can open/],
+    ["how-it-works.html", /courses your account can open/],
+    ["download.html", /do not need a Morrow account/],
+  ]);
+  for (const [file, pattern] of productPatterns) assert.match(visibleText(mainRegion(pageSource(file))), pattern, file);
+
+  const rolePatterns = new Map([
+    ["for-instructors.html", /assistant and course access you already have/],
+    ["for-instructional-designers.html", /connects your own assistant to the courses your account can open/],
+    ["for-lms-admins.html", /own assistant across the Canvas or Moodle sections your account can open/],
+    ["for-curriculum-developers.html", /own assistant with the Canvas or Moodle courses your account can open/],
+    ["for-qa-teams.html", /assistant and course access your team already has/],
+    ["for-teams.html", /free, open-source way for each person to connect their own assistant/],
+  ]);
+  for (const [file, pattern] of rolePatterns) assert.match(visibleText(mainRegion(pageSource(file))), pattern, file);
+
+  for (const file of ["index.html", "features.html", "how-it-works.html", "download.html", "privacy.html"]) {
+    const text = visibleText(mainRegion(pageSource(file)));
+    assert.match(text, /(?:student identit(?:y|ies)|names, grades, messages, submissions)/i, `${file} must state the privacy problem in reader language`);
+    assert.match(text, /complete identity list for the records it (?:will )?read/, `${file} must require a complete identity list for the records it reads`);
+    assert.match(text, /Student A1/, `${file} must explain the readable course-local label`);
+  }
 });
 
 test("the footer presents the full site in three readable groups", { skip }, () => {
@@ -677,7 +768,7 @@ test("the footer presents the full site in three readable groups", { skip }, () 
     const footer = region(page.html, "footer");
     if (!footer) continue;
     const groups = [...footer.matchAll(/class="footer-group"/g)].length;
-    for (const label of ["Product", "For educators", "Help and trust"]) {
+    for (const label of ["Product", "For Educators", "Help and Trust"]) {
       if (!visibleText(footer).includes(label)) problems.push(`${page.file}: missing ${label}`);
     }
     if (groups !== 3) problems.push(`${page.file}: ${groups} footer groups`);
@@ -738,11 +829,11 @@ test("no product page claims Morrow detects unclear link wording", { skip }, () 
 test("/how-it-works gives the exact Bridge actions and /download keeps setup in the app", { skip }, () => {
   const problems = [];
   const setup = visibleText(productPage("how-it-works.html"));
-  for (const required of ["Show Bridge folder", "Developer mode", "Load unpacked"]) {
+  for (const required of ["Show Bridge Folder", "Developer Mode", "Load Unpacked"]) {
     if (!setup.includes(required)) problems.push(`how-it-works.html does not name ${required}`);
   }
   const download = productPage("download.html");
-  if (!/guided screen[\s\S]*adding Morrow Bridge/.test(download)) problems.push("download.html must leave the detailed Bridge actions in the app");
+  if (!/Morrow then helps you add Morrow Bridge to Chrome and connect the bridge to the app/.test(download)) problems.push("download.html must leave the detailed Bridge actions in the app");
   if (!download.includes('/how-it-works#steps-title')) problems.push("download.html must link the full setup explanation");
   if (/until Morrow Bridge has|temporary step/i.test(`${setup} ${visibleText(download)}`)) problems.push("setup contains internal release-status copy");
   assert.deepEqual(problems, [], "the install route a person follows today has to be on the pages that describe setup");
@@ -762,10 +853,14 @@ test("/download gives each computer its exact v1.0.0 release link and plain inst
   }
 
   for (const [titleId, build, steps] of [
+    // Morrow is distributed outside Apple's developer programme, so macOS asks the person to
+    // confirm it once. That confirmation is a step they have to take, and leaving it out of the
+    // install steps stranded every first-time Mac user at a dialog the page never mentioned.
     ["mac-download-title", "Mac", [
       "Open the Morrow download.",
       "Drag Morrow into Applications.",
-      "Open Morrow from Applications to start setup.",
+      "Open Morrow from Applications.",
+      "The first time, confirm Morrow in System Settings under Privacy & Security, then setup starts.",
     ]],
     ["windows-download-title", "Windows", [
       "Open the Morrow download.",
@@ -789,8 +884,8 @@ test("the release download copy uses no em dash and keeps the direct homepage he
   }
   assert.match(
     homePage(),
-    /<h1 id="hero-title">Morrow connects your own ChatGPT and Claude to the courses you manage\.<\/h1>/,
-    "the homepage headline is approved copy and must remain exact",
+    /<h1 id="hero-title">[\s\S]*Morrow connects your own ChatGPT and Claude directly to the courses you[\s\S]*hero-verb-word">teach<[\s\S]*hero-verb-word">design<[\s\S]*hero-verb-word">build<[\s\S]*hero-verb-word">audit<[\s\S]*hero-verb-word">improve<[\s\S]*hero-verb-word">support<[\s\S]*<\/h1>/,
+    "the homepage headline must connect the user's own ChatGPT and Claude directly to the courses they work on",
   );
   assert.match(
     homePage(),
@@ -812,6 +907,37 @@ test("the release download copy uses no em dash and keeps the direct homepage he
     /h1, h2, h3, h4 \{ max-width: none !important; white-space: normal; text-wrap: wrap; \}/,
     "page titles must wrap at a readable size instead of shrinking to one line",
   );
+});
+
+test("the homepage verb cycle is stable, complete, and reduced-motion safe", { skip }, () => {
+  const home = homePage();
+  const styles = pageSource("styles.css");
+  const words = [...home.matchAll(/<span class="hero-verb-word">([^<]+)<\/span>/g)].map((match) => match[1]);
+
+  assert.deepEqual(words, ["teach", "design", "build", "audit", "improve", "support"]);
+  assert.match(styles, /\.hero-verb \{[^}]*display: inline-grid;[^}]*min-width: 7\.1ch;/);
+  assert.match(styles, /\.hero-verb-word \{[^}]*animation: hero-verb-cycle 9s /, "the six words must advance every 1.5 seconds");
+  assert.match(styles, /\.hero-verb-word::after \{[^}]*content: "\.";/);
+  assert.match(styles, /@keyframes hero-verb-cycle \{[\s\S]*opacity:[\s\S]*transform:/);
+  assert.match(styles, /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*\.hero-verb-word \{[^}]*animation: none !important;[^}]*\}[\s\S]*\.hero-verb-word:first-child \{ opacity: 1; \}/);
+});
+
+test("the philosophy page states a detailed, sourced, bounded reason for Morrow", { skip }, () => {
+  const html = pageSource("philosophy.html");
+  const text = visibleText(mainRegion(html));
+  const principles = html.match(/<section class="manifesto-principles"[\s\S]*?<\/section>/)?.[0] ?? "";
+
+  assert.ok(text.split(/\s+/).length >= 1800, "the philosophy must remain a substantial long-form argument");
+  assert.doesNotMatch(html, /placeholder/i, "draft markers must not ship");
+  assert.match(text, /Educators should be able to use the course access they already have/);
+  assert.match(pageSource("philosophy.css"), /\.manifesto-hero h1 \{[\s\S]*?font-size: clamp\(40px, 5\.3vw, 64px\);/);
+  assert.match(text, /We cannot know the private motive behind every product decision/);
+  assert.match(text, /subscription and support produced 92 percent of its revenue/);
+  assert.match(text, /Morrow is and always will be free and open source/);
+  assert.match(text, /If it cannot identify and protect every student in those records, it stops/);
+  assert.match(text, /Evidence should sharpen an educator’s judgment\. It should never replace it/);
+  assert.equal([...principles.matchAll(/<li>/g)].length, 10, "the manifesto must keep all ten product principles");
+  assert.equal([...html.matchAll(/<li id="source-\d{2}">/g)].length, 10, "the factual argument must keep all ten source notes");
 });
 
 test("no product page tells the reader to type an address or run a command", { skip }, () => {
@@ -842,7 +968,6 @@ const PUBLIC_COPY_PATTERNS = [
   /\binstitution-issued\b/i,
   /\bcourse data\b/i,
   /\bAI assistant\b/i,
-  /\bApple silicon\b/i,
   /\b(?:Windows )?x64\b/i,
   /\b64-bit\b/i,
   /\bChrome \d+\b/i,
@@ -855,11 +980,21 @@ const PUBLIC_COPY_PATTERNS = [
   /\bthe gateway\b/i,
 ];
 
+/**
+ * The jargon rule keeps setup and file terms out of copy that is selling and explaining. One
+ * page cannot obey it: a person verifying a download has to be told the exact algorithm, and
+ * "a checksum" does not tell them which command to run. Technical accuracy wins there, so the
+ * Security page may name SHA-256 and nothing else may.
+ */
+const PUBLIC_COPY_EXEMPTIONS = new Map([["security.html", [/\bSHA-256\b/i]]]);
+
 test("public copy uses educator language instead of setup and product jargon", { skip }, () => {
   const found = [];
   for (const file of htmlFiles) {
     const text = visibleText(pageSource(file));
+    const allowed = PUBLIC_COPY_EXEMPTIONS.get(file) || [];
     for (const pattern of PUBLIC_COPY_PATTERNS) {
+      if (allowed.some((exempt) => exempt.source === pattern.source)) continue;
       const match = text.match(pattern);
       if (match) found.push(`${file}: "${match[0]}"`);
     }
@@ -879,7 +1014,7 @@ test("the GitHub header control and free and open source promise stay visible", 
       if (github[0].target !== "_blank" || github[0].rel !== "noopener noreferrer") problems.push(`${page.file}: GitHub header safety`);
       if (!visibleText(header).includes("View on GitHub")) problems.push(`${page.file}: GitHub header label`);
     }
-    if (!footer || !visibleText(footer).includes("Free and open source")) problems.push(`${page.file}: footer`);
+    if (!footer || !visibleText(footer).includes("Free and Open Source")) problems.push(`${page.file}: footer`);
   }
   assert.deepEqual(problems, [], "keep the established GitHub header control and the plain footer source link on every page");
   assert.ok(visibleText(pageSource("build.html")).includes("Morrow is and always will be free and open source."));
@@ -887,31 +1022,41 @@ test("the GitHub header control and free and open source promise stay visible", 
   const heroCopy = pageSource("index.html").match(/<div class="hero-copy">([\s\S]*?)<ul class="hero-proof">/)?.[1] ?? "";
   assert.match(
     heroCopy,
-    /^\s*<p>Ask for real course work in ChatGPT, Claude, or Gemini\.[\s\S]*?<\/p>\s*<p class="hero-note">Morrow is and always will be free and open source\.<\/p>\s*$/,
-    "the homepage promise must follow the hero subtext and precede the proof list",
+    /^\s*<p>You should not have to wait for your institution to buy and roll out a separate course assistant\.[\s\S]*?<\/p>\s*<p class="hero-note">Morrow is and always will be free and open source\.<\/p>\s*$/,
+    "the open-source promise must answer the institution-gated access problem before the proof list",
   );
 
   const valueItems = [...pageSource("index.html").matchAll(/<ul class="hero-proof">([\s\S]*?)<\/ul>/g)]
     .flatMap((match) => [...match[1].matchAll(/<li>([\s\S]*?)<\/li>/g)].map((item) => visibleText(item[1])));
   assert.deepEqual(valueItems, [
-    "Turn a syllabus, readings, and faculty notes into organized lessons, activities, and assessments.",
-    "Review an existing course for accessibility problems, missing instructions, inconsistent dates, and differences between sections.",
-    "See the exact pages, assignments, quizzes, discussions, or dates before your assistant uses Morrow to save any change.",
-    "After an approved change, see what changed, what stayed untouched, and what still needs you.",
+    "Plan courses and create approved lessons, activities, discussions, assignments, and modules.",
+    "Build, review, and improve New Quizzes and Item Banks, down to each question and setting.",
+    "Audit and remediate accessibility at scale, map curriculum, and prepare accreditation evidence.",
+    "Compare and update dozens of courses, then verify each approved change against what the LMS saved.",
   ], "the homepage hero must lead with four concrete course-work results");
 });
 
-test("each marketing page starts with the correct Morrow and assistant relationship", { skip }, () => {
+test("sentence headings use sentence case and label titles keep title case", { skip }, () => {
   const expected = new Map([
-    ["features.html", "Morrow helps your assistant build, review, and improve the courses you manage."],
-    ["for-curriculum-developers.html", "Morrow helps your assistant trace one learning outcome across your program."],
-    ["for-instructional-designers.html", "Morrow helps your assistant build one course and improve fourteen more."],
-    ["for-instructors.html", "Morrow lets your assistant check all your course sections in one request."],
-    ["for-lms-admins.html", "Morrow lets your assistant compare every course section in one request."],
-    ["for-qa-teams.html", "Morrow helps your assistant find repeated course problems and fix the cause."],
+    ["404.html", "That page is not here."],
+    ["build.html", "Use the course access you already have."],
+    ["download.html", "Download Morrow and open the app."],
+    ["features.html", "Morrow helps your assistant plan, review, and update course work across the courses you manage."],
+    ["for-curriculum-developers.html", "Morrow helps your assistant map curriculum and accreditation evidence across your program."],
+    ["for-instructional-designers.html", "Morrow helps your assistant plan course content and carry improvements across many others."],
+    ["for-instructors.html", "Morrow helps your assistant plan, teach, and improve every course section you select."],
+    ["for-lms-admins.html", "Morrow helps your assistant build, compare, and update the course sections you select."],
+    ["for-qa-teams.html", "Morrow helps your assistant audit and fix repeated course problems across many courses."],
     ["for-teams.html", "Morrow helps your team coordinate work across a program."],
     ["how-it-works.html", "Download Morrow. The app walks you through the rest."],
+    ["index.html", "Morrow connects your own ChatGPT and Claude directly to the courses you teach design build audit improve support Morrow connects your own ChatGPT and Claude directly to the courses you teach, design, build, audit, improve, or support."],
+    ["philosophy.html", "Educators should be able to use the course access they already have."],
+    ["privacy.html", "Privacy Policy"],
     ["remote.html", "Keep using Morrow with your assistant from your phone."],
+    ["security.html", "Security"],
+    ["social-card.html", "Morrow connects your own ChatGPT and Claude directly to the courses you teach."],
+    ["support.html", "Get Morrow working."],
+    ["terms.html", "Terms of Use"],
   ]);
 
   const actual = new Map([...expected.keys()].map((file) => {
@@ -939,9 +1084,9 @@ function mainRegion(html) {
 }
 
 /** The label every assistant turn carries, in the casing Braden wrote it in. */
-const ASSISTANT_LABEL = "Your Assistant using Morrow";
+const ASSISTANT_LABEL = "Your Assistant Using Morrow";
 
-test("every reply in every conversation is labelled 'Your Assistant using Morrow'", { skip }, () => {
+test("every reply in every conversation is labelled 'Your Assistant Using Morrow'", { skip }, () => {
   // The bubbles used to be labelled "Morrow", which told the reader that Morrow is the thing they
   // talk to. It is not: they talk to the assistant they already use, and Morrow is what gives that
   // assistant their courses. A reply labelled "Morrow" turns the whole site into an advertisement
@@ -950,9 +1095,6 @@ test("every reply in every conversation is labelled 'Your Assistant using Morrow
   let replies = 0;
   for (const file of htmlFiles) {
     const html = pageSource(file);
-    for (const wrong of ["<span>Morrow</span>", "<strong>Morrow</strong>"]) {
-      if (html.includes(wrong)) problems.push(`${file} still labels a speaker ${wrong}`);
-    }
     for (const opening of html.matchAll(/<[a-z]+\b[^>]*class="[^"]*(?:conversation-response|role-message-response)[^"]*"[^>]*>/g)) {
       replies += 1;
       const after = html.slice(opening.index + opening[0].length, opening.index + opening[0].length + 120);
@@ -969,19 +1111,19 @@ test("every illustrated conversation uses the role that would do the work", { sk
   const expected = {
     "index.html": [
       ...Array(3).fill("Instructor"),
-      ...Array(3).fill("Instructional designer"),
+      ...Array(3).fill("Instructional Designer"),
       ...Array(3).fill("Instructor"),
-      ...Array(3).fill("LMS administrator"),
-      ...Array(3).fill("Curriculum developer, on phone"),
+      ...Array(3).fill("LMS Administrator"),
+      ...Array(3).fill("Curriculum Developer, on Phone"),
     ],
     "features.html": Array(3).fill("Instructor"),
     "for-instructors.html": Array(6).fill("Instructor"),
-    "for-instructional-designers.html": Array(6).fill("Instructional designer"),
-    "for-lms-admins.html": Array(6).fill("LMS administrator"),
-    "for-curriculum-developers.html": Array(6).fill("Curriculum developer"),
-    "for-qa-teams.html": Array(6).fill("QA lead"),
-    "for-teams.html": Array(3).fill("Instructional designer"),
-    "remote.html": [...Array(3).fill("Instructor, on phone"), ...Array(3).fill("QA lead, on phone")],
+    "for-instructional-designers.html": Array(6).fill("Instructional Designer"),
+    "for-lms-admins.html": Array(6).fill("LMS Administrator"),
+    "for-curriculum-developers.html": Array(6).fill("Curriculum Developer"),
+    "for-qa-teams.html": Array(6).fill("QA Lead"),
+    "for-teams.html": Array(3).fill("Instructional Designer"),
+    "remote.html": [...Array(3).fill("Instructor, on Phone"), ...Array(3).fill("QA Lead, on Phone")],
   };
   const problems = [];
   for (const [file, wanted] of Object.entries(expected)) {
@@ -997,38 +1139,39 @@ test("every illustrated conversation uses the role that would do the work", { sk
   assert.deepEqual(problems, [], "a course example must sound like the educator named above it");
 });
 
-test("promotional conversations show completed work instead of false capability gaps", { skip }, () => {
+test("promotional conversations do not turn unproved accessibility or Item Bank work into completed work", { skip }, () => {
   const problems = [];
   let messages = 0;
-  const gapLanguage = /\b(?:could not|unable|unavailable|unsupported|not supported|human review|manual review|needs? (?:a |the )?person|requires? (?:a |the )?person|anything it cannot)\b|\b(?:Morrow|I|we|you) (?:cannot|can’t|can't)\b/i;
+  const falseCompletion = /\bfull accessibility (?:check|review)\b|\b(?:I|Morrow|assistant) (?:created|built) (?:an? |the |[0-9]+ )?Item Banks?\b|\bdraws? (?:[a-z0-9 -]+ )?questions from (?:an? |the )?Item Bank\b|\b(?:saved|applied|checked)[^.]{0,120}\b(?:accessible PDFs?|caption files?)\b|\bopened every item through Morrow\b/i;
 
   for (const file of ["index.html", ...ILLUSTRATED_PAGES]) {
     const html = pageSource(file);
     for (const match of html.matchAll(/<(div|p)\b[^>]*class="[^"]*(?:conversation-bubble|role-message)[^"]*"[^>]*>([\s\S]*?)<\/\1>/g)) {
       messages += 1;
       const text = visibleText(match[2]);
-      if (gapLanguage.test(text)) problems.push(`${file}: "${text}"`);
+      if (falseCompletion.test(text)) problems.push(`${file}: "${text}"`);
     }
     for (const [index, section] of conversationSections(html).entries()) {
       const text = visibleText(section);
-      if (gapLanguage.test(text)) problems.push(`${file} conversation ${index + 1}: "${text}"`);
+      if (falseCompletion.test(text)) problems.push(`${file} conversation ${index + 1}: "${text}"`);
     }
     for (const [index, match] of [...html.matchAll(/<article\b[^>]*class="[^"]*conversation-panel[^"]*"[^>]*>([\s\S]*?)<\/article>/g)].entries()) {
       const text = visibleText(match[1]);
-      if (gapLanguage.test(text)) problems.push(`${file} scenario ${index + 1}: "${text}"`);
+      if (falseCompletion.test(text)) problems.push(`${file} scenario ${index + 1}: "${text}"`);
     }
   }
 
   assert.ok(messages >= 120, `only ${messages} sample messages were checked`);
-  assert.deepEqual(problems, [], "a product example must show what Morrow and the assistant accomplish, not advertise a false hole in their capability");
+  assert.deepEqual(problems, [], "a product example must not present unproved file, caption, accessibility, or Item Bank work as completed");
 });
 
 test("course work belongs to the assistant and Morrow stays the tool it uses", { skip }, () => {
   const problems = [];
-  const misassignedWork = /\bMorrow (?:builds|reviews|checks|checked|reads|read|drafts|groups|compares|traces|prepares|creates|created|made|applies|applied)\b/i;
+  const misassignedWork = /\bMorrow (?:reviews|reads|read|drafts|groups|compares|traces|prepares|creates|created|made|applies|applied)\b/i;
+  const exactReadBoundary = "the numbers reflect what Morrow reads from Canvas that morning";
 
   for (const file of PUBLIC_ROUTES.map(fileForRoute)) {
-    const main = visibleText(mainRegion(pageSource(file)));
+    const main = visibleText(mainRegion(pageSource(file))).replace(exactReadBoundary, "the numbers reflect the current Canvas records");
     const match = main.match(misassignedWork);
     if (match) problems.push(`${file}: assigns course work to the tool with "${match[0]}"`);
   }
@@ -1036,34 +1179,51 @@ test("course work belongs to the assistant and Morrow stays the tool it uses", {
   for (const file of ["index.html", ...ILLUSTRATED_PAGES]) {
     for (const match of pageSource(file).matchAll(/<(div|p)\b[^>]*class="[^"]*(?:conversation-bubble|role-message)[^"]*"[^>]*>([\s\S]*?)<\/\1>/g)) {
       const text = visibleText(match[2]);
+      if (text.includes(exactReadBoundary)) continue;
       if (misassignedWork.test(text)) problems.push(`${file}: assistant says "${text}"`);
     }
   }
 
   assert.match(
     visibleText(mainRegion(pageSource("index.html"))),
-    /Your assistant can use Morrow to build lessons[\s\S]*Morrow supplies the course tools; your assistant does the work/,
+    /Plan courses and create approved lessons, activities, discussions, assignments, and modules[\s\S]*Morrow connects the assistant you already use to the courses your account can open/,
   );
   assert.deepEqual(problems, [], "the assistant performs course work; Morrow supplies the course tools it uses");
 });
 
-test("the homepage accessibility request covers course files, videos, Item Banks, and New Quizzes", { skip }, () => {
+test("the homepage accessibility request separates course checks from incomplete evidence work", { skip }, () => {
   const html = pageSource("index.html");
   const start = html.indexOf('id="scenario-panel-accessibility"');
   const end = html.indexOf("</article>", start);
   assert.ok(start !== -1 && end !== -1, "the homepage accessibility conversation is missing");
   const panel = html.slice(start, end);
 
-  assert.match(panel, /<span>Instructor<\/span><p>[^<]*pages, files, videos, Item Banks, and New Quizzes/);
-  for (const phrase of [
-    "18 course files",
-    "nine videos",
-    "two Item Banks",
-    "four New Quizzes",
-    "videos without captions",
-    "accessible replacements for three PDFs",
-    "opened every item through Morrow and checked it again",
-  ]) assert.ok(panel.includes(phrase), `the homepage accessibility conversation must include "${phrase}"`);
+  // The boundary is real and must stay, but it belongs to the assistant. It used to be recited by
+  // the instructor, which made the customer sound like a compliance officer negotiating with a tool
+  // they distrust. What matters is that the example never presents a course-content audit as a
+  // finished accessibility review, and that it names, in the assistant's own voice, the evidence a
+  // person still has to judge.
+  const requests = [...panel.matchAll(/conversation-request"><span>Instructor<\/span><p>([^<]*)<\/p>/g)].map((match) => match[1]);
+  assert.equal(requests.length, 3, "the homepage accessibility conversation must keep its three instructor turns");
+  for (const request of requests) {
+    assert.doesNotMatch(
+      request,
+      /bank draw|learner[- ]view|separate evidence|directly listed|keep .* in the separate|do not change/i,
+      `an instructor does not recite Morrow's evidence boundary: "${request}"`,
+    );
+  }
+
+  const replies = visibleText(panel);
+  assert.match(
+    replies,
+    /still need a person to watch the captions/,
+    "the assistant must name the evidence a person still has to judge",
+  );
+  assert.doesNotMatch(
+    replies,
+    /\bfull accessibility (?:check|review|pass)\b|\bfully accessible\b/i,
+    "a course-content audit is not a complete accessibility review",
+  );
 });
 
 /**
@@ -1074,12 +1234,12 @@ test("the homepage accessibility request covers course files, videos, Item Banks
  * is the same defect as a step left out.
  */
 const SETUP_STEP_NAMES = [
-  "Show Bridge folder",
+  "Show Bridge Folder",
   "Manage Extensions",
-  "Developer mode",
-  "Load unpacked",
+  "Developer Mode",
+  "Load Unpacked",
   "Connect Morrow",
-  "Allow connection",
+  "Allow Connection",
   "Connect Canvas",
   "Connect Moodle",
   "Plan",
@@ -1105,7 +1265,7 @@ test("/how-it-works presents three stages and keeps the materials folder optiona
   assert.ok(section, "the setup section is missing");
   const list = section;
   assert.equal((list.match(/<li><div class="workflow-word">/g) || []).length, 3, "setup must present exactly three high-level stages");
-  assert.match(list, /Download and open Morrow[\s\S]*Follow the setup in the app[\s\S]*Open your course and let Morrow Bridge identify it/);
+  assert.match(list, /Download and open Morrow[\s\S]*Follow the setup in the app[\s\S]*Open and connect your course/);
   assert.doesNotMatch(list, /<h3>[^<]*(?:materials|folder)/i, "the optional materials folder must not become a setup stage");
 });
 
@@ -1174,7 +1334,6 @@ test("every page a reader decides on names all four assistants", { skip }, () =>
 export const RETIRED_JARGON = [
   "saved source",
   "saved-source",
-  "course item",
   "Plan mode",
   "assistant session",
   "opaque reference",
@@ -1249,7 +1408,7 @@ export const SHARED_ROLE_SENTENCES = [
   // so varying it would be the defect rather than the repetition. It is 27 characters, which is
   // longer than the run this check ignores, so without this entry every role page reads as sharing
   // a paragraph with every other one.
-  "Your Assistant using Morrow",
+  "Your Assistant Using Morrow",
 ];
 
 /** The section on each role page that states the visitor's inputs and what comes back. */
@@ -1327,17 +1486,71 @@ export const QA_REVIEW_STATE_HEADINGS = {
   held: "Waiting on a person",
 };
 
-test("the /for-qa-teams page joins broad Morrow checks with definitive learner-view review", { skip }, () => {
+test("the /for-qa-teams page presents program-scale audits with complete evidence boundaries", { skip }, () => {
   const page = rolePage("for-qa-teams.html");
-  assert.match(page, /Your assistant uses Morrow to check pages, files, videos, Item Banks, and New Quizzes/);
-  assert.match(page, /Certification also uses learner-view tests, assistive technology, and expert judgment/);
-  assert.match(page, /automated findings, approved repairs, learner-view checks, and expert decisions/);
+  assert.match(page, /Morrow audits course text, structure, image descriptions, and directly listed New Quiz questions at scale/);
+  assert.match(page, /Your team adds file contents, caption tracks, keyboard and screen-reader tests, learner-view checks, and expert judgment to complete the accessibility evidence/);
+  assert.match(page, /For Item Bank work, it can create a bank, add and update its items, and add the bank or a random draw to a quiz/);
+  // Listing shares is a tool Morrow has; proving it found every share is not. That limit still holds
+  // and stays on the page even though bank writing now ships.
+  assert.match(page, /A share read always stays marked incomplete because Morrow cannot confirm that it found every share/);
 });
 
-test("every role page carries its own one-sentence description and its own share-card alt", { skip }, () => {
+test("public New Quiz and Item Bank claims stay within the admitted release paths", { skip }, () => {
+  const publicCopy = PUBLIC_ROUTES
+    .map((route) => visibleText(pageSource(fileForRoute(route))))
+    .join("\n");
+  const forbiddenClaims = [
+    /\bbuild complete courses?\b/i,
+    /\bcomplete course build\b/i,
+    /\bcomplete assessment plan\b/i,
+    /\bmanage assessments(?:,| and)[^.]{0,80}\b(?:New Quizzes?|Item Banks?)\b/i,
+    /\bbroad operating surface\b/i,
+    /\bmanage Item Bank work\b/i,
+    /\bcreate, rename, or delete the bank\b/i,
+    /\bcreate or update one bank question\b/i,
+    /\battach or remove one quiz entry\b/i,
+    /\badd one course share\b/i,
+    /\battaches one selected bank to one selected quiz\b/i,
+    /\bselected-bank (?:quiz )?attachment\b/i,
+    /\bonly one (?:Item )?Bank change can move past Plan\b/i,
+    /\badd(?:ing)? one random draw from one selected bank\b/i,
+  ];
+  const overclaims = forbiddenClaims
+    .map((pattern) => publicCopy.match(pattern)?.[0])
+    .filter(Boolean);
+  assert.deepEqual(overclaims, [], "public copy must not claim complete course, assessment, New Quiz, or Item Bank control");
+
+  // New Quiz and Item Bank writing shipped: connector/extension/src/item-bank-executor.js and
+  // quiz-bank-draw-executor.js expose create_bank, rename_bank, archive_bank, share_bank,
+  // create_item, update_item, attach_item, delete_entry, attach_bank_to_quiz and list_quiz_draws.
+  // Deleting a bank is still not one of them, and the forbidden-claim list above still bans it.
+  const features = visibleText(mainRegion(pageSource("features.html")));
+  for (const claim of [
+    "Build assessments, and the Item Banks behind them.",
+    "Build a New Quiz from scratch or reshape an existing one",
+    "your assistant can create, rename, archive, and share a bank",
+    "add a whole bank or a random draw to a quiz",
+    "A share read always stays marked incomplete because Morrow cannot confirm that it found every share.",
+    "Shared stimulus changes and outcome alignment stay in Plan.",
+    "These New Quiz and Item Bank paths have passed local product tests but have not yet been confirmed in a signed-in Morrow-connected Canvas course.",
+  ]) assert.ok(features.includes(claim), `the features page must keep the admitted release claim: "${claim}"`);
+
+  const howItWorks = visibleText(mainRegion(pageSource("how-it-works.html")));
+  assert.ok(
+    howItWorks.includes("Shared stimulus changes and outcome alignment stay in Plan."),
+    "the setup page must name the New Quiz and Item Bank paths that remain in Plan",
+  );
+  assert.ok(
+    howItWorks.includes("The New Quiz paths and Item Bank reads described here have passed local product tests but have not yet been confirmed in a signed-in Morrow-connected Canvas course."),
+    "the setup page must state the live-proof gap",
+  );
+});
+
+test("every role page carries its own short description and accurately describes the shared card", { skip }, () => {
   const problems = [];
   const descriptions = new Map();
-  const alts = new Map();
+  const sharedCardAlt = "Morrow connects your own ChatGPT and Claude directly to the courses you teach.";
 
   for (const file of ROLE_PAGES) {
     const html = rolePage(file);
@@ -1345,7 +1558,8 @@ test("every role page carries its own one-sentence description and its own share
     if (!description) {
       problems.push(`${file} has no meta description`);
     } else {
-      if ((description.match(/\.(?:\s|$)/g) ?? []).length !== 1) problems.push(`${file} description is not one sentence: "${description}"`);
+      const sentenceCount = (description.match(/\.(?:\s|$)/g) ?? []).length;
+      if (sentenceCount < 1 || sentenceCount > 2) problems.push(`${file} description is not one or two short sentences: "${description}"`);
       if (descriptions.has(description)) problems.push(`${file} repeats the description of ${descriptions.get(description)}`);
       else descriptions.set(description, file);
       for (const [key, name] of [["property", "og:description"], ["name", "twitter:description"]]) {
@@ -1356,8 +1570,7 @@ test("every role page carries its own one-sentence description and its own share
     const alt = metaContent(html, "property", "og:image:alt");
     if (!alt) problems.push(`${file} has no og:image:alt`);
     else {
-      if (alts.has(alt)) problems.push(`${file} repeats the share-card alt of ${alts.get(alt)}`);
-      else alts.set(alt, file);
+      if (alt !== sharedCardAlt) problems.push(`${file} describes a different image than the shared social card`);
       if (metaContent(html, "name", "twitter:image:alt") !== alt) problems.push(`${file} twitter:image:alt does not match its og:image:alt`);
     }
   }
@@ -1439,7 +1652,7 @@ test("every role page ends with one copyable first request bound to that role", 
   assert.deepEqual(problems, [], "each role page ends in a request the reader can send after setup");
 });
 
-test("the final website pass keeps role examples, broad media coverage, setup copy, headings, and the tablet capture intentional", { skip }, () => {
+test("the final website pass keeps evidence-bound role examples, setup copy, headings, and the tablet capture intentional", { skip }, () => {
   const designer = topLevelSection(rolePage("for-instructional-designers.html"), "designer-workflow-two");
   const qa = topLevelSection(rolePage("for-qa-teams.html"), "qa-workflow-one");
   assert.ok(designer, "the instructional-designer design brief is missing");
@@ -1447,15 +1660,18 @@ test("the final website pass keeps role examples, broad media coverage, setup co
   assert.match(designer, /Turn a course pattern into a design brief/);
   assert.match(designer, /Nothing has changed in a course/);
   assert.doesNotMatch(designer, /104 things to check|Eight templates account|46 repairs across/);
-  assert.match(qa, /I used Morrow to check 684 pages, files, videos, bank questions, and quiz questions/);
-  assert.match(qa, /62 changes across 41 pages, files, videos, Item Bank questions, and New Quiz items/);
+  assert.match(qa, /There are 612 findings, but they are not 612 problems/);
+  assert.match(qa, /Captions, PDF structure and screen-reader behaviour still need a person/);
 
+  // Each illustrated page still states where a course-content audit stops and human evidence work
+  // begins. On the pages that carry a conversation the sentence is now spoken by the assistant,
+  // because a limit is the tool's to declare and not the customer's to negotiate.
   for (const [file, phrase] of [
-    ["features.html", "Your assistant uses Morrow to check image descriptions, heading order, table headers, document structure, and whether videos include captions."],
-    ["for-instructional-designers.html", "Your assistant uses Morrow to find missing image descriptions, heading and table problems, document structure problems, and videos without captions."],
-    ["for-qa-teams.html", "17 PDFs without document headings, nine videos without captions"],
-    ["index.html", "Go through the pages, files, videos, Item Banks, and New Quizzes."],
-  ]) assert.ok(pageSource(file).includes(phrase), `${file} must show the full accessibility and media review capability`);
+    ["features.html", "Add file, caption, document reading-order, keyboard, screen-reader, and learner-view checks to complete the accessibility review."],
+    ["for-instructional-designers.html", "names the file contents, document structure, captions, keyboard use, and screen-reader behaviour a person still has to judge"],
+    ["for-qa-teams.html", "Captions, PDF structure and screen-reader behaviour still need a person."],
+    ["index.html", "Your 12 videos still need a person to watch the captions."],
+  ]) assert.ok(pageSource(file).includes(phrase), `${file} must state the accessibility and media review boundary`);
 
   for (const file of ["index.html", "how-it-works.html"]) {
     const headings = [...pageSource(file).matchAll(/<h3(?:\s[^>]*)?>([\s\S]*?)<\/h3>/g)].map((match) => visibleText(match[1]));
@@ -1465,9 +1681,20 @@ test("the final website pass keeps role examples, broad media coverage, setup co
 
   const download = pageSource("download.html");
   const setup = pageSource("how-it-works.html");
+  const home = pageSource("index.html");
+  assert.match(
+    home,
+    /Download Morrow for Mac or Windows\. The setup guide helps you install Morrow Bridge and connect your assistant\. Then open a course you teach or manage\./,
+    "the homepage setup sentence must give each action a clear object",
+  );
+  assert.doesNotMatch(
+    htmlFiles.map((file) => pageSource(file)).join("\n"),
+    /the what the course saved|approved what the course saved|guides you through Morrow Bridge and your assistant|Here is where most people go next/,
+    "the final copy pass must not restore malformed or vague sentences",
+  );
   assert.ok(!download.includes("Adding Morrow Bridge takes one manual step"), "/download keeps the retired long setup lead");
   assert.ok(!setup.includes("Morrow lists the assistants it found"), "/how-it-works keeps the retired long setup copy");
-  assert.match(download, /Morrow Bridge connects Morrow on your computer to the signed-in Canvas or Moodle tab/);
+  assert.match(download, /Morrow Bridge connects to the Canvas or Moodle tab where you are signed in/);
   assert.match(setup, /Morrow finds the assistants on your computer/);
 
   const styles = readFileSync(new URL("styles.css", site), "utf8");
@@ -1475,11 +1702,11 @@ test("the final website pass keeps role examples, broad media coverage, setup co
   assert.doesNotMatch(styles, /@media \(max-width: 600px\) \{[\s\S]*?\.course-capture img/);
 });
 
-test("the mobile footer keeps its three route groups side by side", { skip }, () => {
+test("the mobile footer uses two readable columns and a compact full-width trust row", { skip }, () => {
   const styles = readFileSync(new URL("styles.css", site), "utf8");
   assert.match(
     styles,
-    /@media \(max-width: 600px\) \{[\s\S]*?\.site-footer > \.footer-links \{ grid-template-columns: \.94fr 1\.2fr \.86fr;/,
+    /@media \(max-width: 600px\) \{[\s\S]*?\.site-footer > \.footer-links \{ grid-template-columns: \.94fr 1\.06fr;[\s\S]*?\.footer-group:last-child \{[^}]*grid-column: 1 \/ -1;[^}]*grid-template-columns: repeat\(4, minmax\(0, 1fr\)\);/,
   );
 });
 

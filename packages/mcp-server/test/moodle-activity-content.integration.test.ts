@@ -61,9 +61,9 @@ function browserResult(data: JsonObject): JsonObject {
 }
 
 /**
- * The runtime reads the complete participant roster before it lets any Moodle
- * course-content result out. These reads carry no identity, so the roster only
- * proves that none of their fields matches a learner.
+ * The runtime reads the current participant roster before it returns safe
+ * course-authored Choice content. The roster cannot authorize historical
+ * learner participation routes.
  */
 function roster(catalogDigest: string): JsonObject {
   return {
@@ -81,8 +81,8 @@ function roster(catalogDigest: string): JsonObject {
 
 /**
  * The browser answers with the aggregate the page builds, plus learner rows the
- * page never produces. The projection must drop them, and must refuse the
- * anonymous Feedback outright rather than trimming it.
+ * page never produces. Only the course-authored Choice projection may leave the
+ * gateway. Database and Feedback participation routes fail before dispatch.
  */
 function result(command: BridgeCommand, catalogDigest: string): JsonObject {
   if (command.toolName === "moodle_get_course_participant_roster") return roster(catalogDigest);
@@ -133,7 +133,7 @@ function result(command: BridgeCommand, catalogDigest: string): JsonObject {
 }
 
 describe("Moodle Choice, Feedback and Database child-record Full MCP exposure", () => {
-  it("returns aggregate and content rows only, and refuses an anonymous Feedback per-learner projection", async () => {
+  it("returns safe Choice content and fails closed for learner participation history", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-activity-content-integration-")); const port = await availablePort();
     const digest = browserCatalogDigest(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
@@ -171,29 +171,21 @@ describe("Moodle Choice, Feedback and Database child-record Full MCP exposure", 
 
       const entries = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_database_entry_summary", arguments: { course_id: 2, module_id: 10, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const entriesText = JSON.stringify(entries);
-      expect(entries.isError, entriesText).not.toBe(true);
-      expect(entries.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_database_entry_summary",
-        data: { database_id: 31, entry_count: 7, entries_awaiting_approval: 2, comment_count: 3, approval_required: true },
-      });
+      expect(entries.isError, entriesText).toBe(true);
+      expect(entries.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
       for (const privateValue of [...PRIVATE_VALUES, "private entry", "raw_entries"]) expect(entriesText).not.toContain(privateValue);
 
       const named = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_feedback_response_summary", arguments: { course_id: 2, module_id: 11, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const namedText = JSON.stringify(named);
-      expect(named.isError, namedText).not.toBe(true);
-      expect(named.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_feedback_response_summary",
-        data: { feedback_id: 22, anonymous: false, response_count: 5, per_learner_projection: "not_supported" },
-      });
+      expect(named.isError, namedText).toBe(true);
+      expect(named.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
       for (const privateValue of [...PRIVATE_VALUES, "private answer", "respondents"]) expect(namedText).not.toContain(privateValue);
 
-      // The same request against the anonymous Feedback is refused. The runtime
-      // reports every privacy refusal as one opaque problem, so the exact reason
-      // moodle_feedback_response_summary_anonymous_refused stays inside Morrow;
-      // the projection unit test holds that name.
+      // Named and anonymous Feedback responses have the same history boundary.
       const refused = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_feedback_response_summary", arguments: { course_id: 2, module_id: 9, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const refusedText = JSON.stringify(refused);
-      expect(refusedText).toContain("privacy_output_refused");
+      expect(refused.isError, refusedText).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
       expect(refusedText).not.toContain('"anonymous"');
       for (const privateValue of [...PRIVATE_VALUES, "private answer", '"response_count":5', "refused_anonymous"]) {
         expect(refusedText).not.toContain(privateValue);
@@ -201,9 +193,6 @@ describe("Moodle Choice, Feedback and Database child-record Full MCP exposure", 
 
       expect(commands.map((command) => command.toolName).filter((name) => name !== "moodle_get_course_participant_roster")).toEqual([
         "moodle_get_choice_options",
-        "moodle_get_database_entry_summary",
-        "moodle_get_feedback_response_summary",
-        "moodle_get_feedback_response_summary",
       ]);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();

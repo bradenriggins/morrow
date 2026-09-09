@@ -923,7 +923,9 @@ async function collectCourseInventory(
     // one, so read the shares before the entries. A share list Morrow could not
     // read to its end cannot show that no share names this course, so it
     // establishes nothing.
-    const shareList = await list(`item_bank_shares:${bankId}`, "canvas_item_bank_list_shares", { bank_id: bankId, per_page: ITEM_BANK_SHARES_PER_PAGE });
+    const shareList = await list(`item_bank_shares:${bankId}`, "canvas_item_bank_list_shares", {
+      course_id: selected.course_id, bank_id: bankId, per_page: ITEM_BANK_SHARES_PER_PAGE,
+    });
     const shares = itemBankShareEvidence(shareList);
     const association = shares.courseIds.includes(selected.course_id) ? "observed_by_bank_share"
       : shares.complete ? "observed_by_course_scoped_bank_list"
@@ -939,7 +941,9 @@ async function collectCourseInventory(
       },
     };
     const targetsBeforeEntries = targets.length;
-    const entries = await list(`item_bank_entries:${bankId}`, "canvas_item_bank_list_entries", { bank_id: bankId });
+    const entries = await list(`item_bank_entries:${bankId}`, "canvas_item_bank_list_entries", {
+      course_id: selected.course_id, bank_id: bankId,
+    });
     for (const entry of entries.records) {
       const entryId = objectId(entry);
       const entryType = objectText(entry, "entry_type", 100);

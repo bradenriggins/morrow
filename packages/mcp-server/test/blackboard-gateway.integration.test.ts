@@ -352,7 +352,7 @@ describe("Blackboard API Gateway effect integration", () => {
       const roster = await runtime.gateway.callSourceOwned("blackboard_course_roster_summary", scope);
       const learners = isJsonObject(roster.structuredContent) ? roster.structuredContent.learners : null;
       const learner = Array.isArray(learners) ? learners[0] : null;
-      expect(learner).toMatchObject({ learnerToken: expect.stringMatching(/^learner_/) });
+      expect(learner).toMatchObject({ learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*$/) });
       const membership = await client.callTool({ name: "morrow_plan_blackboard_membership_patch", arguments: {
         ...scope, learner_reference: isJsonObject(learner) ? learner.learnerToken : "", patch: { courseRoleId: "Grader" },
       } });

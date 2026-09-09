@@ -12,7 +12,7 @@ import {
   type BridgeProblem,
 } from "@morrow/bridge-protocol";
 import { isJsonObject, type JsonObject, type UpstreamTool } from "@morrow/contracts";
-import type { SourceCatalogSnapshot } from "@morrow/gateway-core";
+import { canvasPrivacyRoster, type SourcePrivacyBinding, type LearnerIdentity, type SourceCatalogSnapshot } from "@morrow/gateway-core";
 import type { LegacyBridgeConfig } from "./config.js";
 
 export interface LegacyBridgeRuntimeHealth {
@@ -150,6 +150,27 @@ export class LegacyBridgeRuntime {
         problem: bridgeFailureResult(error),
       };
     }
+  }
+
+  acceptsPublicPrivacyScope(toolName: string, args: Readonly<Record<string, unknown>>, binding: SourcePrivacyBinding): boolean {
+    // Donor tasks prove a conversation, but do not prove one exact course.
+    if (toolName === "morrow_legacy_task_get") return false;
+    const tool = this.catalog.tools.find((candidate) => candidate.name === toolName);
+    const properties = tool && isJsonObject(tool.inputSchema.properties) ? tool.inputSchema.properties : undefined;
+    return binding.provider === "canvas" && properties?.course_id !== undefined && String(args.course_id) === binding.courseId;
+  }
+
+  async privacyRoster(binding: SourcePrivacyBinding): Promise<readonly LearnerIdentity[]> {
+    const response = await this.bridge.invoke({
+      kind: "invoke_read", operationKey: "legacy:privacy_roster", toolName: "morrow_legacy_private_roster",
+      arguments: { course_id: binding.courseId }, sourceBindingId: binding.sourceBindingId,
+      operationId: operationId(undefined),
+    });
+    const roster = isJsonObject(response.result) ? response.result : undefined;
+    if (!response.ok || !roster || roster.schema !== "morrow.legacy-course-roster.v1" || roster.complete !== true
+      || roster.courseId !== binding.courseId || roster.sourceBindingId !== binding.sourceBindingId) throw new Error("privacy_roster_incomplete");
+    if (roster.historyComplete !== true) throw new Error("privacy_roster_history_incomplete");
+    return canvasPrivacyRoster(roster.identities, roster.deletedEnrollments, String(binding.courseId));
   }
 
   async close(): Promise<void> {

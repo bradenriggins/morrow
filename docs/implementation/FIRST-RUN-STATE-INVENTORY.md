@@ -43,9 +43,9 @@ the list.
 One page: header (`installer/renderer/index.html:11`), welcome
 (`installer/renderer/index.html:18`), progress rail (`installer/renderer/index.html:25`), action panel
 (`installer/renderer/index.html:29`), an updates section that appears only when there is an update
-record (`installer/renderer/index.html:39`), two closed disclosures — Blackboard
+record (`installer/renderer/index.html:39`), two closed disclosures (Blackboard
 (`installer/renderer/index.html:48`) and what stays on this computer
-(`installer/renderer/index.html:90`) — and a support footer that names this Morrow and where to write
+at `installer/renderer/index.html:90`), and a support footer that names this Morrow and where to write
 (`installer/renderer/index.html:99`).
 
 Two facts apply to every row, so they are stated once:
@@ -360,8 +360,8 @@ Every line the five checks can render:
 ## 6. Plan and Edit settings
 
 This page carries more than first-run setup. The rows below are the states a person meets while
-connecting their first course. The Edit stage that follows them — choosing individual actions, a
-duration, and confirming a flagged selection — is rendered at
+connecting their first course. The Edit stage that follows them (choosing individual actions, a
+duration, and confirming a flagged selection) is rendered at
 `connector/extension/settings/settings.js:663-712` and
 `connector/extension/settings/settings.html:98-155`, and is outside first run.
 
@@ -412,7 +412,7 @@ One page per request after approval (`packages/mcp-server/src/approval-server.ts
 region is `role="status"` and updates itself once a second while work is active
 (`packages/mcp-server/src/approval-server.ts:140-158`). Except for **Stop remaining changes** on an
 active group (`packages/mcp-server/src/approval-server.ts:798`), these states carry no control: the
-next action is in the assistant, or is reloading the page. That is deliberate — the page reports what
+next action is in the assistant, or is reloading the page. That is deliberate: the page reports what
 Morrow saved and refuses to offer a repeat.
 
 | State | What the person sees | Next action | Renders at |
@@ -456,7 +456,7 @@ source.** Three groups need naming, because "has a next action" means something 
    `not-paired`, `pair-approved`, `pair-denied`, `pair-unavailable`, popup `pairing`,
    `paired-not-connected`, `connected-no-site`, `detected-platform`, `site-stale`, `course-tab-closed`, setup guide
    `not-paired`, `paired-not-connected`, `connected-no-site`, `site-saved-not-verified`, and every
-   result-page row. These are not dead ends, and each names the surface and the control — but a
+   result-page row. These are not dead ends, and each names the surface and the control, but a
    person cannot act without leaving the page they are on.
 3. **No action is needed.** `first-paint`, `updates-checking`, `updates-downloading`,
    `updates-installing`, `updates-held`, popup `connecting`, setup guide `connecting`, result
@@ -470,8 +470,8 @@ restarts Morrow. Neither was observed here.
 
 One state has a control but no working one: `no-assistant` on a computer with no supported assistant
 shows "No supported assistant was found" with the setup button disabled
-(`installer/shared/setup-view.mjs:126`, `installer/shared/setup-view.mjs:251`). The next action —
-install an assistant, then check status — is named in the text, and the header **Check status** works.
+(`installer/shared/setup-view.mjs:126`, `installer/shared/setup-view.mjs:251`). The next action
+(install an assistant, then check status) is named in the text, and the header **Check status** works.
 
 ---
 
@@ -503,9 +503,9 @@ stale name here.
 | `Try again` | Morrow app | `installer/renderer/renderer.js:194` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:78` |
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:418` |
-| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
-| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
-| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:430` |
+| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:439` |
+| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:439` |
+| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:439` |
 | `Connect Morrow` | Popup | `connector/extension/popup/popup.html:26`, `connector/extension/popup/popup-view.js:59` |
 | `Try again` | Popup | `connector/extension/popup/popup-view.js:56` |
 | `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:41` |
@@ -522,23 +522,23 @@ stale name here.
 | `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:29` |
 | `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:30` |
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:51`, `connector/extension/onboarding/onboarding.html:51` |
-| `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:30` |
-| `Find available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:41` |
-| `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:636` |
-| `Select this page to connect` | Plan and Edit settings | `connector/extension/settings/settings.js:636` |
-| `Clear this page` | Plan and Edit settings | `connector/extension/settings/settings.js:635` |
-| `Previous page` | Plan and Edit settings | `connector/extension/settings/settings.html:59` |
-| `Next page` | Plan and Edit settings | `connector/extension/settings/settings.html:61` |
-| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:65`, `connector/extension/settings/settings.js:588` |
-| `View connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:73` |
-| `Connect selected courses in Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:74`, `connector/extension/settings/settings.js:668` |
-| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:92`, `connector/extension/settings/settings.js:774` |
-| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:774` |
-| `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:93` |
-| `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:141` |
-| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:142`, `connector/extension/settings/settings.js:325` |
-| `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:151` |
-| `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:152` |
+| `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:31` |
+| `Find available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:42` |
+| `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:750` |
+| `Select this page to connect` | Plan and Edit settings | `connector/extension/settings/settings.js:750` |
+| `Clear this page` | Plan and Edit settings | `connector/extension/settings/settings.js:749` |
+| `Previous page` | Plan and Edit settings | `connector/extension/settings/settings.html:60` |
+| `Next page` | Plan and Edit settings | `connector/extension/settings/settings.html:62` |
+| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:66`, `connector/extension/settings/settings.js:702` |
+| `View connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:74` |
+| `Connect selected courses in Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:75`, `connector/extension/settings/settings.js:782` |
+| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:93`, `connector/extension/settings/settings.js:888` |
+| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:888` |
+| `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:94` |
+| `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:142` |
+| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:143`, `connector/extension/settings/settings.js:439` |
+| `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:152` |
+| `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:153` |
 | `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
 | `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
 | `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
@@ -563,10 +563,10 @@ Names a person reads as landmarks rather than presses:
 | `Connect a Blackboard Learn site (optional)` | Morrow app | `installer/renderer/index.html:50` |
 | `Morrow setup` | Setup guide | `connector/extension/onboarding/onboarding.html:6` |
 | `Plan and Edit settings` | Plan and Edit settings | `connector/extension/settings/settings.html:6` |
-| `Morrow Bridge — Plan and Edit settings` | Plan and Edit settings browser tab | `connector/extension/settings/settings.html:6` |
-| `Connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:27` |
-| `Course access` | Plan and Edit settings | `connector/extension/settings/settings.html:101` |
-| `Course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:82` |
+| `Morrow Bridge: Plan and Edit settings` | Plan and Edit settings browser tab | `connector/extension/settings/settings.html:6` |
+| `Connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:28` |
+| `Course access` | Plan and Edit settings | `connector/extension/settings/settings.html:102` |
+| `Course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:83` |
 
 ---
 

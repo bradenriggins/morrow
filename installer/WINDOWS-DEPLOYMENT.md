@@ -18,6 +18,19 @@ The output is `Morrow-<version>-win-x64.exe`. Version `1.0.0` is an unsigned
 release. Automatic updates remain disabled. Use the complete NSIS installer;
 do not deploy an unpacked app or a separately copied `MorrowPayload` directory.
 
+## The Morrow Bridge delivery route
+
+The same build environment chooses the Chrome route the app asks a person to
+take for Morrow Bridge, on both platforms. `MORROW_CHROME_STORE_LIVE=1` builds
+the Chrome Web Store route; any other value, and no value at all, builds the
+temporary Load unpacked route. The app reads the route from its own packaged
+build metadata and keeps the temporary route for a value it cannot recognise.
+
+The Morrow Bridge listing is not published yet, so every build made today keeps
+the temporary route. Set the variable only for a build made after the listing is
+live. The route changes the setup instructions alone: the Bridge identity,
+active-folder, and pairing checks are the same on both routes.
+
 On 7 September, the unsigned 1.0.0 installer passed native `BOOTZ` installation,
 startup, damaged-payload refusal, exact repair, uninstall and retained-data
 checks through `scripts/test/desktop-windows-smoke.mjs`. That harness runs on

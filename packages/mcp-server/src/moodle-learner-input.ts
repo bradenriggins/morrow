@@ -22,7 +22,7 @@ export const MOODLE_ENROL_CANDIDATE_INPUT_TOOL = "moodle_enrol_participant";
 export const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL = "morrow_private_moodle_find_enrolment_candidate";
 export const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION = "moodle.private.enrolment_candidate.find.v1";
 export const PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL = "morrow_find_moodle_enrolment_candidate";
-export const MOODLE_LEARNER_TOKEN_PATTERN = "^learner_[A-Za-z0-9_-]{1,160}$";
+export const MOODLE_LEARNER_TOKEN_PATTERN = "^Student A[1-9][0-9]*$";
 
 const MOODLE_USER_OVERRIDE_INPUT_TOOLS = new Set([
   "moodle_create_assignment_override",
@@ -46,7 +46,7 @@ function renameRequiredField(value: unknown, from: string, to: string): unknown 
 /**
  * The checked-in browser catalog is the private source contract. Its Moodle
  * executors still take a numeric user_id. The public MCP clone names only the
- * scoped opaque token that the Gateway resolves immediately before dispatch.
+ * scoped readable label that the Gateway resolves immediately before dispatch.
  */
 export function publicMoodleLearnerInputSchema(toolName: string, schema: JsonObject): JsonObject {
   const rostered = MOODLE_ROSTER_LEARNER_INPUT_TOOLS.has(toolName as never);
@@ -63,14 +63,14 @@ export function publicMoodleLearnerInputSchema(toolName: string, schema: JsonObj
     type: "string",
     pattern: MOODLE_LEARNER_TOKEN_PATTERN,
     description: candidate
-      ? "The opaque candidate token returned by morrow_find_moodle_enrolment_candidate for this exact course connection."
-      : "The opaque learner token returned by a Morrow participant read for this exact course connection.",
+      ? "The readable candidate label (for example, Student A1) returned by morrow_find_moodle_enrolment_candidate for this exact course connection."
+      : "The readable learner label (for example, Student A1) returned by a Morrow participant read for this exact course connection.",
   };
   return { ...renamed, properties };
 }
 
 export function isMoodleLearnerToken(value: unknown): value is string {
-  return typeof value === "string" && /^learner_[A-Za-z0-9_-]{1,160}$/.test(value);
+  return typeof value === "string" && /^Student A[1-9][0-9]*$/.test(value);
 }
 
 /**
@@ -86,11 +86,11 @@ export function assertPublicMoodleLearnerInput(
   const candidate = toolName === MOODLE_ENROL_CANDIDATE_INPUT_TOOL;
   if (!rostered && !candidate) return;
   if (Object.hasOwn(request, "user_id") || Object.hasOwn(request, "learner_id")) {
-    throw new TypeError("Moodle learner input requires an opaque token");
+    throw new TypeError("Moodle learner input requires a readable learner label");
   }
   if (candidate) {
     if (!isMoodleLearnerToken(request.candidate_token) || Object.hasOwn(request, "learner_token")) {
-      throw new TypeError("Moodle enrolment input requires one candidate token");
+      throw new TypeError("Moodle enrolment input requires one candidate label");
     }
     return;
   }
@@ -101,6 +101,6 @@ export function assertPublicMoodleLearnerInput(
     return;
   }
   if (!isMoodleLearnerToken(request.learner_token)) {
-    throw new TypeError("Moodle learner input requires one learner token");
+    throw new TypeError("Moodle learner input requires one learner label");
   }
 }

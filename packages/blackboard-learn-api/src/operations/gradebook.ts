@@ -42,7 +42,7 @@ const SHA256 = /^[0-9a-f]{64}$/;
  * these and by nothing else, so a caller cannot name a Blackboard account Morrow
  * has not tokenized for this exact course.
  */
-const LEARNER_REFERENCE = /^learner_[A-Za-z0-9_-]{1,160}$/;
+const LEARNER_REFERENCE = /^Student A[1-9][0-9]*$/;
 
 /** One short provider value as it may leave Morrow, such as `Completed` or `Yes`. */
 const PROVIDER_VALUE = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$/;
@@ -83,7 +83,7 @@ const PATCHED_COLUMN_FIELDS: Record<ColumnPatchField, string> = {
  * The provider fields Morrow freezes before a column PATCH and re-checks after
  * it. Public Blackboard documentation does not settle whether a PATCH merges or
  * replaces a nested object, so the siblings of the two nested values a change
- * can set — the rest of `grading`, and the column's own identity — are frozen
+ * can set, including the rest of `grading` and the column's own identity, are frozen
  * too. A site that clears the grading schema or the attempt limit while it
  * applies a due date fails this readback instead of being reported as verified.
  */
@@ -160,7 +160,7 @@ const EVIDENCE = {
  * reference is minted inside this server, for this course, so the Gateway holds
  * no entry for it and a field of that name would never reach this source.
  */
-const learnerReferenceInput = z.string().min(1).max(200);
+const learnerReferenceInput = z.string().regex(LEARNER_REFERENCE).max(200);
 const blackboardIdInput = z.string().regex(BLACKBOARD_ID);
 
 const columnScopeInput = scopeInput.extend({ column_id: blackboardIdInput });
@@ -254,7 +254,7 @@ function reviewedAccount(
   if (!LEARNER_REFERENCE.test(input.learner_reference)) {
     throw new BlackboardApiError(
       "blackboard_scope_binding_required",
-      "Name the person by the protected reference Morrow returned for them in this Blackboard course (learner_…). Morrow does not accept a Blackboard user id here.",
+      "Name the person by the protected reference Morrow returned for them in this Blackboard course (for example, Student A1). Morrow does not accept a Blackboard user id here.",
     );
   }
   return {
@@ -302,7 +302,7 @@ function assertEnrolled(read: BlackboardCourseRead, userId: string): void {
 
 /**
  * One gradebook column as this module returns it. The column name and
- * description are provider text — a column can be named after a person — so they
+ * description are provider text. A column can be named after a person, so they
  * leave through the same privacy boundary as every other Blackboard text.
  */
 export function safeColumn(record: JsonObject, read: BlackboardCourseRead): JsonObject {
@@ -418,8 +418,8 @@ function savedValues(
 /**
  * A gradebook column change sets the name, the description, the points possible,
  * whether the column is available, the due date, or any of those together.
- * Everything else — the grading type, the grading schema, the attempt limit, the
- * content item the column grades — is refused here, before any request.
+ * Everything else, including the grading type, the grading schema, the attempt limit, and the
+ * content item the column grades, is refused here, before any request.
  */
 function reviewedColumnPatch(value: unknown): JsonObject {
   if (!isJsonObject(value)) {
@@ -475,8 +475,8 @@ function reviewedColumnPatch(value: unknown): JsonObject {
 }
 
 /**
- * A grade change sets the score, the grade text, or both. Everything else — the
- * status, whether the grade is exempt, the feedback a learner reads — is refused
+ * A grade change sets the score, the grade text, or both. Everything else, including the
+ * status, whether the grade is exempt, and the feedback a learner reads, is refused
  * here, before any request.
  */
 function reviewedGradePatch(value: unknown): JsonObject {
@@ -1209,7 +1209,7 @@ export const blackboardGradebookModule: BlackboardOperationModule = {
     blackboardTool({
       name: "blackboard_read_gradebook_grade",
       title: "Read one person's Blackboard grade",
-      description: "Read one person's grade in one selected Blackboard Learn gradebook column: the score, the grade as text, the status, and whether the grade is exempt. Name the person by the protected reference the Blackboard roster read returned for them (learner_…); this tool does not accept a Blackboard user id. It returns no learner name, no feedback, and no submitted work.",
+      description: "Read one person's grade in one selected Blackboard Learn gradebook column: the score, the grade as text, the status, and whether the grade is exempt. Name the person by the protected reference the Blackboard roster read returned for them (for example, Student A1); this tool does not accept a Blackboard user id. It returns no learner name, no feedback, and no submitted work.",
       private: false,
       gatewayDispatchOnly: false,
       inputSchema: gradeScopeInput,
@@ -1320,7 +1320,7 @@ export const blackboardGradebookModule: BlackboardOperationModule = {
     blackboardTool({
       name: "blackboard_plan_gradebook_grade_patch",
       title: "Plan one Blackboard grade change",
-      description: "Prepare one change to a person's grade in one Blackboard Learn gradebook column for Morrow review: the score, the grade as text, or both. Name the person by the protected reference the Blackboard roster read returned for them (learner_…). This tool does not send a Blackboard PATCH request, and it changes no feedback and no exemption.",
+      description: "Prepare one change to a person's grade in one Blackboard Learn gradebook column for Morrow review: the score, the grade as text, or both. Name the person by the protected reference the Blackboard roster read returned for them (for example, Student A1). This tool does not send a Blackboard PATCH request, and it changes no feedback and no exemption.",
       private: true,
       gatewayDispatchOnly: false,
       inputSchema: gradePatchInput,

@@ -193,7 +193,7 @@ test("Plan and Edit reads the individual actions for a course only when that cou
 test("an action published for review only carries its reason and no Edit control", async () => {
   const page = await openEditStage([CHECKED_ACTION, REVIEW_ONLY_ACTION]);
   const listed = page.node("#category-list").innerHTML;
-  assert.match(listed, /<strong>Review only — Update New Quiz item<\/strong>/);
+  assert.match(listed, /<strong>Review only: Update New Quiz item<\/strong>/);
   assert.ok(listed.includes(REVIEW_ONLY_ACTION.reviewReason));
   assert.equal(listed.includes(`value="${REVIEW_ONLY_ACTION.id}"`), false);
   assert.ok(listed.includes(`value="${CHECKED_ACTION.id}"`));
@@ -315,7 +315,19 @@ function canvasOption(options, toolName) {
 // in-place change to its answers needs the delete-then-add contract, and the
 // two curated New Quiz repairs stay the only Edit path.
 // scripts/test/canvas-new-quiz-item-guard.test.mjs holds the rest of that rule.
-const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Set(["canvas_update_quiz_item"]);
+/**
+ * Admitted, and still approved change by change rather than switched on in
+ * advance. A New Quiz question update can renumber the answers Canvas matches
+ * on. Every Item Bank change lands in machinery other quizzes and other courses
+ * share, and Canvas publishes no complete list of what uses a bank, so the
+ * person confirms the courses Morrow did find each time.
+ */
+const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
+  ["canvas_update_quiz_item", /delete-then-add contract/],
+  ...canvasOperations
+    .filter((operation) => operation.service === "item_bank" && operation.readOnly === false)
+    .map((operation) => [operation.toolName, /approved change by change rather than switched on in advance/]),
+]);
 
 function admittedEditableCanvasWrites() {
   return canvasOperations.filter((operation) => operation.readOnly === false
@@ -331,10 +343,10 @@ test("Canvas Edit categories are exactly the admitted Canvas writes", () => {
     .sort();
   assert.ok(admitted.length > 0);
   assert.deepEqual(editable, admitted);
-  for (const toolName of REVIEW_ONLY_ADMITTED_CANVAS_WRITES) {
+  for (const [toolName, reviewReason] of REVIEW_ONLY_ADMITTED_CANVAS_WRITES) {
     const option = canvasOption(options, toolName);
     assert.equal(option.availability, "review", toolName);
-    assert.match(option.reviewReason, /delete-then-add contract/, toolName);
+    assert.match(option.reviewReason, reviewReason, toolName);
     assert.equal(option.rules, undefined, toolName);
   }
   for (const operation of canvasOperations.filter((entry) => entry.readOnly === false && canvasOperationAdmission(entry).write.state === "held")) {
@@ -548,144 +560,71 @@ test("Canvas New Quiz nested image repairs require one exact guarded action", as
   assert.ok(permission.rules.every((rule) => rule.toolName === "canvas_update_quiz_item" && rule.allowedChangedFields.length === 0));
 });
 
-// One Edit path exists into an existing Item Bank: the guarded image alternative-text repair. Its
-// guard carries a fresh reading of the exact question and the acknowledged list of every course
-// the bank reaches, so the category is offered only when the catalog carries both the write and
-// the exact read the guard compares against. Every other Item Bank write stays review-only.
-const ITEM_BANK_CATEGORY = "canvas_item_bank_question_image_alt";
-const ITEM_BANK_UPDATE_RULE = Object.freeze({
-  operationKey: "ITEM_BANK PATCH /api/banks/{bank_id}/items/{item_id}",
-  toolName: "canvas_item_bank_update_item",
-  allowedChangedFields: [],
-  requiresItemBankGuard: true,
-  itemBankGuardKind: "item_bank_entry_image_alt",
-});
-
-/** One guard shaped exactly as connector/extension/src/item-bank-guard.js accepts it. */
+// Legacy guards stay invalid. Current Item Bank writes use the generated action categories
+// and require course_id plus the operation-specific expected_snapshot input.
+const LEGACY_ITEM_BANK_CATEGORY = "canvas_item_bank_question_image_alt";
 function itemBankGuardFixture() {
   return {
-    kind: "item_bank_entry_image_alt",
-    course_id: "1",
-    bank_id: "91",
-    bank_entry_id: "701",
-    item_id: "501",
-    entry_type: "Item",
-    item_sha256: "1".repeat(64),
-    protected_state_sha256: "2".repeat(64),
-    image_index: 1,
-    image_src_sha256: "3".repeat(64),
-    alt_text: "Diagram of the heart",
-    fan_out: { schema: "morrow.canvas.item-bank.fan-out.v1" },
-    acknowledged_course_ids: ["2"],
+    kind: "item_bank_entry_image_alt", course_id: "1", bank_id: "91", bank_entry_id: "701", item_id: "501", entry_type: "Item",
+    item_sha256: "1".repeat(64), protected_state_sha256: "2".repeat(64), image_index: 1, image_src_sha256: "3".repeat(64),
+    alt_text: "Diagram of the heart", fan_out: { schema: "morrow.canvas.item-bank.fan-out.v1" }, acknowledged_course_ids: ["2"],
   };
 }
-
 function itemBankWrites() {
   return canvasOperations.filter((operation) => operation.service === "item_bank" && operation.readOnly === false);
 }
 
-test("the Item Bank question repair is the only Edit path into a bank", async () => {
+// Every Item Bank change works, and every one of them is approved change by
+// change. The reach acknowledgement it carries is evidence for one change at one
+// moment: the courses Morrow observed can differ between two changes, so a
+// standing grant given in advance could not have acknowledged the list this
+// change actually reaches.
+test("every Item Bank change is approved change by change, never granted in advance", async () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
-  const repair = options.find((entry) => entry.id === ITEM_BANK_CATEGORY);
-  assert.equal(repair.availability, "edit");
-  assert.equal(repair.group, "Focused Canvas repairs");
-  assert.equal(repair.tier, "standard");
-  assert.equal(repair.destructive, false);
-  assert.equal(repair.verification, "checked");
-  assert.equal(repair.verificationReason, undefined);
-  assert.match(repair.description, /every course the bank reaches/);
-
+  assert.equal(options.some((entry) => entry.id === LEGACY_ITEM_BANK_CATEGORY), false);
   const writes = itemBankWrites();
-  assert.equal(writes.length, 7);
+  assert.equal(writes.length, 11);
   for (const operation of writes) {
     const option = canvasOption(options, operation.toolName);
+    assert.equal(canvasOperationAdmission(operation).write.state, "admitted", operation.toolName);
     assert.equal(option.availability, "review", operation.toolName);
-    assert.equal(option.reviewReason, canvasAdmissionReason(canvasOperationAdmission(operation).write), operation.toolName);
-    assert.equal(option.rules, undefined, operation.toolName);
+    assert.equal(option.verification, undefined, operation.toolName);
+    assert.match(option.reviewReason, /Item Bank is shared between quizzes/, operation.toolName);
+    assert.match(option.reviewReason, /approved change by change rather than switched on in advance/, operation.toolName);
   }
-
-  const permission = await createEditPermission({
+  await assert.rejects(createEditPermission({
     binding: canvasBinding, catalogDigest: "b".repeat(64), revision: 1,
-    enabledCategories: [ITEM_BANK_CATEGORY], operations: canvasOperations,
-  });
-  assert.deepEqual(permission.rules, [{ ...ITEM_BANK_UPDATE_RULE }]);
-  assert.deepEqual(await validEditPermission({ permission, binding: canvasBinding, catalogDigest: "b".repeat(64), operations: canvasOperations }), permission);
+    enabledCategories: writes.map((operation) => `action:canvas:${operation.toolName}`), operations: canvasOperations,
+  }), /edit_policy_category_unavailable/);
 });
 
-test("the Item Bank repair is listed with the courses it can reach, not with its label alone", async () => {
-  const repair = categoriesForBinding({ provider: "canvas" }, canvasOperations).find((entry) => entry.id === ITEM_BANK_CATEGORY);
-  const reach = "One item bank question can be used by quizzes in other courses. Morrow lists every course the bank reaches and asks you to confirm them before it sends the change.";
-  const page = await openEditStage([CHECKED_ACTION, repair]);
-  const listed = page.node("#category-list").innerHTML;
-  assert.match(listed, /<span class="action-flag">Can change other courses<\/span>/);
-  assert.ok(listed.includes(repair.description));
-
-  selectAction(page, ITEM_BANK_CATEGORY);
-  await settle(() => page.node("#selection-summary").textContent.includes(repair.label),
-    "the page never named the selected Item Bank repair");
-  assert.equal(page.node("#selection-summary").textContent,
-    `1 course selected. Morrow can make: ${repair.label}. ${reach}`);
-});
-
-test("exactly one Edit rule in the whole Canvas category set requires an Item Bank guard", async () => {
+test("Item Bank write shapes cannot create an Edit rule or use a legacy guard", async () => {
   const operations = [...canvasOperations, PRIVATE_CANVAS_CONVERSATION_OPERATION];
   const options = categoriesForBinding({ provider: "canvas" }, operations);
-  const enabled = options.filter((option) => option.availability === "edit").map((option) => option.id);
   const permission = await createEditPermission({
     binding: canvasBinding, catalogDigest: "b".repeat(64), revision: 1,
-    enabledCategories: enabled, operations,
+    enabledCategories: options.filter((option) => option.availability === "edit").map((option) => option.id), operations,
   });
-  assert.deepEqual(permission.rules.filter((rule) => rule.requiresItemBankGuard === true), [{ ...ITEM_BANK_UPDATE_RULE }]);
-  assert.equal(permission.rules.filter((rule) => rule.itemBankGuardKind !== undefined).length, 1);
+  const rules = permission.rules.filter((rule) => rule.toolName.startsWith("canvas_item_bank_"));
+  assert.equal(rules.length, 0);
+  assert.equal(rules.some((rule) => rule.requiresItemBankGuard === true), false);
 });
 
-test("the Item Bank question repair is not offered without the exact read its guard compares against", () => {
-  const withoutRead = canvasOperations.filter((operation) => operation.toolName !== "canvas_item_bank_get_item");
-  const withoutWrite = canvasOperations.filter((operation) => operation.toolName !== "canvas_item_bank_update_item");
-  for (const operations of [withoutRead, withoutWrite]) {
-    const option = categoriesForBinding({ provider: "canvas" }, operations).find((entry) => entry.id === ITEM_BANK_CATEGORY);
-    assert.equal(option.availability, "review");
-    assert.match(option.reviewReason, /Canvas routes the connected catalog does not carry/);
-    assert.equal(option.verification, undefined);
-  }
-});
-
-// Section 3.6 of docs/research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md: an archive
-// needs an administrator environment flag, a complete dependency preflight, and fresh counts
-// showing zero bank entries and zero uses. Morrow can establish none of those, so no configuration
-// of the catalog or of the curated categories may offer it.
-test("an Item Bank archive can never be granted Edit access", async () => {
-  for (const operations of [canvasOperations, itemBankWrites()]) {
-    const option = canvasOption(categoriesForBinding({ provider: "canvas" }, operations), "canvas_item_bank_archive_bank");
-    assert.equal(option.availability, "review");
-    assert.equal(option.tier, "destructive");
-    assert.equal(option.rules, undefined);
-  }
-  await assert.rejects(
-    createEditPermission({
-      binding: canvasBinding, catalogDigest: "b".repeat(64), revision: 1,
-      enabledCategories: ["action:canvas:canvas_item_bank_archive_bank"], operations: canvasOperations,
-    }),
-    /edit_policy_category_unavailable/,
-  );
-  const operations = [...canvasOperations, PRIVATE_CANVAS_CONVERSATION_OPERATION];
-  const everyGrant = await createEditPermission({
+test("an Item Bank archive is destructive but cannot receive Edit access", async () => {
+  const option = canvasOption(categoriesForBinding({ provider: "canvas" }, canvasOperations), "canvas_item_bank_archive_bank");
+  assert.equal(option.availability, "review");
+  assert.equal(option.tier, "destructive");
+  await assert.rejects(createEditPermission({
     binding: canvasBinding, catalogDigest: "b".repeat(64), revision: 1,
-    enabledCategories: categoriesForBinding({ provider: "canvas" }, operations)
-      .filter((option) => option.availability === "edit").map((option) => option.id),
-    operations,
-  });
-  assert.equal(everyGrant.rules.some((rule) => rule.toolName === "canvas_item_bank_archive_bank"), false);
+    enabledCategories: ["action:canvas:canvas_item_bank_archive_bank"], operations: canvasOperations,
+  }), /edit_policy_category_unavailable/);
 });
 
-// The predicate the service worker and the connector runtime use to let one Item Bank write past
-// the hold. An update_item call without an accepted guard, and every other Item Bank write, stays
-// held, so the curated repair is the only way a bank question can change.
-test("only an accepted guard lets an Item Bank question update past the hold", () => {
+test("no legacy Item Bank guard can create an alternate write rule", () => {
   const update = canvasOperations.find((operation) => operation.toolName === "canvas_item_bank_update_item");
   const attach = canvasOperations.find((operation) => operation.toolName === "canvas_item_bank_attach_item");
   const guard = itemBankGuardFixture();
-  assert.deepEqual(guardedItemBankUpdate(update, { bank_id: "91", item_id: "501", morrow_item_bank_guard: guard }), guard);
+  assert.equal(guardedItemBankUpdate(update, { bank_id: "91", item_id: "501", morrow_item_bank_guard: guard }), null);
   assert.equal(guardedItemBankUpdate(update, { bank_id: "91", item_id: "501" }), null);
   assert.equal(guardedItemBankUpdate(update, { morrow_item_bank_guard: { ...guard, item_sha256: "not-a-digest" } }), null);
   assert.equal(guardedItemBankUpdate(update, { morrow_item_bank_guard: { ...guard, entry_type: "Stimulus" } }), null);
@@ -702,4 +641,5 @@ test("an Item Bank guard and its bank identifiers are never changed fields", () 
     bank_id: "91", bank_entry_id: "701", item_id: "501", morrow_item_bank_guard: itemBankGuardFixture(),
   }), []);
   assert.deepEqual(changedFields({ bank_id: "91", item_id: "501", item: { title: "New" } }), ["item"]);
+  assert.deepEqual(changedFields({ bank_id: "91", expected_snapshot: { bank_sha256: "1".repeat(64) }, title: "New" }), ["title"]);
 });

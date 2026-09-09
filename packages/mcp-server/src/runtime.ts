@@ -35,6 +35,8 @@ import {
   LearnerRoster,
   LearnerVault,
   canonicalMorrowResult,
+  canvasPrivacyRoster,
+  moodleSourceHistoryAvailable,
   mergeCatalog,
   normalizeLearnerIdentity,
   normalizeUpstreamResult,
@@ -74,6 +76,30 @@ import {
 } from "@morrow/operation-journal";
 import { StdioMcpUpstream } from "@morrow/upstream-mcp";
 import { FileStageStore, MAX_STAGED_FILE_BYTES, type FileStageBinding, type FileStageScope } from "./file-staging.js";
+import { validItemBankFanOutReceipt } from "./item-bank-fan-out.js";
+import { itemBankFanOutPlanRefusal } from "./item-bank-repair.js";
+
+const NEW_QUIZ_ACCOMMODATION_TOOLS = new Set([
+  "canvas_set_course_level_accommodations",
+  "canvas_set_quiz_level_accommodations",
+]);
+
+export function bindNewQuizAccommodationEffectGuard(
+  upstreamName: string,
+  input: Readonly<Record<string, unknown>>,
+): Record<string, unknown> {
+  if (!NEW_QUIZ_ACCOMMODATION_TOOLS.has(upstreamName)) return { ...input };
+  const output = structuredClone(input) as Record<string, unknown>;
+  const payload: JsonObject = {};
+  for (const key of ["user_id", "extra_time", "extra_attempts", "apply_to_in_progress_quiz_sessions", "reduce_choices_enabled"] as const) {
+    if (output[key] !== undefined) payload[key] = output[key];
+  }
+  if (typeof payload.user_id !== "string" || !/^[1-9][0-9]{0,18}$/.test(payload.user_id)) {
+    throw new Error("learner_token_unavailable");
+  }
+  output.morrow_new_quiz_effect_guard = { kind: "accommodation", payload_sha256: sha256Json(payload) };
+  return output;
+}
 import {
   CANVAS_COURSE_FILE_TRANSFER_TOOL,
   CANVAS_FILE_APPROVAL_TTL_MS,
@@ -83,6 +109,17 @@ import {
   isCanvasCourseFileTransfer,
   readWorkspaceMaterial,
 } from "./canvas-file-transfer.js";
+import {
+  assertHotSpotImageBytes,
+  CANVAS_NEW_QUIZ_HOT_SPOT_APPROVAL_TTL_MS,
+  CANVAS_NEW_QUIZ_HOT_SPOT_TOOL,
+  canvasNewQuizHotSpotContentType,
+  canvasNewQuizHotSpotRequestSchema,
+  canvasNewQuizHotSpotScope,
+  exactHotSpotTemplate,
+  isCanvasNewQuizHotSpotTransfer,
+} from "./canvas-new-quiz-hot-spot.js";
+import { prepareNewQuizHotSpotCreate, type NewQuizItemCreateInput } from "./new-quiz-item-lifecycle.js";
 import {
   assertNoPrivateAttachmentInput,
   isMoodleStagedFile,
@@ -246,6 +283,7 @@ export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
   "morrow_activity",
   "morrow_check_new_quiz",
   "morrow_review_lesson",
+  "morrow_private_chat",
   "morrow_audit_course",
   "morrow_catalog",
   "morrow_catalog_search",
@@ -277,6 +315,7 @@ export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
 const INTERNAL_SOURCE_TOOL_NAMES = Object.freeze([
   "morrow_browser_edit_policy_set",
   "morrow_bridge_maintenance",
+  "morrow_private_chat_exchange",
 ] as const);
 
 /**
@@ -292,13 +331,8 @@ export const PRIVATE_SOURCE_TOOL_NAMES: ReadonlySet<string> = new Set([
   PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
   "canvas_get_all_quiz_submissions",
   "canvas_transfer_course_file",
+  CANVAS_NEW_QUIZ_HOT_SPOT_TOOL,
   "canvas_send_private_conversation",
-  // The connector publishes this one route only as the guarded image
-  // alternative-text repair (packages/canvas-connector-mcp/src/server.ts).
-  // morrow_plan_item_bank_question_image_alt_repair is the only way in, because
-  // the guard it builds needs a fresh reading of the exact question and a
-  // confirmed list of every course the bank reaches.
-  "canvas_item_bank_update_item",
   "blackboard_plan_course_group",
   "blackboard_apply_reviewed_course_group",
   "blackboard_verify_course_group",
@@ -697,6 +731,10 @@ const EDIT_POLICY_STRUCTURAL_FIELDS = new Set([
   "section_id",
   "target_section_id",
   "expected_digest",
+  "expected_snapshot",
+  "fan_out",
+  "fan_out_receipt",
+  "acknowledged_course_ids",
   "chapter_id",
   "after_chapter_id",
   "category_id",
@@ -716,11 +754,9 @@ function browserEditFields(mapping: CatalogTool, request: JsonObject): readonly 
 }
 
 function requestCourseId(request: JsonObject): string | null {
-  // Every Item Bank route names a bank, never a course. The one guarded Item
-  // Bank change carries the selected course inside its guard, and the connector
-  // reads it from the same place (`courseScope` in
-  // packages/canvas-connector-mcp/src/runtime.ts), so the two layers lock, bind
-  // and approve the same course.
+  // Every current Item Bank route carries the selected course directly. The
+  // legacy guarded repair also carries it inside the guard, so both forms lock,
+  // bind, and approve the same course.
   const guard = request.morrow_item_bank_guard;
   const value = isJsonObject(guard) && guard.course_id !== undefined ? guard.course_id : request.course_id;
   if (typeof value === "string" && (/^[1-9][0-9]{0,18}$/.test(value) || /^_[1-9][0-9]{0,18}_[1-9][0-9]{0,18}$/.test(value))) return value;
@@ -935,7 +971,8 @@ function currentEditAuthorization(
   request: JsonObject,
   binding: JsonObject,
 ): EffectAuthorization {
-  if (Object.hasOwn(request, "morrow_new_quiz_settings_guard")) return REVIEW_AUTHORIZATION;
+  if (Object.hasOwn(request, "morrow_new_quiz_settings_guard") || Object.hasOwn(request, "morrow_new_quiz_lifecycle_guard")
+    || Object.hasOwn(request, "morrow_new_quiz_effect_guard") || Object.hasOwn(request, "morrow_new_quiz_item_position_guard")) return REVIEW_AUTHORIZATION;
   const routing = legacyRouting(request);
   if (!routing.sourceBindingId
     || binding.sourceBindingId !== routing.sourceBindingId
@@ -1053,6 +1090,74 @@ const CONNECTOR_READBACK_NOT_SENT_LIMITATION = "Morrow has not sent this change 
 const PERSON_CLOSED_LIMITATION = "Morrow did not check this change itself. It is closed because a person read the item and confirmed the saved state.";
 const PERSON_CLOSE_READ_REQUIRED_LIMITATION = "Read the item with Morrow first, then close this request with the digest that read returns. Morrow closes nothing on a description of the result.";
 
+function requestedNewQuizFromArguments(args: JsonObject): JsonObject {
+  const quiz: JsonObject = {};
+  const top: Readonly<Record<string, string>> = {
+    quiz_title: "title", quiz_assignment_group_id: "assignment_group_id", quiz_points_possible: "points_possible",
+    quiz_due_at: "due_at", quiz_lock_at: "lock_at", quiz_unlock_at: "unlock_at",
+    quiz_grading_type: "grading_type", quiz_instructions: "instructions",
+  };
+  for (const [argument, field] of Object.entries(top)) if (Object.hasOwn(args, argument)) quiz[field] = args[argument];
+  const settings: JsonObject = {};
+  const groups = ["result_view_settings", "multiple_attempts", "filters"];
+  for (const [argument, value] of Object.entries(args)) {
+    if (!argument.startsWith("quiz_quiz_settings_")) continue;
+    const suffix = argument.slice("quiz_quiz_settings_".length);
+    const group = groups.find((candidate) => suffix.startsWith(`${candidate}_`));
+    if (group) {
+      const current = isJsonObject(settings[group]) ? settings[group] as JsonObject : {};
+      current[suffix.slice(group.length + 1)] = value;
+      settings[group] = current;
+    } else settings[suffix] = value;
+  }
+  if (Object.keys(settings).length > 0) quiz.quiz_settings = settings;
+  return quiz;
+}
+
+function plannedNewQuizLifecycleDescriptor(
+  mapping: CatalogTool,
+  args: JsonObject,
+  mappings: Iterable<CatalogTool>,
+): CanvasRecoveryDescriptor | null {
+  const guard = isJsonObject(args.morrow_new_quiz_lifecycle_guard) ? args.morrow_new_quiz_lifecycle_guard : null;
+  if (!guard || (guard.kind !== "create" && guard.kind !== "delete") || !Array.isArray(guard.before_quiz_ids)
+    || guard.before_quiz_ids.length > 10_000 || guard.before_quiz_ids.some((id) => typeof id !== "string" || !/^[1-9][0-9]{0,18}$/.test(id))
+    || new Set(guard.before_quiz_ids).size !== guard.before_quiz_ids.length
+    || sha256Json(guard.before_quiz_ids) !== guard.before_quiz_ids_sha256) return null;
+  const courseId = typeof args.course_id === "string" && /^[1-9][0-9]{0,18}$/.test(args.course_id) ? args.course_id : null;
+  if (!courseId) return null;
+  const candidates = [...mappings];
+  const list = candidates.find((candidate) => candidate.upstreamId === mapping.upstreamId
+    && candidate.upstreamName === "canvas_list_new_quizzes" && candidate.annotations?.readOnlyHint === true);
+  if (!list) return null;
+  const base: CanvasRecoveryDescriptor = {
+    schema: "morrow.canvas-recovery-descriptor.v1",
+    strategy: `new-quiz-lifecycle-${guard.kind}`,
+    writeMethod: guard.kind === "create" ? "POST" : "DELETE",
+    assertions: [],
+    collection: { readTool: list.publicName, arguments: { course_id: courseId } },
+  };
+  if (guard.kind === "create") {
+    const requestedQuiz = requestedNewQuizFromArguments(args);
+    const get = candidates.find((candidate) => candidate.upstreamId === mapping.upstreamId
+      && candidate.upstreamName === "canvas_get_new_quiz" && candidate.annotations?.readOnlyHint === true);
+    if (!get || sha256Json(requestedQuiz) !== guard.payload_sha256) return null;
+    return { ...base, newQuizLifecycle: { kind: "create", beforeIds: guard.before_quiz_ids as string[], requestedQuiz, getTool: get.publicName } };
+  }
+  const targetId = typeof guard.quiz_id === "string" && guard.quiz_id === args.assignment_id ? guard.quiz_id : null;
+  return targetId ? { ...base, newQuizLifecycle: { kind: "delete", beforeIds: guard.before_quiz_ids as string[], targetId } } : null;
+}
+
+function requestedJsonShapeMatches(actual: unknown, expected: unknown): boolean {
+  if (Array.isArray(expected)) return Array.isArray(actual) && actual.length === expected.length
+    && expected.every((entry, index) => requestedJsonShapeMatches(actual[index], entry));
+  if (isJsonObject(expected)) return isJsonObject(actual) && Object.entries(expected)
+    .every(([key, entry]) => Object.hasOwn(actual, key) && requestedJsonShapeMatches(actual[key], entry));
+  if ((typeof expected === "string" || typeof expected === "number")
+    && (typeof actual === "string" || typeof actual === "number")) return String(actual) === String(expected);
+  return actual === expected;
+}
+
 function canvasRecoveryReadDescriptor(value: unknown): CanvasRecoveryRead | null {
   if (!isJsonObject(value) || typeof value.readTool !== "string" || !isJsonObject(value.arguments)) return null;
   const argumentsValue: Record<string, string | readonly string[]> = {};
@@ -1100,11 +1205,40 @@ function canvasRecoveryDescriptorOf(value: unknown): CanvasRecoveryDescriptor | 
     && value.read.targetPath.every((part) => typeof part === "string")
     ? value.read.targetPath as string[]
     : undefined;
+  const preconditionSnapshotSha256 = typeof value.preconditionSnapshotSha256 === "string"
+    && /^[0-9a-f]{64}$/.test(value.preconditionSnapshotSha256) ? value.preconditionSnapshotSha256 : undefined;
+  if (value.preconditionSnapshotSha256 !== undefined && !preconditionSnapshotSha256) return null;
+  const hashedAssertions = value.hashedAssertions === undefined ? undefined : Array.isArray(value.hashedAssertions)
+    ? value.hashedAssertions.flatMap((entry) => {
+      if (!isJsonObject(entry) || typeof entry.expectedSha256 !== "string" || !/^[0-9a-f]{64}$/.test(entry.expectedSha256)
+        || !Array.isArray(entry.paths) || !entry.paths.every((path) => Array.isArray(path) && path.every((part) => typeof part === "string"))) return [];
+      return [{ paths: entry.paths as string[][], expectedSha256: entry.expectedSha256 }];
+    }) : undefined;
+  if (Array.isArray(value.hashedAssertions) && (!hashedAssertions || hashedAssertions.length !== value.hashedAssertions.length)) return null;
+  const rawLifecycle = isJsonObject(value.newQuizLifecycle) ? value.newQuizLifecycle : null;
+  let newQuizLifecycle: CanvasRecoveryDescriptor["newQuizLifecycle"] | undefined;
+  if (rawLifecycle) {
+    const beforeIds = Array.isArray(rawLifecycle.beforeIds)
+      && rawLifecycle.beforeIds.length <= 10_000
+      && rawLifecycle.beforeIds.every((id) => typeof id === "string" && /^[1-9][0-9]{0,18}$/.test(id))
+      && new Set(rawLifecycle.beforeIds).size === rawLifecycle.beforeIds.length
+      ? rawLifecycle.beforeIds as string[] : null;
+    const kind = rawLifecycle.kind === "create" || rawLifecycle.kind === "delete" ? rawLifecycle.kind : null;
+    const targetId = typeof rawLifecycle.targetId === "string" && /^[1-9][0-9]{0,18}$/.test(rawLifecycle.targetId)
+      ? rawLifecycle.targetId : undefined;
+    const requestedQuiz = isJsonObject(rawLifecycle.requestedQuiz) && JSON.stringify(rawLifecycle.requestedQuiz).length <= 128 * 1024
+      ? rawLifecycle.requestedQuiz : undefined;
+    const getTool = typeof rawLifecycle.getTool === "string" && rawLifecycle.getTool.length <= 256 ? rawLifecycle.getTool : undefined;
+    if (!beforeIds || !kind || (kind === "create" && (!requestedQuiz || !getTool)) || (kind === "delete" && !targetId)) return null;
+    newQuizLifecycle = { kind, beforeIds, ...(targetId ? { targetId } : {}), ...(requestedQuiz ? { requestedQuiz } : {}), ...(getTool ? { getTool } : {}) };
+  }
   return {
     schema: "morrow.canvas-recovery-descriptor.v1",
     strategy: value.strategy,
     writeMethod: value.writeMethod,
     assertions,
+    ...(preconditionSnapshotSha256 ? { preconditionSnapshotSha256 } : {}),
+    ...(hashedAssertions ? { hashedAssertions } : {}),
     ...(read ? {
       read: {
         ...read,
@@ -1114,6 +1248,7 @@ function canvasRecoveryDescriptorOf(value: unknown): CanvasRecoveryDescriptor | 
       },
     } : {}),
     ...(collection ? { collection } : {}),
+    ...(newQuizLifecycle ? { newQuizLifecycle } : {}),
   };
 }
 
@@ -1281,6 +1416,7 @@ export class GatewayRuntime {
   readonly catalog: CatalogSnapshot;
 
   private readonly upstreams: ReadonlyMap<string, StdioMcpUpstream>;
+  private readonly responseLearnerContexts = new AsyncLocalStorage<Map<string, LearnerTextRedactionContext>>();
   private readonly toolByPublicName: ReadonlyMap<string, CatalogTool>;
   private readonly journal: GatewayOperationJournal;
   private readonly effects: ProviderEffectBroker;
@@ -1294,7 +1430,6 @@ export class GatewayRuntime {
   private readonly publicationPolicy: PublicationPolicyHealth | undefined;
   private readonly learnerVault: LearnerVault;
   private readonly mcpRuntime: McpRuntimeHealth | undefined;
-  private readonly learnerRoster = new LearnerRoster();
   private readonly artifacts: ArtifactGenerationRegistry;
   private approvalBaseUrl: string | null = null;
   /**
@@ -1386,7 +1521,13 @@ export class GatewayRuntime {
             ...(upstreamConfig.cwd ? { cwd: upstreamConfig.cwd } : {}),
             env: upstreamEnvironment,
           };
+      // Windows paths carry backslashes, so the capability matcher compares on
+      // one normalized slash direction.
+      const internalSourceCapability = upstreamConfig.kind === "mcp-stdio"
+        && upstreamConfig.args.some((arg) => /packages\/(?:canvas-connector-mcp|legacy-bridge-mcp)\/dist\/index\.js$/u.test(String(arg).replaceAll("\\", "/")))
+        ? randomBytes(32).toString("hex") : undefined;
       const upstream = new StdioMcpUpstream({
+        ...(internalSourceCapability ? { internalSourceCapability } : {}),
         id: upstreamConfig.id,
         label: upstreamConfig.label,
         command: launch.command,
@@ -1759,6 +1900,21 @@ export class GatewayRuntime {
     return canvasFileScope(bindings[0]!, sourceBindingId, courseId, contentType);
   }
 
+  private async currentCanvasNewQuizHotSpotScope(
+    mapping: CatalogTool,
+    sourceBindingId: string,
+    courseId: string,
+    contentType: string,
+    signal?: AbortSignal,
+  ): Promise<FileStageScope> {
+    const source = this.browserBindingsTool(mapping);
+    if (!source) throw new Error("The Canvas browser connection is unavailable or ambiguous.");
+    const response = await this.callSourceOwned(source.publicName, {}, { signal });
+    const bindings = browserBindingContent(response).filter((entry) => entry.sourceBindingId === sourceBindingId);
+    if (bindings.length !== 1) throw new Error("The selected Canvas course connection is unavailable or ambiguous.");
+    return canvasNewQuizHotSpotScope(bindings[0]!, sourceBindingId, courseId, contentType);
+  }
+
   private resourceFileEffectScope(scope: FileStageScope): EffectBindingScope {
     return {
       provider: scope.provider,
@@ -1958,6 +2114,89 @@ export class GatewayRuntime {
       if (stageHandle) this.fileStages.discard(stageHandle);
       if (operation) this.effects.cancel(operation.operationId);
       return this.planOperationRejected("morrow_plan_canvas_file_upload", error);
+    }
+  }
+
+  /**
+   * One reviewed New Quizzes Hot Spot question, with its image.
+   *
+   * Canvas documents the create as three requests that only work in order: read
+   * one signed media upload URL, PUT the exact image bytes to it, then create
+   * the item with that same URL with its query string removed. Nothing here
+   * sends any of them. This plan reads the course, the quiz, and the complete
+   * saved question list, checks the question the same way every other create is
+   * checked, stages the image bytes privately, and freezes the whole target: the
+   * course, the assignment, the signed-in principal, the session generation, the
+   * catalog digest, the saved question list, and the exact reviewed question.
+   * The bytes stay in the local stage, out of the plan and out of the operation
+   * record, until one person approves this exact operation.
+   */
+  async planCanvasNewQuizHotSpotCreate(
+    value: NewQuizItemCreateInput,
+    options: { readonly signal?: AbortSignal; readonly workspaceRoot?: string } = {},
+  ): Promise<JsonObject> {
+    let stageHandle: string | undefined;
+    let operation: EffectOperationRecord | undefined;
+    try {
+      const matches = this.catalog.tools.filter(isCanvasNewQuizHotSpotTransfer);
+      if (matches.length !== 1) throw new Error("The Canvas Hot Spot capability is unavailable or ambiguous.");
+      const mapping = matches[0]!;
+      if (typeof options.workspaceRoot !== "string" || !options.workspaceRoot) {
+        throw new Error("A trusted assistant workspace is unavailable for this session.");
+      }
+      options.signal?.throwIfAborted();
+      const prepared = await prepareNewQuizHotSpotCreate(this, value, options.signal || AbortSignal.timeout(60_000));
+      const item = exactHotSpotTemplate(prepared.item);
+      if (!item) throw new Error("A reviewed Hot Spot question must not carry its own image URL.");
+      const contentType = canvasNewQuizHotSpotContentType(prepared.input.material_path);
+      const local = await readWorkspaceMaterial(prepared.input.material_path, options.workspaceRoot);
+      const scope = await this.currentCanvasNewQuizHotSpotScope(
+        mapping, prepared.input.source_binding_id, prepared.input.course_id, contentType, options.signal,
+      );
+      let stage;
+      try {
+        assertHotSpotImageBytes(local.bytes, contentType);
+        options.signal?.throwIfAborted();
+        stage = this.fileStages.stage({
+          ...local,
+          scope,
+          expiresAt: Date.now() + CANVAS_NEW_QUIZ_HOT_SPOT_APPROVAL_TTL_MS + 1_000,
+        });
+      } finally {
+        local.bytes.fill(0);
+      }
+      stageHandle = stage.handle;
+      const freshScope = await this.currentCanvasNewQuizHotSpotScope(
+        mapping, prepared.input.source_binding_id, prepared.input.course_id, contentType, options.signal,
+      );
+      if (sha256Json(scope) !== sha256Json(freshScope)) throw new Error("The Canvas course connection changed during preparation.");
+      const request: JsonObject = {
+        course_id: prepared.input.course_id,
+        assignment_id: prepared.input.quiz_id,
+        item,
+        before_items_sha256: prepared.beforeItemsSha256,
+        payload_sha256: sha256Json(item),
+        filename: stage.manifest.filename,
+        size_bytes: stage.manifest.sizeBytes,
+        sha256: stage.manifest.sha256,
+        content_type: contentType,
+        _morrow: { source_binding_id: prepared.input.source_binding_id },
+      };
+      const { _morrow: _routing, ...frozen } = request;
+      canvasNewQuizHotSpotRequestSchema.parse(frozen);
+      operation = this.planEffect(mapping, {
+        request,
+        readback: connectorReadback(mapping, request),
+        approvalTtlMs: CANVAS_NEW_QUIZ_HOT_SPOT_APPROVAL_TTL_MS,
+      }, REVIEW_AUTHORIZATION, undefined, this.resourceFileEffectScope(scope));
+      const bound: FileStageBinding = { handle: stage.handle, manifest: stage.manifest, scope, operationId: operation.operationId };
+      this.fileStages.bind(bound);
+      this.operationFileStages.set(operation.operationId, [bound]);
+      return this.effectResult(operation, "planned");
+    } catch (error) {
+      if (stageHandle) this.fileStages.discard(stageHandle);
+      if (operation) this.effects.cancel(operation.operationId);
+      return this.planOperationRejected("morrow_plan_new_quiz_item_create", error);
     }
   }
 
@@ -2608,6 +2847,29 @@ export class GatewayRuntime {
     return { mode: prepared.mode, command: raw, bindings: latest.bindings, outcome };
   }
 
+  async privateChatExchange(input: JsonObject, signal?: AbortSignal): Promise<JsonObject> {
+    const source = this.editAccessBindingsTool();
+    const upstream = source ? this.upstreams.get(source.upstreamId) : undefined;
+    if (!source || !upstream) throw new Error("The current browser connection is unavailable or ambiguous.");
+    const raw = await upstream.callTool("morrow_private_chat_exchange", input, { safeToRetry: false, signal });
+    const result = isJsonObject(raw) && isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
+    if (!result || result.schema !== "morrow.private-chat.exchange.v1") throw new Error("The Private Chat relay returned an invalid result.");
+    if (result.status === "closed" && Object.keys(result).every((key) => ["schema", "status"].includes(key))) return result;
+    if (result.status !== "message"
+      || Object.keys(result).some((key) => !["schema", "status", "sessionId", "sourceBindingId", "courseId", "protectedText"].includes(key))
+      || result.sessionId !== input.sessionId
+      || typeof result.sourceBindingId !== "string" || !/^[A-Za-z0-9_.:@-]{1,160}$/.test(result.sourceBindingId)
+      || typeof result.courseId !== "string" || !/^[1-9][0-9]{0,18}$/.test(result.courseId)
+      || typeof result.protectedText !== "string" || !result.protectedText.trim() || result.protectedText.length > 100_000) {
+      throw new Error("The Private Chat relay returned an invalid protected message.");
+    }
+    if (input.action === "reply_and_listen"
+      && (result.sourceBindingId !== input.sourceBindingId || result.courseId !== input.courseId)) {
+      throw new Error("The Private Chat course changed during the exchange.");
+    }
+    return result;
+  }
+
   private async resolveCurrentEditAuthorization(
     mapping: CatalogTool,
     request: JsonObject,
@@ -2644,7 +2906,15 @@ export class GatewayRuntime {
   }
 
   private requestCourseId(value: Readonly<Record<string, unknown>>): string | null {
-    const candidate = value.course_id ?? value.courseId;
+    const direct = value.course_id ?? value.courseId;
+    const guard = direct == null && isJsonObject(value.morrow_item_bank_guard)
+      && value.morrow_item_bank_guard.kind === "item_bank_entry_image_alt"
+      ? value.morrow_item_bank_guard
+      : null;
+    // A legacy guarded Item Bank request has no generic top-level course
+    // argument. Keep reading its frozen course only when projecting a saved
+    // historical record. Current Item Bank writes are held before dispatch.
+    const candidate = direct ?? guard?.course_id;
     if (typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate > 0) return String(candidate);
     const normalized = this.exactString(candidate, 30);
     return normalized && (/^[1-9][0-9]{0,18}$/u.test(normalized) || /^_[1-9][0-9]{0,18}_[1-9][0-9]{0,18}$/u.test(normalized)) ? normalized : null;
@@ -5227,6 +5497,7 @@ export class GatewayRuntime {
   }
 
   private hasLearnerToken(value: unknown): boolean {
+    if (typeof value === "string") return /\b(?:Student A[1-9][0-9]*|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/u.test(value);
     if (Array.isArray(value)) return value.some((candidate) => this.hasLearnerToken(candidate));
     if (!isJsonObject(value)) return false;
     return Object.entries(value).some(([key, candidate]) => (
@@ -5248,9 +5519,16 @@ export class GatewayRuntime {
         const raw = candidate[field];
         return typeof raw === "string" && raw.trim() && raw.trim().length <= 500 ? raw.trim() : undefined;
       };
+      const aliasFields = ["sortable_name", "short_name", "display_name", "full_name", "fullname", "username", "integration_id", "uuid", "sis_login_id", "idnumber", "first_name", "last_name", "firstname", "lastname"];
+      for (const field of ["name", "email", "login_id", "sis_user_id", ...aliasFields]) {
+        if (candidate[field] != null && candidate[field] !== "" && !text(field)) throw new Error("learner_roster_result_invalid");
+      }
+      if (!text("name") && !text("fullname")) throw new Error("learner_roster_result_invalid");
+      if (candidate.aliases != null && (!Array.isArray(candidate.aliases) || candidate.aliases.some((alias) => typeof alias !== "string" || !alias.trim() || alias.length > 500))) throw new Error("learner_roster_result_invalid");
       return normalizeLearnerIdentity({
         id: String(id),
-        ...(text("name") ? { name: text("name") } : {}),
+        aliases: [...aliasFields.flatMap((field) => text(field) ? [text(field)!] : []), ...(Array.isArray(candidate.aliases) ? candidate.aliases as string[] : [])],
+        name: text("name") ?? text("fullname"),
         ...(text("email") ? { email: text("email") } : {}),
         ...(text("login_id") ? { loginId: text("login_id") } : {}),
         ...(text("sis_user_id") ? { sisUserId: text("sis_user_id") } : {}),
@@ -5258,7 +5536,7 @@ export class GatewayRuntime {
     });
   }
 
-  private completeCanvasRoster(result: JsonObject): readonly LearnerIdentity[] {
+  private completeCanvasCollection(result: JsonObject): readonly unknown[] {
     const content = isJsonObject(result.structuredContent) ? result.structuredContent : null;
     const browser = content && content.schema === "morrow.canvas-connector.result.v1" && isJsonObject(content.result)
       ? content.result
@@ -5267,7 +5545,8 @@ export class GatewayRuntime {
       || browser.ok !== true || browser.sent !== true || browser.truncated !== false) {
       throw new Error("learner_roster_result_incomplete");
     }
-    return this.rosterIdentities(browser.data);
+    if (!Array.isArray(browser.data)) throw new Error("learner_roster_result_invalid");
+    return browser.data;
   }
 
   private completeMoodleRoster(result: JsonObject, binding: JsonObject): readonly LearnerIdentity[] {
@@ -5289,6 +5568,13 @@ export class GatewayRuntime {
     if (roster.schema !== "morrow.moodle-course-roster.v1" || roster.status !== "complete" || roster.complete !== true
       || expected.some((field) => roster[field] !== binding[field])) {
       throw new Error("learner_roster_result_mismatch");
+    }
+    const proof = isJsonObject(roster.proof) ? roster.proof : null;
+    if (!Array.isArray(roster.identities) || !proof || proof.rowCount !== roster.identities.length
+      || proof.identityCount !== roster.identities.length || !Number.isSafeInteger(proof.pageCount) || Number(proof.pageCount) < 1
+      || Number(proof.pageCount) > 100 || !Number.isSafeInteger(proof.requestCount) || Number(proof.requestCount) < Number(proof.pageCount)
+      || (proof.totalRows !== undefined && proof.totalRows !== roster.identities.length)) {
+      throw new Error("learner_roster_result_incomplete");
     }
     return this.rosterIdentities(roster.identities);
   }
@@ -5332,17 +5618,40 @@ export class GatewayRuntime {
     if (!rosterTool) throw new Error("learner_roster_source_unavailable");
     const scope = this.canvasBindingScope(binding, sourceBindingId, requestedCourseId);
     if (!scope) throw new Error("learner_roster_binding_unavailable");
+    const contexts = this.responseLearnerContexts.getStore();
+    const scopeKey = JSON.stringify(scope);
+    const existing = contexts?.get(scopeKey);
+    if (existing) {
+      if (!existing.learnerRoster.isReady(scope)) throw new Error("learner_roster_scope_unavailable");
+      return existing;
+    }
     const roster = await this.callSourceOwned(rosterTool.publicName, {
       course_id: scope.course,
+      include: ["enrollments", "uuid"],
       enrollment_type: ["student"],
-      enrollment_state: ["active", "invited", "completed", "inactive"],
+      enrollment_state: ["active", "invited", "rejected", "completed", "inactive"],
       morrow_max_pages: 50,
       _morrow: { source_binding_id: sourceBindingId },
     }, options);
     if (roster.isError === true) throw new Error("learner_roster_result_incomplete");
-    // Register only after the source supplied a complete, validated roster.
-    this.learnerRoster.register(scope, this.completeCanvasRoster(roster));
-    return { learnerRoster: this.learnerRoster, learnerVault: this.learnerVault, learnerScope: scope };
+    const historyTools = this.catalog.tools.filter((candidate) => candidate.upstreamId === mapping.upstreamId
+      && candidate.upstreamName === "canvas_list_enrollments_courses" && candidate.annotations?.readOnlyHint === true
+      && candidate.capability?.route.backend === "canvas-connector");
+    if (historyTools.length !== 1) throw new Error("learner_roster_source_unavailable");
+    const history = await this.callSourceOwned(historyTools[0]!.publicName, {
+      course_id: scope.course, type: ["StudentEnrollment"], state: ["deleted"], morrow_max_pages: 50,
+      _morrow: { source_binding_id: sourceBindingId },
+    }, options);
+    if (history.isError === true) throw new Error("learner_roster_result_incomplete");
+    const currentBinding = await this.verifiedBrowserBinding(mapping, { course_id: scope.course, _morrow: { source_binding_id: sourceBindingId } }, options, "canvas");
+    if (JSON.stringify(this.canvasBindingScope(currentBinding, sourceBindingId, scope.course)) !== JSON.stringify(scope)) {
+      throw new Error("learner_roster_binding_unavailable");
+    }
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, canvasPrivacyRoster(this.completeCanvasCollection(roster), this.completeCanvasCollection(history), scope.course));
+    const context = { learnerRoster, learnerVault: this.learnerVault, learnerScope: scope };
+    contexts?.set(scopeKey, context);
+    return context;
   }
 
   private async moodleLearnerContext(
@@ -5369,13 +5678,23 @@ export class GatewayRuntime {
     if (!rosterTool) throw new Error("learner_roster_source_unavailable");
     const scope = this.moodleBindingScope(binding, sourceBindingId, requestedCourseId);
     if (!scope) throw new Error("learner_roster_binding_unavailable");
+    const contexts = this.responseLearnerContexts.getStore();
+    const scopeKey = JSON.stringify(scope);
+    const existing = contexts?.get(scopeKey);
+    if (existing) {
+      if (!existing.learnerRoster.isReady(scope)) throw new Error("learner_roster_scope_unavailable");
+      return existing;
+    }
     const roster = await this.callSourceOwned(rosterTool.publicName, {
       course_id: Number(scope.course),
       _morrow: { source_binding_id: sourceBindingId },
     }, options);
     if (roster.isError === true) throw new Error("learner_roster_result_incomplete");
-    this.learnerRoster.register(scope, this.completeMoodleRoster(roster, binding));
-    return { learnerRoster: this.learnerRoster, learnerVault: this.learnerVault, learnerScope: scope };
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, this.completeMoodleRoster(roster, binding));
+    const context = { learnerRoster, learnerVault: this.learnerVault, learnerScope: scope };
+    contexts?.set(scopeKey, context);
+    return context;
   }
 
   private moodleUserIdForToken(token: string, context: LearnerTextRedactionContext): number {
@@ -5452,7 +5771,7 @@ export class GatewayRuntime {
   }
 
   private privacyFailure(error: unknown): JsonObject {
-    const code = error instanceof Error && (/^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_/u.test(error.message))
+    const code = error instanceof Error && /^[a-z0-9_]{1,160}$/u.test(error.message) && (/^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_/u.test(error.message))
       ? error.message
       : "privacy_output_refused";
     return {
@@ -5490,6 +5809,9 @@ export class GatewayRuntime {
       };
     }
     try {
+      if (mapping.annotations?.readOnlyHint === true && mapping.capability?.provider === "moodle" && !moodleSourceHistoryAvailable(mapping.upstreamName, mapping.capability.authority.dataClass)) {
+        throw new Error("privacy_moodle_history_dictionary_unavailable");
+      }
       if (this.isBrowserBindings(mapping)) {
         return await this.publicBrowserBindings(mapping, raw, options);
       }
@@ -5806,7 +6128,7 @@ export class GatewayRuntime {
       if (["learner", "learners", "student", "students", "user", "users", "person", "people", "enrollment", "enrollments", "submission", "submissions", "gradebook", "recipients", "members"].includes(normalized)) {
         if (allowBlackboardReferences && ["learners", "members"].includes(normalized) && Array.isArray(child)
           && child.every((entry) => isJsonObject(entry)
-            && typeof entry.learnerToken === "string" && /^learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(entry.learnerToken)
+            && typeof entry.learnerToken === "string" && /^Student A[1-9][0-9]*$/.test(entry.learnerToken)
             && Object.keys(entry).every((field) => ["learnerToken", "courseRoleId", "availability"].includes(field))
             && [entry.courseRoleId, entry.availability].every((field) => field === undefined || (typeof field === "string" && /^[A-Za-z0-9_.:-]{1,100}$/.test(field))))) {
           output[key] = child;
@@ -6404,6 +6726,18 @@ export class GatewayRuntime {
       ? structuredClone(result)
       : this.resultArtifacts.bound(result);
     try {
+      const assertHistoryDictionary = (entry: unknown): void => {
+        if (Array.isArray(entry)) { entry.forEach(assertHistoryDictionary); return; }
+        if (!isJsonObject(entry)) return;
+        if (entry.schema === "morrow.result.v1" && typeof entry.tool === "string" && entry.tool.startsWith("moodle_")) {
+          const mapping = this.toolByPublicName.get(entry.tool);
+          if ((!mapping || mapping.annotations?.readOnlyHint === true) && !moodleSourceHistoryAvailable(mapping?.upstreamName ?? entry.tool, mapping?.capability?.authority.dataClass)) {
+            throw new Error("privacy_moodle_history_dictionary_unavailable");
+          }
+        }
+        Object.values(entry).forEach(assertHistoryDictionary);
+      };
+      assertHistoryDictionary(value);
       if (this.isMoodleQuizAttemptSummaryEgress(value)) {
         const capabilityRequest = isJsonObject(request.arguments)
           ? request.arguments
@@ -6554,6 +6888,14 @@ export class GatewayRuntime {
     args: Readonly<Record<string, unknown>>,
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<JsonObject> {
+    return this.responseLearnerContexts.run(new Map(), () => this.callWithLearnerContext(publicName, args, options));
+  }
+
+  private async callWithLearnerContext(
+    publicName: string,
+    args: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
     if (!mapping) {
       return canonicalMorrowResult({
@@ -6578,7 +6920,7 @@ export class GatewayRuntime {
         phase: "rejected",
         verificationStatus: "not_applicable",
         result: {
-          content: [{ type: "text", text: "Use the opaque learner or enrolment-candidate token returned for this exact Moodle course connection." }],
+          content: [{ type: "text", text: "Use the learner or enrolment-candidate label returned for this exact Moodle course connection." }],
           isError: true,
           structuredContent: {
             schema: "morrow.problem.v1",
@@ -6589,6 +6931,15 @@ export class GatewayRuntime {
       });
     }
     if (mapping.annotations?.readOnlyHint === true) {
+      if (mapping.capability?.provider === "moodle" && !moodleSourceHistoryAvailable(mapping.upstreamName, mapping.capability.authority.dataClass)) {
+        return this.privacyFailure(new Error("privacy_moodle_history_dictionary_unavailable"));
+      }
+      if (isCanvasConnector(mapping) && this.requestCourseId(args)) {
+        try {
+          if (mapping.capability?.provider === "moodle") await this.moodleLearnerContext(mapping, args, options);
+          else await this.canvasLearnerContext(mapping, args, options);
+        } catch (error) { return this.privacyFailure(error); }
+      }
       const raw = await this.callSourceOwned(publicName, args, options);
       const result = await this.publicSourceResult(mapping, args, raw, options);
       return canonicalMorrowResult({
@@ -6700,6 +7051,9 @@ export class GatewayRuntime {
       if (isMoodleStagedFile(mapping) || isCanvasCourseFileTransfer(mapping)) {
         throw new TypeError("Prepare the local file with its exact Morrow file planner before review.");
       }
+      if (isCanvasNewQuizHotSpotTransfer(mapping)) {
+        throw new TypeError("Prepare a Hot Spot question with morrow_plan_new_quiz_item_create before review.");
+      }
       if (isCanvasConversationTransfer(mapping)) {
         throw new TypeError("Prepare Canvas Inbox messages with morrow_plan_canvas_conversation before review.");
       }
@@ -6708,6 +7062,43 @@ export class GatewayRuntime {
       }
       if (isCanvasConnector(mapping) && !bindingScope) {
         throw new TypeError("Browser connector writes require a freshly prepared course connection.");
+      }
+      if (mapping.capability?.family === "new-quizzes-item-banks"
+        && mapping.upstreamName !== "canvas_item_bank_create_bank") {
+        const sourceBindingId = legacyRouting(supplied.request).sourceBindingId;
+        if (!validItemBankFanOutReceipt(
+          supplied.request.fan_out,
+          supplied.request.fan_out_receipt,
+          sourceBindingId,
+        )) throw new TypeError("Item Bank writes require the unmodified receipt from a fresh morrow_read_item_bank_fan_out result.");
+        // The receipt proves the record is unmodified; it does not prove the
+        // plan honours it. The snapshot-bound shape carries the record and the
+        // acknowledgement at the top level, so the exact-acknowledgement rule
+        // the Bridge enforces at dispatch is held here too, for every plan
+        // surface and not only the repair planner. The legacy guarded shape
+        // keeps its record inside the guard and stays with dispatch.
+        if (supplied.request.fan_out !== undefined && typeof supplied.request.course_id === "string"
+          && supplied.request.bank_id !== undefined) {
+          const fanOutRefusal = itemBankFanOutPlanRefusal(supplied.request.fan_out, {
+            bankId: String(supplied.request.bank_id),
+            courseId: supplied.request.course_id,
+            acknowledgedCourseIds: Array.isArray(supplied.request.acknowledged_course_ids)
+              ? supplied.request.acknowledged_course_ids.map((value) => String(value)) : [],
+            now: Date.now(),
+          });
+          if (fanOutRefusal !== null) {
+            return canonicalMorrowResult({
+              tool: publicName,
+              phase: "rejected",
+              verificationStatus: "not_requested",
+              result: {
+                content: [{ type: "text", text: `No change was planned. ${fanOutRefusal.message}` }],
+                isError: true,
+                structuredContent: { schema: "morrow.problem.v1", code: fanOutRefusal.code },
+              },
+            });
+          }
+        }
       }
       if (mapping.capability?.provider === "moodle" && !/^[0-9a-f]{64}$/.test(String(supplied.request.expected_digest || ""))) {
         throw new TypeError("Moodle browser writes require expected_digest from the exact preceding read");
@@ -6761,7 +7152,8 @@ export class GatewayRuntime {
       const request = pending.plan.arguments as JsonObject;
       let bindingScope: EffectBindingScope | undefined;
       let currentAuthorization = REVIEW_AUTHORIZATION;
-      checkingFileStage = isBlackboardAttachment(pendingMapping) || isMoodleStagedFile(pendingMapping) || isCanvasCourseFileTransfer(pendingMapping);
+      checkingFileStage = isBlackboardAttachment(pendingMapping) || isMoodleStagedFile(pendingMapping)
+        || isCanvasCourseFileTransfer(pendingMapping) || isCanvasNewQuizHotSpotTransfer(pendingMapping);
       if (isBlackboardAttachment(pendingMapping)) {
         const staged = this.operationFileStages.get(operationId)?.[0];
         if (!staged || this.operationFileStages.get(operationId)?.length !== 1 || authorization.kind !== "review" || request.course_id !== staged.scope.courseId
@@ -6772,6 +7164,32 @@ export class GatewayRuntime {
         }
         this.fileStages.verify(staged);
         fileStages = [staged];
+      } else if (isCanvasNewQuizHotSpotTransfer(pendingMapping)) {
+        // Every part of the reviewed Hot Spot is checked again here: the staged
+        // image, the exact question a person approved, and the course
+        // connection it was approved against. The saved question list is
+        // checked in the page immediately before the create, because only a
+        // reading taken there proves what the quiz holds now.
+        const staged = this.operationFileStages.get(operationId);
+        const stage = staged?.[0];
+        const item = exactHotSpotTemplate(request.item);
+        if (!staged || staged.length !== 1 || !stage || !item || authorization.kind !== "review"
+          || typeof request.course_id !== "string" || typeof request.assignment_id !== "string"
+          || typeof request.content_type !== "string" || request.content_type !== stage.scope.contentType
+          || request.course_id !== stage.scope.courseId
+          || request.filename !== stage.manifest.filename || request.size_bytes !== stage.manifest.sizeBytes
+          || request.sha256 !== stage.manifest.sha256
+          || typeof request.before_items_sha256 !== "string" || !SHA256.test(request.before_items_sha256)
+          || request.payload_sha256 !== sha256Json(item)
+          || legacyRouting(request).sourceBindingId !== stage.scope.sourceBindingId) {
+          throw new Error("The reviewed Hot Spot image is unavailable. Prepare and approve a new Hot Spot plan.");
+        }
+        const scope = await this.currentCanvasNewQuizHotSpotScope(
+          pendingMapping, stage.scope.sourceBindingId, request.course_id, request.content_type,
+        );
+        fileStages = [{ ...stage, scope }];
+        for (const entry of fileStages) this.fileStages.verify(entry);
+        bindingScope = this.resourceFileEffectScope(scope);
       } else if (isMoodleStagedFile(pendingMapping) || isCanvasCourseFileTransfer(pendingMapping)) {
         const staged = this.operationFileStages.get(operationId);
         const capability = moodleStagedFileCapabilityForMapping(pendingMapping);
@@ -6989,7 +7407,7 @@ export class GatewayRuntime {
         if (!context) throw new Error("learner_roster_source_unavailable");
         const resolved = resolveLearnerTokens({
           recipients: (input.recipient_tokens || []).map((learner_token) => ({ learner_token })),
-        }, context.learnerVault, context.learnerScope);
+        }, context.learnerVault, context.learnerScope, context.learnerRoster);
         const recipientIds = Array.isArray(resolved.recipients)
           ? resolved.recipients.map((entry) => isJsonObject(entry) && typeof entry.learner_id === "string" ? entry.learner_id : "")
           : [];
@@ -7001,10 +7419,10 @@ export class GatewayRuntime {
           action: input.action,
           courseId: String(input.course_id),
           recipients: [...recipientIds, ...(input.recipient_contexts || [])],
-          body: input.body,
+          body: String(resolveLearnerTokens({ body: input.body }, context.learnerVault, context.learnerScope, context.learnerRoster).body),
           ...(input.action === "create"
             ? {
-                ...(input.subject === undefined ? {} : { subject: input.subject }),
+                ...(input.subject === undefined ? {} : { subject: String(resolveLearnerTokens({ subject: input.subject }, context.learnerVault, context.learnerScope, context.learnerRoster).subject) }),
                 ...(input.group_conversation === undefined ? {} : { groupConversation: input.group_conversation }),
                 ...(input.force_new === undefined ? {} : { forceNew: input.force_new }),
               }
@@ -7019,6 +7437,10 @@ export class GatewayRuntime {
       const settled = this.effects.settleFailure(reserved.operationId, error, false);
       return this.effectResult(settled, "dispatch_failed");
     }
+    const plannedConnectorDescriptor = usesEmbeddedReadback(mapping)
+      ? plannedNewQuizLifecycleDescriptor(mapping, forwarded as JsonObject, this.toolByPublicName.values())
+      : null;
+    if (plannedConnectorDescriptor) this.effects.recordConnectorReadDescriptor(reserved.operationId, plannedConnectorDescriptor);
     try {
       result = await this.callSourceOwned(mapping.publicName, forwarded, {
         authorizedEffectOperationId: reserved.operationId,
@@ -7402,14 +7824,25 @@ export class GatewayRuntime {
     window: { readonly start: number; readonly end: number },
   ): { readonly outcome: "duplicate" | "single" | "none" | "unavailable"; readonly reason: string; readonly matched: number } {
     if (descriptor.assertions.length === 0) return { outcome: "unavailable", reason: "no_requested_field_set", matched: 0 };
-    if (browser.truncated === true) return { outcome: "unavailable", reason: "collection_readback_incomplete", matched: 0 };
     if (!Array.isArray(browser.data)) return { outcome: "unavailable", reason: "collection_readback_shape_invalid", matched: 0 };
     const matched = browser.data.filter((record) => matchesReadbackAssertions(record, descriptor.assertions));
+    if (browser.truncated === true) {
+      if (descriptor.strategy !== "observed-collection-contains-target") {
+        return { outcome: "unavailable", reason: "collection_readback_incomplete", matched: matched.length };
+      }
+      if (matched.length > 1) return { outcome: "duplicate", reason: "multiple_matching_records_in_observed_collection", matched: matched.length };
+      return matched.length === 1
+        ? { outcome: "single", reason: "one_matching_record_in_observed_collection", matched: 1 }
+        : { outcome: "unavailable", reason: "target_not_observed_in_incomplete_collection", matched: 0 };
+    }
     const created = matched.map((record) => Date.parse(String(readbackFieldValue(record, "created_at") ?? "")));
     if (created.some((value) => !Number.isFinite(value))) {
       // Without a creation time the window cannot separate this change from a
       // record that was already there, so a second match is reported as a
       // suspected duplicate and a single match proves nothing.
+      if (matched.length === 1 && descriptor.preconditionSnapshotSha256) {
+        return { outcome: "single", reason: "one_record_after_exact_precondition_snapshot", matched: 1 };
+      }
       return matched.length > 1
         ? { outcome: "duplicate", reason: "multiple_matching_records_without_creation_time", matched: matched.length }
         : { outcome: "unavailable", reason: "record_created_at_unavailable", matched: matched.length };
@@ -7449,9 +7882,47 @@ export class GatewayRuntime {
     };
     let collection: BrowserReadbackResult | null = null;
     let scan: ReturnType<GatewayRuntime["canvasDuplicateScan"]> | null = null;
-    if (descriptor.collection && descriptor.writeMethod === "POST"
-      && ["created-resource", "collection-contains-target"].includes(descriptor.strategy)) {
+    if (descriptor.collection && ((descriptor.writeMethod === "POST"
+      && ["created-resource", "collection-contains-target", "observed-collection-contains-target"].includes(descriptor.strategy))
+      || descriptor.newQuizLifecycle)) {
       collection = await this.canvasRecoveryRead(descriptor.collection, operation.sourceBindingId);
+      if (descriptor.newQuizLifecycle) {
+        const lifecycle = descriptor.newQuizLifecycle;
+        const rows = collection?.truncated !== true && Array.isArray(collection?.data) ? collection.data : null;
+        const afterIds = rows ? rows.map((row) => isJsonObject(row) && targetIdentityValue(row.id)).filter((id): id is string => Boolean(id)) : [];
+        let verification: JsonObject = { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: descriptor.strategy, reason: "complete_new_quiz_list_unavailable" };
+        if (rows && afterIds.length === rows.length && new Set(afterIds).size === afterIds.length) {
+          const compareExactIds = (left: string, right: string): number => left.length - right.length || (left < right ? -1 : left > right ? 1 : 0);
+          const sortedAfter = [...afterIds].sort(compareExactIds);
+          const sortedBefore = [...lifecycle.beforeIds].sort(compareExactIds);
+          if (lifecycle.kind === "delete") {
+            const expected = sortedBefore.filter((id) => id !== lifecycle.targetId);
+            verification = sortedAfter.length === expected.length && sortedAfter.every((id, index) => id === expected[index])
+              ? { schema: "morrow.browser-verification.v1", status: "verified", strategy: descriptor.strategy, evidence: "complete_course_new_quiz_list_reread_after_restart" }
+              : { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_delete_readback_mismatch" };
+          } else {
+            const additions = sortedAfter.filter((id) => !sortedBefore.includes(id));
+            const removals = sortedBefore.filter((id) => !sortedAfter.includes(id));
+            if (sortedAfter.length === sortedBefore.length + 1 && additions.length === 1 && removals.length === 0
+              && lifecycle.getTool && lifecycle.requestedQuiz) {
+              const created = await this.canvasRecoveryRead({ readTool: lifecycle.getTool, arguments: {
+                course_id: String(descriptor.collection.arguments.course_id), assignment_id: additions[0]!,
+              } }, operation.sourceBindingId);
+              verification = created && isJsonObject(created.data) && targetIdentityValue(created.data.id) === additions[0]
+                && requestedJsonShapeMatches(created.data, lifecycle.requestedQuiz)
+                ? { schema: "morrow.browser-verification.v1", status: "verified", strategy: descriptor.strategy, evidence: "complete_course_quiz_list_and_created_quiz_reread_after_restart" }
+                : { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_create_readback_mismatch" };
+            } else {
+              verification = { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: descriptor.strategy, reason: "new_quiz_create_membership_mismatch" };
+            }
+          }
+        }
+        evidence.verification = verification;
+        const settled = this.effects.recordReadback(operation.operationId, sha256Json(verification), verification.status === "verified");
+        return verification.status === "verified"
+          ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
+          : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION, CONNECTOR_RECOVERY_READ_ONLY_NOTE]);
+      }
       scan = collection
         ? this.canvasDuplicateScan(descriptor, collection, window)
         : { outcome: "unavailable", reason: "collection_read_unavailable", matched: 0 };
@@ -7473,7 +7944,29 @@ export class GatewayRuntime {
         && descriptor.collection.readTool === descriptor.read.readTool
         && sha256Json(descriptor.collection.arguments) === sha256Json(descriptor.read.arguments);
       const fresh = reuse ? collection : await this.canvasRecoveryRead(descriptor.read, operation.sourceBindingId);
-      const verification = fresh
+      const pathValue = (root: unknown, path: readonly string[]): unknown => {
+        let current = root;
+        for (const part of path) {
+          if ((!isJsonObject(current) && !Array.isArray(current)) || !(part in current)) return undefined;
+          current = (current as Record<string, unknown>)[part];
+        }
+        return current;
+      };
+      const hashedMatches = fresh && descriptor.hashedAssertions?.length
+        ? descriptor.hashedAssertions.every((assertion) => assertion.paths.some((path) => {
+          const value = pathValue(fresh.data, path);
+          return value !== undefined && sha256Json(value) === assertion.expectedSha256;
+        }))
+        : undefined;
+      const verification = fresh && hashedMatches !== undefined
+        ? {
+          schema: "morrow.browser-verification.v1" as const,
+          status: hashedMatches ? "verified" as const : "mismatch" as const,
+          strategy: descriptor.strategy,
+          readTool: descriptor.read.readTool,
+          evidence: hashedMatches ? "fresh_readback_matches_hashed_postcondition" : "fresh_readback_hashed_postcondition_mismatch",
+        }
+        : fresh
         ? evaluateBrowserReadback(this.canvasRecoveryPlan(descriptor), fresh)
         : { schema: "morrow.browser-verification.v1" as const, status: "unconfirmed" as const, reason: "fresh_readback_unavailable" };
       evidence.verification = structuredClone(verification) as unknown as JsonObject;
@@ -7549,7 +8042,8 @@ export class GatewayRuntime {
     }
     try {
       assertNoPrivateAttachmentInput(args);
-      if (options.privateAttachment && (!(isMoodleStagedFile(mapping) || isCanvasCourseFileTransfer(mapping) || isBlackboardAttachment(mapping)) || !options.authorizedEffectOperationId)) {
+      if (options.privateAttachment && (!(isMoodleStagedFile(mapping) || isCanvasCourseFileTransfer(mapping)
+        || isCanvasNewQuizHotSpotTransfer(mapping) || isBlackboardAttachment(mapping)) || !options.authorizedEffectOperationId)) {
         throw new TypeError("private_attachment_target_invalid");
       }
       if (options.privateAttachments && (!isMoodleStagedFile(mapping) || moodleStagedFileCapabilityForMapping(mapping)?.planMode !== "folder_add" || !options.authorizedEffectOperationId)) {
@@ -7664,7 +8158,7 @@ export class GatewayRuntime {
     try {
       // A source-owned read stays private. Resolve a learner token only when
       // the request actually carries one, using the fresh binding scope.
-      if (!this.hasLearnerToken(routed.forwarded)) {
+      if (mapping.upstreamId === "blackboard-rest" || !this.hasLearnerToken(routed.forwarded)) {
         dispatchedArguments = structuredClone(routed.forwarded) as Record<string, unknown>;
       } else if (mapping.capability?.provider === "moodle"
         && mapping.publicName === MOODLE_ENROL_CANDIDATE_INPUT_TOOL) {
@@ -7678,7 +8172,7 @@ export class GatewayRuntime {
           ? await this.moodleLearnerContext(mapping, routed.forwarded, options)
           : await this.canvasLearnerContext(mapping, routed.forwarded, options);
         const resolved = learner
-          ? resolveLearnerTokens(routed.forwarded, this.learnerVault, learner.learnerScope)
+          ? resolveLearnerTokens(routed.forwarded, this.learnerVault, learner.learnerScope, learner.learnerRoster)
           : resolveLearnerTokens(routed.forwarded, this.learnerVault, {
               canvasOrigin: this.config.privacy.canvasOrigin,
               account: this.config.privacy.account,
@@ -7698,6 +8192,9 @@ export class GatewayRuntime {
           delete dispatchedArguments.learner_id;
         } else {
           dispatchedArguments = resolved;
+        }
+        if (mapping.capability?.provider === "canvas") {
+          dispatchedArguments = bindNewQuizAccommodationEffectGuard(mapping.upstreamName, dispatchedArguments);
         }
       }
     } catch (error) {

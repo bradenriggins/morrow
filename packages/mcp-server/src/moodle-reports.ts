@@ -68,7 +68,7 @@ const LOG_OMITTED_COLUMNS = [
 const PARTICIPATION_ACTIONS = ["view", "post"] as const;
 const MODNAME = /^[a-z][a-z0-9_]{0,30}$/u;
 const MONTH_LABEL = /^[0-9]{4}-(?:0[1-9]|1[0-2])$/u;
-const LEARNER_TOKEN = /^learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const LEARNER_TOKEN = /^Student A[1-9][0-9]*$/u;
 
 export type MoodleCourseReportExpectation = Readonly<{ courseId: number }>;
 

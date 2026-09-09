@@ -59,10 +59,14 @@ const FIXTURE_CLASS = Object.freeze({
   sectionTitle: "Topic 1",
   moduleId: 11,
   moduleName: "Orientation text",
-  content: "<p>Fixture text before the reviewed change.</p>",
+  content: "<p>Fixture text before the reviewed change. Marisol asked about it.</p>",
   principalId: "3",
   courseContextId: 25,
-  participants: [{ id: "5", name: "Fixture Learner" }],
+  // The learner's given name appears alone in the label body above, because a
+  // student is named in course text far more often by first name than in full.
+  // The proof has to show that Morrow replaces that too before any result
+  // leaves the gateway.
+  participants: [{ id: "5", name: "Marisol Okonkwo" }],
   role: "fixture editing teacher",
 });
 

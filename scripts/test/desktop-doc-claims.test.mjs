@@ -3,15 +3,15 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 /**
  * The gate on Morrow's desktop claims. Each test compares a document against the
- * thing that makes the claim true — the build configuration electron-builder is
+ * thing that makes the claim true: the build configuration electron-builder is
  * handed, the Bridge module that removes a rollback copy, the retention policy
- * the app renders, the receipt a run wrote — so a desktop document cannot
+ * the app renders, and the receipt a run wrote. This keeps a desktop document from
  * describe an application, an artifact, or a proof that does not exist.
  *
  * Receipts under `output/` are local evidence and are not tracked, so a missing
@@ -110,6 +110,12 @@ function loadBuildConfig(t) {
       sha256: createHash("sha256").update(runtimeManifest).digest("hex"),
     },
   })}\n`, "utf8");
+  // The build configuration digests the Node runtime binary the payload carries.
+  const nodeBinary = process.platform === "win32"
+    ? join(payload, "runtime", "node", "node.exe")
+    : join(payload, "runtime", "node", "bin", "node");
+  mkdirSync(dirname(nodeBinary), { recursive: true });
+  writeFileSync(nodeBinary, "doc-claims node runtime fixture");
 
   const configPath = require.resolve(join(rootPath, BUILD_CONFIG));
   const previousPayload = process.env.MORROW_INSTALLER_PAYLOAD;

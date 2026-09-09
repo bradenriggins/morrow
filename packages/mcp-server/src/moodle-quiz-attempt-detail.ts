@@ -40,7 +40,7 @@ const SLOT_STATES = [
   "notyetanswered", "invalidanswer", "answersaved", "requiresgrading", "complete",
   "correct", "partiallycorrect", "incorrect", "notanswered",
 ] as const;
-const LEARNER_TOKEN = /^learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const LEARNER_TOKEN = /^Student A[1-9][0-9]*$/u;
 
 type AttemptState = (typeof ATTEMPT_STATES)[number];
 type SlotState = (typeof SLOT_STATES)[number];

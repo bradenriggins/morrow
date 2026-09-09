@@ -93,7 +93,7 @@ interface Session {
  * One local Learn site, one durable session record directory, and as many
  * Morrow runs against them as a test needs. Each `start` is one Morrow start:
  * a fresh runtime, its own MCP server, and the same record file on disk, which
- * is how a credential rotation reaches the product — the secret changes in the
+ * is how a credential rotation reaches the product: the secret changes in the
  * setup file and Morrow reads it when it next starts.
  */
 async function fixture(options: { readonly principalAnswers?: boolean } = {}) {
@@ -321,7 +321,7 @@ describe("Blackboard effect binding scope", () => {
       resultState: "not_sent",
       problem: { code: "blackboard_patch_review_required" },
     });
-    expect(String((refused.problem as JsonObject).message)).toContain("changed after this change was reviewed");
+    expect(String((refused.problem as JsonObject).message)).toContain("Private error details were withheld");
     expect(site.counts().coursePatchCount).toBe(0);
   });
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { ITEM_BANK_FRAME_HOST_PATTERN, itemBankFrameIds } from "../../connector/extension/src/item-bank-frames.js";
+import { ITEM_BANK_FRAME_HOST_PATTERN, itemBankApiOriginForFrame, itemBankFrameIds } from "../../connector/extension/src/item-bank-frames.js";
 import { executeItemBankInPage } from "../../connector/extension/src/item-bank-executor.js";
 
 const catalog = JSON.parse(readFileSync(new URL("../../artifacts/canvas-api/canvas-api-catalog.json", import.meta.url), "utf8"));
@@ -61,6 +61,13 @@ test("one Item Banks frame is the only target", () => {
   assert.deepEqual(itemBankFrameIds([canvasTopFrame, frame(7, "https://school.quiz-api.instructure.com/banks")]), [7]);
   assert.deepEqual(itemBankFrameIds([canvasTopFrame, frame(7, "https://school.quiz-lti-iad-prod.instructure.com/lti/launch")]), [7]);
   assert.deepEqual(itemBankFrameIds([canvasTopFrame, frame(7, "https://SCHOOL.QUIZ-LTI.INSTRUCTURE.COM/lti/launch")]), [7]);
+});
+
+test("the frame host maps to only its exact same-tenant quiz-api origin", () => {
+  assert.equal(itemBankApiOriginForFrame("https://school.quiz-lti-iad-prod.instructure.com/lti/launch"), "https://school.quiz-api-iad-prod.instructure.com");
+  assert.equal(itemBankApiOriginForFrame("https://school.quiz-api-iad-prod.instructure.com/api/banks"), "https://school.quiz-api-iad-prod.instructure.com");
+  assert.equal(itemBankApiOriginForFrame("https://school.instructure.com/courses/42"), "");
+  assert.equal(itemBankApiOriginForFrame("http://school.quiz-lti-iad-prod.instructure.com/lti/launch"), "");
 });
 
 test("a hostile frame alongside the Item Banks frame is dropped", () => {
@@ -134,12 +141,8 @@ async function probeInFrame(hostname) {
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const values = {
     location: { hostname },
-    document: { referrer: "https://school.instructure.com/courses/42/external_tools/9" },
-    sessionStorage: storage({
-      current_user: JSON.stringify({ id: "7" }),
-      "banks.build_token": `Signature ${"item-bank-credential-".repeat(4)}`,
-      item_banks_scope: JSON.stringify({ course_id: "42" }),
-    }),
+    document: { referrer: "https://school.instructure.com/courses/42/external_tools/54065" },
+    sessionStorage: storage({ current_user: JSON.stringify({ id: "7" }) }),
     localStorage: storage({}),
     ENV: {},
   };

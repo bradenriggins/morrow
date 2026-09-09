@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { dirname, join } from "node:path";
 import { serveStdio, StdioServerTransport, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { loadCanvasConnectorConfig } from "./config.js";
 import { CanvasConnectorRuntime } from "./runtime.js";
@@ -78,7 +79,8 @@ process.once("SIGTERM", () => void close().finally(() => process.exit(0)));
 process.once("exit", () => { if (!closing) void runtime.close(); });
 process.stdin.once("end", shutdown);
 process.stdin.once("close", shutdown);
-serverHandle = serveStdio(() => createCanvasConnectorMcpServer(runtime), { transport: new ConnectorStdioTransport() });
+serverHandle = serveStdio(() => createCanvasConnectorMcpServer(runtime, { internalSourceCapability: process.env.MORROW_INTERNAL_SOURCE_CAPABILITY,
+  learnerVaultPath: join(dirname(config.statePath), "source-learner-vault.canvas.json") }), { transport: new ConnectorStdioTransport() });
 
 export { loadCanvasConnectorConfig } from "./config.js";
 export { CanvasConnectorRuntime } from "./runtime.js";

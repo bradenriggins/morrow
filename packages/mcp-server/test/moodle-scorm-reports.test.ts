@@ -9,7 +9,7 @@ import {
 
 const SUMMARY_METHOD = "core_table_get_dynamic_table_content+mod_scorm_get_scorm_scoes+mod_scorm_get_scorm_attempt_count+mod_scorm_get_scorm_sco_tracks";
 const REPORT_METHOD = "mod_scorm_get_scorm_scoes+mod_scorm_get_scorm_attempt_count+mod_scorm_get_scorm_sco_tracks";
-const TOKEN = "learner_2f1c9a70-8b1e-4c66-9d0a-51f1c4d2e7a3";
+const TOKEN = "Student A1";
 
 const aggregate = {
   schema: MOODLE_SCORM_ATTEMPT_SUMMARY_SCHEMA,

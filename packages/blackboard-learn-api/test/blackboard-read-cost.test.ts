@@ -128,7 +128,7 @@ describe("Blackboard read cost", () => {
     const serialized = JSON.stringify(second);
     expect(serialized).not.toContain("Jane");
     expect(serialized).not.toContain("jane.doe@example.edu");
-    expect(serialized).toContain("learner_");
+    expect(serialized).toContain("Student A");
   });
 
   it("reads the course roster once for a listing and the item reads that follow it", async () => {

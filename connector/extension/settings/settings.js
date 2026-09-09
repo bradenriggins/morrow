@@ -45,19 +45,27 @@ const announcement = document.querySelector("#announcement");
 const fileStorageStatus = document.querySelector("#file-storage-status");
 const enableFileStorageButton = document.querySelector("#enable-file-storage");
 const revokeFileStorageButton = document.querySelector("#revoke-file-storage");
+const privateChatOpenButton = document.querySelector("#private-chat-open");
+const privateChatCloseButton = document.querySelector("#private-chat-close");
+const privateChatDrawer = document.querySelector("#private-chat-drawer");
+const privateChatScrim = document.querySelector("#private-chat-scrim");
+const privateChatClient = document.querySelector("#private-chat-client");
+const privateChatCourse = document.querySelector("#private-chat-course");
+const privateChatHistory = document.querySelector("#private-chat-history");
+const privateChatIdentifiers = document.querySelector("#private-chat-identifiers");
+const privateChatMessage = document.querySelector("#private-chat-message");
+const privateChatStatus = document.querySelector("#private-chat-status");
+const privateChatSendButton = document.querySelector("#private-chat-send");
+const privateChatPage = document.querySelector("body");
 
 const PAGE_SIZE = 6;
 const DISCOVERY_PAGE_LIMIT = 100;
 const DEFAULT_EDIT_DURATION_MS = 60 * 60 * 1_000;
 const COURSE_FILE_STORAGE_ACCESS_KEY = "courseFileStorageAccessEnabled";
 const COURSE_FILE_STORAGE_ORIGINS = ["https://*/*"];
-// One Edit action changes machinery the selected course does not own: a Canvas
-// Item Bank question can be drawn by quizzes in other courses. Its label reads
-// like a change confined to this course, so every list of allowed actions
-// carries the consequence beside the label.
-const CATEGORY_COURSE_REACH = Object.freeze({
-  canvas_item_bank_question_image_alt: "One item bank question can be used by quizzes in other courses. Morrow lists every course the bank reaches and asks you to confirm them before it sends the change.",
-});
+// Course-reach notes belong only to Edit categories that can send a change.
+// Item Bank writes are held and have no Edit category.
+const CATEGORY_COURSE_REACH = Object.freeze({});
 
 const state = {
   busy: false,
@@ -75,6 +83,8 @@ const state = {
   optionsLoading: false,
   optionsRequestToken: 0,
   pendingSaveConfirmation: false,
+  privateChatOpen: false,
+  privateChatBusy: false,
   readGeneration: 0,
   saveConfirmedFor: null,
   selected: new Set(),
@@ -83,6 +93,110 @@ const state = {
   statusReadFailed: false,
   view: "connected"
 };
+
+function privateChatClients() {
+  const value = state.status?.privateChat?.clients;
+  return Array.isArray(value) ? value.filter((client) => client && typeof client.id === "string" && typeof client.name === "string") : [];
+}
+
+function privateChatCourses() {
+  const bindings = Array.isArray(state.status?.bindings) ? state.status.bindings : [];
+  return bindings.filter((binding) => isEligible(binding) && binding.runtimeVerified === true);
+}
+
+function wipePrivateChat() {
+  privateChatIdentifiers.value = "";
+  privateChatMessage.value = "";
+  privateChatHistory.innerHTML = '<p class="state-message">No messages in this local conversation.</p>';
+}
+
+async function closePrivateChat() {
+  await chrome.runtime.sendMessage({ type: "morrow_private_chat_close" }).catch(() => undefined);
+  wipePrivateChat();
+  state.privateChatOpen = false;
+  privateChatDrawer.hidden = true;
+  privateChatScrim.hidden = true;
+  privateChatPage.classList.remove("private-chat-visible");
+  privateChatOpenButton.focus();
+}
+
+function openPrivateChat() {
+  state.privateChatOpen = true;
+  privateChatDrawer.hidden = false;
+  privateChatScrim.hidden = false;
+  privateChatPage.classList.add("private-chat-visible");
+  renderPrivateChat();
+  privateChatCloseButton.focus();
+}
+
+function renderPrivateChat() {
+  const clients = privateChatClients();
+  const courses = privateChatCourses();
+  const chat = state.status?.privateChat;
+  const fixedScope = typeof chat?.sourceBindingId === "string" ? chat.sourceBindingId : "";
+  const selectedClient = clients.find((client) => client.id === privateChatClient.value) || clients[0] || null;
+  const selectedCourse = fixedScope
+    ? courses.find((binding) => binding.sourceBindingId === fixedScope) || null
+    : courses.find((binding) => binding.sourceBindingId === privateChatCourse.value) || courses[0] || null;
+  privateChatClient.innerHTML = clients.length
+    ? clients.map((client) => `<option value="${escapeHtml(client.id)}">${escapeHtml(client.name)}</option>`).join("")
+    : '<option value="">No eligible assistant</option>';
+  privateChatCourse.innerHTML = courses.length
+    ? courses.map((binding) => `<option value="${escapeHtml(binding.sourceBindingId)}">${escapeHtml(providerName(binding))}: ${escapeHtml(courseName(binding))}</option>`).join("")
+    : '<option value="">No ready connected course</option>';
+  if (selectedClient) privateChatClient.value = selectedClient.id;
+  if (selectedCourse) privateChatCourse.value = selectedCourse.sourceBindingId;
+  const transportAvailable = chat?.transportAvailable === true;
+  if (fixedScope && courses.some((binding) => binding.sourceBindingId === fixedScope)) privateChatCourse.value = fixedScope;
+  privateChatClient.disabled = true;
+  privateChatCourse.disabled = !transportAvailable || !courses.length || Boolean(fixedScope);
+  privateChatMessage.disabled = !transportAvailable || !selectedClient || !selectedCourse;
+  privateChatIdentifiers.disabled = privateChatMessage.disabled;
+  privateChatSendButton.disabled = privateChatMessage.disabled || state.privateChatBusy;
+  const messages = Array.isArray(chat?.messages) ? chat.messages : [];
+  privateChatHistory.innerHTML = messages.length
+    ? messages.map((message) => `<div class="private-chat-message private-chat-message-${message.role === "assistant" ? "assistant" : "user"}"><strong>${message.role === "assistant" ? escapeHtml(selectedClient?.name || "Assistant") : "You"}</strong><p>${escapeHtml(message.text)}</p></div>`).join("")
+    : '<p class="state-message">No messages in this local conversation.</p>';
+  privateChatHistory.scrollTop = privateChatHistory.scrollHeight;
+  privateChatStatus.textContent = !transportAvailable
+    ? "Ask the connected assistant to start Morrow Private Chat. Keep this drawer open while you chat."
+    : !clients.length
+      ? "The assistant relay is not ready."
+      : !courses.length
+        ? "Open and reconnect one course before using Private Chat."
+        : !selectedCourse
+          ? "The course used by this Private Chat is no longer connected. Close the drawer and start again."
+        : "Ready. Morrow replaces the listed student identities before the message reaches the assistant.";
+}
+
+async function sendPrivateChatMessage() {
+  const binding = privateChatCourses().find((candidate) => candidate.sourceBindingId === privateChatCourse.value);
+  const identifiers = privateChatIdentifiers.value.split(/\r?\n/u).map((value) => value.trim()).filter(Boolean);
+  const text = privateChatMessage.value;
+  if (!binding || !text.trim() || identifiers.length === 0) {
+    privateChatStatus.textContent = "Choose a course, enter a message, and list each student name or ID used in it.";
+    announce(privateChatStatus.textContent);
+    return;
+  }
+  state.privateChatBusy = true;
+  renderPrivateChat();
+  const response = await chrome.runtime.sendMessage({
+    type: "morrow_private_chat_send",
+    sourceBindingId: binding.sourceBindingId,
+    text,
+    assertedIdentifiers: identifiers,
+  }).catch(() => ({ ok: false, error: "private_chat_send_failed" }));
+  state.privateChatBusy = false;
+  if (!response?.ok) {
+    renderPrivateChat();
+    privateChatStatus.textContent = "Morrow could not protect and send this message. Check every listed student identity and try again.";
+    announce(privateChatStatus.textContent);
+    return;
+  }
+  privateChatIdentifiers.value = "";
+  privateChatMessage.value = "";
+  await refresh();
+}
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>'"]/g, (character) => ({
@@ -398,7 +512,7 @@ function renderCategoryGroup(group, categories, available, expanded) {
           const reason = category.availability === "review" ? ` ${category.reviewReason || "This action remains in Plan for review."}` : "";
           if (category.availability === "review") {
             return `<article class="category-option review-only" aria-describedby="${escapeHtml(descriptionId)}">
-              <span><strong>Review only — ${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)}${escapeHtml(reason)}</small></span>
+              <span><strong>Review only: ${escapeHtml(category.label)}</strong>${categoryFlags(category)}<small id="${escapeHtml(descriptionId)}">${escapeHtml(category.description)}${escapeHtml(reason)}</small></span>
             </article>`;
           }
           const unavailable = isAvailable ? "" : " Not available for every selected course.";
@@ -848,6 +962,7 @@ function render(courseFocus = focusedCourseControl()) {
   renderCourses(courseFocus);
   renderSelection();
   renderFileStorageAccess();
+  renderPrivateChat();
 }
 
 function normalizeStatus(result) {
@@ -1314,6 +1429,17 @@ cancelSaveButton.addEventListener("click", () => {
 });
 enableFileStorageButton.addEventListener("click", () => void enableCourseFileStorageAccess());
 revokeFileStorageButton.addEventListener("click", () => void revokeCourseFileStorageAccess());
+privateChatOpenButton.addEventListener("click", openPrivateChat);
+privateChatCloseButton.addEventListener("click", () => void closePrivateChat());
+privateChatScrim.addEventListener("click", () => void closePrivateChat());
+privateChatSendButton.addEventListener("click", () => void sendPrivateChatMessage());
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && state.privateChatOpen) void closePrivateChat();
+});
+
+chrome.runtime?.onMessage?.addListener((message) => {
+  if (message?.type === "morrow_private_chat_changed") void refresh();
+});
 
 chrome.storage?.onChanged?.addListener((_changes, areaName) => {
   if (areaName === "local") void refresh();

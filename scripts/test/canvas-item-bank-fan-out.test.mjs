@@ -33,15 +33,19 @@ const record = (overrides = {}) => establishFanOut({
 const reason = (fanOut, overrides = {}) => validFanOut(fanOut, {
   bankId: BANK, courseId: COURSE, acknowledgedCourseIds: EXTERNAL, now: NOW, ...overrides,
 });
-const INCOMPLETE = "incomplete_unread_source_is_not_an_empty_fan_out";
+// The record is never a complete-reach claim. Canvas exposes no account-wide
+// reverse-use list, so `quiz_uses` always stays unread. What the record does is
+// disclose the courses Morrow observed, and a reviewer acknowledges exactly
+// those courses before an existing bank changes.
+const UNPROVABLE = "authoritative_reach_claim_refused";
 
-test("a complete record names every course the bank reaches and is accepted", async () => {
+test("a bounded record discloses the observed courses and authorizes the acknowledged change", async () => {
   const fanOut = await record();
   assert.equal(fanOut.schema, ITEM_BANK_FAN_OUT_SCHEMA);
   assert.equal(fanOut.bank_id, BANK);
   assert.equal(fanOut.course_id, COURSE);
-  assert.equal(fanOut.complete, true);
-  assert.deepEqual(fanOut.unreachable, []);
+  assert.equal(fanOut.complete, false);
+  assert.deepEqual(fanOut.unreachable, ["quiz_uses"]);
   assert.deepEqual(fanOut.sources.map((row) => row.name), [...ITEM_BANK_FAN_OUT_SOURCES]);
   assert.deepEqual(fanOut.consumers, [
     { course_id: "9", entity_type: "quiz", entity_id: "5150" },
@@ -52,6 +56,7 @@ test("a complete record names every course the bank reaches and is accepted", as
   assert.deepEqual(fanOut.external_course_ids, EXTERNAL);
   assert.equal(fanOut.consumers_sha256, await fanOutDigest(CONSUMERS));
   assert.equal(fanOut.established_at, "2026-09-06T17:59:00.000Z");
+  assert.equal(fanOut.sources.find((row) => row.name === "quiz_uses").exhausted, false);
   assert.equal(await reason(fanOut), null);
 });
 
@@ -80,41 +85,45 @@ test("an unread source is never an empty fan-out", async () => {
   const missing = await record({ sources: READ.filter((row) => row.name !== "quiz_uses") });
   assert.equal(missing.complete, false);
   assert.deepEqual(missing.unreachable, ["quiz_uses"]);
-  assert.equal(await reason(missing), INCOMPLETE);
+  assert.equal(await reason(missing), null);
 
   const unexhausted = await record({ sources: READ.map((row) => row.name === "shared_banks" ? { ...row, exhausted: false } : row) });
   assert.equal(unexhausted.complete, false);
-  assert.deepEqual(unexhausted.unreachable, ["shared_banks"]);
-  assert.equal(await reason(unexhausted), INCOMPLETE);
+  assert.deepEqual(unexhausted.unreachable, ["quiz_uses", "shared_banks"]);
+  assert.equal(await reason(unexhausted), null);
 
-  const declared = await record({ unreachable: ["quiz_uses"] });
-  assert.equal(declared.complete, false);
-  assert.deepEqual(declared.unreachable, ["quiz_uses"]);
-  assert.equal(await reason(declared), INCOMPLETE);
-
-  // A bank with no consumers found is refused just as firmly while a source is
-  // unread: nothing enumerated is not the same answer as nothing found.
+  // A bank with no consumers found still discloses that a source was unread.
+  // Nothing enumerated is not the same answer as nothing found, so the record
+  // says so and the reviewer acknowledges an empty external list on purpose.
   const nothingRead = await record({ sources: [], consumers: [] });
   assert.deepEqual(nothingRead.unreachable, [...ITEM_BANK_FAN_OUT_SOURCES].sort());
   assert.deepEqual(nothingRead.external_course_ids, []);
-  assert.equal(await reason(nothingRead, { acknowledgedCourseIds: [] }), INCOMPLETE);
-
-  // A hand-built record cannot claim completeness the sources do not support.
-  const complete = await record();
-  assert.equal(await reason({ ...complete, sources: READ.filter((row) => row.name !== "quiz_uses") }), INCOMPLETE);
-  assert.equal(await reason({ ...complete, sources: READ.map((row) => ({ ...row, exhausted: row.name !== "bank_entries" })) }), INCOMPLETE);
-  assert.equal(await reason({ ...complete, complete: "true" }), INCOMPLETE);
-  assert.equal(await reason({ ...complete, unreachable: ["quiz_uses"] }), INCOMPLETE);
-  assert.equal(await reason({ ...complete, unreachable: undefined }), INCOMPLETE);
+  assert.equal(await reason(nothingRead, { acknowledgedCourseIds: [] }), null);
 });
 
-test("a record that disagrees with its own consumers is refused", async () => {
+test("a record that claims complete reach is refused", async () => {
+  const fanOut = await record();
+  // Nothing may present itself as an authoritative account-wide answer.
+  assert.equal(await reason({ ...fanOut, complete: true }), UNPROVABLE);
+  assert.equal(await reason({ ...fanOut, complete: "false" }), UNPROVABLE);
+  assert.equal(await reason({
+    ...fanOut,
+    unreachable: [],
+    sources: READ.map((row) => ({ ...row, exhausted: true })),
+  }), UNPROVABLE);
+  // A record with no `unreachable` list names nothing read, which is still an
+  // unread source, so it stays usable as a disclosure.
+  assert.equal(await reason({ ...fanOut, unreachable: undefined }), null);
+  assert.equal(await reason({ ...fanOut, sources: READ.filter((row) => row.name !== "quiz_uses"), unreachable: [] }), null);
+});
+
+test("a record that was edited after it was taken is refused", async () => {
   const fanOut = await record();
   assert.equal(await reason({ ...fanOut, consumers_sha256: "0".repeat(64) }), "consumers_digest_mismatch");
   assert.equal(await reason({ ...fanOut, consumers_sha256: "not-a-digest" }), "consumers_digest_mismatch");
   // A consumer removed after the digest was taken, with the count corrected to
   // match, is exactly the change the digest exists to catch.
-  assert.equal(await reason({ ...fanOut, consumers: fanOut.consumers.slice(1), consumer_count: 2 }), "consumers_digest_mismatch");
+  assert.equal(await reason({ ...fanOut, consumers: fanOut.consumers.slice(1), consumer_count: 2, external_course_ids: ["77"] }), "consumers_digest_mismatch");
   assert.equal(await reason({ ...fanOut, consumer_count: 2 }), "consumer_count_mismatch");
   assert.equal(await reason({ ...fanOut, consumer_count: "3" }), "consumer_count_mismatch");
   assert.equal(await reason({ ...fanOut, consumers: [...fanOut.consumers, fanOut.consumers[0]], consumer_count: 4 }), "consumers_invalid");
@@ -131,12 +140,13 @@ test("a record that disagrees with its own consumers is refused", async () => {
   assert.equal(await reason([fanOut]), "missing_record");
 });
 
-test("a record outside the current one-hour window, or with no usable stamp, is refused", async () => {
+test("a stale, undated, or future record cannot authorize a change", async () => {
   const stale = await record({ observedAt: NOW - ITEM_BANK_FAN_OUT_MAX_AGE_MS - 60_000 });
   assert.equal(stale.established_at, "2026-09-06T16:59:00.000Z");
   assert.equal(await reason(stale), "record_too_old");
   const edge = await record({ observedAt: NOW - ITEM_BANK_FAN_OUT_MAX_AGE_MS });
   assert.equal(await reason(edge), null);
+  assert.equal(await reason(await record({ observedAt: NOW - ITEM_BANK_FAN_OUT_MAX_AGE_MS - 1 })), "record_too_old");
   const future = await record({ observedAt: NOW + 1 });
   assert.equal(await reason(future), "record_from_future");
 
@@ -162,25 +172,24 @@ test("a record for another bank or another course is refused", async () => {
   assert.equal(await reason(await record({ courseId: "9" })), "course_mismatch");
 });
 
-test("the acknowledgement must be exactly the external courses", async () => {
+test("the acknowledgement must name the observed external courses exactly", async () => {
   const fanOut = await record();
-  assert.equal(await reason(fanOut, { acknowledgedCourseIds: ["9"] }), "acknowledgement_mismatch");
-  assert.equal(await reason(fanOut, { acknowledgedCourseIds: ["77"] }), "acknowledgement_mismatch");
-  assert.equal(await reason(fanOut, { acknowledgedCourseIds: [...EXTERNAL, "88"] }), "acknowledgement_mismatch");
-  assert.equal(await reason(fanOut, { acknowledgedCourseIds: ["9", "9", "77"] }), "acknowledgement_mismatch");
-  assert.equal(await reason(fanOut, { acknowledgedCourseIds: [] }), "acknowledgement_mismatch");
-  assert.equal(await reason(fanOut, { acknowledgedCourseIds: undefined }), "acknowledgement_mismatch");
-  assert.equal(await reason(fanOut, { acknowledgedCourseIds: "9,77" }), "acknowledgement_mismatch");
-  // The same set in another order, or written as numbers, is the same answer.
+  for (const acknowledgedCourseIds of [["9"], ["77"], [...EXTERNAL, "88"], ["9", "9", "77"], [], undefined, "9,77"]) {
+    assert.equal(await reason(fanOut, { acknowledgedCourseIds }), "acknowledgement_mismatch", JSON.stringify(acknowledgedCourseIds));
+  }
+  // Order and number form do not matter; the set of courses does.
   assert.equal(await reason(fanOut, { acknowledgedCourseIds: ["77", "9"] }), null);
   assert.equal(await reason(fanOut, { acknowledgedCourseIds: [9, 77] }), null);
 });
 
-test("a bank that reaches only this course still needs an explicit empty acknowledgement", async () => {
+test("an owner bank with no share rows still needs its observed reach acknowledged", async () => {
   const local = await record({ consumers: [{ course_id: COURSE, entity_type: "bank_entry", entity_id: "401" }] });
-  assert.equal(local.complete, true);
+  assert.equal(local.complete, false);
   assert.equal(local.consumer_count, 1);
   assert.deepEqual(local.external_course_ids, []);
+  assert.deepEqual(local.unreachable, ["quiz_uses"]);
+  // An empty external list is still an explicit acknowledgement, never an
+  // omission: the reviewer says "no other course was observed", in writing.
   assert.equal(await reason(local, { acknowledgedCourseIds: [] }), null);
   assert.equal(await reason(local, { acknowledgedCourseIds: undefined }), "acknowledgement_mismatch");
   assert.equal(await reason(local, { acknowledgedCourseIds: ["77"] }), "acknowledgement_mismatch");
@@ -199,4 +208,9 @@ test("no record is built from input it could not record honestly", async () => {
   assert.equal(await record({ observedAt: "2026-09-06T17:59:00" }), null);
   assert.equal(await record({ observedAt: "whenever" }), null);
   assert.equal(await record({ observedAt: undefined }), null);
+  // A quiz_uses source can never be recorded as walked to its end, whatever the
+  // caller claims, because Canvas has no route that would prove it.
+  const claimed = await record({ sources: READ.map((row) => ({ ...row, exhausted: true })) });
+  assert.equal(claimed.sources.find((row) => row.name === "quiz_uses").exhausted, false);
+  assert.equal(claimed.complete, false);
 });

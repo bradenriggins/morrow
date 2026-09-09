@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, mkdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
@@ -13,8 +13,11 @@ import {
   MorrowClientConfigRefusal,
   morrowClientConfigNotes,
   morrowClientConfigPath,
+  restrictToCurrentAccount,
+  windowsPrivateFileCommand,
   writeClientConfigBundle,
   writeLocalCanvasConfig,
+  writePrivateLocalFile,
 } from "../src/index.js";
 
 function fileContent(bundle: ReturnType<typeof buildClientConfigBundle>, path: string): string {
@@ -955,7 +958,7 @@ describe("project installation and hermetic parity", () => {
 
     const windowsDesktop = morrowClientConfigNotes({ client: "claude-desktop", scope: "user", platform: "win32" });
     expect(windowsDesktop).toHaveLength(1);
-    expect(windowsDesktop[0]).toContain("has not confirmed a write here on a Windows computer");
+    expect(windowsDesktop[0]).toContain("confirmed a write to this documented Windows location");
     expect(windowsDesktop[0]).toContain("Edit Config");
     expect(morrowClientConfigNotes({ client: "claude-desktop", scope: "user", platform: "darwin" })).toEqual([]);
     expect(morrowClientConfigNotes({ client: "claude-code", scope: "project", platform: "win32" })).toEqual([]);
@@ -1242,6 +1245,154 @@ describe("project installation and hermetic parity", () => {
   }, 20_000);
 });
 
+/**
+ * Windows ignores the file mode Morrow sets, so without an explicit access list
+ * a configuration Morrow writes inside a project directory that other accounts
+ * can read is readable by those accounts, while Morrow reports a private write.
+ * No computer running these tests can create a Windows access list, so what is
+ * proven here is Morrow's own decision around one: the exact command, that the
+ * restriction is applied before any content exists, and that a computer which
+ * cannot apply it is left with nothing Morrow wrote.
+ */
+describe("private file restriction", () => {
+  const succeeds = () => ({ status: 0, stdout: "restricted\n" });
+
+  it("leaves POSIX permissions alone and never runs a command there", () => {
+    const calls: string[] = [];
+    const run = (command: string) => {
+      calls.push(command);
+      return succeeds();
+    };
+    for (const platform of ["darwin", "linux", "freebsd"]) {
+      restrictToCurrentAccount("/tmp/morrow-private-file", { platform, run });
+    }
+    expect(calls).toEqual([]);
+  });
+
+  it("restricts a Windows file to this account, SYSTEM and Administrators, with inheritance off", () => {
+    const target = "C:\\Users\\instructor\\Morrow projects\\.mcp.json";
+    const { command, args } = windowsPrivateFileCommand(target);
+    expect(command.endsWith("\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")).toBe(true);
+    expect(args.slice(0, 5)).toEqual(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command"]);
+    const script = args[5]!;
+    // The path travels as base64 UTF-16, so no shell quoting rule can change
+    // which file is restricted, and the raw path never reaches a command line.
+    const encoded = /FromBase64String\('([A-Za-z0-9+/=]+)'\)/.exec(script)?.[1];
+    expect(encoded).toBeTruthy();
+    expect(Buffer.from(encoded!, "base64").toString("utf16le")).toBe(target);
+    expect(script).not.toContain(target);
+    // Replace the list rather than add to it, so a readable parent directory
+    // cannot pass its access on to the file Morrow wrote inside it.
+    expect(script).toContain("$acl.SetAccessRuleProtection($true, $false)");
+    expect(script).toContain("$identity.Value");
+    expect(script).toContain("'S-1-5-18'");
+    expect(script).toContain("'S-1-5-32-544'");
+    expect(script).toContain("[IO.File]::SetAccessControl($target, $acl)");
+    // These are the three principals installer/main.cjs already counts as
+    // private, so a file restricted here is one the release gate calls private.
+    expect(script).not.toContain("S-1-1-0");     // Everyone
+    expect(script).not.toContain("S-1-5-11");    // Authenticated Users
+  });
+
+  it("accepts only a Windows restriction that reported success", () => {
+    const path = "C:\\Users\\instructor\\.codex\\config.toml";
+    expect(() => restrictToCurrentAccount(path, { platform: "win32", run: succeeds })).not.toThrow();
+    const refusals: { readonly label: string; readonly run: () => never | ReturnType<typeof succeeds> }[] = [
+      { label: "a non-zero exit", run: () => ({ status: 1, stdout: "" }) },
+      { label: "no answer at all", run: () => ({ status: 0, stdout: "" }) },
+      { label: "an answer Morrow did not ask for", run: () => ({ status: 0, stdout: "ok" }) },
+      { label: "a command that could not start", run: () => ({ status: null, stdout: "", error: new Error("ENOENT") }) },
+      { label: "a runner that threw", run: () => { throw new Error("spawn failed"); } },
+    ];
+    for (const refusal of refusals) {
+      expect(() => restrictToCurrentAccount(path, { platform: "win32", run: refusal.run as never }), refusal.label)
+        .toThrow(/could not restrict it to this Windows account/);
+    }
+  });
+
+  it("writes nothing at all when the file cannot be made private", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-private-file-"));
+    try {
+      const target = join(directory, "mcp.json");
+      const original = `${JSON.stringify({ mcpServers: { "another-server": { command: "/usr/local/bin/other" } } }, null, 2)}\n`;
+      await writeFile(target, original, "utf8");
+      const failing = () => ({ status: 1, stdout: "" });
+
+      expect(() => writePrivateLocalFile(target, "replacement\n", { platform: "win32", run: failing }))
+        .toThrow(/could not restrict it to this Windows account/);
+      expect(await readFile(target, "utf8")).toBe(original);
+      expect((await readdir(directory)).sort()).toEqual(["mcp.json"]);
+
+      const fresh = join(directory, "new", "settings.json");
+      expect(() => writePrivateLocalFile(fresh, "content\n", { platform: "win32", run: failing }))
+        .toThrow(/could not restrict it to this Windows account/);
+      await expect(stat(fresh)).rejects.toThrow();
+      expect(await readdir(join(directory, "new"))).toEqual([]);
+
+      // The restriction is applied to the temporary file, before it holds
+      // anything and before it replaces anything.
+      const restricted: string[] = [];
+      writePrivateLocalFile(target, "replacement\n", {
+        platform: "win32",
+        run: (_command, args) => {
+          const encoded = /FromBase64String\('([A-Za-z0-9+/=]+)'\)/.exec(args[5] || "")?.[1] || "";
+          restricted.push(Buffer.from(encoded, "base64").toString("utf16le"));
+          return succeeds();
+        },
+      });
+      expect(await readFile(target, "utf8")).toBe("replacement\n");
+      expect(restricted).toHaveLength(1);
+      expect(restricted[0]!.startsWith(`${target}.tmp-`)).toBe(true);
+      expect((await readdir(directory)).sort()).toEqual(["mcp.json", "new"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses and changes nothing when the final replace itself fails", async () => {
+    if (process.platform !== "darwin") return;
+    const directory = await mkdtemp(join(tmpdir(), "morrow-private-replace-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const target = join(repositoryRoot, ".mcp.json");
+    const original = `${JSON.stringify({ mcpServers: { other: { command: "/usr/local/bin/other" } } }, null, 2)}\n`;
+    try {
+      await mkdir(join(repositoryRoot, "packages", "mcp-server", "dist"), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      await writeFile(target, original, "utf8");
+      // A file the operating system will not let Morrow replace. Windows does
+      // this whenever an assistant holds its own configuration open; macOS does
+      // it on request, which is how the refusal is exercised at all.
+      expect(spawnSync("chflags", ["uchg", target]).status).toBe(0);
+
+      let failure: NodeJS.ErrnoException | undefined;
+      try {
+        installMorrowClient({
+          repositoryRoot,
+          upstreamConfigPath,
+          serverEntryPath,
+          nodeCommand: process.execPath,
+          client: "claude-code",
+          scope: "project",
+        });
+      } catch (error) {
+        failure = error as NodeJS.ErrnoException;
+      }
+      // The refusal must be the replace itself, not an earlier check, or this
+      // proves nothing about the state the failed replace leaves behind.
+      expect(failure?.syscall).toBe("rename");
+      expect(["EPERM", "EACCES", "EBUSY"]).toContain(failure?.code);
+      expect(await readFile(target, "utf8")).toBe(original);
+      expect((await readdir(repositoryRoot)).filter((name) => name.includes(".tmp-"))).toEqual([]);
+    } finally {
+      spawnSync("chflags", ["nouchg", target]);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("writeClientConfigBundle", () => {
   it("writes local-only files atomically and refuses an accidental overwrite", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-client-config-"));
@@ -1290,6 +1441,42 @@ describe("writeClientConfigBundle", () => {
         serverEntryPath,
         force: true,
       })).not.toThrow();
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("existing configuration read bound", () => {
+  it("refuses to edit an existing configuration larger than 4 MiB instead of reading it whole", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-config-"));
+    try {
+      const repositoryRoot = directory;
+      const upstreamConfigPath = join(directory, "morrow.upstreams.json");
+      await writeFile(upstreamConfigPath, "{}\n");
+      const serverEntry = join(directory, "packages", "mcp-server", "dist", "index.js");
+      await mkdir(dirname(serverEntry), { recursive: true });
+      await writeFile(serverEntry, "// fixture entry\n");
+      const target = join(directory, ".codex", "config.toml");
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, "x".repeat(4 * 1024 * 1024 + 1));
+      // User scope reads this account's home directory, so the test points
+      // HOME at the sandbox for the duration of the call.
+      const previousHome = process.env.HOME;
+      process.env.HOME = directory;
+      try {
+        expect(() => installMorrowClient({
+          client: "codex",
+          scope: "user",
+          repositoryRoot,
+          upstreamConfigPath,
+        })).toThrow(/not a regular file under 4 MiB/);
+      } finally {
+        if (previousHome === undefined) delete process.env.HOME;
+        else process.env.HOME = previousHome;
+      }
+      // The oversized file is untouched by the refusal.
+      expect((await stat(target)).size).toBe(4 * 1024 * 1024 + 1);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

@@ -44,6 +44,7 @@ const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_AUTH_TIMEOUT_MS = 5_000;
 const DEFAULT_CALL_TIMEOUT_MS = 45_000;
 const DEFAULT_HEARTBEAT_MS = 20_000;
+const MAX_PAIRING_REQUESTS = 32;
 /**
  * How many sent effect receipts one bridge process remembers. The record never
  * drops a receipt, so this is also the point at which the bridge refuses a new
@@ -71,6 +72,8 @@ const PRIVATE_MOODLE_FOLDER_ADD_TOOL = "moodle_add_folder_files";
 const PRIVATE_MOODLE_FOLDER_ADD_OPERATION = "moodle.form.course.modedit.folder.files.add.write.v1";
 const PRIVATE_CANVAS_COURSE_FILE_TOOL = "canvas_transfer_course_file";
 const PRIVATE_CANVAS_COURSE_FILE_OPERATION = "canvas.private.course_file.transfer.v1";
+const PRIVATE_CANVAS_HOT_SPOT_TOOL = "canvas_create_new_quiz_hot_spot";
+const PRIVATE_CANVAS_HOT_SPOT_OPERATION = "canvas.private.new_quiz.hot_spot.create.v1";
 const PRIVATE_CANVAS_CONVERSATION_TOOL = "canvas_send_private_conversation";
 const PRIVATE_CANVAS_CONVERSATION_OPERATION = "canvas.private.conversation.send.v1";
 
@@ -307,6 +310,7 @@ export class LoopbackBridgeServer {
   private readonly onPairApproved: ((extensionId: string) => void | Promise<void>) | undefined;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly pairingRequests = new Map<string, PairingRequest>();
+  private readonly pairingDecisions = new Set<string>();
   /**
    * Every effect receipt this process has sent, held to `writeReceiptCapacity`
    * entries. Nothing is ever removed: a forgotten receipt would be accepted a
@@ -345,7 +349,12 @@ export class LoopbackBridgeServer {
     this.pairingEnabled = options.pairingEnabled === true;
     this.onPairApproved = options.onPairApproved;
 
-    this.httpServer = createServer((request, response) => void this.handleHttp(request, response));
+    this.httpServer = createServer((request, response) => {
+      void this.handleHttp(request, response).catch(() => {
+        if (response.headersSent) response.destroy();
+        else this.json(response, 500, { error: "bridge_request_failed" });
+      });
+    });
     this.webSocketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_BRIDGE_MESSAGE_BYTES });
     this.httpServer.on("upgrade", (request, socket, head) => {
       const host = request.headers.host || `${LOOPBACK_HOST}:${this.requestedPort}`;
@@ -468,6 +477,26 @@ export class LoopbackBridgeServer {
           || body.runtimeRevision !== this.expectedRuntimeRevision) {
           return this.json(response, 403, { error: "connector_identity_refused" }, identity.origin);
         }
+        for (const [pairingId, pairing] of this.pairingRequests) {
+          if (pairing.extensionId === identity.extensionId && pairing.status !== "pending") {
+            this.pairingRequests.delete(pairingId);
+          }
+        }
+        const existing = [...this.pairingRequests.values()]
+          .find((pairing) => pairing.extensionId === identity.extensionId && pairing.status === "pending");
+        if (existing) {
+          return this.json(response, 200, {
+            schema: "morrow.bridge.pairing.v1",
+            pairingId: existing.pairingId,
+            status: existing.status,
+            approvalUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${existing.pairingId}`),
+            statusUrl: this.pairingUrl(`${BRIDGE_PATH}/pair/${existing.pairingId}/status`),
+            expiresAt: existing.expiresAt,
+          }, identity.origin);
+        }
+        if (this.pairingRequests.size >= MAX_PAIRING_REQUESTS) {
+          return this.json(response, 429, { error: "pairing_limit_reached" }, identity.origin);
+        }
         const pairingId = randomUUID();
         const createdAt = Date.now();
         const pairing: PairingRequest = { pairingId, extensionId: identity.extensionId, createdAt, expiresAt: createdAt + 10 * 60_000, status: "pending" };
@@ -527,14 +556,32 @@ export class LoopbackBridgeServer {
         response.end();
         return;
       }
+      if (this.pairingDecisions.has(pairing.pairingId)) {
+        return this.json(response, 409, { error: "pairing_decision_pending" });
+      }
       const bytes: Buffer[] = [];
-      for await (const chunk of request) bytes.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      let total = 0;
+      for await (const chunk of request) {
+        const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        total += value.byteLength;
+        if (total > 16_384) return this.json(response, 413, { error: "request_too_large" });
+        bytes.push(value);
+      }
       const decision = new URLSearchParams(Buffer.concat(bytes).toString("utf8")).get("decision");
-      if (!['approve', 'deny'].includes(decision || "")) return this.json(response, 400, { error: "invalid_decision" });
-      pairing.status = decision === "approve" ? "approved" : "denied";
-      if (pairing.status === "approved") {
+      if (!["approve", "deny"].includes(decision || "")) return this.json(response, 400, { error: "invalid_decision" });
+      if (decision === "approve") {
+        this.pairingDecisions.add(pairing.pairingId);
+        try {
+          await this.onPairApproved?.(pairing.extensionId);
+        } catch {
+          return this.json(response, 500, { error: "pairing_approval_failed" });
+        } finally {
+          this.pairingDecisions.delete(pairing.pairingId);
+        }
         this.allowedExtensionIds.add(pairing.extensionId);
-        await this.onPairApproved?.(pairing.extensionId);
+        pairing.status = "approved";
+      } else {
+        pairing.status = "denied";
       }
       response.writeHead(303, { location: `${BRIDGE_PATH}/pair/${pairing.pairingId}`, "cache-control": "no-store" });
       response.end();
@@ -661,16 +708,22 @@ export class LoopbackBridgeServer {
       socket.close(4400, "invalid_message");
       return;
     }
-    active.lastSeenAt = Date.now();
     if (message.schema === BRIDGE_SCHEMAS.bindings) {
       if (message.generation !== active.generation) return;
+      active.lastSeenAt = Date.now();
       active.bindings = normalizeBridgeBindings(message.bindings);
       return;
     }
-    if (message.schema === BRIDGE_SCHEMAS.pong) return;
+    if (message.schema === BRIDGE_SCHEMAS.pong) {
+      if (message.generation === active.generation) active.lastSeenAt = Date.now();
+      return;
+    }
     if (message.schema !== BRIDGE_SCHEMAS.result) return;
     const pending = this.pending.get(message.requestId);
-    if (!pending) return;
+    if (!pending) {
+      if (message.generation === active.generation) active.lastSeenAt = Date.now();
+      return;
+    }
     if (
       message.generation !== active.generation
       || message.generation !== pending.command.generation
@@ -684,6 +737,7 @@ export class LoopbackBridgeServer {
       ));
       return;
     }
+    active.lastSeenAt = Date.now();
     clearTimeout(pending.timer);
     this.pending.delete(message.requestId);
     pending.resolve(message);
@@ -692,6 +746,11 @@ export class LoopbackBridgeServer {
   private heartbeat(): void {
     const active = this.active;
     if (!active || active.socket.readyState !== WebSocket.OPEN) return;
+    if (Date.now() - active.lastSeenAt >= this.heartbeatMs * 2) {
+      active.socket.terminate();
+      this.disconnectActive("The extension bridge stopped answering local heartbeat checks after a command may have been sent.");
+      return;
+    }
     try {
       send(active.socket, {
         schema: BRIDGE_SCHEMAS.ping,
@@ -784,6 +843,10 @@ export class LoopbackBridgeServer {
       invocation.toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL
         && invocation.operationKey === PRIVATE_CANVAS_COURSE_FILE_OPERATION
         && selectedBinding?.provider === "canvas"
+    ) || (
+      invocation.toolName === PRIVATE_CANVAS_HOT_SPOT_TOOL
+        && invocation.operationKey === PRIVATE_CANVAS_HOT_SPOT_OPERATION
+        && selectedBinding?.provider === "canvas"
     ));
     if (privateAttachment && !privateAttachmentAllowed) {
       throw new BridgeUnavailableError("A private file attachment is only available for one exact reviewed course-file change.");
@@ -791,7 +854,9 @@ export class LoopbackBridgeServer {
     if (privateAttachmentAllowed && !privateAttachment) {
       throw new BridgeUnavailableError("This reviewed course-file change needs its staged private file attachment.");
     }
-    if (privateAttachmentAllowed && invocation.toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL && !privateAttachment?.content_type) {
+    if (privateAttachmentAllowed
+      && (invocation.toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL || invocation.toolName === PRIVATE_CANVAS_HOT_SPOT_TOOL)
+      && !privateAttachment?.content_type) {
       throw new BridgeUnavailableError("This Canvas course-file change needs the staged content type.");
     }
     const privateAttachmentsAllowed = invocation.kind === "invoke_write"
@@ -882,6 +947,9 @@ export class LoopbackBridgeServer {
         })) {
         throw new BridgeUnavailableError("The current edit permission no longer authorizes this change. Create a fresh plan from the current binding.");
       }
+    }
+    if (this.active !== active || active.socket.readyState !== WebSocket.OPEN) {
+      throw new BridgeUnavailableError("The exact course connection changed before this command could be sent. Create a fresh plan from a current binding.");
     }
     if (["invoke_write", "stage_write"].includes(invocation.kind) && invocation.outerGrant) {
       if (this.usedOuterEffectReceipts.has(invocation.outerGrant.effectReceiptId)) {

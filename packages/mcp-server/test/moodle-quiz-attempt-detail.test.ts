@@ -9,7 +9,7 @@ import {
   projectPublicMoodleQuizAttempt,
 } from "../src/moodle-quiz-attempt-detail.js";
 
-const TOKEN = "learner_2f1c9a70-8b1e-4c66-9d0a-51f1c4d2e7a3";
+const TOKEN = "Student A1";
 const AVOIDED_ROUTES = "/mod/quiz/attempt.php+/mod/quiz/review.php+/mod/quiz/reviewquestion.php";
 const ATTEMPT_TARGET = { courseId: 2, moduleId: 8, attemptId: 41 };
 const MODULE_TARGET = { courseId: 2, moduleId: 8 };

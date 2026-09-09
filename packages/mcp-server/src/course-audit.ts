@@ -4,6 +4,7 @@ import { resolveResultArtifact, type ResultArtifactPage } from "./result-artifac
 import { Parser } from "htmlparser2";
 import * as z from "zod/v4";
 import { canvasReadResult } from "./canvas-read.js";
+import { completeQuizItemPayloadReason, quizItemPayloadMessage } from "./quiz-item-payload.js";
 import { BLACKBOARD_CONTENT_PATCH_PLAN_NATIVE_TOOL, BLACKBOARD_CONTENT_PATCH_PLAN_TOOL } from "./blackboard-content-patch.js";
 import { pageMissingAltEvidence } from "./page-correction.js";
 import type { CatalogSearchTool, GatewayRuntime } from "./runtime.js";
@@ -158,7 +159,7 @@ Check image alternative text for purpose and context. Check captions, transcript
 
 ## Platform routes and limits
 
-Canvas audit targets cover Pages, the course syllabus, assignment descriptions, discussion and announcement messages, Classic Quiz descriptions and questions, New Quiz instructions and items, rubric criteria and ratings, Item Bank entries, selected text course files, and the structure of selected PDF and Office course files. Keep native relationships explicit: a New Quiz item needs its selected course, quiz, and item; a Classic Quiz question needs its selected course, quiz, and question; an Item Bank entry needs its selected course, bank, and entry; a Page needs its selected course and page URL; a rubric needs its selected course and rubric ID; the syllabus needs only its selected course. Module placement, publish state, availability, scoring, and parent-child lifecycle facts must be freshly read or reported as not observed. An announcement uses the same exact discussion route as a discussion topic; neither reads replies. The syllabus body is returned only when the read asks for it and the caller's role and the course settings allow it, so a course that returns no syllabus body gives an explicit not-observed result and never a pass; that visibility is live-unverified. A rubric read returns the rubric's own text, its criteria descriptions and long descriptions, and its rating descriptions. It never requests rubric assessments, which are learner data, so no learner score, comment, or identity is observed. A target-specific route candidate may exist for Page body, the course syllabus body, assignment description, discussion message, Classic Quiz description, Classic Quiz question text and answers, New Quiz instructions, New Quiz item body, and Item Bank question body. A candidate is not readiness: plan-time authority and provider holding checks still apply. \`canvas_edit_quiz\` exposes \`quiz[description]\` and \`quiz[notify_of_update]\`, and the guarded Classic Quiz description repair sends only \`quiz[description]\`, verifies the full protected Quiz state, and reruns the selected image-alt check. A Classic Quiz question repair is different: Canvas rebuilds a question from the whole request through \`AssessmentQuestion.parse_question\`, so \`morrow_plan_classic_quiz_question_image_alt_repair\` reads the question again, resends every field that read returned, changes one selected image \`alt\` attribute in the question text or in one answer, and compares the full protected question afterward. It refuses a question with a \`quiz_group_id\`, a question type outside \`multiple_choice_question\`, \`true_false_question\`, \`multiple_answers_question\`, \`short_answer_question\` and \`essay_question\`, and any read that omits a field the write must resend or carries state the write cannot resend. No connected Canvas tenant has proved that round trip, so treat a saved result as unconfirmed until the question is read again. The current rubric update route takes the whole criteria set as one untyped indexed hash that the active catalog does not encode, so rubric remediation stays blocked. An Item Bank entry audit reads the entry. When the entry names a question, the audit reads that question and reports the question as the source, because a list row is not a question and may carry no body at all; a question entry that names no readable question returns \`remediation.status: "blocked_unresolved_entry"\` and never a plan. A question entry returns \`morrow_plan_item_bank_question_image_alt_repair\` with \`readiness: "requires_established_fan_out"\`: that planner needs \`target.item_id\`, \`target.item_sha256\`, and a complete fan-out record from \`morrow_read_item_bank_fan_out\` that is less than one hour old, with every other course the bank reaches confirmed by a person. The audit itself establishes no fan-out and says so in \`target.item_bank_fan_out\`. A \`Stimulus\` entry and every other entry type return \`blocked_current_contract\`: Morrow checked its harvested New Quizzes and Item Banks sources for a stimulus contract and found none, so it will not infer a partial stimulus mutation. The generic Item Bank write stays held, that one guarded repair is the only path to a bank question, and Item Bank reads still cannot prove that an entry belongs to the selected course. No connected Canvas tenant has proved the Item Banks browser frame, so treat this whole path as live-unverified. Canvas file reads require a user opt-in and are bounded at 1 MiB. A fresh confirmed UTF-8 text, HTML, or XHTML file returns its text. A fresh confirmed PDF, Word, PowerPoint, or Excel file returns \`file_signals\` only: the PDF version, page count, marked-content flag, structure tree, document language presence with the length of that value, and whether any page shows text; for an Office file, part presence, drawing and picture counts with and without a description, heading style levels, and slide or sheet counts. That route never returns document text or an alternative-text value, so \`content_evidence.status\` stays \`not_observed\` and a signal set is never a pass. A signal Morrow cannot determine is reported as \`not_determinable\`, never as a missing feature. An image, media file, or archive, an encrypted PDF, a document structure the bounded reader cannot parse, and an oversized, non-UTF-8, permission-absent, or mid-read-changed file each return \`status: "blocked"\` with its \`block_reason\` and observed file metadata, not a tool error. File tags, captions, and learner rendering require manual review. File metadata alone is not file bytes or an accessibility result. Media flags require manual checks; Morrow does not read captions or verify a player.
+Canvas audit targets cover Pages, the course syllabus, assignment descriptions, discussion and announcement messages, Classic Quiz descriptions and questions, New Quiz instructions and items, rubric criteria and ratings, Item Bank entries, selected text course files, and the structure of selected PDF and Office course files. Keep native relationships explicit: a New Quiz item needs its selected course, quiz, and item; a Classic Quiz question needs its selected course, quiz, and question; an Item Bank entry needs its selected course, bank, and entry; a Page needs its selected course and page URL; a rubric needs its selected course and rubric ID; the syllabus needs only its selected course. Module placement, publish state, availability, scoring, and parent-child lifecycle facts must be freshly read or reported as not observed. An announcement uses the same exact discussion route as a discussion topic; neither reads replies. The syllabus body is returned only when the read asks for it and the caller's role and the course settings allow it, so a course that returns no syllabus body gives an explicit not-observed result and never a pass; that visibility is live-unverified. A rubric read returns the rubric's own text, its criteria descriptions and long descriptions, and its rating descriptions. It never requests rubric assessments, which are learner data, so no learner score, comment, or identity is observed. A target-specific route candidate may exist for Page body, the course syllabus body, assignment description, discussion message, Classic Quiz description, Classic Quiz question text and answers, New Quiz instructions, New Quiz item body, and Item Bank question body. A candidate is not readiness: plan-time authority and provider holding checks still apply. \`canvas_edit_quiz\` exposes \`quiz[description]\` and \`quiz[notify_of_update]\`, and the guarded Classic Quiz description repair sends only \`quiz[description]\`, verifies the full protected Quiz state, and reruns the selected image-alt check. A Classic Quiz question repair is different: Canvas rebuilds a question from the whole request through \`AssessmentQuestion.parse_question\`, so \`morrow_plan_classic_quiz_question_image_alt_repair\` reads the question again, resends every field that read returned, changes one selected image \`alt\` attribute in the question text or in one answer, and compares the full protected question afterward. It refuses a question with a \`quiz_group_id\`, a question type outside \`multiple_choice_question\`, \`true_false_question\`, \`multiple_answers_question\`, \`short_answer_question\` and \`essay_question\`, and any read that omits a field the write must resend or carries state the write cannot resend. No connected Canvas tenant has proved that round trip, so treat a saved result as unconfirmed until the question is read again. The current rubric update route takes the whole criteria set as one untyped indexed hash that the active catalog does not encode, so rubric remediation stays blocked. An Item Bank entry audit reads the entry. When the entry names a question, the audit reads that question and reports the question as the source, because a list row is not a question and may carry no body at all; a question entry that names no readable question returns \`remediation.status: "blocked_unresolved_entry"\` and never a plan. A resolved question entry returns a candidate for \`morrow_plan_item_bank_question_image_alt_repair\`. That planner fresh-reads the course, bank, entry, and complete item; changes one selected missing alternative-text attribute; supplies exact bank and item snapshot digests; and uses the admitted complete-item update with one dispatch and exact readback. \`morrow_read_item_bank_fan_out\` reports observed uses for review only and does not grant authority. A \`Stimulus\` entry and every other unsupported entry type return \`blocked_current_contract\`: Morrow checked its harvested New Quizzes and Item Banks sources for a stimulus contract and found none, so it will not infer a partial stimulus mutation. No connected Canvas tenant has proved the Item Banks browser frame, so treat this whole path as live-unverified. Canvas file reads require a user opt-in and are bounded at 1 MiB. A fresh confirmed UTF-8 text, HTML, or XHTML file returns its text. A fresh confirmed PDF, Word, PowerPoint, or Excel file returns \`file_signals\` only: the PDF version, page count, marked-content flag, structure tree, document language presence with the length of that value, and whether any page shows text; for an Office file, part presence, drawing and picture counts with and without a description, heading style levels, and slide or sheet counts. That route never returns document text or an alternative-text value, so \`content_evidence.status\` stays \`not_observed\` and a signal set is never a pass. A signal Morrow cannot determine is reported as \`not_determinable\`, never as a missing feature. An image, media file, or archive, an encrypted PDF, a document structure the bounded reader cannot parse, and an oversized, non-UTF-8, permission-absent, or mid-read-changed file each return \`status: "blocked"\` with its \`block_reason\` and observed file metadata, not a tool error. File tags, captions, and learner rendering require manual review. File metadata alone is not file bytes or an accessibility result. Media flags require manual checks; Morrow does not read captions or verify a player.
 
 Moodle guidance applies only when the signed-in Chrome bridge reports the needed catalog entry. Exact saved-source audits can read Page content, Text and media area content, URL descriptions, Forum, Choice, Glossary, Wiki, Feedback, and Database instructions, Book introductions and separately selected Book chapters, Lesson introductions, Assignment instructions, Quiz instructions, IMS content package and SCORM instructions, and readable Quiz-question text. An activity introduction or description does not audit its posts, entries, nested pages, responses, submissions, external destination, package contents, package navigation, learner attempts, learner launch, or learner view. A Book introduction does not audit Book chapters; each chapter needs its own exact target. Current guarded text edits can cover Page content, Assignment instructions, and Quiz instructions when the source has no attached-file area. Moodle Resource and Folder reads return file metadata only: each file's name, relative path, byte size, media-type label, and the Resource main-file flag. Morrow does not read Moodle file bytes, and file metadata is not a file accessibility pass. Existing Moodle question edits, file replacement, and media accessibility remediation are blocked.
 
@@ -166,7 +167,7 @@ Blackboard Learn works through its official REST integration, and only when this
 
 ## Remediation and verification
 
-Read the exact target again before planning. Use the current guarded write named by the audit result, or \`morrow_plan_page_correction\` only when that helper is exposed by the active MCP server and the Page has one unique visible-text change. That helper supports non-block-editor Pages only and cannot change HTML attributes. Use \`morrow_plan_page_image_alt_repair\` only for one audited missing-alt image on a non-block-editor Canvas Page. Supply the current body digest, the selected image index, and its source digest from the fresh audit. Choose meaningful alternative text for the image purpose and context, or mark the image decorative with empty alternative text. The helper rejects stale, shifted, ambiguous, or existing-alt images, changes one escaped \`alt\` attribute, and keeps the other Page bytes and settings. Its plan and journal use only digests and offsets, not the Page body, image tag, or image URL. An Item Bank question repair takes one more step before planning, because a bank is shared machinery and one question can sit in several courses: read \`morrow_read_item_bank_fan_out\` for that bank and course, show the person every other course the bank reaches, and pass exactly those courses back as the acknowledgement. \`morrow_plan_item_bank_question_image_alt_repair\` then takes \`target.item_id\`, \`target.item_sha256\`, the image index, and its source digest from the same fresh audit. It refuses an incomplete fan-out, a record more than one hour old, an acknowledgement that is not exactly those courses, a stale question, and an image that shifted, repeats, or already carries alternative text. A source the fan-out could not read is not an empty list of courses. Require the current authorization path: human approval, or a selected valid Edit authority when the capability policy permits it. After dispatch, require the operation record to report a verified saved result, and require successful source settlement for a batch. Then run the audit again on the same course and target. Report which observed fields, digests, and source signals changed. Stop on stale, incomplete, held, or unverified evidence; do not retry a write automatically.`;
+Read the exact target again before planning. Use the current guarded write named by the audit result, or \`morrow_plan_page_correction\` only when that helper is exposed by the active MCP server and the Page has one unique visible-text change. That helper supports non-block-editor Pages only and cannot change HTML attributes. Use \`morrow_plan_page_image_alt_repair\` only for one audited missing-alt image on a non-block-editor Canvas Page. Supply the current body digest, the selected image index, and its source digest from the fresh audit. Choose meaningful alternative text for the image purpose and context, or mark the image decorative with empty alternative text. The helper rejects stale, shifted, ambiguous, or existing-alt images, changes one escaped \`alt\` attribute, and keeps the other Page bytes and settings. Its plan and journal use only digests and offsets, not the Page body, image tag, or image URL. For a resolved Item Bank question, use \`morrow_plan_item_bank_question_image_alt_repair\` only with the exact fresh audit evidence for one missing alternative-text attribute. The planner freezes the complete item and exact bank and item snapshots. \`morrow_read_item_bank_fan_out\` reports only the uses observed in selected connected courses; keep it as review context and never treat an incomplete result as an authority grant. Require the current authorization path: human approval, or a selected valid Edit authority when the capability policy permits it. After dispatch, require the operation record to report a verified saved result, and require successful source settlement for a batch. Then run the audit again on the same course and target. Report which observed fields, digests, and source signals changed. Stop on stale, incomplete, held, or unverified evidence; do not retry a write automatically.`;
 
 /**
  * Throws only for an integrity failure: a wrong course, a wrong target, a
@@ -396,7 +397,7 @@ function newQuizNestedAnswerFields(value: unknown, field: string, fields: HtmlFi
     else fields.push({ field: `${field}.${key}`, value: value[key] });
   }
   for (const [key, nested] of Object.entries(value)) {
-    if (["choices", "answers", "questions", "word_bank_choices"].includes(key)) {
+    if (["choices", "answers", "questions", "blanks", "word_bank_choices", "categories", "distractors"].includes(key)) {
       incomplete = newQuizNestedAnswerFields(nested, `${field}.${key}`, fields, true, depth + 1) || incomplete;
     } else if (insideAnswerCollection && (Array.isArray(nested) || isJsonObject(nested))) {
       incomplete = newQuizNestedAnswerFields(nested, `${field}[${key}]`, fields, true, depth + 1) || incomplete;
@@ -410,7 +411,7 @@ function newQuizHtmlFields(entry: JsonObject | undefined): HtmlField[] {
   const interaction = entry && isJsonObject(entry.interaction_data) ? entry.interaction_data : undefined;
   let nestedLimitExceeded = false;
   if (interaction) {
-    for (const field of ["choices", "answers", "questions", "word_bank_choices"]) {
+    for (const field of ["choices", "answers", "questions", "blanks", "word_bank_choices", "categories", "distractors"]) {
       if (Object.hasOwn(interaction, field)) nestedLimitExceeded = newQuizNestedAnswerFields(interaction[field], `entry.interaction_data.${field}`, fields, true) || nestedLimitExceeded;
     }
     if (typeof interaction.true_choice === "string") fields.push({ field: "entry.interaction_data.true_choice", value: interaction.true_choice });
@@ -471,7 +472,7 @@ function newQuizMediaEvidence(entry: JsonObject | undefined, htmlFields: JsonObj
   };
 }
 
-function stimulusEvidence(data: JsonObject): JsonObject {
+function stimulusEvidence(data: JsonObject, relatedStimulus?: JsonObject): JsonObject {
   const entryType = data.entry_type;
   const stimulusId = data.stimulus_quiz_entry_id;
   const entry = isJsonObject(data.entry) ? data.entry : undefined;
@@ -488,6 +489,24 @@ function stimulusEvidence(data: JsonObject): JsonObject {
   if (entryType === "Item" && stimulusId === null) return { status: "not_applicable", reason: "The selected item does not reference a stimulus entry." };
   if ((typeof stimulusId === "string" && stimulusId.length > 0) || (typeof stimulusId === "number" && Number.isSafeInteger(stimulusId) && stimulusId > 0)) {
     const value = String(stimulusId);
+    if (relatedStimulus) {
+      const relatedEntry = isJsonObject(relatedStimulus.entry) ? relatedStimulus.entry : undefined;
+      const htmlFields = assessmentHtmlSignals([{ field: "entry.body", value: relatedEntry?.body }]);
+      const metadata = ["title", "instructions", "source_url", "orientation", "passage", "created_at", "updated_at"]
+        .map((field) => boundedValueEvidence(relatedEntry?.[field], `entry.${field}`));
+      const truncation = truncationEvidence(relatedStimulus, "related_stimulus");
+      const body = boundedValueEvidence(relatedEntry?.body, "entry.body");
+      return {
+        status: assessmentStatus([body, htmlFields, htmlFields.media_review as JsonObject, truncation]),
+        relation: "linked_stimulus_entry",
+        stimulus_quiz_entry_id: value,
+        source_field: "entry.body",
+        body,
+        metadata: { status: relatedEntry ? "observed" : "not_observed", fields: metadata },
+        html_fields: htmlFields,
+        truncation,
+      };
+    }
     return { status: "evidence_incomplete", field: "stimulus_quiz_entry_id", character_count: value.length, sha256: sha256Text(value), value, reason: "The selected item references a stimulus entry, but this read did not return that stimulus body." };
   }
   return { status: "evidence_incomplete", field: "stimulus_quiz_entry_id", reason: "The upstream read did not return a complete stimulus relationship. This is not a passed check." };
@@ -497,6 +516,10 @@ function newQuizAnswerSource(entry: JsonObject | undefined): HtmlField {
   const interaction = entry && isJsonObject(entry.interaction_data) ? entry.interaction_data : undefined;
   if (interaction && Object.hasOwn(interaction, "choices")) return { field: "entry.interaction_data.choices", value: interaction.choices };
   if (interaction && Object.hasOwn(interaction, "answers")) return { field: "entry.interaction_data.answers", value: interaction.answers };
+  if (interaction && (Object.hasOwn(interaction, "categories") || Object.hasOwn(interaction, "distractors"))) {
+    return { field: "entry.interaction_data", value: interaction };
+  }
+  if (interaction && Object.hasOwn(interaction, "blanks")) return { field: "entry.interaction_data.blanks", value: interaction.blanks };
   return { field: "entry.interaction_data", value: undefined };
 }
 
@@ -510,7 +533,7 @@ function newQuizChoiceAnswerEvidence(entry: JsonObject | undefined): JsonObject 
       reason: "Canvas did not return interaction_data for nested choice or answer review. This is not a passed check.",
     };
   }
-  const collectionNames = ["choices", "answers", "questions", "word_bank_choices"] as const;
+  const collectionNames = ["choices", "answers", "questions", "blanks", "word_bank_choices", "categories", "distractors"] as const;
   const collections = collectionNames.filter((field) => Object.hasOwn(interaction, field)).map((field) => boundedValueEvidence(interaction[field], `entry.interaction_data.${field}`));
   const fields: HtmlField[] = [];
   let nestedLimitExceeded = false;
@@ -529,12 +552,18 @@ function newQuizChoiceAnswerEvidence(entry: JsonObject | undefined): JsonObject 
   const requiresChoices = ["choice", "multi-answer", "ordering"].includes(questionType ?? "");
   const requiresAnswers = questionType === "matching";
   const requiresTrueFalse = questionType === "true-false";
+  const requiresCategorization = questionType === "categorization";
+  const requiresBlanks = questionType === "rich-fill-blank";
   const selectorState = requiresChoices && !Object.hasOwn(interaction, "choices")
     ? { status: "not_observed", field: "entry.interaction_data.choices", reason: "This question type requires choices, but the upstream read did not return them." }
     : requiresAnswers && !Object.hasOwn(interaction, "answers")
       ? { status: "not_observed", field: "entry.interaction_data.answers", reason: "This matching question did not return its answer values." }
       : requiresTrueFalse && (typeof interaction.true_choice !== "string" || typeof interaction.false_choice !== "string")
         ? { status: "not_observed", fields: ["entry.interaction_data.true_choice", "entry.interaction_data.false_choice"], reason: "This true-false question did not return both response choices." }
+        : requiresCategorization && (!Object.hasOwn(interaction, "categories") || !Object.hasOwn(interaction, "distractors"))
+          ? { status: "not_observed", fields: ["entry.interaction_data.categories", "entry.interaction_data.distractors"], reason: "This categorization question did not return both categories and response values." }
+          : requiresBlanks && !Object.hasOwn(interaction, "blanks")
+            ? { status: "not_observed", field: "entry.interaction_data.blanks", reason: "This rich fill-in-the-blank question did not return its blanks." }
         : collections.length || requiresTrueFalse
           ? { status: fields.length ? "observed" : "manual_review_required", returned_field_count: fields.length, reason: fields.length ? undefined : "The returned nested response structure has no recognized text field." }
           : ["essay", "file-upload", "formula", "numeric"].includes(questionType ?? "")
@@ -573,7 +602,7 @@ function classicQuizAssessmentEvidence(data: JsonObject): JsonObject {
   };
 }
 
-function newQuizAssessmentEvidence(data: JsonObject): JsonObject {
+function newQuizAssessmentEvidence(data: JsonObject, relatedStimulus?: JsonObject): JsonObject {
   const entry = isJsonObject(data.entry) ? data.entry : undefined;
   if (data.entry_type === "Stimulus") {
     const stimulus = stimulusEvidence(data);
@@ -599,11 +628,17 @@ function newQuizAssessmentEvidence(data: JsonObject): JsonObject {
     entry?.interaction_type_slug === "choice" ? ["feedback_data"] : ["feedback_data", "answer_feedback"],
   );
   const htmlFields = assessmentHtmlSignals(newQuizHtmlFields(entry));
-  const stimulus = stimulusEvidence(data);
+  const stimulus = stimulusEvidence(data, relatedStimulus);
   const truncation = truncationEvidence(entry?.interaction_data, "entry.interaction_data");
   const media = newQuizMediaEvidence(entry, htmlFields);
+  const payloadReason = completeQuizItemPayloadReason(data);
+  const contract = data.entry_type === "Item"
+    ? payloadReason
+      ? { status: "needs_attention", reason: payloadReason, message: quizItemPayloadMessage(payloadReason) }
+      : { status: "observed", creatable_question_type: entry?.interaction_type_slug, shape_and_scoring_references: "checked" }
+    : { status: "not_applicable", entry_type: data.entry_type, reason: "The New Quiz Items API allows only entry_type \"Item\" on create and update, and states that stimulus items and bank items \"can only be retrieved with the API. They must be created and updated via the UI.\" Canvas reads this record; it does not accept it as a create or update target." };
   return {
-    status: assessmentStatus([questionType, pointsPossible, answers, choiceAnswerEvidence, scoring, feedback, htmlFields, media, stimulus, truncation]),
+    status: assessmentStatus([questionType, pointsPossible, answers, choiceAnswerEvidence, scoring, feedback, htmlFields, media, stimulus, truncation, contract]),
     disposition: "untrusted_course_content",
     question_type: questionType,
     points_possible: pointsPossible,
@@ -614,6 +649,7 @@ function newQuizAssessmentEvidence(data: JsonObject): JsonObject {
     html_fields: htmlFields,
     media,
     stimulus,
+    question_contract: contract,
     truncation,
   };
 }
@@ -993,7 +1029,7 @@ function canvasRemediation(
         return {
           status: "blocked_current_contract",
           upstream_tool: "canvas_update_quiz_item",
-          reason: "The documented New Quiz update route supports QuestionItem records only. Canvas did not expose a write contract for this StimulusItem, so Morrow will not infer a partial stimulus mutation.",
+          reason: "The New Quiz Items API allows only entry_type \"Item\" on create and update, and states that stimulus items \"can only be retrieved with the API. They must be created and updated via the UI.\" Canvas publishes no other route for this StimulusItem, so Morrow will not infer a partial stimulus mutation.",
         };
       }
       if (targetRecord?.entry_type !== "Item") {
@@ -1039,37 +1075,17 @@ function canvasRemediation(
           reason: "This entry row names no item bank question Morrow can read. A list row is not a question, so Morrow observed no question to change and will not plan a repair for the row itself.",
         };
       }
-      if (writeRouteCandidates(runtime, source, "canvas", upstreamTool).length !== 1) {
-        return {
-          status: "blocked_current_catalog",
-          upstream_tool: upstreamTool,
-          field: "item",
-          reason: "The selected connection does not expose the guarded Item Bank question route required for this repair.",
-        };
-      }
+      const route = writeRoute(runtime, source, "canvas", upstreamTool, "item");
       return {
-        status: "candidate_route_observed",
-        upstream_tool: upstreamTool,
-        field: "item",
-        planner: "morrow_plan_item_bank_question_image_alt_repair",
-        required_audit_evidence: [
-          "content_evidence.sha256",
-          "observed_source_signals.image_tags_without_alt[].image_index",
-          "observed_source_signals.image_tags_without_alt[].image_src_sha256",
-          "target.item_id",
-          "target.item_sha256",
-          "target.item_bank_fan_out",
-        ],
-        readiness: "requires_established_fan_out",
-        live_verification: "not_established_by_live_tenant",
-        required_before_dispatch: [
-          "complete item bank fan-out record from morrow_read_item_bank_fan_out, less than one hour old",
-          "confirmation of every other course the bank reaches",
-          "fresh pre-write read",
-          "current provider hold check",
-          "valid human approval or selected Edit authority",
-          "verified saved readback",
-        ],
+        ...route,
+        image_alt_repair: route.status === "candidate_route_observed"
+          ? {
+            status: "candidate_route_observed",
+            planner: "morrow_plan_item_bank_question_image_alt_repair",
+            required_audit_evidence: ["content_evidence.sha256", "observed_source_signals.image_tags_without_alt[].image_index", "observed_source_signals.image_tags_without_alt[].image_src_sha256"],
+            readiness: "not_established_by_catalog",
+          }
+          : { status: "blocked_current_catalog", reason: "The selected connection does not expose the snapshot-bound Item Bank item update required for this repair." },
       };
     }
     case "file": return { status: "manual_review_required", reason: "Morrow does not change a course file. The Canvas route reads user-authorized text files at most 1 MiB, and structural signals from user-authorized PDF, Word, PowerPoint, and Excel files at most 1 MiB. Document content, media, file tags, captions, and learner rendering need manual review." };
@@ -1309,14 +1325,26 @@ async function auditCanvas(runtime: GatewayRuntime, input: CanvasInput, signal: 
       requireEvidence(sameId(targetResult.data.id, input.target.quiz_id), "Canvas did not return the selected New Quiz.");
       targetId = input.target.quiz_id; title = textField(targetResult.data, "title"); field = "instructions"; content = textField(targetResult.data, "instructions");
       break;
-    case "new_quiz_item":
+    case "new_quiz_item": {
       targetResult = await read("canvas_get_quiz_item", { course_id: input.course_id, assignment_id: input.target.quiz_id, item_id: input.target.item_id });
       requireEvidence(sameId(targetResult.data.id, input.target.item_id), "Canvas did not return the selected New Quiz item.");
       targetId = input.target.item_id; title = nestedTextField(targetResult.data, "entry", "title"); field = targetResult.data.entry_type === "Stimulus" ? "entry.body" : "entry.item_body"; content = nestedTextField(targetResult.data, "entry", targetResult.data.entry_type === "Stimulus" ? "body" : "item_body");
-      assessmentEvidence = newQuizAssessmentEvidence(targetResult.data);
+      const stimulusValue = targetResult.data.entry_type === "Item" ? targetResult.data.stimulus_quiz_entry_id : undefined;
+      const stimulusId = ((typeof stimulusValue === "string" || typeof stimulusValue === "number") && /^[1-9][0-9]{0,18}$/.test(String(stimulusValue)))
+        ? String(stimulusValue)
+        : undefined;
+      let relatedStimulus: JsonObject | undefined;
+      if (stimulusId) {
+        const stimulusResult = await read("canvas_get_quiz_item", { course_id: input.course_id, assignment_id: input.target.quiz_id, item_id: stimulusId });
+        requireEvidence(sameId(stimulusResult.data.id, stimulusId) && stimulusResult.data.entry_type === "Stimulus", "Canvas did not return the stimulus referenced by the selected New Quiz question.");
+        relatedStimulus = stimulusResult.data;
+        targetProvenance.push(stimulusResult.readProvenance);
+      }
+      assessmentEvidence = newQuizAssessmentEvidence(targetResult.data, relatedStimulus);
       break;
+    }
     case "item_bank_entry": {
-      const entryResult = await read("canvas_item_bank_get_entry", { bank_id: input.target.item_bank_id, bank_entry_id: input.target.entry_id });
+      const entryResult = await read("canvas_item_bank_get_entry", { course_id: input.course_id, bank_id: input.target.item_bank_id, bank_entry_id: input.target.entry_id });
       requireEvidence(sameId(entryResult.data.id, input.target.entry_id), "Canvas did not return the selected Item Bank entry.");
       // A question entry names a question that lives outside the row. The row
       // may carry a partial copy or none at all, so the question itself is the
@@ -1325,12 +1353,12 @@ async function auditCanvas(runtime: GatewayRuntime, input: CanvasInput, signal: 
       if (itemBankItemId === undefined) {
         targetResult = entryResult;
       } else {
-        targetResult = await read("canvas_item_bank_get_item", { bank_id: input.target.item_bank_id, item_id: itemBankItemId });
+        targetResult = await read("canvas_item_bank_get_item", { course_id: input.course_id, bank_id: input.target.item_bank_id, item_id: itemBankItemId });
         requireEvidence(sameId(targetResult.data.id, itemBankItemId), "Canvas did not return the item bank question named by the selected entry.");
         itemBankItemSha256 = sha256Json(targetResult.data);
         targetProvenance = [entryResult.readProvenance];
       }
-      targetId = input.target.entry_id; title = textField(targetResult.data, "title") ?? nestedTextField(targetResult.data, "entry", "title"); field = targetResult.data.entry_type === "Stimulus" ? "entry.body" : "entry.item_body"; content = nestedTextField(targetResult.data, "entry", targetResult.data.entry_type === "Stimulus" ? "body" : "item_body"); assessmentEvidence = newQuizAssessmentEvidence(targetResult.data); association = "The current Item Bank read does not prove that this entry belongs to the selected course."; courseAssociationEstablished = false;
+      targetId = input.target.entry_id; title = textField(targetResult.data, "title") ?? nestedTextField(targetResult.data, "entry", "title"); field = targetResult.data.entry_type === "Stimulus" ? "entry.body" : "entry.item_body"; content = nestedTextField(targetResult.data, "entry", targetResult.data.entry_type === "Stimulus" ? "body" : "item_body"); assessmentEvidence = newQuizAssessmentEvidence(targetResult.data); association = "The Item Bank executor confirmed that this bank appears in the selected course's scoped bank list before reading the entry.";
       break;
     }
     case "file": {
@@ -1464,8 +1492,8 @@ async function auditCanvas(runtime: GatewayRuntime, input: CanvasInput, signal: 
           item_id: itemBankItemId,
           item_sha256: itemBankItemSha256,
           item_bank_fan_out: {
-            status: "not_established_by_this_audit",
-            reason: "This audit reads one item bank entry and its question. It does not enumerate the courses the bank reaches, so it establishes no fan-out. Read the fan-out separately before planning a repair.",
+            status: "observed_uses_only",
+            reason: "This audit reads one item bank entry and its question. The separate fan-out reader can report uses observed in selected connected courses, but Canvas exposes no authoritative account-wide reverse lookup. Its record remains incomplete and cannot authorize a repair.",
             read_with: "morrow_read_item_bank_fan_out",
           },
         }
@@ -1490,8 +1518,8 @@ async function auditCanvas(runtime: GatewayRuntime, input: CanvasInput, signal: 
  * A completed Moodle read reports itself in one of two shapes. The activity
  * settings-form executors dispatch the native request themselves and report
  * `sent: true`; the child-record readers send no state-changing request and
- * report `complete: true` instead. Anything else — a truncated page, a
- * `complete: false` partial, or neither marker — is not a complete read.
+ * report `complete: true` instead. Anything else, including a truncated page, a
+ * `complete: false` partial, or neither marker, is not a complete read.
  * A reader that names no native target returns none, so `targets` is optional.
  */
 function completedMoodleRead(browser: JsonObject): boolean {

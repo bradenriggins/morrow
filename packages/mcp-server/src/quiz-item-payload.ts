@@ -1,8 +1,7 @@
 /**
- * Validate known question shapes before a create or replacement. Canvas
- * validates interaction types without a local checker. Choice, matching,
- * numeric, and rich fill-in-the-blank shapes have local checks; media rules
- * apply to all interaction types.
+ * Validate the complete documented shape of all 12 New Quiz question types
+ * before a create or replacement. Every supported type fails closed against
+ * its structure, scoring references, feedback, properties, and media rules.
  *
  * These rules are the same rules as `connector/extension/src/quiz-item-payload.js`,
  * which is the module the Item Banks frame enforces them with. That module
@@ -21,7 +20,7 @@
  *
  * Live-unverified by construction: whether Canvas accepts a payload these rules
  * pass is not established here, and it cannot be. That is the point of the
- * pass-through rule — Canvas is the authority on its own schema.
+ * local contract: Canvas remains the authority on whether it accepts a payload.
  */
 
 /** Elements whose `src` the harvest constrains, and the three prefixes it allows. */
@@ -39,6 +38,7 @@ const RICH_FILL_SLUGS: readonly string[] = ["rich_fill_blank", "rich_fill", "ric
 const BLANK_KINDS: Readonly<Record<string, string>> = { openentry: "openEntry", dropdown: "TextInChoices", textinchoices: "TextInChoices", wordbank: "wordbank" };
 
 const INTERACTION_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 /** Comments, and tags whose attribute values may hold a ">" inside quotes. */
 const TAG = /<!--[\s\S]*?-->|<(?:"[^"]*"|'[^']*'|[^'">])*>/g;
 const TAG_NAME = /^<\s*(\/?)\s*([a-zA-Z][^\s/>]*)/;
@@ -204,7 +204,7 @@ function choiceReason(interaction: unknown, scoring: unknown): string | null {
   const ids = memberIds(interaction.choices, "choice_id_invalid", "choice_id_duplicate");
   if (!Array.isArray(ids)) return ids;
   for (const choice of interaction.choices) {
-    const body = plainObject(choice) ? choice.item_body ?? choice.body : undefined;
+    const body = plainObject(choice) ? choice.item_body ?? choice.itemBody ?? choice.body : undefined;
     if (!hasContent(body)) return "choice_body_blank";
   }
   // The answer key names choices by id, as one id or as a list of them. A key
@@ -388,7 +388,7 @@ function richFillReason(interaction: unknown, scoring: unknown, itemBody: unknow
  * The payload is the question itself, either as a whole item record with its
  * fields under `entry` (`{id, entry_type, entry: {...}}`), or flat. A payload
  * that carries neither `interaction_data` nor `scoring_data` changes nothing
- * this file structurally checks — a title-only or points-only update, for one —
+ * this file structurally checks, such as a title-only or points-only update,
  * so only the media rules run over it.
  */
 export function quizItemPayloadReason(item: unknown): string | null {
@@ -405,6 +405,410 @@ export function quizItemPayloadReason(item: unknown): string | null {
   if (kind === "matching") return matchingReason(interaction, scoring);
   if (kind === "numeric") return numericReason(interaction, scoring);
   return richFillReason(interaction, scoring, entry.item_body);
+}
+
+const CREATE_ALGORITHMS: Readonly<Record<string, readonly string[]>> = Object.freeze({
+  "true-false": ["Equivalence"],
+  categorization: ["Categorization"],
+  matching: ["DeepEquals", "PartialDeep"],
+  "file-upload": ["None"],
+  formula: ["Numeric"],
+  ordering: ["DeepEquals"],
+  "rich-fill-blank": ["MultipleMethods"],
+  "hot-spot": ["HotSpot"],
+  choice: ["Equivalence", "VaryPointsByAnswer"],
+  "multi-answer": ["AllOrNothing", "PartialScore"],
+  numeric: ["Numeric"],
+  essay: ["None"],
+});
+
+function nonBlankString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
+}
+
+function finiteNumeric(value: unknown): boolean {
+  return (typeof value === "number" && Number.isFinite(value))
+    || (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value)));
+}
+
+function keyedMembers(value: unknown, minimum: number, requireUuid = false): { readonly ids: readonly string[]; readonly rows: readonly Plain[] } | null {
+  if (!plainObject(value)) return null;
+  const entries = Object.entries(value);
+  if (entries.length < minimum) return null;
+  const rows: Plain[] = [];
+  for (const [key, row] of entries) {
+    if (!INTERACTION_ID.test(key) || (requireUuid && !UUID.test(key)) || !plainObject(row) || asText(row.id) !== key || !hasContent(row.item_body ?? row.itemBody)) return null;
+    rows.push(row);
+  }
+  return { ids: entries.map(([key]) => key), rows };
+}
+
+function exactScalarIds(value: unknown, allowed: readonly string[], requireAll: boolean): boolean {
+  if (!Array.isArray(value) || value.length === 0) return false;
+  const ids = value.map(asText);
+  if (ids.some((id) => !allowed.includes(id)) || new Set(ids).size !== ids.length) return false;
+  return !requireAll || sameIdSet(ids, allowed);
+}
+
+function sequentialPositions(rows: readonly unknown[]): boolean {
+  return rows.every((row, index) => plainObject(row) && row.position === index + 1);
+}
+
+function onlyKeys(value: Plain, keys: readonly string[]): boolean {
+  return Object.keys(value).every((key) => keys.includes(key));
+}
+
+function shuffleGroup(properties: Plain, group: "choices" | "questions"): Plain | null | undefined {
+  const rules = properties.shuffle_rules ?? properties.shuffleRules;
+  if (rules === undefined) return undefined;
+  if (!plainObject(rules) || !onlyKeys(rules, [group]) || !plainObject(rules[group])) return null;
+  return rules[group];
+}
+
+function choicePropertiesReason(properties: Plain, interaction: Plain, allowVaryPoints: boolean, algorithm: unknown): string | null {
+  if (!onlyKeys(properties, ["shuffle_rules", "shuffleRules", "vary_points_by_answer", "varyPointsByAnswer"])) return "create_properties_invalid";
+  const group = shuffleGroup(properties, "choices");
+  if (group === null) return "create_properties_invalid";
+  if (group) {
+    if (!onlyKeys(group, ["to_lock", "toLock", "shuffled"]) || typeof group.shuffled !== "boolean") return "create_properties_invalid";
+    const locks = group.to_lock ?? group.toLock;
+    const count = Array.isArray(interaction.choices) ? interaction.choices.length : 0;
+    if (locks !== undefined && (!Array.isArray(locks) || new Set(locks).size !== locks.length
+      || locks.some((index) => !Number.isSafeInteger(index) || Number(index) < 0 || Number(index) >= count))) return "create_properties_invalid";
+  }
+  const vary = properties.vary_points_by_answer ?? properties.varyPointsByAnswer;
+  if (!allowVaryPoints && vary !== undefined) return "create_properties_invalid";
+  if (vary !== undefined && typeof vary !== "boolean") return "create_properties_invalid";
+  if (allowVaryPoints && vary !== undefined && (vary !== (algorithm === "VaryPointsByAnswer"))) return "create_properties_invalid";
+  return null;
+}
+
+function questionShufflePropertiesReason(properties: Plain): string | null {
+  if (!onlyKeys(properties, ["shuffle_rules", "shuffleRules"])) return "create_properties_invalid";
+  const group = shuffleGroup(properties, "questions");
+  if (group === null) return "create_properties_invalid";
+  return group && (!onlyKeys(group, ["shuffled"]) || typeof group.shuffled !== "boolean") ? "create_properties_invalid" : null;
+}
+
+function orderingPropertiesReason(properties: Plain): string | null {
+  if (!onlyKeys(properties, ["top_label", "bottom_label", "shuffle_rules", "include_labels", "display_answers_paragraph"])) return "create_properties_invalid";
+  if (properties.shuffle_rules !== undefined && properties.shuffle_rules !== null) return "create_properties_invalid";
+  for (const field of ["include_labels", "display_answers_paragraph"] as const) {
+    if (properties[field] !== undefined && typeof properties[field] !== "boolean") return "create_properties_invalid";
+  }
+  for (const field of ["top_label", "bottom_label"] as const) {
+    if (properties[field] !== undefined && typeof properties[field] !== "string") return "create_properties_invalid";
+  }
+  if (properties.include_labels === true && (!nonBlankString(properties.top_label) || !nonBlankString(properties.bottom_label))) return "create_properties_invalid";
+  return null;
+}
+
+function richFillPropertiesReason(properties: Plain): string | null {
+  if (!onlyKeys(properties, ["shuffle_rules", "shuffleRules"])) return "create_properties_invalid";
+  const rules = properties.shuffle_rules ?? properties.shuffleRules;
+  if (rules === undefined) return null;
+  if (!plainObject(rules) || !onlyKeys(rules, ["blanks"]) || !plainObject(rules.blanks)
+    || !onlyKeys(rules.blanks, ["children"]) || !plainObject(rules.blanks.children)) return "create_properties_invalid";
+  for (const [index, row] of Object.entries(rules.blanks.children)) {
+    if (!/^(?:0|[1-9][0-9]*)$/.test(index) || !plainObject(row) || !onlyKeys(row, ["children"])) return "create_properties_invalid";
+    if (row.children === null) continue;
+    if (!plainObject(row.children) || !onlyKeys(row.children, ["choices"]) || !plainObject(row.children.choices)
+      || !onlyKeys(row.children.choices, ["shuffled"]) || typeof row.children.choices.shuffled !== "boolean") return "create_properties_invalid";
+  }
+  return null;
+}
+
+function questionPropertiesReason(slug: string, properties: Plain, interaction: Plain, algorithm: unknown): string | null {
+  if (["true-false", "formula", "hot-spot", "numeric", "essay"].includes(slug)) {
+    return Object.keys(properties).length === 0 ? null : "create_properties_invalid";
+  }
+  if (slug === "categorization") {
+    const reason = questionShufflePropertiesReason(properties);
+    if (reason) return reason;
+    const group = shuffleGroup(properties, "questions");
+    return group?.shuffled === true ? "create_properties_invalid" : null;
+  }
+  if (slug === "matching") return questionShufflePropertiesReason(properties);
+  if (slug === "choice") return choicePropertiesReason(properties, interaction, true, algorithm);
+  if (slug === "multi-answer") return choicePropertiesReason(properties, interaction, false, algorithm);
+  if (slug === "ordering") return orderingPropertiesReason(properties);
+  if (slug === "rich-fill-blank") return richFillPropertiesReason(properties);
+  return null;
+}
+
+/**
+ * The exact key sets the documented Categorization and Matching appendix blocks publish. An
+ * unrecognised key is refused rather than passed through, because a create sends the whole object
+ * and Morrow would otherwise write a structure it never checked. Source:
+ * https://developerdocs.instructure.com/services/canvas/resources/new_quiz_items
+ */
+const CATEGORIZATION_INTERACTION_KEYS: readonly string[] = ["categories", "distractors", "category_order"];
+const CATEGORIZATION_SCORING_KEYS: readonly string[] = ["score_method", "value"];
+const CATEGORIZATION_SCORING_ROW_KEYS: readonly string[] = ["id", "scoring_algorithm", "scoring_data"];
+const MATCHING_INTERACTION_KEYS: readonly string[] = ["questions", "answers"];
+const MATCHING_SCORING_KEYS: readonly string[] = ["value", "edit_data"];
+const MATCHING_EDIT_DATA_KEYS: readonly string[] = ["matches", "distractors"];
+const MATCHING_MATCH_KEYS: readonly string[] = ["answer_body", "question_id", "question_body", "id"];
+
+function categorizationCreateReason(interaction: Plain, scoring: Plain): string | null {
+  if (!onlyKeys(interaction, CATEGORIZATION_INTERACTION_KEYS)) return "categorization_structure_invalid";
+  if (!onlyKeys(scoring, CATEGORIZATION_SCORING_KEYS)) return "categorization_scoring_invalid";
+  if ((plainObject(interaction.categories) && Object.keys(interaction.categories).some((id) => !UUID.test(id)))
+    || (plainObject(interaction.distractors) && Object.keys(interaction.distractors).some((id) => !UUID.test(id)))) return "create_uuid_invalid";
+  const categories = keyedMembers(interaction.categories, 2, true);
+  const distractors = keyedMembers(interaction.distractors, 1, true);
+  if (!categories || !distractors) return "categorization_structure_invalid";
+  if (!exactScalarIds(interaction.category_order, categories.ids, true)) return "categorization_structure_invalid";
+  if (scoring.score_method !== "all_or_nothing" || !Array.isArray(scoring.value) || scoring.value.length !== categories.ids.length) return "categorization_scoring_invalid";
+  const seenCategories: string[] = [];
+  const assigned = new Set<string>();
+  for (const row of scoring.value) {
+    if (!plainObject(row) || !onlyKeys(row, CATEGORIZATION_SCORING_ROW_KEYS)
+      || !categories.ids.includes(asText(row.id)) || seenCategories.includes(asText(row.id))
+      || row.scoring_algorithm !== "AllOrNothing" || !plainObject(row.scoring_data)
+      || !onlyKeys(row.scoring_data, ["value"])
+      || !Array.isArray(row.scoring_data.value)) return "categorization_scoring_invalid";
+    seenCategories.push(asText(row.id));
+    for (const answer of row.scoring_data.value) {
+      const id = asText(answer);
+      if (!distractors.ids.includes(id) || assigned.has(id)) return "categorization_scoring_invalid";
+      assigned.add(id);
+    }
+  }
+  return sameIdSet(seenCategories, categories.ids) ? null : "categorization_scoring_invalid";
+}
+
+function matchingCreateReason(interaction: Plain, scoring: Plain): string | null {
+  const baseReason = matchingReason(interaction, scoring);
+  if (baseReason) return baseReason;
+  if (!onlyKeys(interaction, MATCHING_INTERACTION_KEYS) || !onlyKeys(scoring, MATCHING_SCORING_KEYS)
+    || (plainObject(scoring.edit_data) && !onlyKeys(scoring.edit_data, MATCHING_EDIT_DATA_KEYS))
+    || (plainObject(scoring.edit_data) && Array.isArray(scoring.edit_data.matches)
+      && scoring.edit_data.matches.some((match) => !plainObject(match) || !onlyKeys(match, MATCHING_MATCH_KEYS)))) return "matching_structure_invalid";
+  if (!Array.isArray(interaction.questions) || !Array.isArray(interaction.answers)
+    || interaction.answers.length === 0 || interaction.answers.some((answer) => !nonBlankString(answer))
+    || new Set(interaction.answers).size !== interaction.answers.length || !plainObject(scoring.value)
+    || !plainObject(scoring.edit_data) || !Array.isArray(scoring.edit_data.matches)) return "matching_structure_invalid";
+  const answers = interaction.answers as string[];
+  const questionBodies = new Map<string, string>();
+  for (const question of interaction.questions) {
+    if (!plainObject(question) || !hasContent(question.item_body)) return "matching_structure_invalid";
+    questionBodies.set(asText(question.id), asText(question.item_body));
+  }
+  const usedAnswers = new Set<string>();
+  for (const [questionId, answer] of Object.entries(scoring.value)) {
+    if (!nonBlankString(answer) || !answers.includes(answer) || usedAnswers.has(answer)) return "matching_scoring_value_invalid";
+    usedAnswers.add(answer);
+    const match = scoring.edit_data.matches.find((candidate) => plainObject(candidate) && asText(candidate.question_id) === questionId);
+    if (!plainObject(match) || match.answer_body !== answer || match.question_body !== questionBodies.get(questionId)) return "matching_edit_data_values_mismatch";
+  }
+  const distractors = scoring.edit_data.distractors ?? [];
+  if (!Array.isArray(distractors) || distractors.some((answer) => !nonBlankString(answer))
+    || new Set(distractors).size !== distractors.length || distractors.some((answer) => usedAnswers.has(answer))) return "matching_edit_data_values_mismatch";
+  return sameIdSet([...usedAnswers, ...distractors], answers) ? null : "matching_edit_data_values_mismatch";
+}
+
+function orderingCreateReason(interaction: Plain, scoring: Plain): string | null {
+  if (plainObject(interaction.choices) && Object.keys(interaction.choices).some((id) => !UUID.test(id))) return "create_uuid_invalid";
+  const choices = keyedMembers(interaction.choices, 2, true);
+  return choices && exactScalarIds(scoring.value, choices.ids, true) ? null : "ordering_structure_invalid";
+}
+
+const RICH_FILL_ALGORITHMS = Object.freeze(["TextCloseEnough", "TextContainsAnswer", "TextInChoices", "Equivalence", "TextEquivalence", "TextRegex"]);
+
+function richFillCreateReason(interaction: Plain, scoring: Plain, itemBody: string): string | null {
+  const baseReason = richFillReason(interaction, scoring, itemBody);
+  if (baseReason) return baseReason;
+  if (!Array.isArray(interaction.blanks) || !Array.isArray(scoring.value) || !nonBlankString(scoring.working_item_body)) return "rich_fill_structure_invalid";
+  if (interaction.reuse_word_bank_choices !== undefined && typeof interaction.reuse_word_bank_choices !== "boolean") return "rich_fill_structure_invalid";
+  const blankIds = interaction.blanks.map((blank) => plainObject(blank) ? asText(blank.id) : "");
+  const markers = [...itemBody.matchAll(BLANK_MARKER)].map((match) => match[1] ?? match[2] ?? "");
+  if (markers.length !== blankIds.length || !sameIdSet(markers, blankIds)) return "rich_fill_body_blank_markers_mismatch";
+  for (const blank of interaction.blanks) {
+    if (!plainObject(blank)) return "rich_fill_structure_invalid";
+    const row = scoringRow(scoring, asText(blank.id));
+    const data = rowAnswer(row);
+    const kind = blankKind(blank, row);
+    if (!row || !data || !RICH_FILL_ALGORITHMS.includes(asText(row.scoring_algorithm)) || !nonBlankString(data.blank_text)) return "rich_fill_scoring_row_invalid";
+    if (kind === "openEntry") {
+      const value = data.value;
+      if (row.scoring_algorithm === "TextInChoices") {
+        if (!Array.isArray(value) || value.length === 0 || value.some((answer) => !nonBlankString(answer)) || !value.includes(data.blank_text)) return "rich_fill_scoring_row_invalid";
+      } else if (!nonBlankString(value)) return "rich_fill_scoring_row_invalid";
+      if (row.scoring_algorithm === "TextCloseEnough"
+        && (typeof data.ignore_case !== "boolean" || !Number.isSafeInteger(data.edit_distance) || Number(data.edit_distance) < 0)) return "rich_fill_scoring_row_invalid";
+    } else if (kind === "TextInChoices") {
+      if (row.scoring_algorithm !== "Equivalence" || !Array.isArray(blank.choices) || !sequentialPositions(blank.choices)) return "rich_fill_scoring_row_invalid";
+      const choiceIds = blank.choices.map((choice) => plainObject(choice) ? asText(choice.id) : "");
+      if (!choiceIds.includes(asText(data.value))) return "rich_fill_scoring_row_invalid";
+    } else if (kind === "wordbank") {
+      if (row.scoring_algorithm !== "TextEquivalence" || typeof interaction.reuse_word_bank_choices !== "boolean") return "rich_fill_scoring_row_invalid";
+    }
+  }
+  return null;
+}
+
+function trueFalseCreateReason(interaction: Plain, scoring: Plain): string | null {
+  return nonBlankString(interaction.true_choice) && nonBlankString(interaction.false_choice)
+    && typeof scoring.value === "boolean" ? null : "true_false_structure_invalid";
+}
+
+function fileUploadCreateReason(interaction: Plain, scoring: Plain, properties: Plain): string | null {
+  const count = Number(interaction.files_count);
+  if (!Number.isSafeInteger(count) || count < 1 || typeof interaction.restrict_count !== "boolean" || scoring.value !== "") {
+    return "file_upload_structure_invalid";
+  }
+  if (!onlyKeys(properties, ["allowed_types", "restrict_types"])) return "create_properties_invalid";
+  if (properties.allowed_types !== undefined && typeof properties.allowed_types !== "string") return "create_properties_invalid";
+  if (properties.restrict_types !== undefined && typeof properties.restrict_types !== "boolean") return "create_properties_invalid";
+  if (properties.restrict_types === true && !nonBlankString(properties.allowed_types)) return "create_properties_invalid";
+  return null;
+}
+
+function formulaCreateReason(interaction: Plain, scoring: Plain): string | null {
+  if (Object.keys(interaction).length !== 0 || !plainObject(scoring.value)) return "formula_structure_invalid";
+  const value = scoring.value;
+  if (!nonBlankString(value.formula) || !plainObject(value.numeric) || !Array.isArray(value.variables)
+    || value.variables.length === 0 || !Array.isArray(value.generated_solutions) || value.generated_solutions.length === 0) {
+    return "formula_structure_invalid";
+  }
+  const numeric = value.numeric;
+  if (numeric.type !== "marginOfError" || !finiteNumeric(numeric.margin)
+    || Number(numeric.margin) < 0 || !["absolute", "percent"].includes(asText(numeric.margin_type))) return "formula_structure_invalid";
+  const variableNames = new Set<string>();
+  for (const variable of value.variables) {
+    if (!plainObject(variable) || !nonBlankString(variable.name) || variableNames.has(variable.name)
+      || !finiteNumeric(variable.min) || !finiteNumeric(variable.max) || Number(variable.min) > Number(variable.max)
+      || !finiteNumeric(variable.precision) || !Number.isInteger(Number(variable.precision)) || Number(variable.precision) < 0) return "formula_structure_invalid";
+    variableNames.add(variable.name);
+  }
+  if (!Number.isSafeInteger(Number(value.answer_count)) || Number(value.answer_count) !== value.generated_solutions.length) return "formula_structure_invalid";
+  for (const solution of value.generated_solutions) {
+    if (!plainObject(solution) || !finiteNumeric(solution.output) || !Array.isArray(solution.inputs)
+      || solution.inputs.length !== variableNames.size) return "formula_structure_invalid";
+    const names = new Set<string>();
+    for (const input of solution.inputs) {
+      if (!plainObject(input) || !variableNames.has(asText(input.name)) || names.has(asText(input.name)) || !finiteNumeric(input.value)) return "formula_structure_invalid";
+      names.add(asText(input.name));
+    }
+  }
+  return null;
+}
+
+function hotSpotCreateReason(interaction: Plain, scoring: Plain): string | null {
+  if (!nonBlankString(interaction.image_url) || !plainObject(scoring.value)) return "hot_spot_structure_invalid";
+  try {
+    const url = new URL(interaction.image_url);
+    if (!["http:", "https:"].includes(url.protocol) || url.search || url.hash) return "hot_spot_structure_invalid";
+  } catch {
+    return "hot_spot_structure_invalid";
+  }
+  const value = scoring.value;
+  if (!["oval", "square", "polygon"].includes(asText(value.type)) || !Array.isArray(value.coordinates)) return "hot_spot_structure_invalid";
+  if (value.coordinates.length < (value.type === "polygon" ? 3 : 2)) return "hot_spot_structure_invalid";
+  return value.coordinates.every((point) => plainObject(point) && typeof point.x === "number" && Number.isFinite(point.x)
+    && point.x >= 0 && point.x <= 1 && typeof point.y === "number" && Number.isFinite(point.y) && point.y >= 0 && point.y <= 1)
+    ? null : "hot_spot_structure_invalid";
+}
+
+function essayCreateReason(interaction: Plain, scoring: Plain): string | null {
+  if (!onlyKeys(interaction, ["rce", "essay", "word_count", "file_upload", "spell_check", "word_limit_max", "word_limit_min", "word_limit_enabled"])) return "essay_structure_invalid";
+  for (const field of ["rce", "word_count", "file_upload", "spell_check", "word_limit_enabled"] as const) {
+    if (typeof interaction[field] !== "boolean") return "essay_structure_invalid";
+  }
+  if (interaction.essay !== null || interaction.file_upload !== false) return "essay_structure_invalid";
+  if (interaction.word_limit_enabled === true) {
+    if (!finiteNumeric(interaction.word_limit_min) || !finiteNumeric(interaction.word_limit_max)
+      || Number(interaction.word_limit_min) < 0 || Number(interaction.word_limit_min) > Number(interaction.word_limit_max)) return "essay_structure_invalid";
+  }
+  return typeof scoring.value === "string" ? null : "essay_structure_invalid";
+}
+
+/**
+ * Validate a complete QuestionItem for Canvas's create route.
+ *
+ * Unlike `quizItemPayloadReason`, this function never passes an unknown or
+ * incomplete interaction through. Partial PATCH payloads keep using the
+ * permissive function because their omitted fields come from the saved item.
+ */
+export function completeQuizItemPayloadReason(item: unknown): string | null {
+  if (!plainObject(item)) return "payload_not_an_object";
+  const media = mediaReason(item, 0);
+  if (media) return media;
+  if (item.entry_type !== "Item" || !plainObject(item.entry)) return "create_entry_type_invalid";
+  if (item.points_possible !== undefined && (typeof item.points_possible !== "number" || !Number.isFinite(item.points_possible) || item.points_possible <= 0)) {
+    return "create_points_not_positive";
+  }
+  if (item.position !== undefined && (!Number.isSafeInteger(item.position) || Number(item.position) < 1)) return "create_position_invalid";
+  const entry = item.entry;
+  if (!nonBlankString(entry.item_body)) return "create_item_body_missing";
+  if (entry.calculator_type !== undefined && !["none", "basic", "scientific"].includes(asText(entry.calculator_type))) return "create_calculator_type_invalid";
+  const slug = entry.interaction_type_slug;
+  if (typeof slug !== "string" || !(slug in CREATE_ALGORITHMS)) return slug === "fill-blank" ? "create_deprecated_question_type" : "create_question_type_unsupported";
+  if (!plainObject(entry.interaction_data) || !plainObject(entry.scoring_data)) return "create_required_data_missing";
+  if (!CREATE_ALGORITHMS[slug]?.includes(asText(entry.scoring_algorithm))) return "create_scoring_algorithm_invalid";
+  if (entry.properties !== undefined && !plainObject(entry.properties)) return "create_properties_invalid";
+  if (entry.answer_feedback !== undefined) {
+    if (slug !== "choice" || !plainObject(entry.answer_feedback)) return "create_answer_feedback_invalid";
+  }
+  const interaction = entry.interaction_data;
+  const scoring = entry.scoring_data;
+  const properties = plainObject(entry.properties) ? entry.properties : {};
+  const propertiesReason = questionPropertiesReason(slug, properties, interaction, entry.scoring_algorithm);
+  if (propertiesReason) return propertiesReason;
+  if (entry.feedback !== undefined) {
+    if (!plainObject(entry.feedback) || !onlyKeys(entry.feedback, ["neutral", "correct", "incorrect"])
+      || Object.values(entry.feedback).some((value) => typeof value !== "string")) return "create_feedback_invalid";
+  }
+  if (plainObject(entry.answer_feedback) && Object.values(entry.answer_feedback).some((value) => typeof value !== "string")) return "create_answer_feedback_invalid";
+  if (slug === "choice" || slug === "multi-answer") {
+    const reason = choiceReason(interaction, scoring);
+    if (reason) return reason;
+    const ids = memberIds(interaction.choices as readonly unknown[], "choice_id_invalid", "choice_id_duplicate");
+    if (!Array.isArray(ids)) return ids;
+    if (ids.some((id) => !UUID.test(id))) return "create_uuid_invalid";
+    if (!sequentialPositions(interaction.choices as readonly unknown[])) return "create_choice_position_invalid";
+    if (slug === "multi-answer" && !exactScalarIds(scoring.value, ids, false)) return "multi_answer_scoring_invalid";
+    if (slug === "choice" && (Array.isArray(scoring.value) || !ids.includes(asText(scoring.value)))) return "choice_scoring_value_not_a_choice_id";
+    if (slug === "choice" && entry.scoring_algorithm === "VaryPointsByAnswer") {
+      if (!Array.isArray(scoring.values) || scoring.values.length !== ids.length) return "choice_vary_points_invalid";
+      const scored = new Set<string>();
+      for (const row of scoring.values) {
+        if (!plainObject(row) || !ids.includes(asText(row.value)) || scored.has(asText(row.value))
+          || typeof row.points !== "number" || !Number.isFinite(row.points)) return "choice_vary_points_invalid";
+        scored.add(asText(row.value));
+      }
+    }
+    if (plainObject(entry.answer_feedback) && Object.keys(entry.answer_feedback).some((id) => !ids.includes(id))) return "create_answer_feedback_invalid";
+    return null;
+  }
+  if (slug === "matching") return matchingCreateReason(interaction, scoring);
+  if (slug === "numeric") {
+    if (Object.keys(interaction).length !== 0) return "numeric_response_invalid";
+    const reason = numericReason(interaction, scoring);
+    return reason ?? (Array.isArray(scoring.value) && scoring.value.length > 0 ? null : "numeric_response_invalid");
+  }
+  if (slug === "rich-fill-blank") {
+    const reason = richFillCreateReason(interaction, scoring, entry.item_body);
+    if (reason) return reason;
+    const blanks = Array.isArray(interaction.blanks) ? interaction.blanks : [];
+    const blankIds = memberIds(blanks, "rich_fill_blank_id_invalid", "rich_fill_blank_id_duplicate");
+    const scoringIds = Array.isArray(scoring.value) ? memberIds(scoring.value, "rich_fill_scoring_ids_mismatch", "rich_fill_scoring_ids_mismatch") : "";
+    if (!Array.isArray(blankIds) || blankIds.some((id) => !UUID.test(id))) return "create_uuid_invalid";
+    const nestedChoiceIds = blanks.flatMap((blank) => plainObject(blank) && Array.isArray(blank.choices)
+      ? blank.choices.map((choice) => plainObject(choice) ? asText(choice.id) : "") : []);
+    const wordBankIds = Array.isArray(interaction.word_bank_choices)
+      ? interaction.word_bank_choices.map((choice) => plainObject(choice) ? asText(choice.id) : "") : [];
+    if ([...nestedChoiceIds, ...wordBankIds].some((id) => !UUID.test(id))) return "create_uuid_invalid";
+    return Array.isArray(scoringIds) && sameIdSet(blankIds, scoringIds) ? null : "rich_fill_scoring_ids_mismatch";
+  }
+  if (slug === "true-false") return trueFalseCreateReason(interaction, scoring);
+  if (slug === "categorization") return categorizationCreateReason(interaction, scoring);
+  if (slug === "file-upload") return fileUploadCreateReason(interaction, scoring, properties);
+  if (slug === "formula") return formulaCreateReason(interaction, scoring);
+  if (slug === "ordering") return orderingCreateReason(interaction, scoring);
+  if (slug === "hot-spot") return hotSpotCreateReason(interaction, scoring);
+  return essayCreateReason(interaction, scoring);
 }
 
 /**
@@ -452,6 +856,35 @@ const MESSAGES: Readonly<Record<string, string>> = {
   rich_fill_choice_id_unknown: "One word-bank blank points at a choice that is not in the word bank.",
   rich_fill_body_blank_markers_mismatch: "The question body does not mark exactly the blanks this question holds. Each blank needs id=\"blank_<id>\" in the body.",
   rich_fill_working_item_body_answers_out_of_order: "The authoring copy of the body does not carry every answer in backticks in blank order.",
+  create_entry_type_invalid: "Canvas can create only a QuestionItem here. Set entry_type to Item and supply the complete entry object.",
+  create_points_not_positive: "When points_possible is present, it must be a positive number.",
+  create_position_invalid: "When position is present, it must be a positive whole number.",
+  create_item_body_missing: "A created question needs a non-empty entry.item_body.",
+  create_calculator_type_invalid: "entry.calculator_type must be none, basic, or scientific.",
+  create_deprecated_question_type: "Canvas marks fill-blank as deprecated. Create a rich-fill-blank question instead.",
+  create_question_type_unsupported: "entry.interaction_type_slug must name one of the 12 question types Canvas supports for create.",
+  create_required_data_missing: "A created question needs complete entry.interaction_data and entry.scoring_data objects.",
+  create_scoring_algorithm_invalid: "entry.scoring_algorithm does not match this New Quizzes question type.",
+  create_properties_invalid: "entry.properties must be an object when it is present.",
+  create_answer_feedback_invalid: "Only a choice question may carry answer_feedback, and each feedback key must name one of its choices.",
+  create_feedback_invalid: "entry.feedback may contain only text under neutral, correct, and incorrect.",
+  create_uuid_invalid: "This question type requires canonical UUID values for its generated category, response, choice, or blank ids.",
+  create_choice_position_invalid: "Each listed choice needs a one-based position that matches its order.",
+  multi_answer_scoring_invalid: "A multiple-answer key needs a non-empty list of unique choice ids from this question.",
+  choice_vary_points_invalid: "VaryPointsByAnswer scoring needs one finite point value for every choice id.",
+  true_false_structure_invalid: "A true-false question needs named true and false choices and a boolean correct value.",
+  categorization_structure_invalid: "A categorization question needs keyed categories and distractors with matching ids and a complete category order.",
+  categorization_scoring_invalid: "Categorization scoring must name every category once and assign each correct distractor id at most once.",
+  matching_structure_invalid: "A matching question needs unique answer text and a body for every prompt.",
+  matching_scoring_value_invalid: "Each matching answer key value must name one unique answer from interaction_data.answers.",
+  matching_edit_data_values_mismatch: "The matching edit data must reproduce each prompt and correct answer, and list every unused answer once as a distractor.",
+  file_upload_structure_invalid: "A file-upload question needs a positive file count, restriction flags, and an empty scoring value.",
+  formula_structure_invalid: "A formula question needs a formula, valid variables, numeric tolerance, and the declared number of generated solutions.",
+  ordering_structure_invalid: "An ordering question needs keyed choices with matching ids and a scoring list that contains every choice once.",
+  hot_spot_structure_invalid: "A hot-spot question needs an unsigned http or https image URL and valid normalized coordinates for its shape.",
+  rich_fill_structure_invalid: "A rich fill-in-the-blank question needs its complete blank list, working body, and word-bank reuse setting when it uses a word bank.",
+  rich_fill_scoring_row_invalid: "Each rich fill-in-the-blank scoring row must use a supported algorithm and complete data for its blank type.",
+  essay_structure_invalid: "An essay question has invalid response settings, word limits, or grading notes.",
 };
 
 /** Every reason token this file can return, so a test can prove each one has a sentence. */

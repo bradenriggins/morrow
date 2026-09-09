@@ -248,7 +248,9 @@ export async function collectMoodleCourseParticipantRoster(input) {
       const cells = [...row.matchAll(/<(?:td|th)\b[^>]*>([\s\S]*?)<\/(?:td|th)\s*>/gi)].map((match) => match[1]);
       const name = cells.length >= 2 ? stableName(decodeHtmlText(cells[1])) : "";
       if (!userId || !name) return { error: "moodle_roster_table_row_invalid" };
-      identities.push({ id: userId, name });
+      const emails = [...new Set(cells.map((cell) => decodeHtmlText(cell)).join(" ").match(/[A-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [])];
+      if (emails.some((email) => email.length > MAX_NAME_CHARS)) return { error: "moodle_roster_table_row_invalid" };
+      identities.push({ id: userId, name, ...(emails.length ? { email: emails[0], aliases: emails.slice(1) } : {}) });
     }
     return { totalRows, identities };
   };

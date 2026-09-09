@@ -5,8 +5,8 @@ import { RETIRED_PHRASES, findRetiredPhrases } from "./lib/retired-claims.mjs";
 
 /**
  * The gate on Morrow's four claim documents. Each test compares a document against the source that
- * makes the claim true — the packages that ship, the files a link points at, the signal list the
- * course audit returns — so a document cannot describe a Morrow that does not exist.
+ * makes the claim true: the packages that ship, the files a link points at, the signal list the
+ * course audit returns. This keeps a document from describing a Morrow that does not exist.
  *
  * Paths resolve from this file, so a scratch copy of the tree can be checked by copying this test
  * and `lib/retired-claims.mjs` into `<copy>/scripts/test/` and running the copy.

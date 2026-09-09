@@ -40,12 +40,12 @@ All request bodies on this surface are **JSON**, not form encoding.
 | Operation | Method and path | Request body | Notes |
 | --- | --- | --- | --- |
 | Create quiz | `POST /api/quiz/v1/courses/{course_id}/quizzes` | `{"quiz": {"title", "instructions"?, "points_possible"?, "quiz_settings"?}}` | `title` is required. The create endpoint does not synthesize item content. |
-| Read quiz | `GET /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}` | — | Returns a New Quiz envelope. It is not a Classic quiz shape. |
-| Delete quiz | `DELETE /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}` | — | |
+| Read quiz | `GET /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}` | None | Returns a New Quiz envelope. It is not a Classic quiz shape. |
+| Delete quiz | `DELETE /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}` | None | |
 | Update quiz settings | `PATCH /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}` | `{"quiz": {"quiz_settings": <complete merged block>}}` | See the merge rule below. |
-| List items | `GET /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}/items` | — | The authoritative direct-item membership list. |
+| List items | `GET /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}/items` | None | The authoritative direct-item membership list. |
 | Add item | `POST /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}/items` | `{"item": {...}}` | |
-| Delete item | `DELETE /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}/items/{item_id}` | — | |
+| Delete item | `DELETE /api/quiz/v1/courses/{course_id}/quizzes/{quiz_id}/items/{item_id}` | None | |
 
 ### 2.1 The quiz_settings merge rule
 
@@ -106,19 +106,19 @@ Canvas's own single-page router frequently collapses the top-level page to a not
 
 | Operation | Method and path | Body | Response |
 | --- | --- | --- | --- |
-| List banks | `GET /api/banks?course_id={course_id}&page={n}` | — | Array of banks. Paged; an empty page ends the walk. |
-| Read bank | `GET /api/banks/{bank_id}` | — | Bank object |
+| List banks | `GET /api/banks?course_id={course_id}&page={n}` | None | Array of banks. Paged; an empty page ends the walk. |
+| Read bank | `GET /api/banks/{bank_id}` | None | Bank object |
 | Create bank | `POST /api/banks` | `{"bank": {"title", "language"}}` (`language` defaults to `en`) | Created bank |
-| List entries | `GET /api/banks/{bank_id}/bank_entries?page={n}` | — | Array of entry rows. Paged. |
-| Read entry | `GET /api/banks/{bank_id}/bank_entries/{bank_entry_id}` | — | Entry row, sometimes carrying the item |
-| Delete entry | `DELETE /api/banks/{bank_id}/bank_entries/{bank_entry_id}` | — | Removes the association only |
+| List entries | `GET /api/banks/{bank_id}/bank_entries?page={n}` | None | Array of entry rows. Paged. |
+| Read entry | `GET /api/banks/{bank_id}/bank_entries/{bank_entry_id}` | None | Entry row, sometimes carrying the item |
+| Delete entry | `DELETE /api/banks/{bank_id}/bank_entries/{bank_entry_id}` | None | Removes the association only |
 | Create item | `POST /api/banks/{bank_id}/items` | `{"item": {...}}` | Created item, with `id` |
-| **Read item** | `GET /api/banks/{bank_id}/items/{item_id}` | — | The item object. This is the exact comparator for an item write. |
+| **Read item** | `GET /api/banks/{bank_id}/items/{item_id}` | None | The item object. This is the exact comparator for an item write. |
 | Update item | `PATCH /api/banks/{bank_id}/items/{item_id}` | `{"item": {...}}` | Updated item |
 | Attach existing item | `POST /api/banks/{bank_id}/bank_entries` | `{"bank_entry": {"bank_id", "entry_type": "Item", "entry_id"}}` | Created entry row |
-| List shares | `GET /api/banks/{bank_id}/shared_banks[?entity_id=&entity_type=]` | — | Array of share rows |
+| List shares | `GET /api/banks/{bank_id}/shared_banks[?entity_id=&entity_type=]` | None | Array of share rows |
 | Share bank | `POST /api/banks/{bank_id}/shared_banks` | `{"shared_bank": {"entity_id", "entityType", "bank_id", "permission"}}` | Created share |
-| Archive bank | `DELETE /api/banks/{bank_id}` | — | **Not a normal operation.** See 3.6. |
+| Archive bank | `DELETE /api/banks/{bank_id}` | None | **Not a normal operation.** See 3.6. |
 
 If a body is supplied under key `item`, it is used as the whole body. Otherwise it is wrapped as `{"item": <body>}`. The same rule applies to bank entries and shares in their own shapes.
 
@@ -257,9 +257,9 @@ Word-bank blanks cannot be mixed with the other kinds. When they are used, `inte
 
 | Condition | Disposition |
 | --- | --- |
-| Permission error raised before send | **failed** — nothing was sent |
-| Typed RPC rejection: invalid parameters, bound-target mismatch, missing mutation authority | **failed** — nothing was sent |
-| HTTP 4xx **except 408 and 429** | **failed** — the provider refused |
+| Permission error raised before send | **failed**: nothing was sent |
+| Typed RPC rejection: invalid parameters, bound-target mismatch, missing mutation authority | **failed**: nothing was sent |
+| HTTP 4xx **except 408 and 429** | **failed**: the provider refused |
 | HTTP 408, 429, any 5xx, transport error, timeout, unreadable response | **indeterminate** |
 
 An indeterminate result is never retried. The harvested recovery text is: the effect may have happened; do not retry; fresh-read the exact bank target and reconcile the durable receipt.
@@ -303,4 +303,4 @@ These Canvas permissions are necessary for Item Bank work: `Item Banks - manage 
 - That `/api/banks` results are scoped to one course. `list_banks` takes a `course_id` and the credential is course-bound, but no route proves that a given bank or entry belongs only to the selected course. `shared_banks` is the closest available course-association evidence and it covers shares only.
 - Any behaviour on a Morrow-connected Canvas tenant. Every route here is described from ExamplePlatform source and its own dated receipts. For Morrow it is **live-unverified** until Morrow observes it against a course the user can access.
 
-**What Morrow has implemented against this contract, as of 7 September 2026.** The routes, bodies and identifier rules of 3.2 and 3.3 are in `connector/extension/src/item-bank-executor.js`, including the item read this document names as the exact comparator for an item write, a share body limited to `entity_type: "course"` and `permission: "read"`, and the rule that a list row is not an item. The credential boundary of 3.1 is enforced by the frame selection in `connector/extension/src/item-bank-frames.js`, and ExamplePlatform's server-side fallback is deliberately absent: a frame that collapses before the request means nothing was sent, and one that collapses after it leaves the result uncertain. The fan-out record of 4.1 to 4.3 is `packages/mcp-server/src/item-bank-fan-out.ts`, under the schema name `morrow.canvas.item-bank.fan-out.v1`, with the in-frame copy `connector/extension/src/item-bank-fan-out.js`; it keeps the distinction of 4.2 by recording an unread source instead of an empty list, and it records a `shared_banks` response as long as the request as unread, because paging that route is not established. The freeze of section 5 is `connector/extension/src/item-bank-guard.js`, planned by `packages/mcp-server/src/item-bank-repair.ts`. That guard is the only way past the hold on the question update, whether the change carries a person's approval or the single Edit category `canvas_item_bank_question_image_alt`, and the sequence is fixed: one item read before, one entry read, one PATCH, one item read after, compared as 7.3 requires, with the dispositions of 7.1 mapped to an uncertain result that is never repeated. The payload rules of section 6 run in the executor before a bank item create or update, applying the media rules to every type and passing an unknown type through to Canvas, and they deliberately do not run on the guarded alternative-text repair. Nothing else here is implemented: the two-phase bank item creation and its receipt (3.4), the extra preflight for share, use and archive (4.4), archive itself (3.6), and every Stimulus behaviour (2.5) have no Morrow equivalent, and those writes stay held. The proof is `scripts/test/canvas-item-bank-executor.test.mjs`, `scripts/test/canvas-item-bank-frames.test.mjs`, `scripts/test/canvas-item-bank-guard.test.mjs`, `scripts/test/canvas-item-bank-fan-out.test.mjs`, `scripts/test/bridge-settings-contract.test.mjs`, `packages/mcp-server/test/item-bank-fan-out.test.ts`, `packages/mcp-server/test/item-bank-repair.test.ts` and `packages/mcp-server/test/item-bank-repair.integration.test.ts`, all passing in this checkout on 7 September 2026 over fixtures Morrow itself defines. The bullet above still holds for every one of them: none of it is evidence about a Canvas tenant.
+**Current Morrow boundary after the 8 September 2026 complete-contract audit.** Morrow has seven admitted reads and nine held owner-write shapes across the private `/api/banks` and quiz-builder surfaces. Bank creation lacks a recoverable course-association transaction. Existing-bank changes lack complete downstream reach. The selected-quiz bank draw lacks durable recovery after a browser worker or process interruption. All nine writes stop before provider I/O. `morrow_plan_item_bank_question_image_alt_repair` depends on the held complete-item update. `morrow_read_item_bank_fan_out` reports observed rows and selected-course quiz uses, stays incomplete, and does not grant authority. Duplicate, standalone item deletion, stimuli, atomic move or copy, tags and search, QTI import, broader sharing, and account administration remain absent. The local fixture tests prove the Morrow boundary only. They do not prove any Canvas tenant behavior, so all 16 private operations remain live-unverified.

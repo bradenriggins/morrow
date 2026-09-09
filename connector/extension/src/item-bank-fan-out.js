@@ -1,10 +1,8 @@
-// An Item Bank is shared machinery: one change to a bank entry reaches every
-// quiz and every course that draws from that bank, including a course nobody
-// opened. Section 4 of
-// docs/research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md makes a
-// complete, fresh, digest-checked and acknowledged fan-out record the
-// precondition for changing an existing bank. This module builds that record
-// and decides whether one may be trusted.
+// An Item Bank is shared machinery. This module records the courses Morrow
+// observed and verifies that a reviewer acknowledged every observed external
+// course. Canvas exposes no authoritative account-wide reverse-use list, so a
+// valid record remains explicit about unread sources and never claims complete
+// reach.
 //
 // The distinction the module exists to hold: "no course draws from this bank"
 // and "nobody enumerated the courses" are different answers, and only the first
@@ -136,13 +134,14 @@ export async function establishFanOut({ bankId, courseId, sources, consumers, un
   const named = normalizeUnreachable(unreachable);
   const normalized = normalizeFanOutConsumers(consumers);
   if (!ENTITY_ID.test(bank) || !COURSE_ID.test(course) || !establishedAt || rows === null || named === null || normalized === null) return null;
-  const unread = [...new Set([...named, ...ITEM_BANK_FAN_OUT_SOURCES.filter((name) => !rows.some((row) => row.name === name && row.exhausted))])].sort(compareText);
+  const unread = [...new Set([...named, "quiz_uses", ...ITEM_BANK_FAN_OUT_SOURCES.filter((name) => !rows.some((row) => row.name === name && row.exhausted))])].sort(compareText);
+  const heldRows = rows.map((row) => row.name === "quiz_uses" ? { ...row, exhausted: false } : row);
   return {
     schema: ITEM_BANK_FAN_OUT_SCHEMA,
     bank_id: bank,
     course_id: course,
     established_at: establishedAt,
-    sources: rows,
+    sources: heldRows,
     unreachable: unread,
     complete: unread.length === 0,
     consumers: normalized,
@@ -163,9 +162,10 @@ export async function validFanOut(record, { bankId, courseId, acknowledgedCourse
   if (record.schema !== ITEM_BANK_FAN_OUT_SCHEMA) return "wrong_schema";
   if (!ENTITY_ID.test(bank) || record.bank_id !== bank) return "bank_mismatch";
   if (!COURSE_ID.test(course) || record.course_id !== course) return "course_mismatch";
-  // A source that was not read is not an empty fan-out, so an incomplete record
-  // never authorises a change however few consumers it lists.
-  if (record.complete !== true || unreadSources(record).length > 0) return "incomplete_unread_source_is_not_an_empty_fan_out";
+  // A complete claim would be false because Canvas exposes no authoritative
+  // account-wide reverse-use list. The record is usable only as an observed
+  // reach disclosure and acknowledgement.
+  if (record.complete !== false || unreadSources(record).length === 0) return "authoritative_reach_claim_refused";
   const consumers = normalizeFanOutConsumers(record.consumers);
   if (consumers === null) return "consumers_invalid";
   if (record.consumer_count !== consumers.length) return "consumer_count_mismatch";

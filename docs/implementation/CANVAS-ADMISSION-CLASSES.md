@@ -27,13 +27,12 @@ quotes it.
 | `cross_course_object_requires_resolution` | A route that names a group, group set, file, folder, outcome, a new appointment group, or a section move, for which no course-ownership reading is declared yet | "Canvas can attach this group, file, folder, calendar item or outcome to any course, and Morrow cannot yet prove that this one belongs to the course you selected. Change it in Canvas, or ask for the same change from inside the course." |
 | `provider_contract_incomplete` | A route that asks Canvas for a sign-in token, a session, or a one-time action, and leaves no field behind to read | "This asks Canvas for a sign-in token, a session or a one-time action, and Canvas keeps nothing afterwards that Morrow can read back to show you what happened. Morrow does not send a change it cannot check, so make this one in Canvas." |
 | `self_scope_not_supported` | `/v1/users/self/bookmarks` and `/v1/users/self/course_nicknames` | "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course." |
-| `item_bank_account_scope_not_course_scope` | Item Bank creation | "A Canvas Item Bank belongs to the account, not to one course, so a bank Morrow creates would not stay inside the selected course." |
-| `item_bank_fan_out_and_guard_required` | The Item Bank question update | "Morrow changes one Item Bank question only through its focused image alternative-text repair. That repair lists every course the bank reaches and asks you to confirm them before it sends the change." |
-| `item_bank_dependency_review_required` | Every other Item Bank mutation | "Existing Item Bank mutations require complete dependency and affected-course evidence that is not yet available." |
-| `course_scope_required` | Everything else: a route with no course in it that names no object a course can own — a personal preference, an Inbox conversation, a poll, a planner item, an ePortfolio, a media object, a person's own account record, or an LTI tool deployment | "Morrow only changes things that live inside the one course you selected, and this change is not attached to any course. Make it in Canvas yourself, or ask for the same change on a page, assignment, file or other item inside the course." |
+| `new_quiz_lifecycle_planner_required` | Raw New Quiz create and delete | "Creating or deleting a New Quiz needs a governed lifecycle planner that freezes the complete request and verifies the saved assignment. Morrow does not offer this raw change." |
+| `course_scope_required` | Everything else: a route with no course in it that names no object a course can own: a personal preference, an Inbox conversation, a poll, a planner item, an ePortfolio, a media object, a person's own account record, or an LTI tool deployment | "Morrow only changes things that live inside the one course you selected, and this change is not attached to any course. Make it in Canvas yourself, or ask for the same change on a page, assignment, file or other item inside the course." |
 
 `canvasOperationAdmission` reads these classes in order, from the most specific fact about the route
-to the least: the Item Bank service, then account authority, then a course-scoped upload pre-flight,
+to the least: account authority, then a course-scoped upload pre-flight,
+then New Quiz lifecycle holds,
 then a personal bookmark or nickname, then one person's own record, then an object Canvas can attach
 to any course, then a request with no readable effect, and last the plain absence of a course. The
 order matters where two facts are true of one route: a group membership route names both a person's
@@ -46,6 +45,17 @@ The sentence for a held write is published in the tool capability
 (`profiles["public-canvas"].reason` and `evidence.admission.reason`,
 `packages/canvas-api-catalog/src/index.ts`) and shown beside the action in the extension Edit
 permission list (`connector/extension/src/edit-policy.js`, `connector/extension/settings/settings.js`).
+
+## Item Bank course targets
+
+Every private Item Bank write carries a selected `course_id`, so
+`canvasOperationAdmission` records a direct course target. The course id is an
+authority control and is not inserted into the private API path. All nine writes
+remain held. Bank creation lacks a recoverable create-and-course-associate
+transaction. Existing-bank changes lack complete downstream reach. The quiz bank
+draw lacks durable recovery after a browser worker or process interruption. The
+incomplete fan-out reader is review context only and never supplies or expands
+authority.
 
 ## The account authority class
 

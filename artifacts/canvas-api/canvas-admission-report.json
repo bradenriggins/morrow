@@ -1,18 +1,18 @@
 {
   "schema": "morrow.canvas-admission-report.v1",
-  "catalogDigest": "dd3346914d9e7fba922b490b17d4a6da89e2133adb158a50f5882956c4212597",
+  "catalogDigest": "378ece3ab8c7198447d6aee849b294f671890c861c43cf5bf1475cea493c2686",
   "totals": {
-    "operations": 1132,
-    "reads": 570,
-    "writes": 562
+    "operations": 1137,
+    "reads": 571,
+    "writes": 566
   },
   "admission": {
-    "admitted": 235,
+    "admitted": 245,
     "admittedByCourseTargetKind": {
-      "course_path": 219,
+      "course_path": 229,
       "semantic_course_object": 16
     },
-    "held": 327,
+    "held": 321,
     "heldByReason": {
       "account_authority_required": 117,
       "course_scope_required": 100,
@@ -20,10 +20,8 @@
       "learner_scope_requires_separate_authority": 36,
       "provider_contract_incomplete": 9,
       "self_scope_not_supported": 6,
-      "item_bank_dependency_review_required": 5,
       "multi_step_upload_requires_reviewed_transfer": 4,
-      "item_bank_account_scope_not_course_scope": 1,
-      "item_bank_fan_out_and_guard_required": 1
+      "duplicate_assignment_exact_readback_unavailable": 1
     },
     "heldByRouteFamily": {
       "accounts": 105,
@@ -32,11 +30,10 @@
       "sections": 19,
       "polls": 10,
       "conversations": 8,
-      "api/banks": 7,
       "global": 7,
+      "courses": 5,
       "folders": 5,
       "group_categories": 5,
-      "courses": 4,
       "calendar_events": 3,
       "developer_keys": 3,
       "eportfolios": 3,
@@ -69,8 +66,8 @@
   },
   "readback": {
     "stateCounts": {
-      "structurally_exact": 149,
-      "unavailable": 63,
+      "structurally_exact": 163,
+      "unavailable": 59,
       "blocked": 23,
       "unconfirmed": 0
     },
@@ -88,8 +85,9 @@
       "exact": 101,
       "created_child": 37,
       "parent_collection": 9,
+      "executor": 14,
       "mismatched": 2,
-      "none": 86
+      "none": 82
     },
     "namedReadbackTools": [
       "canvas_bulk_update_assignment_dates",
@@ -113,7 +111,6 @@
       "canvas_complete_quiz_submission_turn_it_in",
       "canvas_create_feedback_on_conversation_message",
       "canvas_create_or_update_events_directly_for_course_timetable",
-      "canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post",
       "canvas_create_rubricassociation",
       "canvas_create_score",
       "canvas_create_single_rubric_assessment",
@@ -124,7 +121,6 @@
       "canvas_delete_submission_comment",
       "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis",
       "canvas_disable_summary_courses",
-      "canvas_duplicate_assignment",
       "canvas_duplicate_discussion_topic_courses",
       "canvas_duplicate_page",
       "canvas_edit_external_tool_courses",
@@ -169,13 +165,11 @@
       "canvas_select_provisional_grade",
       "canvas_send_annotation_notification",
       "canvas_send_message_to_unsubmitted_or_submitted_users_for_quiz",
-      "canvas_set_course_level_accommodations",
       "canvas_set_extensions_for_student_assignment_submissions",
       "canvas_set_extensions_for_student_quiz_submissions_course_id_quizzes_quiz_id_extensions_post",
       "canvas_set_extensions_for_student_quiz_submissions_v1_courses_course_id_quiz_extensions_post",
       "canvas_set_or_remove_restrictions_on_blueprint_course_object",
       "canvas_set_outcome_ordering_for_lmgb",
-      "canvas_set_quiz_level_accommodations",
       "canvas_set_usage_rights_courses",
       "canvas_submit_assignment_courses",
       "canvas_subscribe_to_topic_courses",

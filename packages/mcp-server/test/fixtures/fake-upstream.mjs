@@ -125,7 +125,7 @@ function createServer() {
     );
   }
 
-  const internalNames = ["morrow_browser_edit_policy_set"];
+  const internalNames = ["morrow_browser_edit_policy_set", "morrow_private_chat_exchange"];
   if (process.env.FAKE_INTERNAL_BRIDGE_MAINTENANCE === "1") {
     internalNames.push("morrow_bridge_maintenance");
   }

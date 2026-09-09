@@ -50,7 +50,12 @@ function structuralArguments(operation) {
 const STRUCTURAL_RESPONSE = Object.freeze({ id: "1", page_id: "1", rubric_id: "1", url: "morrow-structural-target" });
 
 /** How the planned read relates to the written object. Anything else reads a different resource. */
-function readbackRouteTier(operation, plan) {
+function readbackRouteTier(executorOwned, operation, plan) {
+  // A readback the reviewed executor owns is exact and is not the planner's, so
+  // it is its own tier rather than an absent route. The contract decides which
+  // operations those are, so this report and the readback assessment can never
+  // disagree about it.
+  if (executorOwned) return "executor";
   if (!plan) return "none";
   const write = normalizedRoute(operation.path);
   const read = normalizedRoute(plan.readOperation.path);
@@ -77,7 +82,7 @@ function withFixedKeys(keys, counts) {
 }
 
 function buildCanvasAdmissionReport(catalog, contract) {
-  const { canvasOperationAdmission, canvasReadbackAssessment, hasNamedCanvasReadback, planBrowserReadback } = contract;
+  const { canvasExecutorOwnedReadback, canvasOperationAdmission, canvasReadbackAssessment, hasNamedCanvasReadback, planBrowserReadback } = contract;
   const operations = catalog.operations;
   const writes = operations.filter((operation) => !operation.readOnly);
   const admittedByCourseTargetKind = {};
@@ -106,8 +111,9 @@ function buildCanvasAdmissionReport(catalog, contract) {
     if (assessment.state === "blocked") increment(readbackBlockers, assessment.reason);
     if (assessment.state !== "structurally_exact") withoutExactReadback.push(operation.toolName);
     if (hasNamedCanvasReadback(operation)) namedReadbacks.push(operation.toolName);
-    const plan = planBrowserReadback(operations, operation, structuralArguments(operation), STRUCTURAL_RESPONSE);
-    const tier = readbackRouteTier(operation, plan);
+    const executorOwned = canvasExecutorOwnedReadback(operation);
+    const plan = executorOwned ? null : planBrowserReadback(operations, operation, structuralArguments(operation), STRUCTURAL_RESPONSE);
+    const tier = readbackRouteTier(executorOwned, operation, plan);
     increment(routeTiers, tier);
     if (tier === "mismatched") mismatchedPlans.push(operation.toolName);
   }
@@ -131,7 +137,7 @@ function buildCanvasAdmissionReport(catalog, contract) {
     readback: {
       stateCounts: withFixedKeys(["structurally_exact", "unavailable", "blocked", "unconfirmed"], readbackStates),
       blockedByReason: byCountThenName(readbackBlockers),
-      routeTierCounts: withFixedKeys(["exact", "created_child", "parent_collection", "mismatched", "none"], routeTiers),
+      routeTierCounts: withFixedKeys(["exact", "created_child", "parent_collection", "executor", "mismatched", "none"], routeTiers),
       namedReadbackTools: [...namedReadbacks].sort(),
       mismatchedPlanTools: [...mismatchedPlans].sort(),
       admittedWritesWithoutExactReadback: [...withoutExactReadback].sort(),

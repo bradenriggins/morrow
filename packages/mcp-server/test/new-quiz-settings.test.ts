@@ -18,9 +18,11 @@ const input = { source_binding_id: sourceBindingId, course_id: "42", quiz_id: "7
 const current = {
   id: "77", course_id: "42", title: "Cell Structure Check",
   quiz_settings: {
-    shuffle_answers: false, student_access_code: "cells", session_time_limit_in_seconds: 600,
-    result_view_settings: { display_items: true, display_item_correct_answer: false },
-    multiple_attempts: { multiple_attempts_enabled: true, max_attempts: 3 },
+    shuffle_answers: false, require_student_access_code: true, student_access_code: "cells",
+    has_time_limit: true, session_time_limit_in_seconds: 600, filter_ip_address: true,
+    result_view_settings: { display_items: true, display_item_response: true,
+      display_item_response_correctness: true, display_item_correct_answer: false },
+    multiple_attempts: { multiple_attempts_enabled: true, attempt_limit: true, max_attempts: 3 },
     filters: { ips: [["192.0.2.1", "192.0.2.2"]] },
     provider_extension: { "2": "two", "10": "ten" },
   },
@@ -102,7 +104,8 @@ describe("New Quiz settings planner", () => {
       const listed = (await client.listTools()).tools.find((entry) => entry.name === "morrow_plan_new_quiz_settings");
       expect(listed?.annotations?.readOnlyHint).toBe(true);
       const result = await client.callTool({ name: "morrow_plan_new_quiz_settings", arguments: { ...input,
-        settings: { shuffle_answers: true, student_access_code: null, filters: { ips: [] }, result_view_settings: { display_item_correct_answer: true } } } });
+        settings: { shuffle_answers: true, require_student_access_code: false, student_access_code: null,
+          filter_ip_address: false, filters: { ips: null }, result_view_settings: { display_item_correct_answer: true } } } });
       expect(result.isError, JSON.stringify(result)).not.toBe(true);
       expect(result.structuredContent).toMatchObject({ operationId: "operation:settings", effectState: "awaiting_approval",
         settings_plan: { course: { id: "42" }, quiz: { id: "77" }, preserved_settings: expect.arrayContaining(["multiple_attempts.max_attempts", "result_view_settings.display_items"]) } });
@@ -113,7 +116,9 @@ describe("New Quiz settings planner", () => {
       const dispatched = await execute(plans[0]!.args);
       expect(dispatched.result).toMatchObject({ ok: true, verification: { status: "verified" } });
       expect(dispatched.writes).toEqual([{ quiz: { quiz_settings: { ...current.quiz_settings, shuffle_answers: true,
-        student_access_code: null, filters: { ips: [] }, result_view_settings: { display_items: true, display_item_correct_answer: true } } } }]);
+        require_student_access_code: false, student_access_code: null, filter_ip_address: false, filters: { ips: null },
+        result_view_settings: { display_items: true, display_item_response: true,
+          display_item_response_correctness: true, display_item_correct_answer: true } } } }]);
     } finally { await client.close(); await server.close(); }
   });
 
@@ -137,6 +142,72 @@ describe("New Quiz settings planner", () => {
       const { runtime, plans } = fixture();
       expect((await planNewQuizSettings(runtime, { ...input, settings })).isError).toBe(true);
       expect(plans).toEqual([]);
+    }
+  });
+
+  it("rejects invalid enums, ranges, dates, and dependent settings before review", async () => {
+    const cases: readonly [JsonObject, string][] = [
+      [{ calculator_type: "graphing" }, "calculator_type"],
+      [{ one_at_a_time_type: "page" }, "one_at_a_time_type"],
+      [{ session_time_limit_in_seconds: 0 }, "positive whole number"],
+      [{ filters: { ips: [] } }, "filters.ips"],
+      [{ filters: { ips: [["x", "y"]] } }, "filters.ips"],
+      [{ multiple_attempts: { score_to_keep: "best" } }, "score_to_keep"],
+      [{ result_view_settings: { display_item_response_qualifier: "sometimes" } }, "unsupported value"],
+      [{ result_view_settings: { show_item_responses_at: "tomorrow" } }, "Canvas date and time"],
+      [{ result_view_settings: { show_item_responses_at: "2026-09-08" } }, "Canvas date and time"],
+      [{ allow_backtracking: true, one_at_a_time_type: "none" }, "one_at_a_time_type is question"],
+      [{ filter_ip_address: true, filters: { ips: null } }, "IP filtering needs"],
+      [{ has_time_limit: true, session_time_limit_in_seconds: null }, "A time limit needs"],
+      [{ require_student_access_code: true, student_access_code: null }, "An access code needs"],
+      [{ has_time_limit: false }, "Set session_time_limit_in_seconds to null"],
+      [{ require_student_access_code: false }, "Set student_access_code to null"],
+      [{ filter_ip_address: false }, "Set filters.ips to null"],
+      [{ multiple_attempts: { multiple_attempts_enabled: false } }, "Clear active attempt limit and cooling settings"],
+      [{ multiple_attempts: { attempt_limit: false } }, "Set multiple_attempts.max_attempts to null"],
+      [{ multiple_attempts: { multiple_attempts_enabled: false, attempt_limit: true, max_attempts: 2 } }, "multiple_attempts_enabled true"],
+      [{ multiple_attempts: { cooling_period: true, cooling_period_seconds: null } }, "A cooling period needs"],
+      [{ result_view_settings: { display_items: false } }, "Disable item feedback, response, and correctness settings"],
+      [{ result_view_settings: { display_item_response: false } }, "Clear response times and disable correctness"],
+      [{ result_view_settings: { display_items: false, display_item_feedback: true } }, "display_items true"],
+      [{ result_view_settings: { display_item_response: false, display_item_response_correctness: true } }, "display_item_response true"],
+      [{ result_view_settings: { display_item_response_correctness: false, display_item_correct_answer: true } }, "display_item_response_correctness true"],
+      [{ result_view_settings: { result_view_restricted: false, display_points_awarded: true } }, "result_view_restricted true"],
+      [{ result_view_settings: { show_item_responses_at: "2026-09-08T12:00:00Z", hide_item_responses_at: "2026-09-08T12:00:00Z" } }, "hide time must be later"],
+      [{ result_view_settings: { show_item_response_correctness_at: "2026-09-09T12:00:00Z", hide_item_response_correctness_at: "2026-09-08T12:00:00Z" } }, "hide time must be later"],
+    ];
+    for (const [settings, reason] of cases) {
+      const { runtime, plans } = fixture();
+      const result = await planNewQuizSettings(runtime, { ...input, settings });
+      expect(result.isError, JSON.stringify({ settings, result })).toBe(true);
+      expect(JSON.stringify(result), JSON.stringify(settings)).toContain(reason);
+      expect(plans).toEqual([]);
+    }
+    const activeCorrectAnswer = structuredClone(current);
+    activeCorrectAnswer.quiz_settings.result_view_settings.display_item_correct_answer = true;
+    const { runtime, plans } = fixture(activeCorrectAnswer);
+    const result = await planNewQuizSettings(runtime, { ...input,
+      settings: { result_view_settings: { display_item_response_correctness: false } } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain("disable correct-answer display");
+    expect(plans).toEqual([]);
+  });
+
+  it("accepts atomic parent disable clears, null result dates, and ordered visibility windows", async () => {
+    const cases: JsonObject[] = [
+      { has_time_limit: false, session_time_limit_in_seconds: null },
+      { require_student_access_code: false, student_access_code: null },
+      { filter_ip_address: false, filters: { ips: null } },
+      { multiple_attempts: { multiple_attempts_enabled: false, attempt_limit: false, max_attempts: null } },
+      { result_view_settings: { display_item_response_correctness: false, display_item_correct_answer: false,
+        show_item_response_correctness_at: null, hide_item_response_correctness_at: null } },
+      { result_view_settings: { show_item_responses_at: "2026-09-08T12:00:00Z", hide_item_responses_at: "2026-09-09T12:00:00Z" } },
+    ];
+    for (const settings of cases) {
+      const { runtime, plans } = fixture();
+      const result = await planNewQuizSettings(runtime, { ...input, settings });
+      expect(result.isError, JSON.stringify({ settings, result })).not.toBe(true);
+      expect(plans).toHaveLength(1);
     }
   });
 

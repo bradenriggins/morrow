@@ -113,6 +113,47 @@ function canvasPrivateAttachment() {
 }
 
 describe("CanvasConnectorRuntime", () => {
+  it("relays only the strict protected Private chat result over a local Bridge command", async () => {
+    const runtime = await start();
+    const socket = sockets.at(-1)!;
+    socket.on("message", (raw) => {
+      const value = parseBridgeJson(raw.toString()) as { schema?: string };
+      if (value.schema !== BRIDGE_SCHEMAS.command) return;
+      const command = value as BridgeCommand;
+      expect(command.kind).toBe("private_chat_exchange");
+      expect(command.toolName).toBeUndefined();
+      expect(command.arguments).toEqual({
+        schema: "morrow.private-chat.exchange.v1",
+        action: "listen",
+        sessionId: "session:private-chat-1",
+        assistantName: "Codex",
+      });
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.result,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: command.requestId,
+        operationId: command.operationId,
+        generation: command.generation,
+        ok: true,
+        result: {
+          schema: "morrow.private-chat.exchange.v1",
+          status: "message",
+          sessionId: "session:private-chat-1",
+          sourceBindingId: "canvas:test-account",
+          courseId: "42",
+          protectedText: "Review Student A1.",
+        },
+        completedAt: Date.now(),
+      }));
+    });
+    await expect(runtime.privateChatExchange({
+      schema: "morrow.private-chat.exchange.v1",
+      action: "listen",
+      sessionId: "session:private-chat-1",
+      assistantName: "Codex",
+    })).resolves.toMatchObject({ status: "message", protectedText: "Review Student A1." });
+  });
+
   it("routes private Bridge maintenance outside the course catalog", async () => {
     const runtime = await start([]);
     const socket = sockets.at(-1)!;
@@ -827,10 +868,7 @@ describe("CanvasConnectorRuntime", () => {
     expect(calls).toBe(1);
   });
 
-  // The one Item Bank write with an Edit path. connector/extension/src/item-bank-guard.js holds the
-  // contract; this boundary only refuses an Item Bank write that carries no guard, or one whose
-  // guard names another course, so nothing unguarded reaches the bridge.
-  it("forwards only a guarded Item Bank question repair for the selected course", async () => {
+  it("holds legacy Item Bank guard calls before provider I/O", async () => {
     const runtime = await start();
     const socket = sockets.at(-1)!;
     const guard = {
@@ -868,13 +906,13 @@ describe("CanvasConnectorRuntime", () => {
       item_id: "501",
       morrow_item_bank_guard: guard,
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: outerGrant },
-    })).toMatchObject({ ok: true });
-    expect(calls).toBe(1);
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_binding_course_mismatch" } });
+    expect(calls).toBe(0);
     expect(await runtime.call("canvas_item_bank_update_item", {
       bank_id: "91",
       item_id: "501",
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: outerGrant },
-    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "item_bank_fan_out_and_guard_required" } });
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_binding_course_mismatch" } });
     expect(await runtime.call("canvas_item_bank_update_item", {
       bank_id: "91",
       item_id: "501",
@@ -885,8 +923,8 @@ describe("CanvasConnectorRuntime", () => {
       bank_id: "91",
       morrow_item_bank_guard: guard,
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: outerGrant },
-    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "item_bank_dependency_review_required" } });
-    expect(calls).toBe(1);
+    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_binding_course_mismatch" } });
+    expect(calls).toBe(0);
   });
 
   it("refuses writes without an outer grant and dispatches one granted write", async () => {
@@ -937,10 +975,10 @@ describe("CanvasConnectorRuntime", () => {
     expect(calls).toBe(1);
     const held = runtime.catalog.operations.find((operation) => operation.service === "item_bank" && operation.nickname === "update_item")!;
     expect(await runtime.call(held.toolName, { bank_id: "91", item_id: "501", item: { title: "Updated" } }))
-      .toMatchObject({ ok: false, problem: { code: "item_bank_fan_out_and_guard_required" } });
+      .toMatchObject({ ok: false, problem: { code: "course_binding_required" } });
     const attach = runtime.catalog.operations.find((operation) => operation.service === "item_bank" && operation.nickname === "attach_item")!;
     expect(await runtime.call(attach.toolName, { bank_id: "91", entry_id: "501" }))
-      .toMatchObject({ ok: false, problem: { code: "item_bank_dependency_review_required" } });
+      .toMatchObject({ ok: false, problem: { code: "course_binding_required" } });
     expect(calls).toBe(1);
   });
 

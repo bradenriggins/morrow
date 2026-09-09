@@ -179,23 +179,27 @@ describe("Canvas connector gateway path", () => {
      * every read, hash and bridge frame in this file.
      */
     const repeatedBody = `<p>${"Explain the process. ".repeat(100)}</p>`;
+    const choiceA = "11111111-1111-4111-8111-111111111111";
+    const choiceB = "22222222-2222-4222-8222-222222222222";
+    const missingChoice = "33333333-3333-4333-8333-333333333333";
     const quizItems = [
       { id: "1", position: 1, points_possible: 5, entry_type: "Item", entry: {
         title: "Cell structure", item_body: "Which structure contains DNA?", interaction_type_slug: "choice",
-        interaction_data: { choices: [{ id: "a", item_body: "Nucleus" }, { id: "b", itemBody: "Membrane" }] },
-        scoring_data: { value: "missing-choice" },
+        interaction_data: { choices: [{ id: choiceA, position: 1, item_body: "Nucleus" }, { id: choiceB, position: 2, itemBody: "Membrane" }] },
+        scoring_data: { value: missingChoice }, scoring_algorithm: "Equivalence",
       } },
       { id: "2", position: 2, points_possible: 5, entry_type: "Item", entry: {
         title: "Cell statement", item_body: "Cells have membranes.", interaction_type_slug: "true-false",
-        interaction_data: { true_choice: "True", false_choice: "False" }, scoring_data: { value: false },
+        interaction_data: { true_choice: "True", false_choice: "False" }, scoring_data: { value: false }, scoring_algorithm: "Equivalence",
       } },
       { id: "3", position: 3, points_possible: 5, entry_type: "Item", entry: {
         title: "Cell parts", item_body: "Choose two cell parts.", interaction_type_slug: "multi-answer",
-        interaction_data: { choices: [{ id: "a", item_body: "Nucleus" }, { id: "b", item_body: "Membrane" }] },
-        scoring_data: { value: ["a", "b"] },
+        interaction_data: { choices: [{ id: choiceA, position: 1, item_body: "Nucleus" }, { id: choiceB, position: 2, item_body: "Membrane" }] },
+        scoring_data: { value: [choiceA, choiceB] }, scoring_algorithm: "AllOrNothing",
       } },
       { id: "4", position: 4, points_possible: 5, entry_type: "Item", entry: {
         title: "Written explanation", item_body: repeatedBody, interaction_type_slug: "essay",
+        interaction_data: { rce: true, essay: null, word_count: true, file_upload: false, spell_check: true, word_limit_enabled: false }, scoring_data: { value: "" }, scoring_algorithm: "None",
       } },
     ];
     const pageInput = { source_binding_id: sourceBindingId, course_id: "42", page_url: "lesson", find_text: "Cells have membranes.", replace_text: "Cells have protective membranes." };
@@ -381,8 +385,8 @@ describe("Canvas connector gateway path", () => {
       const checked = await checkNewQuiz(runtime, checkInput);
       expect(checked.structuredContent).toMatchObject({
         status: "needs_attention", course: { name: "Biology" }, findingCount: 3, repeatedGroupCount: 1,
-        quizzes: [{ name: "Cell Structure Check", directQuestionCount: 4, directQuestionPoints: 20, totalsComplete: true, answerSettingsChecked: 3 }, { name: "Practice quiz", directQuestionCount: 1 }],
-        findings: [{ question: "Cell structure", message: "The saved correct answer does not match the answer choices." }, { message: "Expected 5 questions; found 4." }, { message: "Expected 25 question points; found 20." }],
+        quizzes: [{ name: "Cell Structure Check", directQuestionCount: 4, directQuestionPoints: 20, totalsComplete: true, questionContractsChecked: 4 }, { name: "Practice quiz", directQuestionCount: 1, questionContractsChecked: 1 }],
+        findings: [{ question: "Cell structure", message: "The answer key names a choice this question does not have. Every value in entry.scoring_data has to be one of the choice ids." }, { message: "Expected 5 questions; found 4." }, { message: "Expected 25 question points; found 20." }],
         repeatedContent: [[{ quiz: "Cell Structure Check", question: "Written explanation" }, { quiz: "Practice quiz", question: "Written explanation" }]],
         incomplete: [],
       });
@@ -595,10 +599,14 @@ describe("Canvas connector gateway path", () => {
         ]),
       });
       expect(writeCommands).toBe(3);
-      const operationEgress = await runtime.redactMcpEgress(dispatched, { operation_id: id }, { bound: false });
+      const unboundEgress = await runtime.redactMcpEgress(dispatched, { operation_id: id }, { bound: false });
+      expect(unboundEgress).toMatchObject({ isError: true, structuredContent: { code: "learner_roster_binding_unavailable" } });
+      const operationEgress = await runtime.redactMcpEgress(dispatched, {
+        operation_id: id, course_id: "42", _morrow: { source_binding_id: sourceBindingId },
+      }, { bound: false });
       expect(JSON.stringify(operationEgress)).not.toContain("Jane Doe");
       expect(JSON.stringify(operationEgress)).not.toContain("jane.doe@example.edu");
-      expect(JSON.stringify(operationEgress)).toMatch(/learner_[\w-]+/);
+      expect(JSON.stringify(operationEgress)).toMatch(/Student A[1-9][0-9]*/);
     }, CASE_TIMEOUT_MS);
 
     it("plans a private Canvas Inbox message from a learner token and keeps it out of every public list", async () => {
@@ -621,7 +629,7 @@ describe("Canvas connector gateway path", () => {
         morrow_max_pages: 50,
         _morrow: { source_binding_id: sourceBindingId },
       });
-      const learnerToken = /learner_[A-Za-z0-9_-]+/.exec(JSON.stringify(roster))?.[0];
+      const learnerToken = /Student A[1-9][0-9]*/.exec(JSON.stringify(roster))?.[0];
       expect(learnerToken).toBeTruthy();
       const [plannerClientTransport, plannerServerTransport] = InMemoryTransport.createLinkedPair();
       const plannerServer = serveStdio(() => createFullMorrowServer(morrow), { transport: plannerServerTransport });

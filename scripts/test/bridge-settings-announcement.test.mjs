@@ -36,11 +36,25 @@ test("the tag reader finds the attributes the settings page really ships", () =>
   assert.equal(elements(settingsHtml).filter((node) => "id" in node.attributes).length, settingsHtml.match(/\sid="/g).length);
 });
 
-test("the settings page announces through one polite status region plus one alert", () => {
+// The page has exactly one status region, one alert, and one log. The Private Chat transcript is
+// a log because it is a running conversation, not a status: a screen reader reads each new message
+// as it arrives without re-reading the page state. Nothing else may announce, so a result a person
+// asked for is never buried under a re-render of a list or a state line.
+test("the settings page announces through one polite status region, one alert, and one chat log", () => {
   const live = elements(settingsHtml).filter((node) => "aria-live" in node.attributes);
-  assert.deepEqual(live.map((node) => [node.attributes.id, node.attributes["aria-live"], node.attributes.role]), [["announcement", "polite", "status"]]);
-  const regions = elements(settingsHtml).filter((node) => node.attributes.role === "status" || node.attributes.role === "alert");
-  assert.deepEqual(regions.map((node) => [node.attributes.id, node.attributes.role]), [["error", "alert"], ["announcement", "status"]]);
+  assert.deepEqual(live.map((node) => [node.attributes.id, node.attributes["aria-live"], node.attributes.role]), [
+    ["announcement", "polite", "status"],
+    ["private-chat-history", "polite", "log"],
+  ]);
+  const regions = elements(settingsHtml).filter((node) => ["status", "alert", "log"].includes(node.attributes.role));
+  assert.deepEqual(regions.map((node) => [node.attributes.id, node.attributes.role]), [
+    ["error", "alert"],
+    ["announcement", "status"],
+    ["private-chat-history", "log"],
+  ]);
+  // The Private Chat state line is rewritten on every render, so it must not be a live region.
+  assert.equal(nodeById("private-chat-status").attributes.role, undefined);
+  assert.equal("aria-live" in nodeById("private-chat-status").attributes, false);
 });
 
 test("no settings collection or in-place status line is its own live region", () => {
@@ -176,7 +190,7 @@ test("the one status region carries the course-list summary and every notice", a
     assert.match(nodes["#announcement"].textContent, /^Course file access is on\./);
 
     for (const selector of Object.keys(nodes)) {
-      assert.equal("aria-live" in nodes[selector].attributes, selector === "#announcement", selector);
+      assert.equal("aria-live" in nodes[selector].attributes, ["#announcement", "#private-chat-history"].includes(selector), selector);
     }
   } finally {
     delete globalThis.document;

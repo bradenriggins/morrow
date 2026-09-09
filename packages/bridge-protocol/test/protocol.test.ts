@@ -11,7 +11,9 @@ import {
   normalizeBridgePrivateAttachment,
   normalizeBridgePrivateConversation,
   normalizeBridgeBindings,
+  parseBridgeClientMessage,
   parseBridgeHello,
+  parseBridgeResult,
   serializeBridgeMessage,
   splitBridgeCallArguments,
 } from "../src/index.js";
@@ -123,6 +125,49 @@ function canonicalPageTextBinding() {
 }
 
 describe("bridge protocol", () => {
+  it("rejects ambiguous or extended client envelopes", () => {
+    const result = {
+      schema: BRIDGE_SCHEMAS.result,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      requestId: "request:strict-result-1",
+      operationId: "operation:strict-result-1",
+      generation: 1,
+      ok: true,
+      result: { ok: true },
+      completedAt: 1,
+    };
+    expect(parseBridgeResult(result)).toMatchObject({ ok: true, result: { ok: true } });
+    expect(() => parseBridgeResult({
+      ...result,
+      problem: { schema: "morrow.bridge.problem.v1", code: "unexpected", message: "Unexpected", recoverable: false },
+    })).toThrow("cannot include a problem");
+    expect(() => parseBridgeResult({ ...result, trusted: true })).toThrow("invalid schema");
+    expect(() => parseBridgeResult({
+      ...result,
+      ok: false,
+      result: undefined,
+      problem: { schema: "morrow.bridge.problem.v1", code: "failed", message: "Failed", recoverable: false, trusted: true },
+    })).toThrow("invalid schema");
+    expect(() => parseBridgeHello({
+      schema: BRIDGE_SCHEMAS.hello,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      token: "x".repeat(48),
+      extensionId: "a".repeat(32),
+      runtimeRevision: "revision-1",
+      catalogDigest: digest,
+      bindings: [],
+      sentAt: 1,
+      trusted: true,
+    })).toThrow("invalid schema");
+    expect(() => parseBridgeClientMessage({
+      schema: BRIDGE_SCHEMAS.pong,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      generation: 1,
+      sentAt: 1,
+      trusted: true,
+    })).toThrow("unsupported fields");
+  });
+
   it("admits only exact private Bridge maintenance controls", () => {
     expect(normalizeBridgeMaintenanceControl({ action: "quiesce" })).toEqual({ action: "quiesce" });
     expect(normalizeBridgeMaintenanceControl({

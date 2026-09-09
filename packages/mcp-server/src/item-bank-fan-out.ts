@@ -1,4 +1,5 @@
 import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { normalizeBridgeBindings, type BridgeBinding } from "@morrow/bridge-protocol";
 import { isJsonObject, sha256Json, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
@@ -21,21 +22,38 @@ type FanOutRuntime = Pick<GatewayRuntime, "searchCatalog" | "capabilityGet" | "c
 
 /** Mirrors ITEM_BANK_FAN_OUT_SCHEMA in connector/extension/src/item-bank-fan-out.js. */
 const FAN_OUT_SCHEMA = "morrow.canvas.item-bank.fan-out.v1";
+const FAN_OUT_RECEIPT_SECRET = randomBytes(32);
 /** Mirrors ITEM_BANK_FAN_OUT_SOURCES. The order is the order the record lists them in. */
 const FAN_OUT_SOURCES = ["bank_entries", "shared_banks", "quiz_uses"] as const;
 type SourceName = (typeof FAN_OUT_SOURCES)[number];
+
+function fanOutReceipt(record: JsonObject, sourceBindingId: string): string {
+  return createHmac("sha256", FAN_OUT_RECEIPT_SECRET)
+    .update(sourceBindingId).update("\0").update(sha256Json(record)).digest("hex");
+}
+
+/** A process-local proof that this exact record came from the fresh-read tool. */
+export function validItemBankFanOutReceipt(
+  record: unknown,
+  receipt: unknown,
+  sourceBindingId: unknown,
+): boolean {
+  if (!isJsonObject(record) || typeof receipt !== "string" || !/^[0-9a-f]{64}$/.test(receipt)
+    || typeof sourceBindingId !== "string" || !sourceBindingId) return false;
+  const expected = fanOutReceipt(record, sourceBindingId);
+  return timingSafeEqual(Buffer.from(receipt, "hex"), Buffer.from(expected, "hex"));
+}
 
 /** Bank-entry pages one call may walk. Exceeding the budget is an unread source, not a truncation. */
 const ENTRY_PAGE_BUDGET = 25;
 /** New Quiz list pages one call may walk. */
 const QUIZ_PAGE_BUDGET = 25;
-/** Share rows one response may carry. A response this long may be one page of more. */
-const SHARE_PER_PAGE = 100;
 /** Quizzes whose items one call reads across all selected courses. */
 const MAX_QUIZ_ITEM_READS = 200;
 /** Distinct reasons one unread source reports before it says only that there are more. */
 const MAX_UNREAD_REASONS = 8;
 const MORE_UNREAD_REASONS = "More of this source could not be read than is listed here.";
+const QUIZ_USES_UNPROVABLE = "Canvas provides no authoritative route that enumerates every editable course and every New Quiz that uses this item bank. An item bank owned by the current user can be used in an unselected course without a share row.";
 
 /** The New Quiz entry types Canvas documents. `course-inventory.ts` keeps the same list. */
 const BANK_DRAW_ENTRY_TYPES = new Set(["BankEntry", "Bank", "BankItem"]);
@@ -44,12 +62,14 @@ const BANK_ID_KEYS = ["bank_id", "item_bank_id", "bankId", "itemBankId"];
 const BANK_OBJECT_KEYS = ["bank", "item_bank"];
 
 const limits = Object.freeze([
-  "No Canvas route lists the quizzes that draw from an item bank. Morrow enumerates the selected course and the connected courses requested in quiz_use_course_ids. It cannot prove quiz use outside those courses.",
+  "No Canvas route lists every editable course or every New Quiz that draws from an item bank. Morrow can inspect the selected and requested connected courses, but those observations can never prove use outside that set.",
+  "An item bank owned by the current user can be used in an unselected course without a share row. An empty share list is therefore not proof that the selected course is the bank's only use.",
   "Each requested course is read through its own verified connection on the same Canvas site and account. Every course named by a bank share must be included. A missing connection, incomplete read, or changed context leaves quiz use unread.",
   "A share row names one course. A bank shared with an account can reach courses that no share row names, so Morrow records that source as unread instead of counting the rows it can see.",
+  "Canvas Item Bank share pagination is not established. Morrow records rows from one unpaged response as observations, never as a complete share list.",
   "A bank entry names an item, not a course, so bank entries add no course to this record. They are walked to show that the bank itself was read to its end.",
-  "This record is exact for the moment it was read. The guarded Item Bank repair refuses a record more than one hour old, and refuses any record that is not complete.",
-  "Item Bank reads run inside the signed-in New Quizzes Item Banks browser frame. That frame contract is not yet verified against a live Canvas tenant, so every Item Bank result here stays live-unverified.",
+  "This record is an incomplete observation for the moment it was read. It does not claim complete Canvas authority. A write plan can use only the exact observed record, its process-local receipt, and acknowledgement of every course it names.",
+  "Item Bank reads run inside the signed-in New Quizzes Item Banks browser frame. Morrow has no retained live Canvas receipt for this frame contract, so the Morrow route stays live-unverified until attended proof is recorded.",
 ]);
 
 function exactId(value: unknown): string {
@@ -96,7 +116,7 @@ function fanOutRecord(input: {
 }): JsonObject {
   const consumers = [...input.consumers].sort(compareConsumers);
   const unreachable = FAN_OUT_SOURCES
-    .filter((name) => !input.sources.some((row) => row.name === name && row.exhausted))
+    .filter((name) => name === "quiz_uses" || !input.sources.some((row) => row.name === name && row.exhausted))
     .sort(compareText);
   const externalCourseIds = [...new Set(consumers.map((consumer) => consumer.course_id))]
     .filter((id) => id !== input.courseId)
@@ -230,6 +250,35 @@ export async function readItemBankFanOut(
     const pages = typeof result.pageCount === "number" && Number.isSafeInteger(result.pageCount) && result.pageCount > 0 ? result.pageCount : 1;
     return { rows, pages };
   };
+  const readObservedShares = async (): Promise<JsonObject[]> => {
+    signal.throwIfAborted();
+    const toolName = "canvas_item_bank_list_shares";
+    const matches = runtime.searchCatalog({ query: toolName, limit: 100 }).tools.filter((tool) => {
+      const descriptor = runtime.capabilityGet(tool.publicName).descriptor;
+      return tool.upstreamName === toolName && tool.annotations?.readOnlyHint === true
+        && (!source || tool.upstreamId === source) && isJsonObject(descriptor)
+        && isJsonObject(descriptor.route) && descriptor.route.backend === "canvas-connector";
+    });
+    if (matches.length !== 1) throw new Error(`The Canvas connection does not provide one ${toolName} read.`);
+    source = matches[0]!.upstreamId;
+    const response = resolveResultArtifact(await runtime.callSourceOwned(matches[0]!.publicName, {
+      course_id: input.course_id, bank_id: input.bank_id,
+      _morrow: { source_binding_id: input.source_binding_id },
+    }, { signal }), (handle, offset) => runtime.resultPage(handle, offset) as unknown as ResultArtifactPage);
+    const content = response.structuredContent;
+    const browser = isJsonObject(content) ? content.result : null;
+    if (response.isError === true || !isJsonObject(content)
+      || content.schema !== "morrow.canvas-connector.result.v1" || content.ok !== true
+      || content.commandKind !== "invoke_read" || !isJsonObject(browser)
+      || browser.ok !== true || browser.sent !== true || browser.truncated !== true
+      || browser.paginationComplete !== false || browser.paginationUnestablished !== true
+      || !Array.isArray(browser.data)) {
+      throw new Error("Canvas did not return the established one-page Item Bank share observation.");
+    }
+    const rows = browser.data.filter(isJsonObject);
+    if (rows.length !== browser.data.length) throw new Error("Canvas returned a share row that was not a structured record.");
+    return rows;
+  };
   const failure = (error: unknown): string => error instanceof Error && error.message ? error.message : "Canvas did not return a complete list.";
   const readBindings = async (): Promise<readonly BridgeBinding[]> => {
     signal.throwIfAborted();
@@ -266,7 +315,11 @@ export async function readItemBankFanOut(
       && binding.courseId === input.course_id && verifiedBinding(binding));
     if (selected.length !== 1) throw new Error("The selected course connection is unavailable or changed.");
     selectedBinding = selected[0]!;
-    bank = await readRecord("canvas_item_bank_get_bank", { bank_id: input.bank_id });
+    const courseBanks = await readList("canvas_item_bank_list_banks", { course_id: input.course_id, morrow_max_pages: ENTRY_PAGE_BUDGET });
+    if (!courseBanks.rows.some((row) => exactId(row.id) === input.bank_id)) {
+      throw new Error("The item bank is not in the selected course's current Item Banks list.");
+    }
+    bank = await readRecord("canvas_item_bank_get_bank", { course_id: input.course_id, bank_id: input.bank_id });
     if (exactId(bank.id) !== input.bank_id) throw new Error("The Item Bank read returned a different or missing bank identifier.");
   } catch (error) {
     return notEstablished(failure(error));
@@ -278,7 +331,7 @@ export async function readItemBankFanOut(
   let entryCount = 0;
   let entryDigest: string | undefined;
   try {
-    const listed = await readList("canvas_item_bank_list_entries", { bank_id: input.bank_id, morrow_max_pages: ENTRY_PAGE_BUDGET });
+    const listed = await readList("canvas_item_bank_list_entries", { course_id: input.course_id, bank_id: input.bank_id, morrow_max_pages: ENTRY_PAGE_BUDGET });
     entries.pages = listed.pages;
     if (listed.rows.some((row) => row.bank_id !== undefined && exactId(row.bank_id) !== input.bank_id)) {
       throw new Error("Canvas returned an entry from a different or unknown bank.");
@@ -296,41 +349,37 @@ export async function readItemBankFanOut(
   let shareRowCount = 0;
   let shareDigest: string | undefined;
   try {
-    const listed = await readList("canvas_item_bank_list_shares", { bank_id: input.bank_id, per_page: SHARE_PER_PAGE });
+    const listed = { rows: await readObservedShares() };
     shares.pages = 1;
     shareRowCount = listed.rows.length;
-    let readable = true;
     for (const row of listed.rows) {
       if (row.bank_id !== undefined && exactId(row.bank_id) !== input.bank_id) {
-        readable = false;
         unreadSource("shared_banks", "Canvas returned a share from a different or unknown bank.");
         continue;
       }
       const entityType = typeof row.entity_type === "string" ? row.entity_type
         : typeof row.entityType === "string" ? row.entityType : "";
-      const entityId = exactId(row.entity_id ?? row.entityId);
+      const rawEntityId = row.entity_id ?? row.entityId;
+      const entityId = exactId(rawEntityId);
       if (entityType.toLowerCase() !== "course") {
-        readable = false;
         unreadSource("shared_banks", entityType
           ? `One share names an entity of type ${entityType}, not a course. No Item Bank route lists the courses inside it.`
           : "One share row named no entity type, so Morrow cannot say which course it reaches.");
         continue;
       }
       if (!entityId) {
-        readable = false;
-        unreadSource("shared_banks", "One course share row carried no exact course id.");
+        unreadSource("shared_banks", typeof rawEntityId === "string" && rawEntityId.trim()
+          ? "One course share row carried a private context identifier. Morrow has no proved mapping from that value to a numeric Canvas course id."
+          : "One course share row carried no exact course id.");
         continue;
       }
       addConsumer({ course_id: entityId, entity_type: "shared_bank", entity_id: entityId });
     }
-    // The Item Banks share route has no established paging. A response as long
-    // as the request may be one page of more, and asking for a second page
-    // could repeat the same rows, so a full response is recorded as unread.
-    if (listed.rows.length >= SHARE_PER_PAGE) {
-      readable = false;
-      unreadSource("shared_banks", `Canvas returned ${listed.rows.length} share rows, which is as many as Morrow asked for, so the list may continue. Paging this route is not established.`);
-    }
-    shares.exhausted = readable;
+    // No attended provider proof establishes paging or an end signal for this
+    // route. These rows remain useful observations, but even an empty response
+    // cannot establish complete share reach.
+    unreadSource("shared_banks", "Canvas Item Bank share pagination is not established. Morrow read one unpaged response, which may omit more shares.");
+    shares.exhausted = false;
     shareDigest = sha256Json(listed.rows);
   } catch (error) {
     unreadSource("shared_banks", failure(error));
@@ -429,17 +478,19 @@ export async function readItemBankFanOut(
 
   // A long enumeration must not certify sources or bindings that changed while it ran.
   try {
-    const checkedBank = await readRecord("canvas_item_bank_get_bank", { bank_id: input.bank_id });
+    const checkedCourseBanks = await readList("canvas_item_bank_list_banks", { course_id: input.course_id, morrow_max_pages: ENTRY_PAGE_BUDGET });
+    if (!checkedCourseBanks.rows.some((row) => exactId(row.id) === input.bank_id)) throw new Error("The item bank left the selected course during enumeration.");
+    const checkedBank = await readRecord("canvas_item_bank_get_bank", { course_id: input.course_id, bank_id: input.bank_id });
     if (sha256Json(checkedBank) !== sha256Json(bank)) throw new Error("The bank changed during enumeration.");
     if (entries.exhausted) {
-      const checkedEntries = await readList("canvas_item_bank_list_entries", { bank_id: input.bank_id, morrow_max_pages: ENTRY_PAGE_BUDGET });
+      const checkedEntries = await readList("canvas_item_bank_list_entries", { course_id: input.course_id, bank_id: input.bank_id, morrow_max_pages: ENTRY_PAGE_BUDGET });
       entries.pages += checkedEntries.pages;
       if (sha256Json(checkedEntries.rows) !== entryDigest) throw new Error("The bank entries changed during enumeration.");
     }
-    if (shares.exhausted) {
-      const checkedShares = await readList("canvas_item_bank_list_shares", { bank_id: input.bank_id, per_page: SHARE_PER_PAGE });
-      shares.pages += checkedShares.pages;
-      if (sha256Json(checkedShares.rows) !== shareDigest) throw new Error("The bank shares changed during enumeration.");
+    if (shareDigest !== undefined) {
+      const checkedShares = await readObservedShares();
+      shares.pages += 1;
+      if (sha256Json(checkedShares) !== shareDigest) throw new Error("The observed bank shares changed during enumeration.");
     }
     const currentBindings = await readBindings();
     for (const [currentCourseId, binding] of usedBindings) {
@@ -468,7 +519,12 @@ export async function readItemBankFanOut(
   if (shares.exhausted && unreadCourseIds.length > 0) {
     unreadSource("quiz_uses", `This bank reaches ${courseList(unreadCourseIds)}, whose quiz use remains unread. Include these courses in quiz_use_course_ids and keep their verified course connections available.`);
   }
-  quizUses.exhausted = shares.exhausted && unreadCourseIds.length === 0 && coursesToRead.every((id) => readCourseIds.has(id));
+  // These reads describe only the courses named by the caller or by share rows.
+  // Canvas exposes no authoritative enumeration of every editable course, and
+  // an owner bank can be used in another course without a share row. Therefore
+  // quiz use remains incomplete and cannot establish complete Canvas authority.
+  unreadSource("quiz_uses", QUIZ_USES_UNPROVABLE);
+  quizUses.exhausted = false;
 
   const record = fanOutRecord({
     bankId: input.bank_id,
@@ -500,6 +556,7 @@ export async function readItemBankFanOut(
     course: { id: input.course_id, name: courseName },
     bank: { id: input.bank_id },
     fan_out: record,
+    fan_out_receipt: fanOutReceipt(record, input.source_binding_id),
     external_course_ids: externalCourseIds,
     observed: {
       bank_entry_count: entryCount,
@@ -520,11 +577,9 @@ export async function readItemBankFanOut(
       ? `Morrow completed quiz reads for ${courseList([...readCourseIds].sort(compareCourseIds))}.`
       : "Morrow could not complete quiz reads for any requested course.",
     ...(unreadDetail.length
-      ? [`Morrow could not read: ${unreadDetail.map((entry) => `${entry.source} — ${entry.reasons.join(" ")}`).join(" ")}`]
+      ? [`Morrow could not read: ${unreadDetail.map((entry) => `${entry.source}: ${entry.reasons.join(" ")}`).join(" ")}`]
       : []),
-    complete
-      ? "This record is complete, so the guarded Item Bank repair can use it for the next hour. That repair still asks you to confirm every course named above."
-      : "This record is not complete, so the guarded Item Bank repair will refuse it. An unread source is not an empty result.",
+    "This record is not complete Canvas authority. A write can use only this exact observed record, its process-local receipt, and acknowledgement of every course it names. An unread source is not an empty result.",
     ...limits,
   ];
   return { content: [{ type: "text", text: lines.join("\n\n") }], structuredContent: report };
@@ -533,7 +588,7 @@ export async function readItemBankFanOut(
 export function registerItemBankFanOutTool(server: McpServer, runtime: GatewayRuntime): void {
   server.registerTool("morrow_read_item_bank_fan_out", {
     title: "Read the courses one item bank reaches",
-    description: "Read, from Canvas, which courses and New Quizzes draw from one New Quizzes item bank, and record what could not be read. Does not change Canvas. No Canvas route lists the quizzes that draw from a bank, so Morrow reads the selected course and each course named in quiz_use_course_ids through its own verified connection on the same Canvas site and account. All courses named by shares must be read. Naming a course never counts as a completed read. A source Morrow could not read is reported as unread, never as an empty result.",
+    description: "Read observed uses of one New Quizzes item bank in the selected course and requested connected courses. Does not change Canvas. Canvas provides no authoritative route that enumerates every editable course and every consuming New Quiz. An owner bank can be used in an unselected course without a share row. The result therefore always reports quiz_uses as unread. A write plan must bind the exact observed record, its process-local receipt, and acknowledgement of every course the record names.",
     inputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
   }, async (input, context) => await readItemBankFanOut(runtime, input, context.mcpReq.signal));

@@ -23,6 +23,17 @@ if (signedRelease && !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test
 }
 const bridgeReleaseManifestSha256 = crypto.createHash("sha256").update(fs.readFileSync(bridgeReleaseManifest)).digest("hex");
 const mcpRuntimeManifestSha256 = crypto.createHash("sha256").update(fs.readFileSync(mcpRuntimeManifest)).digest("hex");
+// Cross-building from another host sets MORROW_TARGET_PLATFORM, because the
+// payload carries the target's runtime layout while this process may not run
+// on the target.
+const targetPlatform = process.env.MORROW_TARGET_PLATFORM || process.platform;
+const nodeBinaryPath = targetPlatform === "win32"
+  ? path.join(seed, "runtime", "node", "node.exe")
+  : path.join(seed, "runtime", "node", "bin", "node");
+if (!fs.existsSync(nodeBinaryPath)) {
+  throw new Error("Prepared Morrow payload is missing its Node runtime binary.");
+}
+const nodeRuntimeSha256 = crypto.createHash("sha256").update(fs.readFileSync(nodeBinaryPath)).digest("hex");
 let packageInput;
 try { packageInput = JSON.parse(fs.readFileSync(packageInputManifest, "utf8")); } catch { throw new Error("Prepared Morrow payload has an invalid package input manifest."); }
 if (!packageInput || packageInput.schema !== "morrow.desktop-package-input.v1"
@@ -30,12 +41,18 @@ if (!packageInput || packageInput.schema !== "morrow.desktop-package-input.v1"
   || packageInput.mcpRuntime.sha256 !== mcpRuntimeManifestSha256) {
   throw new Error("Prepared Morrow payload MCP runtime manifest is not bound by its package input manifest.");
 }
+// Which Chrome route the packaged app asks a person to take for Morrow Bridge.
+// Set MORROW_CHROME_STORE_LIVE=1 only for a build made after the Chrome Web
+// Store listing is published; every other build keeps the temporary unpacked
+// route. The route changes the setup instructions alone and relaxes no Bridge
+// identity check.
+const bridgeDelivery = process.env.MORROW_CHROME_STORE_LIVE === "1" ? "available" : "developer_temporary";
 const desktopUpdates = Object.freeze({
   enabled: signedRelease,
   feedId: "morrow-github-stable",
   provider: "github",
   owner: "example-owner",
-  repo: "morrow",
+  repo: "morrow-downloads",
   channel: "latest"
 });
 const mac = {
@@ -71,15 +88,16 @@ module.exports = {
   forceCodeSigning: signedRelease,
   extraMetadata: {
     morrow: {
+      bridgeDelivery,
       desktopUpdates,
       bridgeRelease: { manifestSha256: bridgeReleaseManifestSha256 },
-      mcpRuntime: { manifestSha256: mcpRuntimeManifestSha256 }
+      mcpRuntime: { manifestSha256: mcpRuntimeManifestSha256, nodeSha256: nodeRuntimeSha256 }
     }
   },
   publish: [{
     provider: "github",
     owner: "example-owner",
-    repo: "morrow",
+    repo: "morrow-downloads",
     channel: "latest",
     releaseType: "release"
   }],

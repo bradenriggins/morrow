@@ -86,7 +86,7 @@ function mcpRuntimeManifest(value) {
  * in the signed application metadata. It returns only the bounded health
  * binding passed to the child gateway; callers never expose payload paths.
  */
-async function verifyMcpRuntime(payloadRoot, expectedManifestSha256) {
+async function verifyMcpRuntime(payloadRoot, expectedManifestSha256, expectedNodeSha256 = null) {
   if (typeof expectedManifestSha256 !== "string" || !SHA256.test(expectedManifestSha256)) return null;
   const payload = path.resolve(payloadRoot);
   const appRoot = path.join(payload, "app");
@@ -109,6 +109,19 @@ async function verifyMcpRuntime(payloadRoot, expectedManifestSha256) {
     || input.mcpRuntime.path !== "app/mcp-runtime-manifest.json"
     || input.mcpRuntime.sha256 !== expectedManifestSha256) return null;
 
+  if (expectedNodeSha256 !== null) {
+    if (typeof expectedNodeSha256 !== "string" || !SHA256.test(expectedNodeSha256)) return null;
+    const nodePath = process.platform === "win32"
+      ? path.join(payload, "runtime", "node", "node.exe")
+      : path.join(payload, "runtime", "node", "bin", "node");
+    try {
+      const info = await fs.lstat(nodePath);
+      if (!info.isFile() || info.isSymbolicLink()
+        || sha256(await fs.readFile(nodePath)) !== expectedNodeSha256) return null;
+    } catch {
+      return null;
+    }
+  }
   const root = path.join(payload, "app");
   if (!await sameFileRecord(root, manifest.entrypoint)) return null;
   for (const dependency of manifest.dependencies) {

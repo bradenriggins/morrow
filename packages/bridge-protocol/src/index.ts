@@ -41,6 +41,8 @@ export type BridgeCommandKind =
   | "bindings_get"
   | "edit_policy_set"
   | "edit_policy_options_get"
+  /** Private, local-only assistant relay. Never a catalog capability. */
+  | "private_chat_exchange"
   /** Private desktop-to-Bridge maintenance control. Never a catalog capability. */
   | "bridge_maintenance";
 
@@ -503,7 +505,7 @@ const PRINTABLE_TEXT = /^[\x20-\x7e]+$/;
 const PRIVATE_ATTACHMENT_HANDLE = /^file:[A-Za-z0-9_.:-]{1,160}$/;
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const CANVAS_CONVERSATION_RECIPIENT = /^(?:[1-9][0-9]{0,18}|(?:course|section|group)_[1-9][0-9]{0,18}(?:_(?:students|teachers|tas|observers|designers))?)$/;
-const STRUCTURAL_EDIT_FIELDS = new Set(["course_id", "url_or_id", "id", "topic_id", "module_id", "section_id", "target_section_id", "assignment_id", "item_id", "quiz_id", "expected_digest", "chapter_id", "after_chapter_id", "category_id", "grade_item_id", "slot_id", "section_number", "section_name", "bank_id", "bank_entry_id", "_morrow", "morrow_canvas_content_guard", "morrow_item_bank_guard", "morrow_page_guard"]);
+const STRUCTURAL_EDIT_FIELDS = new Set(["course_id", "url_or_id", "id", "topic_id", "module_id", "section_id", "target_section_id", "assignment_id", "item_id", "quiz_id", "expected_digest", "expected_snapshot", "chapter_id", "after_chapter_id", "category_id", "grade_item_id", "slot_id", "section_number", "section_name", "bank_id", "bank_entry_id", "_morrow", "morrow_canvas_content_guard", "morrow_item_bank_guard", "morrow_page_guard"]);
 
 function requiredString(value: unknown, label: string, maxLength: number): string {
   if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
@@ -1162,7 +1164,9 @@ export function matchesBridgeEditPermission(
   binding: Omit<BridgeBinding, "editPermission"> & { readonly editPermission?: BridgeEditPermission },
   input: BridgeEditPermissionMatchInput,
 ): boolean {
-  if (Object.hasOwn(input.arguments, "morrow_new_quiz_settings_guard")) return false;
+  if (Object.hasOwn(input.arguments, "morrow_new_quiz_settings_guard")
+    || Object.hasOwn(input.arguments, "morrow_new_quiz_lifecycle_guard")
+    || Object.hasOwn(input.arguments, "morrow_new_quiz_effect_guard")) return false;
   const permission = binding.editPermission;
   if (!permission || binding.runtimeVerified !== true || binding.provider !== input.provider
     || permission.sourceBindingId !== binding.sourceBindingId || permission.catalogDigest !== input.catalogDigest
@@ -1203,7 +1207,8 @@ export function matchesBridgeEditPermission(
 }
 
 function parseProblem(value: unknown): BridgeProblem {
-  if (!isJsonObject(value) || value.schema !== "morrow.bridge.problem.v1") {
+  if (!isJsonObject(value) || value.schema !== "morrow.bridge.problem.v1"
+    || Object.keys(value).some((key) => !["schema", "code", "message", "recoverable", "detailDigest"].includes(key))) {
     throw new TypeError("bridge problem has an invalid schema");
   }
   if (typeof value.recoverable !== "boolean") throw new TypeError("problem.recoverable must be boolean");
@@ -1221,7 +1226,8 @@ function parseProblem(value: unknown): BridgeProblem {
 }
 
 export function parseBridgeHello(value: unknown): BridgeHello {
-  if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.hello) {
+  if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.hello
+    || Object.keys(value).some((key) => !["schema", "protocolVersion", "token", "extensionId", "runtimeRevision", "catalogDigest", "bindings", "sentAt"].includes(key))) {
     throw new TypeError("bridge hello has an invalid schema");
   }
   if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
@@ -1246,7 +1252,8 @@ export function parseBridgeHello(value: unknown): BridgeHello {
 }
 
 export function parseBridgeResult(value: unknown): BridgeResult {
-  if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.result) {
+  if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.result
+    || Object.keys(value).some((key) => !["schema", "protocolVersion", "requestId", "operationId", "generation", "ok", "result", "problem", "completedAt"].includes(key))) {
     throw new TypeError("bridge result has an invalid schema");
   }
   if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
@@ -1262,6 +1269,7 @@ export function parseBridgeResult(value: unknown): BridgeResult {
   if (result !== undefined && !isJsonObject(result)) throw new TypeError("bridge result payload must be an object");
   const problem = value.problem === undefined ? undefined : parseProblem(value.problem);
   if (value.ok && !result) throw new TypeError("successful bridge result requires result");
+  if (value.ok && problem) throw new TypeError("successful bridge result cannot include a problem");
   if (!value.ok && !problem) throw new TypeError("failed bridge result requires problem");
   return {
     schema: BRIDGE_SCHEMAS.result,
@@ -1281,6 +1289,9 @@ export function parseBridgeClientMessage(value: unknown): BridgeClientMessage {
   if (value.schema === BRIDGE_SCHEMAS.hello) return parseBridgeHello(value);
   if (value.schema === BRIDGE_SCHEMAS.result) return parseBridgeResult(value);
   if (value.schema === BRIDGE_SCHEMAS.bindings) {
+    if (Object.keys(value).some((key) => !["schema", "protocolVersion", "generation", "bindings", "sentAt"].includes(key))) {
+      throw new TypeError("bridge bindings message has unsupported fields");
+    }
     if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) throw new TypeError("bridge protocol version is unsupported");
     return {
       schema: BRIDGE_SCHEMAS.bindings,
@@ -1291,6 +1302,9 @@ export function parseBridgeClientMessage(value: unknown): BridgeClientMessage {
     };
   }
   if (value.schema === BRIDGE_SCHEMAS.pong) {
+    if (Object.keys(value).some((key) => !["schema", "protocolVersion", "generation", "sentAt"].includes(key))) {
+      throw new TypeError("bridge pong has unsupported fields");
+    }
     if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) throw new TypeError("bridge protocol version is unsupported");
     return {
       schema: BRIDGE_SCHEMAS.pong,

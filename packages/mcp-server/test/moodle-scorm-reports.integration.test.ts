@@ -125,7 +125,7 @@ function result(command: BridgeCommand, digest: string): JsonObject {
 }
 
 describe("Moodle SCORM report Full MCP exposure", () => {
-  it("exposes both reads, refuses an unknown roster identity, and refuses a module mismatch", async () => {
+  it("keeps readable current participant labels and refuses retained learner history before source reads", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-scorm-reports-integration-")); const port = await availablePort();
     const digest = browserCatalogDigest(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
@@ -144,58 +144,27 @@ describe("Moodle SCORM report Full MCP exposure", () => {
         expect(gateway.capabilityGet(tool)).toMatchObject({ descriptor: { canonicalName: tool, behavior: { readOnly: true } } });
       }
 
-      const aggregate = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_scorm_attempt_summary", arguments: { course_id: 2, module_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      const aggregateText = JSON.stringify(aggregate);
-      expect(aggregate.isError, aggregateText).not.toBe(true);
-      for (const privateValue of ["Jane Moodle", "jane@example.edu", "Moodle, Jane", "private suspend data", "cmi.", "user_id"]) {
-        expect(aggregateText, `aggregate leaked ${privateValue}`).not.toContain(privateValue);
-      }
-      expect(aggregate.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_scorm_attempt_summary",
-        data: {
-          participant_count: 2, total_attempt_count: 3, tracked_record_count: 6,
-          sco_status_counts: { passed: 1, completed: 1, failed: 1, incomplete: 1, browsed: 1, notattempted: 1, unknown: 0 },
-          score_bucket_counts: { "0-19": 0, "20-39": 1, "40-59": 1, "60-79": 1, "80-100": 1, unscored: 2 },
-        },
-      });
-
       const participants = await client.callTool({ name: "morrow_capability_read", arguments: {
-        name: "moodle_get_course_participants",
-        arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
+        name: "moodle_get_course_participants", arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
       } });
+      expect(participants.isError, JSON.stringify(participants)).not.toBe(true);
       const learnerToken = (participants.structuredContent as { data: { participants: { learnerToken: string }[] } }).data.participants[0]!.learnerToken;
-      const report = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_scorm_learner_report", arguments: { course_id: 2, module_id: 8, learner_token: learnerToken, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      const reportText = JSON.stringify(report);
-      expect(report.isError, reportText).not.toBe(true);
-      for (const privateValue of ["Student Name", "Jane Moodle", "Moodle, Jane", "jane@example.edu", "private suspend data", "user_id"]) {
-        expect(reportText, `learner report leaked ${privateValue}`).not.toContain(privateValue);
+      expect(learnerToken).toMatch(/^Student A[1-9][0-9]*$/);
+      const repeated = await client.callTool({ name: "morrow_capability_read", arguments: {
+        name: "moodle_get_course_participants", arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
+      } });
+      expect(repeated.structuredContent).toMatchObject({ data: { participants: [{ learnerToken }] } });
+      const beforeHistory = commands.length;
+      for (const tool of ["moodle_get_scorm_attempt_summary", "moodle_get_scorm_learner_report"]) {
+        const args = tool === "moodle_get_scorm_learner_report" ? { course_id: 2, module_id: 8, learner_token: learnerToken } : { course_id: 2, module_id: 8 };
+        const denied = await client.callTool({ name: "morrow_capability_read", arguments: {
+          name: tool, arguments: { ...args, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
+        } });
+        expect(denied.isError, JSON.stringify(denied)).toBe(true);
+        expect(denied.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
+        for (const identity of ["Jane Moodle", "jane@example.edu", "learnerToken", "user_id"]) expect(JSON.stringify(denied)).not.toContain(identity);
       }
-      expect(report.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_scorm_learner_report",
-        data: {
-          learner: { learnerToken: expect.stringMatching(/^learner_/) },
-          attempt_count: 1, tracked_sco_count: 2,
-          attempts: [{ attempt: 1, records: [{ sco_id: 31, status: "completed", score_percent: 90 }, { sco_id: 33, status: "incomplete", score_percent: null }] }],
-        },
-      });
-
-      const unknown = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_scorm_learner_report", arguments: { course_id: 2, module_id: 8, learner_token: `learner_${"a".repeat(64)}`, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      expect(unknown.isError).toBe(true);
-      expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "moodle_scorm_learner_report_invalid" } });
-      expect(JSON.stringify(unknown)).not.toContain("private suspend data");
-
-      const mismatch = await gateway.call("moodle_get_scorm_attempt_summary", { course_id: 2, module_id: 9, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
-      const mismatchText = JSON.stringify(mismatch);
-      expect(mismatchText).toContain("moodle_scorm_attempt_summary_invalid");
-      for (const privateValue of ["Jane Moodle", "jane@example.edu", "private suspend data"]) {
-        expect(mismatchText).not.toContain(privateValue);
-      }
-
-      const learnerReads = commands.filter((command) => command.toolName === "moodle_get_scorm_learner_report");
-      expect(learnerReads).toHaveLength(1);
-      expect(learnerReads[0]!.arguments).toMatchObject({ course_id: 2, module_id: 8, user_id: 7 });
-      expect(learnerReads[0]!.arguments).not.toHaveProperty("learner_token");
-      expect(commands.filter((command) => command.toolName === "moodle_get_course_participant_roster").length).toBeGreaterThanOrEqual(3);
+      expect(commands.slice(beforeHistory).every((command) => command.toolName === "moodle_get_course_participant_roster")).toBe(true);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

@@ -164,16 +164,26 @@ try {
     await welcome.setViewportSize({ width, height: 720 });
     const heading = await welcome.evaluate(() => {
       const title = document.querySelector("#setup-title");
+      const intro = document.querySelector(".intro");
+      const copy = document.querySelector(".intro-copy");
+      const lineCount = (element) => Math.round(element.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(element).lineHeight));
       return {
         text: title.textContent,
         fits: title.scrollWidth <= title.clientWidth,
-        lines: Math.round(title.getBoundingClientRect().height / Number.parseFloat(getComputedStyle(title).lineHeight)),
+        lines: lineCount(title),
+        introWidth: intro.getBoundingClientRect().width,
+        copyWidth: copy.getBoundingClientRect().width,
+        copyLines: lineCount(copy),
+        copyWrap: getComputedStyle(copy).overflowWrap,
         sideways: document.documentElement.scrollWidth <= window.innerWidth
       };
     });
     assert.equal(heading.fits, true, `the setup heading must fit its box at ${width}px`);
+    assert.ok(Math.abs(heading.copyWidth - heading.introWidth) <= 0.5, `the intro copy must use the available width at ${width}px`);
+    assert.equal(heading.copyWrap, "break-word", `ordinary intro prose must wrap at word boundaries at ${width}px`);
+    if (width === 940) assert.equal(heading.copyLines, 1, "the intro copy must stay on one line in the default window");
     assert.equal(heading.sideways, true, `the welcome screen must not scroll sideways at ${width}px`);
-    console.log(`${String(width).padStart(4)}px  heading "${heading.text}" on ${heading.lines} line(s)`);
+    console.log(`${String(width).padStart(4)}px  heading "${heading.text}" on ${heading.lines} line(s), intro on ${heading.copyLines} line(s)`);
   }
 
   const unknown = await openSetup(browser, undefined, WELCOME);

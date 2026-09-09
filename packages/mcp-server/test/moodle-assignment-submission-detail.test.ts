@@ -9,7 +9,7 @@ import {
 } from "../src/moodle-assignment-submission-detail.js";
 
 const STATUS_METHOD = "mod_assign_get_submission_status";
-const TOKEN = "learner_2f1c9a70-8b1e-4c66-9d0a-51f1c4d2e7a3";
+const TOKEN = "Student A1";
 
 const submissionBody = {
   schema: MOODLE_ASSIGNMENT_SUBMISSION_SCHEMA,

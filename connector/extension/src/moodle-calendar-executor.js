@@ -15,13 +15,13 @@
  *
  * Every route is native, fixed, and same-site:
  *
- * - `core_calendar_get_calendar_monthly_view` — one month of the course calendar.
- * - `core_calendar_get_calendar_event_by_id` — one exact event record.
- * - `core_get_fragment` with the calendar `event_form` callback — the event's
+ * - `core_calendar_get_calendar_monthly_view`: one month of the course calendar.
+ * - `core_calendar_get_calendar_event_by_id`: one exact event record.
+ * - `core_get_fragment` with the calendar `event_form` callback: the event's
  *   own native form, which is what Moodle's own New event and Edit event
  *   screens load.
- * - `core_calendar_submit_create_update_form` — the one create or update dispatch.
- * - `core_calendar_delete_calendar_events` — the one deletion dispatch.
+ * - `core_calendar_submit_create_update_form`: the one create or update dispatch.
+ * - `core_calendar_delete_calendar_events`: the one deletion dispatch.
  *
  * https://github.com/moodle/moodle/blob/v5.2.2/public/calendar/externallib.php
  * https://github.com/moodle/moodle/blob/v5.2.2/public/calendar/lib.php

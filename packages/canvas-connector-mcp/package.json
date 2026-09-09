@@ -21,6 +21,7 @@
     "@morrow/bridge-protocol": "workspace:*",
     "@morrow/canvas-api-catalog": "workspace:*",
     "@morrow/contracts": "workspace:*",
+    "@morrow/gateway-core": "workspace:*",
     "zod": "^4.2.0"
   },
   "devDependencies": {

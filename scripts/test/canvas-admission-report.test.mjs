@@ -65,28 +65,23 @@ const provenClaims = [
   },
   {
     label: "held for learner_scope_requires_separate_authority",
-    pattern: /, (\d+) name one person's own record: submitted work, a quiz attempt, a grade, an enrollment, group membership, or a booked time slot,/,
+    pattern: /, (\d+) name one person's own record,/,
     expected: [report.admission.heldByReason.learner_scope_requires_separate_authority],
   },
   {
     label: "held for provider_contract_incomplete",
-    pattern: /, (\d+) ask Canvas for a sign-in token, a session, or a one-time action that leaves no record to read back,/,
+    pattern: /, (\d+) have an incomplete provider contract,/,
     expected: [report.admission.heldByReason.provider_contract_incomplete],
   },
   {
     label: "held for self_scope_not_supported",
-    pattern: /, (\d+) change a personal bookmark or course nickname instead of course content,/,
+    pattern: /, (\d+) change a personal bookmark or course nickname,/,
     expected: [report.admission.heldByReason.self_scope_not_supported],
   },
   {
     label: "held for multi_step_upload_requires_reviewed_transfer",
-    pattern: /, (\d+) are the first step of a Canvas file upload, which creates no file by itself and is completed only by Morrow's reviewed course-file transfer,/,
+    pattern: /, (\d+) are unfinished Canvas upload pre-flights,/,
     expected: [report.admission.heldByReason.multi_step_upload_requires_reviewed_transfer],
-  },
-  {
-    label: "held for item_bank_dependency_review_required",
-    pattern: /and (\d+) are existing Item Bank mutations that require dependency evidence\./,
-    expected: [report.admission.heldByReason.item_bank_dependency_review_required],
   },
   {
     label: "admitted before dispatch",
@@ -94,21 +89,21 @@ const provenClaims = [
     expected: [report.admission.admitted],
   },
   {
-    label: "admitted through a direct course path and a proved section, group, file, or folder target",
-    pattern: /\| (\d+) have exactly `\/courses\/\{course_id\}` or `\/courses\/\{id\}` in the path\. The other (\d+) are the section edit and section delete routes, the seven group discussion-topic and group page routes, and the course file rename, file delete, and folder create routes,/,
+    label: "admitted through a direct course target or proved course object",
+    pattern: /\| (\d+) use a direct course target:[^|]+The other (\d+) use declared course-ownership reads/,
     expected: [
       report.admission.admittedByCourseTargetKind.course_path,
       report.admission.admittedByCourseTargetKind.semantic_course_object,
     ],
   },
   {
-    label: "structurally exact generic readback",
-    pattern: /^\| Structurally exact generic readback \| (\d+) \|/m,
+    label: "structurally exact readback",
+    pattern: /^\| Structurally exact readback \| (\d+) \|/m,
     expected: [report.readback.stateCounts.structurally_exact],
   },
   {
     label: "readback route tiers",
-    pattern: /: (\d+) read the same route, (\d+) read the created child, (\d+) read the collection that holds the item, and (\d+) are the named Canvas readbacks/,
+    pattern: /: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, and (\d+) use named readbacks/,
     expected: [
       report.readback.routeTierCounts.exact,
       report.readback.routeTierCounts.created_child,
@@ -149,7 +144,7 @@ const provenClaims = [
   },
   {
     label: "Item Bank operation split",
-    pattern: /The current catalog exposes (\d+) Item Bank operations: (\d+) reads, including `canvas_item_bank_get_item`, which is the exact comparator an item write needs, and (\d+) writes\./,
+    pattern: /The current catalog exposes (\d+) Item Bank operations: (\d+) reads and (\d+) owner writes\./,
     expected: [
       itemBankOperations.length,
       itemBankOperations.filter((operation) => operation.readOnly).length,
@@ -186,7 +181,7 @@ for (const [reason, label] of Object.entries(BLOCKER_ROWS)) {
 const remainingClaims = [
   {
     label: "remaining Canvas admission summary",
-    pattern: /The catalog has ([\d,]+) operations, but (\d+) writes still need semantic scope, dependency, or transfer contracts; (\d+) admitted operations lack exact generic readback\./,
+    pattern: /The catalog has ([\d,]+) operations, with (\d+) writes held[^.]+\. Of the \d+ admitted writes, (\d+) lack exact generic readback\./,
     expected: [
       report.totals.operations,
       report.admission.held,
@@ -274,7 +269,7 @@ test("a document edit that changes a quoted number or breaks an anchor fails lou
   assert.throws(() => assertDocumentClaims(duplicatedAnchor, [heldClaim]), /expected exactly one match/);
 
   const remaining = read(REMAINING);
-  const rewordedSummary = remaining.replace("still need semantic scope, dependency, or transfer contracts", "still need work");
+  const rewordedSummary = remaining.replace("writes held for semantic scope, personal scope, transfer, provider-contract, or exact-readback reasons", "writes still need work");
   assert.notEqual(rewordedSummary, remaining);
   assert.throws(() => assertDocumentClaims(rewordedSummary, remainingClaims), /expected exactly one match/);
 });

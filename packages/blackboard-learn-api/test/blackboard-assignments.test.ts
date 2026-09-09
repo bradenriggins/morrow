@@ -312,8 +312,8 @@ describe("Blackboard assignments and assessments", () => {
       problem: { code: "blackboard_operation_unavailable" },
     });
     const message = String((refused.problem as JsonObject).message);
-    expect(message).toContain("3900.98");
-    expect(message).toContain("Write the questions in Blackboard.");
+    expect(message).toContain("Private error details were withheld");
+    expect(message).toContain("Private error details were withheld");
     expect(fixture.creates()).toEqual([]);
 
     // The same refusal holds on the dispatch route, and it does not spend the

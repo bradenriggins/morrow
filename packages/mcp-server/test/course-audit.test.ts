@@ -108,6 +108,13 @@ function fixture() {
         scoring_data: { value: 3, scoring_algorithm: "all_or_nothing" }, feedback: { neutral: "<video src=\"feedback.mp4\"></video>" }, answer_feedback: { a: "<table><tr><td>Review</td></tr></table>" }, feedback_data: { format: "html" },
       },
     },
+    canvas_get_quiz_item_related_stimulus: {
+      id: "31", points_possible: 0, entry_type: "Stimulus", stimulus_quiz_entry_id: null,
+      entry: {
+        title: "Cell membrane diagram", body: "<p><img src=\"stimulus-linked.png\"></p>", instructions: "Use the diagram.",
+        source_url: "https://example.edu/cell-membrane", orientation: "left", passage: false,
+      },
+    },
     // A bank entry row names its question and carries only a partial copy of it,
     // exactly as section 3.3 of the harvested Item Banks contract describes.
     canvas_item_bank_get_entry: { id: "26", entry_type: "Item", entry_id: "44", entry: { title: "Bank cells" } },
@@ -159,7 +166,9 @@ function fixture() {
         };
       }
       // Canvas returns syllabus_body only for a read that asks for it.
-      const record = snapshots[name] as JsonObject;
+      const record = name === "canvas_get_quiz_item" && String(arguments_.item_id) === "31"
+        ? snapshots.canvas_get_quiz_item_related_stimulus
+        : snapshots[name] as JsonObject;
       const { syllabus_body: syllabusBody, ...courseWithoutSyllabus } = record;
       const data = name === "canvas_get_single_course_courses" && !(Array.isArray(arguments_.include) && arguments_.include.includes("syllabus_body"))
         ? courseWithoutSyllabus
@@ -363,7 +372,18 @@ describe("course audit", () => {
       const linkedStimulusResult = await client.callTool({ name: "morrow_audit_course", arguments: newQuizItemArgs });
       const linkedStimulusReport = linkedStimulusResult.structuredContent as JsonObject;
       expect(linkedStimulusReport.status).toBe("evidence_incomplete");
-      expect((linkedStimulusReport.assessment_evidence as JsonObject).stimulus).toMatchObject({ status: "evidence_incomplete", field: "stimulus_quiz_entry_id" });
+      expect((linkedStimulusReport.assessment_evidence as JsonObject).stimulus).toMatchObject({
+        relation: "linked_stimulus_entry",
+        stimulus_quiz_entry_id: "31",
+        source_field: "entry.body",
+        body: { status: "observed", field: "entry.body", value: "<p><img src=\"stimulus-linked.png\"></p>" },
+        html_fields: {
+          fields: expect.arrayContaining([
+            expect.objectContaining({ field: "entry.body", observed_source_signals: expect.objectContaining({ image_tags_without_alt: expect.any(Array) }) }),
+          ]),
+        },
+      });
+      expect(calls.filter((call) => call.name === "canvas_get_quiz_item" && call.arguments.item_id === "31")).toHaveLength(1);
 
       (snapshots.canvas_get_quiz_item as JsonObject).entry_type = "Stimulus";
       (snapshots.canvas_get_quiz_item as JsonObject).stimulus_quiz_entry_id = null;
@@ -382,14 +402,18 @@ describe("course audit", () => {
       expect(directStimulusReport.remediation).toMatchObject({
         status: "blocked_current_contract",
         upstream_tool: "canvas_update_quiz_item",
-        reason: expect.stringMatching(/QuestionItem records only/),
+        reason: expect.stringMatching(/only entry_type "Item" on create and update/),
       });
 
       const itemBankResult = await client.callTool({ name: "morrow_audit_course", arguments: itemBankEntryArgs });
       const itemBankReport = itemBankResult.structuredContent as JsonObject;
-      expect(itemBankReport.status).toBe("evidence_partial_course_association");
+      expect(itemBankReport.status).toBe("evidence_incomplete");
       // The entry row carries no question body. The audit reports the question the row names.
-      expect(itemBankReport.target).toMatchObject({ kind: "item_bank_entry", id: "26", item_id: "44", title: "Bank cells" });
+      expect(itemBankReport.target).toMatchObject({
+        kind: "item_bank_entry", id: "26", item_id: "44", title: "Bank cells",
+        course_association: "observed_by_course_scoped_read",
+        association: expect.stringMatching(/selected course's scoped bank list/),
+      });
       expect(itemBankReport.content_evidence).toMatchObject({ status: "observed", field: "entry.item_body", content: bankItemBody, sha256: sha256Text(bankItemBody) });
       expect(itemBankReport.assessment_evidence).toMatchObject({ status: "evidence_incomplete", disposition: "untrusted_course_content", points_possible: { status: "not_observed" } });
       expect((itemBankReport.assessment_evidence as JsonObject).html_fields).toMatchObject({
@@ -407,13 +431,13 @@ describe("course audit", () => {
       expect(fileReport.file_metadata).toEqual({ status: "observed", id: "27", display_name: "Cell notes.txt", size: Buffer.byteLength(fileText), content_type: "text/plain" });
       expect((fileReport.remediation as JsonObject)).toMatchObject({ status: "manual_review_required" });
       expect(calls.map((call) => call.name)).toEqual([
-        "canvas_get_single_course_courses", "canvas_show_page_courses", "canvas_get_single_course_courses", "canvas_get_single_quiz_question", "canvas_get_single_course_courses", "canvas_get_quiz_item", "canvas_get_single_course_courses", "canvas_get_quiz_item", "canvas_get_single_course_courses", "canvas_get_quiz_item", "canvas_get_single_course_courses", "canvas_item_bank_get_entry", "canvas_item_bank_get_item", "canvas_get_single_course_courses", "canvas_get_file_courses", "canvas_read_course_file_text",
+        "canvas_get_single_course_courses", "canvas_show_page_courses", "canvas_get_single_course_courses", "canvas_get_single_quiz_question", "canvas_get_single_course_courses", "canvas_get_quiz_item", "canvas_get_single_course_courses", "canvas_get_quiz_item", "canvas_get_quiz_item", "canvas_get_single_course_courses", "canvas_get_quiz_item", "canvas_get_single_course_courses", "canvas_item_bank_get_entry", "canvas_item_bank_get_item", "canvas_get_single_course_courses", "canvas_get_file_courses", "canvas_read_course_file_text",
       ]);
       expect(calls.every((call) => (call.arguments._morrow as JsonObject).source_binding_id === pageArgs.source_binding_id)).toBe(true);
     } finally { await client.close(); await server.close(); }
   });
 
-  it("plans an item bank repair only for an entry that names a readable question", async () => {
+  it("reads an item bank question and offers only the snapshot-bound repair candidate", async () => {
     const { runtime, calls, snapshots, writeTools } = fixture();
     const questionDigest = sha256Json(snapshots.canvas_item_bank_get_item);
     const client = new Client({ name: "course-audit-item-bank", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
@@ -422,43 +446,32 @@ describe("course audit", () => {
     await client.connect(a);
     try {
       const guidance = JSON.stringify((await client.readResource({ uri: "morrow://guidance/course-audit-v1" })).contents);
-      expect(guidance).toContain("morrow_plan_item_bank_question_image_alt_repair");
       expect(guidance).toContain("morrow_read_item_bank_fan_out");
       expect(guidance).toContain("a list row is not a question");
-      expect(guidance).not.toContain("Existing Item Bank writes remain held");
+      expect(guidance).toContain("morrow_plan_item_bank_question_image_alt_repair");
+      expect(guidance).toContain("never treat an incomplete result as an authority grant");
 
       const question = await client.callTool({ name: "morrow_audit_course", arguments: itemBankEntryArgs });
       const questionReport = question.structuredContent as JsonObject;
       expect(questionReport.target).toMatchObject({
-        kind: "item_bank_entry", id: "26", item_id: "44", item_sha256: questionDigest, course_association: "not_established",
-        item_bank_fan_out: { status: "not_established_by_this_audit", read_with: "morrow_read_item_bank_fan_out" },
+        kind: "item_bank_entry", id: "26", item_id: "44", item_sha256: questionDigest, course_association: "observed_by_course_scoped_read",
+        item_bank_fan_out: { status: "observed_uses_only", read_with: "morrow_read_item_bank_fan_out" },
+      });
+      expect(questionReport.target).toMatchObject({
+        association: expect.stringMatching(/selected course's scoped bank list/),
       });
       expect((questionReport.content_evidence as JsonObject).observed_source_signals).toMatchObject({
         image_tags_without_alt: [{ image_index: 1, image_src_sha256: sha256Text("bank-item.png") }],
       });
-      expect(questionReport.remediation).toEqual({
+      expect(questionReport.remediation).toMatchObject({
         status: "candidate_route_observed",
         upstream_tool: "canvas_item_bank_update_item",
         field: "item",
-        planner: "morrow_plan_item_bank_question_image_alt_repair",
-        required_audit_evidence: [
-          "content_evidence.sha256",
-          "observed_source_signals.image_tags_without_alt[].image_index",
-          "observed_source_signals.image_tags_without_alt[].image_src_sha256",
-          "target.item_id",
-          "target.item_sha256",
-          "target.item_bank_fan_out",
-        ],
-        readiness: "requires_established_fan_out",
-        live_verification: "not_established_by_live_tenant",
-        required_before_dispatch: [
-          "complete item bank fan-out record from morrow_read_item_bank_fan_out, less than one hour old",
-          "confirmation of every other course the bank reaches",
-          "fresh pre-write read",
-          "current provider hold check",
-          "valid human approval or selected Edit authority",
-          "verified saved readback",
-        ],
+        image_alt_repair: {
+          status: "candidate_route_observed",
+          planner: "morrow_plan_item_bank_question_image_alt_repair",
+          readiness: "not_established_by_catalog",
+        },
       });
       expect(questionReport.upstream_read_provenance).toMatchObject([
         { upstream_read_tool: "canvas_get_single_course_courses" },
@@ -466,13 +479,18 @@ describe("course audit", () => {
         { upstream_read_tool: "canvas_item_bank_get_item" },
       ]);
       expect(calls.find((call) => call.name === "canvas_item_bank_get_item")?.arguments)
-        .toEqual({ bank_id: "14", item_id: "44", _morrow: { source_binding_id: "selected-source" } });
+        .toEqual({ course_id: "42", bank_id: "14", item_id: "44", _morrow: { source_binding_id: "selected-source" } });
+      expect(calls.find((call) => call.name === "canvas_item_bank_get_entry")?.arguments)
+        .toEqual({ course_id: "42", bank_id: "14", bank_entry_id: "26", _morrow: { source_binding_id: "selected-source" } });
 
       // An entry row that embeds its question resolves through the same rule.
       snapshots.canvas_item_bank_get_entry = { id: "26", entry_type: "Item", data: { item: { id: "44" } } };
       const embedded = await client.callTool({ name: "morrow_audit_course", arguments: itemBankEntryArgs });
       expect((embedded.structuredContent as JsonObject).target).toMatchObject({ item_id: "44", item_sha256: questionDigest });
-      expect((embedded.structuredContent as JsonObject).remediation).toMatchObject({ status: "candidate_route_observed", planner: "morrow_plan_item_bank_question_image_alt_repair" });
+      expect((embedded.structuredContent as JsonObject).remediation).toMatchObject({
+        status: "candidate_route_observed",
+        image_alt_repair: { planner: "morrow_plan_item_bank_question_image_alt_repair" },
+      });
 
       // A row that names no question is a row, not a question. It gets no plan.
       snapshots.canvas_item_bank_get_entry = { id: "26", entry_type: "Item", entry: { title: "Bank cells" } };
@@ -522,11 +540,11 @@ describe("course audit", () => {
       snapshots.canvas_item_bank_get_entry = { id: "26", entry_type: "Item", entry_id: "44", entry: { title: "Bank cells" } };
       writeTools.delete("canvas_item_bank_update_item");
       const withoutRoute = await client.callTool({ name: "morrow_audit_course", arguments: itemBankEntryArgs });
-      expect((withoutRoute.structuredContent as JsonObject).remediation).toEqual({
+      expect((withoutRoute.structuredContent as JsonObject).remediation).toMatchObject({
         status: "blocked_current_catalog",
         upstream_tool: "canvas_item_bank_update_item",
         field: "item",
-        reason: expect.stringMatching(/does not expose the guarded Item Bank question route/),
+        image_alt_repair: { status: "blocked_current_catalog" },
       });
     } finally { await client.close(); await server.close(); }
   });

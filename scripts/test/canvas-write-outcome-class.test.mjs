@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInThisContext } from "node:vm";
@@ -85,22 +86,23 @@ function itemBankStorage(values) {
   return { getItem: (key) => Object.prototype.hasOwnProperty.call(values, key) ? values[key] : null };
 }
 
-async function executeItemBankRequest(nickname, argumentsValue, { status, throwOnRequest = false }) {
+async function executeItemBankRequest(nickname, argumentsValue, { status, throwOnRequest = false, dispatches = { count: 0 } }) {
   const keys = ["location", "document", "sessionStorage", "localStorage", "fetch", "ENV"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const operation = CATALOG.operations.find((entry) => entry.service === "item_bank" && entry.nickname === nickname);
   assert.ok(operation, `missing Item Bank operation ${nickname}`);
+  const token = `Signature ${"item-bank-credential-".repeat(4)}`;
+  const capturedAt = Date.now();
   const values = {
     location: { hostname: "school.quiz-lti.instructure.com" },
-    document: { referrer: `${ORIGIN}/courses/42/external_tools/9` },
-    sessionStorage: itemBankStorage({
-      current_user: JSON.stringify({ id: "7" }),
-      "banks.build_token": `Signature ${"item-bank-credential-".repeat(4)}`,
-      item_banks_scope: JSON.stringify({ course_id: "42" }),
-    }),
+    document: { referrer: `${ORIGIN}/courses/42/external_tools/54065` },
+    sessionStorage: itemBankStorage({ current_user: JSON.stringify({ id: "7" }) }),
     localStorage: itemBankStorage({}),
     ENV: {},
-    fetch: async () => {
+    fetch: async (_input, options = {}) => {
+      const method = options.method || "GET";
+      if (nickname === "create_bank" && method === "GET") return jsonResponse([]);
+      if (method !== "GET") dispatches.count += 1;
       if (throwOnRequest) throw new TypeError("Failed to fetch");
       return jsonResponse({ errors: [{ message: "The Item Banks API did not accept this change." }] }, status);
     },
@@ -115,6 +117,17 @@ async function executeItemBankRequest(nickname, argumentsValue, { status, throwO
       principalId: "7",
       canvasOrigin: ORIGIN,
       courseId: "42",
+      credential: {
+        apiOrigin: "https://school.quiz-api.instructure.com",
+        token,
+        authType: "Signature",
+        contextUuid: "course-context-uuid",
+        canvasLocalContextId: "42",
+        launchUrl: `${ORIGIN}/courses/42/external_tools/54065`,
+        launchNonce: "b28f3aae-8888-4c5b-9a17-458f2e1fe309",
+        launchedAt: capturedAt - 1_000,
+        capturedAt,
+      },
     });
   } finally {
     for (const key of keys) {
@@ -200,16 +213,36 @@ test("a failed Canvas read carries no write outcome", async () => {
   assert.deepEqual(thrown.result, { ok: false, sent: true, outcomeUnknown: false, error: "canvas_read_failed" });
 });
 
-test("the Item Banks executor classifies its writes by the same rule", async () => {
-  for (const status of [...REFUSED, ...UNCERTAIN]) {
-    const result = await executeItemBankRequest("create_bank", { title: "Question bank" }, { status });
-    assert.equal(result.ok, false, `HTTP ${status}`);
+test("the Item Banks executor classifies one bank creation and keeps failed reads repeatable", async () => {
+  const emptyBanksSha256 = createHash("sha256").update("[]").digest("hex");
+  const create = { course_id: "42", title: "Question bank", expected_snapshot: { banks_sha256: emptyBanksSha256 } };
+  // A 4xx other than 408 and 429 is the only answer that proves Canvas refused
+  // the change. One request either way, never a second.
+  for (const status of REFUSED) {
+    const dispatches = { count: 0 };
+    const result = await executeItemBankRequest("create_bank", create, { status, dispatches });
     assert.equal(result.sent, true, `HTTP ${status}`);
-    assert.equal(result.status, status);
-    assert.equal(result.outcomeUnknown, canvasWriteOutcomeUncertain(status), `HTTP ${status}`);
+    assert.equal(result.ok, false, `HTTP ${status}`);
+    assert.equal(result.status, status, `HTTP ${status}`);
+    assert.equal(result.outcomeUnknown, false, `HTTP ${status}`);
+    assert.equal(dispatches.count, 1, `HTTP ${status}`);
   }
-  const thrown = await executeItemBankRequest("create_bank", { title: "Question bank" }, { status: 500, throwOnRequest: true });
-  assert.deepEqual(thrown, { matched: true, ok: false, sent: true, outcomeUnknown: true, error: "item_bank_request_failed" });
+  for (const status of UNCERTAIN) {
+    const dispatches = { count: 0 };
+    const result = await executeItemBankRequest("create_bank", create, { status, dispatches });
+    assert.equal(result.sent, true, `HTTP ${status}`);
+    assert.equal(result.ok, false, `HTTP ${status}`);
+    assert.equal(result.outcomeUnknown, true, `HTTP ${status}`);
+    assert.notEqual(result.verification?.status, "verified", `HTTP ${status}`);
+    assert.equal(dispatches.count, 1, `HTTP ${status}`);
+  }
+  // A lost answer may still have created the bank, so it is uncertain and it is
+  // never sent again.
+  const dispatches = { count: 0 };
+  const thrown = await executeItemBankRequest("create_bank", create, { status: 500, throwOnRequest: true, dispatches });
+  assert.equal(thrown.sent, true);
+  assert.equal(thrown.outcomeUnknown, true);
+  assert.equal(dispatches.count, 1);
   for (const status of [...REFUSED, ...UNCERTAIN]) {
     const read = await executeItemBankRequest("list_banks", { course_id: "42", morrow_max_pages: 1 }, { status });
     assert.equal(read.ok, false, `HTTP ${status}`);

@@ -77,6 +77,7 @@ describe("GatewayRuntime stdio federation", () => {
       expect(names.some((name) => name.startsWith("connect_"))).toBe(false);
       expect(names).not.toContain("morrow_browser_edit_policy_set");
       expect(names).not.toContain("morrow_bridge_maintenance");
+      expect(names).not.toContain("morrow_private_chat_exchange");
       expect(runtime.catalog.tools.every((tool) => !("meta" in tool))).toBe(true);
 
       expect(runtime.catalog.collisions).toEqual([{
@@ -167,7 +168,7 @@ describe("GatewayRuntime stdio federation", () => {
         ready: true,
         publicToolCount: 4,
         collisionCount: 1,
-        excludedToolCount: 8,
+        excludedToolCount: 10,
         operationJournal: {
           totalOperations: 2,
           unresolvedOperations: 0,
@@ -179,8 +180,8 @@ describe("GatewayRuntime stdio federation", () => {
           manifestSha256: "a".repeat(64),
         },
         sources: [
-          { id: "meridian", connected: true, toolCount: 6 },
-          { id: "example-legacy", connected: true, toolCount: 6 },
+          { id: "meridian", connected: true, toolCount: 7 },
+          { id: "example-legacy", connected: true, toolCount: 7 },
         ],
       });
     } finally {

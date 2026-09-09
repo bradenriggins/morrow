@@ -606,6 +606,15 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     if (!client) return testDiagnostic();
     await runTestDiagnosticPhase("listTools", () => client.listTools());
     await runTestDiagnosticPhase("readResource", () => client.readResource({ uri: TEST_DIAGNOSTIC_RESOURCE_URI }));
+    // The connector starts its bridge listening port asynchronously and can
+    // still be pending when the first health read answers, so that read
+    // reports no bridge component at all. Re-read until the port binding is
+    // observed or this bounded window closes, so the trace reports the state a
+    // person would see a moment later instead of a startup race.
+    for (let attempt = 0; testTrace.value.portBinding === "not_observed" && attempt < 10; attempt += 1) {
+      await pause(250);
+      await refreshStatus();
+    }
     return testDiagnostic();
   };
 

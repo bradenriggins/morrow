@@ -25,7 +25,7 @@ const REPORT_TRACK_REQUEST_LIMIT = 500;
 /** Moodle normalizes every SCORM 1.2 and 2004 status to one of these in scorm_format_interactions(). */
 const STATUSES = ["passed", "completed", "failed", "incomplete", "browsed", "notattempted", "unknown"] as const;
 const BUCKETS = ["0-19", "20-39", "40-59", "60-79", "80-100", "unscored"] as const;
-const LEARNER_TOKEN = /^learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
+const LEARNER_TOKEN = /^Student A[1-9][0-9]*$/u;
 
 type ScormStatus = (typeof STATUSES)[number];
 type ScormBucket = (typeof BUCKETS)[number];

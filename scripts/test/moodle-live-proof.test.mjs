@@ -50,7 +50,14 @@ test("the harness proves one Moodle write against the local fixture and reaches 
 
     assert.match(receipt.target.origin, /^https:\/\/127\.0\.0\.1:\d+$/, "the fixture proof must bind the local fixture only");
     assert.equal(receipt.target.courseId, "2");
-    assert.equal(receipt.exactTargetBeforeChange.data.content, "<p>Fixture text before the reviewed change.</p>");
+    // The fixture roster holds one learner, Marisol Okonkwo, and the saved label names her by
+    // her given name alone. The read that reaches the assistant must carry the course-local
+    // label, never the name, and the rest of the sentence must survive untouched.
+    assert.equal(
+      receipt.exactTargetBeforeChange.data.content,
+      "<p>Fixture text before the reviewed change. Student A1 asked about it.</p>",
+    );
+    assert.doesNotMatch(raw, /Marisol|Okonkwo/iu, "a learner name reached the receipt");
     assert.match(receipt.exactTargetBeforeChange.snapshotDigest, /^[a-f0-9]{64}$/);
 
     assert.equal(receipt.requestReview.effectState, "awaiting_approval");

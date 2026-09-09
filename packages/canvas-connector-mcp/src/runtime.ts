@@ -27,6 +27,7 @@ import {
   type MoodleBrowserCatalog,
   type MoodleBrowserOperation,
 } from "./browser-catalog.js";
+import { canvasPrivacyRoster, moodleSourceHistoryAvailable, sourcePrivacyRoster, type SourcePrivacyBinding, type LearnerIdentity } from "@morrow/gateway-core";
 import type { CanvasConnectorConfig } from "./config.js";
 
 function resultObject(value: unknown): JsonObject {
@@ -50,6 +51,13 @@ const PRIVATE_MOODLE_STAGED_FILE_OPERATIONS: ReadonlyArray<{ toolName: string; k
 const PRIVATE_CANVAS_COURSE_FILE_TOOL = "canvas_transfer_course_file";
 const PRIVATE_CANVAS_COURSE_FILE_OPERATION = "canvas.private.course_file.transfer.v1";
 const PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS = ["course_id", "folder_id", "filename", "size_bytes", "sha256", "content_type"];
+const PRIVATE_CANVAS_HOT_SPOT_TOOL = "canvas_create_new_quiz_hot_spot";
+const PRIVATE_CANVAS_HOT_SPOT_OPERATION = "canvas.private.new_quiz.hot_spot.create.v1";
+const PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS = [
+  "course_id", "assignment_id", "item", "before_items_sha256", "payload_sha256",
+  "filename", "size_bytes", "sha256", "content_type",
+];
+const PRIVATE_CANVAS_HOT_SPOT_CONTENT_TYPES = ["image/png", "image/jpeg", "image/gif"];
 const PRIVATE_CANVAS_CONVERSATION_TOOL = "canvas_send_private_conversation";
 const PRIVATE_CANVAS_CONVERSATION_OPERATION = "canvas.private.conversation.send.v1";
 const PRIVATE_CANVAS_CONVERSATION_ARGUMENTS = ["course_id"];
@@ -84,12 +92,8 @@ function supportedCanvasContentGuardOperation(operation: ConnectorOperation, gua
     && candidate.toolName === operation.toolName && candidate.key === operation.key);
 }
 
-// The one Item Bank write with an Edit path is the guarded image alternative-text repair.
-// connector/extension/src/item-bank-guard.js holds the contract, and the Item Banks frame reads
-// the exact question again before and after its single PATCH. This boundary check is the shape
-// only, so an Item Bank write that carries no guard never reaches the bridge; the extension and
-// the frame refuse a guard that carries the wrong course, question, or affected-course list.
-// packages/canvas-connector-mcp/test/runtime.test.ts checks this field list against that module.
+// Kept for decoding durable operations created by an earlier build. Current
+// Item Bank writes use course_id plus operation-specific expected snapshots.
 const ITEM_BANK_GUARD_KIND = "item_bank_entry_image_alt";
 export const ITEM_BANK_GUARD_FIELDS: readonly string[] = [
   "kind", "course_id", "bank_id", "bank_entry_id", "item_id", "entry_type",
@@ -97,15 +101,8 @@ export const ITEM_BANK_GUARD_FIELDS: readonly string[] = [
   "alt_text", "fan_out", "acknowledged_course_ids",
 ];
 
-function guardedItemBankUpdate(operation: ConnectorOperation, argumentsValue: Readonly<Record<string, unknown>>): boolean {
-  if (!isCanvasOperation(operation) || operation.service !== "item_bank" || operation.nickname !== "update_item") return false;
-  const guard = argumentsValue.morrow_item_bank_guard;
-  if (!isJsonObject(guard)) return false;
-  const keys = Object.keys(guard);
-  return keys.length === ITEM_BANK_GUARD_FIELDS.length
-    && ITEM_BANK_GUARD_FIELDS.every((field) => keys.includes(field))
-    && guard.kind === ITEM_BANK_GUARD_KIND
-    && guard.entry_type === "Item";
+function guardedItemBankUpdate(_operation: ConnectorOperation, _argumentsValue: Readonly<Record<string, unknown>>): boolean {
+  return false;
 }
 
 function exactCourseId(value: unknown): string | undefined {
@@ -125,9 +122,8 @@ function courseScope(operation: ConnectorOperation, argumentsValue: JsonObject):
       ? { scoped: false }
       : { scoped: true, ...(exactCourseId(argumentsValue.course_id) ? { courseId: exactCourseId(argumentsValue.course_id) } : {}) };
   }
-  // The Item Bank routes name a bank, never a course. The guarded question repair carries the
-  // selected course in its guard, and the Item Banks frame proves that same course from its own
-  // session before it sends anything, so the course named here is compared with the binding below.
+  // Durable guarded operations from an earlier build are still decoded, but
+  // guardedItemBankUpdate now returns false and the write is held before this.
   if (guardedItemBankUpdate(operation, argumentsValue)) {
     const courseId = exactCourseId((argumentsValue.morrow_item_bank_guard as JsonObject).course_id);
     return { scoped: true, ...(courseId ? { courseId } : {}) };
@@ -194,6 +190,31 @@ function canvasFileAttachmentMatches(argumentsValue: JsonObject, attachment: Bri
     && typeof argumentsValue.content_type === "string"
     && argumentsValue.content_type === attachment.content_type
     && /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/.test(argumentsValue.content_type);
+}
+
+/**
+ * The reviewed Hot Spot arguments and the staged image must be one thing. The
+ * question itself must still be the reviewed template, with no image URL of its
+ * own: Morrow puts the unsigned Canvas URL in only after the confirmed upload.
+ */
+function canvasHotSpotAttachmentMatches(argumentsValue: JsonObject, attachment: BridgePrivateAttachment): boolean {
+  if (Object.keys(argumentsValue).length !== PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS.length
+    || PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS.some((field) => !Object.hasOwn(argumentsValue, field))) return false;
+  const item = isJsonObject(argumentsValue.item) ? argumentsValue.item : undefined;
+  const entry = item && isJsonObject(item.entry) ? item.entry : undefined;
+  const interaction = entry && isJsonObject(entry.interaction_data) ? entry.interaction_data : undefined;
+  return exactCourseId(argumentsValue.course_id) !== undefined
+    && exactCourseId(argumentsValue.assignment_id) !== undefined
+    && item?.entry_type === "Item" && entry?.interaction_type_slug === "hot-spot"
+    && interaction !== undefined && !Object.hasOwn(interaction, "image_url")
+    && typeof argumentsValue.before_items_sha256 === "string" && /^[a-f0-9]{64}$/.test(argumentsValue.before_items_sha256)
+    && typeof argumentsValue.payload_sha256 === "string" && /^[a-f0-9]{64}$/.test(argumentsValue.payload_sha256)
+    && typeof argumentsValue.filename === "string" && argumentsValue.filename === attachment.manifest.filename
+    && argumentsValue.size_bytes === attachment.manifest.size_bytes
+    && argumentsValue.sha256 === attachment.manifest.sha256
+    && typeof argumentsValue.content_type === "string"
+    && argumentsValue.content_type === attachment.content_type
+    && PRIVATE_CANVAS_HOT_SPOT_CONTENT_TYPES.includes(argumentsValue.content_type);
 }
 
 function canvasConversationArgumentsMatch(argumentsValue: JsonObject, conversation: BridgePrivateConversation): boolean {
@@ -299,8 +320,8 @@ function failedProblem(
       "multi_context_object_not_supported", "stale_bridge_command", "operation_catalog_mismatch",
       "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused",
       "edit_policy_canvas_content_guard_required", "edit_policy_canvas_content_guard_refused", "edit_policy_page_guard_required",
-      "edit_policy_item_bank_guard_required", "edit_policy_fields_refused", "new_quiz_settings_review_required",
-      "item_bank_fan_out_and_guard_required", "item_bank_dependency_review_required", "private_attachment_refused",
+      "edit_policy_item_bank_guard_required", "edit_policy_fields_refused", "new_quiz_settings_review_required", "new_quiz_lifecycle_review_required", "new_quiz_effect_review_required",
+      "item_bank_create_course_association_transaction_unestablished", "item_bank_dependency_review_required", "item_bank_dependency_reach_unprovable", "item_bank_restart_recovery_unavailable", "private_attachment_refused",
       "canvas_conversation_private_payload_refused", "canvas_private_attachment_required", "canvas_private_attachment_invalid",
       "canvas_private_attachment_mismatch", "moodle_private_attachment_required", "moodle_private_attachment_invalid",
       "moodle_private_attachment_mismatch"].includes(problem?.code || "") ? "not_sent" : undefined);
@@ -532,6 +553,36 @@ export class CanvasConnectorRuntime {
     }
   }
 
+  async privateChatExchange(input: JsonObject, signal?: AbortSignal): Promise<JsonObject> {
+    try {
+      const response = await this.bridge.invoke({
+        kind: "private_chat_exchange",
+        arguments: input,
+        operationId: `private-chat:${randomUUID()}`,
+        timeoutMs: 9 * 60_000,
+      });
+      signal?.throwIfAborted();
+      if (!response.ok || !isJsonObject(response.result)
+        || response.result.schema !== "morrow.private-chat.exchange.v1"
+        || !["message", "closed"].includes(String(response.result.status))) {
+        return {
+          schema: "morrow.private-chat.exchange.v1",
+          ok: false,
+          status: "error",
+          problem: response.problem || { code: "private_chat_result_invalid" },
+        };
+      }
+      return structuredClone(response.result);
+    } catch (error) {
+      return {
+        schema: "morrow.private-chat.exchange.v1",
+        ok: false,
+        status: "error",
+        problem: bridgeFailureResult(error),
+      };
+    }
+  }
+
   private async callPrivateCanvasCourseFileTransfer(rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
     let separated: ReturnType<typeof splitPrivateAttachment>;
     try {
@@ -617,6 +668,98 @@ export class CanvasConnectorRuntime {
         provider: "canvas",
         toolName: PRIVATE_CANVAS_COURSE_FILE_TOOL,
         operationKey: PRIVATE_CANVAS_COURSE_FILE_OPERATION,
+        commandKind: "invoke_write",
+        problem: bridgeFailureResult(error),
+        ...bridgeErrorResultState(error),
+      };
+    }
+  }
+
+  private async callPrivateCanvasNewQuizHotSpot(rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+    let separated: ReturnType<typeof splitPrivateAttachment>;
+    try {
+      separated = splitPrivateAttachment(rawArguments);
+    } catch {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "canvas_private_attachment_invalid",
+        message: "The staged private Hot Spot image could not be verified.",
+        recoverable: false,
+      });
+    }
+    if (separated.privateConversation || separated.privateAttachments) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: separated.privateConversation ? "canvas_private_conversation_refused" : "canvas_private_attachment_refused",
+        message: separated.privateConversation
+          ? "A private Canvas Inbox payload is not valid for a Hot Spot question."
+          : "A private file bundle is not valid for one Hot Spot question.",
+        recoverable: false,
+      });
+    }
+    if (!separated.privateAttachment) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "canvas_private_attachment_required",
+        message: "This reviewed Hot Spot question needs its staged private image.",
+        recoverable: true,
+      });
+    }
+    const split = splitBridgeCallArguments(separated.publicInput);
+    if (!split.options.sourceBindingId || !split.options.operationId || !split.options.outerGrant) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "canvas_private_file_reservation_required",
+        message: "This private Canvas Hot Spot route requires a current reviewed operation reservation.",
+        recoverable: false,
+      });
+    }
+    if (!canvasHotSpotAttachmentMatches(split.arguments, separated.privateAttachment)) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "canvas_private_attachment_mismatch",
+        message: "The staged private image does not match this exact reviewed Hot Spot question.",
+        recoverable: false,
+      });
+    }
+    const courseId = exactCourseId(split.arguments.course_id);
+    const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
+    if (!courseId || binding?.provider !== "canvas" || binding.courseId !== courseId || binding.runtimeVerified !== true) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "course_binding_course_mismatch",
+        message: "The selected Canvas binding is for a different or changed course.",
+        recoverable: true,
+      });
+    }
+    try {
+      const response = await this.bridge.invoke({
+        kind: "invoke_write",
+        toolName: PRIVATE_CANVAS_HOT_SPOT_TOOL,
+        operationKey: PRIVATE_CANVAS_HOT_SPOT_OPERATION,
+        arguments: split.arguments,
+        privateAttachment: separated.privateAttachment,
+        sourceBindingId: split.options.sourceBindingId,
+        operationId: split.options.operationId,
+        outerGrant: split.options.outerGrant,
+      });
+      if (!response.ok) return failedProblem(response.problem);
+      return {
+        schema: "morrow.canvas-connector.result.v1",
+        ok: true,
+        provider: "canvas",
+        toolName: PRIVATE_CANVAS_HOT_SPOT_TOOL,
+        operationKey: PRIVATE_CANVAS_HOT_SPOT_OPERATION,
+        commandKind: "invoke_write",
+        result: resultObject(response.result),
+      };
+    } catch (error) {
+      return {
+        schema: "morrow.canvas-connector.result.v1",
+        ok: false,
+        provider: "canvas",
+        toolName: PRIVATE_CANVAS_HOT_SPOT_TOOL,
+        operationKey: PRIVATE_CANVAS_HOT_SPOT_OPERATION,
         commandKind: "invoke_write",
         problem: bridgeFailureResult(error),
         ...bridgeErrorResultState(error),
@@ -803,28 +946,15 @@ export class CanvasConnectorRuntime {
     if (toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL) {
       return await this.callPrivateCanvasCourseFileTransfer(rawArguments);
     }
+    if (toolName === PRIVATE_CANVAS_HOT_SPOT_TOOL) {
+      return await this.callPrivateCanvasNewQuizHotSpot(rawArguments);
+    }
     if (toolName === PRIVATE_CANVAS_CONVERSATION_TOOL) {
       return await this.callPrivateCanvasConversation(rawArguments);
     }
     const operation = this.operations.get(toolName);
     if (!operation) throw new Error(`Canvas connector has no operation named ${toolName}`);
     const provider = operationProvider(operation);
-    if (isCanvasOperation(operation) && operation.service === "item_bank" && !operation.readOnly && operation.nickname !== "create_bank"
-      && !guardedItemBankUpdate(operation, rawArguments)) {
-      return failedBeforeSend(operation.nickname === "update_item"
-        ? {
-          schema: "morrow.bridge.problem.v1",
-          code: "item_bank_fan_out_and_guard_required",
-          message: "Morrow changes one Item Bank question only through its focused image alternative-text repair, with the current question read again and every course the bank reaches confirmed first.",
-          recoverable: false,
-        }
-        : {
-          schema: "morrow.bridge.problem.v1",
-          code: "item_bank_dependency_review_required",
-          message: "Changes to an existing Item Bank require a complete dependency and affected-course review. This release cannot yet establish that evidence.",
-          recoverable: false,
-        }, provider);
-    }
     let separated: ReturnType<typeof splitPrivateAttachment>;
     try {
       separated = splitPrivateAttachment(rawArguments);
@@ -1027,6 +1157,46 @@ export class CanvasConnectorRuntime {
         ...bridgeErrorResultState(error),
       };
     }
+  }
+
+  acceptsPublicPrivacyScope(toolName: string, args: Readonly<Record<string, unknown>>, binding: SourcePrivacyBinding): boolean {
+    if (toolName === "morrow_browser_edit_options") return args.source_binding_id === binding.sourceBindingId;
+    const operation = this.operations.get(toolName);
+    if (!operation || operationProvider(operation) !== binding.provider) return false;
+    if (!isCanvasOperation(operation) && operation.provider === "moodle" && operation.readOnly
+      && !moodleSourceHistoryAvailable(toolName, operation.dataClass)) return false;
+    const scope = courseScope(operation, args);
+    return scope.scoped && scope.courseId === binding.courseId;
+  }
+
+  async privacyRoster(binding: SourcePrivacyBinding): Promise<readonly LearnerIdentity[]> {
+    const result = await this.call(binding.provider === "moodle" ? "moodle_get_course_participant_roster" : "canvas_list_users_in_course_users", {
+      course_id: binding.courseId,
+      ...(binding.provider === "moodle" ? {} : {
+        include: ["enrollments", "uuid"], enrollment_type: ["student"],
+        enrollment_state: ["active", "invited", "rejected", "completed", "inactive"], morrow_max_pages: 50,
+      }),
+      _morrow: { source_binding_id: binding.sourceBindingId },
+    });
+    const browser = isJsonObject(result.result) ? result.result : undefined;
+    if (result.ok !== true || result.commandKind !== "invoke_read" || !browser || browser.ok !== true
+      || browser.sent !== true || browser.truncated !== false) throw new Error("privacy_roster_incomplete");
+    if (binding.provider === "moodle") {
+      const roster = isJsonObject(browser.data) ? browser.data : undefined;
+      if (!roster || roster.schema !== "morrow.moodle-course-roster.v1" || roster.status !== "complete" || roster.complete !== true
+        || ["sourceBindingId", "courseId", "origin", "siteUrl", "principalFingerprint", "sessionGeneration", "catalogDigest"]
+          .some((field) => roster[field] !== (binding as unknown as JsonObject)[field])) throw new Error("privacy_roster_mismatch");
+      return sourcePrivacyRoster(roster.identities);
+    }
+    const history = await this.call("canvas_list_enrollments_courses", {
+      course_id: binding.courseId,
+      type: ["StudentEnrollment"], state: ["deleted"], include: ["uuid"], morrow_max_pages: 50,
+      _morrow: { source_binding_id: binding.sourceBindingId },
+    });
+    const deleted = isJsonObject(history.result) ? history.result : undefined;
+    if (history.ok !== true || history.commandKind !== "invoke_read" || !deleted || deleted.ok !== true
+      || deleted.sent !== true || deleted.truncated !== false) throw new Error("privacy_roster_history_incomplete");
+    return canvasPrivacyRoster(browser.data, deleted.data, String(binding.courseId));
   }
 
   async close(): Promise<void> {

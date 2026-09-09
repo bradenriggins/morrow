@@ -660,7 +660,7 @@ describe("approval review context", () => {
     };
   }
 
-  it("names every course an item bank question change reaches", async () => {
+  it("labels legacy Item Bank course rows as observed and incomplete", async () => {
     const calls: { publicName: string; args: Readonly<Record<string, unknown>> }[] = [];
     const context = await resolveApprovalReviewContext({
       operation: itemBankOperation(itemBankGuard({ complete: true, external_course_ids: ["456", "789"], unreachable: [] })),
@@ -672,13 +672,13 @@ describe("approval review context", () => {
       targets: [
         { field: "course_id", label: "Course", name: "Intro to Biology" },
         { field: "bank_id", label: "Item Bank", name: "Unit 3 question bank" },
-        { field: "morrow_item_bank_fan_out", label: "Also changes these courses", name: "Chemistry 110 (course 456), Human Anatomy (course 789)." },
+        { field: "morrow_item_bank_fan_out", label: "Observed courses only", name: "Chemistry 110 (course 456), Human Anatomy (course 789). These are observed courses only. Canvas cannot enumerate every course and New Quiz that uses this item bank. This write remains held." },
         { field: "item_id", label: "Question", name: "Photosynthesis stages" },
       ],
     });
     expect(calls).toEqual(expect.arrayContaining([
-      { publicName: "canvas_item_bank_get_entry", args: { bank_id: "5", bank_entry_id: "9", _morrow: { source_binding_id: sourceBindingId } } },
-      { publicName: "canvas_item_bank_get_item", args: { bank_id: "5", item_id: "7", _morrow: { source_binding_id: sourceBindingId } } },
+      { publicName: "canvas_item_bank_get_entry", args: { course_id: "42", bank_id: "5", bank_entry_id: "9", _morrow: { source_binding_id: sourceBindingId } } },
+      { publicName: "canvas_item_bank_get_item", args: { course_id: "42", bank_id: "5", item_id: "7", _morrow: { source_binding_id: sourceBindingId } } },
       { publicName: "canvas_get_single_course_courses", args: { id: "456", _morrow: { source_binding_id: sourceBindingId } } },
       { publicName: "canvas_get_single_course_courses", args: { id: "789", _morrow: { source_binding_id: sourceBindingId } } },
     ]));
@@ -693,12 +693,12 @@ describe("approval review context", () => {
 
     expect(context.targets).toContainEqual({
       field: "morrow_item_bank_fan_out",
-      label: "Also changes these courses",
-      name: "Chemistry 110 (course 456), Course 789 (Morrow could not read this course name).",
+      label: "Observed courses only",
+      name: "Chemistry 110 (course 456), Course 789 (Morrow could not read this course name). These are observed courses only. Canvas cannot enumerate every course and New Quiz that uses this item bank. This write remains held.",
     });
   });
 
-  it("separates a bank that reaches no other course from a record that was not read", async () => {
+  it("never treats an empty or complete-looking legacy record as complete reach", async () => {
     const complete = await resolveApprovalReviewContext({
       operation: itemBankOperation(itemBankGuard({ complete: true, external_course_ids: [], unreachable: [] })),
       tools: itemBankTools,
@@ -715,16 +715,16 @@ describe("approval review context", () => {
       read: itemBankReads({ 42: "Intro to Biology" }),
     });
 
-    expect(complete.targets).toContainEqual({ field: "morrow_item_bank_fan_out", label: "Also changes these courses", name: "No other course uses this item bank." });
+    expect(complete.targets).toContainEqual({ field: "morrow_item_bank_fan_out", label: "Observed courses only", name: "No other course was observed in this legacy record. Canvas cannot enumerate every course and New Quiz that uses this item bank. This write remains held." });
     expect(incomplete.targets).toContainEqual({
       field: "morrow_item_bank_fan_out",
-      label: "Also changes these courses",
-      name: "Chemistry 110 (course 456). Morrow could not read every course this item bank reaches.",
+      label: "Observed courses only",
+      name: "Chemistry 110 (course 456). These are observed courses only. Canvas cannot enumerate every course and New Quiz that uses this item bank. This write remains held.",
     });
     expect(unreadable.targets).toContainEqual({
       field: "morrow_item_bank_fan_out",
-      label: "Also changes these courses",
-      name: "Morrow could not read every course this item bank reaches.",
+      label: "Observed courses only",
+      name: "No other course was observed in this legacy record. Canvas cannot enumerate every course and New Quiz that uses this item bank. This write remains held.",
     });
   });
 

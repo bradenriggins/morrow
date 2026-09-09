@@ -124,6 +124,47 @@ test("a complete payload remains uncertain until the shared-owner gateway report
   assert.equal(runtimeStatus(true, { health: { gatewayReady: true } }), "ready");
 });
 
+/**
+ * The backup and rollback pair keeps a file mode only on POSIX; on Windows both
+ * skip their `chmod` entirely and the file's protection comes from its access
+ * list instead. Everything else they do has to hold identically on both, and
+ * the branch that carries the most risk is the file that did not exist before:
+ * a rollback there has to leave the computer with no file at all, not with an
+ * empty or partly written one.
+ */
+test("a rollback of a file that did not exist leaves no file behind", async (t) => {
+  const { captureConfiguration, restoreConfiguration } = require("../shared/runtime.cjs");
+  const crypto = require("node:crypto");
+  const digest = (value) => crypto.createHash("sha256").update(value).digest("hex");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-rollback-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const backups = path.join(root, "backups");
+
+  const fresh = path.join(root, "settings.json");
+  const absent = await captureConfiguration(fresh, backups);
+  assert.deepEqual(absent, { file: fresh, backup: null, present: false });
+  await fs.writeFile(fresh, "morrow installed");
+  assert.equal(await restoreConfiguration(absent, digest("morrow installed")), true);
+  assert.equal(await fs.access(fresh).then(() => true, () => false), false, "the rollback left a file that was never there");
+
+  const existing = path.join(root, "config.toml");
+  await fs.writeFile(existing, "the person's own settings");
+  const captured = await captureConfiguration(existing, backups);
+  assert.equal(captured.present, true);
+  assert.equal(await fs.readFile(captured.backup, "utf8"), "the person's own settings", "the backup is not the file it copied");
+  await fs.writeFile(existing, "morrow installed");
+  assert.equal(await restoreConfiguration(captured, digest("morrow installed")), true);
+  assert.equal(await fs.readFile(existing, "utf8"), "the person's own settings");
+
+  // A rollback of a file something else already removed reports that it did
+  // nothing, rather than writing the old content back over that decision.
+  await fs.rm(existing);
+  assert.equal(await restoreConfiguration(captured, digest("morrow installed")), false);
+  assert.equal(await fs.access(existing).then(() => true, () => false), false);
+  // A digest that is not a digest is refused before any path is touched.
+  assert.equal(await restoreConfiguration(captured, "not-a-digest"), false);
+});
+
 test("configuration rollback leaves a newer assistant edit untouched", async (t) => {
   const { captureConfiguration, restoreConfiguration } = require("../shared/runtime.cjs");
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-config-"));

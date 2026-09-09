@@ -152,7 +152,7 @@ function result(command: BridgeCommand, digest: string): JsonObject {
 }
 
 describe("Moodle Assignment learner read Full MCP exposure", () => {
-  it("tokenizes the learner, drops file bytes and text, and refuses an unknown roster identity", async () => {
+  it("keeps readable current participant labels and refuses retained learner history before source reads", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-assign-learner-integration-")); const port = await availablePort();
     const digest = browserCatalogDigest(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
@@ -171,80 +171,26 @@ describe("Moodle Assignment learner read Full MCP exposure", () => {
         expect(gateway.capabilityGet(tool)).toMatchObject({ descriptor: { canonicalName: tool, behavior: { readOnly: true } } });
       }
       const participants = await client.callTool({ name: "morrow_capability_read", arguments: {
-        name: "moodle_get_course_participants",
-        arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
+        name: "moodle_get_course_participants", arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
       } });
+      expect(participants.isError, JSON.stringify(participants)).not.toBe(true);
       const learnerToken = (participants.structuredContent as { data: { participants: { learnerToken: string }[] } }).data.participants[0]!.learnerToken;
-      const read = async (name: string, token: string) => await client!.callTool({
-        name: "morrow_capability_read",
-        arguments: { name, arguments: { course_id: 2, module_id: 8, learner_token: token, _morrow: { source_binding_id: SOURCE_BINDING_ID } } },
-      });
-
-      const submission = await read("moodle_get_assignment_submission", learnerToken);
-      const submissionText = JSON.stringify(submission);
-      expect(submission.isError, submissionText).not.toBe(true);
-      for (const value of [LEARNER_NAME, PRIVATE_ESSAY, "pluginfile.php", "contents_base64", "JVBERi0xLjcKJUZJWFRVUkU=", "submission_text", '"user_id"']) {
-        expect(submissionText, `submission read leaked ${value}`).not.toContain(value);
-      }
-      expect(submission.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_assignment_submission",
-        data: {
-          learner: { learnerToken: expect.stringMatching(/^learner_/) },
-          attempt: { attempt_number: 1, status: "submitted", time_created: 1_700_000_000, time_modified: 1_700_000_600 },
-          grading_status: "readyforrelease",
-          files: [{ plugin_type: "file", area: "submission_files", file_size: 18_321, mime_type: "application/pdf" }],
-          proof: { required_capability: "mod/assign:viewgrades", includes_file_bytes: false },
-        },
-      });
-      // The learner-authored file name reaches the roster boundary and leaves it
-      // carrying the same token as the learner record.
-      const submissionRecord = (submission.structuredContent as { data: { learner: { learnerToken: string }; files: { file_name: string }[] } }).data;
-      expect(submissionRecord.files[0]!.file_name).toContain(submissionRecord.learner.learnerToken);
-      expect(submissionRecord.files[0]!.file_name).toContain("essay.pdf");
-
-      const feedback = await read("moodle_get_assignment_feedback", learnerToken);
-      const feedbackText = JSON.stringify(feedback);
-      expect(feedback.isError, feedbackText).not.toBe(true);
-      for (const value of [LEARNER_NAME, PRIVATE_COMMENT, "pluginfile.php", "contents_base64", "JVBERi0xLjcKJUZFRURCQUNL", "feedback_comment", '"grader"', '"user_id"']) {
-        expect(feedbackText, `feedback read leaked ${value}`).not.toContain(value);
-      }
-      expect(feedback.structuredContent).toMatchObject({
-        schema: "morrow.result.v1", tool: "moodle_get_assignment_feedback",
-        data: {
-          learner: { learnerToken: expect.stringMatching(/^learner_/) },
-          grading_status: "readyforrelease", marking_workflow_state: "readyforrelease",
-          graded: true, grade_value: 85, grade_attempt_number: 1, graded_date: 1_700_001_200,
-          feedback_types: [{ type: "comments", comment_present: true, file_count: 0 }, { type: "file", comment_present: false, file_count: 1 }],
-          proof: { required_capability: "mod/assign:grade", includes_feedback_text: false, includes_file_bytes: false },
-        },
-      });
-
+      expect(learnerToken).toMatch(/^Student A[1-9][0-9]*$/);
+      const repeated = await client.callTool({ name: "morrow_capability_read", arguments: {
+        name: "moodle_get_course_participants", arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
+      } });
+      expect(repeated.structuredContent).toMatchObject({ data: { participants: [{ learnerToken }] } });
+      const beforeHistory = commands.length;
       for (const tool of ["moodle_get_assignment_submission", "moodle_get_assignment_feedback"]) {
-        const unknown = await read(tool, `learner_${"a".repeat(64)}`);
-        const unknownText = JSON.stringify(unknown);
-        expect(unknown.isError, unknownText).toBe(true);
-        expect(unknown.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "privacy_output_refused" } });
-        for (const value of [LEARNER_NAME, PRIVATE_ESSAY, PRIVATE_COMMENT, "pluginfile.php"]) {
-          expect(unknownText, `refusal leaked ${value}`).not.toContain(value);
-        }
+        const args = { course_id: 2, module_id: 8, learner_token: learnerToken };
+        const denied = await client.callTool({ name: "morrow_capability_read", arguments: {
+          name: tool, arguments: { ...args, _morrow: { source_binding_id: SOURCE_BINDING_ID } },
+        } });
+        expect(denied.isError, JSON.stringify(denied)).toBe(true);
+        expect(denied.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
+        for (const identity of ["Jane Moodle", "jane@example.edu", "learnerToken", "user_id"]) expect(JSON.stringify(denied)).not.toContain(identity);
       }
-
-      // A module mismatch fails inside the learner boundary, so the refusal
-      // states the boundary and carries no part of the record.
-      const mismatch = await gateway.call("moodle_get_assignment_submission", { course_id: 2, module_id: 9, learner_token: learnerToken, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
-      const mismatchText = JSON.stringify(mismatch);
-      expect(mismatch.isError).toBe(true);
-      expect(mismatch.structuredContent).toMatchObject({ schema: "morrow.result.v1", data: { schema: "morrow.problem.v1", code: "privacy_output_refused" } });
-      for (const value of [LEARNER_NAME, PRIVATE_ESSAY, "pluginfile.php", "essay.pdf", "learnerToken"]) {
-        expect(mismatchText, `module mismatch leaked ${value}`).not.toContain(value);
-      }
-
-      const dispatched = commands.map((command) => command.toolName);
-      expect(dispatched).toContain("moodle_get_course_participant_roster");
-      expect(dispatched.filter((name) => name === "moodle_get_assignment_submission")).toHaveLength(2);
-      expect(dispatched.filter((name) => name === "moodle_get_assignment_feedback")).toHaveLength(1);
-      expect(commands.filter((command) => command.toolName === "moodle_get_assignment_submission").map((command) => command.arguments.user_id)).toEqual([7, 7]);
-      expect(commands.filter((command) => command.toolName === "moodle_get_assignment_feedback").map((command) => command.arguments.user_id)).toEqual([7]);
+      expect(commands.slice(beforeHistory).every((command) => command.toolName === "moodle_get_course_participant_roster")).toBe(true);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

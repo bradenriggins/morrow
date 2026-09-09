@@ -427,3 +427,19 @@ test("Moodle roster refuses malformed, duplicate, and changing native table reco
     assert.deepEqual(changingTotal.identities, []);
   });
 });
+
+test("Moodle roster retains the email aliases rendered in each participant row", async () => {
+  await withMoodlePage(async () => {
+    globalThis.fetch = async (url) => {
+      const path = new URL(String(url)).pathname;
+      if (path === "/user/index.php") return nativePageResponse(String(url), courseConfig());
+      if (path === "/admin/roles/check.php") return nativePageResponse(String(url), capabilityPage());
+      return nativeAjaxResponse({ html: tablePage(2, 1, [], {
+        rawRows: '<tr><td><input class="usercheckbox" name="user7"></td><td>Michaela Adams</td><td>michaela@example.edu</td><td>m.adams@example.edu</td></tr>',
+      }), warnings: [] });
+    };
+    const result = await collectMoodleCourseParticipantRoster(rosterInput());
+    assert.equal(result.complete, true);
+    assert.deepEqual(result.identities, [{ id: "7", name: "Michaela Adams", email: "michaela@example.edu", aliases: ["m.adams@example.edu"] }]);
+  });
+});

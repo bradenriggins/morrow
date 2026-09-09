@@ -14,7 +14,7 @@ import { parseCanvasBrowserCatalog, parseMoodleBrowserCatalog } from "../../pack
  * scripts/test/bridge-release-provider-scope.test.mjs proves the packaged Bridge ships no
  * Blackboard file, and scripts/test/popup-view.test.mjs proves the words a person reads. Neither
  * runs the refusal. This file does: it loads the shipped service worker with a Chrome stub, sends
- * it the same messages the popup sends, and holds the refusal to what it must be — a named state,
+ * it the same messages the popup sends, and holds the refusal to what it must be: a named state,
  * no request to the Blackboard site, no saved connection, and no site access kept afterwards. It
  * also holds the two sides that would have to change first for a browser route to exist: the
  * worker's catalog load and the Gateway's browser-catalog reader.

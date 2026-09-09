@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { executeItemBankInPage } from "../../connector/extension/src/item-bank-executor.js";
-import { validateQuizItemPayload } from "../../connector/extension/src/quiz-item-payload.js";
+import { completeQuizItemPayloadReason, validateQuizItemPayload } from "../../connector/extension/src/quiz-item-payload.js";
 import {
   CASES,
   choice,
@@ -20,9 +20,7 @@ function storage(values) {
 }
 
 /**
- * Runs the copy of the rules inside the injected function, the way Chrome runs
- * it: `executeItemBankInPage` reads the page globals defined here, so the
- * verdict this returns is the verdict a real Item Banks frame would reach.
+ * Runs the injected Item Banks function the way Chrome runs it.
  *
  * Returns the executor result and every request it made, so a refusal can be
  * proven to happen before anything is sent.
@@ -33,12 +31,8 @@ async function sendItem(nickname, argumentsValue) {
   const calls = [];
   const values = {
     location: { hostname: "school.quiz-lti.instructure.com" },
-    document: { referrer: "https://school.instructure.com/courses/42/external_tools/9" },
-    sessionStorage: storage({
-      current_user: JSON.stringify({ id: "7" }),
-      "banks.build_token": `Signature ${"item-bank-credential-".repeat(4)}`,
-      item_banks_scope: JSON.stringify({ course_id: "42" }),
-    }),
+    document: { referrer: "https://school.instructure.com/courses/42/external_tools/54065" },
+    sessionStorage: storage({ current_user: JSON.stringify({ id: "7" }) }),
     localStorage: storage({}),
     fetch: async (url, options) => {
       calls.push({ url: String(url), method: options.method, body: options.body ? JSON.parse(options.body) : null });
@@ -91,7 +85,7 @@ test("a question read flat is read the same way as one wrapped in its item recor
   }
 });
 
-test("the eight interaction types an allowlist once refused are all sent", () => {
+test("the eight interaction types an allowlist once refused pass the partial structural guard", () => {
   // The same payload, refused as a choice question, is accepted under every one
   // of the eight. Nothing about it changes except the type it declares.
   assert.equal(validateQuizItemPayload(item({ interaction_type_slug: "choice", ...UNCHECKABLE_ENTRY })), "choice_too_few");
@@ -111,39 +105,94 @@ test("media is still checked for every one of the eight pass-through types", () 
   }
 });
 
-test("the copy of the rules inside the injected function answers exactly as the module does", async () => {
+test("generic Item Bank question creates require the exact frame credential before payload dispatch", async () => {
   for (const { name, item: payload, reason } of CASES) {
     const { result, calls } = await sendItem("create_item", { bank_id: "91", item: payload });
-    if (reason === null) {
-      assert.equal(result.ok, true, name);
-      assert.equal(calls.length, 1, name);
-      assert.deepEqual(calls[0].body, { item: payload }, name);
-    } else {
-      assert.deepEqual(result, { matched: true, ok: false, sent: false, error: `item_bank_payload_${reason}` }, name);
-      assert.deepEqual(calls, [], name);
-    }
+    assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" }, `${name}: ${reason}`);
+    assert.deepEqual(calls, [], name);
   }
 });
 
-test("a question update is checked by the same rules as a question create", async () => {
+test("generic Item Bank question updates require the exact frame credential", async () => {
   const refused = await sendItem("update_item", { bank_id: "91", item_id: "501", item: choice({ scoring_data: { value: "c9" } }) });
-  assert.deepEqual(refused.result, { matched: true, ok: false, sent: false, error: "item_bank_payload_choice_scoring_value_not_a_choice_id" });
+  assert.deepEqual(refused.result, { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" });
   assert.deepEqual(refused.calls, []);
 
   const accepted = await sendItem("update_item", { bank_id: "91", item_id: "501", item: choice() });
-  assert.equal(accepted.result.ok, true);
-  assert.equal(accepted.calls.length, 1);
-  assert.equal(accepted.calls[0].method, "PATCH");
+  assert.deepEqual(accepted.result, { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" });
+  assert.deepEqual(accepted.calls, []);
 });
 
-test("a payload the caller already wrapped is checked, not the wrapper", async () => {
+test("a wrapped generic Item Bank create still requires the exact frame credential", async () => {
   const { result, calls } = await sendItem("create_item", { bank_id: "91", item: { item: choice({ scoring_data: { value: "c9" } }) } });
-  assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "item_bank_payload_choice_scoring_value_not_a_choice_id" });
+  assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" });
   assert.deepEqual(calls, []);
 });
 
-test("a question that is not an object is refused before anything is sent", async () => {
+test("a non-object generic Item Bank create cannot bypass the credential boundary", async () => {
   const { result, calls } = await sendItem("create_item", { bank_id: "91", item: "a question" });
-  assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "item_bank_payload_payload_not_an_object" });
+  assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" });
   assert.deepEqual(calls, []);
+});
+
+const CATEGORY_A = "11111111-1111-4111-8111-111111111111";
+const CATEGORY_B = "22222222-2222-4222-8222-222222222222";
+const ANSWER_A = "33333333-3333-4333-8333-333333333333";
+const ANSWER_B = "44444444-4444-4444-8444-444444444444";
+
+function categorizationCreate(over = {}) {
+  return item({
+    interaction_type_slug: "categorization", item_body: "<p>Sort these.</p>", scoring_algorithm: "Categorization",
+    interaction_data: {
+      categories: { [CATEGORY_A]: { id: CATEGORY_A, item_body: "A" }, [CATEGORY_B]: { id: CATEGORY_B, item_body: "B" } },
+      distractors: { [ANSWER_A]: { id: ANSWER_A, item_body: "Alpha" }, [ANSWER_B]: { id: ANSWER_B, item_body: "Beta" } },
+      category_order: [CATEGORY_A, CATEGORY_B],
+    },
+    scoring_data: { score_method: "all_or_nothing", value: [
+      { id: CATEGORY_A, scoring_algorithm: "AllOrNothing", scoring_data: { value: [ANSWER_A] } },
+      { id: CATEGORY_B, scoring_algorithm: "AllOrNothing", scoring_data: { value: [ANSWER_B] } },
+    ] },
+    ...over,
+  });
+}
+
+function matchingCreate(over = {}) {
+  return item({
+    interaction_type_slug: "matching", item_body: "<p>Match each one.</p>", scoring_algorithm: "DeepEquals",
+    interaction_data: { questions: [{ id: "a", item_body: "Alpha" }, { id: "b", item_body: "Beta" }], answers: ["One", "Two"] },
+    scoring_data: {
+      value: { a: "One", b: "Two" },
+      edit_data: { matches: [{ question_id: "a", question_body: "Alpha", answer_body: "One" }, { question_id: "b", question_body: "Beta", answer_body: "Two" }], distractors: [] },
+    },
+    ...over,
+  });
+}
+
+/**
+ * A create writes the whole object, so a key Morrow never checked must never reach Canvas. The
+ * key sets are the ones the New Quiz Items appendix publishes for these two question types.
+ * https://developerdocs.instructure.com/services/canvas/resources/new_quiz_items
+ */
+test("matching and categorization creates refuse an unrecognised structural key", () => {
+  const base = categorizationCreate().entry;
+  const matchingBase = matchingCreate().entry;
+  const cases = [
+    ["categorization baseline", categorizationCreate(), null],
+    ["categorization interaction key", categorizationCreate({ interaction_data: { ...base.interaction_data, unexpected: true } }), "categorization_structure_invalid"],
+    ["categorization scoring key", categorizationCreate({ scoring_data: { ...base.scoring_data, unexpected: true } }), "categorization_scoring_invalid"],
+    ["categorization scoring row key", categorizationCreate({ scoring_data: { ...base.scoring_data, value: base.scoring_data.value.map((row, index) => index === 0 ? { ...row, unexpected: true } : row) } }), "categorization_scoring_invalid"],
+    ["categorization nested scoring key", categorizationCreate({ scoring_data: { ...base.scoring_data, value: base.scoring_data.value.map((row, index) => index === 0 ? { ...row, scoring_data: { ...row.scoring_data, unexpected: true } } : row) } }), "categorization_scoring_invalid"],
+    // Canvas documents the categorization questions shuffle as "currently always false".
+    ["categorization shuffled questions", categorizationCreate({ properties: { shuffle_rules: { questions: { shuffled: true } } } }), "create_properties_invalid"],
+    ["matching baseline", matchingCreate(), null],
+    ["matching interaction key", matchingCreate({ interaction_data: { ...matchingBase.interaction_data, unexpected: true } }), "matching_structure_invalid"],
+    ["matching scoring key", matchingCreate({ scoring_data: { ...matchingBase.scoring_data, unexpected: true } }), "matching_structure_invalid"],
+    ["matching edit_data key", matchingCreate({ scoring_data: { ...matchingBase.scoring_data, edit_data: { ...matchingBase.scoring_data.edit_data, unexpected: true } } }), "matching_structure_invalid"],
+    ["matching match row key", matchingCreate({ scoring_data: { ...matchingBase.scoring_data, edit_data: { ...matchingBase.scoring_data.edit_data, matches: matchingBase.scoring_data.edit_data.matches.map((match, index) => index === 0 ? { ...match, unexpected: true } : match) } } }), "matching_structure_invalid"],
+    // Matching documents its questions shuffle as a real setting, so it stays allowed.
+    ["matching shuffled questions", matchingCreate({ properties: { shuffle_rules: { questions: { shuffled: true } } } }), null],
+  ];
+  for (const [name, payload, reason] of cases) {
+    assert.equal(completeQuizItemPayloadReason(payload), reason, name);
+  }
 });

@@ -203,3 +203,90 @@ test("a resume keeps the fence when the restored Bridge is no longer a developme
     "bridge_update_quiesced",
   );
 });
+
+/**
+ * Everything below is the Store-compatible status path. `status` is the one
+ * control a Chrome Web Store Bridge is allowed to answer, so it is also the one
+ * place where "this install is signed by the Store" must not become a way to
+ * skip a check. An install source Morrow cannot read is not a Store install.
+ */
+test("an install source Morrow cannot read is refused, never treated as a Store install", async () => {
+  const unreadable = fixture();
+  unreadable.chromeApi.management.getSelf = async () => { throw new Error("management unavailable"); };
+  await rejectsCode(() => unreadable.create().control({ action: "status" }), "bridge_install_type_unavailable");
+  assert.deepEqual(unreadable.calls, [], "no marker is read for an install source Morrow could not read");
+
+  for (const installType of [undefined, null, "", "normal ", "Normal", "store", "web_store", 1, true]) {
+    const testFixture = fixture();
+    testFixture.chromeApi.management.getSelf = async () => ({ id: EXTENSION_ID, version: VERSION, installType });
+    await rejectsCode(() => testFixture.create().control({ action: "status" }), "bridge_identity_unavailable");
+    assert.deepEqual(testFixture.calls, [], `${JSON.stringify(installType) ?? "undefined"} is not an install source`);
+  }
+
+  const absent = fixture();
+  absent.chromeApi.management.getSelf = async () => null;
+  await rejectsCode(() => absent.create().control({ action: "status" }), "bridge_identity_unavailable");
+});
+
+test("a Store install answers status only for this exact signed extension", async () => {
+  await rejectsCode(
+    () => fixture({ installType: "normal", selfId: "b".repeat(32) }).create().control({ action: "status" }),
+    "bridge_identity_unavailable",
+  );
+  await rejectsCode(
+    () => fixture({ installType: "normal", selfVersion: "9.9.9" }).create().control({ action: "status" }),
+    "bridge_identity_unavailable",
+  );
+  const foreignId = fixture({ installType: "normal", extensionId: "not-a-chrome-extension-id" });
+  await rejectsCode(() => foreignId.create().control({ action: "status" }), "bridge_identity_unavailable");
+  const noVersion = fixture({ installType: "normal" });
+  noVersion.chromeApi.runtime.getManifest = () => ({});
+  await rejectsCode(() => noVersion.create().control({ action: "status" }), "bridge_identity_unavailable");
+});
+
+test("only a Store install skips the active-folder marker; every other install source still proves it", async () => {
+  for (const installType of ["development", "admin", "sideload", "other"]) {
+    const testFixture = fixture({ installType });
+    const status = await testFixture.create().control({ action: "status" });
+    assert.equal(status.installType, installType);
+    assert.equal(status.activeFolderProof.challengeId, CHALLENGE_ID, `${installType} proves the active folder`);
+    assert.equal(testFixture.calls.length, 1, `${installType} reads the app-owned marker`);
+    await rejectsCode(
+      () => fixture({ installType, markerOk: false }).create().control({ action: "status" }),
+      "bridge_active_folder_unconfirmed",
+    );
+  }
+});
+
+test("a Store install reports its quiesce fence and refuses status when that fence cannot be trusted", async () => {
+  const quiesced = fixture({
+    installType: "normal",
+    values: {
+      morrowBridgeQuiesceFence: {
+        schema: "morrow.bridge.quiesce-fence.v1",
+        extensionId: EXTENSION_ID,
+        manifestVersion: VERSION,
+        quiesceEpoch: "quiesce-12345678-1234-1234",
+      },
+    },
+  });
+  const quiescedStatus = await quiesced.create().control({ action: "status" });
+  assert.equal(quiescedStatus.quiescent, true);
+  assert.equal(quiescedStatus.activeFolderProof, null);
+
+  const damaged = fixture({ installType: "normal", values: { morrowBridgeQuiesceFence: { schema: "morrow.bridge.quiesce-fence.v1" } } });
+  await rejectsCode(() => damaged.create().control({ action: "status" }), "bridge_quiesce_fence_invalid");
+
+  const unreadable = fixture({ installType: "normal" });
+  unreadable.chromeApi.storage.local.get = async () => { throw new Error("storage unavailable"); };
+  await rejectsCode(() => unreadable.create().control({ action: "status" }), "bridge_quiesce_fence_unavailable");
+});
+
+test("status refuses a control Morrow did not send, whatever the install source is", async () => {
+  for (const installType of ["normal", "development"]) {
+    const maintenance = fixture({ installType }).create();
+    await rejectsCode(() => maintenance.control({ action: "status", path: "/tmp/Bridge" }), "bridge_maintenance_control_invalid");
+    await rejectsCode(() => maintenance.control({ action: "Status" }), "bridge_maintenance_control_invalid");
+    await rejectsCode(() => maintenance.control(null), "bridge_maintenance_control_invalid");
+  }
+});

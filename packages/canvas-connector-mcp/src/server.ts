@@ -1,14 +1,17 @@
-import { McpServer, fromJsonSchema } from "@modelcontextprotocol/server";
+import { McpServer, fromJsonSchema as validateJsonSchema } from "@modelcontextprotocol/server";
 import { augmentBridgeInputSchema } from "@morrow/bridge-protocol";
 import { canvasCatalogTools } from "@morrow/canvas-api-catalog";
-import { isJsonObject, type JsonObject, type JsonSchema, type SourceCapabilityMetadata } from "@morrow/contracts";
+import { isJsonObject, type JsonObject, type JsonSchema } from "@morrow/contracts";
 import * as z from "zod/v4";
+import { SourceMcpPrivacyBoundary, sourcePrivacyInputSchema } from "@morrow/gateway-core";
 import { canvasBrowserCatalogTools, moodleCatalogTools } from "./browser-catalog.js";
 import {
   PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
   PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
   type CanvasConnectorRuntime,
 } from "./runtime.js";
+const fromJsonSchema = (schema: JsonObject) => validateJsonSchema(sourcePrivacyInputSchema(schema));
+
 
 export function canvasConnectorSummary(value: JsonObject): string {
   const platform = value.provider === "moodle" ? "Moodle" : "Canvas";
@@ -50,18 +53,6 @@ export function canvasConnectorSummary(value: JsonObject): string {
   return "Morrow could not confirm this change. Ask your assistant to check the existing request. Do not repeat this change.";
 }
 
-/**
- * The generic Item Bank question write stays held everywhere it is described:
- * `canvasOperationAdmission` refuses it, and every profile in the generated
- * capability says so. Morrow sends this one route in exactly one shape — the
- * guarded image alternative-text repair planned by
- * `morrow_plan_item_bank_question_image_alt_repair` — so the connector publishes
- * that shape alone, and nothing else. `PRIVATE_SOURCE_TOOL_NAMES` in
- * packages/mcp-server/src/runtime.ts keeps this tool out of every client tool
- * list, so the planner is the only way in.
- */
-const ITEM_BANK_GUARDED_WRITE_TOOL = "canvas_item_bank_update_item";
-
 export function newQuizSettingsWriteSchema(inputSchema: JsonSchema): JsonObject {
   const schema = augmentBridgeInputSchema(inputSchema);
   return {
@@ -79,69 +70,121 @@ export function newQuizSettingsWriteSchema(inputSchema: JsonSchema): JsonObject 
   };
 }
 
-const ITEM_BANK_GUARD_PROPERTIES: JsonObject = {
-  kind: { const: "item_bank_entry_image_alt" },
-  course_id: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
-  bank_id: { type: "string", minLength: 1, maxLength: 128 },
-  bank_entry_id: { type: "string", minLength: 1, maxLength: 128 },
-  item_id: { type: "string", minLength: 1, maxLength: 128 },
-  entry_type: { const: "Item" },
-  item_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
-  protected_state_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
-  image_index: { type: "integer", minimum: 1 },
-  image_src_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
-  alt_text: { type: "string", minLength: 1, maxLength: 500 },
-  fan_out: { type: "object", additionalProperties: true },
-  acknowledged_course_ids: { type: "array", items: { type: "string", pattern: "^[1-9][0-9]{0,18}$" }, maxItems: 200 },
-};
-
-/**
- * The published shape of the guarded repair: the bank, the question, and the
- * guard. There is no question body here on purpose — the Item Banks frame reads
- * the current question inside the signed-in session and builds the changed body
- * itself, so a body sent from outside could only disagree with what the frame
- * saw. The frame checks every field of this guard again before it sends
- * anything; this schema is the shape only.
- */
-function itemBankGuardedWriteSchema(inputSchema: JsonSchema): JsonObject {
-  const augmented = augmentBridgeInputSchema(inputSchema, false, false);
-  const properties = isJsonObject(augmented.properties) ? augmented.properties : {};
+export function newQuizItemWriteSchema(inputSchema: JsonSchema): JsonObject {
+  const schema = augmentBridgeInputSchema(inputSchema, true);
   return {
-    ...augmented,
+    ...schema,
     properties: {
-      ...(properties.bank_id ? { bank_id: properties.bank_id } : {}),
-      ...(properties.item_id ? { item_id: properties.item_id } : {}),
-      morrow_item_bank_guard: {
+      ...(isJsonObject(schema.properties) ? schema.properties : {}),
+      morrow_new_quiz_item_position_guard: {
         type: "object",
-        description: "The exact question and affected-course evidence this repair was planned against. Morrow's item bank repair planner produces it; nothing else does.",
-        properties: ITEM_BANK_GUARD_PROPERTIES,
-        required: Object.keys(ITEM_BANK_GUARD_PROPERTIES),
+        description: "Complete current and expected New Quiz item order from the reviewed reorder planner. Required when this request changes item_position.",
+        properties: {
+          kind: { const: "new_quiz_item_position" },
+          before_item_ids_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+          expected_item_ids: {
+            type: "array", minItems: 1, maxItems: 10_000, uniqueItems: true,
+            items: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
+          },
+          expected_item_ids_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        },
+        required: ["kind", "before_item_ids_sha256", "expected_item_ids", "expected_item_ids_sha256"],
         additionalProperties: false,
       },
-      ...(properties._morrow ? { _morrow: properties._morrow } : {}),
     },
-    required: ["bank_id", "item_id", "morrow_item_bank_guard"],
-    additionalProperties: false,
   };
 }
 
-/**
- * The generated capability describes the held generic write, so it reports the
- * hold in every profile and no readback. This one guarded shape is different in
- * exactly two ways, and only where a signed-in Item Banks frame exists: it is
- * admitted, and the frame reads the question again after its single change and
- * compares it. Every other profile keeps the hold sentence a person reads.
- */
-function itemBankGuardedWriteCapability(capability: SourceCapabilityMetadata | undefined): SourceCapabilityMetadata | undefined {
-  if (!capability) return capability;
+export function newQuizItemLifecycleWriteSchema(inputSchema: JsonSchema): JsonObject {
+  const schema = augmentBridgeInputSchema(inputSchema);
+  const digest = { type: "string", pattern: "^[0-9a-f]{64}$" };
   return {
-    ...capability,
-    behavior: { ...capability.behavior, supportsReadback: true },
-    profiles: { ...capability.profiles, "private-full": { state: "supported" } },
-    evidence: {
-      ...capability.evidence,
-      admission: { state: "known", reason: "Admitted only as the guarded image alternative-text repair, with a complete affected-course record confirmed by the person." },
-      readback: { state: "known", reason: "The Item Banks frame reads the question again after its single change and compares it. Live provider readback remains required." },
+    ...schema,
+    properties: {
+      ...(isJsonObject(schema.properties) ? schema.properties : {}),
+      morrow_new_quiz_item_lifecycle_guard: {
+        description: "Fresh complete item-list state from a New Quiz lifecycle planner. Required for item create and delete.",
+        oneOf: [
+          {
+            type: "object",
+            properties: {
+              kind: { const: "create" },
+              before_items_sha256: digest,
+              payload_sha256: digest,
+            },
+            required: ["kind", "before_items_sha256", "payload_sha256"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              kind: { const: "delete" },
+              before_items_sha256: digest,
+              target_item_sha256: digest,
+              item_id: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
+              entry_type: { const: "Item" },
+            },
+            required: ["kind", "before_items_sha256", "target_item_sha256", "item_id", "entry_type"],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+  };
+}
+
+export function newQuizLifecycleWriteSchema(inputSchema: JsonSchema): JsonObject {
+  const schema = augmentBridgeInputSchema(inputSchema);
+  const digest = { type: "string", pattern: "^[0-9a-f]{64}$" };
+  return {
+    ...schema,
+    properties: {
+      ...(isJsonObject(schema.properties) ? schema.properties : {}),
+      morrow_new_quiz_lifecycle_guard: {
+        description: "Fresh complete course quiz membership from a reviewed New Quiz lifecycle plan.",
+        oneOf: [
+          {
+            type: "object",
+            properties: {
+              kind: { const: "create" },
+              before_quiz_ids: { type: "array", maxItems: 10_000, uniqueItems: true, items: { type: "string", pattern: "^[1-9][0-9]{0,18}$" } },
+              before_quiz_ids_sha256: digest, payload_sha256: digest,
+            },
+            required: ["kind", "before_quiz_ids", "before_quiz_ids_sha256", "payload_sha256"],
+            additionalProperties: false,
+          },
+          {
+            type: "object",
+            properties: {
+              kind: { const: "delete" }, before_quiz_ids_sha256: digest, target_quiz_sha256: digest,
+              before_quiz_ids: { type: "array", maxItems: 10_000, uniqueItems: true, items: { type: "string", pattern: "^[1-9][0-9]{0,18}$" } },
+              target_items_sha256: digest, target_assignment_sha256: digest,
+              quiz_id: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
+            },
+            required: ["kind", "before_quiz_ids", "before_quiz_ids_sha256", "target_quiz_sha256", "target_items_sha256", "target_assignment_sha256", "quiz_id"],
+            additionalProperties: false,
+          },
+        ],
+      },
+    },
+  };
+}
+
+export function newQuizEffectWriteSchema(inputSchema: JsonSchema): JsonObject {
+  const schema = augmentBridgeInputSchema(inputSchema);
+  return {
+    ...schema,
+    properties: {
+      ...(isJsonObject(schema.properties) ? schema.properties : {}),
+      morrow_new_quiz_effect_guard: {
+        type: "object",
+        properties: {
+          kind: { enum: ["accommodation", "report"] },
+          payload_sha256: { type: "string", pattern: "^[0-9a-f]{64}$" },
+        },
+        required: ["kind", "payload_sha256"],
+        additionalProperties: false,
+      },
     },
   };
 }
@@ -172,33 +215,69 @@ export function privateMoodleEnrolmentCandidateInputSchema(): JsonObject {
   }, false, false);
 }
 
-export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime): McpServer {
+export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, options: { readonly internalSourceCapability?: string; readonly learnerVaultPath?: string } = {}): McpServer {
   const server = new McpServer({ name: "morrow-canvas-connector", version: "1.0.0" });
-  server.registerTool("morrow_canvas_connector_health", {
+  const privacy = new SourceMcpPrivacyBoundary({
+    source: "canvas-connector-mcp",
+    internalSourceCapability: options.internalSourceCapability,
+    learnerVaultPath: options.learnerVaultPath,
+    bindings: () => runtime.bindings(),
+    acceptsCourseRequest: (name, args, binding) => runtime.acceptsPublicPrivacyScope(name, args, binding),
+    loadRoster: (binding) => runtime.privacyRoster(binding),
+  });
+  const registerTool: typeof server.registerTool = ((...registration: Parameters<typeof server.registerTool>) => {
+    const [name, config, callback] = registration;
+    return server.registerTool(name, config, async (args, ctx) => await privacy.invoke(name,
+      isJsonObject(args) ? args : {}, ctx.mcpReq._meta,
+      async (resolved) => callback(resolved, ctx)) as Awaited<ReturnType<typeof callback>>);
+  }) as typeof server.registerTool;
+
+  const privateChatBase = {
+    schema: z.literal("morrow.private-chat.exchange.v1"),
+    sessionId: z.string().min(8).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
+    assistantName: z.string().min(1).max(200),
+  };
+  registerTool("morrow_private_chat_exchange", {
+    title: "Relay one local Private Chat exchange",
+    description: "Internal Morrow control that waits on the authenticated local Bridge drawer. This tool is not a catalog capability.",
+    inputSchema: z.discriminatedUnion("action", [
+      z.strictObject({ ...privateChatBase, action: z.literal("listen") }),
+      z.strictObject({
+        ...privateChatBase,
+        action: z.literal("reply_and_listen"),
+        assistantReply: z.string().min(1).max(100_000),
+        sourceBindingId: z.string().min(1).max(160).regex(/^[A-Za-z0-9_.:@-]+$/),
+        courseId: z.string().regex(/^[1-9][0-9]{0,18}$/),
+      }),
+    ]),
+    annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+  }, async (input, context) => toolResult(await runtime.privateChatExchange(input as unknown as JsonObject, context.mcpReq.signal)));
+
+  registerTool("morrow_canvas_connector_health", {
     title: "Check the Chrome connection",
     description: "Report the local Morrow Canvas connector, full Canvas catalog, and signed-in browser-session state.",
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => toolResult(runtime.health()));
-  server.registerTool("morrow_canvas_bindings", {
+  registerTool("morrow_canvas_bindings", {
     title: "Show saved Canvas connections",
     description: "List the runtime-verified Canvas accounts available through the local Chrome connector.",
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => toolResult({ schema: "morrow.canvas-bindings.v1", ok: true, bindings: runtime.canvasBindings(), count: runtime.canvasBindings().length }));
-  server.registerTool("morrow_browser_bindings", {
+  registerTool("morrow_browser_bindings", {
     title: "Show saved learning-platform connections",
     description: "List the runtime-verified Canvas and Moodle accounts available through the local Chrome connector.",
     inputSchema: z.object({}),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async () => toolResult({ schema: "morrow.browser-bindings.v1", ok: true, bindings: runtime.bindings(), count: runtime.bindings().length }));
-  server.registerTool("morrow_browser_edit_options", {
+  registerTool("morrow_browser_edit_options", {
     title: "Show course Edit actions",
     description: "Read the current individual Edit and Review-only actions for one exact saved browser course connection.",
     inputSchema: z.strictObject({ source_binding_id: z.string().min(1).max(160) }),
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
   }, async (input) => toolResult(await runtime.editOptions(input.source_binding_id)));
-  server.registerTool("morrow_browser_edit_policy_set", {
+  registerTool("morrow_browser_edit_policy_set", {
     title: "Set selected course Edit access",
     description: "Internal Morrow control for one current set of exact browser course bindings. This tool is not a catalog capability.",
     inputSchema: z.discriminatedUnion("mode", [
@@ -220,7 +299,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
     ]),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input) => toolResult(await runtime.editPolicySet(input)));
-  server.registerTool("morrow_bridge_maintenance", {
+  registerTool("morrow_bridge_maintenance", {
     title: "Maintain paired Morrow Bridge",
     description: "Internal Morrow control for authenticated paired-Bridge status, quiescence, recovery, and reload readback. This tool is not a catalog capability.",
     inputSchema: z.discriminatedUnion("action", [
@@ -235,7 +314,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
     ]),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input) => toolResult(await runtime.bridgeMaintenance(input)));
-  server.registerTool(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, {
+  registerTool(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, {
     title: "Find one private Moodle enrolment candidate",
     description: "Internal Morrow read that resolves one exact full name through this course's native manual-enrolment candidate selector. Only the numeric Moodle user ID leaves the signed-in browser session.",
     inputSchema: fromJsonSchema(privateMoodleEnrolmentCandidateInputSchema()),
@@ -266,7 +345,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
     PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
     isJsonObject(argumentsValue) ? argumentsValue : {},
   )));
-  server.registerTool("canvas_send_private_conversation", {
+  registerTool("canvas_send_private_conversation", {
     title: "Send reviewed Canvas Inbox message",
     description: "Internal Morrow route for one reviewed Canvas Inbox conversation or reply. Recipient identities and message content are private transport data and cannot be supplied through public Morrow capability arguments.",
     inputSchema: fromJsonSchema(augmentBridgeInputSchema({
@@ -322,7 +401,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
       },
     },
   }, async (argumentsValue) => toolResult(await runtime.call("canvas_send_private_conversation", isJsonObject(argumentsValue) ? argumentsValue : {})));
-  server.registerTool("canvas_transfer_course_file", {
+  registerTool("canvas_transfer_course_file", {
     title: "Transfer reviewed Canvas course file",
     description: "Internal Morrow route that transfers one staged, reviewed material to one current Canvas course folder. File bytes are private transport data and cannot be supplied in public tool arguments.",
     inputSchema: fromJsonSchema(augmentBridgeInputSchema({
@@ -362,26 +441,70 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
       },
     },
   }, async (argumentsValue) => toolResult(await runtime.call("canvas_transfer_course_file", isJsonObject(argumentsValue) ? argumentsValue : {})));
+  registerTool("canvas_create_new_quiz_hot_spot", {
+    title: "Create reviewed New Quiz Hot Spot question",
+    description: "Internal Morrow route that creates one reviewed New Quizzes Hot Spot question with its reviewed image. Canvas requires a signed media upload URL, one PUT of the exact image bytes, and a create that carries that URL without its query string. Image bytes are private transport data and cannot be supplied in public tool arguments.",
+    inputSchema: fromJsonSchema(augmentBridgeInputSchema({
+      type: "object",
+      properties: {
+        course_id: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
+        assignment_id: { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
+        item: { type: "object" },
+        before_items_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        payload_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        filename: { type: "string", minLength: 1, maxLength: 255 },
+        size_bytes: { type: "integer", minimum: 1, maximum: 1024 * 1024 },
+        sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+        content_type: { type: "string", enum: ["image/png", "image/jpeg", "image/gif"] },
+      },
+      required: ["course_id", "assignment_id", "item", "before_items_sha256", "payload_sha256", "filename", "size_bytes", "sha256", "content_type"],
+      additionalProperties: false,
+    }, false, true)),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+    _meta: {
+      "io.morrow/capability": {
+        family: "new-quizzes",
+        provider: "canvas",
+        sourcePath: "connector/extension/src/canvas-new-quiz-hot-spot.js",
+        sourceExport: "canvas.private.new_quiz.hot_spot.create.v1",
+        behavior: {
+          readOnly: false, mutating: true, destructive: false, irreversible: false,
+          supportsDryRun: false, supportsReadback: true, supportsUndo: false, supportsBatch: false,
+          requiresBrowser: true, requiresLiveCanvas: true,
+        },
+        authority: { scopeClass: "course-quiz", approvalClass: "standard", dataClass: "course" },
+        route: { backend: "canvas-connector", dispatchBackend: "chrome-session-connector", readbackBackend: "chrome-session-connector", comparator: "new-quiz-item-membership" },
+        profiles: {
+          "private-full": { state: "supported" },
+          "public-canvas": { state: "profile_limited", reason: "This action requires a signed-in Canvas session." },
+          sandbox: { state: "profile_limited", reason: "This action requires a signed-in Canvas session." },
+          "read-only": { state: "profile_limited", reason: "This action changes a Canvas course." },
+        },
+        evidence: { transport: { state: "known" }, credentialBoundary: { state: "known" } },
+      },
+    },
+  }, async (argumentsValue) => toolResult(await runtime.call("canvas_create_new_quiz_hot_spot", isJsonObject(argumentsValue) ? argumentsValue : {})));
 
   for (const tool of canvasCatalogTools(runtime.catalog)) {
-    const guardedItemBank = tool.name === ITEM_BANK_GUARDED_WRITE_TOOL;
-    server.registerTool(tool.name, {
+    registerTool(tool.name, {
       ...(tool.title ? { title: tool.title } : {}),
       ...(tool.description ? { description: tool.description } : {}),
-      inputSchema: fromJsonSchema(guardedItemBank
-        ? itemBankGuardedWriteSchema(tool.inputSchema)
-        : tool.name === "canvas_update_single_quiz" ? newQuizSettingsWriteSchema(tool.inputSchema)
+      inputSchema: fromJsonSchema(tool.name === "canvas_update_single_quiz" ? newQuizSettingsWriteSchema(tool.inputSchema)
+        : tool.name === "canvas_update_quiz_item" ? newQuizItemWriteSchema(tool.inputSchema)
+        : ["canvas_create_quiz_item", "canvas_delete_quiz_item"].includes(tool.name) ? newQuizItemLifecycleWriteSchema(tool.inputSchema)
+        : ["canvas_create_new_quiz", "canvas_delete_new_quiz"].includes(tool.name) ? newQuizLifecycleWriteSchema(tool.inputSchema)
+        : ["canvas_set_course_level_accommodations", "canvas_set_quiz_level_accommodations", "canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post"].includes(tool.name) ? newQuizEffectWriteSchema(tool.inputSchema)
         : augmentBridgeInputSchema(tool.inputSchema, [
           "canvas_update_create_page_courses",
           "canvas_edit_assignment",
           "canvas_update_topic_courses",
         ].includes(tool.name), false, tool.name === "canvas_update_create_page_courses")),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
-      _meta: { "io.morrow/capability": guardedItemBank ? itemBankGuardedWriteCapability(tool.capability) : tool.capability },
+      _meta: { "io.morrow/capability": tool.capability },
     }, async (argumentsValue) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {})));
   }
   for (const tool of canvasBrowserCatalogTools(runtime.canvasBrowserCatalog)) {
-    server.registerTool(tool.name, {
+    registerTool(tool.name, {
       ...(tool.title ? { title: tool.title } : {}),
       ...(tool.description ? { description: tool.description } : {}),
       inputSchema: fromJsonSchema(augmentBridgeInputSchema(tool.inputSchema, false, false)),
@@ -390,7 +513,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime):
     }, async (argumentsValue) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {})));
   }
   for (const tool of moodleCatalogTools(runtime.moodleCatalog)) {
-    server.registerTool(tool.name, {
+    registerTool(tool.name, {
       ...(tool.title ? { title: tool.title } : {}),
       ...(tool.description ? { description: tool.description } : {}),
       inputSchema: fromJsonSchema(augmentBridgeInputSchema(

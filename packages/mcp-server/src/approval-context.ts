@@ -563,15 +563,16 @@ function resourceSpec(
       courseId,
     };
   }
-  if (family === "new-quizzes-item-banks" && bankId) {
+  if (family === "new-quizzes-item-banks" && bankId && courseId) {
     return {
       field: "bank_id",
       label: "Item Bank",
       id: bankId,
       readTool: "canvas_item_bank_get_bank",
-      readArguments: { bank_id: bankId },
+      readArguments: { course_id: courseId, bank_id: bankId },
       entityId: (value) => sameId(value.id, bankId),
       nameFields: ["title", "name"],
+      courseId,
     };
   }
   return null;
@@ -618,14 +619,12 @@ interface ItemBankTarget {
   readonly itemId: string;
   /** The courses the frozen record names, or null when that list is unreadable. */
   readonly externalCourseIds: readonly string[] | null;
-  readonly fanOutComplete: boolean;
 }
 
 /**
- * The one Item Bank question change Morrow reviews, taken from the guard the
- * plan froze. The guard carries the course, the bank, the entry, the question,
- * and the record of every course the bank reaches, so the review needs no other
- * source for the scope of the change.
+ * Parse a legacy Item Bank question plan for fail-closed review display. Current
+ * plans use the snapshot-bound generic update. The frozen legacy list can name
+ * observed courses only; it never proves complete reach.
  */
 function itemBankGuardTarget(mapping: CatalogTool, args: JsonObject): ItemBankTarget | null {
   if (mapping.upstreamName !== ITEM_BANK_UPDATE_TOOL || mapping.capability?.family !== "new-quizzes-item-banks") return null;
@@ -644,7 +643,30 @@ function itemBankGuardTarget(mapping: CatalogTool, args: JsonObject): ItemBankTa
   // A list Morrow cannot read is not a list of no courses, so an unreadable
   // record becomes null here and the review says the reach is unread.
   const externalCourseIds = listed && ids && ids.length === listed.length && new Set(ids).size === ids.length ? ids : null;
-  return { courseId, bankId, bankEntryId, itemId, externalCourseIds, fanOutComplete: fanOut?.complete === true };
+  return { courseId, bankId, bankEntryId, itemId, externalCourseIds };
+}
+
+function itemBankObservedReachTarget(mapping: CatalogTool, args: JsonObject): ApprovalReviewContext["targets"][number] | null {
+  if (mapping.capability?.family !== "new-quizzes-item-banks" || mapping.upstreamName === "canvas_item_bank_create_bank") return null;
+  const fanOut = object(args.fan_out);
+  const listed = Array.isArray(fanOut?.external_course_ids) ? fanOut.external_course_ids.map(exactId) : null;
+  const acknowledged = Array.isArray(args.acknowledged_course_ids) ? args.acknowledged_course_ids.map(exactId) : null;
+  // The two lists name a set, so they are compared sorted: the same courses in
+  // a different order are the same acknowledgement.
+  const sorted = (values: readonly (string | null)[] | null) => values !== null && values.every((id): id is string => id !== null) ? [...values].sort() : null;
+  const sortedListed = sorted(listed);
+  const sortedAcknowledged = sorted(acknowledged);
+  if (!sortedListed || !sortedAcknowledged
+    || sortedListed.length !== sortedAcknowledged.length
+    || sortedListed.some((id, index) => id !== sortedAcknowledged[index])) {
+    return { field: "fan_out", label: "Observed Item Bank reach", name: "Morrow could not verify the acknowledged observed course list." };
+  }
+  const unread = Array.isArray(fanOut?.unreachable) ? fanOut.unreachable.filter((value): value is string => typeof value === "string") : [];
+  return {
+    field: "fan_out",
+    label: "Observed Item Bank reach",
+    name: `${sortedListed.length ? `Acknowledged courses: ${sortedListed.map((id) => `course ${id}`).join(", ")}.` : "No external course was observed."} Unread sources: ${unread.join(", ") || "unreadable"}. This is observed reach, not an account-wide claim.`,
+  };
 }
 
 /** One fresh Canvas read reduced to the entity it confirms, or null. */
@@ -659,11 +681,8 @@ function itemBankCourseName(result: JsonObject | null, courseId: string): string
 }
 
 /**
- * Names every course one Item Bank question change reaches, before a person
- * approves it. An item bank is shared machinery: the same question can be drawn
- * by quizzes in courses nobody opened. The review reads the selected course, the
- * bank, the bank entry, and the question, and then reads the name of each course
- * the frozen record names.
+ * Names the courses observed by a legacy Item Bank plan and states that the
+ * list is incomplete. Current Item Bank writes never reach approval.
  *
  * A course whose name no fresh read supplies is shown by its Canvas id and said
  * to be unread; no name is built from the request. The question body and the
@@ -686,9 +705,9 @@ async function itemBankApprovalContext(
   const named = (target.externalCourseIds || []).slice(0, ITEM_BANK_COURSE_NAME_READS);
   const [courseRead, bankRead, entryRead, itemRead, ...courseReads] = await Promise.all([
     read("canvas_get_single_course_courses", { id: target.courseId }),
-    read("canvas_item_bank_get_bank", { bank_id: target.bankId }),
-    read("canvas_item_bank_get_entry", { bank_id: target.bankId, bank_entry_id: target.bankEntryId }),
-    read("canvas_item_bank_get_item", { bank_id: target.bankId, item_id: target.itemId }),
+    read("canvas_item_bank_get_bank", { course_id: target.courseId, bank_id: target.bankId }),
+    read("canvas_item_bank_get_entry", { course_id: target.courseId, bank_id: target.bankId, bank_entry_id: target.bankEntryId }),
+    read("canvas_item_bank_get_item", { course_id: target.courseId, bank_id: target.bankId, item_id: target.itemId }),
     ...named.map((id) => read("canvas_get_single_course_courses", { id })),
   ]);
   const bank = readEntity(bankRead.result, (value) => sameId(value.id, target.bankId));
@@ -713,19 +732,16 @@ async function itemBankApprovalContext(
     const name = names.get(id);
     return name ? `${name} (course ${id})` : `Course ${id} (Morrow could not read this course name)`;
   }).join(", ");
-  // "Nobody read the courses" and "no course draws from this bank" are different
-  // answers, and only the complete record may give the second one.
-  const complete = target.fanOutComplete && target.externalCourseIds !== null;
   const reach = [
-    listed ? `${listed}.` : complete ? "No other course uses this item bank." : "",
+    listed ? `${listed}. These are observed courses only.` : "No other course was observed in this legacy record.",
     external.length > named.length ? `Morrow read the first ${ITEM_BANK_COURSE_NAME_READS} of these course names.` : "",
-    complete ? "" : "Morrow could not read every course this item bank reaches.",
+    "Canvas cannot enumerate every course and New Quiz that uses this item bank. This write remains held.",
   ].filter(Boolean).join(" ");
   return {
     targets: [
       { field: "course_id", label: "Course", name: itemBankCourseName(courseRead.result, target.courseId) || "" },
       { field: "bank_id", label: "Item Bank", name: bankName || "" },
-      { field: "morrow_item_bank_fan_out", label: "Also changes these courses", name: reach },
+      { field: "morrow_item_bank_fan_out", label: "Observed courses only", name: reach },
       { field: "item_id", label: "Question", name: questionName },
     ],
     ...([courseRead, bankRead, entryRead, itemRead, ...courseReads].some((response) => response.limited) ? { limited: true } : {}),
@@ -935,16 +951,17 @@ export async function resolveApprovalReviewContext(
   const question = questionSpec(mapping, args, courseId);
   const moduleItem = moduleItemSpec(mapping, args, courseId);
   const expected = [course, resource, question, moduleItem].filter((target): target is TargetSpec => target !== null);
+  const itemBankReach = itemBankObservedReachTarget(mapping, args);
   if (expected.length === 0) return { targets: [] };
 
   const bindingTool = exactSourceTool(tools, operation.sourceId, "morrow_canvas_bindings", false);
   if (!bindingTool) return {
-    targets: expected.map((target) => ({ field: target.field, label: target.label, name: "" })),
+    targets: [...expected.map((target) => ({ field: target.field, label: target.label, name: "" })), ...(itemBankReach ? [itemBankReach] : [])],
   };
   const bindingRead = await boundedRead(review, bindingTool.publicName, {});
   const origin = bindingRead.result ? bindingOrigin(bindingRead.result, operation.sourceBindingId) : null;
   if (!origin) return {
-    targets: expected.map((target) => ({ field: target.field, label: target.label, name: "" })),
+    targets: [...expected.map((target) => ({ field: target.field, label: target.label, name: "" })), ...(itemBankReach ? [itemBankReach] : [])],
     ...(bindingRead.limited ? { limited: true } : {}),
   };
 
@@ -969,7 +986,7 @@ export async function resolveApprovalReviewContext(
   return {
     ...(Object.keys(current).length ? { current } : {}),
     ...(Object.keys(questionContent).length ? { question: questionContent } : {}),
-    targets: results.map(([target, response]) => resolvedTarget(target, response.result, origin)),
+    targets: [...results.map(([target, response]) => resolvedTarget(target, response.result, origin)), ...(itemBankReach ? [itemBankReach] : [])],
     ...(results.some(([, response]) => response.limited) ? { limited: true } : {}),
   };
 }

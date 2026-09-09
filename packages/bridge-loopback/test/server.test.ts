@@ -507,6 +507,81 @@ describe("LoopbackBridgeServer", () => {
     expect(await expired.text()).toContain("Start a new connection");
   });
 
+  it("reuses a pending pairing request for the same extension", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      port: 0,
+      pairingEnabled: true,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const origin = `chrome-extension://${extensionId}`;
+    const request = () => fetch(`http://${address.host}:${address.port}${address.path}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ extensionId, catalogDigest: digest, runtimeRevision: revision }),
+    });
+    const first = await request();
+    const second = await request();
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(200);
+    expect((await second.json() as { pairingId: string }).pairingId)
+      .toBe((await first.json() as { pairingId: string }).pairingId);
+  });
+
+  it("keeps pairing pending when durable approval fails", async () => {
+    let approvals = 0;
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      port: 0,
+      pairingEnabled: true,
+      onPairApproved: async () => {
+        approvals += 1;
+        if (approvals === 1) throw new Error("state unavailable");
+      },
+    });
+    servers.push(server);
+    const address = await server.start();
+    const origin = `chrome-extension://${extensionId}`;
+    const created = await fetch(`http://${address.host}:${address.port}${address.path}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ extensionId, catalogDigest: digest, runtimeRevision: revision }),
+    });
+    const pairing = await created.json() as { approvalUrl: string; statusUrl: string };
+    const decide = () => fetch(`${pairing.approvalUrl}/decision`, {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded", origin: new URL(pairing.approvalUrl).origin },
+      body: "decision=approve",
+      redirect: "manual",
+    });
+    expect((await decide()).status).toBe(500);
+    const stillPending = await fetch(pairing.statusUrl, { headers: { origin } });
+    expect(await stillPending.json()).toMatchObject({ status: "pending" });
+    expect((await decide()).status).toBe(303);
+    const approved = await fetch(pairing.statusUrl, { headers: { origin } });
+    expect(await approved.json()).toMatchObject({ status: "approved", token });
+  });
+
+  it("disconnects a client that misses two heartbeat intervals", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+      heartbeatMs: 100,
+    });
+    servers.push(server);
+    const socket = await connect(server);
+    await once(socket, "close");
+    expect(server.health()).toMatchObject({ connected: false, bindingCount: 0 });
+  });
+
   it("names the held Bridge port instead of failing with an upstream error, and leaves the first Morrow working", async () => {
     const first = new LoopbackBridgeServer({
       token,

@@ -35,11 +35,11 @@ const RECORD_INVALID = "Blackboard effect record is invalid";
 /**
  * How far one reviewed Blackboard change got.
  *
- * `reserved` — the receipt is spent and nothing has left this process.
- * `sent` — the change request left this process. Morrow cannot prove what
+ * `reserved`: the receipt is spent and nothing has left this process.
+ * `sent`: the change request left this process. Morrow cannot prove what
  * reached Blackboard from here on, so this phase is written before the request.
- * `verified` — a readback proved the reviewed values are saved.
- * `uncertain` — the dispatch failed after the request left this process.
+ * `verified`: a readback proved the reviewed values are saved.
+ * `uncertain`: the dispatch failed after the request left this process.
  */
 export type BlackboardEffectPhase = "reserved" | "sent" | "verified" | "uncertain";
 

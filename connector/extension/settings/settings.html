@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Morrow Bridge — Plan and Edit settings</title>
+  <title>Morrow Bridge: Plan and Edit settings</title>
   <link rel="stylesheet" href="../brand/theme.css">
   <link rel="stylesheet" href="settings.css">
 </head>
@@ -15,6 +15,7 @@
         <h1>Plan and Edit settings</h1>
         <p class="lede">Plan is the default. Choose specific courses and individual Edit actions only when Morrow should apply changes for you.</p>
       </div>
+      <button id="private-chat-open" class="private-chat-open secondary" type="button" aria-haspopup="dialog" aria-controls="private-chat-drawer">Private Chat</button>
     </header>
 
     <p id="notice" class="notice" hidden></p>
@@ -80,13 +81,13 @@
       <div class="section-heading">
         <div>
           <h2 id="file-storage-title">Course file access</h2>
-          <p class="field-help">Use this only when Morrow needs to review a course file or transfer reviewed material.</p>
+          <p class="field-help">Turn this on when Morrow needs to review a course file, transfer reviewed material, or send the image for a reviewed Hot Spot quiz question.</p>
         </div>
       </div>
       <div class="file-storage-card">
         <div>
           <p id="file-storage-status" class="file-storage-status">Checking Chrome permission…</p>
-          <p class="field-help">Chrome grants this permission across HTTPS sites because Canvas can store course files on different domains. During one reviewed upload, Morrow observes only that Canvas-issued upload response until it gets a Canvas confirmation. It does not block or change requests. Morrow reads or transfers only files it confirms belong to selected Canvas courses.</p>
+          <p class="field-help">Chrome grants this permission across HTTPS sites because Canvas can store course files on different domains. During one reviewed upload, Morrow observes only that Canvas-issued upload response until it gets a Canvas confirmation. It does not block or change requests. Morrow reads or transfers only files it confirms belong to selected Canvas courses. The same permission covers the image bytes for a Hot Spot question you approved, which Canvas stores on its own upload host.</p>
         </div>
         <div class="file-storage-actions">
           <button id="enable-file-storage" type="button">Enable course file access</button>
@@ -166,6 +167,38 @@
       </ul>
     </section>
   </main>
+  <div id="private-chat-scrim" class="private-chat-scrim" hidden></div>
+  <aside id="private-chat-drawer" class="private-chat-drawer" role="dialog" aria-modal="true" aria-labelledby="private-chat-title" hidden>
+    <header class="private-chat-header">
+      <div>
+        <p class="private-chat-eyebrow">Local identity protection</p>
+        <h2 id="private-chat-title">Private Chat</h2>
+      </div>
+      <button id="private-chat-close" class="secondary" type="button" aria-label="Close Private Chat and clear this conversation">Close</button>
+    </header>
+    <p class="field-help">Morrow sends only protected text through the connected assistant. Ask the assistant to start Private Chat once. Closing this drawer clears its local conversation.</p>
+    <div class="private-chat-fields">
+      <label for="private-chat-client">Connected assistant
+        <select id="private-chat-client" disabled><option value="">No eligible assistant</option></select>
+      </label>
+      <label for="private-chat-course">Course
+        <select id="private-chat-course" disabled><option value="">Choose one connected course</option></select>
+      </label>
+    </div>
+    <div id="private-chat-history" class="private-chat-history" role="log" aria-live="polite">
+      <p class="state-message">No messages in this local conversation.</p>
+    </div>
+    <label class="private-chat-label" for="private-chat-identifiers">Student names or IDs used in the message
+      <textarea id="private-chat-identifiers" rows="2" autocomplete="off" spellcheck="false" placeholder="One name, email, or school ID per line"></textarea>
+      <small>List every student detail used. Morrow refuses an unknown or ambiguous entry.</small>
+    </label>
+    <label class="private-chat-label" for="private-chat-message">Message
+      <textarea id="private-chat-message" rows="5" autocomplete="off" placeholder="Type the request here"></textarea>
+    </label>
+    <p id="private-chat-status" class="private-chat-status">Ask the connected assistant to start Morrow Private Chat.</p>
+    <button id="private-chat-send" type="button" disabled>Send protected message</button>
+    <p class="private-chat-limit">Text typed directly into an assistant is already exposed to that assistant. Morrow cannot protect it after that point. The assistant provider may retain protected prompts under its own policy.</p>
+  </aside>
   <script type="module" src="settings.js"></script>
 </body>
 </html>

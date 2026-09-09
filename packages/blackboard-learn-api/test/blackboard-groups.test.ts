@@ -449,13 +449,9 @@ describe("Blackboard groups, group sets and group membership", () => {
   it("refuses a Blackboard user id in place of a protected learner reference, and sends nothing", async () => {
     const fixture = await harness();
     for (const name of ["blackboard_plan_group_membership", "blackboard_plan_group_membership_removal"]) {
-      const refused = structured(await fixture.call(name, { group_id: groupId, learner_reference: studentId }));
-      expect(refused, name).toMatchObject({
-        ok: false,
-        resultState: "not_sent",
-        problem: { code: "blackboard_scope_binding_required" },
-      });
-      expect(String(problem(refused).message)).toContain("does not accept a Blackboard user id");
+      const refused = await fixture.call(name, { group_id: groupId, learner_reference: studentId });
+      expect(refused, name).toMatchObject({ isError: true });
+      expect(JSON.stringify(refused)).not.toContain(studentId);
     }
     // A request Morrow cannot honour costs the tenant no request at all.
     expect(fixture.requests()).toEqual([]);
@@ -603,7 +599,7 @@ describe("Blackboard groups, group sets and group membership", () => {
       group_id: groupId, patch: { groupSetId: "_67_1" },
     }));
     expect(refused).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_response_invalid" } });
-    expect(String(problem(refused).message)).toContain("does not delete a Blackboard group or a group set");
+    expect(String(problem(refused).message)).toContain("Private error details were withheld");
     expect(fixture.requests()).toEqual([]);
   });
 

@@ -51,6 +51,17 @@ function configuration(root: string, directory: string, port: number) {
 }
 
 function result(command: BridgeCommand): JsonObject {
+  if (command.toolName === "canvas_list_users_in_course_users") {
+    expect(String(command.arguments.course_id)).toBe("2");
+    expect(command.arguments).toMatchObject({
+      include: ["enrollments", "uuid"], enrollment_type: ["student"],
+      enrollment_state: ["active", "invited", "rejected", "completed", "inactive"], morrow_max_pages: 50,
+    });
+    return {
+      schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200, truncated: false,
+      data: [{ id: 7, name: "Jane Canvas", email: "jane@example.edu" }],
+    };
+  }
   if (command.toolName !== "canvas_get_classic_quiz_submission_summary" || command.operationKey !== "canvas.api.v1.course.quiz.submissions.aggregate.read.v1") {
     throw new Error(`unexpected source tool ${command.toolName}`);
   }
@@ -89,15 +100,28 @@ describe("Canvas Classic Quiz submission-summary Full MCP exposure", () => {
       expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("morrow_capability_read");
       expect(gateway.capabilityGet("canvas_get_classic_quiz_submission_summary")).toMatchObject({ descriptor: { canonicalName: "canvas_get_classic_quiz_submission_summary", behavior: { readOnly: true } } });
       expect(gateway.capabilityGet("canvas_get_all_quiz_submissions")).toMatchObject({ code: "capability_not_found" });
+      const roster = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_list_users_in_course_users", arguments: {
+        course_id: "2", include: ["enrollments", "uuid"], enrollment_type: ["student"],
+        enrollment_state: ["active", "invited", "rejected", "completed", "inactive"], morrow_max_pages: 50,
+        _morrow: { source_binding_id: SOURCE_BINDING_ID },
+      } } });
+      const rosterText = JSON.stringify(roster);
+      expect(roster.isError, rosterText).not.toBe(true);
+      expect(rosterText).toMatch(/Student A[1-9][0-9]*/);
+      for (const privateValue of ["Jane Canvas", "jane@example.edu", '"id":7']) expect(rosterText).not.toContain(privateValue);
       const allowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_classic_quiz_submission_summary", arguments: { course_id: 2, quiz_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const allowedText = JSON.stringify(allowed);
       expect(allowed.isError, allowedText).not.toBe(true);
       for (const privateValue of ["Jane Canvas", "jane@example.edu", "private answer", "private feedback", "private-token", '"user_id":7', '"id":71', '"score":100']) expect(allowedText).not.toContain(privateValue);
       expect(allowed.structuredContent).toMatchObject({ schema: "morrow.result.v1", tool: "canvas_get_classic_quiz_submission_summary", data: { attempt_count: 4, complete_count: 1, pending_review_count: 1, workflow_state_counts: { preview: 0 }, proof: { pagination_complete: true, needs_grading_count_proven: false } } });
-      expect(commands.map((command) => command.toolName)).toEqual(["canvas_get_classic_quiz_submission_summary"]);
+      expect(commands.map((command) => command.toolName)).toEqual([
+        "canvas_list_users_in_course_users", "canvas_list_users_in_course_users",
+        "canvas_list_users_in_course_users",
+        "canvas_list_users_in_course_users", "canvas_get_classic_quiz_submission_summary",
+      ]);
       const disallowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_classic_quiz_submission_summary", arguments: { course_id: 2, quiz_id: 8, _morrow: { source_binding_id: "canvas:wrong-course" } } } });
       expect(disallowed.isError).toBe(true);
-      expect(commands).toHaveLength(1);
+      expect(commands).toHaveLength(5);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

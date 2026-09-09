@@ -60,7 +60,18 @@ function configuration(root: string, directory: string, port: number) {
   });
 }
 
-function result(command: BridgeCommand): JsonObject {
+function result(command: BridgeCommand, digest: string): JsonObject {
+  if (command.toolName === "moodle_get_course_participant_roster") return {
+    schema: "morrow.moodle-browser-result.v1", ok: true, sent: true, status: 200, truncated: false,
+    data: {
+      schema: "morrow.moodle-course-roster.v1", provider: "moodle", sourceBindingId: SOURCE_BINDING_ID, courseId: "2",
+      origin: ORIGIN, siteUrl: SITE_URL, principalFingerprint: PRINCIPAL_FINGERPRINT, sessionGeneration: 1,
+      catalogDigest: digest, status: "complete", complete: true,
+      identities: [{ id: "7", name: "Jane Moodle", email: "jane@example.edu" }],
+      proof: { method: "core_table_get_dynamic_table_content", pageSize: 100, requestCount: 1, pageCount: 1, rowCount: 1, identityCount: 1 },
+    },
+    snapshot_digest: "a".repeat(64),
+  };
   if (command.toolName !== "moodle_get_forum_activity_summary") throw new Error(`unexpected source tool ${command.toolName}`);
   return {
     schema: "morrow.canvas-browser-result.v1", ok: true, sent: false, provider: "moodle", complete: true,
@@ -76,7 +87,7 @@ function result(command: BridgeCommand): JsonObject {
 }
 
 describe("Moodle Forum activity-summary Full MCP exposure", () => {
-  it("exposes one aggregate-only read that drops every Forum identifier", async () => {
+  it("fails closed because the current roster is not a complete Forum-history dictionary", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-forum-activity-summary-integration-")); const port = await availablePort();
     const digest = browserCatalogDigest(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
@@ -86,7 +97,7 @@ describe("Moodle Forum activity-summary Full MCP exposure", () => {
       bridge.onCommand((command) => {
         if (command.kind !== "invoke_read") return;
         commands.push(command);
-        bridge?.respond(command, result(command));
+        bridge?.respond(command, result(command, digest));
       });
       const [left, right] = InMemoryTransport.createLinkedPair(); server = serveStdio(() => createFullMorrowServer(runtime), { transport: right });
       client = new Client({ name: "morrow-moodle-forum-activity-summary", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } }); await client.connect(left);
@@ -95,24 +106,22 @@ describe("Moodle Forum activity-summary Full MCP exposure", () => {
       expect(listed.find((tool) => tool.name === "moodle_get_forum_activity_summary")?.annotations?.readOnlyHint).toBe(true);
       expect(gateway.capabilityGet("moodle_get_forum_activity_summary")).toMatchObject({ descriptor: { canonicalName: "moodle_get_forum_activity_summary", behavior: { readOnly: true } } });
 
-      const allowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_forum_activity_summary", arguments: { course_id: 2, module_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      const allowedText = JSON.stringify(allowed);
-      expect(allowed.isError, allowedText).not.toBe(true);
-      expect(allowed.structuredContent).toMatchObject({ schema: "morrow.result.v1", tool: "moodle_get_forum_activity_summary", data: { schema: "morrow.moodle-forum-activity-summary.v1", provider: "moodle", discussion_count: 51, reply_count: 52, proof: PROOF } });
-      const summary = (allowed.structuredContent as { data: JsonObject }).data;
-      expect(Object.keys(summary).sort()).toEqual(["discussion_count", "proof", "provider", "reply_count", "schema"]);
-      for (const privateValue of ["Jane Moodle", "jane@example.edu", "private subject", "private body", "private-file.pdf", '"course_id"', '"module_id"', '"forum_id"', '"id":2000', '"groupid"', '"numunread"']) {
-        expect(allowedText, `result leaked ${privateValue}`).not.toContain(privateValue);
+      const denied = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_forum_activity_summary", arguments: { course_id: 2, module_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const deniedText = JSON.stringify(denied);
+      expect(denied.isError, deniedText).toBe(true);
+      expect(denied.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
+      for (const privateValue of ["Jane Moodle", "jane@example.edu", "Student A", "private subject", "private body", "private-file.pdf", '"course_id"', '"module_id"', '"forum_id"', '"id":2000', '"groupid"', '"numunread"']) {
+        expect(deniedText, `result leaked ${privateValue}`).not.toContain(privateValue);
       }
-      expect(commands).toHaveLength(1);
+      expect(commands.map((command) => command.toolName)).toEqual(["moodle_get_course_participant_roster"]);
 
       const refused = await gateway.call("moodle_get_forum_activity_summary", { course_id: 2, module_id: 9, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
       const refusedText = JSON.stringify(refused);
-      expect(refusedText).toContain("moodle_forum_activity_summary_invalid");
-      for (const privateValue of ["Jane Moodle", "jane@example.edu", "private subject", "private body", "private-file.pdf", '"discussion_count"', '"reply_count"']) {
+      expect(refused).toMatchObject({ isError: true, structuredContent: { schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" } });
+      for (const privateValue of ["Jane Moodle", "jane@example.edu", "Student A", "private subject", "private body", "private-file.pdf", '"discussion_count"', '"reply_count"']) {
         expect(refusedText, `refusal leaked ${privateValue}`).not.toContain(privateValue);
       }
-      expect(commands.map((command) => command.toolName)).toEqual(["moodle_get_forum_activity_summary", "moodle_get_forum_activity_summary"]);
+      expect(commands.map((command) => command.toolName)).toEqual(["moodle_get_course_participant_roster"]);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

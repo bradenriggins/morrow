@@ -171,8 +171,8 @@ function exactSize(value: unknown): number | null {
 }
 
 /**
- * One attachment as this module returns it. The file name is provider text — a
- * file can be named after a person — so it leaves through the same privacy
+ * One attachment as this module returns it. The file name is provider text. A
+ * file can be named after a person, so it leaves through the same privacy
  * boundary as every other Blackboard text. The size appears only where the
  * tenant reported one, because an absent size is not a size of zero.
  */

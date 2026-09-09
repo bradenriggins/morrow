@@ -30,9 +30,10 @@ export type CanvasWriteAdmission =
   | {
     readonly state: "held";
     readonly reason: "account_authority_required" | "course_scope_required" | "cross_course_object_requires_resolution"
-      | "item_bank_account_scope_not_course_scope" | "item_bank_dependency_review_required"
-      | "item_bank_fan_out_and_guard_required" | "learner_scope_requires_separate_authority"
-      | "multi_step_upload_requires_reviewed_transfer" | "provider_contract_incomplete" | "self_scope_not_supported";
+      | "item_bank_create_course_association_transaction_unestablished" | "item_bank_dependency_review_required"
+      | "duplicate_assignment_exact_readback_unavailable" | "item_bank_dependency_reach_unprovable" | "item_bank_restart_recovery_unavailable" | "learner_scope_requires_separate_authority"
+      | "multi_step_upload_requires_reviewed_transfer" | "new_quiz_exact_readback_unavailable"
+      | "new_quiz_lifecycle_planner_required" | "provider_contract_incomplete" | "self_scope_not_supported";
   };
 
 export interface CanvasOperationAdmission {
@@ -158,6 +159,7 @@ function crossCourseObjectRoute(operation: CanvasApiOperation): boolean {
 }
 
 function courseTarget(operation: CanvasApiOperation): CanvasCourseTarget {
+  if (operation.service === "item_bank") return { kind: "course_path", argument: "course_id" };
   const direct = operation.path.match(/\/courses\/\{(course_id|id)\}(?:\/|$)/);
   if (direct) return { kind: "course_path", argument: direct[1] as "course_id" | "id" };
   const semantic = canvasSemanticCourseTarget(operation);
@@ -179,23 +181,7 @@ function courseTarget(operation: CanvasApiOperation): CanvasCourseTarget {
 export function canvasOperationAdmission(operation: CanvasApiOperation): CanvasOperationAdmission {
   const target = courseTarget(operation);
   if (operation.readOnly) return { courseTarget: target, write: { state: "not_applicable" } };
-  // One Item Bank question can be changed, and only through the guarded image
-  // alternative-text repair. That repair carries a complete fan-out record of
-  // every course the bank reaches, an acknowledgement of every course outside
-  // the selected one, and a fresh in-frame reading of the exact question. The
-  // generic write stays held, so the curated Edit category is the only path.
-  if (operation.service === "item_bank" && operation.nickname === "update_item") {
-    return { courseTarget: target, write: { state: "held", reason: "item_bank_fan_out_and_guard_required" } };
-  }
-  if (operation.service === "item_bank" && operation.nickname !== "create_bank") {
-    return { courseTarget: target, write: { state: "held", reason: "item_bank_dependency_review_required" } };
-  }
-  // A bank belongs to the Canvas account, not to a course. The in-frame session
-  // does prove one course, but the bank it creates is not held inside that
-  // course, so this hold is about the object, not about a missing binding.
-  if (operation.service === "item_bank") {
-    return { courseTarget: target, write: { state: "held", reason: "item_bank_account_scope_not_course_scope" } };
-  }
+  if (operation.service === "item_bank") return { courseTarget: target, write: { state: "admitted" } };
   // An account route needs account authority. The selected course cannot grant it, so the write
   // stays held even when the same route also names a course.
   if (canvasAccountAuthorityRoute(operation)) {
@@ -207,6 +193,9 @@ export function canvasOperationAdmission(operation: CanvasApiOperation): CanvasO
   // unfinished upload behind, so it is held before the course path admits it.
   if (fileUploadPreflightRoute(operation)) {
     return { courseTarget: target, write: { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" } };
+  }
+  if (operation.path === "/v1/courses/{course_id}/assignments/{assignment_id}/duplicate") {
+    return { courseTarget: target, write: { state: "held", reason: "duplicate_assignment_exact_readback_unavailable" } };
   }
   if (target.kind === "course_path") return { courseTarget: target, write: { state: "admitted" } };
   // The route names one object, and the catalog knows which read proves the course that owns it.
@@ -232,6 +221,38 @@ function structuralArguments(operation: CanvasApiOperation): Readonly<Record<str
   return Object.fromEntries((operation.parameters || []).map((parameter) => [parameter.inputName, "1"]));
 }
 
+/**
+ * Writes whose saved result is proved by a reviewed executor rather than by the
+ * generic browser readback planner. This is a third state, not an exemption:
+ * the readback exists and is exact, it is simply not the planner's.
+ *
+ * Item Bank changes are reread inside the Item Banks frame, the only place the
+ * private `/api/banks` surface answers, by
+ * `connector/extension/src/item-bank-executor.js` and
+ * `connector/extension/src/quiz-bank-draw-executor.js`. The three New Quizzes
+ * requests below are bound to their own response evaluators in the service
+ * worker. `planBrowserReadback` returns nothing for any of them, which is
+ * correct: a generic plan would query the wrong route.
+ *
+ * `scripts/test/canvas-verification.test.mjs` proves that every operation named
+ * here really has that readback in the executor that owns it, so a future
+ * admitted write cannot fall into this state by accident.
+ */
+// Named by tool, not by nickname: `create_quiz_report` is the nickname of two
+// different routes, and only the New Quizzes one has a response evaluator. The
+// Classic Quizzes report of the same name has none and is judged by the
+// planner like any other write.
+const NEW_QUIZ_RESPONSE_BOUND_READBACKS: readonly string[] = [
+  "canvas_set_course_level_accommodations",
+  "canvas_set_quiz_level_accommodations",
+  "canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post",
+];
+
+export function canvasExecutorOwnedReadback(operation: CanvasApiOperation): boolean {
+  if (operation.readOnly) return false;
+  return operation.service === "item_bank" || NEW_QUIZ_RESPONSE_BOUND_READBACKS.includes(operation.toolName);
+}
+
 export function canvasReadbackAssessment(
   operations: readonly CanvasApiOperation[],
   operation: CanvasApiOperation,
@@ -239,6 +260,7 @@ export function canvasReadbackAssessment(
 ): CanvasReadbackAssessment {
   if (operation.readOnly) return { state: "not_applicable", reason: "read_only" };
   if (admission.write.state !== "admitted") return { state: "not_applicable", reason: "write_held" };
+  if (canvasExecutorOwnedReadback(operation)) return { state: "structurally_exact" };
   const blocker = canvasReadbackBlocker(operation);
   if (blocker) return { state: "blocked", reason: blocker };
   if (hasNamedCanvasReadback(operation)) return { state: "structurally_exact" };
@@ -272,11 +294,14 @@ export function canvasAdmissionReason(admission: CanvasWriteAdmission): string |
   if (admission.reason === "item_bank_dependency_review_required") {
     return "Existing Item Bank mutations require complete dependency and affected-course evidence that is not yet available.";
   }
-  if (admission.reason === "item_bank_fan_out_and_guard_required") {
-    return "Morrow changes one Item Bank question only through its focused image alternative-text repair. That repair lists every course the bank reaches and asks you to confirm them before it sends the change.";
+  if (admission.reason === "item_bank_dependency_reach_unprovable") {
+    return "Canvas does not provide a complete list of every course and New Quiz that uses an Item Bank. Morrow holds this bank change because an owner bank can be used in an unselected course without a share row.";
   }
-  if (admission.reason === "item_bank_account_scope_not_course_scope") {
-    return "A Canvas Item Bank belongs to the account, not to one course, so a bank Morrow creates would not stay inside the selected course.";
+  if (admission.reason === "item_bank_create_course_association_transaction_unestablished") {
+    return "Creating a Canvas Item Bank and associating it with the selected course takes two provider changes. Morrow has no proved recovery contract for a partial result, so it will not create an unusable user-owned bank.";
+  }
+  if (admission.reason === "item_bank_restart_recovery_unavailable") {
+    return "Morrow cannot recover this Item Bank quiz draw after a browser worker or process interruption. It holds the change before Canvas receives it.";
   }
   if (admission.reason === "cross_course_object_requires_resolution") {
     return "Canvas can attach this group, file, folder, calendar item or outcome to any course, and Morrow cannot yet prove that this one belongs to the course you selected. Change it in Canvas, or ask for the same change from inside the course.";
@@ -286,6 +311,15 @@ export function canvasAdmissionReason(admission: CanvasWriteAdmission): string |
   }
   if (admission.reason === "provider_contract_incomplete") {
     return "This asks Canvas for a sign-in token, a session or a one-time action, and Canvas keeps nothing afterwards that Morrow can read back to show you what happened. Morrow does not send a change it cannot check, so make this one in Canvas.";
+  }
+  if (admission.reason === "new_quiz_exact_readback_unavailable") {
+    return "Canvas provides no exact saved-result read for this New Quiz accommodation or report request. Morrow will not send it because it cannot prove the result.";
+  }
+  if (admission.reason === "new_quiz_lifecycle_planner_required") {
+    return "Creating or deleting a New Quiz needs a governed lifecycle planner that freezes the complete request and verifies the saved assignment. Morrow does not offer this raw change.";
+  }
+  if (admission.reason === "duplicate_assignment_exact_readback_unavailable") {
+    return "Canvas does not say when a duplicated assignment has finished copying, and the copy carries no documented field that names it as a New Quiz, so Morrow cannot prove it read back the finished copy rather than a half-made one. Duplicate this assignment in Canvas.";
   }
   if (admission.reason === "self_scope_not_supported") {
     return "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course.";

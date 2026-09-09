@@ -50,7 +50,18 @@ function configuration(root: string, directory: string, port: number) {
   });
 }
 
-function result(command: BridgeCommand): JsonObject {
+function result(command: BridgeCommand, digest: string): JsonObject {
+  if (command.toolName === "moodle_get_course_participant_roster") return {
+    schema: "morrow.moodle-browser-result.v1", ok: true, sent: true, status: 200, truncated: false,
+    data: {
+      schema: "morrow.moodle-course-roster.v1", provider: "moodle", sourceBindingId: SOURCE_BINDING_ID, courseId: "2",
+      origin: ORIGIN, siteUrl: SITE_URL, principalFingerprint: PRINCIPAL_FINGERPRINT, sessionGeneration: 1,
+      catalogDigest: digest, status: "complete", complete: true,
+      identities: [{ id: "7", name: "Jane Moodle", email: "jane@example.edu" }],
+      proof: { method: "core_table_get_dynamic_table_content", pageSize: 100, requestCount: 1, pageCount: 1, rowCount: 1, identityCount: 1 },
+    },
+    snapshot_digest: "a".repeat(64),
+  };
   if (command.toolName !== "moodle_get_quiz_attempt_summary") throw new Error(`unexpected source tool ${command.toolName}`);
   return {
     schema: "morrow.canvas-browser-result.v1", ok: true, sent: false, provider: "moodle", complete: true,
@@ -67,7 +78,7 @@ function result(command: BridgeCommand): JsonObject {
 }
 
 describe("Moodle Quiz attempt-summary Full MCP exposure", () => {
-  it("returns a bound aggregate projection without a participant-roster egress", async () => {
+  it("fails closed because the current roster is not a complete attempt-history dictionary", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-quiz-attempt-summary-integration-")); const port = await availablePort();
     const digest = browserCatalogDigest(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
@@ -77,22 +88,22 @@ describe("Moodle Quiz attempt-summary Full MCP exposure", () => {
       bridge.onCommand((command) => {
         if (command.kind !== "invoke_read") return;
         commands.push(command);
-        bridge?.respond(command, result(command));
+        bridge?.respond(command, result(command, digest));
       });
       const [left, right] = InMemoryTransport.createLinkedPair(); server = serveStdio(() => createFullMorrowServer(runtime), { transport: right });
       client = new Client({ name: "morrow-moodle-quiz-attempt-summary", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } }); await client.connect(left);
       expect((await client.listTools()).tools.map((tool) => tool.name)).toContain("morrow_capability_read");
       expect(gateway.capabilityGet("moodle_get_quiz_attempt_summary")).toMatchObject({ descriptor: { canonicalName: "moodle_get_quiz_attempt_summary", behavior: { readOnly: true } } });
-      const allowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_quiz_attempt_summary", arguments: { course_id: 2, module_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
-      const allowedText = JSON.stringify(allowed);
-      expect(allowed.isError, allowedText).not.toBe(true);
-      for (const privateValue of ["Jane Moodle", "jane@example.edu", "private answer", "private feedback", '"id":501', '"sumgrades":100']) expect(allowedText).not.toContain(privateValue);
-      expect(allowed.structuredContent).toMatchObject({ schema: "morrow.result.v1", tool: "moodle_get_quiz_attempt_summary", data: { participant_count: 2, total_attempt_count: 3, attempt_state_counts: { notstarted: 0, inprogress: 1, overdue: 0, submitted: 1, finished: 1, abandoned: 0 } } });
+      const denied = await client.callTool({ name: "morrow_capability_read", arguments: { name: "moodle_get_quiz_attempt_summary", arguments: { course_id: 2, module_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const deniedText = JSON.stringify(denied);
+      expect(denied.isError, deniedText).toBe(true);
+      expect(denied.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" });
+      for (const privateValue of ["Jane Moodle", "jane@example.edu", "Student A", "private answer", "private feedback", '"id":501', '"sumgrades":100']) expect(deniedText).not.toContain(privateValue);
       const refused = await gateway.call("moodle_get_quiz_attempt_summary", { course_id: 2, module_id: 9, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
       const refusedText = JSON.stringify(refused);
-      expect(refusedText).toContain("moodle_quiz_attempt_summary_invalid");
-      for (const privateValue of ["Jane Moodle", "jane@example.edu", "private answer", "private feedback", '"id":501']) expect(refusedText).not.toContain(privateValue);
-      expect(commands.map((command) => command.toolName)).toEqual(["moodle_get_quiz_attempt_summary", "moodle_get_quiz_attempt_summary"]);
+      expect(refused).toMatchObject({ isError: true, structuredContent: { schema: "morrow.problem.v1", code: "privacy_moodle_history_dictionary_unavailable" } });
+      for (const privateValue of ["Jane Moodle", "jane@example.edu", "Student A", "private answer", "private feedback", '"id":501']) expect(refusedText).not.toContain(privateValue);
+      expect(commands.map((command) => command.toolName)).toEqual(["moodle_get_course_participant_roster"]);
     } finally {
       await client?.close(); await server?.close(); await bridge?.close();
       await runtime.close(); rmSync(directory, { recursive: true, force: true });

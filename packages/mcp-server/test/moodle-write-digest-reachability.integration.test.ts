@@ -30,8 +30,8 @@ const writeCases: ReadonlyArray<Readonly<{ name: string; arguments: Record<strin
   { name: "moodle_create_group", arguments: { course_id: 2, name: "Reviewed group" } },
   { name: "moodle_update_group", arguments: { course_id: 2, group_id: 5, expected_group_name: "Section A", name: "Reviewed group" } },
   { name: "moodle_delete_group", arguments: { course_id: 2, group_id: 5, expected_group_name: "Section A", expected_member_count: 0 } },
-  { name: "moodle_add_group_member", arguments: { course_id: 2, group_id: 5, expected_group_name: "Section A", learner_token: "learner_add" } },
-  { name: "moodle_remove_group_member", arguments: { course_id: 2, group_id: 5, expected_group_name: "Section A", learner_token: "learner_remove" } },
+  { name: "moodle_add_group_member", arguments: { course_id: 2, group_id: 5, expected_group_name: "Section A", learner_token: "Student A1" } },
+  { name: "moodle_remove_group_member", arguments: { course_id: 2, group_id: 5, expected_group_name: "Section A", learner_token: "Student A1" } },
   { name: "moodle_start_course_import", arguments: { course_id: 2, source_course_id: 7, acknowledge_course_change: true } },
   { name: "moodle_copy_course", arguments: { course_id: 2, new_full_name: "Reviewed copy", new_short_name: "REVIEWED-COPY", acknowledge_new_course: true } },
 ];

@@ -3,9 +3,9 @@
 /**
  * Adversarial verification of the setup app: the requests, payloads, paths,
  * records and update answers Morrow can be handed by something other than the
- * person using it. Each case runs the shipped code — the real IPC handlers
+ * person using it. Each case runs the shipped code: the real IPC handlers
  * installer/main.cjs registers, the real installer controller, the real update
- * controller — and asserts both halves of the answer: the refusal, and that the
+ * controller: and asserts both halves of the answer: the refusal, and that the
  * step it refused changed nothing.
  *
  * Windows access control cannot be read on this computer. Those cases are
@@ -196,6 +196,17 @@ async function temporaryRoot(t, label) {
   return root;
 }
 
+function nodeRuntimePinFor(root) {
+  const nodePath = process.platform === "win32"
+    ? path.join(root, "Payload", "runtime", "node", "node.exe")
+    : path.join(root, "Payload", "runtime", "node", "bin", "node");
+  try {
+    return crypto.createHash("sha256").update(require("node:fs").readFileSync(nodePath)).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
 function controller(root, overrides = {}) {
   return createInstallerController({
     app: { getPath: (name) => (name === "userData" ? path.join(root, "UserData") : root) },
@@ -214,7 +225,11 @@ function controller(root, overrides = {}) {
     trustedMcpRuntimeManifestSha256: () => null,
     detectAssistant: async () => false,
     runCli: async () => ({ code: 0, stdout: "", stderr: "" }),
-    ...overrides
+    ...(
+      overrides.trustedMcpRuntimeManifestSha256 && !overrides.trustedMcpRuntimeNodeSha256
+        ? { ...overrides, trustedMcpRuntimeNodeSha256: () => nodeRuntimePinFor(root) }
+        : overrides
+    )
   });
 }
 

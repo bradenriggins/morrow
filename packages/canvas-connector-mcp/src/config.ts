@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { isJsonObject } from "@morrow/contracts";
@@ -19,6 +19,22 @@ interface ConnectorState {
   readonly token: string;
   readonly port: number;
   readonly allowedExtensionIds: readonly string[];
+}
+
+const stateQueues = new Map<string, Promise<void>>();
+
+async function withStateQueue<T>(path: string, work: () => Promise<T>): Promise<T> {
+  const previous = stateQueues.get(path) || Promise.resolve();
+  let release = (): void => undefined;
+  const current = previous.catch(() => undefined).then(() => new Promise<void>((resolve) => { release = resolve; }));
+  stateQueues.set(path, current);
+  await previous.catch(() => undefined);
+  try {
+    return await work();
+  } finally {
+    release();
+    if (stateQueues.get(path) === current) stateQueues.delete(path);
+  }
 }
 
 function exactPort(value: unknown): number {
@@ -50,10 +66,14 @@ function parseState(value: unknown): ConnectorState {
 
 async function persist(path: string, state: ConnectorState): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-  const temporary = `${path}.tmp-${process.pid}`;
-  await writeFile(temporary, `${JSON.stringify(state)}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(temporary, path);
-  await chmod(path, 0o600).catch(() => undefined);
+  const temporary = `${path}.tmp-${process.pid}-${randomBytes(12).toString("hex")}`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(state)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    await rename(temporary, path);
+    await chmod(path, 0o600).catch(() => undefined);
+  } finally {
+    await unlink(temporary).catch(() => undefined);
+  }
 }
 
 async function loadOrCreate(path: string): Promise<ConnectorState> {
@@ -68,8 +88,21 @@ async function loadOrCreate(path: string): Promise<ConnectorState> {
     port: 32147,
     allowedExtensionIds: [],
   };
-  await persist(path, state);
-  return state;
+  await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+  const temporary = `${path}.create-${process.pid}-${randomBytes(12).toString("hex")}`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(state)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    try {
+      await link(temporary, path);
+      await chmod(path, 0o600).catch(() => undefined);
+      return state;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      return parseState(JSON.parse(await readFile(path, "utf8")) as unknown);
+    }
+  } finally {
+    await unlink(temporary).catch(() => undefined);
+  }
 }
 
 export async function loadCanvasConnectorConfig(
@@ -77,7 +110,7 @@ export async function loadCanvasConnectorConfig(
   workingDirectory = process.cwd(),
 ): Promise<CanvasConnectorConfig> {
   const statePath = resolve(environment.MORROW_CANVAS_CONNECTOR_STATE || `${homedir()}/.morrow/canvas-connector.json`);
-  const state = await loadOrCreate(statePath);
+  const state = await withStateQueue(statePath, async () => await loadOrCreate(statePath));
   const token = String(environment.MORROW_CANVAS_CONNECTOR_TOKEN || state.token).trim();
   if (token.length < 32 || token.length > 512) throw new TypeError("MORROW_CANVAS_CONNECTOR_TOKEN is invalid");
   const idsFromEnvironment = String(environment.MORROW_CANVAS_CONNECTOR_EXTENSION_IDS || "")
@@ -95,10 +128,12 @@ export async function loadCanvasConnectorConfig(
     runtimeRevision: String(environment.MORROW_CANVAS_CONNECTOR_REVISION || "1.0.0-rc.2").trim(),
     allowedExtensionIds,
     approveExtensionId: async (extensionId: string) => {
-      const latest = await loadOrCreate(statePath);
-      await persist(statePath, {
-        ...latest,
-        allowedExtensionIds: [...new Set([...latest.allowedExtensionIds, extensionId])].sort(),
+      await withStateQueue(statePath, async () => {
+        const latest = await loadOrCreate(statePath);
+        await persist(statePath, {
+          ...latest,
+          allowedExtensionIds: exactIds([...latest.allowedExtensionIds, extensionId]),
+        });
       });
     },
   };
