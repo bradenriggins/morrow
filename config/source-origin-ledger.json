@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "42fd9b65ec9989e53db9299beda86d5e7f597225",
+  "candidateCommit": "b3fb2dd3fac90d27d2a298756699114ffedbc50e",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -2128,14 +2128,14 @@
     },
     {
       "path": "installer/test/adversarial.test.cjs",
-      "sourceCommit": "42fd9b65ec9989e53db9299beda86d5e7f597225",
+      "sourceCommit": "b3fb2dd3fac90d27d2a298756699114ffedbc50e",
       "originalPath": "installer/test/adversarial.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f18916498cc5a5ed8a23649c5d7ced4aff468e3c05ba64fde765e52cfd1da234",
-      "afterDigest": "6cb39c07024e6fa13934ba0e5a7bc9a01541f14017f48fbba2c641a8ba9f1ebf"
+      "beforeDigest": "6cb39c07024e6fa13934ba0e5a7bc9a01541f14017f48fbba2c641a8ba9f1ebf",
+      "afterDigest": "09a85cd221bdbd87302eca28946869f4314ca53acb3c1877fcb02b877a8ed994"
     },
     {
       "path": "installer/test/assistant-app-detection.test.cjs",
@@ -2150,14 +2150,14 @@
     },
     {
       "path": "installer/test/assistant-management.test.cjs",
-      "sourceCommit": "36207499cd4f29d1b8f8a5d61d13b494e7381f89",
+      "sourceCommit": "b3fb2dd3fac90d27d2a298756699114ffedbc50e",
       "originalPath": "installer/test/assistant-management.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "860975464def2a51f3cfb85837cb63669f8945ff1cd7e857a49ff01e7f7453e0",
-      "afterDigest": "355c6436f921aff6f89d148427f31700a51613e52ca2f816890aad9030084fe5"
+      "beforeDigest": "355c6436f921aff6f89d148427f31700a51613e52ca2f816890aad9030084fe5",
+      "afterDigest": "16b661da8564ceb9231bb99b67c17765a7bd79ae66787c8d655c87a255a1d2de"
     },
     {
       "path": "installer/test/blackboard.test.cjs",
@@ -2238,14 +2238,14 @@
     },
     {
       "path": "installer/test/installer-controller.test.cjs",
-      "sourceCommit": "42fd9b65ec9989e53db9299beda86d5e7f597225",
+      "sourceCommit": "b3fb2dd3fac90d27d2a298756699114ffedbc50e",
       "originalPath": "installer/test/installer-controller.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f1570dd96dbd8f4ada08b7230dd28497f00c4bfee0b70bddaa185bd35b0247e0",
-      "afterDigest": "395b99eb494c1d1951f1b9faf9d942050784989a38db530de8ba2723266e8455"
+      "beforeDigest": "395b99eb494c1d1951f1b9faf9d942050784989a38db530de8ba2723266e8455",
+      "afterDigest": "f85a311248d9a857bd66ff684fa2df82ac95324076dc2710ddf1f21582306f70"
     },
     {
       "path": "installer/test/main-lifecycle.test.cjs",
