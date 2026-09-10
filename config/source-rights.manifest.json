@@ -337,7 +337,7 @@
     },
     {
       "path": "connector/extension/src/edit-policy.js",
-      "sha256": "a9eb69995d639a3e67fb232446c6770d4d94169b9b2a1258a1e903b76c4f0f2f",
+      "sha256": "ba6245c3f1bca5e0ba35ca6f0ac8c04b43130292c4d6046fe8e1fe45c9b43a79",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },
@@ -703,7 +703,7 @@
     },
     {
       "path": "package.json",
-      "sha256": "5426e114d023c1e9874465bc0a65040484aeb145df1afa70df4365c19804adca",
+      "sha256": "dda5e51b4a20bc094eab159bc5f3e4f1f99f9081158bab970192a0cfd003904f",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },
@@ -1591,7 +1591,7 @@
     },
     {
       "path": "packages/upstream-mcp/package.json",
-      "sha256": "7fc0dbcc6710837797729b0ecbfef88a6f2a940987223d8eb62c2a8dd8cb928d",
+      "sha256": "d36d75a991ac495942c7c245ea11d16fd173dc7a7aee3a2a935b4ae5a32673e9",
       "disposition": "adapted_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },
@@ -1615,7 +1615,7 @@
     },
     {
       "path": "pnpm-lock.yaml",
-      "sha256": "551cd224be8ec2150a0d80e3632938707dcfd589b7e9b367924b5c12243d0a06",
+      "sha256": "5b35e5eeb22a672fe6b932e08f6da78077cae2ae28331e9b5895b33e1c1ac65d",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },
