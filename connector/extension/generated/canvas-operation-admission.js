@@ -228,18 +228,6 @@ export function canvasAdmissionReason(admission) {
     if (admission.reason === "multi_step_upload_requires_reviewed_transfer") {
         return "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload.";
     }
-    if (admission.reason === "item_bank_dependency_review_required") {
-        return "Existing Item Bank mutations require complete dependency and affected-course evidence that is not yet available.";
-    }
-    if (admission.reason === "item_bank_dependency_reach_unprovable") {
-        return "Canvas does not provide a complete list of every course and New Quiz that uses an Item Bank. Morrow holds this bank change because an owner bank can be used in an unselected course without a share row.";
-    }
-    if (admission.reason === "item_bank_create_course_association_transaction_unestablished") {
-        return "Creating a Canvas Item Bank and associating it with the selected course takes two provider changes. Morrow has no proved recovery contract for a partial result, so it will not create an unusable user-owned bank.";
-    }
-    if (admission.reason === "item_bank_restart_recovery_unavailable") {
-        return "Morrow cannot recover this Item Bank quiz draw after a browser worker or process interruption. It holds the change before Canvas receives it.";
-    }
     if (admission.reason === "cross_course_object_requires_resolution") {
         return "Canvas can attach this group, file, folder, calendar item or outcome to any course, and Morrow cannot yet prove that this one belongs to the course you selected. Change it in Canvas, or ask for the same change from inside the course.";
     }
@@ -248,12 +236,6 @@ export function canvasAdmissionReason(admission) {
     }
     if (admission.reason === "provider_contract_incomplete") {
         return "This asks Canvas for a sign-in token, a session or a one-time action, and Canvas keeps nothing afterwards that Morrow can read back to show you what happened. Morrow does not send a change it cannot check, so make this one in Canvas.";
-    }
-    if (admission.reason === "new_quiz_exact_readback_unavailable") {
-        return "Canvas provides no exact saved-result read for this New Quiz accommodation or report request. Morrow will not send it because it cannot prove the result.";
-    }
-    if (admission.reason === "new_quiz_lifecycle_planner_required") {
-        return "Creating or deleting a New Quiz needs a governed lifecycle planner that freezes the complete request and verifies the saved assignment. Morrow does not offer this raw change.";
     }
     if (admission.reason === "duplicate_assignment_exact_readback_unavailable") {
         return "Canvas does not say when a duplicated assignment has finished copying, and the copy carries no documented field that names it as a New Quiz, so Morrow cannot prove it read back the finished copy rather than a half-made one. Duplicate this assignment in Canvas.";

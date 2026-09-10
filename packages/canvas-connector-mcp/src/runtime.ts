@@ -321,7 +321,7 @@ function failedProblem(
       "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused",
       "edit_policy_canvas_content_guard_required", "edit_policy_canvas_content_guard_refused", "edit_policy_page_guard_required",
       "edit_policy_item_bank_guard_required", "edit_policy_fields_refused", "new_quiz_settings_review_required", "new_quiz_lifecycle_review_required", "new_quiz_effect_review_required",
-      "item_bank_create_course_association_transaction_unestablished", "item_bank_dependency_review_required", "item_bank_dependency_reach_unprovable", "item_bank_restart_recovery_unavailable", "private_attachment_refused",
+      "private_attachment_refused",
       "canvas_conversation_private_payload_refused", "canvas_private_attachment_required", "canvas_private_attachment_invalid",
       "canvas_private_attachment_mismatch", "moodle_private_attachment_required", "moodle_private_attachment_invalid",
       "moodle_private_attachment_mismatch"].includes(problem?.code || "") ? "not_sent" : undefined);

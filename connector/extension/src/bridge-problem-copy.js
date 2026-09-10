@@ -270,11 +270,6 @@ const COPY = {
     detail: "Morrow sent nothing. An earlier change to this exact item has no confirmed result yet.",
     action: "Ask your assistant to check that earlier request. If Morrow cannot check it, open that item in your course and confirm it yourself.",
   },
-  item_bank_dependency_review_required: {
-    title: "Item bank changes need a complete review first",
-    detail: "A change to an existing item bank can reach other courses, and Morrow cannot yet establish that evidence.",
-    action: "Make this change directly in Canvas or Moodle, or ask your assistant for the focused question image text repair.",
-  },
   bridge_maintenance_unavailable: {
     title: "Morrow could not run that upkeep step in Chrome",
     detail: "Morrow Bridge could not complete an upkeep request from Morrow, so nothing changed.",

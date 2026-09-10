@@ -50,7 +50,7 @@ const OPERATION_CODES = [
   "bridge_port_in_use", "canvas_binding_required", "course_binding_mismatch", "course_scope_required",
   "edit_policy_stale", "edit_policy_rule_refused", "edit_policy_canvas_content_guard_required",
   "write_outcome_unknown", "bridge_maintenance_unavailable", "canvas_file_storage_access_required",
-  "effect_receipt_refused", "item_bank_dependency_review_required", "provider_effect_target_conflict",
+  "effect_receipt_refused", "provider_effect_target_conflict",
 ];
 
 /** Every .js and .ts file under the Morrow Bridge extension and the workspace package sources. */

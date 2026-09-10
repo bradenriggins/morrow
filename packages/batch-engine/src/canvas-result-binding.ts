@@ -6,6 +6,17 @@ import {
 
 export const CANVAS_RESULT_BINDING_SCHEMA = "morrow.canvas-result-binding.v1" as const;
 
+// Canvas-only by what the providers' write catalogs actually contain, not by omission. Both
+// bound kinds exist because Canvas splits creating a Page or an Assignment from placing it in a
+// Module: the Module Item references the created object by an id or url Canvas assigns only at
+// creation, so a batch needs to carry that value from one step to the next without letting the
+// batch definition itself name an unverified target. Moodle's every content-creating write
+// (moodle_create_page, moodle_create_assignment, moodle_create_forum, and so on) creates the
+// activity directly inside its section in one call, so no second placement step, and no id to
+// carry, ever exists. Blackboard's write catalog has no general create-new-content operation at
+// all yet; every Blackboard write patches, attaches to, or changes the visibility of content that
+// already exists. Add a binding kind here only when a provider's catalog gains a create-then-
+// place-by-id split like Canvas's.
 export const CANVAS_RESULT_BINDING_KINDS = Object.freeze([
   "canvas_page_url_to_module_item_page_url",
   "canvas_assignment_id_to_module_item_content_id",
