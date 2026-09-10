@@ -1554,7 +1554,11 @@ try {
   const reviewOnlyAdmittedCanvasWrites = new Set(["canvas_update_quiz_item"]);
   const expectedCanvasEditActions = canvasWriteOperations
     .filter((operation) => canvasOperationAdmission(operation).write.state === "admitted"
-      && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName))
+      && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName)
+      // An Item Bank write can reach every quiz sharing that bank, past the one
+      // course a binding names, so edit-policy.js routes it to review only, the
+      // same shared-impact rule Moodle's question bank writes already get.
+      && operation.service !== "item_bank")
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
   const publishedCanvasEditActions = fullEditOptions.options
@@ -1976,7 +1980,11 @@ try {
   });
   assert.equal(unscoped.ok, false);
   assert.equal(unscoped.resultState, "not_sent");
-  assert.match(JSON.stringify(unscoped), /course_scope_required/);
+  // Item Bank writes are course_path-scoped by course_id (operation-admission.ts
+  // classifies every item_bank service operation this way), so an absent
+  // course_id takes the same held-open branch as a course_id that names a
+  // different course: one course_binding_course_mismatch rule, not two.
+  assert.match(JSON.stringify(unscoped), /course_binding_course_mismatch/);
 
   const directCourseRead = await runtime.call("canvas_get_single_course_courses", {
     id: "42",
