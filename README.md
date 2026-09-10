@@ -324,7 +324,7 @@ Morrow is one desktop application. It carries the Morrow MCP runtime, the Node r
 | macOS on Apple silicon | `Morrow-<version>-mac-arm64.dmg`, with a matching `.zip` | The unsigned 1.0.0 disk image was mounted and installed on the MacBook. The packaged runtime passed `scripts/test/desktop-mac-smoke.mjs`, including the Bridge listener and private state modes. |
 | Windows on x64 | `Morrow-<version>-win-x64.exe`, a one-click per-user NSIS installer | The unsigned 1.0.0 installer passed install, start, damaged-payload refusal, exact repair, uninstall, and retained-data checks on native Windows `BOOTZ`. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. |
 
-There is no Intel macOS build and no Linux build. Nothing is signed or notarized. The public unsigned 1.0.2 release is available from the [Morrow downloads page](https://meetmorrow.app/download). Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
+There is no Intel macOS build and no Linux build. Nothing is signed or notarized. The public unsigned 1.0.3 release is available from the [Morrow downloads page](https://meetmorrow.app/download). Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
 You need Chrome 116 or later and one supported assistant already installed on the same computer: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
@@ -422,11 +422,11 @@ To build a ZIP of the extension:
 pnpm package:connector
 ```
 
-Extract `artifacts/connector/morrow-canvas-connector-v1.0.5.zip`. Use **Load
+Extract `artifacts/connector/morrow-canvas-connector-v1.0.6.zip`. Use **Load
 unpacked** to select the extracted folder that contains `manifest.json`, not the
 ZIP file. Keep that folder in place while the extension is installed.
 
-Bridge 1.0.5 is the current release. Update the desktop app and Bridge together, reload the unpacked extension, then reconnect them. An older Bridge does not carry the complete 1.0 operation set.
+Bridge 1.0.6 is the current release. Update the desktop app and Bridge together, reload the unpacked extension, then reconnect them. An older Bridge does not carry the complete 1.0 operation set.
 
 Configure Morrow in any of these clients. Compatible clients on the same computer share one Morrow runtime and Chrome Bridge connection. Keep their Morrow configuration consistent. Avoid competing edits to the same course content:
 
@@ -505,4 +505,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-The release checkout uses `1.0.2`. The public `v1.0.2` release provides unsigned macOS Apple silicon and Windows x64 installers from the [Morrow downloads repository](https://github.com/bradenriggins/morrow-downloads/releases/tag/v1.0.2). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+The release checkout uses `1.0.3`. The public `v1.0.3` release provides unsigned macOS Apple silicon and Windows x64 installers from the [Morrow downloads repository](https://github.com/bradenriggins/morrow-downloads/releases/tag/v1.0.3). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.

@@ -29,7 +29,7 @@ The recipient needs both artifacts:
 
 1. `artifacts/candidates/private-full/morrow-v1.0.0-rc.0-<platform>-<arch>-private-full.zip`
    for the complete private MCP source candidate.
-2. `artifacts/connector/morrow-canvas-connector-v1.0.5.zip` and its receipt
+2. `artifacts/connector/morrow-canvas-connector-v1.0.6.zip` and its receipt
    for the connector. This comes from the existing `pnpm package:connector`
    packager. The source candidate also contains `connector/extension` for the
    documented unpacked-extension path.
