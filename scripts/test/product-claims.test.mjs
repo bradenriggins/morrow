@@ -16,7 +16,6 @@ const read = (relativePath) => readFileSync(new URL(relativePath, root), "utf8")
 const present = (relativePath) => existsSync(new URL(relativePath, root));
 
 const CLAIM_DOCS = ["README.md", "LIMITATIONS.md", "ARCHITECTURE.md", "docs/brand/MORROW-BRAND.md"];
-const WEBSITE_GATE = "scripts/test/website-content.test.mjs";
 const BLACKBOARD_PACKAGE = "packages/blackboard-learn-api/package.json";
 const MOODLE_EXECUTOR = "connector/extension/src/moodle-executor.js";
 const COURSE_AUDIT = "packages/mcp-server/src/course-audit.ts";
@@ -78,25 +77,6 @@ test("the claim documents use none of the retired phrases", () => {
     findRetiredPhrases(read(doc)).map((hit) => `${doc}:${hit.line} "${hit.phrase}" in: ${hit.sentence}`),
   );
   assert.deepEqual(found, [], "these phrases are retired; scripts/test/lib/retired-claims.mjs says what each one got wrong");
-});
-
-test("the website gate reads the same retired-phrase list", () => {
-  const websiteGate = read(WEBSITE_GATE);
-  assert.match(
-    websiteGate,
-    /import \{[^}]*RETIRED_PHRASES[^}]*\} from "\.\/lib\/retired-claims\.mjs"/,
-    `${WEBSITE_GATE} must import the shared list so the site and the documents retire the same phrases`,
-  );
-  assert.doesNotMatch(
-    websiteGate,
-    /(const|let|var) BANNED_PHRASES = \[/,
-    `${WEBSITE_GATE} must not declare a second phrase list`,
-  );
-  // Written out again here on purpose: dropping a phrase from the shared module must fail a test,
-  // not quietly shrink what both gates check.
-  for (const phrase of ["Development preview", "course team", "AI app", "private preview", "Blackboard browser connection", "Blackboard browser access"]) {
-    assert.ok(RETIRED_PHRASES.includes(phrase), `"${phrase}" must stay in the retired list`);
-  }
 });
 
 test("the documented platform coverage matches the packages that ship", (t) => {

@@ -1,8 +1,9 @@
 /**
- * The phrases Morrow retired from every product-facing surface, in one place so the document gate
- * (`scripts/test/product-claims.test.mjs`) and the website gate (`scripts/test/website-content.test.mjs`)
- * cannot drift apart. This file is not a test: `pnpm scripts:test` globs `scripts/test/*.test.mjs`,
- * so it stays out of that glob by living in `lib/` and by keeping `.test.` out of its name.
+ * The phrases Morrow retired from every product-facing surface, read by the document gate
+ * (`scripts/test/product-claims.test.mjs`). The website carried its own copy of this gate until the
+ * website moved to its own repository; this file is not a test: `pnpm scripts:test` globs
+ * `scripts/test/*.test.mjs`, so it stays out of that glob by living in `lib/` and by keeping
+ * `.test.` out of its name.
  *
  * Each phrase named a state or a product that Morrow no longer is:
  * - "Development preview" and "private preview" described the product as a preview. Morrow
