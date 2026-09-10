@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "b3fb2dd3fac90d27d2a298756699114ffedbc50e",
+  "candidateCommit": "8727ab774e97b6623419be6922e9c3200d786482",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -2293,14 +2293,14 @@
     },
     {
       "path": "installer/test/run-bounded-tests.cjs",
-      "sourceCommit": "b4c573c7133a785e94a0d5d9c5473177b73062d1",
+      "sourceCommit": "8727ab774e97b6623419be6922e9c3200d786482",
       "originalPath": "installer/test/run-bounded-tests.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "8044b2202df1409118f6dfd13eaa44ad6b966f92e1f392fea9682129a407afce"
+      "beforeDigest": "8044b2202df1409118f6dfd13eaa44ad6b966f92e1f392fea9682129a407afce",
+      "afterDigest": "c2b81611c1f444e839a737db1d9cdd990d9307cafe3de61ddec5eece29b121ea"
     },
     {
       "path": "installer/test/runtime-monitor.test.mjs",
