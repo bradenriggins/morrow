@@ -27,7 +27,7 @@
     },
     {
       "path": "README.md",
-      "sha256": "34c263c64e529d182de1679325fda64188b7849c537f5bda96b36b1f8f1e1ee7",
+      "sha256": "d9b6d8f294c194e8f516d91532446b023da63ed98526101b2ba1e57b6a6f69e3",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },
@@ -145,7 +145,7 @@
     },
     {
       "path": "connector/extension/manifest.json",
-      "sha256": "67669ac29fcc1f4dce45fff9f17747db373eabc9c4725c9d2dcad1795b79f8ad",
+      "sha256": "0f8cb25ff9e9d18cc373cb6223259300d1dfe2daebbfa75b00ab507d2c6cfb31",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },
