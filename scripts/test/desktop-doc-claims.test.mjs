@@ -202,7 +202,9 @@ test("the README names the desktop artifacts the build configuration actually pr
   for (const doc of ["README.md", "LIMITATIONS.md"]) {
     assert.match(read(doc), /unsigned/i, `${doc} must state that the desktop build is unsigned`);
   }
-  assert.match(readme, /Nothing is signed or notarized\./, "README.md must state that nothing is signed or notarized");
+  assert.match(readme, /Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature/,
+    "README.md must state that nothing carries an Apple identity and that the macOS app is ad-hoc signed");
+  assert.equal(typeof config.afterPack, "function", "the unsigned macOS bundle must be ad-hoc sealed after packing");
 });
 
 test("the README leads with the desktop app and keeps the archive and source routes under engineering evidence", () => {

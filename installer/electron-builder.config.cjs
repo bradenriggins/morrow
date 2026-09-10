@@ -1,3 +1,4 @@
+const { execFileSync } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
@@ -65,7 +66,22 @@ const mac = {
 };
 if (!signedRelease) mac.identity = null;
 
+// With identity null, electron-builder skips signing and the bundle keeps only
+// Electron's linker-signed binary with no sealed resources. Gatekeeper reads a
+// quarantined download in that state as damaged and never offers Open Anyway.
+// An ad-hoc signature carries no Apple identity, so the release stays unsigned,
+// but it seals the bundle so macOS shows the documented Open Anyway route. It
+// signs nested code only; the payload under Resources is sealed by hash, not
+// changed, and the packager's payload verification confirms that afterwards.
+async function adHocSignUnsignedMacBuild(context) {
+  if (signedRelease || context.electronPlatformName !== "darwin") return;
+  const bundle = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
+  execFileSync("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", "--timestamp=none", bundle], { stdio: "inherit" });
+  execFileSync("/usr/bin/codesign", ["--verify", "--deep", "--strict", bundle], { stdio: "inherit" });
+}
+
 module.exports = {
+  afterPack: adHocSignUnsignedMacBuild,
   appId: "app.meetmorrow.installer",
   productName: "Morrow",
   copyright: "Copyright © 2026 Braden Riggins",

@@ -19,8 +19,8 @@ const WINDOWS_APPLICATION_METADATA = Object.freeze({
   companyName: "Braden Riggins",
   productName: "Morrow",
   fileDescription: "Morrow",
-  fileVersion: "1.0.3",
-  productVersion: "1.0.3.0"
+  fileVersion: "1.0.4",
+  productVersion: "1.0.4.0"
 });
 
 function metadataMismatches(value) {

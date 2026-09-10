@@ -16,7 +16,7 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -543,6 +543,7 @@ function assertPayload(payload, target, input, { executable = false } = {}) {
     }
   };
   visit(nodeModules);
+  visit(resolve(payload, "runtime/node"));
   if (symlinks.length) throw new Error(`Prepared desktop payload contains unsupported runtime symlinks: ${symlinks[0]}`);
   assertPayloadSnapshot(payload, input);
   if (executable) {
@@ -565,7 +566,12 @@ function copyRuntime(archive, staging, target) {
   } else run("tar", ["-xJf", archive, "-C", extracted]);
   const directory = resolve(extracted, descriptor.archive.replace(/\.(tar\.xz|zip)$/, ""));
   const source = descriptor.platform === "win32" ? directory : directory;
-  copy(source, resolve(staging, "runtime/node"));
+  // The npm, npx and corepack launchers are symbolic links into lib/node_modules
+  // that the payload never resolves, so they arrive dangling. Morrow spawns only
+  // bin/node, and a dangling link inside the bundle breaks the macOS resource
+  // seal that Gatekeeper validates.
+  const launcher = /^(?:npm|npx|corepack)(?:\.cmd|\.ps1)?$/;
+  copy(source, resolve(staging, "runtime/node"), (candidate) => !(launcher.test(basename(candidate)) && lstatSync(candidate).isSymbolicLink()));
   rmSync(extracted, { recursive: true, force: true });
 }
 

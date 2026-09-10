@@ -1,6 +1,6 @@
 # Limitations
 
-Morrow `1.0.3` is the current release build. Publication and live verification remain subject to the evidence below. The version is not an Instructure authorization claim.
+Morrow `1.0.4` is the current release build. Publication and live verification remain subject to the evidence below. The version is not an Instructure authorization claim.
 
 ## Platform coverage
 

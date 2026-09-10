@@ -324,7 +324,7 @@ Morrow is one desktop application. It carries the Morrow MCP runtime, the Node r
 | macOS on Apple silicon | `Morrow-<version>-mac-arm64.dmg`, with a matching `.zip` | The unsigned 1.0.0 disk image was mounted and installed on the MacBook. The packaged runtime passed `scripts/test/desktop-mac-smoke.mjs`, including the Bridge listener and private state modes. |
 | Windows on x64 | `Morrow-<version>-win-x64.exe`, a one-click per-user NSIS installer | The unsigned 1.0.0 installer passed install, start, damaged-payload refusal, exact repair, uninstall, and retained-data checks on native Windows `BOOTZ`. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. |
 
-There is no Intel macOS build and no Linux build. Nothing is signed or notarized. The public unsigned 1.0.3 release is available from the [Morrow downloads page](https://meetmorrow.app/download). Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
+There is no Intel macOS build and no Linux build. Nothing is signed with an Apple Developer ID or notarized; the macOS app carries an ad-hoc signature so that a downloaded copy shows the Open Anyway route instead of a damaged-app refusal. The public unsigned 1.0.4 release is available from the [Morrow downloads page](https://meetmorrow.app/download). Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
 You need Chrome 116 or later and one supported assistant already installed on the same computer: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
@@ -351,7 +351,7 @@ The app keeps the same window for the rest of the installation's life. It carrie
 
 ### What the desktop app has not proved
 
-- The Mac and Windows releases are unsigned, as required for this release. Gatekeeper and SmartScreen behavior after a public download has not been verified.
+- The Mac and Windows releases are unsigned, as required for this release. A quarantined download of the macOS app passes `codesign --verify --deep --strict` and is refused by Gatekeeper only for the missing notarization, which is the state that offers Open Anyway in Privacy & Security. The Windows installer carries no Authenticode signature, so SmartScreen shows More info and Run anyway. Neither dialog has been walked by hand on a fresh machine.
 - Complete live-course setup through the final installed app is still open. The native startup and repair checks use isolated application state.
 - Automatic signed updates have not been tested or enabled. They are outside this unsigned release.
 - Morrow Bridge has no Chrome Web Store listing. The temporary Developer-mode step is the only route, and reloading the unpacked Bridge in Chrome always needs a person.
@@ -505,4 +505,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-The release checkout uses `1.0.3`. The public `v1.0.3` release provides unsigned macOS Apple silicon and Windows x64 installers from the [Morrow downloads repository](https://github.com/bradenriggins/morrow-downloads/releases/tag/v1.0.3). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+The release checkout uses `1.0.4`. The public `v1.0.4` release provides unsigned macOS Apple silicon and Windows x64 installers from the [Morrow downloads repository](https://github.com/bradenriggins/morrow-downloads/releases/tag/v1.0.4). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.

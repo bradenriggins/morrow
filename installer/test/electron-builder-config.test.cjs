@@ -172,6 +172,9 @@ test("an unsigned build does not code-sign and ships with updates turned off", a
   const config = loadConfig({ payload });
   assert.equal(config.forceCodeSigning, false);
   assert.equal(config.mac.identity, null);
+  // The unsigned bundle still gets an ad-hoc seal after packing, or Gatekeeper
+  // reports a quarantined download as damaged instead of offering Open Anyway.
+  assert.equal(typeof config.afterPack, "function");
   assert.equal(config.extraMetadata.morrow.desktopUpdates.enabled, false);
 });
 
