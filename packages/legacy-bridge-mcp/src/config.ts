@@ -32,8 +32,8 @@ export async function loadLegacyBridgeConfig(
   const catalogPath = resolve(requiredEnvironment("MORROW_LEGACY_CATALOG_PATH", environment));
   const text = await readFile(catalogPath, "utf8");
   const sourceCatalog = parseSourceCatalog(JSON.parse(text) as unknown);
-  if (sourceCatalog.source.id !== "example-legacy") {
-    throw new Error("MORROW_LEGACY_CATALOG_PATH must contain the example-legacy source catalog");
+  if (sourceCatalog.source.id !== "morrow-legacy") {
+    throw new Error("MORROW_LEGACY_CATALOG_PATH must contain the morrow-legacy source catalog");
   }
   const expectedRevision = String(
     environment.MORROW_LEGACY_EXPECTED_REVISION || sourceCatalog.source.revision || "",

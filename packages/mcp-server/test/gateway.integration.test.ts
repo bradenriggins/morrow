@@ -36,12 +36,12 @@ describe("GatewayRuntime stdio federation", () => {
           },
         },
         {
-          id: "example-legacy",
+          id: "morrow-legacy",
           label: "Morrow legacy fixture",
           kind: "mcp-stdio",
           command: process.execPath,
           args: [fixturePath],
-          env: { FAKE_SOURCE: "example-legacy", FAKE_INTERNAL_BRIDGE_MAINTENANCE: "1" },
+          env: { FAKE_SOURCE: "morrow-legacy", FAKE_INTERNAL_BRIDGE_MAINTENANCE: "1" },
           priority: 50,
           required: true,
           enabled: true,
@@ -83,7 +83,7 @@ describe("GatewayRuntime stdio federation", () => {
       expect(runtime.catalog.collisions).toEqual([{
         requestedName: "canvas_page_get",
         retainedBy: "meridian",
-        aliasedSource: "example-legacy",
+        aliasedSource: "morrow-legacy",
         aliasedTo: "morrow_legacy__canvas_page_get",
       }]);
 
@@ -108,7 +108,7 @@ describe("GatewayRuntime stdio federation", () => {
       const alias = await runtime.call("morrow_legacy__canvas_page_get", { course_id: "202" });
       expect(alias.structuredContent).toMatchObject({
         schema: "morrow.result.v1",
-        data: { source: "example-legacy", course_id: "202" },
+        data: { source: "morrow-legacy", course_id: "202" },
       });
 
       const firstDedupe = await runtime.call("morrow_legacy_only", {
@@ -181,7 +181,7 @@ describe("GatewayRuntime stdio federation", () => {
         },
         sources: [
           { id: "meridian", connected: true, toolCount: 7 },
-          { id: "example-legacy", connected: true, toolCount: 7 },
+          { id: "morrow-legacy", connected: true, toolCount: 7 },
         ],
       });
     } finally {

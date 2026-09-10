@@ -32,7 +32,7 @@ function argumentsValue(argv) {
     }
   }
   if (sources.length === 0) {
-    sources.push(resolve("artifacts/catalogs/example-legacy.canvas.json"));
+    sources.push(resolve("artifacts/catalogs/morrow-legacy.canvas.json"));
     sources.push(resolve("artifacts/catalogs/meridian.live.json"));
   }
   if (sources.length < 2) throw new Error("At least two --source paths are required");

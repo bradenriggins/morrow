@@ -3,8 +3,8 @@
   "createdAt": "2026-09-03T00:00:00.000Z",
   "sources": [
     {
-      "id": "example-legacy",
-      "repository": "example-org/example-legacy-source",
+      "id": "morrow-legacy",
+      "repository": "example-org/morrow-legacy-source",
       "commit": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
       "role": "Private donor for Canvas tools, planning, approval projections, verification, privacy, workflows, reports, and browser-backed execution.",
       "defaultDisposition": "behavior-reference-and-reviewed-export"

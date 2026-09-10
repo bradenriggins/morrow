@@ -1,7 +1,7 @@
 # Morrow
 
-[![CI](https://github.com/example-owner/morrow/actions/workflows/ci.yml/badge.svg)](https://github.com/example-owner/morrow/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/github/license/example-owner/morrow)](LICENSE)
+[![CI](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml/badge.svg)](https://github.com/bradenriggins/morrow/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/github/license/bradenriggins/morrow)](LICENSE)
 [![Website](https://img.shields.io/badge/website-meetmorrow.app-1f6feb)](https://meetmorrow.app)
 
 Morrow connects the AI assistant you already use to your Canvas and Moodle courses, and to a configured Blackboard course.
@@ -198,7 +198,7 @@ Canvas coverage includes course discovery, pages, modules, assignments, discussi
 
 New Quizzes accepts all twelve question types its interaction contract covers: Multiple Answer, Matching, Categorization, File Upload, Formula, Ordering, Rich Fill in the Blank, Hot Spot, Multiple Choice, Numeric, True or False, and Essay. A Hot Spot create stages the reviewed image privately, sends it once to the presigned host Canvas names, and refuses the create unless the upload observer confirmed that exact request. See [current limits](LIMITATIONS.md) for what each type still needs before it is live-verified.
 
-Canvas Item Banks expose seven reads and eleven course-bound owner-write shapes. Every operation is bound to the selected course. Bank management reads use a fresh credential from the exact signed-in Item Banks frame. The share read returns one observed page and always reports that pagination is incomplete. The quiz-entry read follows numbered pages to an empty end page and fails closed if it reaches its page or row bound. All eleven writes are review-only and dispatch to Canvas behind exact snapshots and fresh readbacks. Existing-bank changes lack complete downstream reach: Canvas provides no complete record of every course a bank reaches, so the fan-out record is always incomplete. Duplicate, standalone item deletion, stimulus lifecycle, move or copy, tags, QTI import, and broader sharing remain absent. The private routes remain live-unverified.
+Canvas Item Banks expose seven reads and eleven course-bound owner-write shapes. Every operation is bound to the selected course. Bank management reads use a fresh credential from the exact signed-in Item Banks frame. The share read returns one observed page and always reports that pagination is incomplete. The quiz-entry read follows numbered pages to an empty end page and fails closed if it reaches its page or row bound. All eleven writes dispatch to Canvas behind exact snapshots and fresh readbacks. Eight of them can hold a standing Edit grant; the three that remove content (archiving a bank, deleting an entry, and removing a quiz's use of a bank) are approved change by change. Existing-bank changes lack complete downstream reach: Canvas provides no complete record of every course a bank reaches, so the fan-out record is always incomplete. Duplicate, standalone item deletion, stimulus lifecycle, move or copy, tags, QTI import, and broader sharing remain absent. The private routes remain live-unverified.
 
 Four instructor-facing reads answer questions about work in progress as counts only, so no learner row has to be read and redacted: `canvas_get_classic_quiz_submission_summary`, `canvas_get_assignment_submission_summary`, `canvas_get_course_gradebook_summary`, and `canvas_get_course_activity_summary`. Each one counts inside the Canvas page before anything crosses the connection, and returns no learner identity, score, comment, or attachment name. The gradebook summary publishes a score distribution only when the assignment has at least 5 scored submissions and every band it would show holds at least 5, so no individual score can be inferred; otherwise that assignment's distribution is dropped. A read that reaches a byte or page bound reports an explicit incomplete state instead of a partial count. The three course-level reads are proved against local browser fixtures only; no signed-in Canvas course has run them, and real submission and gradebook payloads vary by tenant and role.
 
@@ -324,7 +324,7 @@ Morrow is one desktop application. It carries the Morrow MCP runtime, the Node r
 | macOS on Apple silicon | `Morrow-<version>-mac-arm64.dmg`, with a matching `.zip` | The unsigned 1.0.0 disk image was mounted and installed on the MacBook. The packaged runtime passed `scripts/test/desktop-mac-smoke.mjs`, including the Bridge listener and private state modes. |
 | Windows on x64 | `Morrow-<version>-win-x64.exe`, a one-click per-user NSIS installer | The unsigned 1.0.0 installer passed install, start, damaged-payload refusal, exact repair, uninstall, and retained-data checks on native Windows `BOOTZ`. `scripts/test/desktop-windows-smoke.mjs` runs on native Windows only. |
 
-There is no Intel macOS build and no Linux build. Nothing is signed or notarized. The public unsigned 1.0.0 release is available from the [Morrow downloads page](https://meetmorrow.app/download). Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
+There is no Intel macOS build and no Linux build. Nothing is signed or notarized. The public unsigned 1.0.2 release is available from the [Morrow downloads page](https://meetmorrow.app/download). Building the app from this checkout is a maintainer step, described under [development and engineering evidence](#development-and-engineering-evidence).
 
 You need Chrome 116 or later and one supported assistant already installed on the same computer: ChatGPT, Claude Desktop, Claude Code, or Gemini CLI.
 
@@ -366,7 +366,7 @@ The two sections below are how Morrow is built and checked. Neither is the consu
 
 `morrow-v1.0.0-rc.0-darwin-arm64-mcp.zip` was a self-contained archive holding Morrow MCP, Morrow Bridge, and the Node runtime they use. It was set up from the command line. It is historical engineering evidence: `scripts/package-mcp-bundle.mjs` in this checkout builds desktop payloads and installers only, so no command here rebuilds that archive, and no archive is published.
 
-A dated archive passed installed-client startup and workspace isolation on the MacBook, plus a separate iMac recipient check without global Node or pnpm. Its Bridge paired with the native Moodle sandbox on the MacBook. Later runtime fixes are not in it. Those receipts are in `output/private-mcp-candidate-2026-09-06T13-27-55-317Z/` and `work/installation-proof/`, and the [current work record](docs/implementation/MORROW-ACTIVE-GOAL.md) names which archive each result belongs to. These checks establish nothing about another operating system: the archive was built for macOS on Apple silicon only.
+A dated archive passed installed-client startup and workspace isolation on the MacBook, plus a separate iMac recipient check without global Node or pnpm. Its Bridge paired with the native Moodle sandbox on the MacBook. Later runtime fixes are not in it. Those receipts are kept locally, outside the public tree, and the [current work record](docs/implementation/MORROW-ACTIVE-GOAL.md) names which archive each result belongs to. These checks establish nothing about another operating system: the archive was built for macOS on Apple silicon only.
 
 Its documented use was:
 
@@ -505,4 +505,4 @@ See [ARCHITECTURE.md](ARCHITECTURE.md), [LIMITATIONS.md](LIMITATIONS.md), and [S
 
 ## Release status
 
-The release checkout uses `1.0.0`. The public `v1.0.0` release provides unsigned macOS Apple silicon and Windows x64 installers from the [Morrow downloads repository](https://github.com/example-owner/morrow-downloads/releases/tag/v1.0.0). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.
+The release checkout uses `1.0.2`. The public `v1.0.2` release provides unsigned macOS Apple silicon and Windows x64 installers from the [Morrow downloads repository](https://github.com/bradenriggins/morrow-downloads/releases/tag/v1.0.2). Local private and public-candidate source archives are deterministic and include checksums, a stage manifest, and a CycloneDX SBOM. These distribution records do not change the local runtime architecture.

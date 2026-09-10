@@ -18,13 +18,13 @@ function config(options: { readonly delayMs?: number } = {}) {
     profile: "private-full",
     upstreams: [
       {
-        id: "example-legacy",
+        id: "morrow-legacy",
         label: "Morrow legacy fixture",
         kind: "mcp-stdio",
         command: process.execPath,
         args: [fixturePath],
         env: {
-          FAKE_SOURCE: "example-legacy",
+          FAKE_SOURCE: "morrow-legacy",
           ...(options.delayMs ? { FAKE_DELAY_MS: String(options.delayMs) } : {}),
         },
         priority: 50,
@@ -76,7 +76,7 @@ describe("outer provider effects", () => {
   it("plans, separately approves, dispatches once, verifies fresh evidence, and corrects with a new operation", async () => {
     const runtime = await GatewayRuntime.connect(config(), { journalPath: ":memory:" });
     try {
-      const expectedReadbackDigest = sha256Json({ source: "example-legacy", course_id: "101" });
+      const expectedReadbackDigest = sha256Json({ source: "morrow-legacy", course_id: "101" });
       const planned = await runtime.call("morrow_legacy_only", {
         value: "first",
         _morrow: {
@@ -91,7 +91,7 @@ describe("outer provider effects", () => {
       const id = operationId(planned);
       expect(planned.structuredContent).toMatchObject({
         schema: "morrow.result.v1",
-        backend: "example-legacy",
+        backend: "morrow-legacy",
         status: "awaiting_approval",
         phase: "planned",
         completeness: "complete",
@@ -136,7 +136,7 @@ describe("outer provider effects", () => {
         readback: {
           tool: "canvas_page_get",
           arguments: { course_id: courseId },
-          expected_digest: sha256Json({ source: "example-legacy", course_id: courseId }),
+          expected_digest: sha256Json({ source: "morrow-legacy", course_id: courseId }),
         },
       },
     });
@@ -191,7 +191,7 @@ describe("outer provider effects", () => {
           readback: {
             tool: "canvas_page_get",
             arguments: { course_id: "101" },
-            expected_digest: sha256Json({ source: "example-legacy", course_id: "101" }),
+            expected_digest: sha256Json({ source: "morrow-legacy", course_id: "101" }),
           },
         },
       });

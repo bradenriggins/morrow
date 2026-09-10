@@ -10,7 +10,7 @@
       "reason": "Both donor tools list pages in one exact Canvas course. Contract compatibility must still pass against the captured schemas.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_pages_list" },
-        { "sourceId": "example-legacy", "toolName": "list_pages" }
+        { "sourceId": "morrow-legacy", "toolName": "list_pages" }
       ]
     },
     {
@@ -21,7 +21,7 @@
       "reason": "Both donor tools read one Canvas page. Selection remains blocked when the captured input or output contracts differ.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_page_get" },
-        { "sourceId": "example-legacy", "toolName": "get_page" }
+        { "sourceId": "morrow-legacy", "toolName": "get_page" }
       ]
     },
     {
@@ -32,7 +32,7 @@
       "reason": "Both donor tools update one Canvas page, but their approval and readback contracts require separate review after schema comparison.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_page_update" },
-        { "sourceId": "example-legacy", "toolName": "edit_page" }
+        { "sourceId": "morrow-legacy", "toolName": "edit_page" }
       ]
     },
     {
@@ -43,7 +43,7 @@
       "reason": "Both donor tools list modules in one exact Canvas course.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_modules_list" },
-        { "sourceId": "example-legacy", "toolName": "list_modules" }
+        { "sourceId": "morrow-legacy", "toolName": "list_modules" }
       ]
     },
     {
@@ -54,7 +54,7 @@
       "reason": "Both donor tools list the items in one exact Canvas module.",
       "members": [
         { "sourceId": "meridian", "toolName": "canvas_module_items_list" },
-        { "sourceId": "example-legacy", "toolName": "list_module_items" }
+        { "sourceId": "morrow-legacy", "toolName": "list_module_items" }
       ]
     }
   ]

@@ -8,8 +8,8 @@ describe("BatchSourceSettlementStore", () => {
   it("tracks staging separately from final provider outcome", () => {
     const store = new BatchSourceSettlementStore({ path: ":memory:" });
     store.initialize("bat:test-1234", [
-      { childId: "course:41", sourceId: "example-legacy", sourceBindingId: "canvas:41" },
-      { childId: "course:42", sourceId: "example-legacy", sourceBindingId: "canvas:42" },
+      { childId: "course:41", sourceId: "morrow-legacy", sourceBindingId: "canvas:41" },
+      { childId: "course:42", sourceId: "morrow-legacy", sourceBindingId: "canvas:42" },
     ]);
     expect(store.summary("bat:test-1234")).toMatchObject({
       outcome: "not_started",
@@ -109,7 +109,7 @@ describe("BatchSourceSettlementStore", () => {
   it("refuses task identity substitution", () => {
     const store = new BatchSourceSettlementStore({ path: ":memory:" });
     store.initialize("bat:test-5678", [
-      { childId: "course:1", sourceId: "example-legacy" },
+      { childId: "course:1", sourceId: "morrow-legacy" },
     ]);
     store.markStaged("bat:test-5678", "course:1", { sourceTaskId: "task-1" });
     expect(() => store.applyTaskProjection("bat:test-5678", "course:1", {

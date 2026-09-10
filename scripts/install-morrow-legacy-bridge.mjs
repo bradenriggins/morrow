@@ -42,7 +42,7 @@ if (status && !status.split('\n').every((line) => line.endsWith(' extension/back
 const catalog = JSON.parse(await readFile(catalogPath, 'utf8'));
 if (
   catalog?.schema !== 'morrow.source-catalog.v1'
-  || catalog?.source?.id !== 'example-legacy'
+  || catalog?.source?.id !== 'morrow-legacy'
   || catalog?.source?.revision !== expectedRevision
   || !/^[0-9a-f]{64}$/.test(String(catalog?.digest || ''))
 ) throw new Error('MORROW_LEGACY_CATALOG_PATH is not the pinned Morrow legacy source catalog');
@@ -50,7 +50,7 @@ if (
 const extensionRoot = resolve(legacyRoot, 'extension');
 const backgroundPath = resolve(extensionRoot, 'background.js');
 const localConfigPath = resolve(extensionRoot, 'morrow-gateway-bridge.local.js');
-const integrationRoot = resolve(ROOT, 'integrations/example-legacy/extension');
+const integrationRoot = resolve(ROOT, 'integrations/morrow-legacy/extension');
 const original = await readFile(backgroundPath, 'utf8');
 const patched = patchBackground(original);
 await mkdir(extensionRoot, { recursive: true });

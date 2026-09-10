@@ -40,12 +40,12 @@ function config() {
         },
       },
       {
-        id: "example-legacy",
+        id: "morrow-legacy",
         label: "Morrow legacy fixture",
         kind: "mcp-stdio",
         command: process.execPath,
         args: [fixturePath],
-        env: { FAKE_SOURCE: "example-legacy" },
+        env: { FAKE_SOURCE: "morrow-legacy" },
         priority: 50,
         required: true,
         enabled: true,
@@ -998,7 +998,7 @@ describe("MorrowRuntime durable batches", () => {
       expect(JSON.stringify(detail)).not.toContain("Course 41");
 
       const stagingOperations = runtime.gateway.operationsRecent({
-        source: "example-legacy",
+        source: "morrow-legacy",
         tool: "edit_page",
         limit: 10,
       });
@@ -1008,7 +1008,7 @@ describe("MorrowRuntime durable batches", () => {
         && String(operation.sourceTaskId).startsWith("task-")
       ))).toBe(true);
       const inspectionOperations = runtime.gateway.operationsRecent({
-        source: "example-legacy",
+        source: "morrow-legacy",
         tool: "morrow_legacy_task_get",
         limit: 20,
       });

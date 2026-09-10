@@ -18,7 +18,7 @@ function child(index: number, readOnly = true) {
   return {
     childId: `course:${index}`,
     publicToolName: readOnly ? "canvas_page_get" : "edit_page",
-    sourceId: readOnly ? "meridian" : "example-legacy",
+    sourceId: readOnly ? "meridian" : "morrow-legacy",
     sourceToolName: readOnly ? "canvas_page_get" : "edit_page",
     readOnly,
     arguments: { course_id: String(index), secretMarker: `private-${index}` },

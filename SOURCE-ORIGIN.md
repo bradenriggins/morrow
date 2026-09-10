@@ -6,7 +6,7 @@ Morrow's default runtime is directly owned source in this repository. It does no
 
 ### Direct Morrow source
 
-The MCP server, operation journal, effect broker, batch engine, privacy layer, client installer, loopback protocol, Canvas connector MCP, Chrome extension, verification logic, package tooling, and documentation are maintained in `example-owner/morrow`.
+The MCP server, operation journal, effect broker, batch engine, privacy layer, client installer, loopback protocol, Canvas connector MCP, Chrome extension, verification logic, package tooling, and documentation are maintained in `bradenriggins/morrow`.
 
 Each public-candidate file needs one exact digest record before publication. A repository location or authorship claim does not replace that review.
 

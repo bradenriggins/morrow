@@ -29,7 +29,7 @@ function mergedCatalog() {
       ],
     },
     {
-      id: "example-legacy",
+      id: "morrow-legacy",
       label: "Morrow legacy",
       priority: 50,
       tools: [
@@ -61,7 +61,7 @@ function manifestFor(toolName = "get_page") {
       sources: [{
         sourceId: tool.upstreamId,
         catalogDigest: sourceDigest,
-        toolCount: tool.upstreamId === "example-legacy" ? 1 : 2,
+        toolCount: tool.upstreamId === "morrow-legacy" ? 1 : 2,
       }],
       tools: [publicationRuleForTool(tool, "canvas_page_get")],
     },
@@ -72,7 +72,7 @@ describe("applyPublicationPolicy", () => {
   it("publishes only exact reviewed source contracts under explicit public names", () => {
     const { catalog, manifest } = manifestFor();
     const applied = applyPublicationPolicy(catalog, manifest, [{
-      sourceId: "example-legacy",
+      sourceId: "morrow-legacy",
       catalogDigest: sourceDigest,
       toolCount: 1,
     }]);
@@ -80,7 +80,7 @@ describe("applyPublicationPolicy", () => {
     expect(applied.catalog.tools).toHaveLength(1);
     expect(applied.catalog.tools[0]).toMatchObject({
       publicName: "canvas_page_get",
-      upstreamId: "example-legacy",
+      upstreamId: "morrow-legacy",
       upstreamName: "get_page",
     });
     expect(applied.catalog.collisions).toEqual([]);
@@ -110,7 +110,7 @@ describe("applyPublicationPolicy", () => {
   it("refuses source catalog and schema drift", () => {
     const { catalog, manifest } = manifestFor();
     expect(() => applyPublicationPolicy(catalog, manifest, [{
-      sourceId: "example-legacy",
+      sourceId: "morrow-legacy",
       catalogDigest: "b".repeat(64),
       toolCount: 1,
     }])).toThrow(/source catalog drift/);
@@ -118,7 +118,7 @@ describe("applyPublicationPolicy", () => {
     const changed = structuredClone(manifest);
     changed.tools[0]!.inputSchemaSha256 = "c".repeat(64);
     expect(() => applyPublicationPolicy(catalog, changed, [{
-      sourceId: "example-legacy",
+      sourceId: "morrow-legacy",
       catalogDigest: sourceDigest,
       toolCount: 1,
     }])).toThrow(/contract drift/);
@@ -129,7 +129,7 @@ describe("applyPublicationPolicy", () => {
     const reserved = structuredClone(manifest);
     reserved.tools[0]!.publicName = "morrow_health";
     expect(() => applyPublicationPolicy(catalog, reserved, [{
-      sourceId: "example-legacy",
+      sourceId: "morrow-legacy",
       catalogDigest: sourceDigest,
       toolCount: 1,
     }])).toThrow(/reserved/);
@@ -137,7 +137,7 @@ describe("applyPublicationPolicy", () => {
     const held = structuredClone(manifest);
     held.tools[0]!.publicName = "mindtap_page_get";
     expect(() => applyPublicationPolicy(catalog, held, [{
-      sourceId: "example-legacy",
+      sourceId: "morrow-legacy",
       catalogDigest: sourceDigest,
       toolCount: 1,
     }])).toThrow(/denied provider prefix/);
@@ -148,7 +148,7 @@ describe("applyPublicationPolicy", () => {
       publicName: "canvas_page_read",
     });
     expect(() => applyPublicationPolicy(catalog, duplicated, [{
-      sourceId: "example-legacy",
+      sourceId: "morrow-legacy",
       catalogDigest: sourceDigest,
       toolCount: 1,
     }])).toThrow(/selected more than once/);

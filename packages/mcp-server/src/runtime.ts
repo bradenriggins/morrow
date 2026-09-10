@@ -582,7 +582,7 @@ function withSourceOperationId(
   readonly idempotencyKey?: string;
 } {
   const forwarded = structuredClone(args) as Record<string, unknown>;
-  const bridgeControlled = mapping.upstreamId === "example-legacy"
+  const bridgeControlled = mapping.upstreamId === "morrow-legacy"
     || usesEmbeddedReadback(mapping);
   if (!bridgeControlled) {
     // Blackboard is the only REST source that accepts a Gateway-private
@@ -7339,7 +7339,7 @@ export class GatewayRuntime {
           dispatch_token: signBlackboardEffectGrant(this.blackboardEffectDispatchSecret, unsignedGrant),
         },
       };
-    } else if (mapping.upstreamId === "example-legacy" || usesEmbeddedReadback(mapping)) {
+    } else if (mapping.upstreamId === "morrow-legacy" || usesEmbeddedReadback(mapping)) {
       forwarded._morrow = {
         ...(isJsonObject(forwarded._morrow) ? forwarded._morrow : {}),
         operation_id: reserved.sourceOperationId || reserved.operationId,
@@ -7479,7 +7479,7 @@ export class GatewayRuntime {
       );
     }
     const innerApprovalRequired = /awaiting.*approval|pending.*approval|staged/i.test(source.state || "")
-      || (mapping.upstreamId === "example-legacy" && Boolean(source.taskId));
+      || (mapping.upstreamId === "morrow-legacy" && Boolean(source.taskId));
     const settled = this.effects.settleResponse(reserved.operationId, {
       upstreamResultDigest: sha256Json(result),
       ...(source.state ? { sourceResultState: source.state } : {}),

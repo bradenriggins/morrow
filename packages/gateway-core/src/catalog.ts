@@ -62,7 +62,7 @@ function profile(state: CapabilityProfileAvailability["state"], reason?: string)
 }
 
 function defaultProfiles(sourceId: string): Readonly<Record<RuntimeProfile, CapabilityProfileAvailability>> {
-  const isMorrow = sourceId === "example-legacy";
+  const isMorrow = sourceId === "morrow-legacy";
   const isSandbox = sourceId === "sandbox";
   return {
     "private-full": profile("supported"),
@@ -97,8 +97,8 @@ function descriptorFor(
     supportsReadback: sourceMetadata?.behavior?.supportsReadback === true,
     supportsUndo: sourceMetadata?.behavior?.supportsUndo === true,
     supportsBatch: sourceMetadata?.behavior?.supportsBatch === true,
-    requiresBrowser: sourceMetadata?.behavior?.requiresBrowser === true || source.id === "example-legacy",
-    requiresLiveCanvas: sourceMetadata?.behavior?.requiresLiveCanvas === true || source.id === "example-legacy",
+    requiresBrowser: sourceMetadata?.behavior?.requiresBrowser === true || source.id === "morrow-legacy",
+    requiresLiveCanvas: sourceMetadata?.behavior?.requiresLiveCanvas === true || source.id === "morrow-legacy",
   };
   const provider = sourceMetadata?.provider === "local" || sourceMetadata?.provider === "moodle" || sourceMetadata?.provider === "blackboard"
     ? sourceMetadata.provider : "canvas";

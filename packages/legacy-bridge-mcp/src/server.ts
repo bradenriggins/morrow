@@ -36,7 +36,7 @@ function toolMeta(runtime: LegacyBridgeRuntime, sourceToolName: string): Record<
 }
 
 export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime, options: { readonly internalSourceCapability?: string; readonly learnerVaultPath?: string } = {}): McpServer {
-  const server = new McpServer({ name: "example-legacy-bridge", version: "1.0.0" });
+  const server = new McpServer({ name: "morrow-legacy-bridge", version: "1.0.0" });
   const privacy = new SourceMcpPrivacyBoundary({
     source: "legacy-bridge-mcp",
     internalSourceCapability: options.internalSourceCapability,

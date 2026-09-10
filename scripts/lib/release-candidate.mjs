@@ -331,7 +331,7 @@ function sourceRightsState(root, files, visibility) {
 }
 
 const PUBLIC_MARKERS = Object.freeze([
-  { id: "private_example-kit_marker", expression: /(?:\bexample-kit\b|example-kit[_-]|example-attestation-repo|example-lms-vps)/i },
+  { id: "private_chcp_marker", expression: /(?:\bchcp\b|chcp[_-]|chcp-team-agent-kit|meridian-vps)/i },
   { id: "absolute_user_path", expression: /\/(?:Users|home)\/[^/\s]+/ },
   { id: "private_key", expression: /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----/ },
   { id: "secret_literal", expression: /\b(?:sk|pk)_(?:live|test)_[A-Za-z0-9_-]{12,}/ },

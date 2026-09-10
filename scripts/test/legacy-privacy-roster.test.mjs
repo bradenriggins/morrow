@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const source = await readFile(new URL('../../integrations/example-legacy/extension/morrow-gateway-bridge-runtime.js', import.meta.url), 'utf8');
+const source = await readFile(new URL('../../integrations/morrow-legacy/extension/morrow-gateway-bridge-runtime.js', import.meta.url), 'utf8');
 const executable = source.replace(/^import[\s\S]*?from ['"][^'"]+['"];\n/gm, '').replace(/export /g, '');
 function runtime(roster, history = []) {
   const calls = [];

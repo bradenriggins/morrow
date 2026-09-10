@@ -154,7 +154,7 @@ test("public package scan checks docs, JSON, and source maps", () => {
   assert.equal(scan.passed, false);
   assert.deepEqual(scan.violations.map((entry) => entry.marker).sort(), [
     "absolute_user_path",
-    "private_example-kit_marker",
+    "private_chcp_marker",
     "private_key",
   ]);
 });

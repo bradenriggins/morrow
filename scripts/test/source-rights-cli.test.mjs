@@ -40,7 +40,7 @@ test("source-rights CLI requires an exact reviewed public input", async () => {
     ], { encoding: "utf8" });
     assert.match(output, /public-source-rights=ok files=1/);
 
-    const privateSource = Buffer.from("const example-kitInternal = true;\n");
+    const privateSource = Buffer.from("const chcpInternal = true;\n");
     await writeFile(file, privateSource);
     await writeFile(manifest, `${JSON.stringify({
       schema: "morrow.source-rights.v1",

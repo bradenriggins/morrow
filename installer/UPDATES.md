@@ -2,7 +2,7 @@
 
 This guide defines the update boundary for the packaged Morrow desktop app. It
 does not publish a release. The fixed future provider is GitHub repository
-`example-owner/morrow`, channel `latest`, with feed ID
+`bradenriggins/morrow`, channel `latest`, with feed ID
 `morrow-github-stable`. The repository has no signed public release yet, so the
 controller must stay disabled until the release owner provides one.
 
@@ -247,7 +247,7 @@ step.
 Before enabling policy in a released desktop build, the release owner must
 provide all of these inputs:
 
-- A public GitHub release in `example-owner/morrow`, with the fixed
+- A public GitHub release in `bradenriggins/morrow`, with the fixed
   `morrow-github-stable` identity for the stable channel.
 - Signed and notarized macOS artifacts, and signed Windows artifacts whose
   publisher matches the updater configuration.

@@ -409,7 +409,7 @@ function normalizeBatchArguments(
   sourceBindingId: string,
 ): JsonObject {
   const args = structuredClone(rawArguments);
-  const bridgeControlled = mapping.upstreamId === "example-legacy"
+  const bridgeControlled = mapping.upstreamId === "morrow-legacy"
     || mapping.capability?.route.backend === "canvas-connector";
   if (!bridgeControlled) {
     if (args._morrow !== undefined || sourceBindingId) {
@@ -430,7 +430,7 @@ function normalizeBatchArguments(
 }
 
 function browserBridgeControlled(mapping: CatalogTool): boolean {
-  return mapping.upstreamId === "example-legacy"
+  return mapping.upstreamId === "morrow-legacy"
     || mapping.capability?.route.backend === "canvas-connector";
 }
 
@@ -1719,7 +1719,7 @@ export class MorrowRuntime {
       input.batchId,
       settleWithProgress(async ({ batch, child, arguments: args }) => {
         const forwarded = structuredClone(args) as Record<string, unknown>;
-        if (child.sourceId === "example-legacy" && child.sourceOperationId) {
+        if (child.sourceId === "morrow-legacy" && child.sourceOperationId) {
           forwarded._morrow = {
             ...(isJsonObject(forwarded._morrow) ? forwarded._morrow : {}),
             operation_id: child.sourceOperationId,
@@ -1872,7 +1872,7 @@ export class MorrowRuntime {
 
     const inspectionTool = sourceTool(
       this.gateway,
-      "example-legacy",
+      "morrow-legacy",
       "morrow_legacy_task_get",
     );
 

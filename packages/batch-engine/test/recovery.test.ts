@@ -51,7 +51,7 @@ function createWriteBatch(store: DurableBatchStore, sourceOperationId: string) {
     children: [{
       childId: "course:9",
       publicToolName: "edit_page",
-      sourceId: "example-legacy",
+      sourceId: "morrow-legacy",
       sourceToolName: "edit_page",
       readOnly: false,
       sourceOperationId,
@@ -80,7 +80,7 @@ function prepareGatewayOperation(
   const request = { course_id: "9", _morrow: { operation_id: sourceOperationId } };
   return journal.prepare({
     publicToolName: "edit_page",
-    sourceId: "example-legacy",
+    sourceId: "morrow-legacy",
     sourceToolName: "edit_page",
     catalogDigest,
     requestDigest: sha256Json(request),

@@ -18,7 +18,7 @@ const UPDATE_METADATA = BUILD_METADATA.desktopUpdates || null;
 const UPDATE_FEED = Object.freeze({
   id: "morrow-github-stable",
   provider: "github",
-  owner: "example-owner",
+  owner: "bradenriggins",
   repo: "morrow-downloads",
   channel: "latest"
 });

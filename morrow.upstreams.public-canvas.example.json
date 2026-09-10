@@ -19,7 +19,7 @@
       "env": {
         "MORROW_CANVAS_CATALOG_PATH": "${MORROW_REPOSITORY_ROOT}/artifacts/canvas-api/canvas-api-catalog.json"
       },
-      "repository": "example-owner/morrow",
+      "repository": "bradenriggins/morrow",
       "revision": "${MORROW_RELEASE_REVISION}",
       "sourceDisposition": "direct_owned",
       "attestation": {

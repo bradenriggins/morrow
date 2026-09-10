@@ -1,7 +1,7 @@
 {
   "schema": "morrow.upstreams.v1",
   "profile": "private-full",
-  "disposition": "Development-only example. The example-legacy bridge is a development adaptation path for the donor Morrow extension. It is not part of the Morrow 1.0 product, no public release profile in config/release-profiles.json contains packages/legacy-bridge-mcp/, and it needs an external example-legacy donor checkout at revision 1111111111111111111111111111111111111111. See docs/implementation/MORROW-LEGACY-BRIDGE.md.",
+  "disposition": "Development-only example. The morrow-legacy bridge is a development adaptation path for the donor Morrow extension. It is not part of the Morrow 1.0 product, no public release profile in config/release-profiles.json contains packages/legacy-bridge-mcp/, and it needs an external morrow-legacy donor checkout at revision 1111111111111111111111111111111111111111. See docs/implementation/MORROW-LEGACY-BRIDGE.md.",
   "sourcePolicy": {
     "requireAttestation": true
   },
@@ -40,13 +40,13 @@
       "enabled": true
     },
     {
-      "id": "example-legacy",
+      "id": "morrow-legacy",
       "label": "Morrow legacy browser runtime",
       "kind": "mcp-stdio",
       "command": "pnpm",
       "args": ["--filter", "@morrow/legacy-bridge-mcp", "start"],
       "cwd": "${MORROW_NEW_REPO_ROOT}",
-      "repository": "example-org/example-legacy-source",
+      "repository": "example-org/morrow-legacy-source",
       "revision": "1111111111111111111111111111111111111111",
       "attestation": {
         "kind": "local-git",

@@ -18,10 +18,10 @@ const runtimes: LegacyBridgeRuntime[] = [];
 const sockets: WebSocket[] = [];
 
 const catalog = buildSourceCatalog({
-  id: "example-legacy",
+  id: "morrow-legacy",
   label: "Morrow legacy",
   kind: "donor-export",
-  repository: "example-org/example-legacy-source",
+  repository: "example-org/morrow-legacy-source",
   revision,
 }, [
   {

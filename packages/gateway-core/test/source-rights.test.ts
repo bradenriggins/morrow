@@ -19,7 +19,7 @@ describe("public source-rights validation", () => {
       }],
     };
     expect(() => validatePublicAssemblyInputs(manifest, [{ path: "packages/public/canvas-tool.ts", bytes }])).not.toThrow();
-    const privateBytes = Buffer.from("const example-kitInternal = true;\n");
+    const privateBytes = Buffer.from("const chcpInternal = true;\n");
     expect(() => validatePublicAssemblyInputs({
       ...manifest,
       files: [{ ...manifest.files[0], sha256: sha256(privateBytes) }],

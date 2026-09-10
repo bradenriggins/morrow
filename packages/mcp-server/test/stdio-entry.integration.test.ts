@@ -17,7 +17,7 @@ describe("Morrow stdio entry", () => {
       toolSurface: "full",
       sourcePolicy: { requireAttestation: false },
       upstreams: [{
-        id: "example-legacy",
+        id: "morrow-legacy",
         label: "Fixture",
         kind: "mcp-stdio",
         command: process.execPath,
@@ -25,7 +25,7 @@ describe("Morrow stdio entry", () => {
         priority: 1,
         required: true,
         enabled: true,
-        env: { FAKE_SOURCE: "example-legacy", FAKE_INTERNAL_BRIDGE_MAINTENANCE: "1" },
+        env: { FAKE_SOURCE: "morrow-legacy", FAKE_INTERNAL_BRIDGE_MAINTENANCE: "1" },
         outputPrivacy: {
           canvas_page_get: {
             allowedFields: ["source", "course_id"],
@@ -155,7 +155,7 @@ describe("Morrow stdio entry", () => {
       expect(result.structuredContent).toMatchObject({
         schema: "morrow.result.v1",
         verification: { status: "not_applicable" },
-        data: { source: "example-legacy", course_id: "1" },
+        data: { source: "morrow-legacy", course_id: "1" },
       });
       const planned = await client.callTool({
         name: "morrow_legacy_only",

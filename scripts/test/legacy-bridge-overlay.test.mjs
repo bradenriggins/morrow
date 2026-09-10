@@ -44,7 +44,7 @@ test('overlay contains only the reviewed module set and no model-callable approv
     'morrow-gateway-bridge-runtime.js',
   ]);
   const contents = await Promise.all(LEGACY_BRIDGE_OVERLAY_FILES.map((filename) => (
-    readFile(resolve(ROOT, 'integrations/example-legacy/extension', filename), 'utf8')
+    readFile(resolve(ROOT, 'integrations/morrow-legacy/extension', filename), 'utf8')
   )));
   const source = contents.join('\n');
   assert.match(source, /stageChatTask/);

@@ -74,7 +74,7 @@ async function publicConfig(
   toolSurface: "compact" | "full" = "full",
 ): Promise<string> {
   const path = join(directory, "morrow.upstreams.json");
-  const sourceId = environment.FAKE_SOURCE === "example-legacy" ? "example-legacy" : "fixture";
+  const sourceId = environment.FAKE_SOURCE === "morrow-legacy" ? "morrow-legacy" : "fixture";
   await writeFile(path, JSON.stringify({
     schema: "morrow.upstreams.v1",
     profile: "private-full",
@@ -188,7 +188,7 @@ describe("Morrow public stdio protocol", () => {
     const callLog = join(directory, "calls.log");
     const path = await publicConfig(
       directory,
-      { FAKE_SOURCE: "example-legacy", FAKE_CALL_LOG: callLog },
+      { FAKE_SOURCE: "morrow-legacy", FAKE_CALL_LOG: callLog },
       "compact",
     );
     const client = await connectPublic(path);
@@ -240,7 +240,7 @@ describe("Morrow public stdio protocol", () => {
       });
       expect(read.structuredContent).toMatchObject({
         schema: "morrow.result.v1",
-        data: { source: "example-legacy", course_id: "101" },
+        data: { source: "morrow-legacy", course_id: "101" },
       });
       const wrongMode = await client.callTool({
         name: "morrow_capability_read",

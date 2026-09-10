@@ -17,7 +17,7 @@ afterEach(() => {
 function input() {
   return {
     publicToolName: "edit_page",
-    sourceId: "example-legacy",
+    sourceId: "morrow-legacy",
     sourceToolName: "edit_page",
     catalogDigest: "a".repeat(64),
     requestDigest: sha256Json({ course_id: "42", title: "A" }),

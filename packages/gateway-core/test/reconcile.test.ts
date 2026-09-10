@@ -53,13 +53,13 @@ describe("reconcileCatalogs", () => {
         { name: "canvas_page_get" },
         { name: "meridian_only" },
       ]),
-      catalog("example-legacy", [
+      catalog("morrow-legacy", [
         { name: "canvas_page_get" },
         { name: "morrow_only" },
       ]),
     ], {
       generatedAt: "2026-09-03T00:00:00.000Z",
-      sourcePriority: ["meridian", "example-legacy"],
+      sourcePriority: ["meridian", "morrow-legacy"],
     });
 
     const shared = report.rows.find((row) => row.id === "exact:canvas_page_get");
@@ -71,14 +71,14 @@ describe("reconcileCatalogs", () => {
     });
     expect(report.counts.sourceOnlyBySource).toEqual({
       meridian: 1,
-      "example-legacy": 1,
+      "morrow-legacy": 1,
     });
   });
 
   it("refuses to select an exact-name contract drift", () => {
     const report = reconcileCatalogs([
       catalog("meridian", [{ name: "canvas_page_get", inputSchema: emptySchema }]),
-      catalog("example-legacy", [{ name: "canvas_page_get", inputSchema: idSchema }]),
+      catalog("morrow-legacy", [{ name: "canvas_page_get", inputSchema: idSchema }]),
     ]);
     expect(report.rows[0]).toMatchObject({
       status: "contract_drift",
@@ -90,7 +90,7 @@ describe("reconcileCatalogs", () => {
   it("joins differently named tools only through an explicit alias rule", () => {
     const report = reconcileCatalogs([
       catalog("meridian", [{ name: "canvas_pages_list" }]),
-      catalog("example-legacy", [{ name: "list_pages" }]),
+      catalog("morrow-legacy", [{ name: "list_pages" }]),
     ], {
       aliases: [{
         id: "canvas.pages.list",
@@ -99,7 +99,7 @@ describe("reconcileCatalogs", () => {
         reason: "Both tools list Canvas pages in one course.",
         members: [
           { sourceId: "meridian", toolName: "canvas_pages_list" },
-          { sourceId: "example-legacy", toolName: "list_pages" },
+          { sourceId: "morrow-legacy", toolName: "list_pages" },
         ],
       }],
     });
@@ -116,7 +116,7 @@ describe("reconcileCatalogs", () => {
   it("fails when an alias claims a tool that is not in its source catalog", () => {
     expect(() => reconcileCatalogs([
       catalog("meridian", [{ name: "canvas_pages_list" }]),
-      catalog("example-legacy", [{ name: "list_pages" }]),
+      catalog("morrow-legacy", [{ name: "list_pages" }]),
     ], {
       aliases: [{
         id: "bad.alias",
@@ -125,7 +125,7 @@ describe("reconcileCatalogs", () => {
         reason: "Invalid fixture.",
         members: [
           { sourceId: "meridian", toolName: "missing" },
-          { sourceId: "example-legacy", toolName: "list_pages" },
+          { sourceId: "morrow-legacy", toolName: "list_pages" },
         ],
       }],
     })).toThrow("references missing tool");
@@ -134,7 +134,7 @@ describe("reconcileCatalogs", () => {
   it("refuses an alias that would reintroduce a held provider", () => {
     expect(() => reconcileCatalogs([
       catalog("meridian", [{ name: "canvas_pages_list" }]),
-      catalog("example-legacy", [{ name: "list_pages" }]),
+      catalog("morrow-legacy", [{ name: "list_pages" }]),
     ], {
       aliases: [{
         id: "held.alias",
@@ -143,13 +143,13 @@ describe("reconcileCatalogs", () => {
         reason: "Invalid held-provider alias.",
         members: [
           { sourceId: "meridian", toolName: "canvas_pages_list" },
-          { sourceId: "example-legacy", toolName: "connect_pages_list" },
+          { sourceId: "morrow-legacy", toolName: "connect_pages_list" },
         ],
       }],
     })).toThrow("held provider");
     expect(() => reconcileCatalogs([
       catalog("meridian", [{ name: "canvas_pages_list" }]),
-      catalog("example-legacy", [{ name: "list_pages" }]),
+      catalog("morrow-legacy", [{ name: "list_pages" }]),
     ], {
       aliases: [{
         id: "safe.alias",
@@ -158,7 +158,7 @@ describe("reconcileCatalogs", () => {
         reason: "Invalid public alias.",
         members: [
           { sourceId: "meridian", toolName: "canvas_pages_list" },
-          { sourceId: "example-legacy", toolName: "list_pages" },
+          { sourceId: "morrow-legacy", toolName: "list_pages" },
         ],
       }],
     })).toThrow("held provider");

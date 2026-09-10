@@ -51,7 +51,7 @@ const desktopUpdates = Object.freeze({
   enabled: signedRelease,
   feedId: "morrow-github-stable",
   provider: "github",
-  owner: "example-owner",
+  owner: "bradenriggins",
   repo: "morrow-downloads",
   channel: "latest"
 });
@@ -96,7 +96,7 @@ module.exports = {
   },
   publish: [{
     provider: "github",
-    owner: "example-owner",
+    owner: "bradenriggins",
     repo: "morrow-downloads",
     channel: "latest",
     releaseType: "release"

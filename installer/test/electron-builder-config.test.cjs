@@ -46,7 +46,7 @@ const NSIS = {
 const UPDATE_FEED = {
   feedId: "morrow-github-stable",
   provider: "github",
-  owner: "example-owner",
+  owner: "bradenriggins",
   repo: "morrow-downloads",
   channel: "latest"
 };
@@ -220,7 +220,7 @@ test("the build publishes to, and looks for updates on, the GitHub stable feed",
   const config = loadConfig({ payload });
   assert.deepEqual(config.publish, [{
     provider: "github",
-    owner: "example-owner",
+    owner: "bradenriggins",
     repo: "morrow-downloads",
     channel: "latest",
     releaseType: "release"

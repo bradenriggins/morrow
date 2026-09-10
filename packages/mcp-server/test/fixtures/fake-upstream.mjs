@@ -5,7 +5,7 @@ import * as z from "zod/v4";
 
 const source = String(process.env.FAKE_SOURCE || "fake").trim().toLowerCase();
 const sourceToolName = `${source.replace(/[^a-z0-9]+/g, "_")}_only`;
-const sourceToolIsWrite = source === "example-legacy";
+const sourceToolIsWrite = source === "morrow-legacy";
 const callLogPath = String(process.env.FAKE_CALL_LOG || "").trim();
 const delayMilliseconds = Number(process.env.FAKE_DELAY_MS || 0);
 const largeResultCharacters = Number(process.env.FAKE_LARGE_RESULT_CHARS || 0);

@@ -160,7 +160,7 @@ describe("requesting assistant identity", () => {
     try {
       const base = {
         publicToolName: "canvas_page_update",
-        sourceId: "example-legacy",
+        sourceId: "morrow-legacy",
         sourceToolName: "canvas_page_update",
         catalogDigest: "a".repeat(64),
         request: { page_id: "42", title: "Original" },

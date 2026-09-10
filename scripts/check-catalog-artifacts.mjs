@@ -7,7 +7,7 @@ import { parseSourceCatalog } from "../packages/gateway-core/dist/index.js";
 async function main() {
   const paths = process.argv.length > 2
     ? process.argv.slice(2)
-    : ["artifacts/catalogs/example-legacy.canvas.json", "artifacts/catalogs/meridian.live.json"];
+    : ["artifacts/catalogs/morrow-legacy.canvas.json", "artifacts/catalogs/meridian.live.json"];
   if (paths.length < 2) throw new Error("Provide at least two source catalog paths");
   const catalogs = await Promise.all(paths.map(async (path) => (
     parseSourceCatalog(JSON.parse(await readFile(resolve(path), "utf8")))

@@ -26,12 +26,12 @@ describe("Morrow legacy read routing", () => {
           },
         },
         {
-          id: "example-legacy",
+          id: "morrow-legacy",
           label: "Morrow legacy fixture",
           kind: "mcp-stdio",
           command: process.execPath,
           args: [fixturePath],
-          env: { FAKE_SOURCE: "example-legacy" },
+          env: { FAKE_SOURCE: "morrow-legacy" },
           priority: 50,
           required: true,
           enabled: true,
@@ -65,7 +65,7 @@ describe("Morrow legacy read routing", () => {
       expect(first.isError).not.toBe(true);
       expect(second.isError).not.toBe(true);
       const recent = runtime.operationsRecent({
-        source: "example-legacy",
+        source: "morrow-legacy",
         tool: publicName,
         limit: 10,
       });

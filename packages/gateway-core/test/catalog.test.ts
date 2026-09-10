@@ -14,7 +14,7 @@ describe("mergeCatalog", () => {
         tools: [{ name: "canvas_page_get", inputSchema: emptySchema }],
       },
       {
-        id: "example-legacy",
+        id: "morrow-legacy",
         label: "Morrow legacy",
         priority: 50,
         tools: [{ name: "canvas_page_get", inputSchema: emptySchema }],
@@ -28,7 +28,7 @@ describe("mergeCatalog", () => {
     expect(snapshot.collisions).toEqual([{
       requestedName: "canvas_page_get",
       retainedBy: "meridian",
-      aliasedSource: "example-legacy",
+      aliasedSource: "morrow-legacy",
       aliasedTo: "morrow_legacy__canvas_page_get",
     }]);
   });

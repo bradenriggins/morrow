@@ -67,7 +67,7 @@ async function main() {
     : Number(process.env.MORROW_LEGACY_EXPECTED_CANVAS_TOOLS);
   const outputPath = resolve(
     process.cwd(),
-    String(process.env.MORROW_LEGACY_CATALOG_OUTPUT || "artifacts/catalogs/example-legacy.canvas.json"),
+    String(process.env.MORROW_LEGACY_CATALOG_OUTPUT || "artifacts/catalogs/morrow-legacy.canvas.json"),
   );
 
   const commit = git(legacyRoot, "rev-parse", "HEAD");
@@ -175,10 +175,10 @@ async function main() {
     });
 
   const artifact = buildSourceCatalog({
-    id: "example-legacy",
+    id: "morrow-legacy",
     label: "Morrow legacy",
     kind: "donor-export",
-    repository: "example-org/example-legacy-source",
+    repository: "example-org/morrow-legacy-source",
     revision: commit,
   }, tools);
 

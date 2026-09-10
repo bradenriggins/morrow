@@ -28,7 +28,7 @@ function catalogs() {
       },
     ]),
     buildSourceCatalog({
-      id: "example-legacy",
+      id: "morrow-legacy",
       label: "Morrow legacy",
       kind: "donor-export",
       capturedAt: "2026-09-03T00:00:00.000Z",
@@ -63,12 +63,12 @@ function selections(overrides: Record<string, unknown> = {}) {
     selections: [
       {
         publicName: "canvas_page_get",
-        sourceId: "example-legacy",
+        sourceId: "morrow-legacy",
         sourceToolName: "get_page",
       },
       {
         publicName: "canvas_page_update",
-        sourceId: "example-legacy",
+        sourceId: "morrow-legacy",
         sourceToolName: "edit_page",
       },
     ],
@@ -86,19 +86,19 @@ describe("buildPublicationManifestCandidate", () => {
       profile: "public-canvas",
       release: "1.0.0-rc.0",
       sources: [{
-        sourceId: "example-legacy",
-        catalogDigest: upstreamCatalogDigest("example-legacy", legacy.tools),
+        sourceId: "morrow-legacy",
+        catalogDigest: upstreamCatalogDigest("morrow-legacy", legacy.tools),
         toolCount: 3,
       }],
       tools: [
         {
           publicName: "canvas_page_get",
-          sourceId: "example-legacy",
+          sourceId: "morrow-legacy",
           sourceToolName: "get_page",
         },
         {
           publicName: "canvas_page_update",
-          sourceId: "example-legacy",
+          sourceId: "morrow-legacy",
           sourceToolName: "edit_page",
         },
       ],
@@ -119,7 +119,7 @@ describe("buildPublicationManifestCandidate", () => {
     expect(() => buildPublicationManifestCandidate(catalogs(), selections({
       selections: [{
         publicName: "canvas_page_get",
-        sourceId: "example-legacy",
+        sourceId: "morrow-legacy",
         sourceToolName: "missing_tool",
       }],
     }))).toThrow(/Expected one/);
@@ -129,7 +129,7 @@ describe("buildPublicationManifestCandidate", () => {
     expect(() => buildPublicationManifestCandidate(catalogs(), selections({
       selections: [{
         publicName: "morrow_health",
-        sourceId: "example-legacy",
+        sourceId: "morrow-legacy",
         sourceToolName: "get_page",
       }],
     }))).toThrow(/reserved/);
@@ -137,7 +137,7 @@ describe("buildPublicationManifestCandidate", () => {
     expect(() => buildPublicationManifestCandidate(catalogs(), selections({
       selections: [{
         publicName: "connect_page_get",
-        sourceId: "example-legacy",
+        sourceId: "morrow-legacy",
         sourceToolName: "get_page",
       }],
     }))).toThrow(/denied provider prefix/);
@@ -145,7 +145,7 @@ describe("buildPublicationManifestCandidate", () => {
     expect(() => buildPublicationManifestCandidate(catalogs(), selections({
       selections: [{
         publicName: "canvas_publisher_read",
-        sourceId: "example-legacy",
+        sourceId: "morrow-legacy",
         sourceToolName: "mindtap_hidden",
       }],
     }))).toThrow(/unavailable/);
@@ -156,12 +156,12 @@ describe("buildPublicationManifestCandidate", () => {
       selections: [
         {
           publicName: "canvas_page_get",
-          sourceId: "example-legacy",
+          sourceId: "morrow-legacy",
           sourceToolName: "get_page",
         },
         {
           publicName: "canvas_page_get",
-          sourceId: "example-legacy",
+          sourceId: "morrow-legacy",
           sourceToolName: "edit_page",
         },
       ],
@@ -171,12 +171,12 @@ describe("buildPublicationManifestCandidate", () => {
       selections: [
         {
           publicName: "canvas_page_get",
-          sourceId: "example-legacy",
+          sourceId: "morrow-legacy",
           sourceToolName: "get_page",
         },
         {
           publicName: "canvas_page_read",
-          sourceId: "example-legacy",
+          sourceId: "morrow-legacy",
           sourceToolName: "get_page",
         },
       ],

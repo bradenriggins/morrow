@@ -10,7 +10,7 @@ const config = await loadLegacyBridgeConfig();
 const runtime = await LegacyBridgeRuntime.start(config);
 const health = runtime.health();
 console.error(
-  `[example-legacy-bridge] ws://${health.bridge.host}:${health.bridge.port}${health.bridge.path} catalog=${health.source.digest}`,
+  `[morrow-legacy-bridge] ws://${health.bridge.host}:${health.bridge.port}${health.bridge.path} catalog=${health.source.digest}`,
 );
 
 let closing = false;

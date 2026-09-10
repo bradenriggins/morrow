@@ -303,7 +303,7 @@ function main() {
     generatedAt: new Date().toISOString(),
     evidenceRoot: relative(root, outputRoot),
     scope: {
-      repository: "example-owner/morrow",
+      repository: "bradenriggins/morrow",
     localSyntheticOnly: true,
     observedRegressionsOnly: true,
       externalReceiptsRemainSeparate: true,

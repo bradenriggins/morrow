@@ -2147,7 +2147,9 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       // acknowledgement of every disclosed external course, presented with the receipt issued for
       // that exact record, lets the repair plan. Planning still sends nothing: the operation waits
       // for approval and the saved bank question is untouched.
-      expect(repair.isError, JSON.stringify(repair)).not.toBe(true);
+      // The record is named in the failure so a refusal can be read against the exact value the
+      // planner saw, not only its reason code.
+      expect(repair.isError, JSON.stringify({ repair, fan_out: structured(fanOut).fan_out })).not.toBe(true);
       expect(structured(repair)).toMatchObject({
         tool: "canvas_item_bank_update_item", status: "awaiting_approval", phase: "planned",
         effectState: "awaiting_approval", verification: { status: "unconfirmed" },

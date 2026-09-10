@@ -132,7 +132,7 @@ function createServer() {
     },
     async () => ({ content: [{ type: 'text', text: 'donor-native-collision' }] }),
   );
-  if (source === 'example-legacy') {
+  if (source === 'morrow-legacy') {
     server.registerTool(
       'morrow_legacy_task_get',
       {

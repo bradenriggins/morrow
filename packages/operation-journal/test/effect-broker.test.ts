@@ -20,7 +20,7 @@ function create(broker: ProviderEffectBroker, input: Partial<Parameters<Provider
   const sourceOperationId = `operation:effect-${++sequence}`;
   return broker.create({
     publicToolName: "canvas_page_update",
-    sourceId: "example-legacy",
+    sourceId: "morrow-legacy",
     sourceToolName: "canvas_page_update",
     catalogDigest: "a".repeat(64),
     request: { page_id: "42", title: "Original" },

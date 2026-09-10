@@ -3,8 +3,8 @@
 Status: development-only. This is the development adaptation path for the donor Morrow browser extension. It is not part of the Morrow 1.0 product.
 
 - No public release profile contains it. `config/release-profiles.json` leaves `packages/legacy-bridge-mcp/` out of `public-canvas`, and `scripts/test/publication-policy.test.mjs` fails if a public profile ever selects it.
-- No shipped Morrow configuration starts it. The only gateway configuration that names the `example-legacy` upstream is `morrow.upstreams.with-legacy-bridge.example.json`, which is a development example and says so.
-- It cannot run without an external `example-legacy` donor checkout at revision `7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4`. A released copy does not have that checkout.
+- No shipped Morrow configuration starts it. The only gateway configuration that names the `morrow-legacy` upstream is `morrow.upstreams.with-legacy-bridge.example.json`, which is a development example and says so.
+- It cannot run without an external `morrow-legacy` donor checkout at revision `7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4`. A released copy does not have that checkout.
 - The `private-full` source projection and the private desktop payload still carry the built package, because both copy every workspace package. Neither one starts it.
 
 Everything below is development setup in this repository. No instructor step depends on it.
@@ -39,13 +39,13 @@ The overlay binds itself to one exact donor revision and one exact source-catalo
 
 ```bash
 pnpm build
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy node scripts/export-example-legacy-catalog.mjs
+MORROW_LEGACY_ROOT=/absolute/path/to/morrow-legacy node scripts/export-morrow-legacy-catalog.mjs
 ```
 
 The expected artifact is:
 
 ```text
-artifacts/catalogs/example-legacy.canvas.json
+artifacts/catalogs/morrow-legacy.canvas.json
 ```
 
 Run this before installing the overlay because the exporter requires a clean donor checkout.
@@ -63,10 +63,10 @@ The token is carried only in the first WebSocket message. It is not placed in th
 ## Install the donor overlay
 
 ```bash
-export MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy
-export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
+export MORROW_LEGACY_ROOT=/absolute/path/to/morrow-legacy
+export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/morrow-legacy.canvas.json
 export MORROW_LEGACY_BRIDGE_TOKEN
-node scripts/install-example-legacy-bridge.mjs
+node scripts/install-morrow-legacy-bridge.mjs
 ```
 
 The installer:
@@ -82,13 +82,13 @@ The installer:
 The tracked `background.js` patch is intentional and reversible. Remove it with:
 
 ```bash
-MORROW_LEGACY_ROOT=/absolute/path/to/example-legacy node scripts/remove-example-legacy-bridge.mjs
+MORROW_LEGACY_ROOT=/absolute/path/to/morrow-legacy node scripts/remove-morrow-legacy-bridge.mjs
 ```
 
 ## Start the internal bridge MCP
 
 ```bash
-export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
+export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/morrow-legacy.canvas.json
 export MORROW_LEGACY_EXPECTED_REVISION=7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4
 export MORROW_LEGACY_BRIDGE_TOKEN
 pnpm --filter @morrow/legacy-bridge-mcp start
@@ -116,7 +116,7 @@ Copy `morrow.upstreams.with-legacy-bridge.example.json` to `morrow.upstreams.jso
 
 ```bash
 export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
-export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/example-legacy.canvas.json
+export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/morrow-legacy.canvas.json
 export MORROW_LEGACY_BRIDGE_TOKEN
 pnpm start
 ```
