@@ -260,6 +260,9 @@ async function completePayload(root, options = {}) {
   }
   await fs.mkdir(path.join(app, "installer"), { recursive: true });
   await fs.writeFile(path.join(app, "installer", "runtime-monitor.mjs"), "export function createRuntimeMonitor() { return {}; }\n");
+  // Writing an assistant's configuration restricts the file to this account on
+  // win32 before checking its digest, through the real client-config module.
+  await fs.writeFile(path.join(app, "packages", "client-config", "dist", "index.js"), "export function restrictToCurrentAccount() {}\n");
 
   const gatewayFiles = [
     ["package.json", JSON.stringify({ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", type: "module" })],

@@ -89,6 +89,9 @@ async function completePayload(root, options = {}) {
   }
   await fs.mkdir(path.join(app, "installer"), { recursive: true });
   await fs.writeFile(path.join(app, "installer", "runtime-monitor.mjs"), options.runtimeMonitor || "export function createRuntimeMonitor() { return {}; }\n");
+  // Writing an assistant's configuration restricts the file to this account on
+  // win32 before checking its digest, through the real client-config module.
+  await fs.writeFile(path.join(app, "packages", "client-config", "dist", "index.js"), "export function restrictToCurrentAccount() {}\n");
 
   // The gateway runs as ESM from app/packages while its sealed copy under
   // app/node_modules carries the digests the manifest binds.

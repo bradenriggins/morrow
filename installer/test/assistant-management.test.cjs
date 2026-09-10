@@ -26,6 +26,11 @@ async function temporaryRoot() {
   await fs.mkdir(path.join(root, "UserData"), { recursive: true });
   await fs.mkdir(path.join(root, "Home"), { recursive: true });
   await fs.mkdir(path.join(root, "Payload"), { recursive: true });
+  // Writing an assistant's configuration restricts the file to this account on
+  // win32 before checking its digest, through the real client-config module.
+  const clientConfig = path.join(root, "Payload", "app", "packages", "client-config", "dist");
+  await fs.mkdir(clientConfig, { recursive: true });
+  await fs.writeFile(path.join(clientConfig, "index.js"), "export function restrictToCurrentAccount() {}\n");
   test.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }
