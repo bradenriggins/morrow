@@ -1547,23 +1547,22 @@ try {
   const fullEditOptions = await runtime.editOptions(binding.sourceBindingId);
   const canvasCatalog = JSON.parse(readFileSync(join(EXTENSION, "generated/canvas-api-catalog.json"), "utf8"));
   const canvasWriteOperations = canvasCatalog.operations.filter((operation) => operation.readOnly === false);
-  // The general New Quiz question update is an admitted Canvas write that is
-  // still published for review only: an in-place change to a question's answers
-  // needs the delete-then-add contract, so the curated New Quiz repairs stay the
-  // only Edit path. scripts/test/canvas-new-quiz-item-guard.test.mjs holds the rest.
-  // canvas_create_new_quiz and canvas_delete_new_quiz are admitted course-path
-  // writes too, but stay review-only so they are never a standing permission:
-  // the guided New Quiz create and delete tools are the only path that freezes
-  // the complete quiz list, the saved payload, and, for a deletion, Canvas's
-  // own confirmation of no submitted or graded student work.
-  const reviewOnlyAdmittedCanvasWrites = new Set(["canvas_update_quiz_item", "canvas_create_new_quiz", "canvas_delete_new_quiz"]);
+  // Only an irreversible, destructive admitted write stays review-only: never
+  // a standing permission, approved change by change instead. Deleting a New
+  // Quiz takes every item in it with it and Canvas does not restore it;
+  // archiving an Item Bank and deleting one of its entries or a quiz's use of
+  // one reach every quiz, in every course, that draws from the bank, which
+  // Canvas gives no complete list of. Every other admitted write, destructive
+  // or not, is an ordinary standing Edit grant, including the general New
+  // Quiz question update (its id-preserving guard lives in
+  // new-quiz-item-guard.js, not in what is grantable) and creating a New Quiz
+  // or any non-destructive Item Bank write.
+  const reviewOnlyAdmittedCanvasWrites = new Set([
+    "canvas_delete_new_quiz", "canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry",
+  ]);
   const expectedCanvasEditActions = canvasWriteOperations
     .filter((operation) => canvasOperationAdmission(operation).write.state === "admitted"
-      && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName)
-      // An Item Bank write can reach every quiz sharing that bank, past the one
-      // course a binding names, so edit-policy.js routes it to review only, the
-      // same shared-impact rule Moodle's question bank writes already get.
-      && operation.service !== "item_bank")
+      && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName))
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
   const publishedCanvasEditActions = fullEditOptions.options

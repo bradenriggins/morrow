@@ -78,11 +78,6 @@ const MOODLE_COMPLETION_NOTE = "It changes what counts as complete for everyone 
 // granted, not only at approval.
 const MOODLE_RESTRICTION_TOOLS = new Set(["moodle_update_activity_restrictions", "moodle_update_section_restrictions"]);
 const MOODLE_RESTRICTION_NOTE = "It decides which learners can open this, and a restriction set to hide it entirely takes it out of what they see. Morrow cannot see which learners a restriction lets in.";
-const MOODLE_QUESTION_BANK_IMPACT_REASON = "Creating or updating a Question Bank entry can affect other Quizzes. Morrow cannot inspect every live use, including random question-set references.";
-// The dedicated hidden Question bank route writes a question and then a Quiz slot as two separate
-// effects, each bound to its own reviewed read. Neither is offered as a standing Edit grant.
-const MOODLE_QBANK_QUESTION_TOOLS = new Set(["moodle_create_qbank_question", "moodle_add_qbank_question_to_quiz"]);
-const MOODLE_QBANK_QUESTION_REVIEW_REASON = "A new question, and the Quiz slot that uses it, change what learners will answer. Morrow prepares each one on its own, with the exact question and the exact Quiz, so you approve them one at a time.";
 // Deleting an activity removes every learner submission, attempt, and grade it holds, and Morrow
 // cannot undo it. It is prepared for review each time, with the exact activity and the exact list
 // of what goes with it, instead of being granted in advance.
@@ -142,31 +137,34 @@ const MOODLE_UNENROL_REVIEW_REASON = "Unenrolling one person from a course can r
 const COURSE_SCOPE_REVIEW_REASON = "Morrow cannot prove from this operation that the change targets only the selected course.";
 const CURATED_ROUTE_MISSING_REASON = "This repair needs Canvas routes the connected catalog does not carry, so Morrow cannot read the exact saved result back.";
 // New Quizzes matches the parts of a question by the ids the question already
-// holds, so an in-place change that renumbers them leaves the old parts behind
-// as blank answers. Section 2.2 of
+// holds, so an in-place change that renumbers them can leave the old parts
+// behind as blank answers. Section 2.2 of
 // docs/research/CANVAS-NEW-QUIZZES-ITEM-BANKS-CONTRACT-2026-09-06.md records
-// the harvested production evidence. The general New Quiz question update is
-// therefore review-only, and the two curated New Quiz repairs above stay the
-// Edit path, because each one rewrites one field and keeps every id.
-const NEW_QUIZ_ITEM_STRUCTURE_REVIEW_REASON = "Changing a New Quiz question in place can leave its old answers behind as blank ones, because New Quizzes matches answers by the ids the question already has. A change to the answers of a question needs the delete-then-add contract instead. The focused New Quiz image alternative-text repairs stay available.";
-const NEW_QUIZ_ITEM_UPDATE_TOOL = "canvas_update_quiz_item";
-// Creating or deleting a New Quiz needs its complete current quiz list frozen
-// before the change and its saved result proved after, and a delete needs
-// Canvas to confirm the quiz carries no submitted or graded student work
-// first. The guided New Quiz create and delete tools do this; this raw
-// change stays review-only so it is never granted as a standing permission.
-const NEW_QUIZ_LIFECYCLE_REVIEW_REASON = "Creating or deleting a New Quiz needs its complete current quiz list frozen first, its saved result proved after, and, for a deletion, Canvas's confirmation that the quiz carries no submitted or graded student work. Morrow's guided New Quiz create and delete steps do this, so this raw change stays reviewed rather than a standing permission.";
-const NEW_QUIZ_LIFECYCLE_TOOLS = new Set(["canvas_create_new_quiz", "canvas_delete_new_quiz"]);
-// A Canvas Item Bank is shared machinery, the same hazard the Moodle Question
-// Bank reason above names. One change lands in every quiz, in every course,
-// that draws from the bank, and Canvas exposes no account-wide list of those
-// quizzes, so Morrow cannot show how far a change reaches. Every Item Bank
-// change therefore carries the observed courses it did find and the person's
-// acknowledgement of exactly those courses. That acknowledgement is evidence
-// for one change at one moment, so it cannot be given in advance as a standing
-// grant: the list changes between changes. The change itself is available, it
-// just asks each time.
-const ITEM_BANK_SHARED_IMPACT_REASON = "An Item Bank is shared between quizzes and can be shared between courses, and Canvas provides no complete list of everything that uses one. Morrow shows you the courses it did find and asks you to confirm them for each change, so this one is approved change by change rather than switched on in advance.";
+// the harvested production evidence. That risk lives in
+// new-quiz-item-guard.js's newQuizIdsPreserved, enforced on the write itself
+// in canvas-content.js, not here: the general update is not a destructive
+// route (it removes nothing Canvas
+// cannot restore by another update), so it is a standing Edit grant like any
+// other update, the same as the two curated New Quiz repairs above.
+// Deleting a New Quiz is destructive and irreversible: Canvas does not
+// restore it, and the deletion takes every item in it too. Morrow's guided
+// New Quiz delete tool proves the quiz carries no submitted or graded
+// student work first; this raw route is the only way to reach a delete
+// without that proof, so it stays review-only. Creating a New Quiz removes
+// nothing and Canvas assigns a fresh id, so it is a standing Edit grant.
+const NEW_QUIZ_DELETE_REVIEW_REASON = "Deleting a New Quiz removes it and every item in it, and Canvas does not restore it. Morrow prepares each deletion on its own, after confirming the quiz carries no submitted or graded student work, so you approve them one at a time.";
+const NEW_QUIZ_DELETE_TOOL = "canvas_delete_new_quiz";
+// Archiving an Item Bank and deleting a bank entry or a quiz's use of one are
+// destructive and irreversible, and each can reach every quiz, in every
+// course, that draws from the bank - Canvas exposes no account-wide list of
+// those quizzes, so Morrow cannot show how far the change reaches. Every one
+// of the three carries the observed courses Morrow did find and the
+// person's acknowledgement of exactly those courses, evidence for one
+// change at one moment, so none of the three is a standing grant. Creating,
+// attaching, sharing, renaming, and updating an item remove nothing and stay
+// standing Edit grants.
+const ITEM_BANK_DESTRUCTIVE_REASON = "This Item Bank change cannot be undone, and it can reach every quiz, in every course, that draws from the bank - Canvas provides no complete list of everything that uses one. Morrow shows you the courses it did find and asks you to confirm them for each change, so this one is approved change by change rather than switched on in advance.";
+const ITEM_BANK_DESTRUCTIVE_TOOLS = new Set(["canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry"]);
 const VERIFICATION_CLAUSES = Object.freeze({
   student_grade_or_submission_state: "reading it back would open a student grade or submission",
   discussion_or_conversation_content: "reading it back would open student discussion or message content",
@@ -394,19 +392,12 @@ function operationAvailability(operation) {
   const provider = operationProvider(operation);
   if (!provider || operation?.readOnly !== false) return { availability: "review", reviewReason: "This catalog entry is not a course Edit action." };
   if (provider === "canvas") {
-    if (operation.toolName === NEW_QUIZ_ITEM_UPDATE_TOOL) return { availability: "review", reviewReason: NEW_QUIZ_ITEM_STRUCTURE_REVIEW_REASON };
-    if (NEW_QUIZ_LIFECYCLE_TOOLS.has(operation.toolName || "")) return { availability: "review", reviewReason: NEW_QUIZ_LIFECYCLE_REVIEW_REASON };
-    if (operation.service === "item_bank") return { availability: "review", reviewReason: ITEM_BANK_SHARED_IMPACT_REASON };
+    if (NEW_QUIZ_DELETE_TOOL === operation.toolName) return { availability: "review", reviewReason: NEW_QUIZ_DELETE_REVIEW_REASON };
+    if (ITEM_BANK_DESTRUCTIVE_TOOLS.has(operation.toolName || "")) return { availability: "review", reviewReason: ITEM_BANK_DESTRUCTIVE_REASON };
     const admission = canvasWriteAdmission(operation);
     return admission.state === "admitted"
       ? { availability: "edit" }
       : { availability: "review", reviewReason: canvasAdmissionReason(admission) || COURSE_SCOPE_REVIEW_REASON };
-  }
-  if (/^moodle_(?:create|update)_quiz_.*_question$/.test(operation.toolName || "")) {
-    return { availability: "review", reviewReason: MOODLE_QUESTION_BANK_IMPACT_REASON };
-  }
-  if (MOODLE_QBANK_QUESTION_TOOLS.has(operation.toolName || "")) {
-    return { availability: "review", reviewReason: MOODLE_QBANK_QUESTION_REVIEW_REASON };
   }
   if (MOODLE_ACTIVITY_DELETE_TOOLS.has(operation.toolName || "")) {
     return { availability: "review", reviewReason: MOODLE_ACTIVITY_DELETE_REVIEW_REASON };

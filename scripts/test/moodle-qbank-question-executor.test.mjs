@@ -117,14 +117,14 @@ test("phase two of the Moodle Qbank route is cataloged, wired, and leaves every 
   assert.match(worker, /func: executeMoodleQbankQuestionInPage/);
   for (const entry of entries) assert.match(worker, new RegExp(`"${entry.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"`), entry.key);
 
-  // Both writes stay outside every standing Edit grant: each one is approved on its own.
+  // Neither write removes anything, so both are standing Edit grants like any
+  // other non-destructive admitted write.
   const categories = categoriesForBinding({ provider: "moodle" }, catalog.operations);
   const byId = new Map(categories.map((entry) => [entry.id, entry]));
   for (const toolName of ["moodle_create_qbank_question", "moodle_add_qbank_question_to_quiz"]) {
     const category = byId.get(`action:moodle:${toolName}`);
     assert.ok(category, `${toolName} is missing from the Moodle Edit policy`);
-    assert.equal(category.availability, "review", toolName);
-    assert.match(category.reviewReason, /you approve them one at a time/, toolName);
+    assert.equal(category.availability, "edit", toolName);
   }
   assert.equal(byId.get("action:moodle:moodle_create_qbank_activity").availability, "edit", "phase one stays Edit-available");
 

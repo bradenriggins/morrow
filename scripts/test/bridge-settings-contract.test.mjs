@@ -283,7 +283,7 @@ test("the Morrow Bridge popup names Plan and Edit as its destination and never a
   assert.deepEqual(spoken.filter((line) => /course connector/i.test(line)), []);
 });
 
-test("legacy Moodle Question Bank creates and updates cannot receive Edit access", () => {
+test("a legacy-named Moodle Question Bank create or update removes nothing, so it is a standing Edit grant", () => {
   for (const action of ["create", "update"]) {
     const toolName = `moodle_${action}_quiz_multichoice_question`;
     const option = categoriesForBinding({ provider: "moodle" }, [{
@@ -296,9 +296,8 @@ test("legacy Moodle Question Bank creates and updates cannot receive Edit access
       inputSchema: { properties: { course_id: { type: "string" }, module_id: { type: "string" }, slot_id: { type: "string" } } },
     }]).find((entry) => entry.id === `action:moodle:${toolName}`);
     assert.ok(option);
-    assert.equal(option.availability, "review");
-    assert.equal(option.rules, undefined);
-    assert.match(option.reviewReason, /cannot inspect every live use/i);
+    assert.equal(option.availability, "edit");
+    assert.equal(option.tier, "standard");
   }
 });
 
@@ -310,27 +309,22 @@ function canvasOption(options, toolName) {
   return options.find((entry) => entry.id === `action:canvas:${toolName}`);
 }
 
-// One admitted Canvas write is still published for review only. New Quizzes
-// matches the parts of a question by the ids the question already holds, so an
-// in-place change to its answers needs the delete-then-add contract, and the
-// two curated New Quiz repairs stay the only Edit path.
-// scripts/test/canvas-new-quiz-item-guard.test.mjs holds the rest of that rule.
-/**
- * Admitted, and still approved change by change rather than switched on in
- * advance. A New Quiz question update can renumber the answers Canvas matches
- * on. Creating or deleting a New Quiz needs the guided lifecycle tools' own
- * frozen quiz list and, for a deletion, Canvas's confirmation of no student
- * work. Every Item Bank change lands in machinery other quizzes and other
- * courses share, and Canvas publishes no complete list of what uses a bank,
- * so the person confirms the courses Morrow did find each time.
- */
+// Only an admitted Canvas write that is both destructive and irreversible is
+// still published for review only: deleting a New Quiz takes every item in
+// it and Canvas does not restore it; archiving an Item Bank and deleting one
+// of its entries or a quiz's use of one can each reach every quiz, in every
+// course, that draws from the bank, which Canvas gives no complete list of.
+// scripts/test/canvas-new-quiz-item-guard.test.mjs holds the general New
+// Quiz question update, which is destructive-free (its id-preserving guard
+// lives in new-quiz-item-guard.js, independent of what is grantable) and so
+// is an ordinary standing Edit grant like every other non-destructive
+// admitted write, including creating a New Quiz and the other eight Item
+// Bank writes.
 const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
-  ["canvas_update_quiz_item", /delete-then-add contract/],
-  ["canvas_create_new_quiz", /guided New Quiz create and delete steps/],
-  ["canvas_delete_new_quiz", /guided New Quiz create and delete steps/],
-  ...canvasOperations
-    .filter((operation) => operation.service === "item_bank" && operation.readOnly === false)
-    .map((operation) => [operation.toolName, /approved change by change rather than switched on in advance/]),
+  ["canvas_delete_new_quiz", /Canvas does not restore it/],
+  ["canvas_item_bank_archive_bank", /approved change by change rather than switched on in advance/],
+  ["canvas_item_bank_delete_entry", /approved change by change rather than switched on in advance/],
+  ["canvas_item_bank_delete_quiz_bank_entry", /approved change by change rather than switched on in advance/],
 ]);
 
 function admittedEditableCanvasWrites() {
@@ -578,31 +572,51 @@ function itemBankWrites() {
   return canvasOperations.filter((operation) => operation.service === "item_bank" && operation.readOnly === false);
 }
 
-// Every Item Bank change works, and every one of them is approved change by
-// change. The reach acknowledgement it carries is evidence for one change at one
-// moment: the courses Morrow observed can differ between two changes, so a
-// standing grant given in advance could not have acknowledged the list this
-// change actually reaches.
-test("every Item Bank change is approved change by change, never granted in advance", async () => {
+// A destructive Item Bank change - archiving a bank, deleting an entry, or
+// deleting a quiz's use of one - is approved change by change, never granted
+// in advance: it can reach every quiz, in every course, that draws from the
+// bank, and the reach acknowledgement it carries is evidence for one change
+// at one moment, since the courses Morrow observed can differ between two
+// changes. Every other Item Bank write removes nothing and is an ordinary
+// standing Edit grant.
+const ITEM_BANK_DESTRUCTIVE_WRITES = new Set(["canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry"]);
+
+test("only a destructive Item Bank change is approved change by change; every other one is a standing grant", async () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
   assert.equal(options.some((entry) => entry.id === LEGACY_ITEM_BANK_CATEGORY), false);
   const writes = itemBankWrites();
   assert.equal(writes.length, 11);
-  for (const operation of writes) {
+  const destructive = writes.filter((operation) => ITEM_BANK_DESTRUCTIVE_WRITES.has(operation.toolName));
+  const standing = writes.filter((operation) => !ITEM_BANK_DESTRUCTIVE_WRITES.has(operation.toolName));
+  assert.equal(destructive.length, 3);
+  assert.equal(standing.length, 8);
+  for (const operation of destructive) {
     const option = canvasOption(options, operation.toolName);
     assert.equal(canvasOperationAdmission(operation).write.state, "admitted", operation.toolName);
     assert.equal(option.availability, "review", operation.toolName);
+    assert.equal(option.tier, "destructive", operation.toolName);
     assert.equal(option.verification, undefined, operation.toolName);
-    assert.match(option.reviewReason, /Item Bank is shared between quizzes/, operation.toolName);
+    assert.match(option.reviewReason, /Canvas provides no complete list of everything that uses one/, operation.toolName);
     assert.match(option.reviewReason, /approved change by change rather than switched on in advance/, operation.toolName);
+  }
+  for (const operation of standing) {
+    const option = canvasOption(options, operation.toolName);
+    assert.equal(canvasOperationAdmission(operation).write.state, "admitted", operation.toolName);
+    assert.equal(option.availability, "edit", operation.toolName);
+    assert.equal(option.tier, "standard", operation.toolName);
   }
   await assert.rejects(createEditPermission({
     binding: canvasBinding, catalogDigest: "b".repeat(64), revision: 1,
-    enabledCategories: writes.map((operation) => `action:canvas:${operation.toolName}`), operations: canvasOperations,
+    enabledCategories: destructive.map((operation) => `action:canvas:${operation.toolName}`), operations: canvasOperations,
   }), /edit_policy_category_unavailable/);
+  const permission = await createEditPermission({
+    binding: canvasBinding, catalogDigest: "b".repeat(64), revision: 1,
+    enabledCategories: standing.map((operation) => `action:canvas:${operation.toolName}`), operations: canvasOperations,
+  });
+  assert.deepEqual(permission.rules.map((rule) => rule.toolName).sort(), standing.map((operation) => operation.toolName).sort());
 });
 
-test("Item Bank write shapes cannot create an Edit rule or use a legacy guard", async () => {
+test("Item Bank write rules never carry the legacy guard, and a destructive one cannot create a rule at all", async () => {
   const operations = [...canvasOperations, PRIVATE_CANVAS_CONVERSATION_OPERATION];
   const options = categoriesForBinding({ provider: "canvas" }, operations);
   const permission = await createEditPermission({
@@ -610,7 +624,8 @@ test("Item Bank write shapes cannot create an Edit rule or use a legacy guard", 
     enabledCategories: options.filter((option) => option.availability === "edit").map((option) => option.id), operations,
   });
   const rules = permission.rules.filter((rule) => rule.toolName.startsWith("canvas_item_bank_"));
-  assert.equal(rules.length, 0);
+  assert.equal(rules.length, 8);
+  assert.equal(rules.some((rule) => ITEM_BANK_DESTRUCTIVE_WRITES.has(rule.toolName)), false);
   assert.equal(rules.some((rule) => rule.requiresItemBankGuard === true), false);
 });
 

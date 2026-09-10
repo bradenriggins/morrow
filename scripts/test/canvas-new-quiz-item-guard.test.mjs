@@ -563,12 +563,17 @@ test("an uncertain move response reads the full order once and never retries PAT
   assert.equal(mismatched.requests.filter((request) => request.method === "GET" && request.pathname === ITEMS_PATH).length, 2);
 });
 
-test("the general New Quiz question update is offered for review only", () => {
+test("the general New Quiz question update is a standing Edit grant, guarded by id preservation on the write itself", () => {
   const operations = CATALOG.operations.map((operation) => ({ ...operation, provider: "canvas" }));
   const options = categoriesForBinding({ provider: "canvas" }, operations);
   const derived = options.find((option) => option.id === "action:canvas:canvas_update_quiz_item");
-  assert.equal(derived.availability, "review");
-  assert.match(derived.reviewReason, /delete-then-add contract/);
+  assert.equal(derived.availability, "edit");
+  assert.equal(derived.destructive, false);
+  // 15 changeable settings exceeds the blanket field-grant limit, so it needs
+  // a field selection the same way any other broad action does; the
+  // delete-then-add contract itself is enforced by newQuizIdsPreserved on
+  // the write, independent of what is grantable.
+  assert.equal(derived.requiresFieldSelection, true);
   assert.equal(derived.rules, undefined);
 
   // The four curated New Quiz repairs stay the Edit path.
