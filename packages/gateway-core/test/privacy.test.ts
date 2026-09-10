@@ -223,6 +223,27 @@ describe("privacy output boundary", () => {
     expect(result.structuredContent).toMatchObject({ code: "learner_roster_scope_unavailable" });
   });
 
+  it("leaves a clock field or score that equals a learner's platform id alone, and still redacts the id in context", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "17", name: "Ada Lovelace", email: "ada@example.test" }]);
+    const token = vault.tokenize(scope, { id: "17", name: "Ada Lovelace", email: "ada@example.test" });
+    const context = { learnerRoster, learnerVault: vault, learnerScope: scope };
+    const stamp = "2026-09-10T21:17:00.748Z";
+
+    for (const machineText of [stamp, "17/20 points", "page 17 of 40"]) {
+      expect(redactKnownLearnerText(machineText, context)).toBe(machineText);
+    }
+    // The whole string being the id is the one bare form that names a person.
+    expect(redactKnownLearnerText("17", context)).toBe(token);
+    expect(redactLearnerEgress({ recipients: ["17"], established_at: stamp }, context)).toEqual({ recipients: [token], established_at: stamp });
+    expect(redactKnownLearnerText(`Graded user_id: 17 at ${stamp}`, context)).toBe(`Graded user_id: ${token} at ${stamp}`);
+    expect(redactKnownLearnerText('<a data-user-id="17" href="/users/17">Ada Lovelace</a>', context))
+      .toBe(`<a data-user-id="${token}" href="/users/${token}">${token}</a>`);
+    expect(redactLearnerEgress({ established_at: stamp, note: "Ada Lovelace" }, context))
+      .toEqual({ established_at: stamp, note: token });
+  });
+
   it("redacts known roster aliases in Unicode and HTML text while preserving course IDs", () => {
     const vault = new LearnerVault(":memory:");
     const learnerRoster = new LearnerRoster();

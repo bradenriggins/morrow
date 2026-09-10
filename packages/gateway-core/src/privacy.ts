@@ -620,12 +620,24 @@ export function redactKnownLearnerText(value: string, context: LearnerTextRedact
   for (const identity of exactContext.learnerRoster.identities(scope)) {
     const token = exactContext.learnerVault.tokenize(scope, identity);
     identities.set(identity.id, { token });
-    addAlias(aliases, identity.id, token);
+    // A numeric platform id embedded in longer text is not an identity on its own: a clock
+    // field, a score, or a page count equals one by coincidence, and a bare alias for it rewrote
+    // "T21:17:00Z" into "T21:Student A1:00Z". Such an id is redacted where the whole string is
+    // the id (below) or where the text says it is a person, through
+    // replaceKnownIdentityReferences (user_id: 17, data-user-id="17", /users/17). A non-numeric
+    // platform id keeps its bare alias.
+    if (!/^[0-9]+$/u.test(identity.id)) addAlias(aliases, identity.id, token);
     for (const alias of learnerNameAliases(identity)) addAlias(aliases, alias, token);
     if (identity.email) addAlias(aliases, identity.email, token);
     if (identity.loginId) addAlias(aliases, identity.loginId, token);
     if (identity.sisUserId) addAlias(aliases, identity.sisUserId, token);
     for (const alias of identity.aliases ?? []) addAlias(aliases, alias, token);
+  }
+  // A string that is exactly a numeric platform id names a person: a recipient list entry or a
+  // cache value carries people that way, with nothing around the number to say so.
+  const wholeId = value.trim();
+  if (/^[0-9]+$/u.test(wholeId) && identities.has(wholeId)) {
+    return value.replace(wholeId, identities.get(wholeId)!.token ?? "[learner]");
   }
   return replaceKnownIdentityReferences(replaceKnownAliases(value, aliases), identities);
 }
