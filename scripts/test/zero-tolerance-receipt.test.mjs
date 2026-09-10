@@ -42,11 +42,11 @@ function writeFixture() {
       },
     },
   };
-  writeFileSync(resolve(evidence, "Morrow-1.0.0-win-x64.exe"), installer);
+  writeFileSync(resolve(evidence, "Morrow-1.0.1-win-x64.exe"), installer);
   writeFileSync(resolve(evidence, "smoke.json"), JSON.stringify(smoke));
   writeFileSync(resolve(evidence, "smoke.harness.json"), JSON.stringify({
     schema: "morrow.desktop-windows-harness.v2",
-    installer: { fileName: "Morrow-1.0.0-win-x64.exe" },
+    installer: { fileName: "Morrow-1.0.1-win-x64.exe" },
     installation: { completed: true, repairCompleted: true },
     application: { receipt: smoke },
     repair: { restoredExactly: true },
@@ -104,15 +104,15 @@ function writeFixture() {
     statePresentAfterUpgrade: true,
     newApplication: {
       sha256: "d".repeat(64),
-      fileVersion: "1.0.0",
-      productVersion: "1.0.0.0",
+      fileVersion: "1.0.1",
+      productVersion: "1.0.1.0",
       productName: "Morrow",
       companyName: "Braden Riggins",
       fileDescription: "Morrow",
       signatureStatus: "NotSigned",
       signerCertificate: null,
     },
-    registration: { displayName: "Morrow 1.0.0", displayVersion: "1.0.0", publisher: "Braden Riggins" },
+    registration: { displayName: "Morrow 1.0.1", displayVersion: "1.0.1", publisher: "Braden Riggins" },
     uninstall: {
       completed: true,
       uninstallerSignatureStatus: "NotSigned",
@@ -189,7 +189,7 @@ test("only the native-Windows ACL skip is accepted, and only with bound evidence
     platform: "win32",
     windowsEvidenceDirectory: evidence,
   }), /skipped required tests/);
-  writeFileSync(resolve(evidence, "Morrow-1.0.0-win-x64.exe"), "different installer");
+  writeFileSync(resolve(evidence, "Morrow-1.0.1-win-x64.exe"), "different installer");
   assert.throws(() => validateTestOutput({
     id: "workspace-test",
     output: SKIP_LOG,
