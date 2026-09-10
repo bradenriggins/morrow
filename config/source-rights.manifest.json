@@ -39,13 +39,13 @@
     },
     {
       "path": "artifacts/canvas-api/canvas-admission-report.json",
-      "sha256": "5b22b2d5b71a463cacaebb80845c08a449219ed3235f7cb0450395c3248d1d30",
+      "sha256": "366a76524b99bc747f97ed0a9ca978c1b8f5ce5fcc8303a52ff953df11e0038b",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },
     {
       "path": "artifacts/canvas-api/canvas-api-catalog.json",
-      "sha256": "051d3d134c52d41c8e13e34977a582c3427911eb0e72ef3658faceeacf582dd7",
+      "sha256": "22765dac765c37c344f76b853c90116ad298de650abe595083ab90a2b87de599",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },
@@ -109,7 +109,7 @@
     },
     {
       "path": "connector/extension/generated/canvas-api-catalog.json",
-      "sha256": "051d3d134c52d41c8e13e34977a582c3427911eb0e72ef3658faceeacf582dd7",
+      "sha256": "22765dac765c37c344f76b853c90116ad298de650abe595083ab90a2b87de599",
       "disposition": "direct_owned",
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.1 publication; reviewer=Claude technical source review; source=HEAD"
     },

@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "8727ab774e97b6623419be6922e9c3200d786482",
+  "candidateCommit": "5c054e488836a838d1ef2d26394855d113976d4f",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -148,25 +148,25 @@
     },
     {
       "path": "artifacts/canvas-api/canvas-admission-report.json",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "5c054e488836a838d1ef2d26394855d113976d4f",
       "originalPath": "artifacts/canvas-api/canvas-admission-report.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f2b110f246215532b64ec23fa3fe5a770fb8e414ca11618193b4a2a7a4da9264",
-      "afterDigest": "5b22b2d5b71a463cacaebb80845c08a449219ed3235f7cb0450395c3248d1d30"
+      "beforeDigest": "5b22b2d5b71a463cacaebb80845c08a449219ed3235f7cb0450395c3248d1d30",
+      "afterDigest": "366a76524b99bc747f97ed0a9ca978c1b8f5ce5fcc8303a52ff953df11e0038b"
     },
     {
       "path": "artifacts/canvas-api/canvas-api-catalog.json",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "5c054e488836a838d1ef2d26394855d113976d4f",
       "originalPath": "artifacts/canvas-api/canvas-api-catalog.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "753324b85bf7e51022bda9e1c39ef045c5307226848cfea76a15acb9721da7d2",
-      "afterDigest": "051d3d134c52d41c8e13e34977a582c3427911eb0e72ef3658faceeacf582dd7"
+      "beforeDigest": "051d3d134c52d41c8e13e34977a582c3427911eb0e72ef3658faceeacf582dd7",
+      "afterDigest": "22765dac765c37c344f76b853c90116ad298de650abe595083ab90a2b87de599"
     },
     {
       "path": "artifacts/catalogs/.gitkeep",
@@ -302,14 +302,14 @@
     },
     {
       "path": "connector/extension/generated/canvas-api-catalog.json",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "5c054e488836a838d1ef2d26394855d113976d4f",
       "originalPath": "connector/extension/generated/canvas-api-catalog.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "753324b85bf7e51022bda9e1c39ef045c5307226848cfea76a15acb9721da7d2",
-      "afterDigest": "051d3d134c52d41c8e13e34977a582c3427911eb0e72ef3658faceeacf582dd7"
+      "beforeDigest": "051d3d134c52d41c8e13e34977a582c3427911eb0e72ef3658faceeacf582dd7",
+      "afterDigest": "22765dac765c37c344f76b853c90116ad298de650abe595083ab90a2b87de599"
     },
     {
       "path": "connector/extension/generated/canvas-browser-catalog.json",
@@ -6989,14 +6989,14 @@
     },
     {
       "path": "scripts/test/canvas-connector-browser.mjs",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "5c054e488836a838d1ef2d26394855d113976d4f",
       "originalPath": "scripts/test/canvas-connector-browser.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cda843ce768ff3c25b1733cb0b6b876ec568464fb8d1d81ea6227c4c14794e66",
-      "afterDigest": "a58df890375b4bb2c255787998802fc4869fbc923d1ad1b1c2a2a74e5e2e64cf"
+      "beforeDigest": "a58df890375b4bb2c255787998802fc4869fbc923d1ad1b1c2a2a74e5e2e64cf",
+      "afterDigest": "31e149febf33c116b9f4c9b45db902f3d7de4a38b4e05f7e2255360bd03df8e5"
     },
     {
       "path": "scripts/test/canvas-connector-package.test.mjs",
