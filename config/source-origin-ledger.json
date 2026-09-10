@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "7c8f04e53a068a074f9f94f25358e600659c8274",
+  "candidateCommit": "42fd9b65ec9989e53db9299beda86d5e7f597225",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -225,14 +225,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "d0e308c909268b94a5234ce3dfbc76ee43bc0473",
+      "sourceCommit": "595f8e52c5556d391a774721c466ada14830014f",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "a88b0004107d147c9b801a30661c411185e7736847264090d4e38010ef0a02a9",
-      "afterDigest": "4d99ed05303aaff72259790164669d4669d12d659ddc11a1c548dda80c61ae48"
+      "beforeDigest": "4d99ed05303aaff72259790164669d4669d12d659ddc11a1c548dda80c61ae48",
+      "afterDigest": "2ab76b26ed389d96a25a0cc4bdb675f1123b98b75b5c43ea4e780afd589e5d89"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -2128,14 +2128,14 @@
     },
     {
       "path": "installer/test/adversarial.test.cjs",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "42fd9b65ec9989e53db9299beda86d5e7f597225",
       "originalPath": "installer/test/adversarial.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e6ad983f5c63bb17d26c7b24e9d5db7f355528c15bd895e01aa8fb0f8f979e3b",
-      "afterDigest": "f18916498cc5a5ed8a23649c5d7ced4aff468e3c05ba64fde765e52cfd1da234"
+      "beforeDigest": "f18916498cc5a5ed8a23649c5d7ced4aff468e3c05ba64fde765e52cfd1da234",
+      "afterDigest": "6cb39c07024e6fa13934ba0e5a7bc9a01541f14017f48fbba2c641a8ba9f1ebf"
     },
     {
       "path": "installer/test/assistant-app-detection.test.cjs",
@@ -2238,14 +2238,14 @@
     },
     {
       "path": "installer/test/installer-controller.test.cjs",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "42fd9b65ec9989e53db9299beda86d5e7f597225",
       "originalPath": "installer/test/installer-controller.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "fc89befc7e9ee1bd9a7d374d7495030e453d824f01cbd6b1289fc90a6a0f730b",
-      "afterDigest": "f1570dd96dbd8f4ada08b7230dd28497f00c4bfee0b70bddaa185bd35b0247e0"
+      "beforeDigest": "f1570dd96dbd8f4ada08b7230dd28497f00c4bfee0b70bddaa185bd35b0247e0",
+      "afterDigest": "395b99eb494c1d1951f1b9faf9d942050784989a38db530de8ba2723266e8455"
     },
     {
       "path": "installer/test/main-lifecycle.test.cjs",
