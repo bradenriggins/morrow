@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "5705d0a29c62b447783804545f019986ad475b58",
+  "candidateCommit": "cff1a50424c3efe8ea228c62915b81e0a5bc8ce0",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -225,14 +225,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "7f2afdce33a25705af8b34a00bc97451cdcd124f",
+      "sourceCommit": "cff1a50424c3efe8ea228c62915b81e0a5bc8ce0",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "cc47313367ed00c7343502dae1c759232b635019cd3dd8100b9f2f7d4389af6a",
-      "afterDigest": "1e6d4ec5fb25bb21c8c1987f420f8e101e5ae8dc04cde92faa21ab104969c750"
+      "beforeDigest": "1e6d4ec5fb25bb21c8c1987f420f8e101e5ae8dc04cde92faa21ab104969c750",
+      "afterDigest": "d36497a163b2fe3cd82285ee57af2ee02dba5374c0de1dba11555874b4f6db5b"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -3798,7 +3798,7 @@
     },
     {
       "path": "packages/gateway-core/src/privacy.ts",
-      "sourceCommit": "949b4fd81cbe838dfbef1f00944648d74ccb713f",
+      "sourceCommit": "20207c123772f50d0af940a3a3670a42665680f1",
       "originalPath": "packages/gateway-core/src/privacy.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3807,8 +3807,8 @@
         "packages/gateway-core/test/native-controls.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "97574cf98ba345523f566b20e8215e2cf58432fb96b3fca9c53dbb8166427e14",
-      "afterDigest": "b663fb63724c976eccdb33b8eb621b2493dfcdf08ca1234f0b9a05aa213a8325"
+      "beforeDigest": "b663fb63724c976eccdb33b8eb621b2493dfcdf08ca1234f0b9a05aa213a8325",
+      "afterDigest": "1756bf5115edab23bf4158b7bb07d73ae209cd63d55d3bb7b24e2820d574e91b"
     },
     {
       "path": "packages/gateway-core/src/private-file-access.ts",
@@ -3932,14 +3932,14 @@
     },
     {
       "path": "packages/gateway-core/test/privacy.test.ts",
-      "sourceCommit": "949b4fd81cbe838dfbef1f00944648d74ccb713f",
+      "sourceCommit": "20207c123772f50d0af940a3a3670a42665680f1",
       "originalPath": "packages/gateway-core/test/privacy.test.ts",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "664e44a123e80cc4033989aeadba8bb98a6905bb5d270c08c3ff02e3bed83d80",
-      "afterDigest": "1a1676a036a3b1fce6b9ae4885a95b476b3f520f7d51c6212d53df76d969ccd4"
+      "beforeDigest": "1a1676a036a3b1fce6b9ae4885a95b476b3f520f7d51c6212d53df76d969ccd4",
+      "afterDigest": "dd65a0a8f22c9c19e6b68e2554b8feb9bc3fe24c11ffe430823de83c2055dd48"
     },
     {
       "path": "packages/gateway-core/test/private-file-access.test.ts",
