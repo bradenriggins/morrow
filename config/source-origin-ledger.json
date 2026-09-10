@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "a20aed33e49f363491b783007d8b291e59138ec8",
+  "candidateCommit": "3fae0be9dfa505ae483d259ab1605ccbf4e5ddaf",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -104,25 +104,25 @@
     },
     {
       "path": "LIMITATIONS.md",
-      "sourceCommit": "b7650e4072b6dcf22041ea63691437da7f13de28",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "LIMITATIONS.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "a2b392ff100472bc774fa55ea8c9854738df6c39f61ede407c994f05e8c5c843",
-      "afterDigest": "38e629862e4d8aeb2ff0f631aa7c94f670c8240755907f5d09e05894bc73b752"
+      "beforeDigest": "38e629862e4d8aeb2ff0f631aa7c94f670c8240755907f5d09e05894bc73b752",
+      "afterDigest": "553e8fdf69ede3c83227e00faa0a374bfdee9b40b9b84b65b7d7222dcba7b21e"
     },
     {
       "path": "README.md",
-      "sourceCommit": "b7650e4072b6dcf22041ea63691437da7f13de28",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "README.md",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "9c4823c144a97537c5237cb02d01a4cdf90443fd0412d0a4bc0fcd31d732e6da",
-      "afterDigest": "3dcd5cbb950a880503504883b235cd659b65dd11fb11f48573c9763319c312cd"
+      "beforeDigest": "3dcd5cbb950a880503504883b235cd659b65dd11fb11f48573c9763319c312cd",
+      "afterDigest": "2d00de308218e79256b58ed70d8a1fc714f66d824a96852bc41646ff92172792"
     },
     {
       "path": "SOURCE-ORIGIN.md",
@@ -225,14 +225,14 @@
     },
     {
       "path": "config/source-rights.manifest.json",
-      "sourceCommit": "a20aed33e49f363491b783007d8b291e59138ec8",
+      "sourceCommit": "3fae0be9dfa505ae483d259ab1605ccbf4e5ddaf",
       "originalPath": "config/source-rights.manifest.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "d36497a163b2fe3cd82285ee57af2ee02dba5374c0de1dba11555874b4f6db5b",
-      "afterDigest": "6f2fd75bd5626bcd8728fec47e6655a8830617562f9a92d73e2d3e75d1bb722b"
+      "beforeDigest": "6f2fd75bd5626bcd8728fec47e6655a8830617562f9a92d73e2d3e75d1bb722b",
+      "afterDigest": "016c75ee4cfe49499ea75f36b0a1deda1c33350a2b49041fb0f81f7c6dc1e0d8"
     },
     {
       "path": "connector/extension/brand/Manrope-OFL.txt",
@@ -1875,14 +1875,14 @@
     },
     {
       "path": "installer/electron-builder.config.cjs",
-      "sourceCommit": "5705d0a29c62b447783804545f019986ad475b58",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "installer/electron-builder.config.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "7cce62b18db1e1bbac7b95d81a24ad4c42a767942b83ddf8a78c9d6ac8a5cbff",
-      "afterDigest": "2ab7ce94860ef902109e8528a53056d2166dfd5a81dadd6265a7637dcec12972"
+      "beforeDigest": "2ab7ce94860ef902109e8528a53056d2166dfd5a81dadd6265a7637dcec12972",
+      "afterDigest": "37e56e6059d0b9650b339cbbae47b8488220ba8e408078dd8c5f3cd341da8c46"
     },
     {
       "path": "installer/main.cjs",
@@ -1897,14 +1897,14 @@
     },
     {
       "path": "installer/package.json",
-      "sourceCommit": "b7650e4072b6dcf22041ea63691437da7f13de28",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "installer/package.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e95221603dc7c098ca5bbe4fcafc9e979f129fe4f74359f0359a37909d40c4a8",
-      "afterDigest": "33b92d54257113ff16e7755eda98884d4fbcd4d7a75b947adb7ff3e7febe032e"
+      "beforeDigest": "33b92d54257113ff16e7755eda98884d4fbcd4d7a75b947adb7ff3e7febe032e",
+      "afterDigest": "2e6b593c3ba8e729fd87eda02cecbefa5accdb07a0189db5954482d0ca8a0121"
     },
     {
       "path": "installer/pnpm-lock.yaml",
@@ -2216,14 +2216,14 @@
     },
     {
       "path": "installer/test/electron-builder-config.test.cjs",
-      "sourceCommit": "5705d0a29c62b447783804545f019986ad475b58",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "installer/test/electron-builder-config.test.cjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "99eaa4428417ce50da7088783793dfaca55a1cebbb389db190c945dabe3c40c5",
-      "afterDigest": "b14a52c208fe0467a620b00b0ccc03640a6e6e8dce9bf5e09a897af2b3ce482c"
+      "beforeDigest": "b14a52c208fe0467a620b00b0ccc03640a6e6e8dce9bf5e09a897af2b3ce482c",
+      "afterDigest": "918491ebdfcfaa0ec70b1558c88544b8486d9ca273b77cdeb1c8a86fb43e0d27"
     },
     {
       "path": "installer/test/electron-updater-adapter.test.cjs",
@@ -2513,14 +2513,14 @@
     },
     {
       "path": "package.json",
-      "sourceCommit": "b7650e4072b6dcf22041ea63691437da7f13de28",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "package.json",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "dda5e51b4a20bc094eab159bc5f3e4f1f99f9081158bab970192a0cfd003904f",
-      "afterDigest": "b917b305026eb586cac86d573550e96cb3d5e143ffb923ea13354a97d572ce67"
+      "beforeDigest": "b917b305026eb586cac86d573550e96cb3d5e143ffb923ea13354a97d572ce67",
+      "afterDigest": "cf4df0701abd7376fb0ae0913d3c90f9383977dbae50d3fd6c54bcd44eeb3c9e"
     },
     {
       "path": "packages/batch-engine/package.json",
@@ -6641,14 +6641,14 @@
     },
     {
       "path": "scripts/create-zero-tolerance-receipt.mjs",
-      "sourceCommit": "b7650e4072b6dcf22041ea63691437da7f13de28",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "scripts/create-zero-tolerance-receipt.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "dbb09f3af1b97c797faa100d6c3054bc97937b0c9c0de45826364059c278f4da",
-      "afterDigest": "9b837452338febb2e61c0dbba1a3f2513818ae3e30507564a0cdc710f7859ab9"
+      "beforeDigest": "9b837452338febb2e61c0dbba1a3f2513818ae3e30507564a0cdc710f7859ab9",
+      "afterDigest": "1620bcaa1fafc697e8abd335e97211e139c4d8dfe52e09fdb455daf3822371c1"
     },
     {
       "path": "scripts/export-morrow-legacy-catalog.mjs",
@@ -6740,14 +6740,14 @@
     },
     {
       "path": "scripts/package-mcp-bundle.mjs",
-      "sourceCommit": "949b4fd81cbe838dfbef1f00944648d74ccb713f",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "scripts/package-mcp-bundle.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "f79f750a7f27f99aad87917bdaa1fe5bfebc7995486c553611488ca7d60458fc",
-      "afterDigest": "0449fedfb7c0aa632ccbf9d83218bb91d31e113ff05d598bab685bfed16e0d8b"
+      "beforeDigest": "0449fedfb7c0aa632ccbf9d83218bb91d31e113ff05d598bab685bfed16e0d8b",
+      "afterDigest": "1829d570bf3b0228bf17bfddfc715d63444e4ee2cdadf6c75336fe6fa024edcd"
     },
     {
       "path": "scripts/package-profile.mjs",
@@ -7389,14 +7389,14 @@
     },
     {
       "path": "scripts/test/desktop-doc-claims.test.mjs",
-      "sourceCommit": "b267b87ea23390564610082a416720d46e271ec8",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "scripts/test/desktop-doc-claims.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "2a2dada85da6889fe2c88a0bd1731eafd2b21327650e3caa7b4c921cafd135eb",
-      "afterDigest": "b944d084448b294a581bcccba889adf5cc8f983d00d4e9e775f3ee4c506bded6"
+      "beforeDigest": "b944d084448b294a581bcccba889adf5cc8f983d00d4e9e775f3ee4c506bded6",
+      "afterDigest": "3e8b95782f109a52b39c63bace4865926f41becece303140448a663b940ce5d9"
     },
     {
       "path": "scripts/test/desktop-entrypoint-uniqueness.test.mjs",
@@ -7455,14 +7455,14 @@
     },
     {
       "path": "scripts/test/desktop-release-workflow.test.mjs",
-      "sourceCommit": "b7650e4072b6dcf22041ea63691437da7f13de28",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "scripts/test/desktop-release-workflow.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "3ac5dde32a7da00ff5859a3f470a01aeade57821315227bcb336ed266dbe7ee0",
-      "afterDigest": "1e21cdcaa6370cabe17a7cf2f3870c083c6cc3807731dcaa3290410394927ffd"
+      "beforeDigest": "1e21cdcaa6370cabe17a7cf2f3870c083c6cc3807731dcaa3290410394927ffd",
+      "afterDigest": "7c270febeefcda5f299c62c24657ccec772b3a409bb892532037b5a92da09701"
     },
     {
       "path": "scripts/test/desktop-update-harness.test.mjs",
@@ -7499,14 +7499,14 @@
     },
     {
       "path": "scripts/test/desktop-windows-upgrade.ps1",
-      "sourceCommit": "b7650e4072b6dcf22041ea63691437da7f13de28",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "scripts/test/desktop-windows-upgrade.ps1",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "deed364fe81e588503a16d6813f569dd5251884cce78df5158fb714c11473458",
-      "afterDigest": "7fffdcf733230808da2cf11918cade2883fb4b4d54666a24ace14345915d6799"
+      "beforeDigest": "7fffdcf733230808da2cf11918cade2883fb4b4d54666a24ace14345915d6799",
+      "afterDigest": "bd00555d579442938073aa5c90a8f1f87e7f086b3d8695dc2d8797a0d6bdf942"
     },
     {
       "path": "scripts/test/edit-policy.test.mjs",
@@ -8258,14 +8258,14 @@
     },
     {
       "path": "scripts/test/zero-tolerance-receipt.test.mjs",
-      "sourceCommit": "b7650e4072b6dcf22041ea63691437da7f13de28",
+      "sourceCommit": "99a211232a8fb6080e776fa26a759ae205fe16ef",
       "originalPath": "scripts/test/zero-tolerance-receipt.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e24ede37c6ad476595b12b057483e42b28aafd9939fbee2c9f9d3cecb592d62b",
-      "afterDigest": "0588f87c0d48432e077a0e3c9f323c765b3535fa5c686fa8ccf03c437653cc18"
+      "beforeDigest": "0588f87c0d48432e077a0e3c9f323c765b3535fa5c686fa8ccf03c437653cc18",
+      "afterDigest": "a6ae10eb5dd4b2699107836aadc7eeae14fb4bdaa68f239c2bcdd70620ecde46"
     },
     {
       "path": "scripts/validate-source-rights.mjs",
