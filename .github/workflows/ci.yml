@@ -23,6 +23,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Install desktop installer dependencies
         run: pnpm --dir installer --ignore-workspace install --frozen-lockfile
+      - name: Install Playwright's Chromium
+        run: pnpm exec playwright install --with-deps chromium
       - run: pnpm check
       - name: Desktop installer suites
         run: pnpm test:desktop

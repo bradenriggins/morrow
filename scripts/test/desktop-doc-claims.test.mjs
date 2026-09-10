@@ -43,8 +43,8 @@ const REPOSITORY_ROOTS = new Set([
   "artifacts", "config", "connector", "docs", "installer", "packages", "scripts", "work", ".github",
 ]);
 
-/** A local receipt directory: real evidence, but untracked, so it can be absent. */
-const LOCAL_EVIDENCE_ROOTS = new Set(["output"]);
+/** A local receipt or build-output directory: real evidence, but untracked (gitignored), so it can be absent in a clean checkout. */
+const LOCAL_EVIDENCE_ROOTS = new Set(["output", "artifacts"]);
 
 const collapse = (value) => value.replace(/\s+/g, " ").trim();
 
