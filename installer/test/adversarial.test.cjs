@@ -470,9 +470,14 @@ test("a duplicate start registers no setup action at all", async (t) => {
   assert.deepEqual(await fs.readdir(path.join(root, "UserData")), []);
 });
 
-test("a sealed payload file replaced by a link to identical bytes is refused", async (t) => {
+test("a sealed payload file replaced by a link to identical bytes is refused", {
+  skip: fsSync.existsSync(PRIVATE_FILE_ACCESS) ? false : "packages/gateway-core is not built; the private-file rules the app imports are unavailable"
+}, async (t) => {
   const root = await temporaryRoot(t, "payload-link");
-  const manifestSha256 = await completePayload(root);
+  // ensureRuntime() succeeds fully below (unlike every other adversarial case,
+  // which is tampered before that point), so on win32 it reaches the real
+  // gateway-core ACL hardening step and needs that module on disk.
+  const manifestSha256 = await completePayload(root, { privateFileAccess: true });
   const verified = controller(root, { trustedMcpRuntimeManifestSha256: () => manifestSha256 });
   assert.equal((await verified.ensureRuntime()).payload, path.join(root, "Payload"));
 

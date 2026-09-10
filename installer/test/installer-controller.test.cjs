@@ -3,12 +3,19 @@
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { pathToFileURL } = require("node:url");
 const { bridgeDeliveryMode, createInstallerController, readCommandOutput, readMacApplicationBundleIdentifier } = require("../shared/installer-controller.cjs");
 const { freshRecord } = require("../shared/state-policy.cjs");
+
+const installerRoot = path.resolve(__dirname, "..");
+// ensureRuntime() hardens the state directory through the real gateway-core
+// ACL functions on win32, so every fixture below carries it. Present only in
+// a built workspace, same as the packaged app's own payload.
+const PRIVATE_FILE_ACCESS = path.join(installerRoot, "..", "packages", "gateway-core", "dist", "private-file-access.js");
 
 function sha256(content) {
   return crypto.createHash("sha256").update(content).digest("hex");
@@ -115,6 +122,12 @@ async function completePayload(root, options = {}) {
     schema: "morrow.desktop-package-input.v1",
     mcpRuntime: { path: "app/mcp-runtime-manifest.json", sha256: manifestSha256 }
   })}\n`);
+  if (fsSync.existsSync(PRIVATE_FILE_ACCESS)) {
+    const core = path.join(app, "node_modules", "@morrow", "gateway-core", "dist");
+    await fs.mkdir(core, { recursive: true });
+    await fs.copyFile(PRIVATE_FILE_ACCESS, path.join(core, "private-file-access.js"));
+    await fs.writeFile(path.join(core, "index.js"), 'export * from "./private-file-access.js";\n');
+  }
   return manifestSha256;
 }
 
