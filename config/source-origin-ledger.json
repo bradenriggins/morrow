@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "c74649c0c27da0e679ffe472ad8632b762d09bbd",
+  "candidateCommit": "457523d572dc094314fddd373d05779326f0722b",
   "entries": [
     {
       "path": ".better-web-ui.md",
@@ -324,14 +324,14 @@
     },
     {
       "path": "connector/extension/generated/canvas-operation-admission.js",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "457523d572dc094314fddd373d05779326f0722b",
       "originalPath": "connector/extension/generated/canvas-operation-admission.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "bf8be7d2a7acae219cbe1ae34b8211f8b31883ba8ac8b7a849f23c8bec2bff9e",
-      "afterDigest": "884070711d4812b7255dc0304e97024f842c06fb45cb378d1eb948177fd7f2be"
+      "beforeDigest": "884070711d4812b7255dc0304e97024f842c06fb45cb378d1eb948177fd7f2be",
+      "afterDigest": "8e8bcf52e637ddf2c95a5c26aa2b17dc3304d4aa7ae6f2072d71b082fe239c11"
     },
     {
       "path": "connector/extension/generated/canvas-readback-plan.js",
@@ -566,14 +566,14 @@
     },
     {
       "path": "connector/extension/src/bridge-problem-copy.js",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "457523d572dc094314fddd373d05779326f0722b",
       "originalPath": "connector/extension/src/bridge-problem-copy.js",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "3107df57db092b3b9d67cf1827f3c21c986cc5eaa13613e7876ab3b93ff62a6e",
-      "afterDigest": "ff0dcb4955bf0fab41e2cdb76a8416bbc5817717bb11d99656ef4fd62c8099de"
+      "beforeDigest": "ff0dcb4955bf0fab41e2cdb76a8416bbc5817717bb11d99656ef4fd62c8099de",
+      "afterDigest": "ba5fc34c28bfa0350f05d52538e4e1c0b4bdb3d7409ea81f3a78c19b0948d426"
     },
     {
       "path": "connector/extension/src/bridge-transport.js",
@@ -2535,7 +2535,7 @@
     },
     {
       "path": "packages/batch-engine/src/canvas-result-binding.ts",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "457523d572dc094314fddd373d05779326f0722b",
       "originalPath": "packages/batch-engine/src/canvas-result-binding.ts",
       "ownership": "new",
       "dependencies": [],
@@ -2544,8 +2544,8 @@
         "packages/batch-engine/test/batch.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "015e77218b9bec117790ce7404b1e72fcafe286816342e0d88d26610eb09804c"
+      "beforeDigest": "015e77218b9bec117790ce7404b1e72fcafe286816342e0d88d26610eb09804c",
+      "afterDigest": "f27f5bcf0915c0ae0fc54f47e075a4ebac1d6d71a4eb783405dd511ce6565f45"
     },
     {
       "path": "packages/batch-engine/src/facade.ts",
@@ -3434,7 +3434,7 @@
     },
     {
       "path": "packages/canvas-api-catalog/src/operation-admission.ts",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "457523d572dc094314fddd373d05779326f0722b",
       "originalPath": "packages/canvas-api-catalog/src/operation-admission.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3443,8 +3443,8 @@
         "packages/canvas-api-catalog/test/new-quiz-operation-admission.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "bb405a68b79c8233403d7a8a02b37e78c3032d611a899c725a62386b394dfcba",
-      "afterDigest": "029cfafe5a5c5a5d21b0a843e8fcd47e267f11e091b30c62958c8184ec0dcfba"
+      "beforeDigest": "029cfafe5a5c5a5d21b0a843e8fcd47e267f11e091b30c62958c8184ec0dcfba",
+      "afterDigest": "00b35fa8bbe49f1db1efbdf5f608fabdfee6dc21b649184913c7323229c340bf"
     },
     {
       "path": "packages/canvas-api-catalog/src/readback-plan.ts",
@@ -3562,7 +3562,7 @@
     },
     {
       "path": "packages/canvas-connector-mcp/src/runtime.ts",
-      "sourceCommit": "6fc7d879c3e013e239ea80ff03930356fdb88ad5",
+      "sourceCommit": "457523d572dc094314fddd373d05779326f0722b",
       "originalPath": "packages/canvas-connector-mcp/src/runtime.ts",
       "ownership": "new",
       "dependencies": [],
@@ -3571,8 +3571,8 @@
         "packages/canvas-connector-mcp/test/config.test.ts"
       ],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "542cec65cde645bab2710bcf40c79a7c6b0093a8adb4cdc416111f1561fa3947",
-      "afterDigest": "9730c3bf1ef1393b414e05490aaf41d4eae604dc8e978fbcafa998cad7b988d8"
+      "beforeDigest": "9730c3bf1ef1393b414e05490aaf41d4eae604dc8e978fbcafa998cad7b988d8",
+      "afterDigest": "9dec56bb7474eb7542e3895594e80df92f439ce989450caf2e24642fae66911e"
     },
     {
       "path": "packages/canvas-connector-mcp/src/server.ts",
@@ -6916,14 +6916,14 @@
     },
     {
       "path": "scripts/test/bridge-problem-copy.test.mjs",
-      "sourceCommit": "8aae2c74d1786efa531c55cf687f2fd11256f01e",
+      "sourceCommit": "457523d572dc094314fddd373d05779326f0722b",
       "originalPath": "scripts/test/bridge-problem-copy.test.mjs",
       "ownership": "new",
       "dependencies": [],
       "testMapping": [],
       "reviewer": "codex-plan-convergence-review",
-      "beforeDigest": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "afterDigest": "f295180ef42997132b2cc2d811b58a7c3bd5ab2c0be0ca1bfdc5ed4ab49c0b4d"
+      "beforeDigest": "f295180ef42997132b2cc2d811b58a7c3bd5ab2c0be0ca1bfdc5ed4ab49c0b4d",
+      "afterDigest": "b9a7982a49d27069274e40a2aa131c5c04a4bad78e2ef5410996be8a53ad9864"
     },
     {
       "path": "scripts/test/bridge-release-provider-scope.test.mjs",
