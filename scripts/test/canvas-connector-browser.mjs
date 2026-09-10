@@ -1551,7 +1551,12 @@ try {
   // still published for review only: an in-place change to a question's answers
   // needs the delete-then-add contract, so the curated New Quiz repairs stay the
   // only Edit path. scripts/test/canvas-new-quiz-item-guard.test.mjs holds the rest.
-  const reviewOnlyAdmittedCanvasWrites = new Set(["canvas_update_quiz_item"]);
+  // canvas_create_new_quiz and canvas_delete_new_quiz are admitted course-path
+  // writes too, but stay review-only so they are never a standing permission:
+  // the guided New Quiz create and delete tools are the only path that freezes
+  // the complete quiz list, the saved payload, and, for a deletion, Canvas's
+  // own confirmation of no submitted or graded student work.
+  const reviewOnlyAdmittedCanvasWrites = new Set(["canvas_update_quiz_item", "canvas_create_new_quiz", "canvas_delete_new_quiz"]);
   const expectedCanvasEditActions = canvasWriteOperations
     .filter((operation) => canvasOperationAdmission(operation).write.state === "admitted"
       && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName)

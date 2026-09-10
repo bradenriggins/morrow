@@ -150,6 +150,13 @@ const CURATED_ROUTE_MISSING_REASON = "This repair needs Canvas routes the connec
 // Edit path, because each one rewrites one field and keeps every id.
 const NEW_QUIZ_ITEM_STRUCTURE_REVIEW_REASON = "Changing a New Quiz question in place can leave its old answers behind as blank ones, because New Quizzes matches answers by the ids the question already has. A change to the answers of a question needs the delete-then-add contract instead. The focused New Quiz image alternative-text repairs stay available.";
 const NEW_QUIZ_ITEM_UPDATE_TOOL = "canvas_update_quiz_item";
+// Creating or deleting a New Quiz needs its complete current quiz list frozen
+// before the change and its saved result proved after, and a delete needs
+// Canvas to confirm the quiz carries no submitted or graded student work
+// first. The guided New Quiz create and delete tools do this; this raw
+// change stays review-only so it is never granted as a standing permission.
+const NEW_QUIZ_LIFECYCLE_REVIEW_REASON = "Creating or deleting a New Quiz needs its complete current quiz list frozen first, its saved result proved after, and, for a deletion, Canvas's confirmation that the quiz carries no submitted or graded student work. Morrow's guided New Quiz create and delete steps do this, so this raw change stays reviewed rather than a standing permission.";
+const NEW_QUIZ_LIFECYCLE_TOOLS = new Set(["canvas_create_new_quiz", "canvas_delete_new_quiz"]);
 // A Canvas Item Bank is shared machinery, the same hazard the Moodle Question
 // Bank reason above names. One change lands in every quiz, in every course,
 // that draws from the bank, and Canvas exposes no account-wide list of those
@@ -388,6 +395,7 @@ function operationAvailability(operation) {
   if (!provider || operation?.readOnly !== false) return { availability: "review", reviewReason: "This catalog entry is not a course Edit action." };
   if (provider === "canvas") {
     if (operation.toolName === NEW_QUIZ_ITEM_UPDATE_TOOL) return { availability: "review", reviewReason: NEW_QUIZ_ITEM_STRUCTURE_REVIEW_REASON };
+    if (NEW_QUIZ_LIFECYCLE_TOOLS.has(operation.toolName || "")) return { availability: "review", reviewReason: NEW_QUIZ_LIFECYCLE_REVIEW_REASON };
     if (operation.service === "item_bank") return { availability: "review", reviewReason: ITEM_BANK_SHARED_IMPACT_REASON };
     const admission = canvasWriteAdmission(operation);
     return admission.state === "admitted"

@@ -318,12 +318,16 @@ function canvasOption(options, toolName) {
 /**
  * Admitted, and still approved change by change rather than switched on in
  * advance. A New Quiz question update can renumber the answers Canvas matches
- * on. Every Item Bank change lands in machinery other quizzes and other courses
- * share, and Canvas publishes no complete list of what uses a bank, so the
- * person confirms the courses Morrow did find each time.
+ * on. Creating or deleting a New Quiz needs the guided lifecycle tools' own
+ * frozen quiz list and, for a deletion, Canvas's confirmation of no student
+ * work. Every Item Bank change lands in machinery other quizzes and other
+ * courses share, and Canvas publishes no complete list of what uses a bank,
+ * so the person confirms the courses Morrow did find each time.
  */
 const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
   ["canvas_update_quiz_item", /delete-then-add contract/],
+  ["canvas_create_new_quiz", /guided New Quiz create and delete steps/],
+  ["canvas_delete_new_quiz", /guided New Quiz create and delete steps/],
   ...canvasOperations
     .filter((operation) => operation.service === "item_bank" && operation.readOnly === false)
     .map((operation) => [operation.toolName, /approved change by change rather than switched on in advance/]),
