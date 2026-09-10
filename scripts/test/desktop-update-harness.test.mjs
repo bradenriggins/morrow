@@ -339,7 +339,7 @@ test("a feed that reports the running version downloads nothing", async (t) => {
     artifact: ARTIFACT
   });
   const feed = await startFeed(t, release.routes);
-  const harness = updateHarness(t, { feedUrl: feed.url });
+  const harness = updateHarness(t, { feedUrl: feed.url, testPlatform: "darwin" });
 
   const done = settled(harness.controller, "a settled state");
   await harness.controller.start();
@@ -361,7 +361,7 @@ test("a newer release downloads through the library and reaches ready", async (t
     artifact: ARTIFACT
   });
   const feed = await startFeed(t, release.routes);
-  const harness = updateHarness(t, { feedUrl: feed.url });
+  const harness = updateHarness(t, { feedUrl: feed.url, testPlatform: "darwin" });
 
   const ready = settled(harness.controller, "ready");
   await harness.controller.start();
@@ -405,7 +405,7 @@ test("a corrupted artifact reports update_verification_failed and reaches neithe
     served: CORRUPTED_ARTIFACT
   });
   const feed = await startFeed(t, release.routes);
-  const harness = updateHarness(t, { feedUrl: feed.url });
+  const harness = updateHarness(t, { feedUrl: feed.url, testPlatform: "darwin" });
 
   const failed = settled(harness.controller, "a settled state");
   await harness.controller.start();
@@ -448,7 +448,7 @@ test("a cancelled download returns to available with download_cancelled", {
     chunkBytes: SLOW_CHUNK_BYTES
   });
   const feed = await startFeed(t, release.routes);
-  const harness = updateHarness(t, { feedUrl: feed.url });
+  const harness = updateHarness(t, { feedUrl: feed.url, testPlatform: "darwin" });
 
   const downloading = waitForStatus(harness.controller, (snapshot) => snapshot.status === "downloading", "downloading");
   const cancelled = waitForStatus(
@@ -483,7 +483,7 @@ test("a feed that does not answer reports update_check_failed", async (t) => {
   });
   const feed = await startFeed(t, release.routes);
   await feed.close();
-  const harness = updateHarness(t, { feedUrl: feed.url });
+  const harness = updateHarness(t, { feedUrl: feed.url, testPlatform: "darwin" });
 
   const failed = settled(harness.controller, "a settled state");
   await harness.controller.start();
@@ -504,7 +504,7 @@ test("a downgrade is refused before any download", async (t) => {
     artifact: ARTIFACT
   });
   const feed = await startFeed(t, release.routes);
-  const harness = updateHarness(t, { feedUrl: feed.url });
+  const harness = updateHarness(t, { feedUrl: feed.url, testPlatform: "darwin" });
 
   const refusedByLibrary = settled(harness.controller, "a settled state");
   await harness.controller.start();
@@ -518,7 +518,7 @@ test("a downgrade is refused before any download", async (t) => {
 
   // A feed or a library setting that admitted the older release must still be
   // refused by the controller's own admission check, before any download.
-  const admitted = updateHarness(t, { feedUrl: feed.url });
+  const admitted = updateHarness(t, { feedUrl: feed.url, testPlatform: "darwin" });
   admitted.updater.allowDowngrade = true;
   const refusedByController = settled(admitted.controller, "a settled state");
   await admitted.controller.start();
