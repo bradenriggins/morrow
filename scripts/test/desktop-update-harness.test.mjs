@@ -74,9 +74,11 @@ const WINDOWS_ARTIFACT = `Morrow-Setup-${NEXT_VERSION}.exe`;
 const ARTIFACT = Buffer.alloc(512 * 1024, 0x4d);
 const CORRUPTED_ARTIFACT = Buffer.alloc(ARTIFACT.length, 0x58);
 // The cancelled case needs the download open long enough for the cancellation
-// to land while bytes are still in flight.
+// to land while bytes are still in flight. A shared CI runner schedules
+// timers with much more jitter than a dev machine, so this needs a wider
+// absolute margin, not just the same ratio at a smaller scale.
 const SLOW_CHUNK_BYTES = 16 * 1024;
-const SLOW_CHUNK_DELAY_MS = 25;
+const SLOW_CHUNK_DELAY_MS = 100;
 const SETTLE_MS = 400;
 
 /**
