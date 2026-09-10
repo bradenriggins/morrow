@@ -25,8 +25,8 @@ $ExpectedWindowsApplicationMetadata = [ordered]@{
   companyName = 'Braden Riggins'
   productName = 'Morrow'
   fileDescription = 'Morrow'
-  fileVersion = '1.0.1'
-  productVersion = '1.0.1.0'
+  fileVersion = '1.0.2'
+  productVersion = '1.0.2.0'
 }
 
 function Assert-AbsolutePath([string] $Name, [string] $Value) {
@@ -274,7 +274,7 @@ $stateAfterUpgrade = Capture-Files $stateTargets
 Assert-Present $stateAfterUpgrade 'Application state after upgrade'
 $registryAfterUpgrade = @(Registry-Matches)
 if ($registryAfterUpgrade.Count -ne 1) { throw "Expected one current-user Morrow registration after upgrade; found $($registryAfterUpgrade.Count)." }
-if ($registryAfterUpgrade[0].publisher -ne 'Braden Riggins' -or $registryAfterUpgrade[0].displayName -ne 'Morrow 1.0.1' -or $registryAfterUpgrade[0].displayVersion -ne '1.0.1') {
+if ($registryAfterUpgrade[0].publisher -ne 'Braden Riggins' -or $registryAfterUpgrade[0].displayName -ne 'Morrow 1.0.2' -or $registryAfterUpgrade[0].displayVersion -ne '1.0.2') {
   throw 'The uninstall registration metadata is wrong.'
 }
 

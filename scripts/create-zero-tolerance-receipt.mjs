@@ -15,7 +15,7 @@ const WINDOWS_ACL_SKIP = Object.freeze({
   reason: "Windows access control needs a Windows host",
 });
 const WINDOWS_ACL_EVIDENCE = Object.freeze({
-  installer: "Morrow-1.0.1-win-x64.exe",
+  installer: "Morrow-1.0.2-win-x64.exe",
   smoke: "smoke.json",
   harness: "smoke.harness.json",
   upgrade: "upgrade.json",
@@ -143,15 +143,15 @@ function isWindowsUpgradeReceipt(value, { commit, installerSha256 }) {
     && value.retention?.applicationStateAfterRuntime?.exactAcrossUninstall === true
     && value.statePresentAfterUpgrade === true
     && /^[a-f0-9]{64}$/.test(value.newApplication?.sha256)
-    && value.newApplication?.fileVersion === "1.0.1"
-    && value.newApplication?.productVersion === "1.0.1.0"
+    && value.newApplication?.fileVersion === "1.0.2"
+    && value.newApplication?.productVersion === "1.0.2.0"
     && value.newApplication?.productName === "Morrow"
     && value.newApplication?.companyName === "Braden Riggins"
     && value.newApplication?.fileDescription === "Morrow"
     && value.newApplication?.signatureStatus === "NotSigned"
     && value.newApplication?.signerCertificate === null
-    && value.registration?.displayName === "Morrow 1.0.1"
-    && value.registration?.displayVersion === "1.0.1"
+    && value.registration?.displayName === "Morrow 1.0.2"
+    && value.registration?.displayVersion === "1.0.2"
     && value.registration?.publisher === "Braden Riggins"
     && value.uninstall?.completed === true
     && value.uninstall?.uninstallerSignatureStatus === "NotSigned"
@@ -179,7 +179,7 @@ function windowsAclEvidence({ repositoryRoot, commit, evidenceDirectory }) {
     throw new Error("native Windows smoke receipt does not prove the private ACL classification");
   }
   if (harness?.schema !== "morrow.desktop-windows-harness.v2"
-    || harness.installer?.fileName !== "Morrow-1.0.1-win-x64.exe"
+    || harness.installer?.fileName !== "Morrow-1.0.2-win-x64.exe"
     || harness.installation?.completed !== true
     || harness.installation?.repairCompleted !== true
     || !isDeepStrictEqual(harness.application?.receipt, smoke)
