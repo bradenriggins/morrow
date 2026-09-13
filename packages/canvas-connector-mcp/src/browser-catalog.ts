@@ -1,13 +1,59 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { isJsonObject, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
-import type { CanvasApiCatalog } from "@morrow/canvas-api-catalog";
+import { isJsonObject, sha256Json, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
+import { canvasApiCompatibilityDigest, operationalJsonSchema, readExactCatalogBytes, type CanvasApiCatalog } from "@morrow/canvas-api-catalog";
 
 export type BrowserCatalogProvider = "canvas" | "moodle";
 
 export const BROWSER_CATALOG_DATA_CLASSES = ["public", "course", "learner"] as const;
+export const MAX_MOODLE_JSON_INTEGER = Number.MAX_SAFE_INTEGER;
+export const PRIVATE_BRIDGE_COMPATIBILITY_SCHEMA = "morrow.private-bridge-compatibility.v1";
+
+const PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS = ["course_id", "section_id", "name", "filename", "size_bytes", "sha256", "expected_digest"] as const;
+const PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS = ["course_id", "module_id", "filename", "size_bytes", "sha256", "expected_digest"] as const;
+export const PRIVATE_BRIDGE_OPERATION_CONTRACTS = Object.freeze([
+  { kind: "moodle_staged_file", toolName: "moodle_create_resource_file", key: "moodle.form.course.modedit.resource.file.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
+  { kind: "moodle_staged_file", toolName: "moodle_create_folder_file", key: "moodle.form.course.modedit.folder.file.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
+  { kind: "moodle_staged_file", toolName: "moodle_create_imscp_package", key: "moodle.form.course.modedit.imscp.package.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
+  { kind: "moodle_staged_file", toolName: "moodle_create_scorm_package", key: "moodle.form.course.modedit.scorm.package.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
+  { kind: "moodle_staged_file", toolName: "moodle_replace_resource_file", key: "moodle.form.course.modedit.resource.file.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" },
+  { kind: "moodle_staged_file", toolName: "moodle_replace_scorm_package", key: "moodle.form.course.modedit.scorm.package.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" },
+  { kind: "moodle_staged_file", toolName: "moodle_replace_h5pactivity_package", key: "moodle.form.course.modedit.h5pactivity.package.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" },
+  { kind: "moodle_staged_file", toolName: "moodle_add_folder_files", key: "moodle.form.course.modedit.folder.files.add.write.v1", argumentNames: ["course_id", "module_id", "folder_path", "files", "expected_digest"], attachmentMode: "multiple" },
+  { kind: "moodle_staged_file", toolName: "moodle_create_h5pactivity", key: "moodle.form.course.modedit.h5pactivity.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
+  {
+    kind: "canvas_private_operation", toolName: "canvas_transfer_course_file", key: "canvas.private.course_file.transfer.v1",
+    provider: "canvas", readOnly: false, service: "canvas_file_transfer", path: "/v1/courses/{course_id}/folders/{folder_id}/files",
+    argumentNames: ["course_id", "folder_id", "filename", "size_bytes", "sha256", "content_type"], attachmentMode: "single",
+  },
+  {
+    kind: "canvas_private_operation", toolName: "canvas_create_new_quiz_hot_spot", key: "canvas.private.new_quiz.hot_spot.create.v1",
+    provider: "canvas", readOnly: false, method: "POST", service: "canvas_new_quiz_hot_spot",
+    path: "/quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items",
+    argumentNames: ["course_id", "assignment_id", "item", "before_items_sha256", "payload_sha256", "filename", "size_bytes", "sha256", "content_type"],
+    attachmentMode: "single", contentTypes: ["image/png", "image/jpeg", "image/gif"],
+  },
+  {
+    kind: "canvas_private_operation", toolName: "canvas_send_private_conversation", key: "canvas.private.conversation.send.v1",
+    provider: "canvas", readOnly: false, method: "POST", service: "canvas_private_conversation",
+    path: "/morrow/private/courses/{course_id}/conversations", argumentNames: ["course_id"],
+    privatePayloadSchema: "morrow.canvas-conversation.private.v1",
+  },
+  {
+    kind: "moodle_private_operation", toolName: "morrow_private_moodle_find_enrolment_candidate", key: "moodle.private.enrolment_candidate.find.v1",
+    provider: "moodle", readOnly: true, method: "GET", service: "moodle_private_enrolment_candidate",
+    path: "/enrol/manual/manage.php", argumentNames: ["course_id", "query"], resultSchema: "morrow.moodle-enrolment-candidate.private.v1",
+  },
+] as const);
+
+export function privateBridgeCompatibilityContract(): JsonObject {
+  return { schema: PRIVATE_BRIDGE_COMPATIBILITY_SCHEMA, operations: structuredClone(PRIVATE_BRIDGE_OPERATION_CONTRACTS) } as unknown as JsonObject;
+}
+
+export function privateBridgeCompatibilityDigest(): string {
+  return sha256Json(privateBridgeCompatibilityContract());
+}
 
 export type BrowserCatalogDataClass = (typeof BROWSER_CATALOG_DATA_CLASSES)[number];
 
@@ -41,10 +87,12 @@ export interface BrowserCatalog<Provider extends BrowserCatalogProvider> {
   readonly provider: Provider;
   readonly operations: readonly BrowserCatalogOperation<Provider>[];
   readonly rawDigest: string;
+  readonly compatibilityDigest: string;
 }
 
 export type CanvasBrowserCatalog = BrowserCatalog<"canvas">;
 export type MoodleBrowserCatalog = BrowserCatalog<"moodle">;
+type BrowserCatalogCompatibilitySource<Provider extends BrowserCatalogProvider> = Pick<BrowserCatalog<Provider>, "provider" | "operations">;
 
 export const CANVAS_BROWSER_CATALOG_PATH = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -80,6 +128,38 @@ function dataClassOf(value: unknown, label: string): BrowserCatalogDataClass | u
   return known;
 }
 
+function assertExactMoodleIntegerSchemas(value: unknown, label: string): void {
+  if (Array.isArray(value)) {
+    for (const entry of value) assertExactMoodleIntegerSchemas(entry, label);
+    return;
+  }
+  if (!isJsonObject(value)) return;
+  if (value.type === "integer") {
+    if (Array.isArray(value.enum)) {
+      if (!value.enum.every((entry) => Number.isSafeInteger(entry))) {
+        throw new TypeError(`${label} has an integer enum outside JavaScript's exact integer range`);
+      }
+    } else if (typeof value.maximum !== "number" || !Number.isSafeInteger(value.maximum) || value.maximum > MAX_MOODLE_JSON_INTEGER
+      || (value.minimum !== undefined && (typeof value.minimum !== "number" || !Number.isSafeInteger(value.minimum)))) {
+      throw new TypeError(`${label} has an unbounded or inexact integer schema`);
+    }
+  }
+  for (const entry of Object.values(value)) assertExactMoodleIntegerSchemas(entry, label);
+}
+
+export function moodleArgumentsUseExactIntegers(schema: JsonSchema, value: unknown): boolean {
+  if (!isJsonObject(schema)) return true;
+  if (schema.type === "integer") return value === undefined || (typeof value === "number" && Number.isSafeInteger(value));
+  if (schema.type === "array" && Array.isArray(value) && isJsonObject(schema.items)) {
+    return value.every((entry) => moodleArgumentsUseExactIntegers(schema.items as JsonSchema, entry));
+  }
+  if (schema.type === "object" && isJsonObject(value) && isJsonObject(schema.properties)) {
+    return Object.entries(schema.properties).every(([name, propertySchema]) => !Object.hasOwn(value, name)
+      || moodleArgumentsUseExactIntegers(propertySchema as JsonSchema, value[name]));
+  }
+  return true;
+}
+
 function operation<Provider extends BrowserCatalogProvider>(value: unknown, provider: Provider): BrowserCatalogOperation<Provider> {
   const label = provider === "canvas" ? "Canvas" : "Moodle";
   if (!isJsonObject(value)) throw new TypeError(`${label} browser catalog operation is invalid`);
@@ -91,6 +171,7 @@ function operation<Provider extends BrowserCatalogProvider>(value: unknown, prov
   if (value.provider !== provider || typeof value.readOnly !== "boolean" || !isJsonObject(value.inputSchema)) {
     throw new TypeError(`${label} browser catalog operation is invalid`);
   }
+  if (provider === "moodle") assertExactMoodleIntegerSchemas(value.inputSchema, `${label} browser catalog operation ${toolName}`);
   const reviewTool = value.reviewTool === undefined || value.reviewTool === null
     ? undefined
     : text(value.reviewTool, `${label} browser catalog reviewTool`, 160);
@@ -146,7 +227,40 @@ function parseBrowserCatalog<Provider extends BrowserCatalogProvider>(
       throw new TypeError(`${label} browser catalog reviewTool is invalid`);
     }
   }
-  return { schema: "morrow.browser-catalog.v1", provider, operations, rawDigest };
+  const compatibilityDigest = browserCatalogCompatibilityDigest({ provider, operations });
+  return { schema: "morrow.browser-catalog.v1", provider, operations, rawDigest, compatibilityDigest };
+}
+
+export const BROWSER_CATALOG_COMPATIBILITY_SCHEMA = "morrow.browser-catalog-compatibility.v1";
+export const BRIDGE_CATALOG_COMPATIBILITY_SCHEMA = "morrow.bridge-catalog-compatibility.v2";
+
+/** The browser-catalog fields that can change admission, dispatch, or readback. */
+export function browserCatalogCompatibilityContract<Provider extends BrowserCatalogProvider>(
+  catalog: BrowserCatalogCompatibilitySource<Provider>,
+): JsonObject {
+  return {
+    schema: BROWSER_CATALOG_COMPATIBILITY_SCHEMA,
+    provider: catalog.provider,
+    operations: catalog.operations.map((operation) => ({
+      key: operation.key,
+      toolName: operation.toolName,
+      provider: operation.provider,
+      readOnly: operation.readOnly,
+      reviewTool: operation.reviewTool ?? null,
+      destructive: operation.destructive === true,
+      irreversible: operation.irreversible === true,
+      dataClass: operation.dataClass ?? null,
+      family: operation.family ?? null,
+      morrowPrivate: operation.morrowPrivate === true,
+      inputSchema: operationalJsonSchema(operation.inputSchema),
+    })),
+  };
+}
+
+export function browserCatalogCompatibilityDigest<Provider extends BrowserCatalogProvider>(
+  catalog: BrowserCatalogCompatibilitySource<Provider>,
+): string {
+  return sha256Json(browserCatalogCompatibilityContract(catalog));
 }
 
 export function parseCanvasBrowserCatalog(value: unknown, rawDigest: string): CanvasBrowserCatalog {
@@ -158,13 +272,13 @@ export function parseMoodleBrowserCatalog(value: unknown, rawDigest: string): Mo
 }
 
 export function loadCanvasBrowserCatalog(path = CANVAS_BROWSER_CATALOG_PATH): CanvasBrowserCatalog {
-  const raw = readFileSync(path);
-  return parseCanvasBrowserCatalog(JSON.parse(raw.toString("utf8")) as unknown, sha256(raw));
+  const catalog = readExactCatalogBytes(path, "Canvas browser catalog");
+  return parseCanvasBrowserCatalog(JSON.parse(catalog.text) as unknown, sha256(catalog.bytes));
 }
 
 export function loadMoodleBrowserCatalog(path = MOODLE_BROWSER_CATALOG_PATH): MoodleBrowserCatalog {
-  const raw = readFileSync(path);
-  return parseMoodleBrowserCatalog(JSON.parse(raw.toString("utf8")) as unknown, sha256(raw));
+  const catalog = readExactCatalogBytes(path, "Moodle browser catalog");
+  return parseMoodleBrowserCatalog(JSON.parse(catalog.text) as unknown, sha256(catalog.bytes));
 }
 
 export function bridgeCatalogDigest(
@@ -172,7 +286,13 @@ export function bridgeCatalogDigest(
   canvasBrowserCatalog: CanvasBrowserCatalog,
   moodleCatalog: MoodleBrowserCatalog,
 ): string {
-  return sha256(`${canvasCatalog.catalogDigest}\n${canvasBrowserCatalog.rawDigest}\n${moodleCatalog.rawDigest}`);
+  return sha256Json({
+    schema: BRIDGE_CATALOG_COMPATIBILITY_SCHEMA,
+    canvasApi: canvasApiCompatibilityDigest(canvasCatalog),
+    canvasBrowser: canvasBrowserCatalog.compatibilityDigest,
+    moodleBrowser: moodleCatalog.compatibilityDigest,
+    privateCommands: privateBridgeCompatibilityDigest(),
+  });
 }
 
 function capability<Provider extends BrowserCatalogProvider>(

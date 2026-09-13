@@ -11,6 +11,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleGradebookInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const MAX_FORM_ENTRIES = 600;
   const MAX_FORM_BYTES = 256 * 1024;
@@ -244,14 +246,56 @@ export async function executeMoodleGradebookInPage(rawInput) {
       || (deleteIds.length === 1 && deleteIds[0] !== editIds[0])) return { shape: "invalid" };
     return { shape: "control", targetId: editIds[0], deletable: deleteIds.length === 1 };
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const boundedResponseText = async (response) => {
+    const maximum = 2 * 1024 * 1024;
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > maximum)) {
+      cancelBody(response.body);
+      return null;
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") return null;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const remaining = Number.isFinite(input?.expiresAt) ? input.expiresAt - Date.now() : Infinity;
+        if (remaining <= 0) throw new Error("moodle_execution_expired");
+        let timeout;
+        const next = Number.isFinite(remaining)
+          ? await Promise.race([
+              reader.read(),
+              new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+            ]).finally(() => clearTimeout(timeout))
+          : await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > maximum) {
+          cancelBody(reader);
+          return null;
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch {
+      cancelBody(reader);
+      return null;
+    }
+  };
   const readPage = async (context, endpoint) => {
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error: "moodle_gradebook_read_unavailable" }; }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())) return { error: "moodle_gradebook_read_unavailable", status: response.status };
     let html;
-    try { html = await response.text(); } catch { return { error: "moodle_gradebook_read_unavailable", status: response.status }; }
+    html = await boundedResponseText(response);
     if (typeof html !== "string" || html.length > 2 * 1024 * 1024 || typeof globalThis.DOMParser !== "function") return { error: "moodle_gradebook_read_unavailable", status: response.status };
     try { return { status: response.status, document: new DOMParser().parseFromString(html, "text/html") }; } catch { return { error: "moodle_gradebook_read_unavailable", status: response.status }; }
   };
@@ -589,6 +633,7 @@ export async function executeMoodleGradebookInPage(rawInput) {
       writeAttempted = true;
       response = await fetch(state.action, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual", headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" }, body,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return unconfirmedWrite("moodle_gradebook_write_unconfirmed"); }
     if (!sameContext(context, currentContext())) return unconfirmedWrite("moodle_gradebook_write_unconfirmed", response.status);

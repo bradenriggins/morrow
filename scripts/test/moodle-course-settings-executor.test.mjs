@@ -491,6 +491,16 @@ test("Moodle course settings executor changes one bounded group per POST and rep
     assert.deepEqual(await execute(operations.update, { course_id: 2, format_options: [{ name: "numsections", value: 12 }], expected_digest: afterChange.snapshot_digest }), {
       ok: false, sent: false, status: 200, error: "moodle_course_setting_refused",
     });
+    for (const protectedName of ["category", "visible", "summary_editor[text]"]) {
+      assert.deepEqual(await execute(operations.update, {
+        course_id: 2,
+        format_options: [{ name: protectedName, value: protectedName === "summary_editor[text]" ? "Rewritten" : "4" }],
+        expected_digest: afterChange.snapshot_digest,
+      }), { ok: false, sent: false, status: 200, error: "moodle_course_setting_refused" }, protectedName);
+    }
+    assert.equal(state.course.category, "3");
+    assert.equal(state.course.visible, "1");
+    assert.equal(state.course.summary, "<p>Care of the adult patient.</p>");
     assert.equal(posts.length, 1);
 
     // Tags, course custom fields and the options of the current format each change in one POST.

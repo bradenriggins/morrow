@@ -1,4 +1,5 @@
 import type { CallToolResult, McpServer } from "@modelcontextprotocol/server";
+import { classicQuizQuestionContract } from "@morrow/canvas-api-catalog";
 import { isJsonObject, sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
 import { Parser } from "htmlparser2";
 import * as z from "zod/v4";
@@ -79,7 +80,7 @@ const classicQuizQuestionImageAltInputSchema = z.object({
   quiz_id: z.string().regex(/^[1-9][0-9]{0,18}$/),
   question_id: z.string().regex(/^[1-9][0-9]{0,18}$/),
   answer_id: z.string().regex(/^[1-9][0-9]{0,18}$/).optional().describe("Set only when the image is inside one answer of this question."),
-  answer_field: z.enum(["answer_text", "answer_html"]).optional().describe("The answer field that holds the image. Required with answer_id."),
+  answer_field: z.enum(["text", "html", "answer_text", "answer_html"]).optional().describe("The exact Canvas answer field that holds the image. Required with answer_id."),
   expected_body_sha256: z.string().regex(/^[0-9a-f]{64}$/),
   image_index: z.number().int().min(1).max(2 * 1024 * 1024),
   image_src_sha256: z.string().regex(/^[0-9a-f]{64}$/),
@@ -826,85 +827,9 @@ export async function planClassicQuizDescriptionImageAltRepair(runtime: GatewayR
   return await planCanvasContentImageAltRepair(runtime, classicQuizDescriptionImageAltInputSchema.parse(value), classicQuizDescriptionImageAltTarget, callerSignal);
 }
 
-// Canvas rebuilds a Classic Quiz question from the whole request through
-// AssessmentQuestion.parse_question, so a field left out of the request is
-// rebuilt from a default rather than preserved. This planner therefore refuses
-// the same cases the connector refuses at write time: a question in a question
-// group, a question type whose payload cannot be rebuilt, an incomplete read,
-// and a read that carries state the write cannot resend. The contract lives in
-// connector/extension/src/canvas-content.js; this copy exists so a person is
-// told before an approval is requested, not after. The round trip itself is
-// live-unverified against a connected Canvas tenant.
-const CLASSIC_QUIZ_QUESTION_TYPES = ["multiple_choice_question", "true_false_question", "multiple_answers_question", "short_answer_question", "essay_question"];
-const CLASSIC_QUIZ_ANSWERLESS_QUESTION_TYPES = ["essay_question"];
-const CLASSIC_QUIZ_QUESTION_TEXT_FIELDS = ["question_name", "question_text", "correct_comments", "incorrect_comments", "neutral_comments"];
-const CLASSIC_QUIZ_QUESTION_DERIVED_FIELDS = ["id", "quiz_id", "quiz_group_id", "assessment_question_id", "correct_comments_html", "incorrect_comments_html", "neutral_comments_html"];
-const CLASSIC_QUIZ_QUESTION_SENT_FIELDS = ["question_type", "points_possible", "position", "text_after_answers", "answers"];
-const CLASSIC_QUIZ_ANSWER_FIELDS = ["id", "answer_text", "answer_weight", "answer_comments", "answer_html", "text_after_answers"];
-const CLASSIC_QUIZ_ANSWER_DERIVED_FIELDS = ["answer_comment_html"];
-
-/** A field name Canvas returned is untrusted text, so a refusal repeats it only when it is a plain identifier. */
-function reportableFieldName(name: string): string {
-  return /^[A-Za-z0-9_]{1,60}$/.test(name) ? name : "an unexpected field";
-}
-
 function checkClassicQuizQuestion(question: JsonObject): void {
-  if (question.quiz_group_id !== undefined && question.quiz_group_id !== null) {
-    throw new PageCorrectionError("This question belongs to a question group, so Canvas can rebuild it from a question bank and a change here could reach other quizzes. Morrow does not repair it.");
-  }
-  if (typeof question.question_type !== "string" || !CLASSIC_QUIZ_QUESTION_TYPES.includes(question.question_type)) {
-    throw new PageCorrectionError("Morrow repairs images only in multiple choice, true or false, multiple answers, short answer, and essay Classic Quiz questions.");
-  }
-  const unmodelled = Object.keys(question).find((field) => !CLASSIC_QUIZ_QUESTION_TEXT_FIELDS.includes(field)
-    && !CLASSIC_QUIZ_QUESTION_DERIVED_FIELDS.includes(field) && !CLASSIC_QUIZ_QUESTION_SENT_FIELDS.includes(field));
-  if (unmodelled) {
-    throw new PageCorrectionError(`Canvas returned ${reportableFieldName(unmodelled)} for this question, and this repair cannot send it back.`);
-  }
-  for (const field of CLASSIC_QUIZ_QUESTION_TEXT_FIELDS) {
-    if (typeof question[field] !== "string") {
-      throw new PageCorrectionError(`Canvas did not return ${field} for this question, and Morrow will not rebuild a question without it.`);
-    }
-  }
-  if (typeof question.points_possible !== "number" && typeof question.points_possible !== "string") {
-    throw new PageCorrectionError("Canvas did not return points_possible for this question, and Morrow will not rebuild a question without it.");
-  }
-  if (typeof question.position !== "number" || !Number.isSafeInteger(question.position) || question.position < 1) {
-    throw new PageCorrectionError("Canvas did not return position for this question, and Morrow will not rebuild a question without it.");
-  }
-  if (Object.hasOwn(question, "text_after_answers") && typeof question.text_after_answers !== "string") {
-    throw new PageCorrectionError("Canvas returned text_after_answers for this question in a form Morrow cannot send back.");
-  }
-  const answerless = CLASSIC_QUIZ_ANSWERLESS_QUESTION_TYPES.includes(String(question.question_type));
-  const answers = question.answers;
-  if (answerless) {
-    if (answers !== undefined && (!Array.isArray(answers) || answers.length > 0)) {
-      throw new PageCorrectionError("Canvas returned answers for this essay question, and this repair cannot send them back.");
-    }
-    return;
-  }
-  if (!Array.isArray(answers) || answers.length < 1 || answers.length > 100) {
-    throw new PageCorrectionError("Canvas did not return the answers for this question, and Morrow will not rebuild a question without them.");
-  }
-  const ids = new Set<string>();
-  for (const answer of answers) {
-    if (!isJsonObject(answer)) throw new PageCorrectionError("Canvas did not return one of this question's answers as a record.");
-    const unmodelledAnswer = Object.keys(answer).find((field) => !CLASSIC_QUIZ_ANSWER_FIELDS.includes(field) && !CLASSIC_QUIZ_ANSWER_DERIVED_FIELDS.includes(field));
-    if (unmodelledAnswer) {
-      throw new PageCorrectionError(`Canvas returned ${reportableFieldName(unmodelledAnswer)} on an answer of this question, and this repair cannot send it back.`);
-    }
-    const id = exactId(answer.id);
-    if (ids.has(id)) throw new PageCorrectionError("Canvas returned two answers with the same identifier for this question.");
-    ids.add(id);
-    if (typeof answer.answer_text !== "string" || typeof answer.answer_weight !== "number"
-      || !Number.isInteger(answer.answer_weight) || answer.answer_weight < 0 || answer.answer_weight > 100) {
-      throw new PageCorrectionError("Canvas did not return answer_text and answer_weight for every answer of this question.");
-    }
-    for (const field of ["answer_comments", "answer_html", "text_after_answers"]) {
-      if (Object.hasOwn(answer, field) && typeof answer[field] !== "string") {
-        throw new PageCorrectionError(`Canvas returned ${field} on an answer of this question in a form Morrow cannot send back.`);
-      }
-    }
-  }
+  const result = classicQuizQuestionContract(question);
+  if (!result.ok) throw new PageCorrectionError(result.message);
 }
 
 type ClassicQuizQuestionImageAltInput = z.infer<typeof classicQuizQuestionImageAltInputSchema>;

@@ -5,8 +5,11 @@ const STATUS_SCHEMA = "morrow.bridge.update-status.v1";
 const QUIESCED_SCHEMA = "morrow.bridge.update-quiesced.v1";
 const RESUMED_SCHEMA = "morrow.bridge.update-resumed.v1";
 const READBACK_SCHEMA = "morrow.bridge.update-readback.v1";
+const COMMITTED_SCHEMA = "morrow.bridge.update-committed.v1";
 const FENCE_SCHEMA = "morrow.bridge.quiesce-fence.v1";
+const COMMIT_SCHEMA = "morrow.bridge.update-commit.v1";
 const FENCE_KEY = "morrowBridgeQuiesceFence";
+const COMMIT_KEY = "morrowBridgeMaintenanceCommit";
 const RECEIPTS_KEY = "morrowBridgeMaintenanceReceipts";
 const MAX_RECEIPTS = 2_000;
 const MAX_MARKER_BYTES = 16 * 1024;
@@ -38,6 +41,16 @@ function validVersion(value) {
   return typeof value === "string" && /^(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*)){0,3}$/.test(value);
 }
 
+function compareVersions(left, right) {
+  const a = left.split(".").map(Number);
+  const b = right.split(".").map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] || 0) - (b[index] || 0);
+    if (difference !== 0) return difference < 0 ? -1 : 1;
+  }
+  return 0;
+}
+
 function validInstallType(value) {
   return ["admin", "development", "normal", "sideload", "other"].includes(value);
 }
@@ -57,6 +70,15 @@ function fence(value) {
     && typeof value.quiesceEpoch === "string" && EPOCH.test(value.quiesceEpoch);
 }
 
+function commitReceipt(value) {
+  return exactKeys(value, ["extensionId", "manifestVersion", "previousManifestVersion", "quiesceEpoch", "schema"])
+    && value.schema === COMMIT_SCHEMA
+    && typeof value.extensionId === "string" && EXTENSION_ID.test(value.extensionId)
+    && validVersion(value.manifestVersion) && validVersion(value.previousManifestVersion)
+    && typeof value.quiesceEpoch === "string" && EPOCH.test(value.quiesceEpoch)
+    && compareVersions(value.manifestVersion, value.previousManifestVersion) > 0;
+}
+
 function maintenanceControl(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) fail("bridge_maintenance_control_invalid");
   if ((value.action === "status" || value.action === "quiesce" || value.action === "readback")
@@ -65,10 +87,13 @@ function maintenanceControl(value) {
     && value.fileLayerRestored === true && typeof value.quiesceEpoch === "string" && EPOCH.test(value.quiesceEpoch)) {
     return value;
   }
+  if (value.action === "commit" && exactKeys(value, ["action", "previousManifestVersion", "quiesceEpoch"])
+    && validVersion(value.previousManifestVersion)
+    && typeof value.quiesceEpoch === "string" && EPOCH.test(value.quiesceEpoch)) return value;
   fail("bridge_maintenance_control_invalid");
 }
 
-export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch, randomUUID = crypto.randomUUID } = {}) {
+export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch, randomUUID = () => crypto.randomUUID() } = {}) {
   if (!chromeApi?.runtime?.getManifest || !chromeApi?.runtime?.getURL || !chromeApi?.storage?.local
     || !chromeApi?.management?.getSelf || typeof fetchImpl !== "function" || typeof randomUUID !== "function") {
     throw new TypeError("bridge maintenance requires Chrome runtime, storage, management, and fetch");
@@ -134,6 +159,15 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     const value = stored?.[FENCE_KEY];
     if (value === undefined) return null;
     if (!fence(value)) fail("bridge_quiesce_fence_invalid");
+    return value;
+  }
+
+  async function loadCommit() {
+    let stored;
+    try { stored = await chromeApi.storage.local.get(COMMIT_KEY); } catch { fail("bridge_update_commit_unavailable"); }
+    const value = stored?.[COMMIT_KEY];
+    if (value === undefined) return null;
+    if (!commitReceipt(value)) fail("bridge_update_commit_invalid");
     return value;
   }
 
@@ -221,6 +255,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
       const proof = await activeFolderProof(current);
       const nextFence = { schema: FENCE_SCHEMA, extensionId: current.extensionId, manifestVersion: current.manifestVersion, quiesceEpoch };
       await chromeApi.storage.local.set({ [FENCE_KEY]: nextFence });
+      await chromeApi.storage.local.remove(COMMIT_KEY);
       inMemoryFence = nextFence;
       return {
         schema: QUIESCED_SCHEMA,
@@ -259,6 +294,54 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     };
   }
 
+  async function commit(control) {
+    const request = maintenanceControl(control);
+    if (request.action !== "commit") fail("bridge_maintenance_control_invalid");
+    const current = await identity();
+    if (current.installType !== "development") fail("bridge_store_install_refused");
+    const proof = await activeFolderProof(current);
+    const persistedFence = await loadFence();
+    const existing = await loadCommit();
+    if (!persistedFence) {
+      if (!existing || existing.extensionId !== current.extensionId
+        || existing.manifestVersion !== current.manifestVersion
+        || existing.previousManifestVersion !== request.previousManifestVersion
+        || existing.quiesceEpoch !== request.quiesceEpoch) fail("bridge_update_commit_stale");
+    } else {
+      if (persistedFence.extensionId !== current.extensionId
+        || persistedFence.manifestVersion !== request.previousManifestVersion
+        || persistedFence.quiesceEpoch !== request.quiesceEpoch
+        || compareVersions(current.manifestVersion, persistedFence.manifestVersion) <= 0) {
+        fail("bridge_update_commit_unconfirmed");
+      }
+      const nextCommit = {
+        schema: COMMIT_SCHEMA,
+        extensionId: current.extensionId,
+        previousManifestVersion: persistedFence.manifestVersion,
+        manifestVersion: current.manifestVersion,
+        quiesceEpoch: persistedFence.quiesceEpoch,
+      };
+      await chromeApi.storage.local.set({ [COMMIT_KEY]: nextCommit });
+      await chromeApi.storage.local.remove(FENCE_KEY);
+      if (await loadFence()) fail("bridge_update_commit_unavailable");
+      const stored = await loadCommit();
+      if (!stored || stored.extensionId !== nextCommit.extensionId
+        || stored.manifestVersion !== nextCommit.manifestVersion
+        || stored.previousManifestVersion !== nextCommit.previousManifestVersion
+        || stored.quiesceEpoch !== nextCommit.quiesceEpoch) fail("bridge_update_commit_unavailable");
+    }
+    inMemoryFence = null;
+    return {
+      schema: COMMITTED_SCHEMA,
+      extensionId: current.extensionId,
+      previousManifestVersion: request.previousManifestVersion,
+      manifestVersion: current.manifestVersion,
+      quiesceEpoch: request.quiesceEpoch,
+      committed: true,
+      activeFolderProof: proof,
+    };
+  }
+
   async function readback() {
     const current = await identity();
     if (current.installType !== "development") fail("bridge_store_install_refused");
@@ -276,8 +359,9 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     if (request.action === "status") return await status();
     if (request.action === "quiesce") return await quiesce();
     if (request.action === "resume") return await resume(request);
+    if (request.action === "commit") return await commit(request);
     return await readback();
   }
 
-  return Object.freeze({ beginWrite, finishWrite, control, readback, resume, status });
+  return Object.freeze({ beginWrite, finishWrite, commit, control, readback, resume, status });
 }

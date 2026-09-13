@@ -7,12 +7,16 @@ const sourceBindingId = "canvas:instructor";
 const questionImage = "/courses/42/files/17";
 const answerImage = "/courses/42/files/18";
 const questionText = `<p>Which part controls the cell?</p><img src="${questionImage}">`;
-const answerText = `<p>Nucleus</p><img src="${answerImage}">`;
+const answerHtml = `<p>Nucleus</p><img src="${answerImage}">`;
 const question: JsonObject = {
   id: "301",
   quiz_id: "77",
   quiz_group_id: null,
   assessment_question_id: "9001",
+  assessment_question_bank_id: null,
+  created_at: "2026-09-01T12:00:00Z",
+  updated_at: "2026-09-02T12:00:00Z",
+  regrade_option: null,
   position: 1,
   question_name: "Cell structure",
   question_type: "multiple_choice_question",
@@ -24,9 +28,15 @@ const question: JsonObject = {
   correct_comments_html: "<p>Correct.</p>",
   incorrect_comments_html: "<p>Review the diagram.</p>",
   neutral_comments_html: "",
+  variables: null,
+  formulas: null,
+  answer_tolerance: null,
+  formula_decimal_places: null,
+  matches: null,
+  matching_answer_incorrect_matches: null,
   answers: [
-    { id: "6656", answer_text: answerText, answer_weight: 100, answer_comments: "Correct." },
-    { id: "6657", answer_text: "<p>Cell wall</p>", answer_weight: 0, answer_comments: "Review the diagram." },
+    { id: "6656", text: "Nucleus", html: answerHtml, weight: 100, comments: "Correct.", comments_html: "<p>Correct.</p>" },
+    { id: "6657", text: "Cell wall", html: "<p>Cell wall</p>", weight: 0, comments: "Review the diagram.", comments_html: "<p>Review the diagram.</p>" },
   ],
 };
 
@@ -76,8 +86,8 @@ const questionTextInput = {
 const answerInput = {
   ...questionTextInput,
   answer_id: "6656",
-  answer_field: "answer_text" as const,
-  expected_body_sha256: sha256Text(answerText),
+  answer_field: "html" as const,
+  expected_body_sha256: sha256Text(answerHtml),
   image_src_sha256: sha256Text(answerImage),
   alt_text: "Cell nucleus diagram",
 };
@@ -108,6 +118,7 @@ describe("Classic Quiz question image alternative-text planning", () => {
     expect(guard.answer_id).toBeUndefined();
     expect(guard.answer_field).toBeUndefined();
     const protectedState = structuredClone(question);
+    delete protectedState.updated_at;
     delete protectedState.question_text;
     expect(guard.protected_state_sha256).toBe(sha256Json(protectedState));
     expect(JSON.stringify(plans)).not.toContain(questionText);
@@ -121,11 +132,12 @@ describe("Classic Quiz question image alternative-text planning", () => {
     expect(result.isError).not.toBe(true);
     expect(plans).toHaveLength(1);
     const guard = (plans[0]!.arguments._morrow as JsonObject).canvas_content_guard as JsonObject;
-    expect(guard).toMatchObject({ answer_id: "6656", answer_field: "answer_text", body_sha256: sha256Text(answerText) });
+    expect(guard).toMatchObject({ answer_id: "6656", answer_field: "html", body_sha256: sha256Text(answerHtml) });
     const protectedState = structuredClone(question);
-    delete (protectedState.answers as JsonObject[])[0]!.answer_text;
+    delete protectedState.updated_at;
+    delete (protectedState.answers as JsonObject[])[0]!.html;
     expect(guard.protected_state_sha256).toBe(sha256Json(protectedState));
-    expect(JSON.stringify(plans)).not.toContain(answerText);
+    expect(JSON.stringify(plans)).not.toContain(answerHtml);
     expect(JSON.stringify(plans)).not.toContain(answerImage);
   });
 
@@ -145,11 +157,20 @@ describe("Classic Quiz question image alternative-text planning", () => {
     }
   });
 
-  it("refuses question and answer state this write cannot send back", async () => {
+  it("accepts official nullable response fields and refuses only nonempty unsupported state", async () => {
     await refusal({ ...question, regrade_option: "current_and_previous_submissions" }, questionTextInput, "regrade_option");
+    await refusal({ ...question, variables: [] }, questionTextInput, "variables");
     const withAnswerState = structuredClone(question);
     (withAnswerState.answers as JsonObject[])[1]!.blank_id = "response1";
     await refusal(withAnswerState, questionTextInput, "blank_id");
+  });
+
+  it("accepts an official answerless essay response with null answers", async () => {
+    const essay = { ...structuredClone(question), question_type: "essay_question", answers: null };
+    const { runtime, plans } = fixture(essay);
+    const result = await planClassicQuizQuestionImageAltRepair(runtime, questionTextInput);
+    expect(result.isError).not.toBe(true);
+    expect(plans).toHaveLength(1);
   });
 
   it("refuses stale evidence, an unavailable answer, and a question outside the bound quiz", async () => {

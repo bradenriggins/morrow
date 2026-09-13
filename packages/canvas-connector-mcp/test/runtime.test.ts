@@ -1,10 +1,10 @@
 import { once } from "node:events";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { fromJsonSchema } from "@modelcontextprotocol/server";
-import { augmentBridgeInputSchema, BRIDGE_PROTOCOL_VERSION, BRIDGE_SCHEMAS, parseBridgeJson, serializeBridgeMessage, type BridgeBinding, type BridgeCommand } from "@morrow/bridge-protocol";
+import { augmentBridgeInputSchema, BRIDGE_PROTOCOL_VERSION, BRIDGE_SCHEMAS, bridgeAuthenticationProofPayload, parseBridgeJson, serializeBridgeMessage, type BridgeBinding, type BridgeCommand } from "@morrow/bridge-protocol";
 import type { CanvasConnectorConfig } from "../src/config.js";
 import {
   CanvasConnectorRuntime,
@@ -50,10 +50,26 @@ async function start(bindings: readonly BridgeBinding[] = [{
   const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, { origin: `chrome-extension://${extensionId}` });
   sockets.push(socket);
   await once(socket, "open");
+  const authentication = {
+    schema: BRIDGE_SCHEMAS.authenticate,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    clientNonce: randomBytes(32).toString("hex"),
+    extensionId,
+    runtimeRevision,
+    catalogDigest: runtime.catalogDigest,
+    sentAt: Date.now(),
+  } as const;
+  socket.send(serializeBridgeMessage(authentication));
+  const [challengeRaw] = await once(socket, "message");
+  const challenge = parseBridgeJson(challengeRaw.toString()) as { serverNonce: string };
   socket.send(serializeBridgeMessage({
     schema: BRIDGE_SCHEMAS.hello,
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
-    token,
+    clientNonce: authentication.clientNonce,
+    serverNonce: challenge.serverNonce,
+    clientProof: createHmac("sha256", token)
+      .update(bridgeAuthenticationProofPayload("client", authentication, challenge.serverNonce), "utf8")
+      .digest("hex"),
     extensionId,
     runtimeRevision,
     catalogDigest: runtime.catalogDigest,
@@ -154,6 +170,41 @@ describe("CanvasConnectorRuntime", () => {
     })).resolves.toMatchObject({ status: "message", protectedText: "Review Student A1." });
   });
 
+  it("cancels the exact Private Chat Bridge wait when the MCP request aborts", async () => {
+    const runtime = await start([]);
+    const socket = sockets.at(-1)!;
+    const controller = new AbortController();
+    let command: BridgeCommand | undefined;
+    let resolveCancellation!: (value: Record<string, unknown>) => void;
+    const cancellation = new Promise<Record<string, unknown>>((resolve) => {
+      resolveCancellation = resolve;
+    });
+    socket.on("message", (raw) => {
+      const message = parseBridgeJson(raw.toString()) as Record<string, unknown>;
+      if (message.schema === BRIDGE_SCHEMAS.command) command = message as unknown as BridgeCommand;
+      if (message.schema === BRIDGE_SCHEMAS.cancel) resolveCancellation(message);
+    });
+    const result = runtime.privateChatExchange({
+      schema: "morrow.private-chat.exchange.v1",
+      action: "listen",
+      sessionId: "session:private-chat-cancel",
+      assistantName: "Codex",
+    }, controller.signal);
+    while (!command) await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+
+    await expect(result).resolves.toMatchObject({
+      status: "error",
+      problem: { code: "bridge_request_cancelled" },
+    });
+    await expect(cancellation).resolves.toMatchObject({
+      requestId: command.requestId,
+      operationId: command.operationId,
+      generation: command.generation,
+    });
+    expect(runtime.bridge.health().pendingCount).toBe(0);
+  });
+
   it("routes private Bridge maintenance outside the course catalog", async () => {
     const runtime = await start([]);
     const socket = sockets.at(-1)!;
@@ -226,12 +277,15 @@ describe("CanvasConnectorRuntime", () => {
   });
 
   it("routes and privacy-projects one private Moodle enrolment candidate read outside every catalog", async () => {
+    const courseId = "9007199254740993";
+    const adjacentCourseId = "9007199254740992";
+    const sourceBindingId = `moodle:course-${courseId}`;
     const runtime = await start([{
-      sourceBindingId: "moodle:course-42",
+      sourceBindingId,
       provider: "moodle",
       origin: "https://school.example.edu",
       siteUrl: "https://school.example.edu/moodle",
-      courseId: "42",
+      courseId,
       principalFingerprint: "b".repeat(64),
       sessionGeneration: 1,
       runtimeVerified: true,
@@ -241,6 +295,7 @@ describe("CanvasConnectorRuntime", () => {
     const socket = sockets.at(-1)!;
     let commands = 0;
     let invalidResult = false;
+    let resultCourseId = courseId;
     socket.on("message", (raw) => {
       const value = parseBridgeJson(raw.toString()) as { schema?: string };
       if (value.schema !== BRIDGE_SCHEMAS.command) return;
@@ -249,8 +304,8 @@ describe("CanvasConnectorRuntime", () => {
       expect(command.kind).toBe("invoke_read");
       expect(command.toolName).toBe(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL);
       expect(command.operationKey).toBe(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION);
-      expect(command.sourceBindingId).toBe("moodle:course-42");
-      expect(command.arguments).toEqual({ course_id: 42, query: "Mary Jackson" });
+      expect(command.sourceBindingId).toBe(sourceBindingId);
+      expect(command.arguments).toEqual({ course_id: courseId, query: "Mary Jackson" });
       expect(command.outerGrant).toBeUndefined();
       socket.send(serializeBridgeMessage({
         schema: BRIDGE_SCHEMAS.result,
@@ -270,7 +325,7 @@ describe("CanvasConnectorRuntime", () => {
           data: {
             schema: "morrow.moodle-enrolment-candidate.private.v1",
             provider: "moodle",
-            course_id: 42,
+            course_id: resultCourseId,
             candidate: invalidResult ? { user_id: "not-an-id", email: "mary@example.edu" } : { user_id: "21", email: "mary@example.edu" },
             match: { kind: "exact_native_query", candidate_count: 1, query: "Mary Jackson" },
             proof: {
@@ -287,9 +342,9 @@ describe("CanvasConnectorRuntime", () => {
       }));
     });
     const input = {
-      course_id: 42,
+      course_id: courseId,
       query: "Mary Jackson",
-      _morrow: { source_binding_id: "moodle:course-42", operation_id: "operation:moodle-candidate-42" },
+      _morrow: { source_binding_id: sourceBindingId, operation_id: "operation:moodle-candidate-exact-id" },
     };
     const resolved = await runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, input);
     expect(resolved).toMatchObject({
@@ -307,7 +362,7 @@ describe("CanvasConnectorRuntime", () => {
         provider: "moodle",
         data: {
           schema: "morrow.moodle-enrolment-candidate.private.v1",
-          course_id: 42,
+          course_id: courseId,
           candidate: { user_id: "21" },
           match: { kind: "exact_native_query", candidate_count: 1 },
           proof: { dispatch_count: 0, read_request_count: 2, candidate_limit: 100 },
@@ -319,9 +374,11 @@ describe("CanvasConnectorRuntime", () => {
     const beforeRefusals = commands;
     await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { ...input, query: " Mary Jackson" }))
       .resolves.toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "moodle_enrolment_candidate_arguments_invalid" } });
-    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { ...input, course_id: 9 }))
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { ...input, course_id: adjacentCourseId }))
       .resolves.toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "moodle_binding_course_mismatch" } });
-    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { course_id: 42, query: "Mary Jackson" }))
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { ...input, course_id: Number(courseId) }))
+      .resolves.toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "moodle_enrolment_candidate_arguments_invalid" } });
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, { course_id: courseId, query: "Mary Jackson" }))
       .resolves.toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "moodle_binding_required" } });
     await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, {
       ...input,
@@ -337,7 +394,51 @@ describe("CanvasConnectorRuntime", () => {
       ...input,
       _morrow: { ...input._morrow, operation_id: "operation:moodle-candidate-invalid-result" },
     })).resolves.toMatchObject({ ok: false, problem: { code: "moodle_enrolment_candidate_result_invalid" } });
-    expect(commands).toBe(beforeRefusals + 1);
+    invalidResult = false;
+    resultCourseId = adjacentCourseId;
+    await expect(runtime.call(PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL, {
+      ...input,
+      _morrow: { ...input._morrow, operation_id: "operation:moodle-candidate-cross-course-result" },
+    })).resolves.toMatchObject({ ok: false, problem: { code: "moodle_enrolment_candidate_result_invalid" } });
+    expect(commands).toBe(beforeRefusals + 2);
+  });
+
+  it("refuses unsafe public Moodle integer identifiers before Bridge dispatch", async () => {
+    const runtime = await start([{
+      sourceBindingId: "moodle:course-42",
+      provider: "moodle",
+      origin: "https://school.example.edu",
+      siteUrl: "https://school.example.edu/moodle",
+      courseId: "42",
+      principalFingerprint: "b".repeat(64),
+      sessionGeneration: 1,
+      runtimeVerified: true,
+    }]);
+    const socket = sockets.at(-1)!;
+    let commands = 0;
+    respond(socket, () => { commands += 1; });
+    const base = {
+      course_id: 42,
+      module_id: 7,
+      _morrow: { source_binding_id: "moodle:course-42" },
+    };
+    await expect(runtime.call("moodle_get_assignment_submission_summary", {
+      ...base,
+      module_id: Number.MAX_SAFE_INTEGER + 1,
+    })).resolves.toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "moodle_integer_out_of_range" },
+    });
+    await expect(runtime.call("moodle_get_assignment_submission_summary", {
+      ...base,
+      module_id: "9007199254740993",
+    })).resolves.toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "moodle_integer_out_of_range" },
+    });
+    expect(commands).toBe(0);
   });
 
   it("forwards one verified private file attachment only to its exact Moodle Resource write", async () => {
@@ -599,6 +700,16 @@ describe("CanvasConnectorRuntime", () => {
       id: "7",
       _morrow: { source_binding_id: "canvas:test-account" },
     })).toMatchObject({ ok: false, problem: { code: "course_binding_course_mismatch" } });
+    const cancelled = new AbortController();
+    cancelled.abort();
+    expect(await runtime.call("canvas_get_single_course_courses", {
+      id: "42",
+      _morrow: { source_binding_id: "canvas:test-account" },
+    }, cancelled.signal)).toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "request_cancelled_before_dispatch" },
+    });
     expect(commands).toBe(1);
   });
 

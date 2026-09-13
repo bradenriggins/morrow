@@ -8,6 +8,8 @@ const ORIGIN = "https://school.instructure.com";
 const LIST_PATH = "/api/v1/courses/42/pages";
 const CONTENT_SOURCE = readFileSync(new URL("../../connector/extension/src/canvas-content.js", import.meta.url), "utf8");
 const CATALOG = JSON.parse(readFileSync(new URL("../../artifacts/canvas-api/canvas-api-catalog.json", import.meta.url), "utf8"));
+const RESUME_STATES = new Map();
+let resumeSequence = 0;
 
 function catalogOperation(toolName) {
   const operation = CATALOG.operations.find((entry) => entry.toolName === toolName);
@@ -29,6 +31,9 @@ async function sendListRead(args, canvas, toolName = "canvas_list_pages_courses"
   const keys = ["location", "document", "fetch", "chrome", "__morrowCanvasConnectorInstalled"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const operation = catalogOperation(toolName);
+  const suppliedToken = args?.morrow_list_resume?.next_page;
+  const listResumeState = typeof suppliedToken === "string" ? RESUME_STATES.get(suppliedToken) : undefined;
+  if (listResumeState) RESUME_STATES.delete(suppliedToken);
   const requests = [];
   const listeners = [];
   const values = {
@@ -59,9 +64,17 @@ async function sendListRead(args, canvas, toolName = "canvas_list_pages_courses"
         principalId: "7",
         expiresAt: Date.now() + 60_000,
         courseId: "42",
+        ...(listResumeState ? { listResumeState } : {}),
       }, null, resolve);
       if (handled !== true) reject(new Error("the content script did not accept the execute message"));
     });
+    if (result?._morrowListResumeState) {
+      const token = `resume${String(++resumeSequence).padStart(8, "0")}`;
+      RESUME_STATES.set(token, result._morrowListResumeState);
+      const publicResult = { ...result, morrow_next_page: token };
+      delete publicResult._morrowListResumeState;
+      return { result: publicResult, requests };
+    }
     return { result, requests };
   } finally {
     for (const key of keys) {
@@ -220,14 +233,27 @@ test("a resume token for another origin, another path, or a wider read is refuse
   }
 });
 
-test("a resume token that only adds Canvas pagination parameters is accepted", async () => {
+test("a caller-created same-route resume token is refused", async () => {
   const token = Buffer.from(JSON.stringify({ v: 1, p: 1, u: `${ORIGIN}${LIST_PATH}?page=2&per_page=1` }), "utf8").toString("base64url");
   const { result, requests } = await sendListRead(
     { course_id: "42", morrow_max_pages: 1, morrow_list_resume: { next_page: token } },
     pagedCanvas(),
   );
-  assert.equal(result.ok, true);
-  assert.deepEqual(requests.map((request) => request.search), ["?page=2&per_page=1"]);
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "canvas_pagination_resume_refused");
+  assert.deepEqual(requests, []);
+});
+
+test("a service-worker continuation token is one-use", async () => {
+  const canvas = pagedCanvas();
+  const first = await sendListRead({ course_id: "42", morrow_max_pages: 1, morrow_list_resume: {} }, canvas);
+  const token = first.result.morrow_next_page;
+  const resumed = await sendListRead({ course_id: "42", morrow_max_pages: 1, morrow_list_resume: { next_page: token } }, canvas);
+  assert.equal(resumed.result.ok, true);
+  const replayed = await sendListRead({ course_id: "42", morrow_max_pages: 1, morrow_list_resume: { next_page: token } }, canvas);
+  assert.equal(replayed.result.ok, false);
+  assert.equal(replayed.result.error, "canvas_pagination_resume_refused");
+  assert.deepEqual(replayed.requests, []);
 });
 
 test("a list with no last link reports its unread pages as not stated", async () => {

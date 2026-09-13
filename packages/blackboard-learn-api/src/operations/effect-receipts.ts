@@ -1,14 +1,15 @@
-import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
-import { privateFileAccessAccepted } from "@morrow/gateway-core";
 import * as z from "zod/v4";
 import { BLACKBOARD_ID, BlackboardApiError } from "../types.js";
 import type { BlackboardEffectGrant } from "../effect-grant.js";
 import { blackboardTool, type BlackboardOperationModule } from "./definition.js";
+import { readDurableJsonState, replaceDurableState, withDurableStateTransaction } from "./durable-state.js";
 
-const EFFECT_STATE_SCHEMA = "morrow.blackboard-learn.effects.v1";
+const EFFECT_STATE_SCHEMA_V1 = "morrow.blackboard-learn.effects.v1";
+const EFFECT_STATE_SCHEMA_V2 = "morrow.blackboard-learn.effects.v2";
+const EFFECT_STATE_SCHEMA = "morrow.blackboard-learn.effects.v3";
 
 /** The path that keeps the effect record only in this process, for a test. */
 export const BLACKBOARD_EFFECT_STATE_IN_MEMORY = ":memory:";
@@ -45,6 +46,19 @@ export type BlackboardEffectPhase = "reserved" | "sent" | "verified" | "uncertai
 
 /** What an explicit fresh read of the exact item found afterwards. */
 export type BlackboardEffectFinding = "reviewed_values_saved" | "reviewed_values_not_saved";
+
+/** Provider identities returned by the exact create request that spent one receipt. */
+export type BlackboardCreateEvidence =
+  | { readonly kind: "ultra-assignment"; readonly contentId: string; readonly gradeColumnId: string }
+  | { readonly kind: "course-group"; readonly apiVersion: "v1" | "v2"; readonly groupId: string }
+  | { readonly kind: "course-announcement"; readonly announcementId: string };
+
+/** The complete source-owned identity of one effect receipt. */
+export interface BlackboardEffectReceiptReference {
+  readonly gatewayProcessId: string;
+  readonly receiptId: string;
+  readonly operationId: string;
+}
 
 const PHASES: readonly BlackboardEffectPhase[] = ["reserved", "sent", "verified", "uncertain"];
 const FINDINGS: readonly BlackboardEffectFinding[] = ["reviewed_values_saved", "reviewed_values_not_saved"];
@@ -89,9 +103,13 @@ interface StoredEffect {
   readonly target?: BlackboardEffectTarget;
   readonly claimedAt: number;
   readonly updatedAt: number;
+  /** The signed grant cannot be presented at or after this epoch millisecond. */
+  readonly grantNotAfter?: number;
   /** Set only by an explicit fresh read of the item after the change. */
   readonly finding?: BlackboardEffectFinding;
   readonly checkedAt?: number;
+  /** Written immediately after the exact create response names its new object. */
+  readonly providerEvidence?: BlackboardCreateEvidence;
 }
 
 /**
@@ -103,6 +121,8 @@ interface StoredEffect {
 export interface BlackboardEffectDispatch {
   /** Written before the change request leaves this process. It refuses when it cannot be written. */
   markSent(): void;
+  /** Persists the provider identities returned by this exact create before any readback. */
+  recordProviderEvidence(evidence: BlackboardCreateEvidence): void;
   /** Written after a readback proved the reviewed values are saved. */
   markVerified(): void;
   /** Written when the dispatch failed after the request left this process. */
@@ -143,11 +163,35 @@ function exactTime(value: unknown): number {
   return value;
 }
 
-function parseEffects(value: unknown): Map<string, StoredEffect> {
-  if (!isJsonObject(value) || value.schema !== EFFECT_STATE_SCHEMA || !Array.isArray(value.effects)
+function exactCreateEvidence(value: unknown): BlackboardCreateEvidence | undefined {
+  if (value === undefined) return undefined;
+  if (!isJsonObject(value) || typeof value.kind !== "string") throw new TypeError(RECORD_INVALID);
+  const keys = Object.keys(value).sort().join("\0");
+  if (value.kind === "ultra-assignment" && keys === "contentId\0gradeColumnId\0kind"
+    && typeof value.contentId === "string" && BLACKBOARD_ID.test(value.contentId)
+    && typeof value.gradeColumnId === "string" && BLACKBOARD_ID.test(value.gradeColumnId)) {
+    return { kind: value.kind, contentId: value.contentId, gradeColumnId: value.gradeColumnId };
+  }
+  if (value.kind === "course-group" && keys === "apiVersion\0groupId\0kind"
+    && (value.apiVersion === "v1" || value.apiVersion === "v2")
+    && typeof value.groupId === "string" && BLACKBOARD_ID.test(value.groupId)) {
+    return { kind: value.kind, apiVersion: value.apiVersion, groupId: value.groupId };
+  }
+  if (value.kind === "course-announcement" && keys === "announcementId\0kind"
+    && typeof value.announcementId === "string" && BLACKBOARD_ID.test(value.announcementId)) {
+    return { kind: value.kind, announcementId: value.announcementId };
+  }
+  throw new TypeError(RECORD_INVALID);
+}
+
+function parseEffects(value: unknown): { readonly revision: number; readonly value: Map<string, StoredEffect> } {
+  if (!isJsonObject(value) || ![EFFECT_STATE_SCHEMA, EFFECT_STATE_SCHEMA_V2, EFFECT_STATE_SCHEMA_V1].includes(String(value.schema)) || !Array.isArray(value.effects)
     || value.effects.length > MAX_EFFECTS) {
     throw new TypeError(RECORD_INVALID);
   }
+  const revision = value.schema === EFFECT_STATE_SCHEMA_V1
+    ? 0
+    : exactTime(value.revision);
   const effects = new Map<string, StoredEffect>();
   for (const entry of value.effects) {
     if (!isJsonObject(entry) || typeof entry.receiptId !== "string" || !RECEIPT_ID.test(entry.receiptId)
@@ -167,22 +211,24 @@ function parseEffects(value: unknown): Map<string, StoredEffect> {
       ...(target ? { target } : {}),
       claimedAt: exactTime(entry.claimedAt),
       updatedAt: exactTime(entry.updatedAt),
+      ...(entry.grantNotAfter === undefined ? {} : { grantNotAfter: exactTime(entry.grantNotAfter) }),
       ...(entry.finding !== undefined
         ? { finding: entry.finding as BlackboardEffectFinding, checkedAt: exactTime(entry.checkedAt) }
         : {}),
+      ...(entry.providerEvidence === undefined ? {} : { providerEvidence: exactCreateEvidence(entry.providerEvidence)! }),
     };
     const identity = key(stored.gatewayProcessId, stored.receiptId);
     if (effects.has(identity)) throw new TypeError(RECORD_INVALID);
     effects.set(identity, stored);
   }
-  return effects;
+  return { revision, value: effects };
 }
 
-function serializeEffects(effects: ReadonlyMap<string, StoredEffect>): string {
+function serializeEffects(revision: number, effects: ReadonlyMap<string, StoredEffect>): string {
   const ordered = [...effects.entries()]
     .sort((left, right) => (left[0] < right[0] ? -1 : 1))
     .map(([, effect]) => effect);
-  return `${JSON.stringify({ schema: EFFECT_STATE_SCHEMA, effects: ordered })}\n`;
+  return `${JSON.stringify({ schema: EFFECT_STATE_SCHEMA, revision, effects: ordered })}\n`;
 }
 
 /** Whether this record is still waiting for a person or for a fresh read. */
@@ -226,7 +272,8 @@ function sameTarget(effect: StoredEffect, target: BlackboardEffectTarget): boole
 export class BlackboardEffectReceipts {
   private readonly path: string;
   private readonly now: () => number;
-  private effects?: Map<string, StoredEffect>;
+  private memoryEffects = new Map<string, StoredEffect>();
+  private memoryRevision = 0;
 
   constructor(path: string = BLACKBOARD_EFFECT_STATE_IN_MEMORY, now: () => number = Date.now) {
     this.path = path;
@@ -244,14 +291,7 @@ export class BlackboardEffectReceipts {
    * this is the one-use rule.
    */
   assertUnspent(grant: BlackboardEffectGrant): void {
-    const spent = this.load().get(key(grant.gatewayProcessId, grant.effectReceiptId));
-    if (!spent) return;
-    throw new BlackboardApiError(
-      "blackboard_patch_review_required",
-      spent.phase === "reserved"
-        ? "This Blackboard effect grant was already dispatched."
-        : "This Blackboard effect grant was already dispatched, and Morrow sent that change to Blackboard. It sent nothing now.",
-    );
+    this.read((effects) => this.requireUnspent(effects, grant));
   }
 
   /**
@@ -261,12 +301,7 @@ export class BlackboardEffectReceipts {
    * then refuse.
    */
   assertTargetFree(target: BlackboardEffectTarget): void {
-    const holder = [...this.load().values()].find((effect) => unresolvedEffect(effect) && sameTarget(effect, target));
-    if (!holder) return;
-    throw new BlackboardApiError(
-      "blackboard_effect_unresolved",
-      `Morrow already sent a change to this Blackboard item and could not confirm what reached Blackboard, so it sent nothing now. Return to your assistant and ask Morrow to check that saved request (${holder.operationId}), or open the item in Blackboard and check it yourself. Do not repeat the change.`,
-    );
+    this.read((effects) => this.requireTargetFree(effects, target));
   }
 
   /**
@@ -275,20 +310,25 @@ export class BlackboardEffectReceipts {
    * unconfirmed change holds it afterwards.
    */
   claim(grant: BlackboardEffectGrant, target: BlackboardEffectTarget): BlackboardEffectDispatch {
-    this.assertUnspent(grant);
     const identity = key(grant.gatewayProcessId, grant.effectReceiptId);
-    const at = this.now();
-    this.write({
-      receiptId: grant.effectReceiptId,
-      gatewayProcessId: grant.gatewayProcessId,
-      operationId: grant.operationId,
-      phase: "reserved",
-      target,
-      claimedAt: at,
-      updatedAt: at,
+    this.change((effects) => {
+      this.requireUnspent(effects, grant);
+      this.requireTargetFree(effects, target);
+      const at = this.now();
+      effects.set(identity, {
+        receiptId: grant.effectReceiptId,
+        gatewayProcessId: grant.gatewayProcessId,
+        operationId: grant.operationId,
+        phase: "reserved",
+        target,
+        claimedAt: at,
+        updatedAt: at,
+        grantNotAfter: grant.notAfter,
+      });
     });
     return {
       markSent: () => this.advance(identity, "sent"),
+      recordProviderEvidence: (evidence) => this.recordProviderEvidence(identity, evidence),
       // A phase Morrow cannot write after the request has left keeps the
       // earlier phase, which is the safe direction: the record stays
       // unresolved and asks a person to look at the item.
@@ -303,19 +343,59 @@ export class BlackboardEffectReceipts {
    * and it is a read: Morrow sends no change here and repeats none.
    */
   recordComparison(target: BlackboardEffectTarget, verified: boolean): void {
-    const effects = this.load();
-    const held = [...effects.entries()].filter(([, effect]) => unresolvedEffect(effect) && sameTarget(effect, target));
-    if (held.length === 0) return;
-    const at = this.now();
-    for (const [, effect] of held) {
-      this.write({
+    this.change((effects) => {
+      const held = [...effects.entries()].filter(([, effect]) => unresolvedEffect(effect) && sameTarget(effect, target));
+      if (held.length === 0) return false;
+      const at = this.now();
+      for (const [identity, effect] of held) {
+        effects.set(identity, {
+          ...effect,
+          phase: verified ? "verified" : effect.phase,
+          finding: verified ? "reviewed_values_saved" : "reviewed_values_not_saved",
+          checkedAt: at,
+          updatedAt: at,
+        });
+      }
+      return true;
+    });
+  }
+
+  /** Reads provider create evidence only through its exact receipt and operation identity. */
+  createEvidence(
+    reference: BlackboardEffectReceiptReference,
+    target: BlackboardEffectTarget,
+    kind: BlackboardCreateEvidence["kind"],
+  ): BlackboardCreateEvidence | null {
+    return this.read((effects) => {
+      const effect = effects.get(key(reference.gatewayProcessId, reference.receiptId));
+      if (!effect || effect.operationId !== reference.operationId || !sameTarget(effect, target)
+        || effect.providerEvidence?.kind !== kind) return null;
+      return structuredClone(effect.providerEvidence);
+    });
+  }
+
+  /** Settles only the exact receipt whose persisted create identity was read. */
+  recordCreateComparison(
+    reference: BlackboardEffectReceiptReference,
+    target: BlackboardEffectTarget,
+    kind: BlackboardCreateEvidence["kind"],
+    verified: boolean,
+  ): void {
+    this.change((effects) => {
+      const identity = key(reference.gatewayProcessId, reference.receiptId);
+      const effect = effects.get(identity);
+      if (!effect || effect.operationId !== reference.operationId || !sameTarget(effect, target)
+        || effect.providerEvidence?.kind !== kind || !unresolvedEffect(effect)) return false;
+      const at = this.now();
+      effects.set(identity, {
         ...effect,
         phase: verified ? "verified" : effect.phase,
         finding: verified ? "reviewed_values_saved" : "reviewed_values_not_saved",
         checkedAt: at,
         updatedAt: at,
       });
-    }
+      return true;
+    });
   }
 
   /**
@@ -323,7 +403,8 @@ export class BlackboardEffectReceipts {
    * this to know which Blackboard items to open and check.
    */
   unresolved(): JsonObject {
-    const effects = [...this.load().values()]
+    return this.read((stored) => {
+      const effects = [...stored.values()]
       .filter((effect) => unresolvedEffect(effect))
       .sort((left, right) => left.claimedAt - right.claimedAt)
       .map((effect): JsonObject => ({
@@ -339,80 +420,102 @@ export class BlackboardEffectReceipts {
         startedAt: new Date(effect.claimedAt).toISOString(),
         updatedAt: new Date(effect.updatedAt).toISOString(),
       }));
-    return {
-      schema: "morrow.blackboard.unresolved-effects.v1",
-      ok: true,
-      effects,
-      count: effects.length,
-      status: "api_configured_live_untested",
-    };
+      return {
+        schema: "morrow.blackboard.unresolved-effects.v1",
+        ok: true,
+        effects,
+        count: effects.length,
+        status: "api_configured_live_untested",
+      };
+    });
   }
 
   private advance(identity: string, phase: BlackboardEffectPhase): void {
-    const effect = this.load().get(identity);
-    if (!effect) throw new TypeError(RECORD_INVALID);
-    this.write({ ...effect, phase, updatedAt: this.now() });
+    this.change((effects) => {
+      const effect = effects.get(identity);
+      if (!effect) throw new TypeError(RECORD_INVALID);
+      const allowed = (effect.phase === "reserved" && phase === "sent")
+        || (effect.phase === "sent" && (phase === "verified" || phase === "uncertain"));
+      if (!allowed) throw new TypeError(RECORD_INVALID);
+      effects.set(identity, { ...effect, phase, updatedAt: this.now() });
+    });
   }
 
-  private load(): Map<string, StoredEffect> {
-    if (this.effects) return this.effects;
-    if (!this.durable) {
-      this.effects = new Map();
-      return this.effects;
-    }
+  private recordProviderEvidence(identity: string, evidenceValue: BlackboardCreateEvidence): void {
+    const evidence = exactCreateEvidence(evidenceValue)!;
+    this.change((effects) => {
+      const effect = effects.get(identity);
+      if (!effect || effect.phase !== "sent" || effect.providerEvidence !== undefined) throw new TypeError(RECORD_INVALID);
+      effects.set(identity, { ...effect, providerEvidence: evidence, updatedAt: this.now() });
+    });
+  }
+
+  private requireUnspent(effects: ReadonlyMap<string, StoredEffect>, grant: BlackboardEffectGrant): void {
+    const spent = effects.get(key(grant.gatewayProcessId, grant.effectReceiptId));
+    if (!spent) return;
+    throw new BlackboardApiError(
+      "blackboard_patch_review_required",
+      spent.phase === "reserved"
+        ? "This Blackboard effect grant was already dispatched."
+        : "This Blackboard effect grant was already dispatched, and Morrow sent that change to Blackboard. It sent nothing now.",
+    );
+  }
+
+  private requireTargetFree(effects: ReadonlyMap<string, StoredEffect>, target: BlackboardEffectTarget): void {
+    const holder = [...effects.values()].find((effect) => unresolvedEffect(effect) && sameTarget(effect, target));
+    if (!holder) return;
+    throw new BlackboardApiError(
+      "blackboard_effect_unresolved",
+      `Morrow already sent a change to this Blackboard item and could not confirm what reached Blackboard, so it sent nothing now. Return to your assistant and ask Morrow to check that saved request (${holder.operationId}), or open the item in Blackboard and check it yourself. Do not repeat the change.`,
+    );
+  }
+
+  private currentState(): { readonly revision: number; readonly value: Map<string, StoredEffect> } {
+    if (!this.durable) return { revision: this.memoryRevision, value: new Map(this.memoryEffects) };
+    return readDurableJsonState(this.path, MAX_STATE_BYTES, parseEffects, () => new Map());
+  }
+
+  private read<T>(action: (effects: ReadonlyMap<string, StoredEffect>) => T): T {
     try {
-      let effects = new Map<string, StoredEffect>();
-      try {
-        const metadata = lstatSync(this.path);
-        if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_STATE_BYTES
-          || !privateFileAccessAccepted(this.path, metadata.mode)) {
-          throw new TypeError("Blackboard effect record is not one exact private file");
+      if (!this.durable) return action(this.memoryEffects);
+      return withDurableStateTransaction(this.path, () => action(this.currentState().value), this.now);
+    } catch (error) {
+      if (error instanceof BlackboardApiError) throw error;
+      throw this.unusable(error);
+    }
+  }
+
+  private change(action: (effects: Map<string, StoredEffect>) => void | boolean): void {
+    try {
+      const transact = (): void => {
+        const state = this.currentState();
+        const effects = state.value;
+        const changed = action(effects);
+        if (changed === false) return;
+        const now = this.now();
+        for (const [identity, stored] of effects) {
+          const expiredAudit = stored.updatedAt + SETTLED_RETENTION_MS <= now;
+          const grantExpired = stored.grantNotAfter !== undefined && stored.grantNotAfter <= now;
+          if (!unresolvedEffect(stored) && expiredAudit && grantExpired) effects.delete(identity);
         }
-        effects = parseEffects(JSON.parse(readFileSync(this.path, "utf8")) as unknown);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      }
-      this.effects = effects;
-      return effects;
+        if (effects.size > MAX_EFFECTS) throw new TypeError(RECORD_FULL);
+        const revision = state.revision + 1;
+        if (!Number.isSafeInteger(revision)) throw new TypeError(RECORD_INVALID);
+        if (this.durable) replaceDurableState(this.path, serializeEffects(revision, effects));
+        else {
+          this.memoryEffects = effects;
+          this.memoryRevision = revision;
+        }
+      };
+      if (this.durable) withDurableStateTransaction(this.path, transact, this.now);
+      else transact();
     } catch (error) {
+      if (error instanceof BlackboardApiError) throw error;
       throw this.unusable(error);
     }
-  }
-
-  /**
-   * Replaces one row and writes the record. Settled rows older than the
-   * retention window are dropped as it is written; an unconfirmed row is kept
-   * however old it is.
-   */
-  private write(effect: StoredEffect): void {
-    const effects = this.load();
-    const identity = key(effect.gatewayProcessId, effect.receiptId);
-    const kept = new Map<string, StoredEffect>();
-    const oldest = this.now() - SETTLED_RETENTION_MS;
-    for (const [candidate, stored] of effects) {
-      if (candidate === identity || unresolvedEffect(stored) || stored.updatedAt >= oldest) kept.set(candidate, stored);
-    }
-    if (!kept.has(identity) && kept.size >= MAX_EFFECTS) throw this.unusable(new TypeError(RECORD_FULL));
-    kept.set(identity, effect);
-    try {
-      if (this.durable) {
-        mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-        const temporary = `${this.path}.tmp-${process.pid}`;
-        writeFileSync(temporary, serializeEffects(kept), { encoding: "utf8", mode: 0o600 });
-        renameSync(temporary, this.path);
-        try { chmodSync(this.path, 0o600); } catch { /* best effort on non-POSIX filesystems */ }
-      }
-    } catch (error) {
-      // The record on disk is the one that counts. A row Morrow could not write
-      // is not a row it may act on, so the next call reads the file again.
-      this.effects = undefined;
-      throw this.unusable(error);
-    }
-    this.effects = kept;
   }
 
   private unusable(error: unknown): BlackboardApiError {
-    this.effects = undefined;
     const detail = error instanceof Error && error.message === RECORD_FULL
       ? "Its record of the Blackboard changes it has already sent is full."
       : "It could not read or write that record as one exact private file.";

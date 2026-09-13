@@ -11,6 +11,7 @@
     { "path": "../contracts" },
     { "path": "../canvas-api-catalog" },
     { "path": "../bridge-protocol" },
-    { "path": "../bridge-loopback" }
+    { "path": "../bridge-loopback" },
+    { "path": "../gateway-core" }
   ]
 }

@@ -120,6 +120,7 @@ test("one section is added, removed, or placed exactly, against the complete cou
   let origin = "";
   let browser;
   let model;
+  let stallNextUpdateResponse = false;
 
   const activity = (values) => ({
     visible: true, stealth: false, hasdelegatedsection: false, uservisible: true, accessvisible: true,
@@ -250,6 +251,10 @@ test("one section is added, removed, or placed exactly, against the complete cou
         }
         if (model.formatAfterUpdate) model.format = model.formatAfterUpdate;
         if (model.formUnreadableAfterUpdate) model.courseFormReadable = false;
+        if (stallNextUpdateResponse) {
+          stallNextUpdateResponse = false;
+          return;
+        }
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify([{ data: null }]));
         return;
@@ -518,6 +523,29 @@ test("one section is added, removed, or placed exactly, against the complete cou
     });
     assert.equal(updates.length, 1);
     assert.equal(model.section.some((entry) => entry.id === "7"), false);
+
+    // A provider that accepts the write but never returns response headers is
+    // aborted at the operation deadline and remains applied_or_unknown.
+    model = initialModel();
+    updates.length = 0;
+    const stalledDigest = await reviewedDigest();
+    stallNextUpdateResponse = true;
+    const stalledAt = Date.now();
+    const stalled = await execute(
+      operations.remove,
+      { course_id: 2, section_id: 7, expected_digest: stalledDigest },
+      Date.now() + 500,
+    );
+    assert.deepEqual(stalled, {
+      ok: false,
+      sent: true,
+      outcomeUnknown: true,
+      verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_section_write_unconfirmed" },
+      error: "moodle_section_write_unconfirmed",
+    });
+    assert.equal(updates.length, 1);
+    assert.equal(model.section.some((entry) => entry.id === "7"), false);
+    assert.ok(Date.now() - stalledAt < 2_000);
 
     // A course format that changes under the action, and a course settings form
     // that stops answering after it, are both unconfirmed rather than verified.

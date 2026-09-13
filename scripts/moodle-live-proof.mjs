@@ -22,7 +22,7 @@
  */
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpsServer } from "node:https";
@@ -34,6 +34,14 @@ import { chromium } from "playwright";
 import { executeMoodleInPage } from "../connector/extension/src/moodle-executor.js";
 import { collectMoodleCourseParticipantRoster } from "../connector/extension/src/moodle-privacy.js";
 import { bridgeWriteFailureCode } from "../connector/extension/src/canvas-write-outcome.js";
+import {
+  PRIVATE_BRIDGE_OPERATION_CONTRACTS,
+  bridgeCatalogCompatibilityContract,
+  browserCatalogCompatibilityContract,
+  canvasApiCompatibilityContract,
+  privateBridgeCompatibilityContract,
+  stableJson,
+} from "../connector/extension/src/catalog-compatibility.js";
 
 const root = resolve(import.meta.dirname, "..");
 const require = createRequire(import.meta.url);
@@ -48,6 +56,11 @@ const EXTENSION_ID = "a".repeat(32);
 const BRIDGE_TOKEN = "morrow-live-proof-bridge-token-".repeat(2);
 const read = (relativePath) => readFileSync(join(root, relativePath), "utf8");
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+const proofPayload = (direction, authentication, serverNonce) => JSON.stringify([
+  `morrow.bridge.${direction}-proof.v1`, BRIDGE_PROTOCOL_VERSION, BRIDGE_PATH,
+  authentication.clientNonce, serverNonce, authentication.extensionId,
+  authentication.runtimeRevision, authentication.catalogDigest,
+]);
 
 /** The one write class this file can serve locally. Every other operation needs a real target. */
 const FIXTURE_CLASS = Object.freeze({
@@ -121,11 +134,16 @@ function loadCatalog() {
  * any other value is refused by a socket close, not by an error.
  */
 function bridgeCatalogDigest() {
-  const canvas = JSON.parse(read("artifacts/canvas-api/canvas-api-catalog.json")).catalogDigest;
-  assert.match(String(canvas), /^[0-9a-f]{64}$/, "the Canvas API catalog carries no digest");
-  const canvasBrowser = sha256(readFileSync(join(root, "connector/extension/generated/canvas-browser-catalog.json")));
-  const moodle = sha256(readFileSync(join(root, CATALOG_PATH)));
-  return sha256(`${canvas}\n${canvasBrowser}\n${moodle}`);
+  const canvas = JSON.parse(read("artifacts/canvas-api/canvas-api-catalog.json"));
+  const canvasBrowser = JSON.parse(read("connector/extension/generated/canvas-browser-catalog.json"));
+  const moodle = JSON.parse(read(CATALOG_PATH));
+  const compatibilityDigest = (value) => sha256(stableJson(value));
+  return compatibilityDigest(bridgeCatalogCompatibilityContract(
+    compatibilityDigest(canvasApiCompatibilityContract(canvas)),
+    compatibilityDigest(browserCatalogCompatibilityContract(canvasBrowser)),
+    compatibilityDigest(browserCatalogCompatibilityContract(moodle)),
+    compatibilityDigest(privateBridgeCompatibilityContract(PRIVATE_BRIDGE_OPERATION_CONTRACTS)),
+  ));
 }
 
 /** A recorded route keeps its path and its shape. Session material never reaches a receipt. */
@@ -311,6 +329,32 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
     });
   });
   const send = (message) => socket.send(JSON.stringify(message));
+  const authentication = {
+    schema: "morrow.bridge.authenticate.v1",
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    clientNonce: randomBytes(32).toString("hex"),
+    extensionId: EXTENSION_ID,
+    runtimeRevision: RUNTIME_REVISION,
+    catalogDigest: binding.catalogDigest,
+    sentAt: Date.now(),
+  };
+  const challenge = await new Promise((done, fail) => {
+    const deadline = setTimeout(() => fail(new Error("the bridge did not prove its identity")), 10_000);
+    socket.on("message", function accept(raw) {
+      const value = JSON.parse(raw.toString());
+      if (value?.schema !== "morrow.bridge.challenge.v1") return;
+      socket.off("message", accept);
+      clearTimeout(deadline);
+      done(value);
+    });
+    send(authentication);
+  });
+  const expectedServerProof = createHmac("sha256", BRIDGE_TOKEN)
+    .update(proofPayload("server", authentication, challenge.serverNonce))
+    .digest("hex");
+  if (challenge.clientNonce !== authentication.clientNonce || challenge.serverProof !== expectedServerProof) {
+    throw new Error("the bridge server identity proof did not match");
+  }
   const ready = await new Promise((done, fail) => {
     const deadline = setTimeout(() => fail(new Error("the bridge did not accept the handshake")), 10_000);
     socket.on("message", function accept(raw) {
@@ -327,7 +371,11 @@ async function connectHarnessConnector({ port, binding, page, expiresAt, command
     send({
       schema: "morrow.bridge.hello.v1",
       protocolVersion: BRIDGE_PROTOCOL_VERSION,
-      token: BRIDGE_TOKEN,
+      clientNonce: authentication.clientNonce,
+      serverNonce: challenge.serverNonce,
+      clientProof: createHmac("sha256", BRIDGE_TOKEN)
+        .update(proofPayload("client", authentication, challenge.serverNonce))
+        .digest("hex"),
       extensionId: EXTENSION_ID,
       runtimeRevision: RUNTIME_REVISION,
       catalogDigest: binding.catalogDigest,

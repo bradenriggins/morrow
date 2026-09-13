@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import {
   BRIDGE_PATH,
@@ -7,6 +7,7 @@ import {
   BRIDGE_SCHEMAS,
   MAX_BRIDGE_MESSAGE_BYTES,
   MIN_BRIDGE_TOKEN_LENGTH,
+  bridgeAuthenticationProofPayload,
   createBridgeProblem,
   matchesBridgeEditPermission,
   normalizeBridgeEditPolicySet,
@@ -17,10 +18,14 @@ import {
   normalizeBridgePrivateAttachments,
   normalizeBridgePrivateConversation,
   parseBridgeClientMessage,
+  parseBridgeAuthenticate,
   parseBridgeHello,
   parseBridgeJson,
   serializeBridgeMessage,
   type BridgeBinding,
+  type BridgeAuthenticate,
+  type BridgeChallenge,
+  type BridgeCancel,
   type BridgeProvider,
   type BridgeClientMessage,
   type BridgeCommand,
@@ -44,6 +49,7 @@ const LOOPBACK_HOST = "127.0.0.1";
 const DEFAULT_AUTH_TIMEOUT_MS = 5_000;
 const DEFAULT_CALL_TIMEOUT_MS = 45_000;
 const DEFAULT_HEARTBEAT_MS = 20_000;
+const DEFAULT_SHUTDOWN_GRACE_MS = 250;
 const MAX_PAIRING_REQUESTS = 32;
 /**
  * How many sent effect receipts one bridge process remembers. The record never
@@ -95,6 +101,7 @@ export interface LoopbackBridgeOptions {
   readonly authTimeoutMs?: number;
   readonly callTimeoutMs?: number;
   readonly heartbeatMs?: number;
+  readonly shutdownGraceMs?: number;
   readonly allowMissingOriginForTests?: boolean;
   /** How many sent effect receipts this bridge remembers. Default 20000. */
   readonly writeReceiptCapacity?: number;
@@ -117,6 +124,8 @@ export interface BridgeInvocation {
   readonly operationId?: string;
   readonly outerGrant?: BridgeOuterGrant;
   readonly timeoutMs?: number;
+  /** Cancellation is acknowledged by the extension before any definite effect result is reported. */
+  readonly signal?: AbortSignal;
 }
 
 /**
@@ -150,7 +159,7 @@ export interface LoopbackBridgeHealth {
 
 interface PendingRequest {
   readonly command: BridgeCommand;
-  readonly timer: NodeJS.Timeout;
+  timer: NodeJS.Timeout;
   readonly resolve: (result: BridgeResult) => void;
   readonly reject: (error: Error) => void;
 }
@@ -241,6 +250,19 @@ export class BridgeOutcomeUnknownError extends Error {
   }
 }
 
+export class BridgeRequestCancelledError extends Error {
+  readonly code = "bridge_request_cancelled";
+  readonly requestId: string;
+  readonly operationId: string;
+
+  constructor(command: BridgeCommand) {
+    super("The local Bridge request was cancelled.");
+    this.name = "BridgeRequestCancelledError";
+    this.requestId = command.requestId;
+    this.operationId = command.operationId;
+  }
+}
+
 function exactPort(value: number | undefined): number {
   if (value === undefined) return 0;
   if (!Number.isInteger(value) || value < 0 || value > 65_535) {
@@ -273,10 +295,21 @@ function tokenBytes(token: string): Buffer {
   return Buffer.from(normalized, "utf8");
 }
 
-function constantTimeTokenEquals(expected: Buffer, actual: string): boolean {
-  const candidate = Buffer.from(String(actual || "").trim(), "utf8");
-  if (candidate.length !== expected.length) return false;
-  return timingSafeEqual(candidate, expected);
+function authenticationProof(
+  token: Buffer,
+  direction: "server" | "client",
+  authentication: BridgeAuthenticate,
+  serverNonce: string,
+): string {
+  return createHmac("sha256", token)
+    .update(bridgeAuthenticationProofPayload(direction, authentication, serverNonce), "utf8")
+    .digest("hex");
+}
+
+function constantTimeHexEquals(expected: string, actual: string): boolean {
+  const candidate = Buffer.from(String(actual || ""), "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  return candidate.length === expectedBytes.length && timingSafeEqual(candidate, expectedBytes);
 }
 
 function originExtensionId(origin: string | undefined): string | null {
@@ -284,16 +317,36 @@ function originExtensionId(origin: string | undefined): string | null {
   return EXTENSION_ORIGIN.exec(origin.trim())?.[1] || null;
 }
 
-function rawText(data: RawData): string {
-  if (typeof data === "string") return data;
-  if (Buffer.isBuffer(data)) return data.toString("utf8");
-  if (Array.isArray(data)) return Buffer.concat(data).toString("utf8");
-  return Buffer.from(data).toString("utf8");
+function strictUtf8(data: Uint8Array): string {
+  return new TextDecoder("utf-8", { fatal: true }).decode(data);
 }
 
-function send(socket: WebSocket, message: BridgeReady | BridgeCommand | BridgePing): void {
+function rawText(data: RawData): string {
+  if (typeof data === "string") return data;
+  if (Buffer.isBuffer(data)) return strictUtf8(data);
+  if (Array.isArray(data)) return strictUtf8(Buffer.concat(data));
+  return strictUtf8(Buffer.from(data));
+}
+
+function send(socket: WebSocket, message: BridgeChallenge | BridgeReady | BridgeCommand | BridgePing | BridgeCancel): void {
   if (socket.readyState !== WebSocket.OPEN) throw new BridgeUnavailableError();
   socket.send(serializeBridgeMessage(message));
+}
+
+function completesWithin(completion: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let finished = false;
+    const timer = setTimeout(() => {
+      finished = true;
+      resolve(false);
+    }, timeoutMs);
+    timer.unref?.();
+    void completion.then(() => {
+      if (finished) return;
+      clearTimeout(timer);
+      resolve(true);
+    });
+  });
 }
 
 export class LoopbackBridgeServer {
@@ -305,6 +358,7 @@ export class LoopbackBridgeServer {
   private readonly authTimeoutMs: number;
   private readonly callTimeoutMs: number;
   private readonly heartbeatMs: number;
+  private readonly shutdownGraceMs: number;
   private readonly allowMissingOriginForTests: boolean;
   private readonly pairingEnabled: boolean;
   private readonly onPairApproved: ((extensionId: string) => void | Promise<void>) | undefined;
@@ -320,12 +374,16 @@ export class LoopbackBridgeServer {
   private readonly writeReceiptCapacity: number;
   private readonly httpServer: HttpServer;
   private readonly webSocketServer: WebSocketServer;
+  private readonly acceptedSockets = new Set<WebSocket>();
+  private readonly authenticationTimers = new Map<WebSocket, NodeJS.Timeout>();
   private active: ActiveClient | null = null;
   private generation = 0;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private listeningPort: number | null = null;
   private started = false;
   private portInUse = false;
+  private closing = false;
+  private closePromise: Promise<void> | null = null;
 
   constructor(options: LoopbackBridgeOptions) {
     this.expectedToken = tokenBytes(options.token);
@@ -344,6 +402,7 @@ export class LoopbackBridgeServer {
     this.authTimeoutMs = exactTimeout(options.authTimeoutMs, DEFAULT_AUTH_TIMEOUT_MS, "authTimeoutMs");
     this.callTimeoutMs = exactTimeout(options.callTimeoutMs, DEFAULT_CALL_TIMEOUT_MS, "callTimeoutMs");
     this.heartbeatMs = exactTimeout(options.heartbeatMs, DEFAULT_HEARTBEAT_MS, "heartbeatMs");
+    this.shutdownGraceMs = exactTimeout(options.shutdownGraceMs, DEFAULT_SHUTDOWN_GRACE_MS, "shutdownGraceMs");
     this.writeReceiptCapacity = exactCapacity(options.writeReceiptCapacity);
     this.allowMissingOriginForTests = options.allowMissingOriginForTests === true;
     this.pairingEnabled = options.pairingEnabled === true;
@@ -357,6 +416,10 @@ export class LoopbackBridgeServer {
     });
     this.webSocketServer = new WebSocketServer({ noServer: true, maxPayload: MAX_BRIDGE_MESSAGE_BYTES });
     this.httpServer.on("upgrade", (request, socket, head) => {
+      if (this.closing) {
+        socket.destroy();
+        return;
+      }
       const host = request.headers.host || `${LOOPBACK_HOST}:${this.requestedPort}`;
       let url: URL;
       try {
@@ -383,8 +446,26 @@ export class LoopbackBridgeServer {
       });
     });
     this.webSocketServer.on("connection", (socket, request) => {
+      this.acceptedSockets.add(socket);
+      socket.on("error", () => undefined);
+      socket.once("close", () => {
+        this.clearAuthenticationTimer(socket);
+        this.acceptedSockets.delete(socket);
+        if (this.active?.socket === socket) this.disconnectActive("The extension bridge disconnected after a command may have been sent.");
+      });
+      if (this.closing) {
+        socket.close(1001, "server_shutdown");
+        return;
+      }
       this.acceptUnauthenticated(socket, originExtensionId(request.headers.origin));
     });
+  }
+
+  private clearAuthenticationTimer(socket: WebSocket): void {
+    const timer = this.authenticationTimers.get(socket);
+    if (!timer) return;
+    clearTimeout(timer);
+    this.authenticationTimers.delete(socket);
   }
 
   private responseHeaders(contentType: string, origin?: string): Record<string, string> {
@@ -417,7 +498,7 @@ export class LoopbackBridgeServer {
       if (total > 16_384) throw new RangeError("request body is too large");
       chunks.push(bytes);
     }
-    return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}");
+    return JSON.parse(strictUtf8(Buffer.concat(chunks)) || "{}");
   }
 
   private pairingOrigin(request: IncomingMessage): { origin: string; extensionId: string } | null {
@@ -567,7 +648,12 @@ export class LoopbackBridgeServer {
         if (total > 16_384) return this.json(response, 413, { error: "request_too_large" });
         bytes.push(value);
       }
-      const decision = new URLSearchParams(Buffer.concat(bytes).toString("utf8")).get("decision");
+      let decision: string | null;
+      try {
+        decision = new URLSearchParams(strictUtf8(Buffer.concat(bytes))).get("decision");
+      } catch {
+        return this.json(response, 400, { error: "invalid_decision" });
+      }
       if (!["approve", "deny"].includes(decision || "")) return this.json(response, 400, { error: "invalid_decision" });
       if (decision === "approve") {
         this.pairingDecisions.add(pairing.pairingId);
@@ -591,6 +677,7 @@ export class LoopbackBridgeServer {
   }
 
   async start(): Promise<{ host: typeof LOOPBACK_HOST; port: number; path: typeof BRIDGE_PATH }> {
+    if (this.closing) throw new Error("bridge server is closed");
     if (this.started) {
       if (this.listeningPort === null) throw new Error("bridge start is still pending");
       return { host: LOOPBACK_HOST, port: this.listeningPort, path: BRIDGE_PATH };
@@ -622,12 +709,19 @@ export class LoopbackBridgeServer {
 
   private acceptUnauthenticated(socket: WebSocket, originId: string | null): void {
     let authenticated = false;
+    let authentication: { request: BridgeAuthenticate; serverNonce: string } | null = null;
     const authTimer = setTimeout(() => {
+      this.authenticationTimers.delete(socket);
       if (!authenticated) socket.close(4401, "authentication_required");
     }, this.authTimeoutMs);
+    this.authenticationTimers.set(socket, authTimer);
     authTimer.unref?.();
 
-    const onMessage = (data: RawData) => {
+    const onMessage = (data: RawData, isBinary: boolean) => {
+      if (isBinary) {
+        socket.close(4400, "invalid_message");
+        return;
+      }
       let value: unknown;
       try {
         value = parseBridgeJson(rawText(data));
@@ -636,6 +730,35 @@ export class LoopbackBridgeServer {
         return;
       }
       if (!authenticated) {
+        if (!authentication) {
+          let request: BridgeAuthenticate;
+          try {
+            request = parseBridgeAuthenticate(value);
+          } catch {
+            socket.close(4401, "authentication_request_required");
+            return;
+          }
+          if (
+            request.runtimeRevision !== this.expectedRuntimeRevision
+            || request.catalogDigest !== this.expectedCatalogDigest
+            || (originId && request.extensionId !== originId)
+            || (this.allowedExtensionIds.size > 0 && !this.allowedExtensionIds.has(request.extensionId))
+          ) {
+            socket.close(4403, "bridge_identity_refused");
+            return;
+          }
+          const serverNonce = randomBytes(32).toString("hex");
+          authentication = { request, serverNonce };
+          send(socket, {
+            schema: BRIDGE_SCHEMAS.challenge,
+            protocolVersion: BRIDGE_PROTOCOL_VERSION,
+            clientNonce: request.clientNonce,
+            serverNonce,
+            serverProof: authenticationProof(this.expectedToken, "server", request, serverNonce),
+            issuedAt: Date.now(),
+          });
+          return;
+        }
         let hello: BridgeHello;
         try {
           hello = parseBridgeHello(value);
@@ -644,28 +767,27 @@ export class LoopbackBridgeServer {
           return;
         }
         if (
-          !constantTimeTokenEquals(this.expectedToken, hello.token)
-          || hello.runtimeRevision !== this.expectedRuntimeRevision
-          || hello.catalogDigest !== this.expectedCatalogDigest
-          || (originId && hello.extensionId !== originId)
-          || (this.allowedExtensionIds.size > 0 && !this.allowedExtensionIds.has(hello.extensionId))
+          hello.clientNonce !== authentication.request.clientNonce
+          || hello.serverNonce !== authentication.serverNonce
+          || hello.extensionId !== authentication.request.extensionId
+          || hello.runtimeRevision !== authentication.request.runtimeRevision
+          || hello.catalogDigest !== authentication.request.catalogDigest
+          || !constantTimeHexEquals(
+            authenticationProof(this.expectedToken, "client", authentication.request, authentication.serverNonce),
+            hello.clientProof,
+          )
         ) {
           socket.close(4403, "bridge_identity_refused");
           return;
         }
         authenticated = true;
-        clearTimeout(authTimer);
+        this.clearAuthenticationTimer(socket);
         this.activate(socket, hello);
         return;
       }
       this.handleClientMessage(socket, value);
     };
     socket.on("message", onMessage);
-    socket.on("error", () => undefined);
-    socket.on("close", () => {
-      clearTimeout(authTimer);
-      if (this.active?.socket === socket) this.disconnectActive("The extension bridge disconnected after a command may have been sent.");
-    });
   }
 
   private activate(socket: WebSocket, hello: BridgeHello): void {
@@ -763,11 +885,11 @@ export class LoopbackBridgeServer {
     }
   }
 
-  private disconnectActive(message: string): void {
+  private disconnectActive(message: string, rejectEveryPendingRequest = false): void {
     const active = this.active;
     this.active = null;
     for (const [requestId, pending] of this.pending) {
-      if (!active || pending.command.generation === active.generation) {
+      if (rejectEveryPendingRequest || !active || pending.command.generation === active.generation) {
         clearTimeout(pending.timer);
         this.pending.delete(requestId);
         pending.reject(new BridgeOutcomeUnknownError(pending.command, message));
@@ -776,6 +898,7 @@ export class LoopbackBridgeServer {
   }
 
   async invoke(invocation: BridgeInvocation): Promise<BridgeResult> {
+    invocation.signal?.throwIfAborted();
     const active = this.active;
     if (!active || active.socket.readyState !== WebSocket.OPEN) throw this.unavailable();
     if (invocation.arguments && (Object.hasOwn(invocation.arguments, "privateAttachment") || Object.hasOwn(invocation.arguments, "privateAttachments") || Object.hasOwn(invocation.arguments, "privateConversation"))) {
@@ -923,6 +1046,7 @@ export class LoopbackBridgeServer {
         kind: "edit_policy_options_get",
         sourceBindingId: selectedBinding.sourceBindingId,
         operationId: `edit-options:${randomUUID()}`,
+        ...(invocation.signal ? { signal: invocation.signal } : {}),
       });
       if (!detailResponse.ok || !detailResponse.result) {
         throw new BridgeUnavailableError("Morrow could not read the current Edit permission for this course. Create a fresh plan from the current binding.");
@@ -948,6 +1072,7 @@ export class LoopbackBridgeServer {
         throw new BridgeUnavailableError("The current edit permission no longer authorizes this change. Create a fresh plan from the current binding.");
       }
     }
+    invocation.signal?.throwIfAborted();
     if (this.active !== active || active.socket.readyState !== WebSocket.OPEN) {
       throw new BridgeUnavailableError("The exact course connection changed before this command could be sent. Create a fresh plan from a current binding.");
     }
@@ -991,21 +1116,77 @@ export class LoopbackBridgeServer {
       expiresAt: now + timeoutMs,
     };
     return await new Promise<BridgeResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
+      let timer: NodeJS.Timeout;
+      let commandSent = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        invocation.signal?.removeEventListener("abort", onAbort);
+      };
+      const resolvePending = (result: BridgeResult) => {
+        cleanup();
+        resolve(result);
+      };
+      const rejectPending = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      const onAbort = () => {
+        const pending = this.pending.get(requestId);
+        if (!pending || pending.command !== command) return;
+        if (!commandSent || invocation.kind === "private_chat_exchange") {
+          this.pending.delete(requestId);
+        }
+        if (commandSent && this.active === active && active.socket.readyState === WebSocket.OPEN) {
+          try {
+            send(active.socket, {
+              schema: BRIDGE_SCHEMAS.cancel,
+              protocolVersion: BRIDGE_PROTOCOL_VERSION,
+              requestId,
+              operationId,
+              generation: active.generation,
+              cancelledAt: Date.now(),
+            });
+          } catch {
+            // The bounded acknowledgement deadline below decides the final state.
+          }
+        }
+        if (!commandSent || invocation.kind === "private_chat_exchange") {
+          rejectPending(new BridgeRequestCancelledError(command));
+          return;
+        }
+        clearTimeout(pending.timer);
+        pending.timer = setTimeout(() => {
+          if (this.pending.get(requestId) !== pending) return;
+          this.pending.delete(requestId);
+          rejectPending(["invoke_write", "stage_write"].includes(command.kind)
+            ? new BridgeOutcomeUnknownError(
+              command,
+              "The extension did not acknowledge cancellation before the provider effect may have started.",
+            )
+            : new BridgeRequestCancelledError(command));
+        }, Math.min(5_000, Math.max(250, command.expiresAt - Date.now())));
+        pending.timer.unref?.();
+      };
+      timer = setTimeout(() => {
         this.pending.delete(requestId);
-        reject(new BridgeOutcomeUnknownError(
+        rejectPending(new BridgeOutcomeUnknownError(
           command,
           "The extension did not return a result before the bridge deadline. Morrow did not resend the command.",
         ));
       }, timeoutMs);
       timer.unref?.();
-      this.pending.set(requestId, { command, timer, resolve, reject });
+      this.pending.set(requestId, { command, timer, resolve: resolvePending, reject: rejectPending });
+      invocation.signal?.addEventListener("abort", onAbort, { once: true });
+      if (invocation.signal?.aborted) {
+        onAbort();
+        return;
+      }
       try {
         send(active.socket, command);
+        commandSent = true;
       } catch (error) {
-        clearTimeout(timer);
         this.pending.delete(requestId);
-        reject(error instanceof Error ? error : new BridgeUnavailableError());
+        rejectPending(error instanceof Error ? error : new BridgeUnavailableError());
       }
     });
   }
@@ -1042,22 +1223,56 @@ export class LoopbackBridgeServer {
     };
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closing = true;
+    this.closePromise = this.closeOwnedResources();
+    return this.closePromise;
+  }
+
+  private async closeOwnedResources(): Promise<void> {
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
     this.heartbeatTimer = null;
-    const active = this.active;
-    if (active) active.socket.close(1001, "server_shutdown");
-    this.disconnectActive("The extension bridge server closed.");
-    await new Promise<void>((resolve) => this.webSocketServer.close(() => resolve()));
-    if (this.started) {
-      await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
-    }
+    for (const timer of this.authenticationTimers.values()) clearTimeout(timer);
+    this.authenticationTimers.clear();
+    const wasStarted = this.started;
     this.started = false;
     this.listeningPort = null;
+    const webSocketClosed = new Promise<void>((resolve) => this.webSocketServer.close(() => resolve()));
+    const httpClosed = wasStarted
+      ? new Promise<void>((resolve) => this.httpServer.close(() => resolve()))
+      : Promise.resolve();
+    for (const socket of [...this.acceptedSockets]) {
+      try {
+        if (socket.readyState === WebSocket.OPEN) socket.close(1001, "server_shutdown");
+        else if (socket.readyState === WebSocket.CONNECTING) socket.terminate();
+      } catch {
+        socket.terminate();
+      }
+    }
+    this.disconnectActive("The extension bridge server closed.", true);
+    const closed = Promise.all([webSocketClosed, httpClosed]);
+    if (!await completesWithin(closed, this.shutdownGraceMs)) {
+      for (const socket of [...this.acceptedSockets]) socket.terminate();
+      this.httpServer.closeAllConnections();
+      await completesWithin(closed, this.shutdownGraceMs);
+    }
+    for (const socket of [...this.acceptedSockets]) {
+      if (socket.readyState !== WebSocket.CLOSED) socket.terminate();
+    }
+    this.acceptedSockets.clear();
   }
 }
 
 export function bridgeFailureResult(error: unknown): BridgeResult["problem"] {
+  if (error instanceof BridgeRequestCancelledError) {
+    return createBridgeProblem(
+      error.code,
+      "The local Bridge request was cancelled.",
+      true,
+      { requestId: error.requestId, operationId: error.operationId },
+    );
+  }
   if (error instanceof BridgeOutcomeUnknownError) {
     return createBridgeProblem(
       error.code,

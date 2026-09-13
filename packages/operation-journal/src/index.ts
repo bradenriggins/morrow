@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
+import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
 
 export const GATEWAY_OPERATION_STATES = Object.freeze([
   "prepared",
@@ -24,6 +23,9 @@ export interface PrepareGatewayOperationInput {
   readonly sourceOperationId?: string;
   readonly idempotencyKey?: string;
   readonly readOnly: boolean;
+  readonly sourceBindingId?: string;
+  readonly targetIdentityDigest?: string;
+  readonly actorDigest?: string;
 }
 
 export interface CompleteGatewayOperationInput {
@@ -31,6 +33,7 @@ export interface CompleteGatewayOperationInput {
   readonly normalizedResultDigest: string;
   readonly sourceResultState?: string;
   readonly sourceTaskId?: string;
+  readonly responseSucceeded?: boolean;
 }
 
 export interface GatewayOperationRecord {
@@ -45,7 +48,12 @@ export interface GatewayOperationRecord {
   readonly sourceOperationId: string | null;
   readonly idempotencyKey: string | null;
   readonly readOnly: boolean;
+  readonly sourceBindingId: string | null;
+  readonly targetIdentityDigest: string | null;
+  readonly actorDigest: string | null;
   readonly state: GatewayOperationState;
+  readonly responseSucceeded: boolean | null;
+  readonly publicResultDelivered: boolean;
   readonly upstreamResultDigest: string | null;
   readonly normalizedResultDigest: string | null;
   readonly sourceResultState: string | null;
@@ -77,6 +85,15 @@ export interface ListGatewayOperationsInput {
   readonly publicToolName?: string;
   readonly state?: GatewayOperationState;
   readonly limit?: number;
+}
+
+export interface FindSuccessfulReadEvidenceInput {
+  readonly sourceId: string;
+  readonly sourceBindingId: string;
+  readonly targetIdentityDigest: string;
+  readonly actorDigest: string;
+  readonly upstreamResultDigest: string;
+  readonly notBefore: string;
 }
 
 export interface GatewayOperationJournalOptions {
@@ -111,7 +128,12 @@ interface SqlRow {
   source_operation_id: string | null;
   idempotency_key: string | null;
   read_only: number;
+  source_binding_id: string | null;
+  target_identity_digest: string | null;
+  actor_digest: string | null;
   state: GatewayOperationState;
+  response_succeeded: number | null;
+  public_result_delivered: number;
   upstream_result_digest: string | null;
   normalized_result_digest: string | null;
   source_result_state: string | null;
@@ -161,12 +183,43 @@ function optionalOperationIdentity(value: unknown, label: string): string | null
   return normalized;
 }
 
+function optionalBindingIdentity(value: unknown, label: string): string | null {
+  if (value === undefined || value === null || value === "") return null;
+  const normalized = exactString(value, label, 160);
+  if (!/^[A-Za-z0-9_.:@-]+$/u.test(normalized)) throw new TypeError(`${label} has an invalid format`);
+  return normalized;
+}
+
 function optionalBoundedString(value: unknown, label: string, maximum: number): string | null {
   if (value === undefined || value === null || value === "") return null;
   return exactString(value, label, maximum);
 }
 
+function exactIsoInstant(value: unknown, label: string): string {
+  const normalized = exactString(value, label, 40);
+  const time = Date.parse(normalized);
+  if (!Number.isFinite(time) || new Date(time).toISOString() !== normalized) {
+    throw new TypeError(`${label} must be an exact ISO instant`);
+  }
+  return normalized;
+}
+
 function rowRecord(row: SqlRow): GatewayOperationRecord {
+  const sourceBindingId = optionalBindingIdentity(row.source_binding_id, "source binding id");
+  const targetIdentityDigest = row.target_identity_digest === null
+    ? null : exactDigest(row.target_identity_digest, "target identity digest");
+  const actorDigest = row.actor_digest === null ? null : exactDigest(row.actor_digest, "actor digest");
+  const authorityEvidenceCount = [sourceBindingId, targetIdentityDigest, actorDigest]
+    .filter((value) => value !== null).length;
+  if (authorityEvidenceCount !== 0 && authorityEvidenceCount !== 3) {
+    throw new Error("gateway read authority evidence is incomplete");
+  }
+  if (row.response_succeeded !== null && row.response_succeeded !== 0 && row.response_succeeded !== 1) {
+    throw new Error("gateway response success evidence is invalid");
+  }
+  if (row.public_result_delivered !== 0 && row.public_result_delivered !== 1) {
+    throw new Error("gateway public delivery evidence is invalid");
+  }
   return {
     schema: "morrow.gateway-operation.v1",
     operationId: row.operation_id,
@@ -179,7 +232,12 @@ function rowRecord(row: SqlRow): GatewayOperationRecord {
     sourceOperationId: row.source_operation_id,
     idempotencyKey: row.idempotency_key,
     readOnly: row.read_only === 1,
+    sourceBindingId,
+    targetIdentityDigest,
+    actorDigest,
     state: row.state,
+    responseSucceeded: row.response_succeeded === null ? null : row.response_succeeded === 1,
+    publicResultDelivered: row.public_result_delivered === 1,
     upstreamResultDigest: row.upstream_result_digest,
     normalizedResultDigest: row.normalized_result_digest,
     sourceResultState: row.source_result_state,
@@ -246,13 +304,13 @@ export class GatewayOperationJournal {
   private readonly selectById: StatementSync;
 
   constructor(options: GatewayOperationJournalOptions) {
-    this.path = options.path === ":memory:" ? ":memory:" : resolve(options.path);
-    this.now = options.now ?? (() => new Date());
-    if (this.path !== ":memory:") mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-    this.database = new DatabaseSync(this.path, {
+    const opened = openExactPrivateSqliteDatabase(options.path, "Morrow operation journal", {
       enableForeignKeyConstraints: true,
       enableDoubleQuotedStringLiterals: false,
     });
+    this.path = opened.path;
+    this.now = options.now ?? (() => new Date());
+    this.database = opened.database;
     this.database.exec(`
       PRAGMA busy_timeout = 5000;
       PRAGMA synchronous = FULL;
@@ -269,7 +327,12 @@ export class GatewayOperationJournal {
         source_operation_id TEXT,
         idempotency_key TEXT,
         read_only INTEGER NOT NULL CHECK(read_only IN (0,1)),
+        source_binding_id TEXT,
+        target_identity_digest TEXT,
+        actor_digest TEXT,
         state TEXT NOT NULL CHECK(state IN ('prepared','dispatched','response_received','failed_before_send','source_unknown')),
+        response_succeeded INTEGER CHECK(response_succeeded IN (0,1)),
+        public_result_delivered INTEGER NOT NULL DEFAULT 0 CHECK(public_result_delivered IN (0,1)),
         upstream_result_digest TEXT,
         normalized_result_digest TEXT,
         source_result_state TEXT,
@@ -299,10 +362,39 @@ export class GatewayOperationJournal {
       CREATE INDEX IF NOT EXISTS gateway_operation_events_operation
         ON gateway_operation_events(operation_id, event_id);
     `);
+    this.migrateReadAuthorityEvidence();
+    this.database.exec(`
+      CREATE INDEX IF NOT EXISTS gateway_operations_read_evidence
+        ON gateway_operations(
+          source_id, source_binding_id, target_identity_digest, actor_digest,
+          upstream_result_digest, public_result_delivered, created_at DESC
+        )
+        WHERE read_only=1 AND state='response_received' AND response_succeeded=1 AND public_result_delivered=1;
+    `);
     this.selectById = this.database.prepare(
       "SELECT * FROM gateway_operations WHERE operation_id = ?",
     );
     this.recoverInterruptedOperations();
+  }
+
+  private migrateReadAuthorityEvidence(): void {
+    const columns = new Set((this.database.prepare("PRAGMA table_info(gateway_operations)").all() as { name: string }[])
+      .map((column) => column.name));
+    if (!columns.has("source_binding_id")) {
+      this.database.exec("ALTER TABLE gateway_operations ADD COLUMN source_binding_id TEXT");
+    }
+    if (!columns.has("target_identity_digest")) {
+      this.database.exec("ALTER TABLE gateway_operations ADD COLUMN target_identity_digest TEXT");
+    }
+    if (!columns.has("actor_digest")) {
+      this.database.exec("ALTER TABLE gateway_operations ADD COLUMN actor_digest TEXT");
+    }
+    if (!columns.has("response_succeeded")) {
+      this.database.exec("ALTER TABLE gateway_operations ADD COLUMN response_succeeded INTEGER CHECK(response_succeeded IN (0,1))");
+    }
+    if (!columns.has("public_result_delivered")) {
+      this.database.exec("ALTER TABLE gateway_operations ADD COLUMN public_result_delivered INTEGER NOT NULL DEFAULT 0 CHECK(public_result_delivered IN (0,1))");
+    }
   }
 
   private instant(): string {
@@ -387,6 +479,18 @@ export class GatewayOperationJournal {
     const forwardedRequestDigest = exactDigest(input.forwardedRequestDigest, "forwarded request digest");
     const sourceOperationId = optionalOperationIdentity(input.sourceOperationId, "source operation id");
     const idempotencyKey = optionalOperationIdentity(input.idempotencyKey, "idempotency key");
+    const sourceBindingId = optionalBindingIdentity(input.sourceBindingId, "source binding id");
+    const targetIdentityDigest = input.targetIdentityDigest === undefined
+      ? null : exactDigest(input.targetIdentityDigest, "target identity digest");
+    const actorDigest = input.actorDigest === undefined ? null : exactDigest(input.actorDigest, "actor digest");
+    const authorityEvidenceCount = [sourceBindingId, targetIdentityDigest, actorDigest]
+      .filter((value) => value !== null).length;
+    if (authorityEvidenceCount !== 0 && authorityEvidenceCount !== 3) {
+      throw new TypeError("gateway read authority evidence must be complete");
+    }
+    if (authorityEvidenceCount === 3 && input.readOnly !== true) {
+      throw new TypeError("gateway read authority evidence belongs only to a read-only operation");
+    }
     const now = this.instant();
 
     return this.transaction(() => {
@@ -401,6 +505,9 @@ export class GatewayOperationJournal {
             || existing.catalog_digest !== catalogDigest
             || existing.request_digest !== requestDigest
             || existing.forwarded_request_digest !== forwardedRequestDigest
+            || existing.source_binding_id !== sourceBindingId
+            || existing.target_identity_digest !== targetIdentityDigest
+            || existing.actor_digest !== actorDigest
           ) {
             throw new GatewayOperationConflictError(
               "The idempotency key is already bound to a different exact gateway request.",
@@ -415,8 +522,9 @@ export class GatewayOperationJournal {
         INSERT INTO gateway_operations(
           operation_id, public_tool_name, source_id, source_tool_name, catalog_digest,
           request_digest, forwarded_request_digest, source_operation_id, idempotency_key,
-          read_only, state, created_at, updated_at, revision
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, 1)
+          read_only, source_binding_id, target_identity_digest, actor_digest,
+          state, created_at, updated_at, revision
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, 1)
       `).run(
         operationId,
         publicToolName,
@@ -428,6 +536,9 @@ export class GatewayOperationJournal {
         sourceOperationId,
         idempotencyKey,
         input.readOnly ? 1 : 0,
+        sourceBindingId,
+        targetIdentityDigest,
+        actorDigest,
         now,
         now,
       );
@@ -467,6 +578,10 @@ export class GatewayOperationJournal {
     const normalizedResultDigest = exactDigest(input.normalizedResultDigest, "normalized result digest");
     const sourceResultState = optionalBoundedString(input.sourceResultState, "source result state", 120);
     const sourceTaskId = optionalBoundedString(input.sourceTaskId, "source task id", 160);
+    if (input.responseSucceeded !== undefined && typeof input.responseSucceeded !== "boolean") {
+      throw new TypeError("response succeeded must be a boolean");
+    }
+    const responseSucceeded = input.responseSucceeded === undefined ? null : input.responseSucceeded ? 1 : 0;
     const now = this.instant();
     const terminalState: GatewayOperationState = [
       "unknown",
@@ -486,11 +601,12 @@ export class GatewayOperationJournal {
       }
       const changed = this.database.prepare(`
         UPDATE gateway_operations
-        SET state=?, upstream_result_digest=?, normalized_result_digest=?,
+        SET state=?, response_succeeded=?, upstream_result_digest=?, normalized_result_digest=?,
             source_result_state=?, source_task_id=?, updated_at=?, terminal_at=?, revision=revision+1
         WHERE operation_id=? AND state='dispatched'
       `).run(
         terminalState,
+        responseSucceeded,
         upstreamResultDigest,
         normalizedResultDigest,
         sourceResultState,
@@ -558,6 +674,30 @@ export class GatewayOperationJournal {
     });
   }
 
+  recordPublicReadDelivered(operationIdValue: string): GatewayOperationRecord {
+    const operationId = optionalOperationIdentity(operationIdValue, "operation id");
+    if (!operationId) throw new TypeError("operation id is required");
+    const now = this.instant();
+    return this.transaction(() => {
+      const record = this.get(operationId);
+      if (!record.readOnly || record.state !== "response_received" || record.responseSucceeded !== true
+        || !record.sourceBindingId || !record.targetIdentityDigest || !record.actorDigest) {
+        throw new GatewayOperationTransitionError("Only a successful authority-bound read can be marked delivered.");
+      }
+      if (record.publicResultDelivered) return record;
+      const changed = this.database.prepare(`
+        UPDATE gateway_operations
+        SET public_result_delivered=1, updated_at=?, revision=revision+1
+        WHERE operation_id=? AND read_only=1 AND state='response_received'
+          AND response_succeeded=1 AND public_result_delivered=0
+      `).run(now, operationId);
+      if (Number(changed.changes) !== 1) {
+        throw new GatewayOperationTransitionError("Gateway read delivery lost its response record.");
+      }
+      return this.get(operationId);
+    });
+  }
+
   get(operationIdValue: string): GatewayOperationRecord {
     this.assertOpen();
     const operationId = optionalOperationIdentity(operationIdValue, "operation id");
@@ -589,6 +729,30 @@ export class GatewayOperationJournal {
     const sql = `SELECT * FROM gateway_operations${conditions.length ? ` WHERE ${conditions.join(" AND ")}` : ""}
       ORDER BY created_at DESC, operation_id DESC LIMIT ?`;
     return (this.database.prepare(sql).all(...values) as unknown as SqlRow[]).map(rowRecord);
+  }
+
+  findSuccessfulReadEvidence(input: FindSuccessfulReadEvidenceInput): GatewayOperationRecord | null {
+    this.assertOpen();
+    const sourceBindingId = optionalBindingIdentity(input.sourceBindingId, "source binding id");
+    if (!sourceBindingId) throw new TypeError("source binding id is required");
+    const row = this.database.prepare(`
+      SELECT * FROM gateway_operations
+      WHERE source_id=? AND source_binding_id=?
+        AND target_identity_digest=? AND actor_digest=?
+        AND upstream_result_digest=? AND created_at>=?
+        AND read_only=1 AND state='response_received' AND response_succeeded=1
+        AND public_result_delivered=1
+      ORDER BY created_at DESC, operation_id DESC
+      LIMIT 1
+    `).get(
+      exactName(input.sourceId, "source id"),
+      sourceBindingId,
+      exactDigest(input.targetIdentityDigest, "target identity digest"),
+      exactDigest(input.actorDigest, "actor digest"),
+      exactDigest(input.upstreamResultDigest, "upstream result digest"),
+      exactIsoInstant(input.notBefore, "read evidence lower bound"),
+    ) as SqlRow | undefined;
+    return row ? rowRecord(row) : null;
   }
 
   health(): GatewayOperationJournalHealth {

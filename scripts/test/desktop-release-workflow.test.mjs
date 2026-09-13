@@ -11,10 +11,12 @@ const inventoryPath = ".github/workflows/windows-chatgpt-inventory.yml";
 const releasePath = ".github/workflows/desktop-release.yml";
 const upgradePath = "scripts/test/desktop-windows-upgrade.ps1";
 const boundedRunnerPath = "installer/test/run-bounded-tests.cjs";
+const macSmokePath = "scripts/test/desktop-mac-smoke.mjs";
 const inventory = readFileSync(join(root, inventoryPath), "utf8");
 const release = readFileSync(join(root, releasePath), "utf8");
 const upgrade = readFileSync(join(root, upgradePath), "utf8");
 const boundedRunner = readFileSync(join(root, boundedRunnerPath), "utf8");
+const macSmoke = readFileSync(join(root, macSmokePath), "utf8");
 const WINDOWS_APPLICATION_METADATA = Object.freeze({
   companyName: "Braden Riggins",
   productName: "Morrow",
@@ -130,9 +132,17 @@ test("the release workflow is dispatch-only and builds both desktop platforms", 
   assert.match(releaseJobs.get("windows-installer"), /^ {4}runs-on: windows-2022$/m);
   assert.match(releaseJobs.get("windows-installer"), /^ {4}timeout-minutes: 120$/m);
   assert.match(releaseJobs.get("macos-installer"), /^ {4}runs-on: macos-14$/m);
+  assert.equal((release.match(/^\s+node-version: 22\.23\.2$/gm) || []).length, 2,
+    "both package jobs must use the exact Node release embedded in the payload");
+  for (const reference of release.matchAll(/uses:\s+([^\s@]+)@([^\s]+)/g)) {
+    assert.match(reference[2], /^[0-9a-f]{40}$/, `${reference[1]} must be pinned to an immutable commit`);
+  }
+  assert.equal((release.match(/^\s+if: success\(\)$/gm) || []).length, 2,
+    "only complete successful platform evidence may use the normal artifact names");
+  assert.equal((release.match(/^\s+if-no-files-found: error$/gm) || []).length, 2);
 });
 
-test("the Windows job runs each installer test file and the full suite under explicit limits", () => {
+test("the Windows job runs bounded tests and packages through one retained release graph", () => {
   const job = jobs(release).get("windows-installer");
   const commands = [...job.matchAll(/^\s+run: (?!\|)(.+)$/gm)].map((match) => match[1].trim());
   const ordered = [
@@ -152,12 +162,14 @@ test("the Windows job runs each installer test file and the full suite under exp
   assert.match(job, /Test the complete installer contract suite with a process limit\n {8}timeout-minutes: 7/);
   assert.match(job, /Upgrade the exact published 3720 build and preserve its state\n {8}timeout-minutes: 32/);
   assert.match(job, /Install, start, damage and repair the sealed payload, uninstall, and check retained data\n {8}timeout-minutes: 30/);
-  assert.match(job, /for \(\$attempt = 1; \$attempt -le 3; \$attempt \+= 1\)/);
-  assert.match(job, /if \(\$LASTEXITCODE -eq 0\)/);
-  assert.match(job, /if \(Test-Path -LiteralPath \$payload\) \{ throw "Desktop payload exists after failed preparation attempt \$\{attempt\}: \$payload" \}/, "PowerShell parses a colon immediately after a variable name as a scoped variable; the retry count must be braced");
-  assert.doesNotMatch(job, /failed preparation attempt \$attempt: \$payload/, "the unbraced retry interpolation is a PowerShell parse error");
-  assert.match(job, /Desktop payload preparation failed after 3 attempts/);
+  assert.match(job, /node scripts\/package-mcp-bundle\.mjs --target win32-x64 --unsigned-qa --output \$env:MORROW_WINDOWS_PACKAGE_OUTPUT/);
+  assert.match(job, /Copy-Item -LiteralPath \(Join-Path \$env:MORROW_WINDOWS_PACKAGE_OUTPUT 'receipt\.json'\) -Destination \(Join-Path \$env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt\.json'\)/);
+  assert.match(job, /desktop-windows-smoke\.mjs --installer \$env:MORROW_WINDOWS_INSTALLER --package-receipt/);
+  assert.doesNotMatch(job, /pnpm --dir installer --ignore-workspace package:win/);
   assert.doesNotMatch(boundedRunner, /const failures = \[\]/);
+  assert.match(boundedRunner, /scripts\/lib\/owned-process\.mjs/);
+  assert.match(boundedRunner, /runOwnedProcess/);
+  assert.doesNotMatch(boundedRunner, /\bspawn(?:Sync)?\(/);
   assert.match(boundedRunner, /assertPassed\(result, FILE_TIMEOUT_MS\);/);
 });
 
@@ -183,6 +195,7 @@ test("the Windows job upgrades the exact published 3720 artifact before its fina
   }
   assert.match(job, /\$receipt = Join-Path \$env:MORROW_WINDOWS_ARTIFACT_ROOT 'upgrade\.json'/);
   assert.match(job, /\$receipt = Join-Path \$env:MORROW_WINDOWS_ARTIFACT_ROOT "smoke\.json"/);
+  assert.match(job, /desktop-windows-smoke\.mjs[^\r\n]+--source \$env:GITHUB_SHA --run-id \$runId/);
   assert.doesNotMatch(job, /upgrade-receipt\.json/);
   assert.doesNotMatch(job, /"receipt\.json"/);
   assert.ok(job.indexOf(upgradeHarness) < job.indexOf("desktop-windows-smoke.mjs"), "the pinned upgrade must finish before the final isolated smoke");
@@ -299,23 +312,38 @@ test("the smoke command the macOS job runs is accepted by the smoke harness", (t
   const job = jobs(release).get("macos-installer");
   const harness = "scripts/test/desktop-mac-smoke.mjs";
   const options = invocationOptions(job, harness);
-  const argv = argumentVector(options, { "--app": join(directory, "Absent.app"), "--receipt": join(directory, "receipt.json") });
+  const argv = argumentVector(options, {
+    "--disk-image": join(directory, "Morrow-1.0.4-mac-arm64.dmg"),
+    "--package-receipt": join(directory, "package-receipt.json"),
+    "--receipt": join(directory, "receipt.json"),
+    "--source": "a".repeat(40),
+    "--run-id": "b".repeat(32)
+  });
 
   const accepted = node([harness, ...argv]);
   assert.equal(accepted.status, 1);
   assert.doesNotMatch(accepted.stderr, /Usage:/, "the harness must accept the options the workflow passes");
-  assert.match(accepted.stderr, /--app must name a macOS application bundle/);
+  assert.match(accepted.stderr, /package-receipt\.json/, "the parsed command reaches its missing package input");
 
   const rejected = node([harness, "--not-an-option", directory]);
   assert.equal(rejected.status, 1);
   assert.match(rejected.stderr, /Usage:/, "option rejection is what the accepted run above is measured against");
 });
 
-test("the macOS job hands the harness the bundle it just built and keeps its receipts", () => {
+test("the macOS job mounts and tests the same disk image it uploads", () => {
   const job = jobs(release).get("macos-installer");
-  assert.match(job, /ditto -x -k "\$MORROW_MAC_ARCHIVE" "\$bundleRoot"/, "Morrow.app comes from the archive the packaging step kept");
-  assert.match(job, /--app "\$bundleRoot\/Morrow\.app"/);
+  assert.match(job, /cp "\$\{images\[0\]\}" "\$artifactRoot\/\$\(basename "\$\{images\[0\]\}"\)"/);
+  assert.match(job, /cp "\$\{archives\[0\]\}" "\$artifactRoot\/\$\(basename "\$\{archives\[0\]\}"\)"/);
+  assert.match(job, /echo "MORROW_MAC_DISK_IMAGE=\$artifactRoot\/\$\(basename "\$\{images\[0\]\}"\)" >> "\$GITHUB_ENV"/);
+  assert.match(macSmoke, /run\("\/usr\/bin\/hdiutil", \["attach", diskImage, "-nobrowse", "-readonly", "-mountpoint", mountRoot\]/,
+    "the evidence producer must mount the bound DMG itself");
+  assert.match(macSmoke, /operation\(join\(mountRoot, "Morrow\.app"\)\)/);
+  assert.doesNotMatch(job, /--app\b/, "the workflow cannot substitute an app outside the retained DMG");
+  assert.doesNotMatch(job, /MORROW_MAC_ARCHIVE|ditto -x -k/, "the smoke must not substitute the unuploaded ZIP for the retained disk image");
   assert.match(job, /--receipt "\$MORROW_MAC_ARTIFACT_ROOT\/receipt\.json"/);
+  assert.match(job, /--disk-image "\$MORROW_MAC_DISK_IMAGE"/);
+  assert.match(job, /--package-receipt "\$MORROW_MAC_ARTIFACT_ROOT\/package-receipt\.json"/);
+  assert.match(job, /--source "\$GITHUB_SHA" --run-id "\$MORROW_MAC_RUN_ID"/);
   const uploaded = /^\s+path: (.+)$/m.exec(job);
   assert.ok(uploaded, "the macOS job must upload a directory");
   assert.ok(job.includes(`artifactRoot="$PWD/${uploaded[1].trim()}"`), "the uploaded directory must be the one the job writes its receipts into");

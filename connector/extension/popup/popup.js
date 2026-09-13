@@ -1,5 +1,5 @@
 import { problemText } from "../src/bridge-problem-copy.js";
-import { canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, nextError, primaryLabel, runtimeNeedsReload, statusValue } from "./popup-view.js";
+import { canChooseCourses, controlState, courseValue, currentBinding, currentPlatform, currentSiteAnchor, detailText, nextError, primaryLabel, runtimeNeedsReload, statusAnnouncement, statusValue } from "./popup-view.js";
 
 const primary = document.querySelector("#primary");
 const consentAction = document.querySelector("#consent-action");
@@ -14,6 +14,7 @@ const canvasValue = document.querySelector("#canvas-value");
 const pulse = document.querySelector("#pulse");
 const detail = document.querySelector("#detail");
 const error = document.querySelector("#error");
+const announcement = document.querySelector("#status-announcement");
 const account = document.querySelector("#account");
 const accountLabel = document.querySelector("#account-label");
 const accountOrigin = document.querySelector("#account-origin");
@@ -42,6 +43,8 @@ function openCourseSelection() {
 
 function render(status) {
   current = status;
+  const nextAnnouncement = statusAnnouncement(status);
+  if (announcement.textContent !== nextAnnouncement) announcement.textContent = nextAnnouncement;
   const consentRequired = status?.consentRequired === true;
   consentAction.hidden = !consentRequired;
   consentDetail.hidden = !consentRequired;
@@ -97,6 +100,15 @@ function updateControls(status = current) {
   primary.setAttribute("aria-busy", String(controls.primaryBusy));
   canvasAction.disabled = controls.secondaryDisabled;
   disconnect.disabled = controls.secondaryDisabled;
+}
+
+function focusFirstConnectionAction() {
+  for (const control of [primary, canvasAction, disconnect, editingSettings, setupGuide]) {
+    if (!control.hidden && !control.disabled) {
+      control.focus();
+      return;
+    }
+  }
 }
 
 async function refresh() {
@@ -203,9 +215,11 @@ async function connectCanvasCourse() {
 consentAction.addEventListener("click", async () => {
   if (actionInFlight) return;
   actionInFlight = true;
+  let accepted = false;
   updateControls();
   try {
     await message("morrow_course_data_consent_accept");
+    accepted = true;
     reportSuccess("action");
     await refresh();
   } catch (cause) {
@@ -213,6 +227,7 @@ consentAction.addEventListener("click", async () => {
   } finally {
     actionInFlight = false;
     updateControls();
+    if (accepted) focusFirstConnectionAction();
   }
 });
 
@@ -232,6 +247,7 @@ primary.addEventListener("click", async () => {
     return;
   }
   await runAction(async () => {
+    if (current?.authenticationFailed === true) return await message("morrow_pair");
     if (!current?.paired) return await message("morrow_pair");
     return await connectCanvasCourse();
   }, (result) => {

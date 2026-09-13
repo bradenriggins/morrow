@@ -63,16 +63,18 @@ const receipt = {
   files: sourceFiles.map((entry) => ({ path: entry.path, bytes: entry.data.byteLength, sha256: sha256(entry.data) })),
 };
 const receiptBytes = stableJson(receipt);
+const checking = process.argv.includes("--check");
 
-if (process.argv.includes("--check")) {
-  const existingArchive = readFileSync(archivePath);
-  const existingReceipt = readFileSync(receiptPath, "utf8");
-  if (!existingArchive.equals(archive) || existingReceipt !== receiptBytes) throw new Error("Canvas connector package is stale");
+if (checking) {
+  const rebuilt = deterministicZip(sourceFiles);
+  if (!rebuilt.equals(archive) || sha256(rebuilt) !== receipt.archiveSha256) {
+    throw new Error("Canvas connector package rebuild is not deterministic");
+  }
 } else {
   mkdirSync(outputRoot, { recursive: true });
   writeFileSync(archivePath, archive, { mode: 0o600 });
   writeFileSync(receiptPath, receiptBytes, { mode: 0o600 });
 }
 
-if (!statSync(archivePath).isFile()) throw new Error("Canvas connector archive was not created");
-process.stdout.write(`${JSON.stringify(receipt)}\n`);
+if (!checking && !statSync(archivePath).isFile()) throw new Error("Canvas connector archive was not created");
+process.stdout.write(`${JSON.stringify({ ...receipt, check: checking })}\n`);

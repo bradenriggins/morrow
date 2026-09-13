@@ -36,6 +36,15 @@ async function waitFor(predicate, detail) {
   throw new Error(`Timed out waiting for ${detail}`);
 }
 
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
 async function writeGatewayConfig(directory) {
   const config = {
     schema: "morrow.upstreams.v1",
@@ -92,7 +101,7 @@ const mcpRuntime = (() => {
   try {
     const bytes = fs.readFileSync(nodePath.resolve(__dirname, "../../../mcp-runtime-manifest.json"));
     const manifest = JSON.parse(bytes.toString("utf8"));
-    if (manifest.schema !== "morrow.mcp-runtime-manifest.v1" || manifest.package.name !== "@morrow-lms/gateway") return null;
+    if (manifest.schema !== "morrow.mcp-runtime-manifest.v2" || manifest.package.name !== "@morrow-lms/gateway") return null;
     return {
       schema: "morrow.mcp-runtime.health.v1",
       packageVersion: manifest.package.version,
@@ -145,6 +154,10 @@ server.registerTool("morrow_capability_read", {
   if (name === "morrow_browser_bindings") {
     bindingCalls += 1;
     const bindings = connectedBindings();
+    if (mode === "exit-after-status") {
+      note("status-process:" + process.pid);
+      setTimeout(() => process.exit(71), 25);
+    }
     return { content: [{ type: "text", text: "bindings" }], structuredContent: {
       schema: "morrow.result.v1", data: { schema: "morrow.browser-bindings.v1", ok: true, count: bindings.length, bindings },
     }};
@@ -177,7 +190,7 @@ void serveStdio(() => server);
 
 function mcpRuntimeManifestFixture(entrypointSha256) {
   return {
-    schema: "morrow.mcp-runtime-manifest.v1",
+    schema: "morrow.mcp-runtime-manifest.v2",
     package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
     entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: 341, sha256: entrypointSha256 },
     dependencies: [{
@@ -249,6 +262,15 @@ async function bridgeOwnerEndpoint(workspaceRoot, journalPath) {
     };
     if (control.action === "readback") return {
       schema: "morrow.bridge.update-readback.v1", extensionId, manifestVersion, installType: "development", activeFolderProof: proof(),
+    };
+    if (control.action === "commit") return {
+      schema: "morrow.bridge.update-committed.v1",
+      extensionId,
+      previousManifestVersion: control.previousManifestVersion,
+      manifestVersion,
+      quiesceEpoch: control.quiesceEpoch,
+      committed: true,
+      activeFolderProof: proof(),
     };
     return {
       schema: "morrow.bridge.update-resumed.v1", extensionId, manifestVersion, quiesceEpoch: control.quiesceEpoch, resumed: true,
@@ -430,6 +452,10 @@ test("uses only the held private owner lease for Bridge maintenance", async (t) 
   assert.equal(quiesced.quiescent, true);
   const readback = await monitor.bridgeMaintenance({ action: "readback" });
   assert.equal(readback.schema, "morrow.bridge.update-readback.v1");
+  const committed = await monitor.bridgeMaintenance({
+    action: "commit", previousManifestVersion: "1.0.1", quiesceEpoch: quiesced.quiesceEpoch,
+  });
+  assert.equal(committed.schema, "morrow.bridge.update-committed.v1");
   const resumed = await monitor.bridgeMaintenance({
     action: "resume", quiesceEpoch: quiesced.quiesceEpoch, fileLayerRestored: true,
   });
@@ -457,6 +483,7 @@ test("uses only the held private owner lease for Bridge maintenance", async (t) 
     { action: "acquire", control: null, hasLease: false },
     { action: "bridge", control: "quiesce", hasLease: true },
     { action: "bridge", control: "readback", hasLease: true },
+    { action: "bridge", control: "commit", hasLease: true },
     { action: "bridge", control: "resume", hasLease: true },
     { action: "bridge", control: "status", hasLease: false },
   ]);
@@ -558,6 +585,52 @@ test("reports only sanitized verified runtime state and reconnects through publi
   await monitor.close();
   process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "partial";
   assert.equal((await monitor.start()).health.canRestart, "unknown");
+});
+
+test("replaces a connected runtime client after its stdio process dies", async (t) => {
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-reconnect-");
+  const workspaceRoot = await realpath(directory);
+  const log = path.join(directory, "calls.log");
+  const entry = await writeMockGateway(directory);
+  const originalMode = process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
+  const originalLog = process.env.MORROW_RUNTIME_MONITOR_LOG;
+  process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "exit-after-status";
+  process.env.MORROW_RUNTIME_MONITOR_LOG = log;
+  const monitor = createRuntimeMonitor({
+    nodePath: process.execPath,
+    serverEntryPath: entry,
+    upstreamsPath: path.join(workspaceRoot, "upstreams.json"),
+    workspaceRoot,
+    journalPath: path.join(workspaceRoot, "gateway.sqlite3"),
+  });
+  t.after(async () => {
+    if (originalMode === undefined) delete process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
+    else process.env.MORROW_RUNTIME_MONITOR_FIXTURE = originalMode;
+    if (originalLog === undefined) delete process.env.MORROW_RUNTIME_MONITOR_LOG;
+    else process.env.MORROW_RUNTIME_MONITOR_LOG = originalLog;
+    await monitor.close();
+    await rm(entry, { force: true });
+    await removeTemporaryDirectory(directory);
+  });
+
+  const first = await monitor.start();
+  assert.equal(first.health.gatewayReady, true);
+  const statusLine = (await readFile(log, "utf8")).trim().split("\n").find((line) => line.startsWith("status-process:"));
+  const deadPid = Number(statusLine?.slice("status-process:".length));
+  assert.equal(Number.isSafeInteger(deadPid), true);
+  await waitFor(() => !processIsAlive(deadPid), "the first runtime process to exit");
+
+  process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "good";
+  const second = await monitor.start();
+  assert.equal(second.health.gatewayReady, true);
+  assert.deepEqual(second.bindings, {
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "Verified Course",
+    firstPreviewCourseName: "Verified Course",
+  });
+  const calls = (await readFile(log, "utf8")).trim().split("\n");
+  assert.equal(calls.filter((line) => line === "morrow_health").length, 2);
+  assert.equal(calls.filter((line) => line === "morrow_browser_bindings").length, 2);
 });
 
 test("names and reads exactly one connected course while several courses are connected", async (t) => {

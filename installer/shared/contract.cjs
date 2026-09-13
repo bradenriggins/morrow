@@ -171,7 +171,15 @@ function installerState(input) {
 
 function blackboardSnapshot(value) {
   const input = value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  const status = input.status === "api_configured_live_untested" ? "api_configured_live_untested" : "not_configured";
+  const statuses = new Set([
+    "not_configured",
+    "api_configured_live_untested",
+    "configuration_repair_required",
+    "credential_missing",
+    "credential_mismatched",
+    "private_access_refused"
+  ]);
+  const status = statuses.has(input.status) ? input.status : "not_configured";
   const tenantPattern = /^[a-z][a-z0-9-]{0,79}$/;
   const blackboardId = /^_[1-9][0-9]{0,18}_[1-9][0-9]{0,18}$/;
   const sourceBinding = /^[A-Za-z0-9_.:@-]{1,160}$/;
@@ -204,7 +212,8 @@ function blackboardSnapshot(value) {
       courseBindings
     }];
   }) : [];
-  return { schema: "morrow.blackboard.health.v1", status, tenants };
+  const publicTenants = status === "not_configured" || status === "configuration_repair_required" ? [] : tenants;
+  return { schema: "morrow.blackboard.health.v1", status, tenants: publicTenants };
 }
 
 function retentionPath(value) {

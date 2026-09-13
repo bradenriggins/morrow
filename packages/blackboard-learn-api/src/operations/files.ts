@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { canonicalJson, isJsonObject, sha256Text, type JsonObject, type SourceCapabilityMetadata } from "@morrow/contracts";
 import * as z from "zod/v4";
 import type { BlackboardEffectGrant } from "../effect-grant.js";
+import { assertPathScopedContent } from "../provider-contract.js";
 import { redactInto, type BlackboardCourseRead, type BlackboardLearnRuntime } from "../runtime.js";
 import { BLACKBOARD_ID, BlackboardApiError, withBlackboardDispatchState, type BlackboardDispatchState } from "../types.js";
 import { blackboardTool, contentScopeInput, effectGrantInput, type BlackboardOperationModule } from "./definition.js";
@@ -236,10 +237,8 @@ function reviewedBytes(attachment: z.output<typeof privateAttachmentInput>, file
  * document inside the selected course: not a folder, not the Ultra wrapper
  * around a document, and not an item whose handler it cannot read.
  */
-function assertAttachableContent(content: JsonObject, courseId: string): void {
-  if (content.courseId !== courseId) {
-    throw new BlackboardApiError("blackboard_scope_binding_mismatch", "Blackboard did not return this content item as part of the selected course.");
-  }
+function assertAttachableContent(content: JsonObject, courseId: string, contentId: string): void {
+  assertPathScopedContent(content, courseId, contentId);
   if (content.parentId !== undefined && (typeof content.parentId !== "string" || !BLACKBOARD_ID.test(content.parentId))) {
     throw new BlackboardApiError("blackboard_response_invalid", "Blackboard returned an invalid parent for this content item.");
   }
@@ -269,7 +268,6 @@ function attachmentPrecondition(item: JsonObject, attachments: readonly JsonObje
   const handler = isJsonObject(item.contentHandler) && typeof item.contentHandler.id === "string" ? item.contentHandler.id : null;
   return {
     id: typeof item.id === "string" ? item.id : null,
-    courseId: typeof item.courseId === "string" ? item.courseId : null,
     parentId: typeof item.parentId === "string" ? item.parentId : null,
     handler,
     // Blackboard does not promise a collection order, so the frozen list is
@@ -301,7 +299,7 @@ async function freezeAttachmentPlan(
 ): Promise<FrozenAttachmentPlan> {
   const item = await read.client.get(contentPath(read.courseId, contentId), signal);
   if (item.id !== contentId) throw new BlackboardApiError("blackboard_content_mismatch", "Blackboard returned a different content item.");
-  assertAttachableContent(item, read.courseId);
+  assertAttachableContent(item, read.courseId, contentId);
   const attachments = await read.client.collect(attachmentsPath(read.courseId, contentId), { label: "attachment", signal });
   if (attachments.some((entry) => entry[FILENAME_FIELD] === file.filename)) {
     throw new BlackboardApiError(
@@ -507,6 +505,8 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
     effectReceiptId: value.effect_receipt_id,
     dispatchAttempt: value.dispatch_attempt,
     gatewayProcessId: value.gateway_process_id,
+    issuedAt: value.issued_at,
+    notAfter: value.not_after,
     dispatchToken: value.dispatch_token,
   };
 }

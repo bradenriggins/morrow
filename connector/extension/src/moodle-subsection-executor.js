@@ -57,6 +57,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleSubsectionInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const AJAX_PATH = "/lib/ajax/service.php";
   const MODEDIT_PATH = "/course/modedit.php";
@@ -173,11 +175,17 @@ export async function executeMoodleSubsectionInPage(rawInput) {
   const live = () => Number.isSafeInteger(input.expiresAt) && Date.now() < input.expiresAt;
   const boundedText = async (response, endpoint, context) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return null;
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return null;
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())
-      || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -185,14 +193,14 @@ export async function executeMoodleSubsectionInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return null;
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -210,6 +218,7 @@ export async function executeMoodleSubsectionInPage(rawInput) {
         redirect: "error",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify([{ index: 0, methodname: methodName, args: methodArgs }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_subsection_state_unavailable" }; }
     const raw = await boundedText(response, endpoint, context);
@@ -319,7 +328,7 @@ export async function executeMoodleSubsectionInPage(rawInput) {
     if (!live()) return { error: "moodle_execution_expired" };
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error: "moodle_subsection_form_unavailable" }; }
     const html = await boundedText(response, endpoint, context);
     if (typeof html !== "string" || typeof globalThis.DOMParser !== "function") return { error: "moodle_subsection_form_unavailable", status: response.status };
@@ -392,6 +401,7 @@ export async function executeMoodleSubsectionInPage(rawInput) {
       response = await fetch(endpoint, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" }, body,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { unconfirmed: true }; }
     if (!sameContext(context, currentContext())) return { unconfirmed: true, status: response.status };

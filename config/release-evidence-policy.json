@@ -1,0 +1,15 @@
+{
+  "schema": "morrow.release-evidence-policy.v1",
+  "receipts": {
+    "blackboard_authorization": { "kind": "authorization" },
+    "blackboard_no_live_tenant_exception": { "kind": "authorization" },
+    "canvas_authorization": { "kind": "authorization" },
+    "canvas_live_proof": { "kind": "evidence" },
+    "client_parity": { "kind": "evidence" },
+    "independent_clean_machine": { "kind": "evidence" },
+    "moodle_authorization": { "kind": "authorization" },
+    "moodle_live_proof": { "kind": "evidence" },
+    "publication_authorization": { "kind": "authorization" }
+  },
+  "trustedAuthorizationKeys": []
+}

@@ -1,11 +1,18 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { parseStrictJson } = require("./strict-utf8.cjs");
 
-const MCP_RUNTIME_SCHEMA = "morrow.mcp-runtime-manifest.v1";
+const MCP_RUNTIME_SCHEMA = "morrow.mcp-runtime-manifest.v2";
 const MCP_RUNTIME_HEALTH_SCHEMA = "morrow.mcp-runtime.health.v1";
 const SHA256 = /^[0-9a-f]{64}$/;
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+const REQUIRED_DIRECT_RUNTIME_FILES = Object.freeze([
+  "packages/client-config/dist/cli.js",
+  "packages/mcp-server/dist/index.js",
+  "packages/canvas-connector-mcp/dist/index.js",
+  "installer/runtime-monitor.mjs",
+]);
 
 function sha256(content) {
   return crypto.createHash("sha256").update(content).digest("hex");
@@ -32,11 +39,57 @@ function validFileRecord(value) {
   return { path: relative, bytes: value.bytes, sha256: value.sha256 };
 }
 
+function directRuntimePath(value) {
+  const relative = safePayloadRelative(value);
+  if (!relative || (!relative.startsWith("packages/") && !relative.startsWith("installer/"))) return null;
+  return relative;
+}
+
+async function directRuntimeFileSet(root) {
+  const files = [];
+  const visit = async (directory, prefix) => {
+    let entries;
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch {
+      return false;
+    }
+    for (const entry of entries) {
+      const relative = `${prefix}/${entry.name}`;
+      const target = path.join(directory, entry.name);
+      if (entry.isSymbolicLink()) return false;
+      if (entry.isDirectory()) {
+        if (!await visit(target, relative)) return false;
+      } else if (entry.isFile()) {
+        files.push(relative.replaceAll(path.sep, "/"));
+        if (files.length > 100_000) return false;
+      } else {
+        return false;
+      }
+    }
+    return true;
+  };
+  const packages = path.join(root, "packages");
+  const installer = path.join(root, "installer");
+  try {
+    const [packagesInfo, installerInfo] = await Promise.all([fs.lstat(packages), fs.lstat(installer)]);
+    if (!packagesInfo.isDirectory() || packagesInfo.isSymbolicLink()
+      || !installerInfo.isDirectory() || installerInfo.isSymbolicLink()) return null;
+  } catch {
+    return null;
+  }
+  if (!await visit(packages, "packages")) return null;
+  if (!await visit(installer, "installer")) return null;
+  return files.sort();
+}
+
 async function sameFileRecord(root, record) {
   const target = path.resolve(root, record.path);
   const relative = path.relative(root, target);
   if (!relative || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return false;
   try {
+    const [canonicalRoot, canonicalTarget] = await Promise.all([fs.realpath(root), fs.realpath(target)]);
+    if (canonicalTarget !== path.resolve(canonicalRoot, record.path)) return false;
     const info = await fs.lstat(target);
     if (!info.isFile() || info.isSymbolicLink() || info.size !== record.bytes) return false;
     return sha256(await fs.readFile(target)) === record.sha256;
@@ -46,14 +99,26 @@ async function sameFileRecord(root, record) {
 }
 
 function mcpRuntimeManifest(value) {
-  if (!exactKeys(value, ["schema", "package", "entrypoint", "dependencies"])
+  if (!exactKeys(value, ["schema", "package", "entrypoint", "dependencies", "directFiles"])
     || value.schema !== MCP_RUNTIME_SCHEMA
     || !exactKeys(value.package, ["name", "version"])
     || value.package.name !== "@morrow-lms/gateway"
     || typeof value.package.version !== "string" || !VERSION.test(value.package.version)
+    || !Array.isArray(value.directFiles) || value.directFiles.length === 0 || value.directFiles.length > 100_000
     || !Array.isArray(value.dependencies) || value.dependencies.length === 0 || value.dependencies.length > 500) return null;
   const entrypoint = validFileRecord(value.entrypoint);
   if (!entrypoint || entrypoint.path !== "packages/mcp-server/dist/index.js") return null;
+  const directFiles = [];
+  const directPaths = new Set();
+  for (const file of value.directFiles) {
+    const record = validFileRecord(file);
+    if (!record || !directRuntimePath(record.path) || directPaths.has(record.path)) return null;
+    directPaths.add(record.path);
+    directFiles.push(record);
+  }
+  if (!REQUIRED_DIRECT_RUNTIME_FILES.every((required) => directPaths.has(required))) return null;
+  const directEntrypoint = directFiles.find((record) => record.path === entrypoint.path);
+  if (!directEntrypoint || directEntrypoint.bytes !== entrypoint.bytes || directEntrypoint.sha256 !== entrypoint.sha256) return null;
   const dependencies = [];
   const packageNames = new Set();
   for (const item of value.dependencies) {
@@ -78,7 +143,7 @@ function mcpRuntimeManifest(value) {
   }
   const gateway = dependencies.find((item) => item.name === value.package.name && item.version === value.package.version);
   if (!gateway) return null;
-  return { packageVersion: value.package.version, entrypoint, dependencies, gateway };
+  return { packageVersion: value.package.version, entrypoint, dependencies, gateway, directFiles };
 }
 
 /**
@@ -97,14 +162,14 @@ async function verifyMcpRuntime(payloadRoot, expectedManifestSha256, expectedNod
   let manifest;
   try {
     manifestBytes = await fs.readFile(manifestPath);
-    input = JSON.parse(await fs.readFile(inputPath, "utf8"));
-    manifest = mcpRuntimeManifest(JSON.parse(manifestBytes.toString("utf8")));
+    input = parseStrictJson(await fs.readFile(inputPath), "MCP package input manifest");
+    manifest = mcpRuntimeManifest(parseStrictJson(manifestBytes, "MCP runtime manifest"));
   } catch {
     return null;
   }
   if (!manifest || sha256(manifestBytes) !== expectedManifestSha256
     || !input || typeof input !== "object" || Array.isArray(input)
-    || input.schema !== "morrow.desktop-package-input.v1"
+    || input.schema !== "morrow.desktop-package-input.v2"
     || !exactKeys(input.mcpRuntime, ["path", "sha256"])
     || input.mcpRuntime.path !== "app/mcp-runtime-manifest.json"
     || input.mcpRuntime.sha256 !== expectedManifestSha256) return null;
@@ -127,15 +192,11 @@ async function verifyMcpRuntime(payloadRoot, expectedManifestSha256, expectedNod
   for (const dependency of manifest.dependencies) {
     for (const record of dependency.files) if (!await sameFileRecord(root, record)) return null;
   }
-  // The gateway runs from app/packages while its runtime dependencies resolve
-  // from app/node_modules. Verify every sibling it can import by mapping the
-  // sealed gateway package records back to that direct entrypoint tree.
-  for (const record of manifest.gateway.files) {
-    const prefix = `node_modules/${manifest.gateway.name}/`;
-    const suffix = record.path.slice(prefix.length);
-    const direct = { ...record, path: `packages/mcp-server/${suffix}` };
-    if (!await sameFileRecord(root, direct)) return null;
-  }
+  for (const record of manifest.directFiles) if (!await sameFileRecord(root, record)) return null;
+  const actualDirectFiles = await directRuntimeFileSet(root);
+  const expectedDirectFiles = manifest.directFiles.map((record) => record.path).sort();
+  if (!actualDirectFiles || actualDirectFiles.length !== manifest.directFiles.length
+    || actualDirectFiles.some((file, index) => file !== expectedDirectFiles[index])) return null;
   return Object.freeze({
     schema: MCP_RUNTIME_HEALTH_SCHEMA,
     packageVersion: manifest.packageVersion,
@@ -230,7 +291,6 @@ async function restoreConfiguration(snapshot, expectedCurrentSha256) {
   if (current !== expectedCurrentSha256) return false;
   await fs.rm(snapshot.file, { force: true });
   if (snapshot.present && snapshot.backup) {
-    await mkdirPrivate(path.dirname(snapshot.file));
     await fs.copyFile(snapshot.backup, snapshot.file, fs.constants.COPYFILE_EXCL);
     if (process.platform !== "win32") await fs.chmod(snapshot.file, 0o600);
   }

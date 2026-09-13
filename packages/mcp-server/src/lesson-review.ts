@@ -7,6 +7,9 @@ import type { GatewayRuntime } from "./runtime.js";
 
 const id = z.string().regex(/^[1-9][0-9]{0,18}$/);
 const text = z.string().min(1).max(1000);
+const reviewText = (maximum: number) => z.string().min(1).max(maximum)
+  .refine((value) => value === value.trim(), "Review text must not start or end with whitespace")
+  .refine((value) => !/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/u.test(value), "Review text contains an unsupported control character");
 const inputSchema = z.strictObject({
   source_binding_id: z.string().min(1).max(160), course_id: id,
   page_url: z.string().min(1).max(1000).describe("The exact Canvas page slug or page ID."),
@@ -16,8 +19,14 @@ const inputSchema = z.strictObject({
 });
 const specialistSchema = z.strictObject({
   request_id: text, request_key: z.enum(["lesson_alignment", "quiz_alignment"]),
-  findings: z.array(z.strictObject({ target_key: text, source_quote: text, target_quote: text, concern: text, proposed_correction: text })).max(8),
-  limits: z.array(z.string().min(1).max(400)).max(4),
+  findings: z.array(z.strictObject({
+    target_key: text,
+    source_quote: reviewText(1000),
+    target_quote: reviewText(1000),
+    concern: reviewText(1000),
+    proposed_correction: reviewText(1000),
+  })).max(8),
+  limits: z.array(reviewText(400)).max(4),
 });
 const checkerSchema = z.strictObject({
   request_id: text, request_key: z.literal("checker"),

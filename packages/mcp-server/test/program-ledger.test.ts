@@ -2,13 +2,16 @@ import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
+import { COURSE_AUDIT_SOURCE_SIGNAL_NAMES } from "../src/course-audit.js";
 import { collectCanvasProgramInventory } from "../src/course-inventory.js";
 import {
   buildProgramAuditLedger,
+  collectProgramLedger,
   PROGRAM_LEDGER_FINAL_STATES,
   type ProgramLedgerAuditChildResult,
   type ProgramLedgerManualCheck,
 } from "../src/program-ledger.js";
+import { ResultArtifactStore } from "../src/result-artifacts.js";
 import { createMorrowServer } from "../src/server.js";
 import type { GatewayRuntime } from "../src/runtime.js";
 
@@ -79,13 +82,11 @@ function inventoryRuntime(truncatedTool?: string): GatewayRuntime {
 }
 
 function signalBlock(missingAlt: number): JsonObject {
+  const signals = Object.fromEntries(COURSE_AUDIT_SOURCE_SIGNAL_NAMES.map((name) => [name, []])) as JsonObject;
+  signals.image_tags_without_alt = Array.from({ length: missingAlt }, (_unused, index) => ({ image_index: index + 1, image_src_sha256: sha256Text(`image-${index}`) }));
   return {
-    observed_source_signals: {
-      image_tags_without_alt: Array.from({ length: missingAlt }, (_unused, index) => ({ image_index: index + 1, image_src_sha256: sha256Text(`image-${index}`) })),
-      heading_level_jumps: [],
-      tables_without_th: [],
-      embedded_media_tags: [],
-    },
+    observed_source_signals: signals,
+    source_signal_limits: { status: "observed", max_entries_per_signal: 100, truncated_signals: [] },
     media_metadata: { status: "not_applicable", returned_count: 0, truncated: false },
     interpretation: "These are finite source signals only. They do not prove or disprove WCAG conformance.",
   };
@@ -111,6 +112,15 @@ function auditReport(input: {
   readonly remediation?: JsonObject;
   readonly extra?: JsonObject;
 }): JsonObject {
+  const selectedTarget: JsonObject = input.kind === "assignment" ? { kind: input.kind, assignment_id: input.id }
+    : input.kind === "discussion" ? { kind: input.kind, topic_id: input.id }
+      : input.kind === "classic_quiz" ? { kind: input.kind, quiz_id: input.id }
+        : input.kind === "classic_quiz_question" ? { kind: input.kind, quiz_id: "14", question_id: input.id }
+          : input.kind === "new_quiz" ? { kind: input.kind, quiz_id: input.id }
+            : input.kind === "new_quiz_item" ? { kind: input.kind, quiz_id: "16", item_id: input.id }
+              : input.kind === "item_bank_entry" ? { kind: input.kind, item_bank_id: "19", entry_id: input.id }
+                : input.kind === "file" ? { kind: input.kind, file_id: input.id }
+                  : { kind: input.kind, id: input.id };
   return {
     schema: "morrow.course-audit.v1",
     provider: "canvas",
@@ -118,6 +128,7 @@ function auditReport(input: {
     observed_at: "2026-09-06T12:00:00.000Z",
     read_started_at: "2026-09-06T11:59:59.000Z",
     source_binding_id: "canvas-course-42",
+    selected_target: selectedTarget,
     course: { id: "42", name: "Biology" },
     target: { kind: input.kind, id: input.id, course_association: "observed_by_course_scoped_read" },
     content_evidence: input.contentEvidence,
@@ -435,13 +446,88 @@ describe("program accessibility ledger", () => {
       state: "succeeded",
       report: { ...readyReport("assignment", "12", "description", "<p>Text</p>", 0), course: { id: "77", name: "Other" } },
     }];
-    expect(() => buildProgramAuditLedger(report, wrongReportCourse)).toThrowError(/different course or target kind/);
+    expect(() => buildProgramAuditLedger(report, wrongReportCourse)).toThrowError(/different provider, connection, course, or exact target/);
+
+    const wrongReportTarget: ProgramLedgerAuditChildResult[] = [{
+      child_id: childId,
+      state: "succeeded",
+      report: { ...readyReport("assignment", "12", "description", "<p>Text</p>", 0), selected_target: { kind: "assignment", assignment_id: "22" } },
+    }];
+    expect(() => buildProgramAuditLedger(report, wrongReportTarget)).toThrowError(/exact target/);
+
+    const wrongReportConnection: ProgramLedgerAuditChildResult[] = [{
+      child_id: childId,
+      state: "succeeded",
+      report: { ...readyReport("assignment", "12", "description", "<p>Text</p>", 0), source_binding_id: "other-canvas-connection" },
+    }];
+    expect(() => buildProgramAuditLedger(report, wrongReportConnection)).toThrowError(/connection/);
+
+    const wrongReAudit: ProgramLedgerAuditChildResult[] = [{
+      child_id: childId,
+      state: "succeeded",
+      report: readyReport("assignment", "12", "description", "<p>Text</p>", 0),
+      repair: {
+        operation_id: "op:assignment-12",
+        operation_state: "verified",
+        verification_status: "verified",
+        re_audit: { ...readyReport("assignment", "12", "description", "<p>Text</p>", 0), selected_target: { kind: "assignment", assignment_id: "22" } },
+      },
+    }];
+    expect(() => buildProgramAuditLedger(report, wrongReAudit)).toThrowError(/repair re-audit.*exact target/);
 
     const duplicated: ProgramLedgerAuditChildResult[] = [
       { child_id: childId, state: "succeeded" },
       { child_id: childId, state: "succeeded" },
     ];
     expect(() => buildProgramAuditLedger(report, duplicated)).toThrowError(/same inventory target/);
+  });
+
+  it("counts every course-audit source signal and refuses incomplete zero-signal evidence", async () => {
+    const report = object(await collectCanvasProgramInventory(inventoryRuntime(), selection));
+    const childId = childIdFor(report, { kind: "assignment", assignment_id: "12" });
+    for (const signalName of COURSE_AUDIT_SOURCE_SIGNAL_NAMES) {
+      const audit = readyReport("assignment", "12", "description", "<p>Text</p>", 0);
+      const content = object(audit.content_evidence);
+      const signals = object(content.observed_source_signals);
+      signals[signalName] = [{ evidence: signalName }];
+      const ledger = buildProgramAuditLedger(report, [{ child_id: childId, state: "succeeded", report: audit }]);
+      expect(entryFor(ledger, { kind: "assignment", assignment_id: "12" }), signalName).toMatchObject({
+        final_state: "evidence_ready_pending_review",
+        reason: "source_signal_requires_review",
+        evidence: { signals: { [signalName]: 1 }, signal_coverage_complete: true },
+      });
+    }
+
+    const incompleteAudit = readyReport("assignment", "12", "description", "<p>Text</p>", 0);
+    object(object(incompleteAudit.content_evidence).source_signal_limits).status = "evidence_incomplete";
+    const incompleteLedger = buildProgramAuditLedger(report, [{
+      child_id: childId,
+      state: "succeeded",
+      report: incompleteAudit,
+      repair: { operation_id: "op:assignment-12", operation_state: "verified", verification_status: "verified", re_audit: incompleteAudit },
+    }]);
+    expect(entryFor(incompleteLedger, { kind: "assignment", assignment_id: "12" })).toMatchObject({
+      final_state: "evidence_ready_pending_review",
+      reason: "repair_verified_re_audit_incomplete",
+      evidence: { signal_coverage_complete: false },
+    });
+  });
+
+  it("resolves a saved inventory only for its exact artifact audience", async () => {
+    const report = object(await collectCanvasProgramInventory(inventoryRuntime(), selection));
+    const store = new ResultArtifactStore();
+    const stored = store.bound({ content: [], structuredContent: { ...report, padding: "x".repeat(65_000) } });
+    const artifact = object(stored.structuredContent);
+    expect(artifact.schema).toBe("morrow.result-artifact.v1");
+    store.bindAudience(stored, "session-a");
+    const runtime = {
+      resultPage: (handle: string, offset?: number, limit?: number, audience?: string) => store.page(handle, offset, limit, audience),
+    } as unknown as GatewayRuntime;
+    expect(collectProgramLedger(runtime, { inventory: artifact }, "session-a").isError).not.toBe(true);
+    expect(collectProgramLedger(runtime, { inventory: artifact }, "session-b").structuredContent).toMatchObject({
+      schema: "morrow.problem.v1",
+      code: "program_ledger_unavailable",
+    });
   });
 
   it("registers a read-only tool with its guidance resource and resolves a saved inventory handle", async () => {

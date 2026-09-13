@@ -24,6 +24,8 @@ export const MAX_BRIDGE_PRIVATE_FILE_ATTACHMENTS = 8;
 export const MAX_BRIDGE_PRIVATE_CONVERSATION_RECIPIENTS = 5_000;
 
 export const BRIDGE_SCHEMAS = Object.freeze({
+  authenticate: "morrow.bridge.authenticate.v1",
+  challenge: "morrow.bridge.challenge.v1",
   hello: "morrow.bridge.hello.v1",
   ready: "morrow.bridge.ready.v1",
   command: "morrow.bridge.command.v1",
@@ -31,6 +33,7 @@ export const BRIDGE_SCHEMAS = Object.freeze({
   bindings: "morrow.bridge.bindings.v1",
   ping: "morrow.bridge.ping.v1",
   pong: "morrow.bridge.pong.v1",
+  cancel: "morrow.bridge.cancel.v1",
 } as const);
 
 export type BridgeCommandKind =
@@ -130,6 +133,7 @@ export interface BridgeEditPolicySet {
 export type BridgeMaintenanceControl =
   | { readonly action: "status" }
   | { readonly action: "quiesce" }
+  | { readonly action: "commit"; readonly previousManifestVersion: string; readonly quiesceEpoch: string }
   | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true }
   | { readonly action: "readback" };
 
@@ -194,12 +198,35 @@ export interface BridgeBinding {
 export interface BridgeHello {
   readonly schema: typeof BRIDGE_SCHEMAS.hello;
   readonly protocolVersion: typeof BRIDGE_PROTOCOL_VERSION;
-  readonly token: string;
+  readonly clientNonce: string;
+  readonly serverNonce: string;
+  readonly clientProof: string;
   readonly extensionId: string;
   readonly runtimeRevision: string;
   readonly catalogDigest: string;
   readonly bindings: readonly BridgeBinding[];
   readonly sentAt: number;
+}
+
+/** Secret-free first message. The extension sends no token or course data before the server proves its identity. */
+export interface BridgeAuthenticate {
+  readonly schema: typeof BRIDGE_SCHEMAS.authenticate;
+  readonly protocolVersion: typeof BRIDGE_PROTOCOL_VERSION;
+  readonly clientNonce: string;
+  readonly extensionId: string;
+  readonly runtimeRevision: string;
+  readonly catalogDigest: string;
+  readonly sentAt: number;
+}
+
+/** Server proof bound to this exact socket handshake and extension identity. */
+export interface BridgeChallenge {
+  readonly schema: typeof BRIDGE_SCHEMAS.challenge;
+  readonly protocolVersion: typeof BRIDGE_PROTOCOL_VERSION;
+  readonly clientNonce: string;
+  readonly serverNonce: string;
+  readonly serverProof: string;
+  readonly issuedAt: number;
 }
 
 export interface BridgeReady {
@@ -298,8 +325,17 @@ export interface BridgePong {
   readonly sentAt: number;
 }
 
-export type BridgeClientMessage = BridgeHello | BridgeResult | BridgeBindingsMessage | BridgePong;
-export type BridgeServerMessage = BridgeReady | BridgeCommand | BridgePing;
+export interface BridgeCancel {
+  readonly schema: typeof BRIDGE_SCHEMAS.cancel;
+  readonly protocolVersion: typeof BRIDGE_PROTOCOL_VERSION;
+  readonly requestId: string;
+  readonly operationId: string;
+  readonly generation: number;
+  readonly cancelledAt: number;
+}
+
+export type BridgeClientMessage = BridgeAuthenticate | BridgeHello | BridgeResult | BridgeBindingsMessage | BridgePong;
+export type BridgeServerMessage = BridgeChallenge | BridgeReady | BridgeCommand | BridgePing | BridgeCancel;
 
 export interface MorrowBridgeCallOptions {
   readonly sourceBindingId?: string;
@@ -516,11 +552,36 @@ function requiredString(value: unknown, label: string, maxLength: number): strin
   return normalized;
 }
 
+function requiredPayloadText(value: unknown, label: string, maxBytes: number): string {
+  if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
+  if (!value.trim() || Buffer.byteLength(value, "utf8") > maxBytes) {
+    throw new TypeError(`${label} must contain 1 to ${maxBytes} UTF-8 bytes`);
+  }
+  return value;
+}
+
 function requiredInteger(value: unknown, label: string, minimum = 0): number {
   if (!Number.isSafeInteger(value) || Number(value) < minimum) {
     throw new TypeError(`${label} must be a safe integer greater than or equal to ${minimum}`);
   }
   return Number(value);
+}
+
+export function bridgeAuthenticationProofPayload(
+  direction: "server" | "client",
+  authentication: Pick<BridgeAuthenticate, "clientNonce" | "extensionId" | "runtimeRevision" | "catalogDigest">,
+  serverNonce: string,
+): string {
+  return JSON.stringify([
+    `morrow.bridge.${direction}-proof.v1`,
+    BRIDGE_PROTOCOL_VERSION,
+    BRIDGE_PATH,
+    authentication.clientNonce,
+    serverNonce,
+    authentication.extensionId,
+    authentication.runtimeRevision,
+    authentication.catalogDigest,
+  ]);
 }
 
 function optionalString(value: unknown, label: string, maxLength: number): string | undefined {
@@ -632,7 +693,7 @@ export function normalizeBridgePrivateConversation(value: unknown): BridgePrivat
     : ["schema", "action", "courseId", "conversationId", "recipients", "body"];
   if (Object.keys(value).some((key) => !allowed.includes(key))) throw new TypeError("privateConversation has unsupported fields");
   const courseId = privateConversationId(value.courseId, "privateConversation.courseId");
-  const body = requiredString(value.body, "privateConversation.body", MAX_BRIDGE_MESSAGE_BYTES);
+  const body = requiredPayloadText(value.body, "privateConversation.body", MAX_BRIDGE_MESSAGE_BYTES);
   if (action === "create") {
     if (value.subject !== undefined && (typeof value.subject !== "string" || value.subject.length > 255)) {
       throw new TypeError("privateConversation.subject is invalid");
@@ -671,6 +732,14 @@ export function normalizeBridgeMaintenanceControl(value: unknown): BridgeMainten
   if (value.action === "status" || value.action === "quiesce" || value.action === "readback") {
     if (Object.keys(value).length !== 1) throw new TypeError("bridge maintenance control has unsupported fields");
     return { action: value.action };
+  }
+  if (value.action === "commit") {
+    if (Object.keys(value).length !== 3) throw new TypeError("bridge maintenance control has unsupported fields");
+    const previousManifestVersion = requiredString(value.previousManifestVersion, "bridge maintenance previousManifestVersion", 64);
+    const quiesceEpoch = requiredString(value.quiesceEpoch, "bridge maintenance quiesceEpoch", 256);
+    if (!/^(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*)){0,3}$/.test(previousManifestVersion)
+      || !/^[A-Za-z0-9._-]{16,256}$/.test(quiesceEpoch)) throw new TypeError("bridge maintenance commit is invalid");
+    return { action: "commit", previousManifestVersion, quiesceEpoch };
   }
   if (value.action !== "resume" || Object.keys(value).length !== 3 || value.fileLayerRestored !== true) {
     throw new TypeError("bridge maintenance control is invalid");
@@ -1153,7 +1222,7 @@ function validCanvasContentGuard(value: unknown): value is JsonObject {
       ? typeof value.feedback_type === "string" && ["correct", "incorrect", "neutral"].includes(value.feedback_type)
       : value.kind === "classic_quiz_question_image_alt"
         ? !classicQuizAnswerSelected || (typeof value.answer_id === "string" && DECIMAL_ID.test(value.answer_id)
-          && typeof value.answer_field === "string" && ["answer_text", "answer_html"].includes(value.answer_field))
+          && typeof value.answer_field === "string" && ["text", "html", "answer_text", "answer_html"].includes(value.answer_field))
         : true;
   return itemIdFields !== null && itemIdFields.every((field) => typeof value[field] === "string" && DECIMAL_ID.test(value[field]))
     && selectorIsValid && typeof value.protected_state_sha256 === "string" && HEX_SHA256.test(value.protected_state_sha256)
@@ -1225,16 +1294,65 @@ function parseProblem(value: unknown): BridgeProblem {
   };
 }
 
+export function parseBridgeAuthenticate(value: unknown): BridgeAuthenticate {
+  if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.authenticate
+    || Object.keys(value).some((key) => !["schema", "protocolVersion", "clientNonce", "extensionId", "runtimeRevision", "catalogDigest", "sentAt"].includes(key))) {
+    throw new TypeError("bridge authentication request has an invalid schema");
+  }
+  if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) throw new TypeError("bridge protocol version is unsupported");
+  const clientNonce = requiredString(value.clientNonce, "clientNonce", 64);
+  const extensionId = requiredString(value.extensionId, "extensionId", 32);
+  const catalogDigest = requiredString(value.catalogDigest, "catalogDigest", 64);
+  if (!HEX_SHA256.test(clientNonce)) throw new TypeError("clientNonce must be 32 random bytes");
+  if (!EXTENSION_ID.test(extensionId)) throw new TypeError("extensionId is invalid");
+  if (!HEX_SHA256.test(catalogDigest)) throw new TypeError("catalogDigest must be a SHA-256 digest");
+  return {
+    schema: BRIDGE_SCHEMAS.authenticate,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    clientNonce,
+    extensionId,
+    runtimeRevision: requiredString(value.runtimeRevision, "runtimeRevision", 160),
+    catalogDigest,
+    sentAt: requiredInteger(value.sentAt, "sentAt"),
+  };
+}
+
+export function parseBridgeChallenge(value: unknown): BridgeChallenge {
+  if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.challenge
+    || Object.keys(value).some((key) => !["schema", "protocolVersion", "clientNonce", "serverNonce", "serverProof", "issuedAt"].includes(key))) {
+    throw new TypeError("bridge authentication challenge has an invalid schema");
+  }
+  if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) throw new TypeError("bridge protocol version is unsupported");
+  const clientNonce = requiredString(value.clientNonce, "clientNonce", 64);
+  const serverNonce = requiredString(value.serverNonce, "serverNonce", 64);
+  const serverProof = requiredString(value.serverProof, "serverProof", 64);
+  if (!HEX_SHA256.test(clientNonce) || !HEX_SHA256.test(serverNonce) || !HEX_SHA256.test(serverProof)) {
+    throw new TypeError("bridge challenge nonces and proof must be 32-byte hexadecimal values");
+  }
+  return {
+    schema: BRIDGE_SCHEMAS.challenge,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    clientNonce,
+    serverNonce,
+    serverProof,
+    issuedAt: requiredInteger(value.issuedAt, "issuedAt"),
+  };
+}
+
 export function parseBridgeHello(value: unknown): BridgeHello {
   if (!isJsonObject(value) || value.schema !== BRIDGE_SCHEMAS.hello
-    || Object.keys(value).some((key) => !["schema", "protocolVersion", "token", "extensionId", "runtimeRevision", "catalogDigest", "bindings", "sentAt"].includes(key))) {
+    || Object.keys(value).some((key) => !["schema", "protocolVersion", "clientNonce", "serverNonce", "clientProof", "extensionId", "runtimeRevision", "catalogDigest", "bindings", "sentAt"].includes(key))) {
     throw new TypeError("bridge hello has an invalid schema");
   }
   if (value.protocolVersion !== BRIDGE_PROTOCOL_VERSION) {
     throw new TypeError("bridge protocol version is unsupported");
   }
-  const token = requiredString(value.token, "token", MAX_BRIDGE_TOKEN_LENGTH);
-  if (token.length < MIN_BRIDGE_TOKEN_LENGTH) throw new TypeError("bridge token is too short");
+  const clientNonce = requiredString(value.clientNonce, "clientNonce", 64);
+  const serverNonce = requiredString(value.serverNonce, "serverNonce", 64);
+  const clientProof = requiredString(value.clientProof, "clientProof", 64);
+  if (!HEX_SHA256.test(clientNonce) || !HEX_SHA256.test(serverNonce) || !HEX_SHA256.test(clientProof)) {
+    throw new TypeError("bridge hello nonces and proof must be 32-byte hexadecimal values");
+  }
   const extensionId = requiredString(value.extensionId, "extensionId", 32);
   if (!EXTENSION_ID.test(extensionId)) throw new TypeError("extensionId is invalid");
   const catalogDigest = requiredString(value.catalogDigest, "catalogDigest", 64);
@@ -1242,7 +1360,9 @@ export function parseBridgeHello(value: unknown): BridgeHello {
   return {
     schema: BRIDGE_SCHEMAS.hello,
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
-    token,
+    clientNonce,
+    serverNonce,
+    clientProof,
     extensionId,
     runtimeRevision: requiredString(value.runtimeRevision, "runtimeRevision", 160),
     catalogDigest,
@@ -1286,6 +1406,7 @@ export function parseBridgeResult(value: unknown): BridgeResult {
 
 export function parseBridgeClientMessage(value: unknown): BridgeClientMessage {
   if (!isJsonObject(value)) throw new TypeError("bridge client message must be an object");
+  if (value.schema === BRIDGE_SCHEMAS.authenticate) return parseBridgeAuthenticate(value);
   if (value.schema === BRIDGE_SCHEMAS.hello) return parseBridgeHello(value);
   if (value.schema === BRIDGE_SCHEMAS.result) return parseBridgeResult(value);
   if (value.schema === BRIDGE_SCHEMAS.bindings) {

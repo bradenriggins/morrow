@@ -4,17 +4,7 @@ import {
   randomBytes,
   randomUUID,
 } from "node:crypto";
-import {
-  chmodSync,
-  closeSync,
-  constants,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, resolve } from "node:path";
-import { DatabaseSync, type StatementSync } from "node:sqlite";
+import type { DatabaseSync, StatementSync } from "node:sqlite";
 import {
   canonicalJson,
   isJsonObject,
@@ -24,6 +14,12 @@ import {
   type JsonObject,
   type RequestedByIdentity,
 } from "@morrow/contracts";
+import {
+  canonicalPrivateStateFilePath,
+  createExactPrivateStateFile,
+  openExactPrivateSqliteDatabase,
+  readExactPrivateStateFile,
+} from "@morrow/gateway-core";
 import {
   bindCanvasResultArguments,
   normalizeCanvasResultBinding,
@@ -35,8 +31,16 @@ import {
 export {
   CANVAS_RESULT_BINDING_KINDS,
   CANVAS_RESULT_BINDING_SCHEMA,
+  CANVAS_RESULT_BINDING_ARTIFACT_SCHEMA,
+  CANVAS_RESULT_BINDING_ARTIFACT_ENVELOPE_SCHEMA,
+  canvasResultBindingArtifactFromVerifiedConnector,
+  decryptCanvasResultBindingArtifact,
+  encryptCanvasResultBindingArtifact,
   type CanvasResultBindingKind,
   type CanvasResultBinding,
+  type CanvasResultBindingArtifact,
+  type CanvasResultBindingArtifactContext,
+  type CanvasResultBindingArtifactEnvelope,
 } from "./canvas-result-binding.js";
 
 export const BATCH_MODES = Object.freeze(["read_only", "stage_writes"] as const);
@@ -106,6 +110,16 @@ export interface BatchRatePolicyInput {
   readonly requestCost?: number;
   readonly rateLimitRemaining?: number;
   readonly jitterRatio?: number;
+}
+
+export interface BatchRateState {
+  readonly schema: "morrow.batch-rate-state.v1";
+  readonly batchId: string;
+  readonly sourceId: string;
+  readonly policy: Pick<BatchRatePolicyInput, "requestCost" | "rateLimitRemaining">;
+  readonly notBeforeAt: string | null;
+  readonly observedAt: string;
+  readonly remainingDelayMs: number;
 }
 
 export interface FrozenBatchManifest {
@@ -352,6 +366,14 @@ interface ManifestRow {
   manifest_ciphertext: string;
   manifest_iv: string;
   manifest_tag: string;
+}
+
+interface RateStateRow {
+  batch_id: string;
+  source_id: string;
+  policy_json: string;
+  not_before_at: string | null;
+  observed_at: string;
 }
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -731,33 +753,32 @@ function decryptedManifest(key: Buffer, row: ManifestRow): FrozenBatchManifest {
   return parsed as unknown as FrozenBatchManifest;
 }
 
-export function loadOrCreateBatchEncryptionKey(pathValue: string): Uint8Array {
-  const path = resolve(pathValue);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  try {
-    const existing = Buffer.from(readFileSync(path, "utf8").trim(), "base64url");
-    if (existing.length !== 32) throw new Error("batch state key has an invalid length");
-    try { chmodSync(path, 0o600); } catch { /* best effort outside POSIX */ }
-    return existing;
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code && code !== "ENOENT") throw error;
-  }
-  const key = randomBytes(32);
-  let descriptor: number | null = null;
-  try {
-    descriptor = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-    writeFileSync(descriptor, `${key.toString("base64url")}\n`, "utf8");
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code !== "EEXIST") throw error;
-    const existing = Buffer.from(readFileSync(path, "utf8").trim(), "base64url");
-    if (existing.length !== 32) throw new Error("batch state key has an invalid length");
-    return existing;
-  } finally {
-    if (descriptor !== null) closeSync(descriptor);
+const MAX_BATCH_KEY_FILE_BYTES = 128;
+const BATCH_KEY_TEXT = /^[A-Za-z0-9_-]{43}\n?$/u;
+
+function parseBatchEncryptionKey(bytes: Buffer): Buffer {
+  const text = bytes.toString("utf8");
+  if (!BATCH_KEY_TEXT.test(text)) throw new Error("batch state key has an invalid encoding");
+  const encoded = text.endsWith("\n") ? text.slice(0, -1) : text;
+  const key = Buffer.from(encoded, "base64url");
+  if (key.length !== 32 || key.toString("base64url") !== encoded) {
+    throw new Error("batch state key has an invalid length");
   }
   return key;
+}
+
+/** Loads or durably creates the exact private key that encrypts saved batch manifests. */
+export function loadOrCreateBatchEncryptionKey(pathValue: string): Uint8Array {
+  const options = { label: "batch state key", minBytes: 43, maxBytes: MAX_BATCH_KEY_FILE_BYTES } as const;
+  const path = canonicalPrivateStateFilePath(pathValue, options.label);
+  const existing = readExactPrivateStateFile(path, options);
+  if (existing) return parseBatchEncryptionKey(existing);
+  const key = randomBytes(32);
+  const content = Buffer.from(`${key.toString("base64url")}\n`, "utf8");
+  if (createExactPrivateStateFile(path, content, options)) return key;
+  const raced = readExactPrivateStateFile(path, options);
+  if (!raced) throw new Error("batch state key disappeared during creation");
+  return parseBatchEncryptionKey(raced);
 }
 
 export class DurableBatchStore {
@@ -771,14 +792,15 @@ export class DurableBatchStore {
   private readonly selectManifest: StatementSync;
 
   constructor(options: DurableBatchStoreOptions) {
-    this.path = options.path === ":memory:" ? ":memory:" : resolve(options.path);
-    this.key = exactKey(options.encryptionKey);
-    this.now = options.now ?? (() => new Date());
-    if (this.path !== ":memory:") mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-    this.database = new DatabaseSync(this.path, {
+    const key = exactKey(options.encryptionKey);
+    const opened = openExactPrivateSqliteDatabase(options.path, "Morrow batch database", {
       enableForeignKeyConstraints: true,
       enableDoubleQuotedStringLiterals: false,
     });
+    this.path = opened.path;
+    this.key = key;
+    this.now = options.now ?? (() => new Date());
+    this.database = opened.database;
     this.database.exec(`
       PRAGMA busy_timeout = 5000;
       PRAGMA synchronous = FULL;
@@ -852,6 +874,14 @@ export class DurableBatchStore {
         manifest_ciphertext TEXT NOT NULL,
         manifest_iv TEXT NOT NULL,
         manifest_tag TEXT NOT NULL
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS gateway_batch_rate_state (
+        batch_id TEXT NOT NULL REFERENCES gateway_batches(batch_id) ON DELETE CASCADE,
+        source_id TEXT NOT NULL,
+        policy_json TEXT NOT NULL,
+        not_before_at TEXT,
+        observed_at TEXT NOT NULL,
+        PRIMARY KEY(batch_id, source_id)
       ) STRICT;
     `);
     const batchColumns = new Set((this.database.prepare("PRAGMA table_info(gateway_batches)").all() as { name: string }[]).map((column) => column.name));
@@ -1297,6 +1327,89 @@ export class DurableBatchStore {
     return decryptedManifest(this.key, row);
   }
 
+  readRateStates(batchIdValue: string): readonly BatchRateState[] {
+    this.assertOpen();
+    const batchId = exactName(batchIdValue, "batch id");
+    this.getBatch(batchId);
+    const rows = this.database.prepare(`
+      SELECT * FROM gateway_batch_rate_state WHERE batch_id=? ORDER BY source_id ASC
+    `).all(batchId) as unknown as RateStateRow[];
+    const now = this.now().getTime();
+    return rows.map((row) => {
+      const parsed = JSON.parse(row.policy_json) as unknown;
+      if (!isJsonObject(parsed) || Object.keys(parsed).some((key) => !["requestCost", "rateLimitRemaining"].includes(key))) {
+        throw new Error("batch rate state policy is invalid");
+      }
+      const checked = exactRatePolicy(parsed);
+      const policy = {
+        ...(checked.requestCost === undefined ? {} : { requestCost: checked.requestCost }),
+        ...(checked.rateLimitRemaining === undefined ? {} : { rateLimitRemaining: checked.rateLimitRemaining }),
+      };
+      const observedAt = exactIsoInstant(row.observed_at, "batch rate observation time");
+      const notBeforeAt = row.not_before_at === null
+        ? null : exactIsoInstant(row.not_before_at, "batch rate not-before time");
+      const observedTime = Date.parse(observedAt);
+      const notBeforeTime = notBeforeAt === null ? null : Date.parse(notBeforeAt);
+      const delayDuration = notBeforeTime === null ? 0 : notBeforeTime - observedTime;
+      if (
+        notBeforeTime !== null
+        && (!Number.isSafeInteger(delayDuration) || delayDuration < 0 || delayDuration > 600_000)
+      ) {
+        throw new Error("batch rate state deadline is invalid");
+      }
+      return {
+        schema: "morrow.batch-rate-state.v1" as const,
+        batchId,
+        sourceId: exactName(row.source_id, "batch rate source id"),
+        policy,
+        notBeforeAt,
+        observedAt,
+        remainingDelayMs: notBeforeTime === null ? 0 : Math.max(0, notBeforeTime - now),
+      };
+    });
+  }
+
+  recordRateState(
+    batchIdValue: string,
+    sourceIdValue: string,
+    policyValue: BatchRatePolicyInput,
+    delayMsValue: number,
+  ): BatchRateState {
+    const batchId = exactName(batchIdValue, "batch id");
+    const sourceId = exactName(sourceIdValue, "batch rate source id");
+    const checked = exactRatePolicy(policyValue);
+    const policy = {
+      ...(checked.requestCost === undefined ? {} : { requestCost: checked.requestCost }),
+      ...(checked.rateLimitRemaining === undefined ? {} : { rateLimitRemaining: checked.rateLimitRemaining }),
+    };
+    const delayMs = exactNonNegativeInteger(delayMsValue, "batch rate delay", 600_000);
+    this.transaction(() => {
+      this.getBatch(batchId);
+      const observedAt = this.instant();
+      const notBeforeAt = delayMs === 0
+        ? null : new Date(Date.parse(observedAt) + delayMs).toISOString();
+      this.database.prepare(`
+        INSERT INTO gateway_batch_rate_state(batch_id, source_id, policy_json, not_before_at, observed_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(batch_id, source_id) DO UPDATE SET
+          policy_json=excluded.policy_json,
+          not_before_at=excluded.not_before_at,
+          observed_at=excluded.observed_at
+      `).run(batchId, sourceId, canonicalJson(policy), notBeforeAt, observedAt);
+    });
+    return this.readRateStates(batchId).find((state) => state.sourceId === sourceId)!;
+  }
+
+  clearRateDelays(batchIdValue: string): void {
+    const batchId = exactName(batchIdValue, "batch id");
+    this.transaction(() => {
+      this.getBatch(batchId);
+      this.database.prepare(`
+        UPDATE gateway_batch_rate_state SET not_before_at=NULL WHERE batch_id=? AND not_before_at IS NOT NULL
+      `).run(batchId);
+    });
+  }
+
   get(batchIdValue: string): BatchDetail {
     const batch = this.getBatch(batchIdValue);
     const manifest = this.getManifest(batch.batchId);
@@ -1397,15 +1510,35 @@ export class DurableBatchStore {
     });
   }
 
-  cancel(batchIdValue: string): BatchRecord {
+  cancel(batchIdValue: string, irreversibleOperationIdsValue: readonly string[] = []): BatchRecord {
     const batchId = exactName(batchIdValue, "batch id");
+    const irreversibleOperationIds = [...new Set(irreversibleOperationIdsValue.map((value) => (
+      exactName(value, "irreversible gateway operation id")
+    )))];
     return this.transaction(() => {
       const current = this.getBatch(batchId);
       if (TERMINAL_BATCH_STATES.has(current.state)) return current;
       const now = this.instant();
+      if (irreversibleOperationIds.length > 0) {
+        const placeholders = irreversibleOperationIds.map(() => "?").join(",");
+        this.database.prepare(`
+          UPDATE gateway_batch_children
+          SET state='unknown', gateway_operation_state='dispatch_reserved_before_batch_cancel',
+              error_digest=?, updated_at=?, terminal_at=?, revision=revision+1
+          WHERE batch_id=? AND state='pending' AND gateway_operation_id IN (${placeholders})
+        `).run(
+          sha256Text("dispatch_reserved_before_batch_cancel"),
+          now,
+          now,
+          batchId,
+          ...irreversibleOperationIds,
+        );
+      }
       this.database.prepare(`
         UPDATE gateway_batch_children
-        SET state='cancelled', updated_at=?, terminal_at=?, revision=revision+1
+        SET state='cancelled',
+            gateway_operation_state=CASE WHEN gateway_operation_id IS NULL THEN gateway_operation_state ELSE 'cancelled' END,
+            updated_at=?, terminal_at=?, revision=revision+1
         WHERE batch_id=? AND state='pending'
       `).run(now, now, batchId);
       const counts = this.database.prepare(`
@@ -1504,8 +1637,8 @@ export class DurableBatchStore {
       const rows = this.database.prepare(`
         SELECT * FROM gateway_batch_children
         WHERE batch_id=? AND state='pending'
-        ORDER BY ordinal ASC LIMIT ?
-      `).all(batchId, Math.min(limit * 4, 500)) as unknown as ChildRow[];
+        ORDER BY ordinal ASC
+      `).all(batchId) as unknown as ChildRow[];
       const now = this.instant();
       const update = this.database.prepare(`
         UPDATE gateway_batch_children
@@ -1514,6 +1647,10 @@ export class DurableBatchStore {
         WHERE batch_id=? AND child_id=? AND state='pending'
       `);
       const claimed: BatchChildRecord[] = [];
+      // Dependency order is a graph property, not an ordinal-prefix property.
+      // Creation caps the complete manifest at MAX_BATCH_CHILDREN, so scanning
+      // every pending row here is bounded and guarantees that a ready child
+      // after any blocked prefix is considered on this run.
       for (const row of rows) {
         if (claimed.length >= limit) break;
         const dependencies = dependenciesByChild.get(row.child_id) || [];

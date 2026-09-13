@@ -17,6 +17,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleCourseSettingsInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const MAX_FORM_ENTRIES = 600;
   // The course summary and a long-text custom field are both larger than any
@@ -255,16 +257,58 @@ export async function executeMoodleCourseSettingsInPage(rawInput) {
     }
     return definition.kind === "format" ? formatArgumentsFor(args, courseId) : settingsArgumentsFor(args, courseId);
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const boundedResponseText = async (response) => {
+    const maximum = 4 * 1024 * 1024;
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > maximum)) {
+      cancelBody(response.body);
+      return null;
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") return null;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const remaining = Number.isFinite(input?.expiresAt) ? input.expiresAt - Date.now() : Infinity;
+        if (remaining <= 0) throw new Error("moodle_execution_expired");
+        let timeout;
+        const next = Number.isFinite(remaining)
+          ? await Promise.race([
+              reader.read(),
+              new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+            ]).finally(() => clearTimeout(timeout))
+          : await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > maximum) {
+          cancelBody(reader);
+          return null;
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch {
+      cancelBody(reader);
+      return null;
+    }
+  };
   const readPage = async (context, endpoint) => {
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error: "moodle_course_settings_read_unavailable" }; }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())) {
       return { error: "moodle_course_settings_read_unavailable", status: response.status };
     }
     let html;
-    try { html = await response.text(); } catch { return { error: "moodle_course_settings_read_unavailable", status: response.status }; }
+    html = await boundedResponseText(response);
     if (typeof html !== "string" || html.length > 4 * 1024 * 1024 || typeof globalThis.DOMParser !== "function") {
       return { error: "moodle_course_settings_read_unavailable", status: response.status };
     }
@@ -306,11 +350,12 @@ export async function executeMoodleCourseSettingsInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: new URLSearchParams({ sesskey: context.sesskey, itemid: itemId, filepath: "/" }),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return null; }
     if (!response.ok) return null;
     let payload;
-    try { payload = JSON.parse(await response.text()); } catch { return null; }
+    try { payload = JSON.parse(await boundedResponseText(response)); } catch { return null; }
     return object(payload) ? payload : null;
   };
   /**
@@ -594,6 +639,7 @@ export async function executeMoodleCourseSettingsInPage(rawInput) {
       response = await fetch(state.action, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" }, body,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return unconfirmedWrite("moodle_course_settings_write_unconfirmed"); }
     if (!sameContext(context, currentContext())) return unconfirmedWrite("moodle_course_settings_write_unconfirmed", response.status);
@@ -617,6 +663,7 @@ export async function executeMoodleCourseSettingsInPage(rawInput) {
    */
   const settingsPlan = (state, requested) => {
     const { form } = state;
+    const currentFormatOptions = formatOptionFields(form, state.fileAreas);
     const changes = new Map();
     const applied = [];
     for (const setting of requested) {
@@ -628,6 +675,10 @@ export async function executeMoodleCourseSettingsInPage(rawInput) {
       }
       if (setting.kind === "select" || setting.kind === "option") {
         const value = String(setting.value);
+        if (setting.group === "format_options"
+          && (!currentFormatOptions || !currentFormatOptions.includes(setting.field))) {
+          return { error: "moodle_course_setting_refused" };
+        }
         // A format option and a course custom field are whatever the plugin
         // declared, so each one is written through the control the loaded form
         // actually renders: one select that offers the value, or one writable
@@ -741,10 +792,11 @@ export async function executeMoodleCourseSettingsInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify([{ index: 0, methodname: "core_courseformat_get_state", args: { courseid: Number(courseId) } }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_course_state_unavailable" }; }
     let payload;
-    try { payload = JSON.parse(await response.text()); } catch { return { error: "moodle_course_state_unavailable", status: response.status }; }
+    try { payload = JSON.parse(await boundedResponseText(response)); } catch { return { error: "moodle_course_state_unavailable", status: response.status }; }
     const entry = Array.isArray(payload) && payload.length === 1 && object(payload[0]) ? payload[0] : null;
     if (!response.ok || !entry || entry.error || entry.exception || typeof entry.data !== "string") {
       return { error: "moodle_course_state_unavailable", status: response.status };

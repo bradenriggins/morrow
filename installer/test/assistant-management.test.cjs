@@ -30,7 +30,25 @@ async function temporaryRoot() {
   // win32 before checking its digest, through the real client-config module.
   const clientConfig = path.join(root, "Payload", "app", "packages", "client-config", "dist");
   await fs.mkdir(clientConfig, { recursive: true });
-  await fs.writeFile(path.join(clientConfig, "index.js"), "export function restrictToCurrentAccount() {}\n");
+  await fs.writeFile(path.join(clientConfig, "index.js"), [
+    "export function restrictToCurrentAccount() {}",
+    "export function withoutMorrowCodexTable(content) {",
+    "  const lines = content.split('\\n');",
+    "  const start = lines.findIndex((line) => /^\\s*\\[\\s*mcp_servers\\s*\\.\\s*(?:morrow|\\\"morrow\\\"|'morrow')\\s*\\]\\s*(?:#.*)?$/.test(line));",
+    "  if (start === -1) return null;",
+    "  if (lines.slice(start + 1).some((line) => line.trimStart().startsWith('['))) throw new Error('unsupported table order');",
+    "  const kept = lines.slice(0, start).join('\\n').trimEnd();",
+    "  return kept ? `${kept}\\n` : '';",
+    "}",
+    "export function withoutMorrowClientJson(content, container = 'mcpServers', serverName = 'morrow') {",
+    "  const document = JSON.parse(content);",
+    "  const servers = document?.[container];",
+    "  if (!servers || typeof servers !== 'object' || !Object.hasOwn(servers, serverName)) return null;",
+    "  delete servers[serverName];",
+    "  return `${JSON.stringify(document, null, 2)}\\n`;",
+    "}",
+    ""
+  ].join("\n"));
   test.after(() => fs.rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -58,6 +76,34 @@ async function writeFile(target, content) {
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, content);
   return sha256(await fs.readFile(target));
+}
+
+async function claudeSetupFixture(installer, name, installationId = name) {
+  const directory = path.join(installer.paths.state, "ClaudeDesktop", name);
+  await writeFile(path.join(directory, "Morrow.mcpb"), `${name} bundle`);
+  await writeFile(path.join(directory, "bundle", "server", "launch.cjs"), `${name} launcher`);
+  const canonical = await fs.realpath(directory);
+  return {
+    bundlePath: path.join(canonical, "Morrow.mcpb"),
+    installationId,
+    receiptPath: path.join(canonical, "connection.json"),
+  };
+}
+
+async function claudeRuntimeFixture(installer) {
+  for (const file of [installer.paths.node, installer.paths.server, installer.paths.upstreams]) await writeFile(file, "fixture");
+  const serverBytes = await fs.readFile(installer.paths.server);
+  await writeFile(installer.paths.mcpRuntimeManifest, `${JSON.stringify({
+    schema: "morrow.mcp-runtime-manifest.v2",
+    package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
+    entrypoint: {
+      path: "packages/mcp-server/dist/index.js",
+      bytes: serverBytes.length,
+      sha256: sha256(serverBytes),
+    },
+    dependencies: [],
+    directFiles: [],
+  })}\n`);
 }
 
 /**
@@ -114,6 +160,14 @@ function controller(root, overrides = {}) {
     },
     ...controllerOverrides
   });
+  installer.acquireDesktopMutationGuard = async () => ({ kind: "owner", leaseId: "test-desktop-mutation" });
+  installer.stopRuntimeForDesktopMutation = async (guard) => {
+    await installer.closeRuntimeMonitor();
+    return { ...guard, kind: "stopped", leaseToken: "test-desktop-mutation-token" };
+  };
+  installer.releaseDesktopMutationGuard = async (guard) => {
+    if (installer.desktopMutationGuard === guard) installer.desktopMutationGuard = null;
+  };
   return { installer, calls };
 }
 
@@ -204,6 +258,227 @@ test("removing one assistant removes only its own entry, and leaves every other 
   assert.equal(emptied.selectedAssistantId, null);
 });
 
+test("JSON assistant removal uses the shared offset-preserving JSONC remover", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const project = path.join(root, "Project");
+  const target = path.join(project, ".mcp.json");
+  const content = "{\r\n"
+    + "  // keep this comment\r\n"
+    + "  \"mcpServers\": {\r\n"
+    + "    \"other\": { \"command\": \"other\" },\r\n"
+    + "    \"mo\\u0072row\": { \"command\": \"node\" }, /* keep this boundary */\r\n"
+    + "  },\r\n"
+    + "  \"large\": 9007199254740993123456789,\r\n"
+    + "}\r\n";
+  const expected = "{\r\n"
+    + "  // keep this comment\r\n"
+    + "  \"mcpServers\": {\r\n"
+    + "    \"other\": { \"command\": \"other\" },\r\n"
+    + "     /* keep this boundary */\r\n"
+    + "  },\r\n"
+    + "  \"large\": 9007199254740993123456789,\r\n"
+    + "}\r\n";
+  const recorded = await writeFile(target, content);
+  await installer.writeRecord({
+    ...freshRecord(),
+    selectedAssistantId: "claude-code",
+    configured: { "claude-code": { target, sha256: recorded } }
+  });
+  const calls = [];
+  installer.clientConfigModule = async () => ({
+    withoutMorrowClientJson(value, container, serverName) {
+      calls.push([value, container, serverName]);
+      if (value === content) return expected;
+      if (value === expected) return null;
+      throw new Error("unexpected JSONC source");
+    }
+  });
+
+  await installer.removeAssistant("claude-code");
+
+  assert.equal(await fs.readFile(target, "utf8"), expected);
+  assert.deepEqual(calls, [
+    [content, "mcpServers", "morrow"],
+    [expected, "mcpServers", "morrow"],
+  ]);
+  assert.deepEqual((await installer.record()).configured, {});
+  assert.equal(await fs.lstat(installer.assistantRemovalPath).then(() => true, () => false), false);
+});
+
+test("a durable removal tombstone recovers a confirmed file removal after the record commit fails", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const project = path.join(root, "Project");
+  const target = path.join(project, ".mcp.json");
+  const content = `${JSON.stringify({
+    mcpServers: { other: { command: "other" }, morrow: { command: "node" } },
+    large: "9007199254740993123456789",
+  }, null, 2)}\n`;
+  const expected = `${JSON.stringify({
+    mcpServers: { other: { command: "other" } },
+    large: "9007199254740993123456789",
+  }, null, 2)}\n`;
+  const recorded = await writeFile(target, content);
+  const originalRecord = {
+    ...freshRecord(),
+    selectedAssistantId: "claude-code",
+    configured: { "claude-code": { target, sha256: recorded } }
+  };
+  await installer.writeRecord(originalRecord);
+  const durableWriteRecord = installer.writeRecord.bind(installer);
+  let refusedCommit = false;
+  installer.writeRecord = async (record) => {
+    if (!refusedCommit && record.configured?.["claude-code"] === undefined) {
+      refusedCommit = true;
+      throw new Error("simulated record commit failure");
+    }
+    return durableWriteRecord(record);
+  };
+
+  await assert.rejects(() => installer.removeAssistant("claude-code"), /simulated record commit failure/);
+
+  assert.equal(await fs.readFile(target, "utf8"), expected, "the external removal was confirmed before the record commit failed");
+  assert.deepEqual(JSON.parse(await fs.readFile(installer.recordPath, "utf8")), originalRecord);
+  const tombstone = JSON.parse(await fs.readFile(installer.assistantRemovalPath, "utf8"));
+  assert.equal(tombstone.schema, "morrow.assistant-removal.v1");
+  assert.equal(tombstone.assistantId, "claude-code");
+  assert.equal(tombstone.target, target);
+  assert.equal(tombstone.beforeSha256, recorded);
+  assert.equal(tombstone.afterSha256, sha256(Buffer.from(expected)));
+  assert.equal((await installer.state()).lifecycle, "repair_required");
+
+  const { installer: restarted } = controller(root);
+  let repeatedExternalWrites = 0;
+  const writeAssistantConfiguration = restarted.writeAssistantConfiguration.bind(restarted);
+  restarted.writeAssistantConfiguration = async (...args) => {
+    repeatedExternalWrites += 1;
+    return writeAssistantConfiguration(...args);
+  };
+  const recovered = await restarted.repairInstallerRecord();
+
+  assert.equal(repeatedExternalWrites, 0, "recovery recognized the exact confirmed after digest");
+  assert.deepEqual(recovered.configured, {});
+  assert.equal(recovered.selectedAssistantId, null);
+  assert.deepEqual((await restarted.record()).configured, {});
+  assert.equal(await fs.readFile(target, "utf8"), expected);
+  assert.equal(await fs.lstat(restarted.assistantRemovalPath).then(() => true, () => false), false);
+});
+
+test("recovery completes one removal when interruption happened after the tombstone but before mutation", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const project = path.join(root, "Project");
+  const target = path.join(project, ".mcp.json");
+  const content = `${JSON.stringify({ mcpServers: { morrow: { command: "node" }, other: { command: "other" } } }, null, 2)}\n`;
+  const expected = `${JSON.stringify({ mcpServers: { other: { command: "other" } } }, null, 2)}\n`;
+  const recorded = await writeFile(target, content);
+  const originalRecord = {
+    ...freshRecord(),
+    selectedAssistantId: "claude-code",
+    configured: { "claude-code": { target, sha256: recorded } }
+  };
+  await installer.writeRecord(originalRecord);
+  const flushed = [];
+  const originalOpen = fs.open;
+  fs.open = async (...argumentsValue) => {
+    const handle = await originalOpen(...argumentsValue);
+    const originalSync = handle.sync.bind(handle);
+    handle.sync = async () => {
+      flushed.push(String(argumentsValue[0]));
+      return originalSync();
+    };
+    return handle;
+  };
+  installer.writeAssistantConfiguration = async () => {
+    const tombstone = JSON.parse(await fs.readFile(installer.assistantRemovalPath, "utf8"));
+    assert.equal(tombstone.target, target);
+    assert.equal(tombstone.beforeSha256, recorded);
+    assert.equal(tombstone.afterSha256, sha256(Buffer.from(expected)));
+    throw new Error("simulated interruption before mutation");
+  };
+
+  try {
+    await assert.rejects(() => installer.removeAssistant("claude-code"), /simulated interruption before mutation/);
+  } finally {
+    fs.open = originalOpen;
+  }
+  assert.equal(flushed.some((file) => file.startsWith(`${installer.assistantRemovalPath}.tmp-`)), true);
+  if (process.platform !== "win32") assert.equal(flushed.includes(path.dirname(installer.assistantRemovalPath)), true);
+  assert.equal(await fs.readFile(target, "utf8"), content);
+  assert.deepEqual(JSON.parse(await fs.readFile(installer.recordPath, "utf8")), originalRecord);
+
+  const { installer: restarted } = controller(root);
+  let externalWrites = 0;
+  const writeAssistantConfiguration = restarted.writeAssistantConfiguration.bind(restarted);
+  restarted.writeAssistantConfiguration = async (...args) => {
+    externalWrites += 1;
+    return writeAssistantConfiguration(...args);
+  };
+  await restarted.repairInstallerRecord();
+
+  assert.equal(externalWrites, 1);
+  assert.equal(await fs.readFile(target, "utf8"), expected);
+  assert.deepEqual((await restarted.record()).configured, {});
+  assert.equal(await fs.lstat(restarted.assistantRemovalPath).then(() => true, () => false), false);
+});
+
+test("recovery refuses a tombstone retargeted away from the recorded assistant file", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const project = path.join(root, "Project");
+  const target = path.join(project, ".mcp.json");
+  const foreign = path.join(root, "OtherProject", ".mcp.json");
+  const content = `${JSON.stringify({ mcpServers: { morrow: { command: "node" } } }, null, 2)}\n`;
+  const foreignContent = `${JSON.stringify({ mcpServers: { private: { command: "other" } } }, null, 2)}\n`;
+  const recorded = await writeFile(target, content);
+  await writeFile(foreign, foreignContent);
+  const originalRecord = {
+    ...freshRecord(),
+    selectedAssistantId: "claude-code",
+    configured: { "claude-code": { target, sha256: recorded } }
+  };
+  await installer.writeRecord(originalRecord);
+  installer.writeAssistantConfiguration = async () => { throw new Error("pause with valid tombstone"); };
+  await assert.rejects(() => installer.removeAssistant("claude-code"), /pause with valid tombstone/);
+  const tombstone = JSON.parse(await fs.readFile(installer.assistantRemovalPath, "utf8"));
+  tombstone.target = foreign;
+  await fs.writeFile(installer.assistantRemovalPath, `${JSON.stringify(tombstone)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") await fs.chmod(installer.assistantRemovalPath, 0o600);
+
+  const { installer: restarted } = controller(root);
+  await assert.rejects(() => restarted.repairInstallerRecord(), /assistant_removal_recovery_required/);
+
+  assert.equal(await fs.readFile(target, "utf8"), content);
+  assert.equal(await fs.readFile(foreign, "utf8"), foreignContent);
+  assert.deepEqual(JSON.parse(await fs.readFile(restarted.recordPath, "utf8")), originalRecord);
+});
+
+test("removing Codex recognizes the quoted Morrow table written by valid TOML", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const content = [
+    "model = \"gpt-6\"",
+    "",
+    "[mcp_servers.\"morrow\"] # equivalent quoted key",
+    "command = \"node\"",
+    "required = true",
+    ""
+  ].join("\n");
+  const recorded = await writeFile(target, content);
+  await installer.writeRecord({
+    ...freshRecord(),
+    selectedAssistantId: "codex",
+    configured: { codex: { target, sha256: recorded } }
+  });
+
+  await installer.removeAssistant("codex");
+
+  assert.equal(await fs.readFile(target, "utf8"), "model = \"gpt-6\"\n");
+  assert.deepEqual((await installer.record()).configured, {});
+});
+
 test("removing an assistant Morrow never configured changes nothing and is not an error", async () => {
   const root = await temporaryRoot();
   const { installer } = controller(root);
@@ -213,16 +488,18 @@ test("removing an assistant Morrow never configured changes nothing and is not a
   await assert.rejects(() => installer.removeAssistant("not-an-assistant"), (error) => error.code === "assistant_not_found");
 });
 
-test("removing Claude Desktop removes the bundle Morrow made and nothing beside it", async () => {
+test("removing Claude Desktop revokes every generated setup and leaves unrelated state", async () => {
   const root = await temporaryRoot();
   const { installer } = controller(root);
   const setupRoot = path.join(root, "UserData", "State", "ClaudeDesktop");
   const bundleDirectory = path.join(setupRoot, "setup-current");
   const otherDirectory = path.join(setupRoot, "setup-other");
+  const unrelated = path.join(root, "UserData", "State", "support-note.txt");
   const bundlePath = path.join(bundleDirectory, "Morrow.mcpb");
   await writeFile(bundlePath, "bundle");
   await writeFile(path.join(bundleDirectory, "connection.json"), "{}\n");
   await writeFile(path.join(otherDirectory, "Morrow.mcpb"), "another bundle");
+  await writeFile(unrelated, "keep this");
   await installer.writeRecord({
     ...freshRecord(),
     selectedAssistantId: "claude-desktop",
@@ -232,7 +509,170 @@ test("removing Claude Desktop removes the bundle Morrow made and nothing beside 
   await installer.removeAssistant("claude-desktop");
 
   assert.equal(await fs.lstat(bundleDirectory).then(() => true, () => false), false);
-  assert.equal((await fs.stat(path.join(otherDirectory, "Morrow.mcpb"))).isFile(), true, "only the recorded bundle was removed");
+  assert.equal(await fs.lstat(otherDirectory).then(() => true, () => false), false, "an unrecorded old generation was revoked too");
+  assert.equal(await fs.readFile(unrelated, "utf8"), "keep this");
+  assert.deepEqual((await installer.record()).configured, {});
+});
+
+test("Claude replacement revokes old roots before activation and restores them when activation fails", async () => {
+  const root = await temporaryRoot();
+  const materials = path.join(root, "Materials");
+  await fs.mkdir(materials);
+  const { installer } = controller(root, { platform: "darwin" });
+  await claudeRuntimeFixture(installer);
+  installer.ensureRuntime = async () => installer.paths;
+  const old = await claudeSetupFixture(installer, "setup-old", "old-installation");
+  const original = { ...freshRecord(), materialsFolder: materials, selectedAssistantId: "claude-desktop", configured: { "claude-desktop": old } };
+  await installer.writeRecord(original);
+
+  const writeRecord = installer.writeRecord.bind(installer);
+  let activationObserved = false;
+  installer.writeRecord = async (next) => {
+    if (next.configured?.["claude-desktop"]?.installationId !== old.installationId) {
+      activationObserved = true;
+      assert.equal(await fs.lstat(path.dirname(old.bundlePath)).then(() => true, () => false), false,
+        "the old source is unavailable before the active record changes");
+    }
+    return writeRecord(next);
+  };
+  await installer.installAssistant("claude-desktop", null);
+  assert.equal(activationObserved, true);
+  const active = (await installer.record()).configured["claude-desktop"];
+  assert.notEqual(active.installationId, old.installationId);
+  assert.equal(await fs.lstat(path.dirname(old.bundlePath)).then(() => true, () => false), false);
+
+  await installer.removeClaudeDesktopSetup(active);
+  const rollbackOld = await claudeSetupFixture(installer, "setup-rollback-old", "rollback-old");
+  const rollbackRecord = { ...original, configured: { "claude-desktop": rollbackOld } };
+  await writeRecord(rollbackRecord);
+  installer.writeRecord = async (next) => {
+    if (next.configured?.["claude-desktop"]?.installationId !== rollbackOld.installationId) {
+      throw new Error("simulated activation failure");
+    }
+    return writeRecord(next);
+  };
+  await assert.rejects(() => installer.installAssistant("claude-desktop", null), { code: "setup_failed" });
+  assert.deepEqual(await installer.record(), rollbackRecord);
+  assert.equal((await fs.stat(rollbackOld.bundlePath)).isFile(), true, "rollback restored the old source root");
+  assert.equal(await installer.readClaudeGenerationTransition(), null);
+  assert.deepEqual((await installer.claudeSetupDirectories()).map((value) => path.basename(value)), ["setup-rollback-old"]);
+});
+
+test("Claude removal commits revocation before cleanup and a cleanup failure cannot restore authority", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const current = await claudeSetupFixture(installer, "setup-current", "current-installation");
+  const stale = await claudeSetupFixture(installer, "setup-stale", "stale-installation");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "claude-desktop", configured: { "claude-desktop": current } });
+  const writeRecord = installer.writeRecord.bind(installer);
+  let revokedBeforeCommit = false;
+  installer.writeRecord = async (next) => {
+    if (!next.configured?.["claude-desktop"]) {
+      revokedBeforeCommit = true;
+      assert.equal(await fs.lstat(path.dirname(current.bundlePath)).then(() => true, () => false), false);
+      assert.equal(await fs.lstat(path.dirname(stale.bundlePath)).then(() => true, () => false), false);
+    }
+    return writeRecord(next);
+  };
+  const removeSetup = installer.removeClaudeDesktopSetup.bind(installer);
+  installer.removeClaudeDesktopSetup = async (entry) => {
+    if (path.basename(path.dirname(entry.bundlePath)).startsWith(".quarantine-")) throw new Error("simulated cleanup failure");
+    return removeSetup(entry);
+  };
+
+  await installer.removeAssistant("claude-desktop");
+
+  assert.equal(revokedBeforeCommit, true);
+  assert.deepEqual((await installer.record()).configured, {});
+  assert.equal(await installer.readClaudeGenerationTransition(), null, "cleanup runs only after the durable transition is cleared");
+  assert.equal((await installer.claudeSetupDirectories(".quarantine-")).length, 2,
+    "failed cleanup leaves only inert quarantine names");
+});
+
+test("Claude generation recovery restores before-state or completes committed after-state", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const old = await claudeSetupFixture(installer, "setup-old", "old-installation");
+  let next = await claudeSetupFixture(installer, "setup-next", "next-installation");
+  const before = { ...freshRecord(), selectedAssistantId: "claude-desktop", configured: { "claude-desktop": old } };
+  let after = { ...before, configured: { "claude-desktop": next } };
+  await installer.writeRecord(before);
+
+  await installer.stageClaudeGenerationTransition(before, after, next);
+  assert.equal(await fs.lstat(path.dirname(old.bundlePath)).then(() => true, () => false), false);
+  assert.equal(await installer.recoverClaudeGenerationTransition(), "rolled_back");
+  assert.equal((await fs.stat(old.bundlePath)).isFile(), true);
+  assert.equal(await fs.lstat(path.dirname(next.bundlePath)).then(() => true, () => false), false);
+  assert.equal(await installer.readClaudeGenerationTransition(), null);
+
+  next = await claudeSetupFixture(installer, "setup-next", "next-installation");
+  after = { ...before, configured: { "claude-desktop": next } };
+  await installer.stageClaudeGenerationTransition(before, after, next);
+  await installer.writeRecord(after);
+  const { installer: recovered } = controller(root);
+  assert.equal(await recovered.recoverClaudeGenerationTransition(), "committed");
+  assert.deepEqual(await recovered.record(), after);
+  assert.equal(await fs.lstat(path.dirname(old.bundlePath)).then(() => true, () => false), false);
+  assert.equal((await fs.stat(next.bundlePath)).isFile(), true);
+
+  const future = await claudeSetupFixture(installer, "setup-future", "future-installation");
+  const futureRecord = { ...after, configured: { "claude-desktop": future } };
+  await installer.stageClaudeGenerationTransition(after, futureRecord, future);
+  await installer.writeRecord({ ...after, selectedAssistantId: null });
+  await assert.rejects(() => installer.recoverClaudeGenerationTransition(), /claude_generation_recovery_required/);
+  assert.notEqual(await installer.readClaudeGenerationTransition(), null, "an unbound third record leaves recovery fail-closed");
+  assert.equal(await fs.lstat(path.dirname(next.bundlePath)).then(() => true, () => false), false,
+    "the prior source stays quarantined while authority is ambiguous");
+});
+
+test("startup migrates a legacy Claude launcher to an authority-bound generation", async () => {
+  const root = await temporaryRoot();
+  const materials = path.join(root, "Materials");
+  await fs.mkdir(materials);
+  const { installer } = controller(root, { platform: "darwin" });
+  await claudeRuntimeFixture(installer);
+  const legacy = await claudeSetupFixture(installer, "setup-legacy", "legacy-installation");
+  await installer.writeRecord({
+    ...freshRecord(),
+    materialsFolder: materials,
+    selectedAssistantId: "claude-desktop",
+    configured: { "claude-desktop": legacy },
+  });
+
+  await installer.reconcileClaudeDesktopGenerationsAtStartup();
+
+  const active = (await installer.record()).configured["claude-desktop"];
+  assert.notEqual(active.installationId, legacy.installationId);
+  assert.equal(await fs.lstat(path.dirname(legacy.bundlePath)).then(() => true, () => false), false);
+  const metadata = JSON.parse(await fs.readFile(path.join(path.dirname(active.bundlePath), "setup.json"), "utf8"));
+  assert.equal(metadata.schema, "morrow.claude-desktop-setup.v3");
+  assert.deepEqual(metadata.activeEntry, active);
+  assert.equal(metadata.installerRecordPath, await fs.realpath(installer.recordPath));
+});
+
+test("a concurrent Claude mutation is refused while revocation owns the desktop transaction", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const current = await claudeSetupFixture(installer, "setup-current", "current-installation");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "claude-desktop", configured: { "claude-desktop": current } });
+  const writeRecord = installer.writeRecord.bind(installer);
+  let release;
+  const held = new Promise((resolve) => { release = resolve; });
+  let entered;
+  const writing = new Promise((resolve) => { entered = resolve; });
+  installer.writeRecord = async (next) => {
+    if (!next.configured?.["claude-desktop"]) {
+      entered();
+      await held;
+    }
+    return writeRecord(next);
+  };
+
+  const removal = installer.removeAssistant("claude-desktop");
+  await writing;
+  await assert.rejects(() => installer.removeAssistant("claude-desktop"), { code: "active_or_uncertain_operations" });
+  release();
+  await removal;
   assert.deepEqual((await installer.record()).configured, {});
 });
 
@@ -347,7 +787,7 @@ test("a materials folder change is refused while another operation holds the run
   assert.equal((await installer.record()).materialsFolder, undefined);
 });
 
-test("a folder change stops before it writes anything when the record names a file this computer cannot rebuild", async () => {
+test("a foreign configured path enters record recovery before a folder change writes anything", async () => {
   const root = await temporaryRoot();
   const chosen = path.join(root, "Fall biology");
   await fs.mkdir(chosen, { recursive: true });
@@ -358,16 +798,20 @@ test("a folder change stops before it writes anything when the record names a fi
   const { installer, calls } = controller(root, {
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
   });
-  await installer.writeRecord({
+  const stored = {
     ...freshRecord(),
     selectedAssistantId: "codex",
     configured: { codex: { target: foreign, sha256: foreignSha256 } }
-  });
+  };
+  await fs.mkdir(installer.paths.state, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") await fs.chmod(installer.paths.state, 0o700);
+  await fs.writeFile(installer.recordPath, `${JSON.stringify(stored)}\n`, { mode: 0o600 });
   let closed = false;
   installer.runtimeMonitor = { close: async () => { closed = true; } };
 
-  await assert.rejects(() => installer.configureWorkspace(null), (error) => error.code === "setup_failed");
-  assert.equal((await installer.record()).materialsFolder, undefined, "the folder Morrow uses did not change");
+  assert.equal((await installer.state()).lifecycle, "repair_required");
+  await assert.rejects(() => installer.configureWorkspace(null), /record_invalid/);
+  assert.equal(JSON.parse(await fs.readFile(installer.recordPath, "utf8")).materialsFolder, undefined, "the folder Morrow uses did not change");
   assert.equal(closed, false, "the runtime kept running");
   assert.deepEqual(calls, []);
   assert.equal(sha256(await fs.readFile(foreign)), foreignSha256);
@@ -514,6 +958,18 @@ test("a folder change makes the Claude Desktop extension again, for the folder t
     dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) }
   });
   for (const file of [installer.paths.node, installer.paths.server, installer.paths.upstreams]) await writeFile(file, "fixture");
+  const serverBytes = await fs.readFile(installer.paths.server);
+  await writeFile(installer.paths.mcpRuntimeManifest, `${JSON.stringify({
+    schema: "morrow.mcp-runtime-manifest.v2",
+    package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
+    entrypoint: {
+      path: "packages/mcp-server/dist/index.js",
+      bytes: serverBytes.length,
+      sha256: sha256(serverBytes)
+    },
+    dependencies: [],
+    directFiles: []
+  })}\n`);
   const previousBundle = path.join(root, "UserData", "State", "ClaudeDesktop", "setup-previous", "Morrow.mcpb");
   await writeFile(previousBundle, "the bundle for the folder in use now");
   await installer.writeRecord({
@@ -667,4 +1123,27 @@ test("an assistant added after setup does not take the lifecycle back while it w
   assert.equal(claude.configured, false);
   assert.equal(claude.pending, true);
   assert.equal(state.assistants.find((assistant) => assistant.id === "codex").configured, true);
+});
+
+test("a saved configuration is not ready while its assistant is unavailable", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root, { detectAssistant: async () => false });
+  const materials = path.join(root, "Materials");
+  const codex = path.join(root, "Home", ".codex", "config.toml");
+  await fs.mkdir(materials, { recursive: true });
+  const codexSha256 = await writeFile(codex, codexTable(materials));
+  await installer.writeRecord({
+    ...freshRecord(),
+    materialsFolder: materials,
+    selectedAssistantId: "codex",
+    configured: { codex: { target: codex, sha256: codexSha256 } },
+  });
+  installer.ensureRuntime = async () => installer.paths;
+  installer.runtimeSnapshot = async () => readyRuntime();
+
+  const state = await installer.state();
+  const assistant = state.assistants.find((entry) => entry.id === "codex");
+  assert.equal(assistant.configured, true);
+  assert.equal(assistant.detected, false);
+  assert.equal(state.lifecycle, "ready_for_assistant");
 });

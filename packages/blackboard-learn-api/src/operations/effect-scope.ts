@@ -1,11 +1,11 @@
-import { chmod, lstat, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { resolve } from "node:path";
 import { canonicalJson, isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
-import { privateFileAccessAccepted } from "@morrow/gateway-core";
 import { BlackboardApiError, type BlackboardPrincipalResolution, type BlackboardTenant } from "../types.js";
+import { readDurableJsonState, replaceDurableState, withDurableStateTransaction } from "./durable-state.js";
 
-const SESSION_STATE_SCHEMA = "morrow.blackboard-learn.sessions.v1";
+const SESSION_STATE_SCHEMA_V1 = "morrow.blackboard-learn.sessions.v1";
+const SESSION_STATE_SCHEMA = "morrow.blackboard-learn.sessions.v2";
 
 /** The path that keeps a session record only in this process, for a test. */
 export const BLACKBOARD_SESSION_STATE_IN_MEMORY = ":memory:";
@@ -103,8 +103,8 @@ function sessionRevision(tenant: BlackboardTenant, resolution: BlackboardPrincip
   }));
 }
 
-function parseSessions(value: unknown): Map<string, StoredSession> {
-  if (!isJsonObject(value) || value.schema !== SESSION_STATE_SCHEMA || !Array.isArray(value.sessions)
+function parseSessions(value: unknown): { readonly revision: number; readonly value: Map<string, StoredSession> } {
+  if (!isJsonObject(value) || (value.schema !== SESSION_STATE_SCHEMA && value.schema !== SESSION_STATE_SCHEMA_V1) || !Array.isArray(value.sessions)
     || value.sessions.length > MAX_SESSIONS) {
     throw new TypeError("Blackboard session record is invalid");
   }
@@ -118,12 +118,16 @@ function parseSessions(value: unknown): Map<string, StoredSession> {
     }
     sessions.set(entry.identity, { identity: entry.identity, generation: entry.generation, revision: entry.revision });
   }
-  return sessions;
+  const revision = value.schema === SESSION_STATE_SCHEMA_V1 ? 0 : value.revision;
+  if (typeof revision !== "number" || !Number.isSafeInteger(revision) || revision < 0) {
+    throw new TypeError("Blackboard session record is invalid");
+  }
+  return { revision, value: sessions };
 }
 
-function serializeSessions(sessions: ReadonlyMap<string, StoredSession>): string {
+function serializeSessions(revision: number, sessions: ReadonlyMap<string, StoredSession>): string {
   const ordered = [...sessions.values()].sort((left, right) => (left.identity < right.identity ? -1 : 1));
-  return `${JSON.stringify({ schema: SESSION_STATE_SCHEMA, sessions: ordered })}\n`;
+  return `${JSON.stringify({ schema: SESSION_STATE_SCHEMA, revision, sessions: ordered })}\n`;
 }
 
 /**
@@ -147,7 +151,8 @@ export class BlackboardSessionGenerations {
   private readonly path: string;
   private readonly bindings = new Map<string, BlackboardSessionBinding>();
   private readonly revisions = new Map<string, string>();
-  private sessions?: Map<string, StoredSession>;
+  private sessions = new Map<string, StoredSession>();
+  private stateRevision = 0;
   private unavailable?: string;
 
   constructor(path: string = BLACKBOARD_SESSION_STATE_IN_MEMORY) {
@@ -171,17 +176,25 @@ export class BlackboardSessionGenerations {
    */
   async observe(tenant: BlackboardTenant, resolution: BlackboardPrincipalResolution): Promise<void> {
     const revision = sessionRevision(tenant, resolution);
-    if (this.revisions.get(tenant.id) === revision && this.bindings.has(tenant.id)) return;
+    if (!this.durable && this.revisions.get(tenant.id) === revision && this.bindings.has(tenant.id)) return;
     const identity = sessionIdentity(tenant);
     try {
-      const sessions = await this.load();
-      const stored = sessions.get(identity);
-      if (!stored || stored.revision !== revision) {
-        if (!stored && sessions.size >= MAX_SESSIONS) throw new TypeError(RECORD_FULL);
-        sessions.set(identity, { identity, generation: stored ? stored.generation + 1 : 1, revision });
-        await this.persist(sessions);
-      }
-      const generation = sessions.get(identity)!.generation;
+      let generation = 0;
+      const transaction = (): void => {
+        const state = this.load();
+        const sessions = state.value;
+        const stored = sessions.get(identity);
+        if (!stored || stored.revision !== revision) {
+          if (!stored && sessions.size >= MAX_SESSIONS) throw new TypeError(RECORD_FULL);
+          const nextGeneration = stored ? stored.generation + 1 : 1;
+          if (!Number.isSafeInteger(nextGeneration)) throw new TypeError("Blackboard session generation is invalid");
+          sessions.set(identity, { identity, generation: nextGeneration, revision });
+          this.persist({ revision: state.revision + 1, value: sessions });
+        }
+        generation = sessions.get(identity)!.generation;
+      };
+      if (this.durable) withDurableStateTransaction(this.path, transaction);
+      else transaction();
       if (!Number.isSafeInteger(generation) || generation < 1) throw new TypeError("Blackboard session generation is invalid");
       this.bindings.set(tenant.id, {
         principalFingerprint: blackboardPrincipalFingerprint(tenant),
@@ -196,7 +209,7 @@ export class BlackboardSessionGenerations {
       // become dispatchable again.
       this.bindings.delete(tenant.id);
       this.revisions.delete(tenant.id);
-      this.sessions = undefined;
+      if (this.durable) this.sessions = new Map();
       this.unavailable = error instanceof Error && error.message === RECORD_FULL
         ? "Its record of past Blackboard connections is full."
         : "It could not read or write that record as one exact private file.";
@@ -210,7 +223,28 @@ export class BlackboardSessionGenerations {
    */
   binding(tenant: BlackboardTenant): BlackboardSessionBinding {
     const binding = this.bindings.get(tenant.id);
-    if (binding) return binding;
+    if (binding) {
+      if (!this.durable) return binding;
+      try {
+        return withDurableStateTransaction(this.path, () => {
+          const stored = this.load().value.get(sessionIdentity(tenant));
+          if (!stored || stored.revision !== this.revisions.get(tenant.id) || stored.generation !== binding.sessionGeneration) {
+            this.bindings.delete(tenant.id);
+            this.revisions.delete(tenant.id);
+            throw new BlackboardApiError(
+              "blackboard_session_unavailable",
+              "The durable Blackboard connection changed after this process last observed it. Morrow must check the current account again before it can change Blackboard.",
+            );
+          }
+          return binding;
+        });
+      } catch (error) {
+        if (error instanceof BlackboardApiError) throw error;
+        this.bindings.delete(tenant.id);
+        this.revisions.delete(tenant.id);
+        this.unavailable = "It could not read the current durable Blackboard connection transaction.";
+      }
+    }
     throw new BlackboardApiError(
       "blackboard_session_unavailable",
       this.unavailable
@@ -219,33 +253,18 @@ export class BlackboardSessionGenerations {
     );
   }
 
-  private async load(): Promise<Map<string, StoredSession>> {
-    if (this.sessions) return this.sessions;
-    if (!this.durable) {
-      this.sessions = new Map();
-      return this.sessions;
-    }
-    try {
-      const metadata = await lstat(this.path);
-      if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > MAX_STATE_BYTES
-        || !privateFileAccessAccepted(this.path, metadata.mode)) {
-        throw new TypeError("Blackboard session record is not one exact private file");
-      }
-      this.sessions = parseSessions(JSON.parse(await readFile(this.path, "utf8")) as unknown);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      this.sessions = new Map();
-    }
-    return this.sessions;
+  private load(): { readonly revision: number; readonly value: Map<string, StoredSession> } {
+    if (!this.durable) return { revision: this.stateRevision, value: new Map(this.sessions) };
+    return readDurableJsonState(this.path, MAX_STATE_BYTES, parseSessions, () => new Map());
   }
 
-  private async persist(sessions: ReadonlyMap<string, StoredSession>): Promise<void> {
-    if (!this.durable) return;
-    await mkdir(dirname(this.path), { recursive: true, mode: 0o700 });
-    const temporary = `${this.path}.tmp-${process.pid}`;
-    await writeFile(temporary, serializeSessions(sessions), { encoding: "utf8", mode: 0o600 });
-    await rename(temporary, this.path);
-    await chmod(this.path, 0o600).catch(() => undefined);
+  private persist(state: { readonly revision: number; readonly value: Map<string, StoredSession> }): void {
+    if (!Number.isSafeInteger(state.revision) || state.revision < 1) throw new TypeError("Blackboard session record is invalid");
+    if (this.durable) replaceDurableState(this.path, serializeSessions(state.revision, state.value));
+    else {
+      this.sessions = state.value;
+      this.stateRevision = state.revision;
+    }
   }
 }
 

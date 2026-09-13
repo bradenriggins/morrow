@@ -6,6 +6,8 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { isDesktopRendererSmokeReceipt } from "./lib/desktop-renderer-smoke.mjs";
+import { createWindowsSmokeBindingFromPackage, windowsSmokeObservation } from "./lib/windows-smoke-evidence.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const outputRoot = resolve(root, "artifacts/release", `evidence-${Date.now()}`);
@@ -16,6 +18,7 @@ const WINDOWS_ACL_SKIP = Object.freeze({
 });
 const WINDOWS_ACL_EVIDENCE = Object.freeze({
   installer: "Morrow-1.0.4-win-x64.exe",
+  packageReceipt: "package-receipt.json",
   smoke: "smoke.json",
   harness: "smoke.harness.json",
   upgrade: "upgrade.json",
@@ -174,19 +177,51 @@ function windowsAclEvidence({ repositoryRoot, commit, evidenceDirectory }) {
   const smoke = jsonObject(paths.smoke);
   const harness = jsonObject(paths.harness);
   const upgrade = jsonObject(paths.upgrade);
+  const expectedSmokeBinding = createWindowsSmokeBindingFromPackage({
+    runId: smoke?.binding?.runId,
+    sourceCommit: commit,
+    packageReceipt: paths.packageReceipt,
+    installer: paths.installer,
+  });
+  const smokeObservation = isDeepStrictEqual(smoke?.binding, expectedSmokeBinding)
+    ? windowsSmokeObservation(smoke)
+    : null;
 
-  if (!isWindowsAclSmokeReceipt(smoke)) {
+  if (!smokeObservation) {
+    throw new Error("native Windows smoke receipt is not bound to this installer and source");
+  }
+  if (!isWindowsAclSmokeReceipt(smokeObservation)) {
     throw new Error("native Windows smoke receipt does not prove the private ACL classification");
   }
-  if (harness?.schema !== "morrow.desktop-windows-harness.v2"
-    || harness.installer?.fileName !== "Morrow-1.0.4-win-x64.exe"
+  const sameRunBinding = {
+    runId: expectedSmokeBinding.runId,
+    sourceCommit: expectedSmokeBinding.sourceCommit,
+    packageReceiptSha256: expectedSmokeBinding.packageReceipt.sha256,
+    releaseGraphSha256: expectedSmokeBinding.releaseGraphSha256,
+    installerFileName: expectedSmokeBinding.installer.fileName,
+    installerSha256: expectedSmokeBinding.installer.sha256,
+  };
+  const boundRepairReceipts = [harness?.repair?.receiptWhileDamaged, harness?.repair?.receiptAfterRepair];
+  if (harness?.schema !== "morrow.desktop-windows-harness.v5"
+    || !isDeepStrictEqual(harness.binding, smoke.binding)
+    || !isDeepStrictEqual(harness.installer, smoke.binding.installer)
     || harness.installation?.completed !== true
     || harness.installation?.repairCompleted !== true
     || !isDeepStrictEqual(harness.application?.receipt, smoke)
+    || harness.application?.runtimeDiagnosticCompleted !== true
+    || harness.application?.rendererStartupCompleted !== true
+    || !isDesktopRendererSmokeReceipt(harness.application?.rendererReceipt)
+    || !isDeepStrictEqual(harness.application?.installedPackage, {
+      sourceCommit: expectedSmokeBinding.sourceCommit,
+      releaseGraphSha256: expectedSmokeBinding.releaseGraphSha256,
+    })
+    || boundRepairReceipts.some((receipt) => !windowsSmokeObservation(receipt, sameRunBinding))
     || harness.repair?.restoredExactly !== true
     || harness.uninstall?.completed !== true
     || harness.uninstall?.applicationRemoved !== true
-    || harness.uninstall?.unrelatedDataPreserved !== true) {
+    || harness.uninstall?.unrelatedDataPreserved !== true
+    || harness.cleanup?.temporaryStateRemoved !== true
+    || harness.cleanup?.installationDirectoryRemoved !== true) {
     throw new Error("native Windows harness receipt is not a completed smoke, repair, and uninstall proof");
   }
   if (!isWindowsUpgradeReceipt(upgrade, { commit, installerSha256 })) {

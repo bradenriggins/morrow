@@ -27,6 +27,50 @@ function harness(capability?: string) {
 afterEach(() => vi.restoreAllMocks());
 
 describe("Canvas source MCP handler privacy", () => {
+  it("publishes exact string schemas for private Canvas IDs", async () => {
+    const { callbacks } = harness("a".repeat(64));
+    const largeId = "9007199254740993";
+    const conversation = callbacks.get("canvas_send_private_conversation")!.config.inputSchema["~standard"].validate;
+    expect((await conversation({
+      course_id: largeId,
+      privateConversation: {
+        schema: "morrow.canvas-conversation.private.v1",
+        action: "create",
+        courseId: largeId,
+        recipients: [],
+        subject: "Subject",
+        body: "Body",
+        groupConversation: false,
+        forceNew: false,
+      },
+    })).issues).toBeUndefined();
+    expect((await conversation({
+      course_id: 9007199254740992,
+      privateConversation: {
+        schema: "morrow.canvas-conversation.private.v1",
+        action: "create",
+        courseId: largeId,
+        recipients: [],
+        subject: "Subject",
+        body: "Body",
+        groupConversation: false,
+        forceNew: false,
+      },
+    })).issues).toBeTruthy();
+
+    const file = callbacks.get("canvas_transfer_course_file")!.config.inputSchema["~standard"].validate;
+    const fileInput = {
+      course_id: largeId,
+      folder_id: "9007199254740995",
+      filename: "notes.txt",
+      size_bytes: 5,
+      sha256: "b".repeat(64),
+      content_type: "text/plain",
+    };
+    expect((await file(fileInput)).issues).toBeUndefined();
+    expect((await file({ ...fileInput, folder_id: 9007199254740996 })).issues).toBeTruthy();
+  });
+
   it("validates readable learner labels in scalar and recipient-array inputs", async () => {
     const schema = fromJsonSchema(sourcePrivacyInputSchema({ type: "object", properties: {
       course_id: { type: "integer" }, user_id: { type: "integer" }, recipients: { type: "array", items: { type: "integer" } },

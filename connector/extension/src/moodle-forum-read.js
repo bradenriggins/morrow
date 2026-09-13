@@ -3,6 +3,8 @@
  * The POST is Moodle's native CSV export download, not a course mutation.
  */
 export async function executeMoodleForumReadInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const MAX_BYTES = 2_000_000;
   const MAX_RECORDS = 10_000;
   const ID = /^[1-9][0-9]{0,18}$/;
@@ -49,30 +51,70 @@ export async function executeMoodleForumReadInPage(rawInput) {
   const sameRoute = (actual, expected) => {
     try { const received = new URL(actual); return received.origin === expected.origin && received.pathname === expected.pathname && received.search === expected.search && !received.hash; } catch { return false; }
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const boundedText = async (response) => {
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) {
+      cancelBody(response.body);
+      return null;
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") return null;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let bytes = 0;
+    let output = "";
+    try {
+      for (;;) {
+        const remaining = input.expiresAt - Date.now();
+        if (remaining <= 0) throw new Error("moodle_execution_expired");
+        let timeout;
+        const chunk = await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+        ]).finally(() => clearTimeout(timeout));
+        if (chunk.done) break;
+        if (!(chunk.value instanceof Uint8Array) || (bytes += chunk.value.byteLength) > MAX_BYTES) {
+          cancelBody(reader);
+          return null;
+        }
+        output += decoder.decode(chunk.value, { stream: true });
+      }
+      return output + decoder.decode();
+    } catch {
+      cancelBody(reader);
+      return null;
+    }
+  };
   const ajax = async (methodname, argsValue) => {
     const endpoint = url("/lib/ajax/service.php", { sesskey: cfg.sesskey, info: methodname });
     let response;
     try {
-      response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify([{ index: 0, methodname, args: argsValue }]) });
+      response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify([{ index: 0, methodname, args: argsValue }]), signal: requestSignal(input?.expiresAt) });
     } catch { return null; }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext()) return null;
     let payload;
-    try { payload = await response.json(); } catch { return null; }
+    try { payload = JSON.parse(await boundedText(response)); } catch { return null; }
     if (!Array.isArray(payload) || payload.length !== 1 || object(payload[0]?.error)) return null;
     try { return JSON.parse(payload[0]?.data); } catch { return null; }
   };
   const forums = await ajax("mod_forum_get_forums_by_courses", { courseids: [Number(courseId)] });
+  if (!approved()) return failed("moodle_forum_export_context_changed");
   const candidates = Array.isArray(forums) ? forums.filter((forum) => id(forum?.course) === courseId && id(forum?.cmid) === moduleId && id(forum?.id)) : [];
   if (candidates.length !== 1) return failed("moodle_forum_target_unavailable");
   const forumId = id(candidates[0].id);
   const exportUrl = url("/mod/forum/export.php", { id: forumId });
   if (!approved()) return failed("moodle_forum_export_context_changed");
   let formResponse;
-  try { formResponse = await fetch(exportUrl, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } }); } catch { return failed("moodle_forum_export_unavailable"); }
+  try { formResponse = await fetch(exportUrl, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return failed("moodle_forum_export_unavailable"); }
   if (!formResponse.ok || !sameRoute(formResponse.url, exportUrl) || !sameContext()) return failed("moodle_forum_export_unavailable", formResponse.status);
   let formHtml;
-  try { formHtml = await formResponse.text(); } catch { return failed("moodle_forum_export_unavailable", formResponse.status); }
-  if (typeof globalThis.TextEncoder !== "function" || new TextEncoder().encode(formHtml).byteLength > MAX_BYTES || typeof globalThis.DOMParser !== "function") return failed("moodle_forum_export_unavailable", formResponse.status);
+  formHtml = await boundedText(formResponse);
+  if (typeof formHtml !== "string" || typeof globalThis.DOMParser !== "function") return failed("moodle_forum_export_unavailable", formResponse.status);
   const documentValue = new DOMParser().parseFromString(formHtml, "text/html");
   const forms = [...documentValue.querySelectorAll("form")].filter((form) => {
     if (String(form.method || "").toLowerCase() !== "post") return false;
@@ -83,7 +125,8 @@ export async function executeMoodleForumReadInPage(rawInput) {
   const action = new URL(form.getAttribute("action") || "", exportUrl);
   const allControls = [...form.querySelectorAll("input[name], select[name], textarea[name]")].filter((control) => !control.disabled);
   const allowed = new Set(["id", "sesskey", "format", "striphtml", "humandates", "submitbutton", "cancel", "useridsselected", "discussionids"]);
-  const nativeField = (name) => allowed.has(name) || /^_qf__/.test(name) || /^mform_isexpanded_[A-Za-z0-9_]+$/.test(name)
+  const nativeField = (name) => allowed.has(name) || ["useridsselected[]", "discussionids[]"].includes(name)
+    || /^_qf__/.test(name) || /^mform_isexpanded_[A-Za-z0-9_]+$/.test(name)
     || /^(?:from|to)\[(?:enabled|year|month|day|hour|minute)\]$/.test(name);
   if (allControls.some((control) => !nativeField(control.name))) return failed("moodle_forum_export_form_invalid", formResponse.status);
   const values = new FormData();
@@ -102,7 +145,7 @@ export async function executeMoodleForumReadInPage(rawInput) {
   const readBounded = async (response) => {
     if (!response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0; let output = "";
     try {
       for (;;) {
@@ -110,15 +153,15 @@ export async function executeMoodleForumReadInPage(rawInput) {
         if (chunk.done) return { value: output + decoder.decode(), limited: false };
         if (!(chunk.value instanceof Uint8Array)) return null;
         bytes += chunk.value.byteLength;
-        if (bytes > MAX_BYTES) { await reader.cancel(); return { value: "", limited: true }; }
+        if (bytes > MAX_BYTES) { try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return { value: "", limited: true }; }
         output += decoder.decode(chunk.value, { stream: true });
       }
-    } catch { try { await reader.cancel(); } catch {} return null; }
+    } catch { try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return null; }
   };
   if (!approved()) return failed("moodle_forum_export_context_changed");
   let data;
   try {
-    const response = await fetch(action, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/csv" }, body: values });
+    const response = await fetch(action, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/csv" }, body: values, signal: requestSignal(input?.expiresAt) });
     if (!response.ok || !sameRoute(response.url, action) || !sameContext()) return failed("moodle_forum_export_unavailable", response.status);
     // Content-Length can be absent or wrong. Count received bytes while decoding.
     const downloaded = await readBounded(response);

@@ -15,6 +15,12 @@ const COURSE_ID = "2";
 const MODULE_ID = "8";
 const FORUM_ID = "71";
 const PRINCIPAL_ID = "3";
+const csv = (rows) => {
+  const header = ["id", "discussion", "parent", "userid", "userfullname", "created", "modified", "mailed", "subject", "message",
+    "messageformat", "messagetrust", "attachment", "totalscore", "mailnow", "deleted", "privatereplyto",
+    "privatereplytofullname", "wordcount", "charcount"];
+  return `\ufeff${[header, ...rows].map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n")}\n`;
+};
 
 const operations = Object.freeze({
   target: { key: "moodle.form.forum.post_target.read.v1", toolName: "moodle_get_forum_post_target", provider: "moodle", readOnly: true },
@@ -57,7 +63,7 @@ test("the Moodle Forum discussion lifecycle is cataloged and routed through the 
     assert.match(entryFor(operations[name].key).description, new RegExp(capability.replace(/\\/g, "")));
   }
   for (const name of ["create", "reply", "lock", "pin", "subscription"]) {
-    assert.match(entryFor(operations[name].key).description, /sends exactly one POST/);
+    assert.match(entryFor(operations[name].key).description, /sends exactly one state-changing POST/);
   }
   // A learner-visible post cannot be undone by Morrow, and both post writes say so.
   for (const name of ["create", "reply"]) {
@@ -204,6 +210,31 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
       response.end(modeditForm());
       return;
     }
+    if (request.method === "GET" && target.pathname === "/mod/forum/export.php" && target.search === `?id=${FORUM_ID}`) {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(`<!doctype html><form method="post" action="/mod/forum/export.php">
+        <input type="hidden" name="id" value="${FORUM_ID}"><input type="hidden" name="sesskey" value="${PRIVATE_SESSION}">
+        <input type="hidden" name="_qf__mod_forum_form_export_form" value="1">
+        <select multiple name="useridsselected[]"></select><select multiple name="discussionids[]"></select>
+        <select name="format"><option value="xlsx">xlsx</option><option value="csv">csv</option></select>
+        <input type="submit" name="submitbutton" value="Export"></form>`);
+      return;
+    }
+    if (request.method === "POST" && target.pathname === "/mod/forum/export.php" && !target.search) {
+      const chunks = [];
+      for await (const chunk of request) chunks.push(chunk);
+      const body = Buffer.concat(chunks).toString("utf8");
+      assert.match(body, new RegExp(`name="id"\\r\\n\\r\\n${FORUM_ID}`));
+      assert.match(body, new RegExp(`name="sesskey"\\r\\n\\r\\n${PRIVATE_SESSION}`));
+      assert.match(body, /name="format"\r\n\r\ncsv/);
+      const rows = [...discussions.values()].flatMap((discussion) => discussion.posts.map((post) => [
+        post.id, discussion.id, post.parent || 0, post.own ? PRINCIPAL_ID : 7, post.own ? "Course Teacher" : AUTHOR_NAME,
+        1_700_000_000, 1_700_000_000, 0, post.subject, post.message, 1, 0, 0, 0, 0, 0, 0, "", 0, 0,
+      ]));
+      response.writeHead(200, { "content-type": "text/csv" });
+      response.end(csv(rows));
+      return;
+    }
     if (request.method === "GET" && target.pathname === "/mod/forum/post.php") {
       const forum = target.searchParams.get("forum");
       const reply = target.searchParams.get("reply");
@@ -346,7 +377,7 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
     );
     const dispatches = () => requests.filter((entry) => (entry.method === "POST" && entry.pathname === "/mod/forum/post.php")
       || (entry.method === "POST" && entry.pathname === "/lib/ajax/service.php" && entry.info.startsWith("mod_forum_set_"))).length;
-    const executorRoutes = ["/course/modedit.php", "/mod/forum/post.php", "/lib/ajax/service.php", "/repository/draftfiles_ajax.php"];
+    const executorRoutes = ["/course/modedit.php", "/mod/forum/post.php", "/mod/forum/export.php", "/lib/ajax/service.php", "/repository/draftfiles_ajax.php"];
     const nativeRequests = () => requests.filter((entry) => executorRoutes.includes(entry.pathname)).length;
 
     // An argument the operation does not name reaches no native route.
@@ -384,12 +415,13 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
     const seed = discussions.get(seedId);
     const discussionTarget = await invoke(operations.target, { course_id: 2, module_id: 8, discussion_id: Number(seedId) });
     assert.equal(discussionTarget.ok, true, JSON.stringify(discussionTarget));
+    assert.equal(discussionTarget.sent, false);
     assert.equal(discussionTarget.data.discussion_id, seedId);
     assert.equal(discussionTarget.data.discussion_subject, "Week 1 reading");
     assert.equal(discussionTarget.data.post_count, 2);
     assert.deepEqual(discussionTarget.data.posts, [
-      { post_id: seed.posts[0].id, parent_post_id: "", subject: "Week 1 reading", deleted: false, private_reply: false, attachment_count: 0 },
-      { post_id: seed.posts[1].id, parent_post_id: seed.posts[0].id, subject: "Re: Week 1 reading", deleted: false, private_reply: false, attachment_count: 0 },
+      { post_id: seed.posts[0].id, parent_post_id: "", subject: "Week 1 reading", deleted: false, private_reply: false, has_attachment: false },
+      { post_id: seed.posts[1].id, parent_post_id: seed.posts[0].id, subject: "Re: Week 1 reading", deleted: false, private_reply: false, has_attachment: false },
     ]);
     assert.deepEqual(discussionTarget.targets, [
       { field: "module_id", label: "Forum", name: "Week 3 questions" },
@@ -448,7 +480,7 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
     assert.equal(created.data.created_post_id, createdDiscussion.posts[0].id);
     assert.equal(created.data.post_count, 1);
     assert.deepEqual(created.data.posts, [
-      { post_id: createdDiscussion.posts[0].id, parent_post_id: "", subject: "Week 3 office hours", deleted: false, private_reply: false, attachment_count: 0 },
+      { post_id: createdDiscussion.posts[0].id, parent_post_id: "", subject: "Week 3 office hours", deleted: false, private_reply: false, has_attachment: false },
     ]);
     assert.deepEqual(created.data.proof, {
       method: "mod_forum_post_form",
@@ -456,7 +488,7 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
       exact_module_binding: "course_modedit_form",
       required_capability: "mod/forum:startdiscussion",
       dispatch_count: 1,
-      readback: "mod_forum_get_discussion_posts_by_userid",
+      readback: "native_forum_csv_export",
       saved_state_source: "native_readback",
       learner_visible: true,
       learner_identity: "never_returned",
@@ -480,7 +512,7 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
     assert.equal(replied.data.created_post_id, seed.posts[2].id);
     assert.deepEqual(replied.data.posts[2], {
       post_id: seed.posts[2].id, parent_post_id: seed.posts[0].id, subject: "Re: Week 1 reading",
-      deleted: false, private_reply: false, attachment_count: 0,
+      deleted: false, private_reply: false, has_attachment: false,
     });
     assert.equal(replied.data.proof.required_capability, "mod/forum:replypost");
     assert.equal(seed.posts[2].message, "<p>Chapter two is optional.</p>");
@@ -599,6 +631,7 @@ test("the Moodle Forum discussion lifecycle sends one native POST and requires t
 
     // Morrow never opens a Forum view or discussion route.
     assert.equal(requests.some((entry) => entry.pathname === "/mod/forum/view.php" || entry.pathname === "/mod/forum/discuss.php"), false);
+    assert.equal(requests.some((entry) => ["mod_forum_get_discussion_posts", "mod_forum_get_discussion_posts_by_userid"].includes(entry.info)), false);
   } finally {
     await browser?.close();
     await new Promise((resolve) => server.close(resolve));

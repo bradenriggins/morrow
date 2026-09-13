@@ -103,6 +103,95 @@ describe("Blackboard transport", () => {
     });
   });
 
+  it("bounds streamed response bytes, cancels immediately, and preserves write dispatch state", async () => {
+    const makeClient = (write: boolean) => {
+      let cancelled = 0;
+      const fetcher = (async (input: URL | RequestInfo) => {
+        const url = new URL(String(input));
+        if (url.pathname === tokenPath) {
+          return new Response(JSON.stringify({ access_token: "temporary-token", expires_in: 3600 }), { status: 200 });
+        }
+        return new Response(new ReadableStream({
+          start(controller) {
+            controller.enqueue(new Uint8Array(2 * 1024 * 1024));
+            controller.enqueue(new Uint8Array(1));
+          },
+          cancel() { cancelled += 1; },
+        }), { status: write ? 201 : 200 });
+      }) as typeof fetch;
+      return { client: new BlackboardLearnClient(tenant, fetcher), cancelled: () => cancelled };
+    };
+
+    const read = makeClient(false);
+    await expect(read.client.get(contentPath)).rejects.toMatchObject({
+      code: "blackboard_response_oversized",
+      dispatchState: "not_sent",
+    });
+    expect(read.cancelled()).toBe(1);
+
+    const write = makeClient(true);
+    await expect(write.client.patch(contentPath, { title: "Reviewed title" })).rejects.toMatchObject({
+      code: "blackboard_response_oversized",
+      dispatchState: "applied_or_unknown",
+    });
+    expect(write.cancelled()).toBe(1);
+  });
+
+  it("refuses malformed provider UTF-8 before JSON parsing and preserves write dispatch state", async () => {
+    const makeClient = (write: boolean) => {
+      let cancelled = 0;
+      const fetcher = (async (input: URL | RequestInfo) => {
+        const url = new URL(String(input));
+        if (url.pathname === tokenPath) {
+          return new Response(JSON.stringify({ access_token: "temporary-token", expires_in: 3600 }), { status: 200 });
+        }
+        return new Response(new ReadableStream({
+          start(controller) { controller.enqueue(Uint8Array.from([0x7b, 0x22, 0xff])); },
+          cancel() { cancelled += 1; },
+        }), { status: write ? 201 : 200 });
+      }) as typeof fetch;
+      return { client: new BlackboardLearnClient(tenant, fetcher), cancelled: () => cancelled };
+    };
+
+    const read = makeClient(false);
+    await expect(read.client.get(contentPath)).rejects.toMatchObject({
+      code: "blackboard_response_invalid",
+      message: "Blackboard returned invalid UTF-8.",
+      dispatchState: "not_sent",
+    });
+    expect(read.cancelled()).toBe(1);
+
+    const write = makeClient(true);
+    await expect(write.client.patch(contentPath, { title: "Reviewed title" })).rejects.toMatchObject({
+      code: "blackboard_response_invalid",
+      message: "Blackboard returned invalid UTF-8.",
+      dispatchState: "applied_or_unknown",
+    });
+    expect(write.cancelled()).toBe(1);
+  });
+
+  it("propagates cancellation while a provider response body is stalled", async () => {
+    let cancelled = 0;
+    const fetcher = (async (input: URL | RequestInfo) => {
+      const url = new URL(String(input));
+      if (url.pathname === tokenPath) {
+        return new Response(JSON.stringify({ access_token: "temporary-token", expires_in: 3600 }), { status: 200 });
+      }
+      return new Response(new ReadableStream({
+        cancel() { cancelled += 1; },
+      }), { status: 201 });
+    }) as typeof fetch;
+    const client = new BlackboardLearnClient(tenant, fetcher);
+    const controller = new AbortController();
+    const pending = client.patch(contentPath, { title: "Reviewed title" }, controller.signal);
+    setTimeout(() => controller.abort(), 10);
+    await expect(pending).rejects.toMatchObject({
+      code: "blackboard_request_cancelled",
+      dispatchState: "applied_or_unknown",
+    });
+    expect(cancelled).toBe(1);
+  });
+
   it("keeps Retry-After and the tenant's rate-limit headers on the failure and sends nothing again", async () => {
     const { client, sent, tokens } = transport(() => ({
       status: 429,
@@ -266,6 +355,26 @@ describe("Blackboard transport", () => {
       code: "blackboard_response_incomplete",
       message: "Blackboard returned duplicate or invalid roster identities.",
     });
+  });
+
+  it("uses the provider identity declared for a collection route", async () => {
+    const official = transport(() => ({ body: { results: [{ userId: "_44_1" }, { userId: "_45_1" }] } }));
+    await expect(official.client.collect("/learn/api/public/v2/courses/_22_1/groups/_55_1/users", {
+      label: "group membership",
+      fields: ["userId", "user"],
+      identityField: "userId",
+    })).resolves.toEqual([{ userId: "_44_1" }, { userId: "_45_1" }]);
+
+    for (const results of [[{ userId: "_44_1" }, { userId: "_44_1" }], [{ id: "_membership_1" }]]) {
+      const refused = transport(() => ({ body: { results } }));
+      await expect(refused.client.collect("/learn/api/public/v2/courses/_22_1/groups/_55_1/users", {
+        label: "group membership",
+        identityField: "userId",
+      })).rejects.toMatchObject({
+        code: "blackboard_response_incomplete",
+        message: "Blackboard returned duplicate or invalid group membership identities.",
+      });
+    }
   });
 
   it("refuses more pages than the ceiling allows instead of returning part of a collection", async () => {

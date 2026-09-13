@@ -96,7 +96,7 @@ const EXACT_READBACKS = Object.freeze({
     unlink_outcome_courses: {
         read: "list_linked_outcomes_courses",
         targetArgument: "outcome_id",
-        targetField: "id",
+        targetField: "outcome.id",
         strategy: "collection-omits-target",
     },
 });
@@ -185,6 +185,20 @@ function readsWriteTargetResource(write, read) {
     const candidate = normalizedRoute(read.path);
     return candidate === target || candidate === `${target}/{}` || `${candidate}/{}` === target;
 }
+function collectionTargetArgument(write, read) {
+    const writeSegments = write.path.split("/").filter(Boolean);
+    const readSegments = read.path.split("/").filter(Boolean);
+    if (writeSegments.length !== readSegments.length + 1)
+        return undefined;
+    if (normalizedPath(`/${writeSegments.slice(0, -1).join("/")}`) !== normalizedPath(`/${readSegments.join("/")}`))
+        return undefined;
+    const match = /^\{([^{}]+)\}$/.exec(writeSegments.at(-1) || "");
+    if (!match)
+        return undefined;
+    const parameters = (write.parameters || []).filter((parameter) => parameter.location === "path"
+        && (parameter.wireName === match[1] || parameter.inputName === match[1]));
+    return parameters.length === 1 ? parameters[0].inputName : undefined;
+}
 function requestedAssertions(write, args, ignored = [], bodies = []) {
     return (write.parameters || []).flatMap((parameter) => {
         if (parameter.location === "path" || ignored.includes(parameter.inputName))
@@ -245,13 +259,19 @@ export function planBrowserReadback(operations, write, args, writeData) {
     const argumentsValue = readArguments(read, args, override?.dynamic, override?.fixedArguments, writeData);
     if (!argumentsValue)
         return null;
+    const collectionArgument = !override && !hasNamedCanvasReadback(write) ? collectionTargetArgument(write, read) : undefined;
+    if (collectionArgument && write.method !== "POST") {
+        strategy = write.method === "DELETE" ? "collection-omits-target" : "collection-contains-target";
+    }
     const targetId = override?.targetArgument
         ? args?.[override.targetArgument]
         : override?.targetResponse
             ? valueByKey(writeData, override.targetResponse)
             : write.method === "POST"
                 ? valueByKey(writeData, "id")
-                : undefined;
+                : collectionArgument
+                    ? args?.[collectionArgument]
+                    : undefined;
     const targetField = targetId === undefined || targetId === null ? undefined : override?.targetField || "id";
     return {
         schema: "morrow.browser-readback-plan.v1",
@@ -356,7 +376,8 @@ function targetScope(value, targetPath) {
 function fieldValue(record, field) {
     if (!record || typeof record !== "object" || Array.isArray(record))
         return undefined;
-    return pathValue(record, [field]);
+    const path = wirePath(field);
+    return path.length > 0 ? pathValue(record, path) : undefined;
 }
 function targetRecords(value, target, targetField, targetPath) {
     return targetScope(value, targetPath).filter((record) => {

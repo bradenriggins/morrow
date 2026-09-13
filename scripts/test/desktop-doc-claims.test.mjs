@@ -50,6 +50,14 @@ const collapse = (value) => value.replace(/\s+/g, " ").trim();
 
 /** A document as one line, so an assertion on a sentence survives its wrapping. */
 const flat = (relativePath) => collapse(read(relativePath));
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+function writePayloadFile(payload, relative, content) {
+  const target = join(payload, ...relative.split("/"));
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, content);
+  return { path: relative, bytes: Buffer.byteLength(content), sha256: sha256(content) };
+}
 
 /**
  * Repository paths a document names inside backticks or a Markdown link, with
@@ -97,25 +105,71 @@ function headingSections(text) {
 function loadBuildConfig(t) {
   const payload = mkdtempSync(join(tmpdir(), "morrow-desktop-doc-claims-"));
   t.after(() => rmSync(payload, { recursive: true, force: true }));
-  const app = join(payload, "app");
-  mkdirSync(join(app, "bridge-release"), { recursive: true });
-  const bridgeManifest = '{"schema":"morrow.bridge-release.v1"}\n';
-  const runtimeManifest = '{"schema":"morrow.mcp-runtime.v1"}\n';
-  writeFileSync(join(app, "bridge-release", "manifest.json"), bridgeManifest, "utf8");
-  writeFileSync(join(app, "mcp-runtime-manifest.json"), runtimeManifest, "utf8");
-  writeFileSync(join(app, "package-input-manifest.json"), `${JSON.stringify({
-    schema: "morrow.desktop-package-input.v1",
-    mcpRuntime: {
-      path: "app/mcp-runtime-manifest.json",
-      sha256: createHash("sha256").update(runtimeManifest).digest("hex"),
+  const target = process.platform === "win32" ? "win32-x64" : "darwin-arm64";
+  writePayloadFile(payload, target === "win32-x64" ? "runtime/node/node.exe" : "runtime/node/bin/node", "doc-claims node runtime fixture");
+  const definitions = [
+    ["connector/extension/manifest.json", ["app/connector/extension/manifest.json"], '{"name":"Morrow Bridge"}\n'],
+    ["installer/runtime-monitor.mjs", ["app/installer/runtime-monitor.mjs"], "export const monitor = true;\n"],
+    ["packages/canvas-connector-mcp/dist/index.js", ["app/packages/canvas-connector-mcp/dist/index.js"], "export const connector = true;\n"],
+    ["packages/client-config/dist/cli.js", ["app/packages/client-config/dist/cli.js"], "export const cli = true;\n"],
+    ["packages/mcp-server/dist/index.js", ["app/node_modules/@morrow-lms/gateway/dist/index.js", "app/packages/mcp-server/dist/index.js"], "export const gateway = true;\n"],
+    ["packages/mcp-server/package.json", ["app/node_modules/@morrow-lms/gateway/package.json", "app/packages/mcp-server/package.json"], '{"name":"@morrow-lms/gateway","version":"1.0.0"}\n'],
+  ];
+  const files = [];
+  for (const [sourcePath, destinations, content] of definitions) {
+    for (const destination of destinations) writePayloadFile(payload, destination, content);
+    files.push({ path: sourcePath, bytes: Buffer.byteLength(content), sha256: sha256(content), destinations: [...destinations].sort() });
+  }
+  files.sort((left, right) => left.path.localeCompare(right.path));
+  const appRecord = (relative) => {
+    const content = readFileSync(join(payload, "app", ...relative.split("/")));
+    return { path: relative, bytes: content.byteLength, sha256: sha256(content) };
+  };
+  const packageJson = appRecord("node_modules/@morrow-lms/gateway/package.json");
+  const gatewayEntry = appRecord("node_modules/@morrow-lms/gateway/dist/index.js");
+  const mcpRuntime = {
+    schema: "morrow.mcp-runtime-manifest.v2",
+    package: { name: "@morrow-lms/gateway", version: "1.0.0" },
+    entrypoint: appRecord("packages/mcp-server/dist/index.js"),
+    dependencies: [{
+      name: "@morrow-lms/gateway",
+      version: "1.0.0",
+      packageJson,
+      files: [gatewayEntry, packageJson].sort((left, right) => left.path.localeCompare(right.path)),
+    }],
+    directFiles: [
+      "installer/runtime-monitor.mjs",
+      "packages/canvas-connector-mcp/dist/index.js",
+      "packages/client-config/dist/cli.js",
+      "packages/mcp-server/dist/index.js",
+    ].map(appRecord).sort((left, right) => left.path.localeCompare(right.path)),
+  };
+  const mcp = writePayloadFile(payload, "app/mcp-runtime-manifest.json", `${JSON.stringify(mcpRuntime)}\n`);
+  const bridgeFile = files.find((record) => record.path === "connector/extension/manifest.json");
+  writePayloadFile(payload, "app/bridge-release/extension/manifest.json", '{"name":"Morrow Bridge"}\n');
+  writePayloadFile(payload, "app/bridge-release/manifest.json", `${JSON.stringify({
+    schema: "morrow.bridge-release.v1",
+    version: "1.0.0",
+    extensionId: "abeloclekioohahgedmjcdbpllfjfhko",
+    manifestSha256: bridgeFile.sha256,
+    permissions: [],
+    hostPermissions: [],
+    optionalHostPermissions: [],
+    files: [{ path: "manifest.json", bytes: bridgeFile.bytes, sha256: bridgeFile.sha256 }],
+  })}\n`);
+  writePayloadFile(payload, "app/package-input-manifest.json", `${JSON.stringify({
+    schema: "morrow.desktop-package-input.v2",
+    source: { head: "a".repeat(40), dirty: false, statusSha256: "b".repeat(64) },
+    dependencyMaterialization: {
+      schema: "morrow.runtime-dependency-materialization.v1",
+      packageManager: { declared: "pnpm@10.6.1", observed: "10.6.1" },
+      lockfile: { path: "pnpm-lock.yaml", sha256: "c".repeat(64), integritySource: "pnpm-lock.yaml packages resolution.integrity" },
+      install: { mode: "isolated_frozen_install", network: "offline", scripts: "disabled", flags: ["--prod", "--frozen-lockfile", "--offline", "--ignore-scripts", "--verify-store-integrity"] },
+      dependencies: [{ name: "fixture", version: "1.0.0", integrity: "sha512-AAAA" }],
     },
-  })}\n`, "utf8");
-  // The build configuration digests the Node runtime binary the payload carries.
-  const nodeBinary = process.platform === "win32"
-    ? join(payload, "runtime", "node", "node.exe")
-    : join(payload, "runtime", "node", "bin", "node");
-  mkdirSync(dirname(nodeBinary), { recursive: true });
-  writeFileSync(nodeBinary, "doc-claims node runtime fixture");
+    files,
+    mcpRuntime: { path: "app/mcp-runtime-manifest.json", sha256: mcp.sha256 },
+  })}\n`);
 
   const configPath = require.resolve(join(rootPath, BUILD_CONFIG));
   const previousPayload = process.env.MORROW_INSTALLER_PAYLOAD;
@@ -319,7 +373,14 @@ test("the data-removal action the Windows guide describes is the one the policy 
   assert.equal(snapshot.explicitRemovalRequired, true);
   assert.equal(snapshot.uninstall, "windows_settings_apps");
   const removable = snapshot.locations.filter((location) => location.removable).map((location) => location.id);
-  assert.deepEqual(removable, ["state", "backups", "bridge", "materials", "blackboard_credentials"]);
+  assert.deepEqual(removable, [
+    "state",
+    "backups",
+    "bridge",
+    "materials",
+    "blackboard_credentials",
+    "blackboard_configuration",
+  ]);
   const assistant = snapshot.locations.find((location) => location.id === "assistant_configuration");
   assert.equal(assistant.removable, false);
   assert.equal(assistant.keptReason, "assistant_configuration");

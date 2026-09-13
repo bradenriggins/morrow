@@ -3,7 +3,15 @@ import { LearnerRoster, LearnerVault, redactLearnerEgress, resolveLearnerTokens,
 import { BlackboardLearnClient } from "./client.js";
 import { deriveBlackboardSourceBindingId } from "./binding.js";
 import { blackboardEffectGrantAccepted, type BlackboardEffectGrant } from "./effect-grant.js";
-import { BLACKBOARD_EFFECT_STATE_IN_MEMORY, BlackboardEffectReceipts, type BlackboardEffectDispatch, type BlackboardEffectTarget } from "./operations/effect-receipts.js";
+import { assertPathScopedContent } from "./provider-contract.js";
+import {
+  BLACKBOARD_EFFECT_STATE_IN_MEMORY,
+  BlackboardEffectReceipts,
+  type BlackboardCreateEvidence,
+  type BlackboardEffectDispatch,
+  type BlackboardEffectReceiptReference,
+  type BlackboardEffectTarget,
+} from "./operations/effect-receipts.js";
 import { BLACKBOARD_SESSION_STATE_IN_MEMORY, BlackboardSessionGenerations, blackboardEffectScope } from "./operations/effect-scope.js";
 import { BLACKBOARD_ID, BLACKBOARD_SOURCE_BINDING_ID, BlackboardApiError, blackboardPrincipalVerification, withBlackboardDispatchState, type BlackboardApiFailureCode, type BlackboardContentPatchPlan, type BlackboardCourseBinding, type BlackboardDispatchState, type BlackboardPublicTenant, type BlackboardTenant } from "./types.js";
 
@@ -33,7 +41,6 @@ const FOLDER_HANDLER = "resource/x-bb-folder";
 const PROTECTED_FIELDS: readonly (readonly string[])[] = [
   ["id"],
   ["parentId"],
-  ["courseId"],
   ["contentHandler", "id"],
   ["title"],
   ["description"],
@@ -71,6 +78,8 @@ interface RosterMember {
 }
 
 export interface PreparedRoster {
+  /** The one provider course whose learner identities this roster contains. */
+  readonly courseId: string;
   readonly learnerScope: LearnerScope;
   readonly learnerRoster: LearnerRoster;
   readonly learnerVault: LearnerVault;
@@ -283,10 +292,8 @@ function patchedFieldsMatch(content: JsonObject, patch: JsonObject): boolean {
  * document inside the selected course: not a folder, not the Ultra wrapper
  * around a document, and not an item whose handler it cannot read.
  */
-function assertPatchableContent(content: JsonObject, courseId: string): void {
-  if (content.courseId !== courseId) {
-    throw new BlackboardApiError("blackboard_scope_binding_mismatch", "Blackboard did not return this content item as part of the selected course.");
-  }
+function assertPatchableContent(content: JsonObject, courseId: string, contentId: string): void {
+  assertPathScopedContent(content, courseId, contentId);
   if (content.parentId !== undefined && (typeof content.parentId !== "string" || !BLACKBOARD_ID.test(content.parentId))) {
     throw new BlackboardApiError("blackboard_response_invalid", "Blackboard returned an invalid parent for this content item.");
   }
@@ -368,10 +375,29 @@ export function safeContent(value: JsonObject, roster: PreparedRoster): JsonObje
   return output;
 }
 
-export function safeCourse(value: JsonObject, roster: PreparedRoster): JsonObject {
-  const output: JsonObject = {};
-  redactInto(output, value, ["id", "courseId", "name", "description"], roster, "course");
+export function safeCourseWithRoster(value: JsonObject, roster: PreparedRoster): JsonObject {
+  const id = typeof value.id === "string" && BLACKBOARD_ID.test(value.id) ? value.id : null;
+  if (!id) throw new BlackboardApiError("blackboard_response_invalid", "Blackboard course identity is invalid.");
+  if (id !== roster.courseId) {
+    throw new BlackboardApiError(
+      "blackboard_scope_binding_mismatch",
+      "Morrow cannot project Blackboard course text through a roster from another course.",
+    );
+  }
+  const output: JsonObject = { id };
+  redactInto(output, value, ["courseId", "name", "description"], roster, "course");
   return output;
+}
+
+/**
+ * One account-wide course whose exact roster is unavailable. Blackboard course
+ * ids, names, and descriptions are free text, so only the opaque provider
+ * identity leaves this boundary until that course establishes its own roster.
+ */
+export function identityOnlyCourse(value: JsonObject): JsonObject {
+  const id = typeof value.id === "string" && BLACKBOARD_ID.test(value.id) ? value.id : null;
+  if (!id) throw new BlackboardApiError("blackboard_response_invalid", "Blackboard course identity is invalid.");
+  return { id, textWithheld: true, textWithheldReason: "course_roster_unavailable" };
 }
 
 /**
@@ -398,6 +424,7 @@ export class BlackboardLearnRuntime {
   private readonly clients = new Map<string, BlackboardLearnClient>();
   private readonly learnerVault: LearnerVault;
   private readonly effectDispatchSecret: string | undefined;
+  private readonly effectGrantNow: () => number;
   /**
    * Every effect receipt this installation has spent, and how far the change it
    * paid for got. It is durable, so a receipt stays one-use across a restart of
@@ -410,10 +437,11 @@ export class BlackboardLearnRuntime {
   /** Which Blackboard account and credential each tenant acts as, and since when. */
   private readonly sessions: BlackboardSessionGenerations;
 
-  constructor(tenants: readonly BlackboardTenant[], options: { readonly fetcher?: typeof fetch; readonly learnerVault?: LearnerVault; readonly effectDispatchSecret?: string; readonly sessionStatePath?: string; readonly effectStatePath?: string } = {}) {
+  constructor(tenants: readonly BlackboardTenant[], options: { readonly fetcher?: typeof fetch; readonly learnerVault?: LearnerVault; readonly effectDispatchSecret?: string; readonly effectGrantNow?: () => number; readonly sessionStatePath?: string; readonly effectStatePath?: string } = {}) {
     this.learnerVault = options.learnerVault || new LearnerVault(":memory:");
     this.effectDispatchSecret = options.effectDispatchSecret;
-    this.effects = new BlackboardEffectReceipts(options.effectStatePath || BLACKBOARD_EFFECT_STATE_IN_MEMORY);
+    this.effectGrantNow = options.effectGrantNow || Date.now;
+    this.effects = new BlackboardEffectReceipts(options.effectStatePath || BLACKBOARD_EFFECT_STATE_IN_MEMORY, this.effectGrantNow);
     this.sessions = new BlackboardSessionGenerations(options.sessionStatePath || BLACKBOARD_SESSION_STATE_IN_MEMORY);
     for (const tenant of tenants) {
       if (this.tenants.has(tenant.id)) throw new TypeError("Blackboard tenant id is duplicated");
@@ -689,7 +717,7 @@ export class BlackboardLearnRuntime {
       // call stops here instead of redacting course text against nothing.
       throw rosterRefusal(intent, "Blackboard returned course memberships Morrow could not hold as one exact roster.");
     }
-    const roster: PreparedRoster = { learnerScope, learnerRoster, learnerVault: this.learnerVault, members };
+    const roster: PreparedRoster = { courseId: scope.courseId, learnerScope, learnerRoster, learnerVault: this.learnerVault, members };
     this.heldRosters.set(key, { tokenGeneration: scope.client.tokenGeneration, readAt: Date.now(), roster });
     return roster;
   }
@@ -703,7 +731,7 @@ export class BlackboardLearnRuntime {
   /** One fresh read of the exact item, admitted against the write contract. */
   private async patchableContent(scope: ScopeResolution, contentId: string, signal?: AbortSignal): Promise<JsonObject> {
     const content = await this.contentRaw(scope, contentId, signal);
-    assertPatchableContent(content, scope.courseId);
+    assertPatchableContent(content, scope.courseId, contentId);
     return content;
   }
 
@@ -841,7 +869,7 @@ export class BlackboardLearnRuntime {
       tenantId: scope.tenant.id,
       sourceBindingId: scope.sourceBindingId,
       courseId: scope.courseId,
-      course: safeCourse(course, roster),
+      course: safeCourseWithRoster(course, roster),
       status: "api_configured_live_untested",
       diagnostics: providerCost(scope, requestsBefore),
     };
@@ -948,7 +976,7 @@ export class BlackboardLearnRuntime {
   }
 
   assertReservedEffectGrant(grant: BlackboardEffectGrant): void {
-    if (!blackboardEffectGrantAccepted(this.effectDispatchSecret, grant)) {
+    if (!blackboardEffectGrantAccepted(this.effectDispatchSecret, grant, this.effectGrantNow())) {
       throw new BlackboardApiError("blackboard_patch_review_required", "Blackboard content changes require an exact reserved Morrow effect grant.");
     }
     this.effects.assertUnspent(grant);
@@ -998,6 +1026,25 @@ export class BlackboardLearnRuntime {
   /** Settles any sent change held against this exact target after a fresh read. */
   recordEffectComparison(target: BlackboardEffectTarget, verified: boolean): void {
     this.effects.recordComparison(target, verified);
+  }
+
+  /** Returns create evidence only for the exact source receipt and operation. */
+  effectCreateEvidence(
+    reference: BlackboardEffectReceiptReference,
+    target: BlackboardEffectTarget,
+    kind: BlackboardCreateEvidence["kind"],
+  ): BlackboardCreateEvidence | null {
+    return this.effects.createEvidence(reference, target, kind);
+  }
+
+  /** Settles only the exact source receipt whose provider identity was read. */
+  recordEffectCreateComparison(
+    reference: BlackboardEffectReceiptReference,
+    target: BlackboardEffectTarget,
+    kind: BlackboardCreateEvidence["kind"],
+    verified: boolean,
+  ): void {
+    this.effects.recordCreateComparison(reference, target, kind, verified);
   }
 
   /**

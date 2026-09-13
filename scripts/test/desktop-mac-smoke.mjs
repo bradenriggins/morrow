@@ -1,13 +1,15 @@
 #!/usr/bin/env node
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { constants } from "node:fs";
-import { access, mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { createServer } from "node:net";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { runOwnedProcess } from "../lib/owned-process.mjs";
+import { assertDesktopRendererSmokeReceipt } from "../lib/desktop-renderer-smoke.mjs";
+import { electronAsarReleaseIdentity, readElectronAsarPackage } from "../lib/electron-asar-package.mjs";
+import { withTemporaryDirectory } from "../lib/temporary-directory.mjs";
 
 const MAX_OUTPUT_BYTES = 128 * 1024;
 // Morrow verifies every file of the sealed MCP payload by hash before it starts
@@ -37,7 +39,7 @@ const STDERR_NO_FAILURE_STAGES = Object.freeze(["none", "local_owner_ready", "ot
 function usage() {
   return [
     "Usage:",
-    "  node scripts/test/desktop-mac-smoke.mjs --app <absolute Morrow.app> --receipt <absolute receipt.json>"
+    "  node scripts/test/desktop-mac-smoke.mjs --disk-image <absolute DMG> --package-receipt <absolute package receipt> --receipt <absolute receipt.json> --source <git commit> --run-id <32 lowercase hex>"
   ].join("\n");
 }
 
@@ -45,14 +47,74 @@ function parseArguments(values) {
   const parsed = new Map();
   for (let index = 0; index < values.length; index += 1) {
     const flag = values[index];
-    if (!new Set(["--app", "--receipt"]).has(flag) || parsed.has(flag)) throw new Error(usage());
+    if (!new Set(["--disk-image", "--package-receipt", "--receipt", "--source", "--run-id"]).has(flag) || parsed.has(flag)) throw new Error(usage());
     const value = values[index + 1];
-    if (!value || !isAbsolute(value)) throw new Error(`${flag} requires one absolute path.\n${usage()}`);
-    parsed.set(flag, resolve(value));
+    if (!value) throw new Error(`${flag} requires one value.\n${usage()}`);
+    if (["--disk-image", "--package-receipt", "--receipt"].includes(flag) && !isAbsolute(value)) {
+      throw new Error(`${flag} requires one absolute path.\n${usage()}`);
+    }
+    parsed.set(flag, ["--disk-image", "--package-receipt", "--receipt"].includes(flag) ? resolve(value) : value);
     index += 1;
   }
-  if (parsed.size !== 2) throw new Error(usage());
-  return Object.freeze({ app: parsed.get("--app"), receipt: parsed.get("--receipt") });
+  if (parsed.size !== 5 || !/^[0-9a-f]{40,64}$/.test(parsed.get("--source") || "")
+    || !/^[0-9a-f]{32}$/.test(parsed.get("--run-id") || "")) throw new Error(usage());
+  return Object.freeze({
+    diskImage: parsed.get("--disk-image"),
+    packageReceipt: parsed.get("--package-receipt"),
+    receipt: parsed.get("--receipt"),
+    source: parsed.get("--source"),
+    runId: parsed.get("--run-id"),
+  });
+}
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function createMacSmokeBinding({ diskImage, packageReceipt, source, runId }) {
+  if (!/^[0-9a-f]{40,64}$/.test(source || "") || !/^[0-9a-f]{32}$/.test(runId || "")) {
+    throw new Error("The macOS smoke source and run identity are invalid.");
+  }
+  const receiptBytes = await readFile(packageReceipt);
+  const receipt = JSON.parse(receiptBytes.toString("utf8"));
+  if (receipt?.schema !== "morrow.desktop-installer.v1" || !/^\d+\.\d+\.\d+$/.test(receipt.version || "")
+    || receipt.target !== "darwin-arm64" || receipt.source?.head !== source || receipt.source?.dirty !== false
+    || receipt.payload?.releaseGraph?.schema !== "morrow.desktop-packager-admission.v1"
+    || !/^[0-9a-f]{64}$/.test(receipt.payload?.releaseGraph?.sha256 || "")
+    || receipt.signing?.mode !== "unsigned_private_qa" || receipt.signing?.target !== "darwin-arm64"
+    || receipt.signing?.publicRelease !== false || !Array.isArray(receipt.artifacts) || receipt.artifacts.length !== 2) {
+    throw new Error("The macOS smoke package receipt is not the expected unsigned QA release graph.");
+  }
+  const artifactDirectory = dirname(packageReceipt);
+  const artifacts = [];
+  for (const entry of receipt.artifacts) {
+    if (typeof entry?.name !== "string" || basename(entry.name) !== entry.name || !/^[0-9a-f]{64}$/.test(entry.sha256 || "")) {
+      throw new Error("The macOS smoke package receipt has an invalid artifact identity.");
+    }
+    const path = join(artifactDirectory, entry.name);
+    const metadata = await stat(path).catch(() => null);
+    if (!metadata?.isFile()) throw new Error(`The retained macOS package artifact is missing: ${entry.name}`);
+    const digest = sha256(await readFile(path));
+    if (digest !== entry.sha256) throw new Error(`The retained macOS package artifact changed: ${entry.name}`);
+    artifacts.push({ name: entry.name, sha256: digest });
+  }
+  const names = artifacts.map((entry) => entry.name).sort();
+  const expectedBase = `Morrow-${receipt.version}-mac-arm64`;
+  if (names.length !== 2 || names[0] !== `${expectedBase}.dmg` || names[1] !== `${expectedBase}.zip`
+    || resolve(diskImage) !== resolve(artifactDirectory, basename(diskImage))) {
+    throw new Error("The macOS smoke package must retain one DMG and ZIP beside its receipt.");
+  }
+  const image = artifacts.find((entry) => entry.name === basename(diskImage));
+  if (!image || !image.name.endsWith(".dmg")) throw new Error("The mounted macOS disk image is not the DMG in the package receipt.");
+  return Object.freeze({
+    schema: "morrow.desktop-mac-smoke-binding.v1",
+    runId,
+    sourceCommit: source,
+    packageReceipt: { fileName: basename(packageReceipt), sha256: sha256(receiptBytes) },
+    releaseGraphSha256: receipt.payload.releaseGraph.sha256,
+    diskImage: { fileName: image.name, sha256: image.sha256 },
+    artifacts,
+  });
 }
 
 async function exists(path) {
@@ -64,37 +126,11 @@ async function exists(path) {
   }
 }
 
-function boundedOutput(chunks) {
-  return Buffer.concat(chunks).subarray(0, MAX_OUTPUT_BYTES).toString("utf8");
-}
-
 async function run(executable, argumentsValue, { timeoutMs, environment } = {}) {
-  return new Promise((resolveResult, reject) => {
-    const child = spawn(executable, argumentsValue, {
-      env: environment ?? process.env,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    const stdout = [];
-    const stderr = [];
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) child.kill();
-    }, timeoutMs ?? APP_TIMEOUT_MS);
-    child.stdout.on("data", (chunk) => stdout.push(chunk));
-    child.stderr.on("data", (chunk) => stderr.push(chunk));
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      if (!settled) {
-        settled = true;
-        reject(error);
-      }
-    });
-    child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      if (settled) return;
-      settled = true;
-      resolveResult({ code, signal, stdout: boundedOutput(stdout), stderr: boundedOutput(stderr) });
-    });
+  return runOwnedProcess(executable, argumentsValue, {
+    timeoutMs: timeoutMs ?? APP_TIMEOUT_MS,
+    environment,
+    maxOutputBytes: MAX_OUTPUT_BYTES,
   });
 }
 
@@ -120,6 +156,19 @@ async function bundleExecutable(bundle) {
   const payload = await stat(join(bundle, "Contents", "Resources", "MorrowPayload")).catch(() => null);
   if (!payload?.isDirectory()) throw new Error("--app does not contain Contents/Resources/MorrowPayload.");
   return executable;
+}
+
+async function withMountedDiskImage(diskImage, operation) {
+  return withTemporaryDirectory("morrow-desktop-mac-mount-", async (mountRoot) => {
+    ensureSuccess(await run("/usr/bin/hdiutil", ["attach", diskImage, "-nobrowse", "-readonly", "-mountpoint", mountRoot], {
+      timeoutMs: 60_000,
+    }), "Morrow disk image mount");
+    try {
+      return await operation(join(mountRoot, "Morrow.app"));
+    } finally {
+      ensureSuccess(await run("/usr/bin/hdiutil", ["detach", mountRoot, "-force"], { timeoutMs: 60_000 }), "Morrow disk image detach");
+    }
+  });
 }
 
 /**
@@ -284,52 +333,79 @@ async function writeHarnessReceipt(path, value) {
 async function main() {
   if (process.platform !== "darwin") throw new Error("This smoke harness must run on native macOS.");
   const input = parseArguments(process.argv.slice(2));
-  const executable = await bundleExecutable(input.app);
+  const binding = await createMacSmokeBinding(input);
   if (await exists(input.receipt)) throw new Error("--receipt must not already exist.");
   await mkdir(dirname(input.receipt), { recursive: true });
 
   const bridgePortFree = await probeBridgePort(BRIDGE_PORT);
   if (bridgePortFree === null) throw new Error(`This harness could not tell whether Morrow's Chrome bridge port ${BRIDGE_PORT} is free, so it cannot say what the run should report.`);
 
-  const testRoot = await mkdtemp(join(tmpdir(), "morrow-desktop-mac-smoke-"));
-  const appReceiptPath = join(testRoot, "app-receipt.json");
-  const unrelatedMarker = join(testRoot, "unrelated-marker.txt");
-  const markerContents = `preserve-${randomUUID()}\n`;
-  await writeFile(unrelatedMarker, markerContents, { encoding: "utf8", flag: "wx" });
+  const harnessReceipt = await withMountedDiskImage(input.diskImage, async (app) => {
+    const executable = await bundleExecutable(app);
+    const installedPackage = electronAsarReleaseIdentity(
+      readElectronAsarPackage(join(app, "Contents", "Resources", "app.asar")),
+      binding
+    );
+    return withTemporaryDirectory("morrow-desktop-mac-smoke-", async (testRoot) => {
+    const appReceiptPath = join(testRoot, "app-receipt.json");
+    const rendererReceiptPath = join(testRoot, "renderer-receipt.json");
+    const unrelatedMarker = join(testRoot, "unrelated-marker.txt");
+    const markerContents = `preserve-${randomUUID()}\n`;
+    await writeFile(unrelatedMarker, markerContents, { encoding: "utf8", flag: "wx" });
 
-  ensureSuccess(await run(executable, [
-    `--morrow-test-root=${testRoot}`,
-    `--morrow-smoke-receipt=${appReceiptPath}`,
-    "--morrow-smoke-install-codex"
-  ], {
-    timeoutMs: APP_TIMEOUT_MS,
-    environment: { ...process.env, MORROW_INSTALLER_TEST_MODE: "1" }
-  }), "Installed Morrow startup");
-  const appReceipt = await waitForReceipt(appReceiptPath, RECEIPT_TIMEOUT_MS);
-  assertAppReceipt(appReceipt, { bridgePortFree });
-  const usedPort = await connectorPort(testRoot);
-  if (usedPort !== BRIDGE_PORT) throw new Error(`Morrow used Chrome bridge port ${usedPort}, which this harness did not measure before the run.`);
-  if (await readFile(unrelatedMarker, "utf8") !== markerContents) throw new Error("Morrow modified unrelated isolated data in the test root.");
-  await writeFile(input.receipt, `${JSON.stringify(appReceipt, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+    ensureSuccess(await run(executable, [
+      `--morrow-test-root=${testRoot}`,
+      `--morrow-smoke-receipt=${appReceiptPath}`,
+      "--morrow-smoke-install-codex"
+    ], {
+      timeoutMs: APP_TIMEOUT_MS,
+      environment: { ...process.env, MORROW_INSTALLER_TEST_MODE: "1" }
+    }), "Installed Morrow startup");
+    const appReceipt = await waitForReceipt(appReceiptPath, RECEIPT_TIMEOUT_MS);
+    assertAppReceipt(appReceipt, { bridgePortFree });
+    const usedPort = await connectorPort(testRoot);
+    if (usedPort !== BRIDGE_PORT) throw new Error(`Morrow used Chrome bridge port ${usedPort}, which this harness did not measure before the run.`);
+    if (await readFile(unrelatedMarker, "utf8") !== markerContents) throw new Error("Morrow modified unrelated isolated data in the test root.");
+    const boundAppReceipt = { ...appReceipt, binding };
+    await writeFile(input.receipt, `${JSON.stringify(boundAppReceipt, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
 
-  const harnessReceipt = {
-    schema: "morrow.desktop-mac-harness.v1",
-    application: { bundleName: basename(input.app), startupCompleted: true, receipt: appReceipt },
-    isolation: { testRoot, unrelatedDataPreserved: true },
-    bridgePort: {
-      port: BRIDGE_PORT,
-      freeBeforeRun: bridgePortFree,
-      // Morrow can only bind the one Chrome bridge port a computer has. When
-      // another program already held it, this run proved that Morrow starts
-      // and names that state, not that Morrow can bind the port.
-      listenerProven: bridgePortFree
-    },
-    observed: { stderrStage: appReceipt.runtimeTrace.stderrStage, portBinding: appReceipt.runtimeTrace.portBinding },
-    // This harness launches the bundle it is given, straight from the build
-    // output. It measures none of the following, so no run of it is evidence
-    // about them.
-    notVerified: ["code signature", "notarization", "Gatekeeper quarantine handling", "macOS on Intel"]
-  };
+    ensureSuccess(await run(executable, [
+      `--morrow-test-root=${testRoot}`,
+      `--morrow-renderer-smoke-receipt=${rendererReceiptPath}`
+    ], {
+      timeoutMs: APP_TIMEOUT_MS,
+      environment: { ...process.env, MORROW_INSTALLER_TEST_MODE: "1" }
+    }), "Installed Morrow renderer startup");
+    const rendererReceipt = await waitForReceipt(rendererReceiptPath, RECEIPT_TIMEOUT_MS);
+    assertDesktopRendererSmokeReceipt(rendererReceipt);
+
+    return {
+      schema: "morrow.desktop-mac-harness.v4",
+      binding,
+      application: {
+        bundleName: basename(app),
+        runtimeDiagnosticCompleted: true,
+        rendererStartupCompleted: true,
+        receipt: boundAppReceipt,
+        rendererReceipt,
+        installedPackage
+      },
+      isolation: { unrelatedDataPreserved: true, temporaryStateRemoved: true },
+      bridgePort: {
+        port: BRIDGE_PORT,
+        freeBeforeRun: bridgePortFree,
+        // Morrow can only bind the one Chrome bridge port a computer has. When
+        // another program already held it, this run proved that Morrow starts
+        // and names that state, not that Morrow can bind the port.
+        listenerProven: bridgePortFree
+      },
+      observed: { stderrStage: appReceipt.runtimeTrace.stderrStage, portBinding: appReceipt.runtimeTrace.portBinding },
+      // This harness mounts and launches the retained unsigned QA disk image.
+      // It measures none of the following, so no run of it is evidence about them.
+      notVerified: ["code signature", "notarization", "Gatekeeper quarantine handling", "macOS on Intel"]
+    };
+    });
+  });
   await writeHarnessReceipt(receiptSidecarPath(input.receipt), harnessReceipt);
   process.stdout.write(`${JSON.stringify(harnessReceipt)}\n`);
 }
@@ -341,4 +417,4 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   });
 }
 
-export { assertAppReceipt };
+export { assertAppReceipt, createMacSmokeBinding };

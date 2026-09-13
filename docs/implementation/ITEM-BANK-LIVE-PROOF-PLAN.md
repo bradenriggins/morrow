@@ -6,7 +6,7 @@ Use a release built from this checkout. Select one signed-in Canvas course where
 
 ## Step 1: Frame observation
 
-Connect the selected numeric course. Start one Item Bank read. Morrow must open an inactive temporary tab at the exact `/courses/{course_id}/external_tools/54065` launch. The first same-frame `GET /api/banks` must establish the private API origin, `contextUuid`, `canvasLocalContextId`, and the short-lived Signature credential. The credential stays in service-worker memory and is cleared when the temporary tab closes. `connector/extension/src/item-bank-credential.js`, `connector/extension/src/item-bank-frames.js`, and `connector/extension/src/item-bank-executor.js` define this boundary.
+Connect the selected numeric course. Start one Item Bank read. Morrow must read that course's current Canvas Tabs record, resolve exactly one Item Banks external-tool deployment, and open an inactive temporary tab at that exact `/courses/{course_id}/external_tools/{deployment_id}` launch. The first same-frame `GET /api/banks` must establish the private API origin, `contextUuid`, `canvasLocalContextId`, deployment ID, and the short-lived Signature credential. The credential stays in service-worker memory and is cleared when the temporary tab closes. `connector/extension/src/item-bank-credential.js`, `connector/extension/src/item-bank-frames.js`, and `connector/extension/src/item-bank-executor.js` define this boundary.
 
 Stop if the launch, frame, tenant, principal, course, private context, or credential is missing or ambiguous. Save the exact refusal code in `01-frame.json`. Never paste a token or use a credential from another launch.
 
@@ -52,7 +52,7 @@ The eleven course-bound changes use these contracts:
 
 Skip this step for the current assignment. It needs its own written authorization from the course owner, on a course whose Item Bank may be changed.
 
-Immediately before dispatch, Morrow obtains a fresh `54065` credential, proves the same selected course and bank association, rereads every required snapshot source, and compares every SHA-256 value the reviewer pinned. A quiz bank draw also opens the exact selected New Quiz assignment, obtains its assignment-bound builder credential inside that frame, derives and verifies the private quiz id, and rereads the complete quiz-entry list. A mismatch or unreadable source stops the change before Canvas receives it. One successful preflight permits one provider request. There is no automatic retry.
+Immediately before dispatch, Morrow resolves the course's current Item Banks deployment and obtains a fresh credential from that exact launch. It proves the same selected course and bank association, rereads every required snapshot source, and compares every SHA-256 value the reviewer pinned. A quiz bank draw also opens the exact selected New Quiz assignment, obtains its assignment-bound builder credential inside that frame, derives and verifies the private quiz id, and rereads the complete quiz-entry list. A mismatch or unreadable source stops the change before Canvas receives it. One successful preflight permits one provider request. There is no automatic retry.
 
 When this step is authorized, record in `04-write.json`: the operation, the target ids, every required snapshot digest, the HTTP status, the verification status and evidence, and the exact reread that proved the saved result. Record a refusal or an uncertain outcome the same way. Never record the credential.
 

@@ -35,7 +35,7 @@ const announcement = {
 const announcementRequest = {
   title: announcement.title,
   body: announcement.body,
-  availability: { duration: { type: "DateRange", start: announcement.duration_start, end: announcement.duration_end } },
+  availability: { duration: { type: "Restricted", start: announcement.duration_start, end: announcement.duration_end } },
   showAtTopOfCourse: true,
 };
 
@@ -133,7 +133,7 @@ async function harness(options: FixtureOptions = {}) {
       // A learner named in an announcement written in Blackboard. Every read of
       // this record has to replace the name with a protected reference.
       body: "Jane Doe is the lab assistant this term. Write to jane.doe@example.edu.",
-      availability: { duration: { type: "Continuous" } },
+      availability: { duration: { type: "Permanent" } },
       showAtTopOfCourse: false,
       created: "2026-09-01T08:00:00.000Z",
     }],
@@ -238,14 +238,16 @@ let receipts = 0;
 function effectGrant(planDigest: string): BlackboardEffectGrant {
   receipts += 1;
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-announcements-test",
     planDigest,
     outerPlanDigest: "b".repeat(64),
     approvalGrantDigest: "c".repeat(64),
     effectReceiptId: `effect:00000000-0000-4000-8000-${String(receipts).padStart(12, "0")}`,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:test",
+   gatewayProcessId: "gateway:test",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return { ...unsigned, dispatchToken: signBlackboardEffectGrant(effectSecret, unsigned) };
 }
@@ -260,7 +262,17 @@ function grantArguments(grant: BlackboardEffectGrant): JsonObject {
     effect_receipt_id: grant.effectReceiptId,
     dispatch_attempt: grant.dispatchAttempt,
     gateway_process_id: grant.gatewayProcessId,
+    issued_at: grant.issuedAt,
+    not_after: grant.notAfter,
     dispatch_token: grant.dispatchToken,
+  };
+}
+
+function receiptArguments(grant: BlackboardEffectGrant): JsonObject {
+  return {
+    gateway_process_id: grant.gatewayProcessId,
+    effect_receipt_id: grant.effectReceiptId,
+    operation_id: grant.operationId,
   };
 }
 
@@ -521,13 +533,19 @@ describe("Blackboard course announcements", () => {
   it("reports applied_or_unknown when Blackboard names an announcement the course already held", async () => {
     const fixture = await harness({ createNamesExisting: true });
     const digest = await createPlan(fixture);
-    const result = structured(await fixture.call("blackboard_apply_reviewed_course_announcement", applyArguments(digest)));
+    const grant = effectGrant(digest);
+    const result = structured(await fixture.call("blackboard_apply_reviewed_course_announcement", applyArguments(digest, {}, grant)));
     expect(result).toMatchObject({
       ok: false,
       resultState: "applied_or_unknown",
       problem: { code: "blackboard_content_mismatch" },
     });
     expect(String(problem(result).message)).toContain("already in this course");
+    expect(structured(await fixture.call("blackboard_verify_course_announcement", {
+      ...announcement,
+      _morrow_receipt: receiptArguments(grant),
+    }))).toMatchObject({ schema: "morrow.blackboard.course-announcement.comparator.v2", verified: false });
+    expect(structured(await fixture.call("blackboard_unresolved_effects"))).toMatchObject({ count: 1 });
   });
 
   it("reports applied_or_unknown when a read-back value is not the reviewed one", async () => {
@@ -544,7 +562,7 @@ describe("Blackboard course announcements", () => {
     await close?.();
     close = undefined;
 
-    const wrongWindow = await harness({ readbackDurationType: "Continuous" });
+    const wrongWindow = await harness({ readbackDurationType: "Permanent" });
     const window = structured(await wrongWindow.call("blackboard_apply_reviewed_course_announcement", applyArguments(await createPlan(wrongWindow))));
     expect(window).toMatchObject({ ok: false, resultState: "applied_or_unknown", problem: { code: "blackboard_content_mismatch" } });
     expect(String(problem(window).message)).toContain("when learners see it");
@@ -571,7 +589,7 @@ describe("Blackboard course announcements", () => {
     const fixture = await harness();
     const before = structured(await fixture.call("blackboard_verify_course_announcement", announcement));
     expect(before).toMatchObject({
-      schema: "morrow.blackboard.course-announcement.comparator.v1",
+      schema: "morrow.blackboard.course-announcement.comparator.v2",
       ok: true,
       verified: false,
       readback: "reviewed_fields",
@@ -580,8 +598,13 @@ describe("Blackboard course announcements", () => {
     // comparison, so it carries no diagnostics for the Gateway to compare against.
     expect(before).not.toHaveProperty("diagnostics");
 
-    expect(structured(await fixture.call("blackboard_apply_reviewed_course_announcement", applyArguments(await createPlan(fixture)))).ok).toBe(true);
-    expect(structured(await fixture.call("blackboard_verify_course_announcement", announcement))).toMatchObject({ verified: true });
+    const digest = await createPlan(fixture);
+    const grant = effectGrant(digest);
+    expect(structured(await fixture.call("blackboard_apply_reviewed_course_announcement", applyArguments(digest, {}, grant))).ok).toBe(true);
+    expect(structured(await fixture.call("blackboard_verify_course_announcement", {
+      ...announcement,
+      _morrow_receipt: receiptArguments(grant),
+    }))).toMatchObject({ verified: true });
   });
 
   it("plans one announcement change against the announcement as it is now", async () => {

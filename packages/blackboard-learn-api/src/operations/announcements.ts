@@ -2,9 +2,10 @@ import { canonicalJson, isJsonObject, sha256Text, type JsonObject, type SourceCa
 import * as z from "zod/v4";
 import type { BlackboardLearnClient } from "../client.js";
 import type { BlackboardEffectGrant } from "../effect-grant.js";
+import { providerAnnouncementDuration, publicAnnouncementDuration } from "../provider-contract.js";
 import { redactInto, type BlackboardCourseRead, type BlackboardLearnRuntime, type PreparedRoster } from "../runtime.js";
 import { BLACKBOARD_ID, BlackboardApiError, withBlackboardDispatchState, type BlackboardDispatchState } from "../types.js";
-import { blackboardTool, effectGrantInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
+import { blackboardTool, effectGrantInput, effectReceiptReferenceInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
 import { READ_ANNOTATIONS, READ_BEHAVIOR, READ_PROFILES } from "./course-read.js";
 // One date is read, frozen, and compared as one instant everywhere in this
 // server, and one field list is pinned on a read the same way, so this module
@@ -87,9 +88,6 @@ const MAX_BODY = 10_000;
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
-/** One short provider vocabulary value, such as `Continuous` or `DateRange`. */
-const PROVIDER_ENUM = /^[A-Za-z][A-Za-z0-9_]{0,40}$/;
-
 /** What every reviewed Blackboard change reports about itself, by Morrow profile. */
 const WRITE_PROFILES = {
   "private-full": { state: "supported" },
@@ -124,6 +122,7 @@ const announcementInput = {
 
 const announcementScopeInput = scopeInput.extend({ announcement_id: announcementIdInput });
 const announcementPlanInput = scopeInput.extend(announcementInput);
+const announcementVerifyInput = announcementPlanInput.extend({ _morrow_receipt: effectReceiptReferenceInput.optional() });
 const announcementApplyInput = announcementPlanInput.extend({
   expected_plan_digest: z.string().regex(SHA256),
   _morrow: z.strictObject({ outer_grant: effectGrantInput }),
@@ -236,6 +235,15 @@ function durationOf(record: JsonObject): JsonObject | undefined {
   return isJsonObject(duration) ? duration : undefined;
 }
 
+function providerDuration(type: string): string {
+  if (type === DURATION_CONTINUOUS || type === DURATION_RANGE) return providerAnnouncementDuration(type);
+  throw new BlackboardApiError("blackboard_response_invalid", "The reviewed Blackboard announcement duration is invalid.");
+}
+
+function publicDuration(value: unknown): string | null {
+  return publicAnnouncementDuration(value);
+}
+
 /**
  * The exact request one approved dispatch sends. Morrow sends the whole
  * announcement, and the whole `availability.duration` object inside it, on a
@@ -249,7 +257,7 @@ function announcementRequest(announcement: ReviewedAnnouncement): JsonObject {
     [BODY_FIELD]: announcement.body,
     [AVAILABILITY_FIELD]: {
       [DURATION_FIELD]: {
-        type: announcement.durationType,
+        type: providerDuration(announcement.durationType),
         ...(announcement.durationStart ? { start: announcement.durationStart, end: announcement.durationEnd } : {}),
       },
     },
@@ -280,7 +288,8 @@ function protectedAnnouncement(record: JsonObject): JsonObject {
   if (record.id !== undefined) output.id = record.id;
   if (record[TITLE_FIELD] !== undefined) output.title = record[TITLE_FIELD];
   if (record[BODY_FIELD] !== undefined) output.body = record[BODY_FIELD];
-  if (duration?.type !== undefined) output.durationType = duration.type;
+  const durationType = publicDuration(duration?.type);
+  if (durationType) output.durationType = durationType;
   // A date is frozen and compared as one instant, so the same moment written two
   // ways is one value here.
   if (duration?.start !== undefined) output.durationStart = instant(duration.start) ?? duration.start;
@@ -301,7 +310,7 @@ function safeAnnouncement(record: JsonObject, roster: PreparedRoster): JsonObjec
   redactInto(output, record, [TITLE_FIELD, BODY_FIELD], roster, "announcement");
   const duration = durationOf(record);
   if (duration) {
-    const type = typeof duration.type === "string" && PROVIDER_ENUM.test(duration.type) ? duration.type : undefined;
+    const type = publicDuration(duration.type);
     const start = instant(duration.start);
     const end = instant(duration.end);
     output[AVAILABILITY_FIELD] = {
@@ -408,7 +417,7 @@ function compareAnnouncement(
     throw mismatch("Blackboard returned a different title for this announcement.", dispatchState);
   }
   const duration = durationOf(record);
-  const type = duration && typeof duration.type === "string" ? duration.type : null;
+  const type = publicDuration(duration?.type);
   if (type !== announcement.durationType) {
     throw mismatch(`Blackboard did not return this announcement as ${announcement.durationType}, so Morrow cannot say when learners see it.`, dispatchState);
   }
@@ -564,6 +573,8 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
     effectReceiptId: value.effect_receipt_id,
     dispatchAttempt: value.dispatch_attempt,
     gatewayProcessId: value.gateway_process_id,
+    issuedAt: value.issued_at,
+    notAfter: value.not_after,
     dispatchToken: value.dispatch_token,
   };
 }
@@ -683,6 +694,7 @@ async function applyReviewedCourseAnnouncement(
     if (existing.includes(announcementId)) {
       throw mismatch("Blackboard named an announcement that was already in this course before this change.", dispatchState);
     }
+    dispatch.recordProviderEvidence({ kind: "course-announcement", announcementId });
     const record = await readAnnouncement(write.client, write.courseId, announcementId, signal);
     const verification = compareAnnouncement(record, announcement, dispatchState);
     dispatch.markVerified();
@@ -722,23 +734,32 @@ async function applyReviewedCourseAnnouncement(
  */
 async function verifyCourseAnnouncement(
   runtime: BlackboardLearnRuntime,
-  input: AnnouncementPlanInput,
+  input: z.output<typeof announcementVerifyInput>,
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const announcement = reviewedAnnouncement(input);
-  const comparator = await runtime.beginComparatorRead({
-    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
-  }, signal);
-  const records = await collectAnnouncements(comparator.client, comparator.courseId, signal);
-  const matches = records.filter((record) => savedAnnouncement(record, announcement));
-  const verified = matches.length === 1;
-  runtime.recordEffectComparison(announcementCreateTarget(runtime, input), verified);
+  const target = announcementCreateTarget(runtime, input);
+  const reference = input._morrow_receipt ? {
+    gatewayProcessId: input._morrow_receipt.gateway_process_id,
+    receiptId: input._morrow_receipt.effect_receipt_id,
+    operationId: input._morrow_receipt.operation_id,
+  } : null;
+  const evidence = reference ? runtime.effectCreateEvidence(reference, target, "course-announcement") : null;
+  let verified = false;
+  if (reference && evidence?.kind === "course-announcement") {
+    const comparator = await runtime.beginComparatorRead({
+      tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+    }, signal);
+    const record = await readAnnouncement(comparator.client, comparator.courseId, evidence.announcementId, signal);
+    verified = savedAnnouncement(record, announcement);
+    runtime.recordEffectCreateComparison(reference, target, "course-announcement", verified);
+  }
   return {
-    schema: "morrow.blackboard.course-announcement.comparator.v1",
+    schema: "morrow.blackboard.course-announcement.comparator.v2",
     ok: true,
-    tenantId: comparator.tenantId,
-    sourceBindingId: comparator.sourceBindingId,
-    courseId: comparator.courseId,
+    tenantId: input.tenant_id,
+    sourceBindingId: input.source_binding_id,
+    courseId: input.course_id,
     verified,
     readback: READBACK_STATE,
     status: "api_configured_live_untested",
@@ -1041,7 +1062,7 @@ export const blackboardAnnouncementsModule: BlackboardOperationModule = {
       description: "Internal Morrow fresh-read comparator for one reviewed Blackboard course announcement. It re-reads the course announcements and states whether exactly one carries the reviewed values.",
       private: true,
       gatewayDispatchOnly: true,
-      inputSchema: announcementPlanInput,
+      inputSchema: announcementVerifyInput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       capability: {
         family: "course-read",

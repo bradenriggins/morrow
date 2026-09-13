@@ -28,7 +28,7 @@ test("Moodle Forum reader uses only the native export download and preserves pri
       if (listDelayMs) await new Promise((resolve) => setTimeout(resolve, listDelayMs));
       return response.end(JSON.stringify([{ data: JSON.stringify([{ id: 8, course: 2, cmid: 71 }]) }]));
     }
-    if (target.pathname === "/mod/forum/export.php" && request.method === "GET" && target.search === "?id=8") return response.end(`<!doctype html><form method="post" action="/mod/forum/export.php"><input type="hidden" name="id" value="8"><input type="hidden" name="sesskey" value="private-session"><input type="hidden" name="_qf__mod_forum_form_export_form" value="1"><select name="format"><option value="xlsx">xlsx</option><option value="csv">csv</option></select><input type="submit" name="submitbutton" value="Export"></form>`);
+    if (target.pathname === "/mod/forum/export.php" && request.method === "GET" && target.search === "?id=8") return response.end(`<!doctype html><form method="post" action="/mod/forum/export.php"><input type="hidden" name="id" value="8"><input type="hidden" name="sesskey" value="private-session"><input type="hidden" name="_qf__mod_forum_form_export_form" value="1"><select multiple name="useridsselected[]"></select><select multiple name="discussionids[]"></select><select name="format"><option value="xlsx">xlsx</option><option value="csv">csv</option></select><input type="submit" name="submitbutton" value="Export"></form>`);
     if (target.pathname === "/mod/forum/export.php" && request.method === "POST" && !target.search) {
       const chunks = []; for await (const chunk of request) chunks.push(chunk);
       const body = Buffer.concat(chunks).toString();

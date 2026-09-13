@@ -2,16 +2,21 @@ import {
   readSync,
   chmodSync,
   closeSync,
+  constants,
   existsSync,
+  fstatSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   openSync,
+  readdirSync,
   renameSync,
   realpathSync,
+  rmSync,
   statSync,
-  readFileSync,
   unlinkSync,
   writeFileSync,
+  type BigIntStats,
 } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { isDeepStrictEqual } from "node:util";
@@ -580,7 +585,7 @@ function exactExecutable(path: string, label: string): string {
       throw new Error(`${label} is not a Windows executable: ${path}`);
     }
   }
-  return absolute;
+  return canonical;
 }
 
 function assertNoSymlinkPath(root: string, path: string): void {
@@ -604,6 +609,21 @@ function assertNoSymlinkPath(root: string, path: string): void {
 
 function safeChmod(path: string, mode: number): void {
   try { chmodSync(path, mode); } catch { /* best effort on non-POSIX filesystems */ }
+}
+
+function privatePosixFileAccepted(path: string): boolean {
+  try {
+    const info = lstatSync(path);
+    if (!info.isFile() || info.isSymbolicLink() || (info.mode & 0o077) !== 0) return false;
+    return typeof process.getuid !== "function" || info.uid === process.getuid();
+  } catch {
+    return false;
+  }
+}
+
+function macAclIsPrivate(output: string): boolean {
+  const mode = output.match(/^(\S+)/)?.[1];
+  return Boolean(mode) && !mode!.includes("+") && !/\n\s*\d+:\s/u.test(output);
 }
 
 /**
@@ -678,22 +698,45 @@ export function windowsPrivateFileCommand(path: string): { readonly command: str
 /**
  * Restricts one file to the account running Morrow.
  *
- * POSIX permissions are the file mode, which the caller has already set, so
- * this does nothing there and changes nothing about that path. Windows ignores
- * the file mode completely: without this, a configuration Morrow wrote inside a
- * project directory that other accounts can read is readable by those accounts,
- * and Morrow would report a private write it did not perform.
+ * POSIX files receive and verify an account-only mode. macOS files also have
+ * every extended ACL removed and the resulting ACL inspected. Windows ignores
+ * mode bits, so it receives a replacement ACL for this account, SYSTEM, and
+ * Administrators with inheritance disabled.
  *
  * It throws when the restriction cannot be applied. Every caller applies it to
  * a still-empty temporary file, before that file holds anything and before it
  * replaces anything, so a refusal here leaves no Morrow-written content on the
  * computer at all.
  */
-export function restrictToCurrentAccount(path: string, restriction?: PrivateFileRestriction): void {
+export function restrictToCurrentAccount(path: string, restriction?: PrivateFileRestriction, posixMode = 0o600): void {
   const platform = restriction?.platform ?? process.platform;
-  if (platform !== "win32") return;
-  const { command, args } = windowsPrivateFileCommand(path);
   const run = restriction?.run ?? defaultRestrictionRunner;
+  if (platform !== "win32") {
+    try {
+      chmodSync(path, posixMode);
+    } catch (error) {
+      throw new Error(`Refusing to use ${path} because Morrow could not make it private: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (platform === "darwin") {
+      let removed: PrivateFileRestrictionResult;
+      let inspected: PrivateFileRestrictionResult;
+      try {
+        removed = run("/bin/chmod", ["-N", path]);
+        inspected = run("/bin/ls", ["-lde", path]);
+      } catch (error) {
+        throw new Error(`Refusing to use ${path} because Morrow could not remove and verify its macOS access-control list: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      if (removed.error || removed.status !== 0 || inspected.error || inspected.status !== 0
+        || !macAclIsPrivate(String(inspected.stdout ?? ""))) {
+        throw new Error(`Refusing to use ${path} because Morrow could not remove and verify its macOS access-control list`);
+      }
+    }
+    if (!privatePosixFileAccepted(path)) {
+      throw new Error(`Refusing to use ${path} because it is not a private regular file owned by this account`);
+    }
+    return;
+  }
+  const { command, args } = windowsPrivateFileCommand(path);
   let result: PrivateFileRestrictionResult;
   try {
     result = run(command, args);
@@ -705,26 +748,96 @@ export function restrictToCurrentAccount(path: string, restriction?: PrivateFile
   }
 }
 
+function sameExactFile(left: BigIntStats, right: BigIntStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameExactSnapshot(left: BigIntStats, right: BigIntStats): boolean {
+  return sameExactFile(left, right)
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs
+    && left.mode === right.mode
+    && left.nlink === right.nlink;
+}
+
+function unlinkExactFile(path: string, expected: BigIntStats): void {
+  try {
+    const current = lstatSync(path, { bigint: true });
+    if (sameExactFile(current, expected)) unlinkSync(path);
+  } catch { /* preserve the primary failure */ }
+}
+
+function syncExactDirectory(path: string): void {
+  if (process.platform === "win32") return;
+  const named = lstatSync(path, { bigint: true });
+  if (!named.isDirectory() || named.isSymbolicLink()) throw new Error(`${path} is not one exact directory`);
+  const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+  const handle = openSync(path, constants.O_RDONLY | noFollow);
+  try {
+    const opened = fstatSync(handle, { bigint: true });
+    if (!opened.isDirectory() || !sameExactFile(named, opened)) throw new Error(`${path} changed before its directory flush`);
+    fsyncSync(handle);
+    const after = fstatSync(handle, { bigint: true });
+    const current = lstatSync(path, { bigint: true });
+    if (!sameExactSnapshot(opened, after) || !sameExactSnapshot(after, current)) {
+      throw new Error(`${path} changed during its directory flush`);
+    }
+  } finally {
+    closeSync(handle);
+  }
+}
+
 /**
  * Creates one file that no other account can read, then fills it. The file is
  * created empty and restricted before a single byte of content reaches it, so
  * a computer that cannot apply the restriction never holds an unprotected copy
  * of what Morrow was about to write.
  */
-function writeRestrictedFile(path: string, content: string, mode: number, restriction?: PrivateFileRestriction): void {
+function writeRestrictedFile(path: string, content: string, mode: number, restriction?: PrivateFileRestriction): BigIntStats {
   const handle = openSync(path, "wx", mode);
+  let closed = false;
+  let created = fstatSync(handle, { bigint: true });
   try {
-    restrictToCurrentAccount(path, restriction);
+    const named = lstatSync(path, { bigint: true });
+    if (!created.isFile() || created.nlink !== 1n || !sameExactFile(created, named) || named.nlink !== 1n) {
+      throw new Error(`${path} changed during private-file creation`);
+    }
+    restrictToCurrentAccount(path, restriction, mode);
+    const restricted = fstatSync(handle, { bigint: true });
+    const restrictedName = lstatSync(path, { bigint: true });
+    if (!sameExactFile(created, restricted) || !sameExactSnapshot(restricted, restrictedName)
+      || restricted.nlink !== 1n) {
+      throw new Error(`${path} changed during private-file preparation`);
+    }
     writeFileSync(handle, content, "utf8");
-  } finally {
+    fsyncSync(handle);
+    const written = fstatSync(handle, { bigint: true });
+    const writtenName = lstatSync(path, { bigint: true });
+    if (!sameExactSnapshot(written, writtenName) || written.nlink !== 1n
+      || written.size !== BigInt(Buffer.byteLength(content, "utf8"))) {
+      throw new Error(`${path} changed while private content was written`);
+    }
+    created = written;
+    if ((restriction?.platform ?? process.platform) !== "win32"
+      && (Number(written.mode) & 0o777) !== mode) {
+      throw new Error(`Refusing to use ${path} because its private mode could not be verified`);
+    }
+    return written;
+  } catch (error) {
     closeSync(handle);
+    closed = true;
+    unlinkExactFile(path, created);
+    throw error;
+  } finally {
+    if (!closed) closeSync(handle);
   }
-  safeChmod(path, mode);
 }
 
 interface ExpectedFileText {
   readonly exists: boolean;
   readonly content: string;
+  readonly identity?: BigIntStats;
 }
 
 // An assistant configuration file is a hand-edited JSON or TOML document. Four
@@ -733,17 +846,61 @@ interface ExpectedFileText {
 // this surface, so it is refused instead.
 const MAX_CLIENT_CONFIG_BYTES = 4 * 1024 * 1024;
 
-function currentFileText(path: string): ExpectedFileText {
-  if (!existsSync(path)) return { exists: false, content: "" };
-  const info = lstatSync(path);
-  if (!info.isFile() || info.size > MAX_CLIENT_CONFIG_BYTES) {
-    throw new Error(`Refusing to replace ${path} because it is not a regular file under 4 MiB`);
+function currentFileText(path: string, requirePrivate = false): ExpectedFileText {
+  const invalid = (): Error => new Error(
+    `Refusing to replace ${path} because it is not a regular file under 4 MiB with stable single-link identity`,
+  );
+  let named: BigIntStats;
+  try {
+    named = lstatSync(path, { bigint: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, content: "" };
+    throw invalid();
   }
-  return { exists: true, content: readFileSync(path, "utf8") };
+  if (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1n
+    || named.size > BigInt(MAX_CLIENT_CONFIG_BYTES)
+    || (typeof process.getuid === "function" && named.uid !== BigInt(process.getuid()))) {
+    throw invalid();
+  }
+  const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+  const nonblocking = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
+  let handle: number | undefined;
+  try {
+    handle = openSync(path, constants.O_RDONLY | noFollow | nonblocking);
+    const opened = fstatSync(handle, { bigint: true });
+    if (!opened.isFile() || opened.nlink !== 1n || !sameExactSnapshot(named, opened)
+      || opened.size > BigInt(MAX_CLIENT_CONFIG_BYTES)
+      || (requirePrivate && process.platform !== "win32" && (Number(opened.mode) & 0o077) !== 0)) {
+      throw invalid();
+    }
+    const bytes = Buffer.allocUnsafe(Number(opened.size));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(handle, bytes, offset, bytes.length - offset, null);
+      if (count === 0) break;
+      offset += count;
+    }
+    const after = fstatSync(handle, { bigint: true });
+    const current = lstatSync(path, { bigint: true });
+    if (offset !== bytes.length || !sameExactSnapshot(opened, after)
+      || !sameExactSnapshot(after, current) || current.nlink !== 1n) {
+      throw invalid();
+    }
+    let content: string;
+    try { content = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw invalid(); }
+    return { exists: true, content, identity: after };
+  } catch (error) {
+    if (error instanceof Error && error.message === invalid().message) throw error;
+    throw invalid();
+  } finally {
+    if (handle !== undefined) closeSync(handle);
+  }
 }
 
 function sameFileText(left: ExpectedFileText, right: ExpectedFileText): boolean {
-  return left.exists === right.exists && left.content === right.content;
+  if (!left.exists || !right.exists) return left.exists === right.exists;
+  return left.content === right.content && left.identity !== undefined && right.identity !== undefined
+    && sameExactSnapshot(left.identity, right.identity);
 }
 
 function writePrivateText(
@@ -752,14 +909,16 @@ function writePrivateText(
   expected?: ExpectedFileText,
   restriction?: PrivateFileRestriction,
 ): void {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  safeChmod(dirname(path), 0o700);
+  const parent = dirname(path);
+  const created = mkdirSync(parent, { recursive: true, mode: 0o700 });
+  if (created !== undefined) safeChmod(parent, 0o700);
   if (expected && !sameFileText(currentFileText(path), expected)) {
     throw new Error(`Refusing to replace ${path} because it changed during installation`);
   }
   const temporary = `${path}.tmp-${process.pid}-${randomUUID()}`;
+  let prepared: BigIntStats | undefined;
   try {
-    writeRestrictedFile(temporary, content, 0o600, restriction);
+    prepared = writeRestrictedFile(temporary, content, 0o600, restriction);
     if (expected && !sameFileText(currentFileText(path), expected)) {
       throw new Error(`Refusing to replace ${path} because it changed during installation`);
     }
@@ -773,9 +932,14 @@ function writePrivateText(
       }
       throw error;
     }
-    safeChmod(path, 0o600);
+    const installed = currentFileText(path, true);
+    if (!installed.exists || installed.identity === undefined || !sameExactFile(prepared, installed.identity)
+      || installed.content !== content) {
+      throw new Error(`Morrow could not confirm the exact configuration written to ${path}`);
+    }
+    syncExactDirectory(parent);
   } finally {
-    if (existsSync(temporary)) unlinkSync(temporary);
+    if (prepared !== undefined) unlinkExactFile(temporary, prepared);
   }
 }
 
@@ -1072,12 +1236,68 @@ function codexSection(bundle: ClientConfigBundle): string {
 function parseClientJson(path: string, content: string): Record<string, unknown> {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(content);
+    parsed = JSON.parse(jsoncForJsonParse(content));
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Refusing to replace ${path} because it is not valid JSON: ${detail}`);
   }
   return jsonObject(parsed, path);
+}
+
+/**
+ * Converts the comment-bearing JSON accepted by editor configuration files to
+ * strict JSON without moving any later source offset. Keeping offsets stable is
+ * what lets the structural editor below preserve every unrelated byte.
+ */
+function jsoncForJsonParse(content: string): string {
+  const prepared = content.split("");
+  let inString = false;
+  for (let index = 0; index < content.length; index += 1) {
+    const current = content[index]!;
+    if (inString) {
+      if (current === "\\") index += 1;
+      else if (current === '"') inString = false;
+      continue;
+    }
+    if (current === '"') {
+      inString = true;
+      continue;
+    }
+    if (current !== "/" || (content[index + 1] !== "/" && content[index + 1] !== "*")) continue;
+    const lineComment = content[index + 1] === "/";
+    prepared[index] = " ";
+    prepared[index + 1] = " ";
+    index += 2;
+    if (lineComment) {
+      while (index < content.length && content[index] !== "\n" && content[index] !== "\r") {
+        prepared[index] = " ";
+        index += 1;
+      }
+      index -= 1;
+      continue;
+    }
+    let closed = false;
+    while (index < content.length) {
+      if (content[index] === "*" && content[index + 1] === "/") {
+        prepared[index] = " ";
+        prepared[index + 1] = " ";
+        index += 1;
+        closed = true;
+        break;
+      }
+      if (content[index] !== "\n" && content[index] !== "\r") prepared[index] = " ";
+      index += 1;
+    }
+    if (!closed) throw new Error("unterminated block comment");
+  }
+  const tokens = tokenizeJson(content);
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (token.text === "," && (tokens[index + 1]?.text === "}" || tokens[index + 1]?.text === "]")) {
+      prepared[token.start] = " ";
+    }
+  }
+  return prepared.join("");
 }
 
 interface JsonToken {
@@ -1092,12 +1312,15 @@ interface JsonObjectMember {
   readonly keyEnd: number;
   readonly valueStart: number;
   readonly valueEnd: number;
+  readonly commaStart?: number;
+  readonly commaEnd?: number;
 }
 
 interface JsonObjectText {
   readonly openEnd: number;
   readonly closeStart: number;
   readonly members: readonly JsonObjectMember[];
+  readonly trailingComma: boolean;
 }
 
 function tokenizeJson(content: string): readonly JsonToken[] {
@@ -1105,6 +1328,18 @@ function tokenizeJson(content: string): readonly JsonToken[] {
   for (let index = 0; index < content.length;) {
     if (/\s/.test(content[index]!)) {
       index += 1;
+      continue;
+    }
+    if (content[index] === "/" && content[index + 1] === "/") {
+      index += 2;
+      while (index < content.length && content[index] !== "\n" && content[index] !== "\r") index += 1;
+      continue;
+    }
+    if (content[index] === "/" && content[index + 1] === "*") {
+      index += 2;
+      while (index < content.length && !(content[index] === "*" && content[index + 1] === "/")) index += 1;
+      if (index >= content.length) throw new Error("valid JSON had an unterminated block comment");
+      index += 2;
       continue;
     }
     const start = index;
@@ -1154,6 +1389,7 @@ function jsonObjectText(
 ): JsonObjectText {
   if (tokens[openIndex]?.text !== "{") throw new Error(`${label} must contain a JSON object`);
   const members: JsonObjectMember[] = [];
+  let trailingComma = false;
   let index = openIndex + 1;
   while (tokens[index]?.text !== "}") {
     const key = tokens[index];
@@ -1162,21 +1398,36 @@ function jsonObjectText(
     }
     const valueIndex = index + 2;
     const afterValue = afterJsonValue(tokens, valueIndex);
-    members.push({
+    const member: {
+      key: string;
+      keyStart: number;
+      keyEnd: number;
+      valueStart: number;
+      valueEnd: number;
+      commaStart?: number;
+      commaEnd?: number;
+    } = {
       key: JSON.parse(key.text) as string,
       keyStart: key.start,
       keyEnd: key.end,
       valueStart: tokens[valueIndex]!.start,
       valueEnd: tokens[afterValue - 1]!.end,
-    });
+    };
     index = afterValue;
-    if (tokens[index]?.text === ",") index += 1;
+    if (tokens[index]?.text === ",") {
+      member.commaStart = tokens[index]!.start;
+      member.commaEnd = tokens[index]!.end;
+      index += 1;
+      trailingComma = tokens[index]?.text === "}";
+    }
     else if (tokens[index]?.text !== "}") throw new Error(`${label} must contain a JSON object`);
+    members.push(member);
   }
   return {
     openEnd: tokens[openIndex]!.end,
     closeStart: tokens[index]!.start,
     members,
+    trailingComma,
   };
 }
 
@@ -1238,7 +1489,9 @@ function addJsonMember(
   while (insertion > object.openEnd && /\s/.test(content[insertion - 1]!)) insertion -= 1;
   const prefix = object.members.length === 0
     ? multiline ? `${lineEnding}${propertyIndent}` : ""
-    : multiline ? `,${lineEnding}${propertyIndent}` : ", ";
+    : object.trailingComma
+      ? multiline ? `${lineEnding}${propertyIndent}` : " "
+      : multiline ? `,${lineEnding}${propertyIndent}` : ", ";
   return `${content.slice(0, insertion)}${prefix}${property}${content.slice(insertion)}`;
 }
 
@@ -1253,6 +1506,63 @@ function replaceJsonMemberValue(
   const propertyIndent = lineIndent(content, member.keyStart);
   const replacement = formattedJsonValue(value, multiline, propertyIndent, jsonIndentUnit(content, object), lineEnding);
   return `${content.slice(0, member.valueStart)}${replacement}${content.slice(member.valueEnd)}`;
+}
+
+function removeJsonMember(content: string, object: JsonObjectText, member: JsonObjectMember): string {
+  const memberIndex = object.members.indexOf(member);
+  if (memberIndex < 0) throw new Error("JSON member is not part of its container");
+  const ranges = [{ start: member.keyStart, end: member.valueEnd }];
+  if (member.commaStart !== undefined && member.commaEnd !== undefined) {
+    ranges.push({ start: member.commaStart, end: member.commaEnd });
+  } else if (memberIndex > 0) {
+    const previous = object.members[memberIndex - 1]!;
+    if (previous.commaStart === undefined || previous.commaEnd === undefined) {
+      throw new Error("JSON member has no removable separator");
+    }
+    ranges.push({ start: previous.commaStart, end: previous.commaEnd });
+  }
+  return ranges.sort((left, right) => right.start - left.start).reduce(
+    (updated, range) => `${updated.slice(0, range.start)}${updated.slice(range.end)}`,
+    content,
+  );
+}
+
+/**
+ * Removes one semantic server member from a JSON or JSONC client document.
+ * Only the member tokens and one adjacent comma are removed. Every other byte,
+ * including comments, line endings, whitespace, and numeric spelling, stays
+ * byte-exact and in the same order.
+ */
+export function withoutMorrowClientJson(
+  content: string,
+  container = "mcpServers",
+  serverName = "morrow",
+): string | null {
+  const label = "assistant configuration";
+  const parsed = parseClientJson(label, content);
+  const tokens = tokenizeJson(content);
+  const document = jsonObjectText(content, tokens, 0, label);
+  const containerMember = oneJsonMember(document, container, label);
+  if (!containerMember) {
+    if (Object.hasOwn(parsed, container)) throw new Error(`Refusing to remove ${serverName} from ${label}`);
+    return null;
+  }
+  const parsedServers = jsonObject(parsed[container], `${label}.${container}`);
+  const containerOpen = tokens.findIndex((token) => token.start === containerMember.valueStart);
+  const servers = jsonObjectText(content, tokens, containerOpen, `${label}.${container}`);
+  const server = oneJsonMember(servers, serverName, `${label}.${container}`);
+  if (!server) {
+    if (Object.hasOwn(parsedServers, serverName)) throw new Error(`Refusing to remove ${serverName} from ${label}`);
+    return null;
+  }
+
+  const updated = removeJsonMember(content, servers, server);
+  const checked = parseClientJson(label, updated);
+  const checkedServers = jsonObject(checked[container], `${label}.${container}`);
+  if (Object.hasOwn(checkedServers, serverName)) {
+    throw new Error(`Refusing to remove ${serverName} from ${label}`);
+  }
+  return updated;
 }
 
 function editClientJson(
@@ -1311,7 +1621,10 @@ function installJsonEntry(
     : jsonObject(document[container], `${path}.${container}`);
   const existing = servers[serverName];
   if (existing !== undefined) {
-    if (isDeepStrictEqual(existing, entry)) return false;
+    if (isDeepStrictEqual(existing, entry)) {
+      restrictToCurrentAccount(path);
+      return false;
+    }
     if (expectedConfigSha256 === undefined) {
       throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
     }
@@ -1348,6 +1661,57 @@ function codexMcpServer(document: Record<string, unknown>, serverName: string, p
   const servers = document.mcp_servers;
   if (servers === undefined) return undefined;
   return tomlObject(servers, `${path}.mcp_servers`)[serverName];
+}
+
+function tomlHeaderPath(line: string): readonly string[] | null {
+  const trimmed = line.trimStart();
+  if (!trimmed.startsWith("[") || trimmed.startsWith("[[")) return null;
+  const marker = "__morrow_header_marker__";
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = tomlObject(parseToml(`${line}\n${marker} = true\n`), "TOML header");
+  } catch {
+    return null;
+  }
+  const paths: string[][] = [];
+  const visit = (value: unknown, path: string[]): void => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      if (key === marker && nested === true) paths.push(path);
+      else visit(nested, [...path, key]);
+    }
+  };
+  visit(parsed, []);
+  return paths.length === 1 ? paths[0]! : null;
+}
+
+/**
+ * Removes the exact Codex table that Morrow appends. The TOML parser decides
+ * key identity, so bare, quoted, and escaped spellings of `morrow` cannot leave
+ * a live server behind. A later table still causes a refusal because it is a
+ * document shape Morrow's append-only install path did not create.
+ */
+export function withoutMorrowCodexTable(content: string, serverName = "morrow"): string | null {
+  const path = "Codex configuration";
+  const document = parseCodexToml(path, content);
+  if (codexMcpServer(document, serverName, path) === undefined) return null;
+  const lines = content.match(/[^\n]*(?:\n|$)/g) || [];
+  let offset = 0;
+  let start = -1;
+  for (const line of lines) {
+    const withoutNewline = line.endsWith("\n") ? line.slice(0, -1) : line;
+    const headerPath = tomlHeaderPath(withoutNewline);
+    if (headerPath?.length === 2 && headerPath[0] === "mcp_servers" && headerPath[1] === serverName) {
+      if (start !== -1) throw new Error(`Refusing to remove Morrow from ${path} without rewriting existing TOML`);
+      start = offset;
+    } else if (start !== -1 && withoutNewline.trimStart().startsWith("[")) {
+      throw new Error(`Refusing to remove Morrow from ${path} without rewriting existing TOML`);
+    }
+    offset += line.length;
+  }
+  if (start === -1) throw new Error(`Refusing to remove Morrow from ${path} without rewriting existing TOML`);
+  const kept = content.slice(0, start).trimEnd();
+  return kept.length === 0 ? "" : `${kept}\n`;
 }
 
 function appendCodexSection(content: string, section: string): string {
@@ -1402,7 +1766,10 @@ function installCodexEntry(
   const expected = codexMcpServer(parseCodexToml(path, section), serverName, path);
   const existing = codexMcpServer(document, serverName, path);
   if (existing !== undefined) {
-    if (isDeepStrictEqual(existing, expected)) return false;
+    if (isDeepStrictEqual(existing, expected)) {
+      restrictToCurrentAccount(path);
+      return false;
+    }
     if (expectedConfigSha256 === undefined) {
       throw new Error(`Refusing to replace existing Morrow server ${serverName} in ${path}`);
     }
@@ -1430,7 +1797,9 @@ function installedClientDigest(
   serverName: string,
   expected: Record<string, unknown>,
 ): string {
-  const content = readFileSync(path, "utf8");
+  const current = currentFileText(path, true);
+  if (!current.exists) throw new Error(`Morrow could not confirm its configuration in ${path}`);
+  const content = current.content;
   const actual = client === "codex"
     ? codexMcpServer(parseCodexToml(path, content), serverName, path)
     : jsonObject(parseClientJson(path, content)[container!], `${path}.${container}`)[serverName];
@@ -1451,7 +1820,7 @@ export function installMorrowClient(options: InstallMorrowClientOptions): Instal
   }
   const configurationRoot = scope === "project"
     ? canonicalDirectory(options.projectRoot || repositoryRoot, "projectRoot")
-    : repositoryRoot;
+    : canonicalRepositoryRoot;
   const workspaceRoot = options.workspaceRoot === undefined
     ? configurationRoot
     : canonicalDirectory(options.workspaceRoot, "workspaceRoot");
@@ -1462,13 +1831,14 @@ export function installMorrowClient(options: InstallMorrowClientOptions): Instal
   );
   const canonicalServerEntryPath = canonicalRegularFile(serverEntryPath, "Morrow server entry");
   assertWithinRepository(canonicalRepositoryRoot, canonicalServerEntryPath);
-  assertRegularFile(exactAbsolutePath(options.upstreamConfigPath, "upstreamConfigPath"), "Upstream configuration");
+  const canonicalUpstreamConfigPath = canonicalRegularFile(options.upstreamConfigPath, "Upstream configuration");
   const bundle = buildClientConfigBundle({
     ...options,
-    repositoryRoot,
+    repositoryRoot: canonicalRepositoryRoot,
     workspaceRoot,
     nodeCommand: command,
-    serverEntryPath,
+    serverEntryPath: canonicalServerEntryPath,
+    upstreamConfigPath: canonicalUpstreamConfigPath,
   });
   const homeDirectory = exactAbsolutePath(homedir(), "homeDirectory");
   const path = morrowClientConfigPath({ client, scope, projectRoot: configurationRoot, homeDirectory });
@@ -1483,7 +1853,7 @@ export function installMorrowClient(options: InstallMorrowClientOptions): Instal
       codexMcpServer(parseCodexToml(path, codexSection(bundle)), bundle.serverName, path),
       `${path}.mcp_servers.${bundle.serverName}`,
     )
-    : serverEntry(bundle, client, options.upstreamConfigPath);
+    : serverEntry(bundle, client, canonicalUpstreamConfigPath);
   const changed = client === "codex"
     ? installCodexEntry(path, bundle.serverName, codexSection(bundle), expectedConfigSha256)
     : installJsonEntry(path, CLIENT_JSON[client].container, bundle.serverName, expectedEntry, expectedConfigSha256);
@@ -1536,12 +1906,24 @@ export function writeClientConfigBundle(
   options: WriteClientConfigBundleOptions,
 ): ClientConfigBundle {
   const outputDirectory = exactAbsolutePath(options.outputDirectory, "outputDirectory");
+  const outputParent = dirname(outputDirectory);
+  if (outputParent === outputDirectory) throw new Error("outputDirectory cannot be a filesystem root");
   const bundle = buildClientConfigBundle(options);
   assertRegularFile(bundle.args[0]!, "Morrow server entry");
   assertRegularFile(exactAbsolutePath(options.upstreamConfigPath, "upstreamConfigPath"), "Upstream configuration");
-  mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
-  safeChmod(outputDirectory, 0o700);
+  mkdirSync(outputParent, { recursive: true, mode: 0o700 });
 
+  const expectedNames = new Set(bundle.files.map((entry) => entry.path));
+  if (existsSync(outputDirectory)) {
+    const info = lstatSync(outputDirectory);
+    if (!info.isDirectory() || info.isSymbolicLink()) {
+      throw new Error(`Refusing to replace ${outputDirectory} because it is not a regular directory`);
+    }
+    const unknown = readdirSync(outputDirectory).filter((name) => !expectedNames.has(name));
+    if (unknown.length !== 0) {
+      throw new Error(`Refusing to replace ${outputDirectory} because it contains files Morrow does not own`);
+    }
+  }
   for (const entry of bundle.files) {
     const destination = resolve(outputDirectory, entry.path);
     if (existsSync(destination) && options.force !== true) {
@@ -1549,16 +1931,38 @@ export function writeClientConfigBundle(
     }
   }
 
-  for (const entry of bundle.files) {
-    const destination = resolve(outputDirectory, entry.path);
-    const temporary = `${destination}.tmp-${process.pid}-${randomUUID()}`;
-    const mode = entry.path === "install.posix.sh" ? 0o700 : 0o600;
+  const transactionId = `${process.pid}-${randomUUID()}`;
+  const stagingDirectory = `${outputDirectory}.staging-${transactionId}`;
+  const previousDirectory = `${outputDirectory}.previous-${transactionId}`;
+  let previousMoved = false;
+  let published = false;
+  try {
+    mkdirSync(stagingDirectory, { mode: 0o700 });
+    safeChmod(stagingDirectory, 0o700);
+    for (const entry of bundle.files) {
+      const destination = resolve(stagingDirectory, entry.path);
+      if (dirname(destination) !== stagingDirectory) throw new Error("Morrow generated an invalid client bundle path");
+      const mode = entry.path === "install.posix.sh" ? 0o700 : 0o600;
+      writeRestrictedFile(destination, entry.content, mode, options.restriction);
+    }
+    if (existsSync(outputDirectory)) {
+      renameSync(outputDirectory, previousDirectory);
+      previousMoved = true;
+    }
     try {
-      writeRestrictedFile(temporary, entry.content, mode, options.restriction);
-      renameSync(temporary, destination);
-      safeChmod(destination, mode);
-    } finally {
-      if (existsSync(temporary)) unlinkSync(temporary);
+      renameSync(stagingDirectory, outputDirectory);
+      published = true;
+    } catch (error) {
+      if (previousMoved && !existsSync(outputDirectory)) {
+        renameSync(previousDirectory, outputDirectory);
+        previousMoved = false;
+      }
+      throw error;
+    }
+  } finally {
+    if (existsSync(stagingDirectory)) rmSync(stagingDirectory, { recursive: true, force: true });
+    if (published && previousMoved && existsSync(previousDirectory)) {
+      rmSync(previousDirectory, { recursive: true, force: true });
     }
   }
   return bundle;

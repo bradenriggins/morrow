@@ -1,4 +1,6 @@
 export async function executeQuizBankDrawInPage(input) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const MAX_BYTES = 2 * 1024 * 1024;
   const MAX_ENTRY_PAGES = 1000;
   const MAX_ENTRIES = 10_000;
@@ -56,10 +58,13 @@ export async function executeQuizBankDrawInPage(input) {
   const headers = { Accept: "application/json", Authorization: token, AuthType: "Signature" };
   const boundedResponse = async (response) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) return { oversize: true };
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return { oversize: true };
+    }
     if (!response?.body || typeof response.body.getReader !== "function") return { text: "" };
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let text = "";
     let size = 0;
     try {
@@ -67,14 +72,14 @@ export async function executeQuizBankDrawInPage(input) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return { oversize: true };
         }
         text += decoder.decode(next.value, { stream: true });
       }
       return { text: text + decoder.decode() };
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return { unreadable: true };
     }
   };
@@ -87,6 +92,7 @@ export async function executeQuizBankDrawInPage(input) {
         credentials: "omit",
         redirect: "error",
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch {
       return { transport: true };

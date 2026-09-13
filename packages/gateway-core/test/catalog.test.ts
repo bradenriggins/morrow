@@ -64,6 +64,23 @@ describe("mergeCatalog", () => {
     expect(first.digest).toBe(second.digest);
   });
 
+  it("rejects duplicate canonical source ids before merging tools", () => {
+    expect(() => mergeCatalog([
+      {
+        id: "Fixture",
+        label: "First fixture",
+        priority: 100,
+        tools: [{ name: "canvas_page_get", inputSchema: emptySchema }],
+      },
+      {
+        id: " fixture ",
+        label: "Second fixture",
+        priority: 50,
+        tools: [{ name: "canvas_course_get", inputSchema: emptySchema }],
+      },
+    ])).toThrow("Duplicate canonical source id fixture");
+  });
+
   it("emits a validated descriptor and excludes held source ids before routing", () => {
     const snapshot = mergeCatalog([
       {
@@ -139,5 +156,71 @@ describe("mergeCatalog", () => {
       catalogDigest: "a".repeat(64),
       evidence: {},
     })).toThrow(/sourceImplementations/);
+  });
+
+  it.each([
+    {
+      label: "read behavior",
+      annotations: { readOnlyHint: true },
+      capability: { behavior: { readOnly: false, mutating: true } },
+      message: /behavior\.readOnly conflicts/u,
+    },
+    {
+      label: "missing read annotation",
+      annotations: undefined,
+      capability: { behavior: { readOnly: true, mutating: false } },
+      message: /behavior\.readOnly conflicts/u,
+    },
+    {
+      label: "write approval",
+      annotations: { readOnlyHint: false },
+      capability: { authority: { approvalClass: "none" } },
+      message: /mutating capability cannot bypass mutation approval/u,
+    },
+    {
+      label: "destructive approval",
+      annotations: { readOnlyHint: false, destructiveHint: true },
+      capability: { behavior: { destructive: true }, authority: { approvalClass: "standard" } },
+      message: /destructive classification conflicts/u,
+    },
+    {
+      label: "read-only profile",
+      annotations: { readOnlyHint: false },
+      capability: { profiles: { "read-only": { state: "supported" } } },
+      message: /cannot be supported by the read-only profile/u,
+    },
+  ])("rejects contradictory $label metadata at catalog admission", ({ annotations, capability, message }) => {
+    expect(() => mergeCatalog([{
+      id: "contradictory-source",
+      label: "Contradictory source",
+      priority: 1,
+      tools: [{ name: "provider_effect", inputSchema: emptySchema, annotations, capability }],
+    }])).toThrow(message);
+  });
+
+  it("preserves one consistent access classification in annotations and capability metadata", () => {
+    const snapshot = mergeCatalog([{
+      id: "consistent-source",
+      label: "Consistent source",
+      priority: 1,
+      tools: [{
+        name: "provider_effect",
+        inputSchema: emptySchema,
+        annotations: { readOnlyHint: false, destructiveHint: false },
+        capability: {
+          behavior: { readOnly: false, mutating: true, destructive: false },
+          authority: { approvalClass: "grade" },
+          profiles: { "read-only": { state: "profile_limited", reason: "This operation changes provider state." } },
+        },
+      }],
+    }]);
+    expect(snapshot.tools[0]).toMatchObject({
+      annotations: { readOnlyHint: false, destructiveHint: false },
+      capability: {
+        behavior: { readOnly: false, mutating: true, destructive: false },
+        authority: { approvalClass: "grade" },
+        profiles: { "read-only": { state: "profile_limited" } },
+      },
+    });
   });
 });

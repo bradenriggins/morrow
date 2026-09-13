@@ -89,6 +89,10 @@ interface FixtureOptions {
   readonly readbackPoints?: number;
   /** Read the created column back as the column that grades this other item. */
   readonly readbackColumnContentId?: string;
+  /** Fail the create request before saving any assignment. */
+  readonly createFails?: boolean;
+  /** Start with one old column whose compared values equal the reviewed assignment. */
+  readonly preexistingMatchingColumn?: boolean;
 }
 
 async function harness(options: FixtureOptions = {}) {
@@ -96,19 +100,19 @@ async function harness(options: FixtureOptions = {}) {
   const createRequests: JsonObject[] = [];
   const columns = new Map<string, JsonObject>([
     [existingColumnId, {
-      id: existingColumnId, name: "Week 1 quiz", contentId: testLinkId, externalGrade: true,
-      score: { possible: 10 }, availability: { available: "Yes" },
-      grading: { type: "Attempts", due: "2026-09-08T23:59:00.000Z" },
+      id: existingColumnId, name: options.preexistingMatchingColumn ? assignment.title : "Week 1 quiz", contentId: testLinkId, externalGrade: true,
+      score: { possible: options.preexistingMatchingColumn ? assignment.points_possible : 10 }, availability: { available: "Yes" },
+      grading: { type: "Attempts", due: options.preexistingMatchingColumn ? assignment.due : "2026-09-08T23:59:00.000Z" },
     }],
   ]);
   const content = new Map<string, JsonObject>([
     [testLinkId, {
-      id: testLinkId, courseId, parentId: "_55_1", title: "Week 1 quiz", position: 1,
+      id: testLinkId, parentId: "_55_1", title: "Week 1 quiz", position: 1,
       description: "Feedback goes to Jane Doe.",
       contentHandler: { id: "resource/x-bb-asmt-test-link" }, availability: { available: "Yes" },
     }],
     [documentId, {
-      id: documentId, courseId, parentId: "_55_1", title: "Week 1", position: 2,
+      id: documentId, parentId: "_55_1", title: "Week 1", position: 2,
       contentHandler: { id: "resource/x-bb-document" }, availability: { available: "Yes" },
     }],
   ]);
@@ -132,9 +136,10 @@ async function harness(options: FixtureOptions = {}) {
     if (pathname === createAssignmentPath && request.method === "POST") {
       void body(request).then((requested) => {
         createRequests.push(requested);
+        if (options.createFails) { json(response, { message: "create failed" }, 500); return; }
         const columnId = options.createNamesExistingColumn ? existingColumnId : createdColumnId;
         content.set(createdContentId, {
-          id: createdContentId, courseId, parentId: "_55_1", position: 3,
+          id: createdContentId, parentId: "_55_1", position: 3,
           title: options.readbackTitle ?? String(requested.title),
           ...(options.readbackWithoutInstructions ? {} : { instructions: requested.instructions }),
           contentHandler: { id: "resource/x-bb-asmt-test-link" }, availability: { available: "Yes" },
@@ -152,7 +157,7 @@ async function harness(options: FixtureOptions = {}) {
         }
         json(response, {
           ...(options.createWithoutContentId ? {} : { contentId: createdContentId }),
-          ...(options.createWithoutColumnId ? {} : { gradebookColumnId: columnId }),
+          ...(options.createWithoutColumnId ? {} : { gradeColumnId: columnId }),
         }, 201);
       });
       return;
@@ -222,14 +227,16 @@ let receipts = 0;
 function effectGrant(planDigest: string): BlackboardEffectGrant {
   receipts += 1;
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-assignments-test",
     planDigest,
     outerPlanDigest: "b".repeat(64),
     approvalGrantDigest: "c".repeat(64),
     effectReceiptId: `effect:00000000-0000-4000-8000-${String(receipts).padStart(12, "0")}`,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:test",
+   gatewayProcessId: "gateway:test",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return { ...unsigned, dispatchToken: signBlackboardEffectGrant(effectSecret, unsigned) };
 }
@@ -244,7 +251,17 @@ function grantArguments(grant: BlackboardEffectGrant): JsonObject {
     effect_receipt_id: grant.effectReceiptId,
     dispatch_attempt: grant.dispatchAttempt,
     gateway_process_id: grant.gatewayProcessId,
+    issued_at: grant.issuedAt,
+    not_after: grant.notAfter,
     dispatch_token: grant.dispatchToken,
+  };
+}
+
+function receiptArguments(grant: BlackboardEffectGrant): JsonObject {
+  return {
+    gateway_process_id: grant.gatewayProcessId,
+    effect_receipt_id: grant.effectReceiptId,
+    operation_id: grant.operationId,
   };
 }
 
@@ -432,7 +449,7 @@ describe("Blackboard assignments and assessments", () => {
       resultState: "applied_or_unknown",
       problem: { code: "blackboard_content_mismatch" },
     });
-    expect(String((result.problem as JsonObject).message)).toContain("gradebookColumnId");
+    expect(String((result.problem as JsonObject).message)).toContain("gradeColumnId");
     expect(fixture.creates()).toHaveLength(1);
   });
 
@@ -514,7 +531,7 @@ describe("Blackboard assignments and assessments", () => {
     const fixture = await harness();
     const before = structured(await fixture.call("blackboard_verify_ultra_assignment", assignment));
     expect(before).toMatchObject({
-      schema: "morrow.blackboard.ultra-assignment.comparator.v1",
+      schema: "morrow.blackboard.ultra-assignment.comparator.v2",
       ok: true,
       verified: false,
       readback: "content_and_gradebook_column",
@@ -524,7 +541,27 @@ describe("Blackboard assignments and assessments", () => {
     expect(before).not.toHaveProperty("diagnostics");
 
     const digest = await planDigestOf(fixture);
-    expect(structured(await fixture.call("blackboard_apply_reviewed_ultra_assignment", applyArguments(digest))).ok).toBe(true);
-    expect(structured(await fixture.call("blackboard_verify_ultra_assignment", assignment))).toMatchObject({ verified: true });
+    const grant = effectGrant(digest);
+    expect(structured(await fixture.call("blackboard_apply_reviewed_ultra_assignment", applyArguments(digest, {}, grant))).ok).toBe(true);
+    expect(structured(await fixture.call("blackboard_verify_ultra_assignment", {
+      ...assignment,
+      _morrow_receipt: receiptArguments(grant),
+    }))).toMatchObject({ verified: true });
+  });
+
+  it("keeps a failed create unresolved when an old column has all reviewed values", async () => {
+    const fixture = await harness({ createFails: true, preexistingMatchingColumn: true });
+    const digest = await planDigestOf(fixture);
+    const grant = effectGrant(digest);
+    expect(structured(await fixture.call("blackboard_apply_reviewed_ultra_assignment", applyArguments(digest, {}, grant))))
+      .toMatchObject({ ok: false, resultState: "applied_or_unknown" });
+    expect(structured(await fixture.call("blackboard_verify_ultra_assignment", {
+      ...assignment,
+      _morrow_receipt: receiptArguments(grant),
+    }))).toMatchObject({ schema: "morrow.blackboard.ultra-assignment.comparator.v2", verified: false });
+    expect(structured(await fixture.call("blackboard_unresolved_effects"))).toMatchObject({ count: 1 });
+    expect(structured(await fixture.call("blackboard_plan_ultra_assignment", assignment)))
+      .toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_effect_unresolved" } });
+    expect(fixture.creates()).toHaveLength(1);
   });
 });

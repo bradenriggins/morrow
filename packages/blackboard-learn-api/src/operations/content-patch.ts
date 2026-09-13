@@ -120,6 +120,8 @@ export const blackboardContentPatchModule: BlackboardOperationModule = {
           effectReceiptId: input._morrow.outer_grant.effect_receipt_id,
           dispatchAttempt: input._morrow.outer_grant.dispatch_attempt,
           gatewayProcessId: input._morrow.outer_grant.gateway_process_id,
+          issuedAt: input._morrow.outer_grant.issued_at,
+          notAfter: input._morrow.outer_grant.not_after,
           dispatchToken: input._morrow.outer_grant.dispatch_token,
         };
         runtime.assertReservedEffectGrant(grant);

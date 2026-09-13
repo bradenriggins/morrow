@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   EFFECT_TARGET_IDENTITY_VERSION,
   ProviderEffectBroker,
+  ProviderEffectParentAuthorityError,
   ProviderEffectTargetConflictError,
   ProviderEffectTargetScopeUnknownError,
 } from "../src/index.js";
@@ -233,6 +234,39 @@ function writeCheckedLegacyEffectDatabase(path: string): void {
 }
 
 describe("ProviderEffectBroker", () => {
+  it("reuses a source operation only for the complete same frozen effect identity", () => {
+    const broker = new ProviderEffectBroker({ path: ":memory:" });
+    const sourceOperationId = "operation:complete-frozen-identity";
+    const request = { page_id: "42", title: "Original" };
+    const forwardedRequest = { ...request, _morrow: { operation_id: sourceOperationId } };
+    const readback = { tool: "canvas_page_get", arguments: { page_id: "42" }, expectedDigest: "b".repeat(64) };
+    const shared = { sourceOperationId, request, forwardedRequest, readback };
+    const original = create(broker, shared);
+    broker.approve(original.operationId);
+    broker.reserveDispatch(original.operationId);
+    broker.settleResponse(original.operationId, { upstreamResultDigest: "c".repeat(64) });
+    broker.recordReadback(original.operationId, readback.expectedDigest, true);
+
+    expect(create(broker, { ...shared, requestedBy: { clientName: "A retry", clientVersion: "1" } }))
+      .toMatchObject({ operationId: original.operationId, state: "verified", verificationStatus: "verified" });
+    expect(() => create(broker, {
+      ...shared,
+      authority: { ...authorityForTarget("4"), providerPrincipalDigest: "9".repeat(64), connectionGeneration: 2 },
+    })).toThrow("source operation identity is already bound to a different frozen plan");
+    expect(() => create(broker, {
+      ...shared,
+      authority: {
+        ...authorityForTarget("4"), editPolicyDigest: "d".repeat(64), editPolicyRevision: 3,
+      },
+      authorization: { kind: "edit_scope", policyDigest: "d".repeat(64), policyRevision: 3 },
+    })).toThrow("source operation identity is already bound to a different frozen plan");
+    expect(() => create(broker, {
+      ...shared,
+      readback: { ...readback, expectedDigest: "e".repeat(64) },
+    })).toThrow("source operation identity is already bound to a different frozen plan");
+    broker.close();
+  });
+
   it("freezes plans and binds one expiring, single-use approval grant", () => {
     let clock = new Date("2026-09-04T00:00:00.000Z");
     const broker = new ProviderEffectBroker({ path: ":memory:", now: () => clock });
@@ -293,6 +327,20 @@ describe("ProviderEffectBroker", () => {
     const correction = create(broker, { authority: authorityForTarget("5"), correctionOf: verified.operationId });
     expect(correction.correctionOf).toBe(verified.operationId);
     expect(correction.operationId).not.toBe(verified.operationId);
+    broker.close();
+  });
+
+  it("records cancellation after reservation only while provider dispatch is still disproved", () => {
+    const broker = new ProviderEffectBroker({ path: ":memory:" });
+    const operation = create(broker);
+    broker.approve(operation.operationId);
+    broker.reserveDispatch(operation.operationId);
+    expect(broker.settleCancelledBeforeSend(operation.operationId)).toMatchObject({
+      state: "cancelled",
+      dispatchAttempt: 1,
+      attention: ["cancelled_before_dispatch"],
+    });
+    expect(() => broker.settleFailure(operation.operationId, { timeout: true }, true)).toThrow(/cannot fail from cancelled/);
     broker.close();
   });
 
@@ -588,6 +636,116 @@ describe("ProviderEffectBroker", () => {
         .toContain("provider_effect_target_scope_unknown");
     }
 
+    broker.close();
+  });
+
+  it("serializes parent-batch revocation with dispatch reservation", () => {
+    const broker = new ProviderEffectBroker({ path: ":memory:" });
+    expect(broker.registerBatch("batch:cancel-first")).toBe("active");
+    const cancelled = create(broker, { sourceOperationId: "operation:cancel-first" });
+    broker.bindBatchOperation("batch:cancel-first", "child:1", cancelled.operationId);
+    broker.approve(cancelled.operationId);
+
+    const revocation = broker.revokeBatch("batch:cancel-first", "batch_cancelled");
+    expect(revocation.operations).toMatchObject([{
+      batchId: "batch:cancel-first",
+      childId: "child:1",
+      operation: { operationId: cancelled.operationId, state: "cancelled", dispatchAttempt: 0 },
+    }]);
+    expect(() => broker.reserveDispatch(cancelled.operationId)).toThrow(/cannot dispatch from cancelled/);
+    expect(broker.registerBatch("batch:cancel-first")).toBe("revoked");
+
+    expect(broker.registerBatch("batch:reserve-first")).toBe("active");
+    const reserved = create(broker, {
+      sourceOperationId: "operation:reserve-first",
+      authority: authorityForTarget("8"),
+    });
+    broker.bindBatchOperation("batch:reserve-first", "child:2", reserved.operationId);
+    broker.approve(reserved.operationId);
+    expect(broker.reserveDispatch(reserved.operationId)).toMatchObject({ state: "dispatching", dispatchAttempt: 1 });
+    expect(broker.revokeBatch("batch:reserve-first", "batch_cancelled").operations).toMatchObject([{
+      childId: "child:2",
+      operation: { state: "dispatching", dispatchAttempt: 1 },
+    }]);
+
+    expect(broker.registerBatch("batch:revoked-before-bind")).toBe("active");
+    broker.revokeBatch("batch:revoked-before-bind", "batch_creation_failed");
+    const legacy = create(broker, {
+      sourceOperationId: "operation:legacy-bind",
+      authority: authorityForTarget("9"),
+    });
+    expect(broker.bindBatchOperation("batch:revoked-before-bind", "child:3", legacy.operationId).operation)
+      .toMatchObject({ state: "cancelled", dispatchAttempt: 0 });
+    expect(() => broker.reserveDispatch(legacy.operationId)).toThrow(/cannot dispatch from cancelled/);
+    broker.close();
+  });
+
+  it("refuses an approved child when its durable parent authority is revoked", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-effects-parent-authority-"));
+    roots.push(root);
+    const path = join(root, "operations.sqlite3");
+    const broker = new ProviderEffectBroker({ path });
+    broker.registerBatch("batch:parent-check");
+    const operation = create(broker, { sourceOperationId: "operation:parent-check" });
+    broker.bindBatchOperation("batch:parent-check", "child:1", operation.operationId);
+    broker.approve(operation.operationId);
+    broker.revokeBatch("batch:parent-check", "batch_terminal");
+    expect(() => broker.reserveDispatch(operation.operationId)).toThrow(/cannot dispatch from cancelled/);
+
+    // The explicit parent check also protects a historical row whose state was
+    // restored to approved by an older build after revocation.
+    const database = new DatabaseSync(path);
+    database.prepare(`
+      UPDATE provider_effect_operations
+      SET state='approved', terminal_at=NULL WHERE operation_id=?
+    `).run(operation.operationId);
+    database.close();
+    expect(() => broker.reserveDispatch(operation.operationId)).toThrow(ProviderEffectParentAuthorityError);
+    expect(broker.get(operation.operationId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+    broker.close();
+  });
+
+  it("paginates every saved effect and counts an old unresolved operation authoritatively", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-effects-complete-list-"));
+    roots.push(root);
+    let instant = Date.parse("2026-09-13T00:00:00.000Z");
+    const broker = new ProviderEffectBroker({
+      path: join(root, "operations.sqlite3"),
+      now: () => new Date(instant++),
+    });
+    const oldest = create(broker, {
+      sourceOperationId: "operation:oldest-unresolved",
+      readback: { tool: "canvas_page_get", arguments: { page_id: "42" }, expectedDigest: "9".repeat(64) },
+    });
+    broker.approve(oldest.operationId);
+    broker.reserveDispatch(oldest.operationId);
+    expect(broker.settleResponse(oldest.operationId, { upstreamResultDigest: "8".repeat(64) }).state)
+      .toBe("awaiting_verification");
+    for (let index = 0; index < 205; index += 1) {
+      const operation = create(broker, { sourceOperationId: `operation:list-decoy-${index}` });
+      broker.cancel(operation.operationId);
+    }
+
+    const ids: string[] = [];
+    let cursor: string | undefined;
+    do {
+      const page = broker.listPage({ limit: 50, ...(cursor ? { cursor } : {}) });
+      ids.push(...page.operations.map((operation) => operation.operationId));
+      cursor = page.nextCursor || undefined;
+      expect(page.hasMore).toBe(Boolean(cursor));
+    } while (cursor);
+
+    expect(ids).toHaveLength(206);
+    expect(new Set(ids).size).toBe(206);
+    expect(ids.at(-1)).toBe(oldest.operationId);
+    expect(broker.stats()).toEqual({
+      totalOperationCount: 206,
+      unresolvedOperationCount: 1,
+      appliedOrUnknownCount: 0,
+      dispatchingCount: 0,
+    });
+    expect(() => broker.listPage({ cursor: Buffer.from('{"createdAt":"not-a-date","operationId":"op:bad"}').toString("base64url") }))
+      .toThrow("operation list cursor is invalid");
     broker.close();
   });
 });

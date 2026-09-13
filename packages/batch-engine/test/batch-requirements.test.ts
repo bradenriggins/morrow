@@ -183,6 +183,38 @@ describe("BAT durable batch requirements", () => {
     store.close();
   });
 
+  it("finds a ready child beyond a blocked dependency prefix", async () => {
+    const store = new DurableBatchStore({ path: ":memory:", encryptionKey: randomBytes(32) });
+    const prerequisiteId = "course:501";
+    const children = Array.from({ length: 501 }, (_, index) => ({
+      ...readChild(index + 1),
+      dependencyChildIds: index < 500 ? [prerequisiteId] : [],
+    }));
+    const created = store.create({
+      name: "Forward dependency",
+      mode: "read_only",
+      catalogDigest,
+      concurrency: 1,
+      operationFamily: "course_read",
+      profileDigest,
+      expiresAt: "2030-01-01T00:00:00.000Z",
+      children,
+    });
+    const started: string[] = [];
+    const firstWindow = await runBatchWindow(store, created.batch.batchId, async ({ child }) => {
+      started.push(child.childId);
+      return { state: "succeeded", resultDigest: sha256Json({ childId: child.childId }) };
+    }, {
+      expectedCatalogDigest: catalogDigest,
+      expectedCourseSetDigest: created.manifest.courseSet.digest,
+      expectedProfileDigest: profileDigest,
+      maxChildren: 2,
+    });
+    expect(started).toEqual([prerequisiteId, "course:1"]);
+    expect(firstWindow.batch).toMatchObject({ state: "running", succeededChildren: 2, pendingChildren: 499 });
+    store.close();
+  });
+
   it("BAT-07 and BAT-08 block incomplete discovery and target-set drift", () => {
     expect(() => resolveBatchCourseSet({
       source: "account_search",
@@ -259,6 +291,83 @@ describe("BAT durable batch requirements", () => {
     expect(result).toMatchObject({ effectiveConcurrency: 1, backoffMs: 100, processed: 4 });
     expect(slept).toEqual([100]);
     store.close();
+  });
+
+  it("keeps response rate telemetry across a bounded window and process restart", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-batch-rate-state-"));
+    const path = join(directory, "morrow.sqlite3");
+    const key = randomBytes(32);
+    let now = Date.parse("2029-01-01T00:00:00.000Z");
+    const clock = () => new Date(now);
+    try {
+      const firstStore = new DurableBatchStore({ path, encryptionKey: key, now: clock });
+      const created = readBatch(firstStore, 2);
+      const first = await runBatchWindow(firstStore, created.batch.batchId, async ({ child }) => ({
+        state: "succeeded",
+        resultDigest: sha256Json({ childId: child.childId }),
+        ratePolicy: { requestCost: 2, rateLimitRemaining: 2, retryAfterMs: 300 },
+      }), {
+        expectedCatalogDigest: catalogDigest,
+        expectedCourseSetDigest: created.manifest.courseSet.digest,
+        expectedProfileDigest: profileDigest,
+        maxChildren: 1,
+        random: () => 0,
+      });
+      expect(first).toMatchObject({ processed: 1, remaining: 1, backoffMs: 0 });
+      expect(firstStore.readRateStates(created.batch.batchId)).toMatchObject([{
+        sourceId: "meridian",
+        policy: { requestCost: 2, rateLimitRemaining: 2 },
+        remainingDelayMs: 300,
+      }]);
+      firstStore.close();
+
+      const secondStore = new DurableBatchStore({ path, encryptionKey: key, now: clock });
+      const slept: number[] = [];
+      const started: string[] = [];
+      const second = await runBatchWindow(secondStore, created.batch.batchId, async ({ child }) => {
+        started.push(child.childId);
+        return { state: "succeeded", resultDigest: sha256Json({ childId: child.childId }) };
+      }, {
+        expectedCatalogDigest: catalogDigest,
+        expectedCourseSetDigest: created.manifest.courseSet.digest,
+        expectedProfileDigest: profileDigest,
+        maxChildren: 1,
+        random: () => 0,
+        sleep: async (milliseconds) => { slept.push(milliseconds); now += milliseconds; },
+      });
+      expect(slept).toEqual([300]);
+      expect(started).toEqual(["course:2"]);
+      expect(second).toMatchObject({ processed: 1, remaining: 0, backoffMs: 300, effectiveConcurrency: 1 });
+      expect(secondStore.readRateStates(created.batch.batchId)[0]).toMatchObject({ remainingDelayMs: 0, notBeforeAt: null });
+      secondStore.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects a corrupt durable rate deadline before it can create an unbounded wait", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-batch-rate-corrupt-"));
+    const path = join(directory, "morrow.sqlite3");
+    const key = randomBytes(32);
+    const now = Date.parse("2029-01-01T00:00:00.000Z");
+    try {
+      const store = new DurableBatchStore({ path, encryptionKey: key, now: () => new Date(now) });
+      const created = readBatch(store, 1);
+      store.recordRateState(created.batch.batchId, "meridian", { requestCost: 1 }, 300);
+      store.close();
+
+      const database = new DatabaseSync(path);
+      database.prepare(`
+        UPDATE gateway_batch_rate_state SET not_before_at=? WHERE batch_id=? AND source_id=?
+      `).run("2029-01-02T00:00:00.000Z", created.batch.batchId, "meridian");
+      database.close();
+
+      const reopened = new DurableBatchStore({ path, encryptionKey: key, now: () => new Date(now) });
+      expect(() => reopened.readRateStates(created.batch.batchId)).toThrow(/deadline is invalid/);
+      reopened.close();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 
   it("pauses an automatic write window before a rate-reduced next wave after an unverified result", async () => {

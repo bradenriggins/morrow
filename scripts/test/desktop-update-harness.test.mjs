@@ -373,7 +373,6 @@ test("a newer release downloads through the library and reaches ready", async (t
   assert.deepEqual(harness.statuses, [
     "unavailable",
     "checking",
-    "checking",
     "available",
     "downloading",
     "ready"

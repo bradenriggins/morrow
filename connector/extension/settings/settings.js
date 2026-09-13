@@ -57,6 +57,7 @@ const privateChatMessage = document.querySelector("#private-chat-message");
 const privateChatStatus = document.querySelector("#private-chat-status");
 const privateChatSendButton = document.querySelector("#private-chat-send");
 const privateChatPage = document.querySelector("body");
+const privateChatBackground = document.querySelector("main");
 
 const PAGE_SIZE = 6;
 const DISCOVERY_PAGE_LIMIT = 100;
@@ -66,6 +67,9 @@ const COURSE_FILE_STORAGE_ORIGINS = ["https://*/*"];
 // Course-reach notes belong only to Edit categories that can send a change.
 // Item Bank writes are held and have no Edit category.
 const CATEGORY_COURSE_REACH = Object.freeze({});
+const PRIVATE_CHAT_FOCUSABLE_SELECTOR = "button, select, textarea, input, [href], [tabindex]";
+
+let privateChatReturnFocus = null;
 
 const state = {
   busy: false,
@@ -111,22 +115,55 @@ function wipePrivateChat() {
 }
 
 async function closePrivateChat() {
-  await chrome.runtime.sendMessage({ type: "morrow_private_chat_close" }).catch(() => undefined);
+  if (!state.privateChatOpen) return;
+  const returnFocus = privateChatReturnFocus;
+  privateChatReturnFocus = null;
   wipePrivateChat();
   state.privateChatOpen = false;
   privateChatDrawer.hidden = true;
   privateChatScrim.hidden = true;
   privateChatPage.classList.remove("private-chat-visible");
-  privateChatOpenButton.focus();
+  privateChatBackground.removeAttribute("inert");
+  privateChatOpenButton.setAttribute("aria-expanded", "false");
+  (returnFocus?.focus ? returnFocus : privateChatOpenButton).focus();
+  await chrome.runtime.sendMessage({ type: "morrow_private_chat_close" }).catch(() => undefined);
 }
 
 function openPrivateChat() {
+  if (state.privateChatOpen) return;
+  privateChatReturnFocus = document.activeElement?.focus ? document.activeElement : privateChatOpenButton;
   state.privateChatOpen = true;
   privateChatDrawer.hidden = false;
   privateChatScrim.hidden = false;
   privateChatPage.classList.add("private-chat-visible");
+  privateChatBackground.setAttribute("inert", "");
+  privateChatOpenButton.setAttribute("aria-expanded", "true");
   renderPrivateChat();
   privateChatCloseButton.focus();
+}
+
+function privateChatFocusableControls() {
+  return [...privateChatDrawer.querySelectorAll(PRIVATE_CHAT_FOCUSABLE_SELECTOR)].filter((element) => {
+    return !element.disabled && element.getAttribute("tabindex") !== "-1" && !element.closest("[hidden]");
+  });
+}
+
+function trapPrivateChatFocus(event) {
+  if (!state.privateChatOpen || event.key !== "Tab") return;
+  const controls = privateChatFocusableControls();
+  if (!controls.length) {
+    event.preventDefault();
+    privateChatDrawer.focus();
+    return;
+  }
+  const active = document.activeElement;
+  const inside = active === privateChatDrawer || active?.closest?.("#private-chat-drawer") === privateChatDrawer;
+  const first = controls[0];
+  const last = controls.at(-1);
+  if (!inside || (event.shiftKey && active === first) || (!event.shiftKey && active === last)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  }
 }
 
 function renderPrivateChat() {
@@ -219,8 +256,8 @@ function providerName(binding) {
 
 function nativeCourseId(value) {
   if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
-  if (typeof value !== "string" || !/^[1-9][0-9]*$/.test(value)) return "";
-  return Number.isSafeInteger(Number(value)) ? value : "";
+  if (typeof value !== "string" || !/^[1-9][0-9]{0,18}$/.test(value)) return "";
+  return value;
 }
 
 function anchors() {
@@ -615,11 +652,20 @@ function renderCourseContext(binding) {
   return `<dl class="course-context"><div><dt>Account</dt><dd>${escapeHtml(account)}</dd></div><div><dt>Learning platform</dt><dd>${escapeHtml(site)}</dd></div></dl>`;
 }
 
+function courseSelectionAccessibleName(binding, { connect = false } = {}) {
+  const provider = providerName(binding);
+  const name = courseName(binding);
+  const courseId = nativeCourseId(binding.courseId) || "unavailable";
+  const site = binding.siteUrl || binding.origin || "unavailable site";
+  const account = binding.principalId || "unavailable account";
+  return `Select ${provider} course ${name} (course ID ${courseId}) at ${site} for ${account}${connect ? " to connect" : ""}`;
+}
+
 function renderAvailableCourse(course) {
   const selected = state.discoverySelected.has(course.courseId);
   return `
     <article class="course-card ${selected ? "is-selected" : ""}" data-course-id="${escapeHtml(course.courseId)}">
-      <input class="available-course-select" type="checkbox" aria-label="Select ${escapeHtml(course.courseName)} to connect" ${selected ? "checked" : ""}>
+      <input class="available-course-select" type="checkbox" aria-label="${escapeHtml(courseSelectionAccessibleName(course, { connect: true }))}" ${selected ? "checked" : ""}>
       <div class="course-content">
         <div class="course-card-header">
           <h3 class="course-title"><span class="provider">${escapeHtml(providerName(course))}</span>${escapeHtml(course.courseName)}</h3>
@@ -640,7 +686,7 @@ function renderBinding(binding) {
   const note = bindingNote(binding);
   return `
     <article class="course-card ${selected ? "is-selected" : ""} ${eligible ? "" : "is-unavailable"}" data-binding-id="${escapeHtml(binding.sourceBindingId || "")}">
-      <input class="course-select" type="checkbox" aria-label="Select ${escapeHtml(courseName(binding))}" ${selected ? "checked" : ""} ${eligible ? "" : "disabled"}>
+      <input class="course-select" type="checkbox" aria-label="${escapeHtml(courseSelectionAccessibleName(binding))}" ${selected ? "checked" : ""} ${eligible ? "" : "disabled"}>
       <div class="course-content">
         <div class="course-card-header">
           <h3 class="course-title"><span class="provider">${escapeHtml(providerName(binding))}</span>${escapeHtml(courseName(binding))}</h3>
@@ -1217,7 +1263,7 @@ function selectedNativeCourseIds() {
   const values = [];
   for (const course of state.discovery?.courses || []) {
     const id = nativeCourseId(course?.id);
-    if (id && selected.delete(id)) values.push(Number(id));
+    if (id && selected.delete(id)) values.push(id);
   }
   return selected.size ? [] : values;
 }
@@ -1426,6 +1472,7 @@ cancelSaveButton.addEventListener("click", () => {
   state.pendingSaveConfirmation = false;
   state.saveConfirmedFor = null;
   renderSelection();
+  saveEditButton.focus();
 });
 enableFileStorageButton.addEventListener("click", () => void enableCourseFileStorageAccess());
 revokeFileStorageButton.addEventListener("click", () => void revokeCourseFileStorageAccess());
@@ -1434,11 +1481,18 @@ privateChatCloseButton.addEventListener("click", () => void closePrivateChat());
 privateChatScrim.addEventListener("click", () => void closePrivateChat());
 privateChatSendButton.addEventListener("click", () => void sendPrivateChatMessage());
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && state.privateChatOpen) void closePrivateChat();
+  if (!state.privateChatOpen) return;
+  if (event.key === "Escape") {
+    event.preventDefault();
+    event.stopPropagation();
+    void closePrivateChat();
+    return;
+  }
+  trapPrivateChatFocus(event);
 });
 
 chrome.runtime?.onMessage?.addListener((message) => {
-  if (message?.type === "morrow_private_chat_changed") void refresh();
+  if (["morrow_bridge_status_changed", "morrow_private_chat_changed"].includes(message?.type)) void refresh();
 });
 
 chrome.storage?.onChanged?.addListener((_changes, areaName) => {

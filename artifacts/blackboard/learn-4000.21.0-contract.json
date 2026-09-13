@@ -1,0 +1,31 @@
+{
+  "schema": "morrow.blackboard.provider-contract.v1",
+  "source": {
+    "url": "https://devportal-docstore.s3.amazonaws.com/learn-swagger.json",
+    "version": "4000.21.0",
+    "sha256": "303fd4f8323ddee7b72d49b17deb8022752a67f52dcf0e4c2f35518fdcd9cf31"
+  },
+  "groupMembership": {
+    "identityField": "userId",
+    "fields": ["userId", "user"]
+  },
+  "content": {
+    "identityField": "id",
+    "pathScoped": true,
+    "courseIdField": null
+  },
+  "assignmentCreate": {
+    "contentIdField": "contentId",
+    "gradeColumnIdField": "gradeColumnId",
+    "optionalAssessmentIdField": "assessmentId"
+  },
+  "announcementDuration": {
+    "provider": ["Permanent", "Restricted"],
+    "public": ["Continuous", "DateRange"]
+  },
+  "grade": {
+    "displayField": "displayGrade",
+    "displayFields": ["score", "possible", "scaleType", "text"],
+    "overrideFields": ["score", "text"]
+  }
+}

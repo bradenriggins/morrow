@@ -68,6 +68,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleGroupsLifecycleInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const AJAX_PATH = "/lib/ajax/service.php";
   const GROUP_FORM_PATH = "/group/group.php";
@@ -212,11 +214,17 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
   const live = () => Number.isSafeInteger(input.expiresAt) && Date.now() < input.expiresAt;
   const boundedText = async (response, endpoint, context) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && declared !== undefined && (!COUNT.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return null;
+    if (declared !== null && declared !== undefined && (!COUNT.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return null;
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())
-      || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -224,14 +232,14 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return null;
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -242,7 +250,7 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
     if (!live()) return { error: "moodle_execution_expired" };
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error }; }
     const html = await boundedText(response, endpoint, context);
     if (typeof html !== "string" || typeof globalThis.DOMParser !== "function") return { error, status: response.status };
@@ -252,7 +260,7 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
     if (!live()) return { error: "moodle_execution_expired" };
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error }; }
     const raw = await boundedText(response, endpoint, context);
     try { return { status: response.status, value: typeof raw === "string" ? JSON.parse(raw) : null }; } catch { return { error, status: response.status }; }
@@ -270,6 +278,7 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
         redirect: "error",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify([{ index: 0, methodname: methodName, args }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return write ? { unconfirmed: "moodle_groups_write_unconfirmed" } : { error }; }
     const raw = await boundedText(response, endpoint, context);
@@ -301,6 +310,7 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
         redirect: "manual",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" },
         body,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { unconfirmed: "moodle_groups_write_unconfirmed" }; }
     if (!sameContext(context, currentContext())) return { unconfirmed: "moodle_groups_write_unconfirmed", status: response.status };
@@ -472,14 +482,13 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
       if (!object(role) || !Array.isArray(role.users)) return { error: "moodle_group_members_invalid", status: response.status };
       for (const user of role.users) {
         const userId = id(user?.id);
-        const name = collapsed(user?.name, 2_000);
-        if (!userId || !name || seen.has(userId)) return { error: "moodle_group_members_invalid", status: response.status };
+        if (!userId || seen.has(userId)) return { error: "moodle_group_members_invalid", status: response.status };
         seen.add(userId);
-        members.push({ user_id: userId, name });
+        members.push({ user_id: userId });
         if (members.length > MAX_MEMBERS) return { incomplete: true, status: response.status };
       }
     }
-    members.sort((left, right) => Number(left.user_id) - Number(right.user_id));
+    members.sort((left, right) => left.user_id.length - right.user_id.length || left.user_id.localeCompare(right.user_id, "en-US"));
     return { members, status: response.status };
   };
 
@@ -1035,7 +1044,8 @@ export async function executeMoodleGroupsLifecycleInPage(rawInput) {
     const after = await groupMembers(context, args.courseId, args.groupId);
     if (after.error || after.incomplete) return unconfirmedWrite("moodle_groups_readback_unconfirmed", posted.status);
     const expectedMembers = adding
-      ? [...membership.members, { user_id: args.userId, name: "" }].map((entry) => entry.user_id).sort((left, right) => Number(left) - Number(right))
+      ? [...membership.members, { user_id: args.userId }].map((entry) => entry.user_id)
+        .sort((left, right) => left.length - right.length || left.localeCompare(right, "en-US"))
       : membership.members.filter((entry) => entry.user_id !== args.userId).map((entry) => entry.user_id);
     if (stable(after.members.map((entry) => entry.user_id)) !== stable(expectedMembers)) {
       return unconfirmedWrite("moodle_group_write_not_verified", posted.status);

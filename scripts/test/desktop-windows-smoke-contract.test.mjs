@@ -13,6 +13,13 @@ import {
   retentionTargets,
   sealedGatewayEntry
 } from "./desktop-windows-smoke.mjs";
+import { electronAsarReleaseIdentity, readElectronAsarPackage } from "../lib/electron-asar-package.mjs";
+import {
+  bindWindowsSmokeObservation,
+  createWindowsSmokeBinding,
+  createWindowsSmokeBindingFromPackage,
+  windowsSmokeObservation,
+} from "../lib/windows-smoke-evidence.mjs";
 
 const INSTALL_DIRECTORY = resolve("/morrow-install");
 const TEST_ROOT = resolve("/morrow-test-root");
@@ -105,6 +112,108 @@ function retained(overrides = {}) {
 
 test("accepts the receipt a contained Windows run writes", () => {
   assertAppReceipt(healthyReceipt());
+});
+
+test("binds each retained smoke observation to one exact installer, source, and run", () => {
+  const binding = createWindowsSmokeBinding({
+    runId: "1".repeat(32),
+    sourceCommit: "a".repeat(40),
+    packageReceiptSha256: "c".repeat(64),
+    releaseGraphSha256: "e".repeat(64),
+    installerFileName: "Morrow-1.0.4-win-x64.exe",
+    installerSha256: "b".repeat(64),
+  });
+  const evidence = bindWindowsSmokeObservation(healthyReceipt(), binding);
+  assert.deepEqual(windowsSmokeObservation(evidence, {
+    runId: "1".repeat(32),
+    sourceCommit: "a".repeat(40),
+    packageReceiptSha256: "c".repeat(64),
+    releaseGraphSha256: "e".repeat(64),
+    installerFileName: "Morrow-1.0.4-win-x64.exe",
+    installerSha256: "b".repeat(64),
+  }), healthyReceipt());
+  for (const mismatch of [
+    { runId: "2".repeat(32) },
+    { sourceCommit: "c".repeat(40) },
+    { packageReceiptSha256: "f".repeat(64) },
+    { releaseGraphSha256: "0".repeat(64) },
+    { installerFileName: "another.exe" },
+    { installerSha256: "d".repeat(64) },
+  ]) assert.equal(windowsSmokeObservation(evidence, mismatch), null);
+});
+
+test("Windows smoke source identity comes from the retained package receipt", (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), "morrow-windows-package-binding-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const installer = resolve(root, "Morrow-1.0.4-win-x64.exe");
+  const packageReceipt = resolve(root, "package-receipt.json");
+  const installerBytes = Buffer.from("retained Windows installer");
+  writeFileSync(installer, installerBytes);
+  writeFileSync(packageReceipt, JSON.stringify({
+    schema: "morrow.desktop-installer.v1",
+    version: "1.0.4",
+    target: "win32-x64",
+    source: { head: "a".repeat(40), dirty: false },
+    payload: { releaseGraph: { schema: "morrow.desktop-packager-admission.v1", sha256: "e".repeat(64) } },
+    signing: {
+      mode: "unsigned_private_qa",
+      target: "win32-x64",
+      publicRelease: false,
+      artifactSignature: "authenticode_absent",
+    },
+    artifacts: [{ name: "Morrow-1.0.4-win-x64.exe", sha256: createHash("sha256").update(installerBytes).digest("hex") }],
+  }));
+
+  const binding = createWindowsSmokeBindingFromPackage({
+    runId: "1".repeat(32),
+    sourceCommit: "a".repeat(40),
+    packageReceipt,
+    installer,
+  });
+  assert.equal(binding.sourceCommit, "a".repeat(40));
+  assert.equal(binding.releaseGraphSha256, "e".repeat(64));
+  assert.throws(() => createWindowsSmokeBindingFromPackage({
+    runId: "1".repeat(32),
+    sourceCommit: "b".repeat(40),
+    packageReceipt,
+    installer,
+  }), /not the expected unsigned QA release graph/);
+});
+
+test("Windows smoke reads the source and release graph embedded in the installed ASAR", (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), "morrow-windows-installed-graph-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const packageValue = {
+    name: "morrow-installer",
+    morrow: {
+      releaseGraph: {
+        schema: "morrow.desktop-packager-admission.v1",
+        sourceHead: "a".repeat(40),
+        sha256: "e".repeat(64),
+      },
+    },
+  };
+  const packageBytes = Buffer.from(JSON.stringify(packageValue));
+  const treeBytes = Buffer.from(JSON.stringify({ files: { "package.json": { size: packageBytes.length, offset: "0" } } }));
+  const header = Buffer.alloc(8 + treeBytes.length);
+  header.writeUInt32LE(header.length - 4, 0);
+  header.writeUInt32LE(treeBytes.length, 4);
+  treeBytes.copy(header, 8);
+  const prefix = Buffer.alloc(8);
+  prefix.writeUInt32LE(4, 0);
+  prefix.writeUInt32LE(header.length, 4);
+  const archive = resolve(root, "app.asar");
+  writeFileSync(archive, Buffer.concat([prefix, header, packageBytes]));
+
+  const embedded = readElectronAsarPackage(archive);
+  assert.deepEqual(embedded, packageValue);
+  const binding = {
+    sourceCommit: "a".repeat(40),
+    releaseGraphSha256: "e".repeat(64),
+  };
+  assert.deepEqual(electronAsarReleaseIdentity(embedded, binding), binding);
+  assert.throws(() => electronAsarReleaseIdentity(embedded, { ...binding, sourceCommit: "b".repeat(40) }), /does not carry/);
+  assert.throws(() => electronAsarReleaseIdentity(embedded, { ...binding, releaseGraphSha256: "f".repeat(64) }), /does not carry/);
 });
 
 test("accepts every startup stage that names no failure", () => {

@@ -96,8 +96,8 @@ test("Canvas Classic Quiz submission summary follows only bounded exact paginati
     assert.deepEqual(summary.data, {
       schema: "morrow.canvas-classic-quiz-submission-summary.v1",
       provider: "canvas",
-      course_id: 2,
-      quiz_id: 8,
+      course_id: "2",
+      quiz_id: "8",
       attempt_count: 4,
       complete_count: 1,
       pending_review_count: 1,
@@ -141,6 +141,55 @@ test("Canvas Classic Quiz submission summary follows only bounded exact paginati
     await browser?.close();
     await new Promise((resolve) => server.close(resolve));
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("Canvas Classic Quiz summary preserves canonical IDs above Number.MAX_SAFE_INTEGER", async () => {
+  const courseId = "9007199254740993";
+  const quizId = "9007199254740995";
+  const origin = "https://canvas.example.test";
+  const priorFetch = globalThis.fetch;
+  const priorLocation = globalThis.location;
+  const json = (url, value) => ({
+    ok: true,
+    status: 200,
+    url,
+    headers: new Headers({ "content-type": "application/json" }),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(JSON.stringify(value)));
+        controller.close();
+      },
+    }),
+  });
+  globalThis.location = { origin };
+  globalThis.fetch = async (resource) => {
+    const url = new URL(String(resource));
+    if (url.pathname === "/api/v1/users/self/profile") return json(url.href, { id: "3" });
+    if (url.pathname === `/api/v1/courses/${courseId}`) return json(url.href, { id: courseId });
+    if (url.pathname === `/api/v1/courses/${courseId}/quizzes/${quizId}`) return json(url.href, { id: quizId });
+    if (url.pathname === `/api/v1/courses/${courseId}/quizzes/${quizId}/submissions`) {
+      return json(url.href, { quiz_submissions: [{ id: "11", quiz_id: quizId, workflow_state: "complete" }] });
+    }
+    throw new Error(`unexpected request ${url.href}`);
+  };
+
+  try {
+    const result = await executeCanvasClassicQuizSubmissionSummaryInPage(JSON.stringify({
+      operation: OPERATION,
+      arguments: { course_id: courseId, quiz_id: quizId },
+      binding: { origin, siteUrl: `${origin}/courses/${courseId}/quizzes/${quizId}`, principalId: "3", courseId },
+      expiresAt: Date.now() + 10_000,
+    }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.course_id, courseId);
+    assert.equal(result.data.quiz_id, quizId);
+    assert.equal(typeof result.data.course_id, "string");
+    assert.equal(typeof result.data.quiz_id, "string");
+  } finally {
+    globalThis.fetch = priorFetch;
+    if (priorLocation === undefined) delete globalThis.location;
+    else globalThis.location = priorLocation;
   }
 });
 

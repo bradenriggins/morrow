@@ -6,9 +6,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { chromium } from "playwright";
-import { executeMoodleEnrolmentCandidateInPage } from "../../connector/extension/src/moodle-enrolment-executor.js";
+import {
+  executeMoodleEnrolmentCandidateInPage,
+  executeMoodleEnrolmentInPage,
+} from "../../connector/extension/src/moodle-enrolment-executor.js";
 
-const COURSE_ID = 2;
+const COURSE_ID = "9007199254740993";
+const ADJACENT_COURSE_ID = "9007199254740992";
 const PRINCIPAL_ID = 3;
 const OPERATION = Object.freeze({
   key: "moodle.private.enrolment_candidate.find.v1",
@@ -62,7 +66,7 @@ test("the private resolver returns only one native candidate ID and refuses unsa
     requests.push({ method: request.method, pathname: target.pathname, search: target.search });
     if (request.method === "GET" && target.pathname === "/course/view.php") {
       response.writeHead(200, { "content-type": "text/html" });
-      response.end(`<!doctype html><html><body class="path-course course-${COURSE_ID}"><script>var M = { cfg: ${JSON.stringify({ wwwroot: origin, userId: PRINCIPAL_ID, courseId: COURSE_ID })} };</script></body></html>`);
+      response.end(`<!doctype html><html><body class="path-course course-${COURSE_ID}"><script>var M = { cfg: ${JSON.stringify({ wwwroot: origin, sesskey: "sess-key", userId: PRINCIPAL_ID, courseId: COURSE_ID })} };</script></body></html>`);
       return;
     }
     if (request.method === "GET" && target.pathname === "/enrol/instances.php") {
@@ -143,8 +147,11 @@ test("the private resolver returns only one native candidate ID and refuses unsa
     const successRequests = requests.slice(before).filter((entry) => entry.pathname.startsWith("/enrol/"));
     assert.equal(successRequests.length, 2);
     assert.ok(successRequests.every((entry) => entry.method === "GET"));
+    const instancesRequest = successRequests.find((entry) => entry.pathname === "/enrol/instances.php");
+    assert.equal(new URLSearchParams(instancesRequest.search).get("id"), COURSE_ID);
     const manageRequest = successRequests.find((entry) => entry.pathname === "/enrol/manual/manage.php");
     const manageQuery = new URLSearchParams(manageRequest.search);
+    assert.equal(manageQuery.get("id"), COURSE_ID);
     assert.equal(manageQuery.get("addselect_searchtext"), "Mary Jackson");
     assert.equal(manageQuery.has("userselector_searchtype"), false, "read must not change Moodle's search-type preference");
 
@@ -164,7 +171,7 @@ test("the private resolver returns only one native candidate ID and refuses unsa
     await refusal("moodle_enrolment_candidate_excess", (state) => {
       state.candidates = Array.from({ length: 101 }, (_, index) => ({ id: String(1000 + index), name: `Candidate ${index}`, email: `c${index}@example.edu` }));
     });
-    await refusal("moodle_enrolment_candidate_course_mismatch", (state) => { state.courseId = 9; });
+    await refusal("moodle_enrolment_candidate_course_mismatch", (state) => { state.courseId = ADJACENT_COURSE_ID; });
     await refusal("moodle_enrolment_candidate_manual_method_unavailable", (state) => { state.methods = []; });
     await refusal("moodle_enrolment_candidate_manual_method_ambiguous", (state) => { state.methods = ["7", "8"]; });
     await refusal("moodle_enrolment_candidate_form_invalid", (state) => { state.includeSearch = false; });
@@ -180,12 +187,35 @@ test("the private resolver returns only one native candidate ID and refuses unsa
     model = initialModel();
     before = requests.length;
     assert.equal((await run(" Mary Jackson")).error, "moodle_enrolment_candidate_arguments_invalid");
-    assert.equal((await run(undefined, { arguments: { course_id: 9, query: "Mary Jackson" } })).error, "moodle_enrolment_candidate_arguments_invalid");
+    assert.equal((await run(undefined, { arguments: { course_id: ADJACENT_COURSE_ID, query: "Mary Jackson" } })).error, "moodle_enrolment_candidate_arguments_invalid");
+    assert.equal((await run(undefined, { arguments: { course_id: Number(COURSE_ID), query: "Mary Jackson" } })).error, "moodle_enrolment_candidate_arguments_invalid");
     assert.equal((await run(undefined, { arguments: { course_id: COURSE_ID, query: "Mary Jackson", user_id: 21 } })).error, "moodle_enrolment_candidate_arguments_invalid");
     assert.equal((await run(undefined, { operation: { ...OPERATION, morrowPrivate: false } })).error, "moodle_enrolment_candidate_operation_refused");
-    assert.equal((await run(undefined, { binding: { ...binding, courseId: "9" } })).error, "moodle_binding_mismatch");
+    assert.equal((await run(undefined, { binding: { ...binding, courseId: ADJACENT_COURSE_ID } })).error, "moodle_binding_mismatch");
     assert.equal((await run(undefined, { expiresAt: Date.now() - 1 })).error, "moodle_execution_expired");
     assert.equal(requests.length, before);
+
+    const beforeUnsupportedAjax = requests.length;
+    const unsupportedAjax = await page.evaluate(
+      executeMoodleEnrolmentInPage,
+      JSON.stringify({
+        mode: "execute",
+        operation: {
+          key: "moodle.form.enrol.participant.suspend.write.v1",
+          toolName: "moodle_suspend_participant",
+          provider: "moodle",
+          readOnly: false,
+        },
+        arguments: { course_id: COURSE_ID, user_id: "21", expected_digest: "0".repeat(64) },
+        binding,
+        expiresAt: Date.now() + 60_000,
+      }),
+    );
+    assert.deepEqual(
+      [unsupportedAjax.ok, unsupportedAjax.sent, unsupportedAjax.error],
+      [false, false, "moodle_enrolment_course_id_unsupported"],
+    );
+    assert.equal(requests.length, beforeUnsupportedAjax, "an ID beyond Moodle's integer AJAX contract must not dispatch");
 
     const worker = readFileSync(new URL("../../connector/extension/src/service-worker.js", import.meta.url), "utf8");
     assert.match(worker, /import \{ executeMoodleEnrolmentCandidateInPage, executeMoodleEnrolmentInPage \} from "\.\/moodle-enrolment-executor\.js";/);

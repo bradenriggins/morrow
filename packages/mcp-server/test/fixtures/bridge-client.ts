@@ -1,11 +1,14 @@
+import { createHmac, randomBytes } from "node:crypto";
 import { WebSocket } from "ws";
 import {
   BRIDGE_PATH,
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_SCHEMAS,
+  bridgeAuthenticationProofPayload,
   parseBridgeJson,
   serializeBridgeMessage,
   type BridgeBinding,
+  type BridgeChallenge,
   type BridgeCommand,
   type BridgeProblem,
   type BridgeReady,
@@ -53,6 +56,16 @@ export class BridgeTimeoutError extends Error {
   }
 }
 
+export class BridgeServerAuthenticationError extends Error {
+  readonly code = 4403;
+  readonly reason = "bridge_server_identity_refused";
+
+  constructor() {
+    super("the bridge server did not prove the expected token");
+    this.name = "BridgeServerAuthenticationError";
+  }
+}
+
 export interface BridgeTestClientOptions {
   /** Synthetic datasets have no deleted enrollments unless this fixture overrides them. False routes history to onCommand. */
   readonly deletedEnrollmentHistory?: false | ((command: BridgeCommand) => JsonObject);
@@ -89,6 +102,8 @@ export class BridgeTestClient {
   private readonly waiters = new Set<CommandWaiter>();
   private readonly handlers = new Set<(command: BridgeCommand) => void>();
   private readonly commands: BridgeCommand[] = [];
+  private challengeSettle: ((challenge: BridgeChallenge) => void) | null = null;
+  private challengeMessage: BridgeChallenge | null = null;
   private readySettle: ((ready: BridgeReady) => void) | null = null;
   private readyMessage: BridgeReady | null = null;
   private closeInfo: BridgeCloseInfo | null = null;
@@ -210,6 +225,13 @@ export class BridgeTestClient {
     return ready;
   }
 
+  async waitForChallenge(): Promise<BridgeChallenge> {
+    if (this.challengeMessage) return this.challengeMessage;
+    return await this.guard<BridgeChallenge>(BRIDGE_SCHEMAS.challenge, this.timeoutMs, (settle) => {
+      this.challengeSettle = settle;
+    });
+  }
+
   private send(
     command: BridgeCommand,
     ending: { ok: true; result: JsonObject } | { ok: false; problem: BridgeProblem; result?: JsonObject },
@@ -234,6 +256,13 @@ export class BridgeTestClient {
       return;
     }
     if (!isJsonObject(value)) return;
+    if (value.schema === BRIDGE_SCHEMAS.challenge) {
+      this.challengeMessage = value as unknown as BridgeChallenge;
+      const settle = this.challengeSettle;
+      this.challengeSettle = null;
+      settle?.(this.challengeMessage);
+      return;
+    }
     if (value.schema === BRIDGE_SCHEMAS.ready) {
       this.readyMessage = value as unknown as BridgeReady;
       const settle = this.readySettle;
@@ -323,12 +352,34 @@ export async function connectBridgeTestClient(options: BridgeTestClientOptions):
   const client = new BridgeTestClient(socket, options.timeoutMs ?? BRIDGE_TEST_WAIT_MS, options.deletedEnrollmentHistory);
   try {
     await client.opened();
+    const authentication = {
+      schema: BRIDGE_SCHEMAS.authenticate,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      clientNonce: randomBytes(32).toString("hex"),
+      extensionId: options.extensionId,
+      runtimeRevision: options.runtimeRevision ?? BRIDGE_TEST_RUNTIME_REVISION,
+      catalogDigest: options.catalogDigest,
+      sentAt: Date.now(),
+    } as const;
+    socket.send(serializeBridgeMessage(authentication));
+    const challenge = await client.waitForChallenge();
+    const serverProof = createHmac("sha256", options.token)
+      .update(bridgeAuthenticationProofPayload("server", authentication, challenge.serverNonce), "utf8")
+      .digest("hex");
+    if (challenge.clientNonce !== authentication.clientNonce || challenge.serverProof !== serverProof) {
+      throw new BridgeServerAuthenticationError();
+    }
+    const clientProof = createHmac("sha256", options.token)
+      .update(bridgeAuthenticationProofPayload("client", authentication, challenge.serverNonce), "utf8")
+      .digest("hex");
     socket.send(serializeBridgeMessage({
       schema: BRIDGE_SCHEMAS.hello,
       protocolVersion: BRIDGE_PROTOCOL_VERSION,
-      token: options.token,
+      clientNonce: authentication.clientNonce,
+      serverNonce: challenge.serverNonce,
+      clientProof,
       extensionId: options.extensionId,
-      runtimeRevision: options.runtimeRevision ?? BRIDGE_TEST_RUNTIME_REVISION,
+      runtimeRevision: authentication.runtimeRevision,
       catalogDigest: options.catalogDigest,
       bindings: options.bindings ?? [],
       sentAt: Date.now(),

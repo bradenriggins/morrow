@@ -241,6 +241,14 @@ function bridgeControl(value) {
   if (exactKeys(value, ["action"]) && ["status", "quiesce", "readback"].includes(value.action)) {
     return { action: value.action };
   }
+  if (exactKeys(value, ["action", "previousManifestVersion", "quiesceEpoch"])
+    && value.action === "commit"
+    && typeof value.previousManifestVersion === "string"
+    && BRIDGE_VERSION.test(value.previousManifestVersion)
+    && typeof value.quiesceEpoch === "string"
+    && BRIDGE_IDENTIFIER.test(value.quiesceEpoch)) {
+    return { action: "commit", previousManifestVersion: value.previousManifestVersion, quiesceEpoch: value.quiesceEpoch };
+  }
   if (!exactKeys(value, ["action", "quiesceEpoch", "fileLayerRestored"])
     || value.action !== "resume"
     || typeof value.quiesceEpoch !== "string"
@@ -285,6 +293,13 @@ function bridgeRecord(control, value) {
     if (!exactKeys(record, ["schema", "extensionId", "manifestVersion", "installType", "activeFolderProof"])
       || record.schema !== "morrow.bridge.update-readback.v1"
       || record.installType !== "development"
+      || !activeFolderProof(record.activeFolderProof, extensionId, manifestVersion)) return null;
+  } else if (control.action === "commit") {
+    if (!exactKeys(record, ["schema", "extensionId", "previousManifestVersion", "manifestVersion", "quiesceEpoch", "committed", "activeFolderProof"])
+      || record.schema !== "morrow.bridge.update-committed.v1"
+      || record.previousManifestVersion !== control.previousManifestVersion
+      || record.quiesceEpoch !== control.quiesceEpoch
+      || record.committed !== true
       || !activeFolderProof(record.activeFolderProof, extensionId, manifestVersion)) return null;
   } else if (!exactKeys(record, ["schema", "extensionId", "manifestVersion", "quiesceEpoch", "resumed"])
     || record.schema !== "morrow.bridge.update-resumed.v1"
@@ -534,6 +549,7 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
       });
       return setBindingState(browserBindings(result));
     } catch {
+      await disconnect();
       return setBindingState({ kind: "unknown" });
     }
   };
@@ -547,6 +563,7 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     } catch {
       current.firstPreview = { available: "unknown", completed: false };
       previewBinding = null;
+      await disconnect();
       return null;
     }
     return readBindings();
@@ -591,7 +608,10 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
 
   const refreshInitialGatewayReadiness = async () => {
     if (!client) await connect();
-    else await refreshStatus();
+    else {
+      await refreshStatus();
+      if (!client) await connect();
+    }
     // The owner can accept the proxy connection immediately before its required
     // upstream has reported ready. Re-read only that observed, transient state.
     for (let attempt = 0; client && current.health.gatewayReady === false && attempt < INITIAL_GATEWAY_READY_RETRIES; attempt += 1) {
@@ -644,6 +664,7 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     } catch {
       current.firstPreview = { available: "unknown", completed: false };
       previewBinding = null;
+      await disconnect();
     }
     return safeFirstRead(current);
   };

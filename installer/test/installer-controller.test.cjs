@@ -2,13 +2,14 @@
 
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const { spawn } = require("node:child_process");
 const fs = require("node:fs/promises");
 const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { pathToFileURL } = require("node:url");
-const { bridgeDeliveryMode, createInstallerController, readCommandOutput, readMacApplicationBundleIdentifier } = require("../shared/installer-controller.cjs");
+const { bridgeDeliveryMode, createInstallerController, readCommandOutput, readMacApplicationBundleIdentifier, runBoundedCommand } = require("../shared/installer-controller.cjs");
 const { freshRecord } = require("../shared/state-policy.cjs");
 
 const installerRoot = path.resolve(__dirname, "..");
@@ -102,6 +103,7 @@ async function completePayload(root, options = {}) {
     ["dist/local-owner-sidecar-access.js", "sidecar fixture"]
   ];
   const files = [];
+  const directFiles = [];
   for (const [relative, content] of gatewayFiles) {
     const direct = path.join(app, "packages", "mcp-server", relative);
     const installed = path.join(app, "node_modules", "@morrow-lms", "gateway", relative);
@@ -110,19 +112,31 @@ async function completePayload(root, options = {}) {
     await fs.writeFile(direct, content);
     await fs.writeFile(installed, content);
     files.push({ path: `node_modules/@morrow-lms/gateway/${relative}`, bytes: Buffer.byteLength(content), sha256: sha256(content) });
+    directFiles.push({ path: `packages/mcp-server/${relative}`, bytes: Buffer.byteLength(content), sha256: sha256(content) });
   }
+  for (const relative of [
+    "packages/client-config/dist/cli.js",
+    "packages/client-config/dist/index.js",
+    "packages/canvas-connector-mcp/dist/index.js",
+    "installer/runtime-monitor.mjs",
+  ]) {
+    const content = await fs.readFile(path.join(app, relative));
+    directFiles.push({ path: relative, bytes: content.byteLength, sha256: sha256(content) });
+  }
+  directFiles.sort((left, right) => left.path.localeCompare(right.path));
   const entrypoint = gatewayFiles[1][1];
   const manifest = {
-    schema: "morrow.mcp-runtime-manifest.v1",
+    schema: "morrow.mcp-runtime-manifest.v2",
     package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
     entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: Buffer.byteLength(entrypoint), sha256: sha256(entrypoint) },
-    dependencies: [{ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", packageJson: files[0], files }]
+    dependencies: [{ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", packageJson: files[0], files }],
+    directFiles,
   };
   const bytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
   const manifestSha256 = sha256(bytes);
   await fs.writeFile(path.join(app, "mcp-runtime-manifest.json"), bytes);
   await fs.writeFile(path.join(app, "package-input-manifest.json"), `${JSON.stringify({
-    schema: "morrow.desktop-package-input.v1",
+    schema: "morrow.desktop-package-input.v2",
     mcpRuntime: { path: "app/mcp-runtime-manifest.json", sha256: manifestSha256 }
   })}\n`);
   if (fsSync.existsSync(PRIVATE_FILE_ACCESS)) {
@@ -139,10 +153,11 @@ test("the installer record round-trips and an incompatible record is refused", a
   const installer = controller(root);
   assert.deepEqual(await installer.record(), freshRecord());
 
-  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target: "config", sha256: "a".repeat(64) } } });
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  await installer.writeRecord({ ...freshRecord(), selectedAssistantId: "codex", configured: { codex: { target, sha256: "a".repeat(64) } } });
   const stored = await installer.record();
   assert.equal(stored.selectedAssistantId, "codex");
-  assert.deepEqual(stored.configured, { codex: { target: "config", sha256: "a".repeat(64) } });
+  assert.deepEqual(stored.configured, { codex: { target, sha256: "a".repeat(64) } });
 
   await assert.rejects(() => installer.writeRecord({ schema: "morrow.desktop-state.v2" }), /migration_required/);
   await assert.rejects(() => installer.writeRecord({ configured: ["not an object"] }), /record_invalid/);
@@ -152,12 +167,150 @@ test("the installer record round-trips and an incompatible record is refused", a
   await assert.rejects(() => installer.record(), /migration_required/);
 });
 
-test("effectiveWorkspace creates the default materials folder and refuses a missing chosen folder", async () => {
+test("the installer refuses malformed UTF-8 before it can change a saved path", async () => {
   const root = await temporaryRoot();
   const installer = controller(root);
-  const materials = await installer.effectiveWorkspace();
-  assert.equal(materials, await fs.realpath(path.join(root, "UserData", "Materials")));
-  assert.equal((await fs.stat(materials)).isDirectory(), true);
+  await fs.mkdir(path.dirname(installer.recordPath), { recursive: true, mode: 0o700 });
+  const prefix = Buffer.from(`{"schema":"morrow.desktop-state.v1","version":1,"selectedAssistantId":null,"materialsFolder":"${path.join(root, "Home", "Cour")}`);
+  const suffix = Buffer.from('ses","configured":{}}\n');
+  await fs.writeFile(installer.recordPath, Buffer.concat([prefix, Buffer.from([0xff]), suffix]), { mode: 0o600 });
+
+  await assert.rejects(() => installer.record(), /installer record is not valid UTF-8/);
+});
+
+test("installer record replacement flushes the new file and its directory", {
+  skip: process.platform === "win32" ? "directory fsync is a POSIX durability primitive" : false
+}, async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const opened = [];
+  const originalOpen = fs.open;
+  fs.open = async (...argumentsValue) => {
+    const handle = await originalOpen(...argumentsValue);
+    const originalSync = handle.sync.bind(handle);
+    handle.sync = async () => {
+      opened.push(String(argumentsValue[0]));
+      return originalSync();
+    };
+    return handle;
+  };
+  try {
+    await installer.writeRecord(freshRecord());
+  } finally {
+    fs.open = originalOpen;
+  }
+  assert.equal(opened.some((file) => file.startsWith(`${installer.recordPath}.tmp-`)), true);
+  assert.equal(opened.includes(path.dirname(installer.recordPath)), true);
+  assert.deepEqual(await installer.record(), freshRecord());
+});
+
+test("record admission refuses a symlink and repair removes only the link", {
+  skip: process.platform === "win32" ? "file symlink creation needs a POSIX host" : false
+}, async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const stateDirectory = path.dirname(installer.recordPath);
+  const outside = path.join(root, "outside-installer.json");
+  const stored = `${JSON.stringify(freshRecord())}\n`;
+  await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  await fs.chmod(stateDirectory, 0o700);
+  await fs.writeFile(outside, stored, { mode: 0o600 });
+  await fs.symlink(outside, installer.recordPath);
+
+  await assert.rejects(() => installer.record(), /private_file_not_admitted/);
+  await installer.repairInstallerRecord();
+
+  assert.equal(await fs.readFile(outside, "utf8"), stored);
+  assert.equal((await fs.lstat(installer.recordPath)).isSymbolicLink(), false);
+  assert.deepEqual(await installer.record(), freshRecord());
+  assert.deepEqual(await fs.readdir(path.join(stateDirectory, "Backups")), []);
+});
+
+test("record admission refuses a linked State directory before using its record", {
+  skip: process.platform === "win32" ? "directory symlink creation needs a POSIX host" : false
+}, async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const outside = path.join(root, "outside-state");
+  const stored = `${JSON.stringify({ ...freshRecord(), selectedAssistantId: "codex" })}\n`;
+  await fs.mkdir(outside, { mode: 0o700 });
+  await fs.writeFile(path.join(outside, "installer.json"), stored, { mode: 0o600 });
+  await fs.symlink(outside, path.dirname(installer.recordPath));
+
+  await assert.rejects(() => installer.record(), /private_file_ancestor_not_admitted/);
+  assert.equal((await installer.state()).lifecycle, "repair_required");
+  assert.equal(await fs.readFile(path.join(outside, "installer.json"), "utf8"), stored);
+});
+
+test("invalid configured state is never admitted and repair preserves it only as inert backup", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const stateDirectory = path.dirname(installer.recordPath);
+  const invalid = `${JSON.stringify({
+    ...freshRecord(),
+    selectedAssistantId: "unknown-assistant",
+    configured: { codex: { target: "relative/config.toml", sha256: "not-a-digest" } },
+  })}\n`;
+  await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  if (process.platform !== "win32") await fs.chmod(stateDirectory, 0o700);
+  await fs.writeFile(installer.recordPath, invalid, { mode: 0o600 });
+
+  await assert.rejects(() => installer.record(), /record_invalid/);
+  await installer.repairInstallerRecord();
+
+  assert.deepEqual(await installer.record(), freshRecord());
+  const backups = await fs.readdir(path.join(stateDirectory, "Backups"));
+  assert.equal(backups.length, 1);
+  assert.equal(await fs.readFile(path.join(stateDirectory, "Backups", backups[0]), "utf8"), invalid);
+});
+
+test("record recovery refuses a linked Backups directory without moving the record through it", {
+  skip: process.platform === "win32" ? "directory symlink creation needs a POSIX host" : false
+}, async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const stateDirectory = path.dirname(installer.recordPath);
+  const outside = path.join(root, "outside-backups");
+  const stored = "{not-json\n";
+  await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  await fs.chmod(stateDirectory, 0o700);
+  await fs.mkdir(outside, { mode: 0o700 });
+  await fs.writeFile(installer.recordPath, stored, { mode: 0o600 });
+  await fs.symlink(outside, path.join(stateDirectory, "Backups"));
+
+  await assert.rejects(() => installer.repairInstallerRecord(), /record_backup_directory_invalid/);
+  assert.equal(await fs.readFile(installer.recordPath, "utf8"), stored);
+  assert.deepEqual(await fs.readdir(outside), []);
+});
+
+test("a nonprivate installer record enters recovery before JSON fields are used", {
+  skip: process.platform === "win32" ? "POSIX mode admission needs a POSIX host" : false
+}, async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const stateDirectory = path.dirname(installer.recordPath);
+  const stored = `${JSON.stringify({ ...freshRecord(), selectedAssistantId: "codex" })}\n`;
+  await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  await fs.chmod(stateDirectory, 0o700);
+  await fs.writeFile(installer.recordPath, stored, { mode: 0o644 });
+
+  await assert.rejects(() => installer.record(), /private_file_not_admitted/);
+  assert.equal((await installer.state()).lifecycle, "repair_required");
+  await installer.repairInstallerRecord();
+  assert.deepEqual(await installer.record(), freshRecord());
+  const [backup] = await fs.readdir(path.join(stateDirectory, "Backups"));
+  assert.equal(await fs.readFile(path.join(stateDirectory, "Backups", backup), "utf8"), stored);
+  assert.equal((await fs.stat(path.join(stateDirectory, "Backups", backup))).mode & 0o777, 0o600);
+});
+
+test("effectiveWorkspace is observational and refuses a missing chosen folder", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const materials = path.join(root, "UserData", "Materials");
+  assert.equal(await installer.effectiveWorkspace(), null);
+  assert.equal(await fs.lstat(materials).then(() => true, () => false), false);
+  await fs.mkdir(materials, { recursive: true });
+  assert.equal(await installer.effectiveWorkspace(), await fs.realpath(materials));
 
   const missing = path.join(root, "Gone");
   assert.equal(await installer.effectiveWorkspace({ ...freshRecord(), materialsFolder: missing }), null);
@@ -205,6 +358,44 @@ test("a detection command that runs too long or answers too much is refused", { 
   assert.equal(await readCommandOutput("/bin/sh", ["-c", "echo out; exit 3"], { timeoutMs: 2_000, maxBytes: 1024 }), null);
   assert.equal(await readCommandOutput(path.join(os.tmpdir(), "morrow-no-such-command"), [], { timeoutMs: 2_000, maxBytes: 1024 }), null);
   assert.equal(await readCommandOutput("/bin/echo", ["morrow"], { timeoutMs: 2_000, maxBytes: 1024 }), "morrow\n");
+});
+
+test("the installer command runner bounds retained output while the child is writing", async () => {
+  const result = await runBoundedCommand(process.execPath, ["-e", [
+    "const block = Buffer.alloc(64 * 1024, 120);",
+    "function write() { while (process.stdout.write(block)) {} setImmediate(write); }",
+    "write();"
+  ].join("\n")], {
+    timeoutMs: 5_000,
+    maxOutputBytes: 4 * 1024,
+    terminationGraceMs: 100,
+    closeGraceMs: 200
+  });
+
+  assert.equal(result.termination, "output_limit");
+  assert.equal(Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr), 4 * 1024);
+  assert.notEqual(result.code, 0);
+});
+
+test("the installer command runner hard-kills a child that ignores its soft timeout", { skip: process.platform === "win32" ? "POSIX signal behavior" : false }, async () => {
+  const started = Date.now();
+  const result = await runBoundedCommand(process.execPath, ["-e", [
+    "process.on('SIGTERM', () => {});",
+    "console.log(process.pid);",
+    "setInterval(() => {}, 1_000);"
+  ].join("\n")], {
+    timeoutMs: 150,
+    maxOutputBytes: 1024,
+    terminationGraceMs: 100,
+    closeGraceMs: 300
+  });
+  const pid = Number.parseInt(result.stdout.trim(), 10);
+
+  assert.equal(result.termination, "timeout");
+  assert.ok(Number.isSafeInteger(pid) && pid > 0);
+  assert.ok(Date.now() - started < 2_000, "the runner obeyed its hard close deadline");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.throws(() => process.kill(pid, 0), (error) => error?.code === "ESRCH");
 });
 
 // The Windows half of this, runWindowsPowerShell, uses the same runner and
@@ -325,6 +516,25 @@ test("state() reports the repair lifecycle when the installer record cannot be r
   assert.equal(state.runtime.status, "repair_required");
   assert.deepEqual(state.assistants, []);
   assert.equal(state.selectedAssistantId, null);
+});
+
+test("Blackboard health does not turn saved data into absence when private access inspection is unavailable", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  installer.privateFileAccessAccepted = async () => { throw new Error("private access module unavailable"); };
+  assert.deepEqual(await installer.blackboardHealth(), {
+    schema: "morrow.blackboard.health.v1",
+    status: "not_configured",
+    tenants: [],
+  });
+  const config = path.join(root, "Home", ".morrow", "blackboard-learn.json");
+  await fs.mkdir(path.dirname(config), { mode: 0o700 });
+  await fs.writeFile(config, "{}\n", { mode: 0o600 });
+  assert.deepEqual(await installer.blackboardHealth(), {
+    schema: "morrow.blackboard.health.v1",
+    status: "private_access_refused",
+    tenants: [],
+  });
 });
 
 test("state() reports repair for an incomplete payload and never creates the Bridge folder", async () => {
@@ -508,8 +718,30 @@ test("a paired Chrome Web Store Bridge is accepted without app-folder maintenanc
   );
 });
 
+test("Bridge reconciliation stages same-version bytes only when their sealed release digest changed", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const monitor = {};
+  const installed = bridgeInstallation({ releaseManifestSha256: "a".repeat(64) });
+  let release = { version: installed.version, releaseManifestSha256: installed.releaseManifestSha256 };
+  let stages = 0;
+  installer.verifiedBridgeInstallation = async () => installed;
+  installer.packagedBridgeRelease = async () => release;
+  installer.bridgeMonitor = async () => monitor;
+  installer.currentBridgeStatus = async () => ({ installType: "development" });
+  installer.stageBridgeUpdate = async () => { stages += 1; return { updated: true }; };
+
+  assert.equal(await installer.reconcileBridgeRelease(), installed);
+  assert.equal(stages, 0);
+
+  release = { ...release, releaseManifestSha256: "b".repeat(64) };
+  assert.deepEqual(await installer.reconcileBridgeRelease(), { updated: true });
+  assert.equal(stages, 1);
+});
+
 test("state() reports the Chrome load state the Bridge itself answered", async () => {
   const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
   const installation = bridgeInstallation();
   const answer = bridgeStatusAnswer(installation.activeFolderChallenge);
   const manifestSha256 = await completePayload(root, {
@@ -584,6 +816,7 @@ const HELD_MONITOR = [
 
 test("a state read answers with the runtime already observed and never waits for the start", async () => {
   const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
   const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor: HELD_MONITOR });
   const installer = controller(root, { trustedMcpRuntimeManifestSha256: () => manifestSha256 });
   await installer.ensureRuntime();
@@ -601,6 +834,35 @@ test("a state read answers with the runtime already observed and never waits for
   assert.equal(observed.runtime.status, "ready", "the next read shows what that start found");
 
   await installer.closeRuntimeMonitor();
+});
+
+test("concurrent desktop cleanup waits for one runtime close and clears its lease references", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  let releaseClose;
+  let closeCalls = 0;
+  const closeGate = new Promise((resolve) => { releaseClose = resolve; });
+  installer.runtimeMonitor = {
+    async close() {
+      closeCalls += 1;
+      await closeGate;
+    }
+  };
+  installer.runtimeWorkspace = path.join(root, "Materials");
+  installer.restartLeases.set("lease-one", installer.runtimeMonitor);
+
+  const first = installer.closeRuntimeMonitor();
+  const second = installer.closeRuntimeMonitor();
+  await Promise.resolve();
+  assert.equal(closeCalls, 1);
+  assert.equal(installer.runtimeMonitor, null);
+  assert.equal(installer.restartLeases.size, 1, "lease state remains owned until close finishes");
+
+  releaseClose();
+  await Promise.all([first, second]);
+  assert.equal(closeCalls, 1);
+  assert.equal(installer.restartLeases.size, 0);
+  assert.equal(installer.runtimeClosing, null);
 });
 
 test("assistant detection is read once for each assistant until Check status or the time limit", async (t) => {
@@ -662,6 +924,7 @@ test("setting up an assistant reads this computer again instead of reusing an an
 
 test("dead maintenance is recovered before a runtime monitor is created", async () => {
   const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
   const manifestSha256 = await completePayload(root, {
     maintenance: [
       "globalThis.__morrowRuntimeOrder ??= [];",
@@ -705,6 +968,142 @@ test("dead maintenance is recovered before a runtime monitor is created", async 
   assert.deepEqual(globalThis.__morrowRuntimeOrder, ["maintenance", "monitor", "closed"]);
 });
 
+test("a desktop mutation stops a live owner under one unbroken authoritative guard", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  globalThis.__morrowDesktopMutationOrder = [];
+  const maintenance = [
+    "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function readLocalOwnerMaintenanceLease() { return null; }",
+    "export function requestLocalOwnerMaintenance() { return null; }",
+    "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
+    "export function acquireStoppedLocalOwnerMaintenanceLease() { globalThis.__morrowDesktopMutationOrder.push('stopped-probe'); return null; }",
+    "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { globalThis.__morrowDesktopMutationOrder.push('stopped-guard'); return { leaseId: '00000000-0000-4000-8000-000000000071', leaseToken: 'morrow-desktop-mutation-token-1234567890123456' }; }",
+    "export function removeExactLocalOwnerMaintenanceLease() { globalThis.__morrowDesktopMutationOrder.push('release'); return true; }",
+    "",
+  ].join("\n");
+  const runtimeMonitor = [
+    "export function createRuntimeMonitor() {",
+    "  return {",
+    "    start: async () => { globalThis.__morrowDesktopMutationOrder.push('monitor-start'); return {}; },",
+    "    snapshot: () => ({ health: { canRestart: 'yes' } }),",
+    "    maintenance: async ({ action }) => { globalThis.__morrowDesktopMutationOrder.push(`owner-${action}`); return action === 'acquire' ? { status: 'held' } : action === 'commit' ? { status: 'closing' } : { status: 'released' }; },",
+    "    close: async () => { globalThis.__morrowDesktopMutationOrder.push('monitor-close'); }",
+    "  };",
+    "}",
+    "",
+  ].join("\n");
+  const manifestSha256 = await completePayload(root, { maintenance, runtimeMonitor });
+  const installer = controller(root, { trustedMcpRuntimeManifestSha256: () => manifestSha256 });
+  await installer.ensureRuntime();
+  await fs.writeFile(path.join(root, "UserData", "State", "morrow.upstreams.json"), "{}\n");
+
+  await installer.withDesktopMutation(async (transaction) => {
+    await transaction.stopRuntime();
+    globalThis.__morrowDesktopMutationOrder.push("mutation");
+  });
+
+  assert.deepEqual(globalThis.__morrowDesktopMutationOrder, [
+    "stopped-probe",
+    "monitor-start",
+    "owner-acquire",
+    "owner-commit",
+    "monitor-close",
+    "stopped-guard",
+    "mutation",
+    "release",
+  ]);
+  assert.equal(installer.desktopMutationGuard, null);
+  assert.equal(installer.desktopMutationInProgress, null);
+});
+
+test("every public desktop configuration mutation writes nothing when owner admission is refused", async () => {
+  const root = await temporaryRoot();
+  const maintenance = [
+    "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function readLocalOwnerMaintenanceLease() { return null; }",
+    "export function requestLocalOwnerMaintenance() { return null; }",
+    "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
+    "export function acquireStoppedLocalOwnerMaintenanceLease() { return null; }",
+    "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { return null; }",
+    "export function removeExactLocalOwnerMaintenanceLease() { return false; }",
+    "",
+  ].join("\n");
+  const runtimeMonitor = [
+    "export function createRuntimeMonitor() {",
+    "  return { start: async () => ({}), snapshot: () => ({ health: { canRestart: 'unknown' } }),",
+    "    maintenance: async () => ({ status: 'unavailable' }), close: async () => {} };",
+    "}",
+    "",
+  ].join("\n");
+  const manifestSha256 = await completePayload(root, { maintenance, runtimeMonitor });
+  const chosen = path.join(root, "Chosen materials");
+  await fs.mkdir(chosen);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  const content = '[mcp_servers.morrow]\ncommand = "node"\n';
+  await fs.writeFile(target, content);
+  const calls = [];
+  const installer = controller(root, {
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+    detectAssistant: async () => true,
+    dialog: { showOpenDialog: async () => ({ canceled: false, filePaths: [chosen] }) },
+    runCli: async (...input) => { calls.push(input); return { code: 0, stdout: "", stderr: "" }; },
+  });
+  await installer.ensureRuntime();
+  await fs.writeFile(path.join(root, "UserData", "State", "morrow.upstreams.json"), "{}\n");
+  await installer.writeRecord({
+    ...freshRecord(),
+    materialsFolder: chosen,
+    selectedAssistantId: "codex",
+    configured: { codex: { target, sha256: sha256(content) } },
+  });
+  const beforeRecord = await fs.readFile(installer.recordPath);
+  const operations = [
+    () => installer.configureWorkspace(null),
+    () => installer.configureBlackboard({ baseUrl: "https://learn.example.edu", applicationKey: "key", applicationSecret: "secret-value" }),
+    () => installer.selectBlackboardCourses({ tenantId: "learn-example-edu", courseBindings: [] }),
+    () => installer.removeBlackboardTenant({ tenantId: "learn-example-edu" }),
+    () => installer.removeBlackboardData(),
+    () => installer.installAssistant("codex", null),
+    () => installer.removeAssistant("codex"),
+    () => installer.repair(),
+  ];
+
+  for (const operation of operations) {
+    await assert.rejects(operation, (error) => error.code === "active_or_uncertain_operations");
+  }
+  assert.deepEqual(await fs.readFile(installer.recordPath), beforeRecord);
+  assert.equal(await fs.readFile(target, "utf8"), content);
+  assert.deepEqual(calls, []);
+  assert.equal(await fs.stat(path.join(root, "Home", ".morrow", "blackboard-learn.json")).then(() => true, () => false), false);
+});
+
+test("a second desktop mutation is refused while the first is acquiring authority", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  let admit;
+  const admission = new Promise((resolve) => { admit = resolve; });
+  installer.acquireDesktopMutationGuard = async () => {
+    await admission;
+    return { kind: "stopped", leaseId: "test-lease", leaseToken: "test-token" };
+  };
+  installer.releaseDesktopMutationGuard = async (guard) => {
+    if (installer.desktopMutationGuard === guard) installer.desktopMutationGuard = null;
+  };
+  const order = [];
+  const first = installer.withDesktopMutation(async () => { order.push("first"); });
+  await Promise.resolve();
+  await assert.rejects(
+    () => installer.withDesktopMutation(async () => { order.push("second"); }),
+    (error) => error.code === "active_or_uncertain_operations",
+  );
+  admit();
+  await first;
+  assert.deepEqual(order, ["first"]);
+  assert.equal(installer.desktopMutationInProgress, null);
+});
+
 const BRIDGE_EXTENSION_KEY = JSON.parse(require("node:fs").readFileSync(path.join(__dirname, "..", "..", "connector", "extension", "manifest.json"), "utf8")).key;
 
 const MAINTENANCE_MODULE = [
@@ -712,6 +1111,9 @@ const MAINTENANCE_MODULE = [
   "export function readLocalOwnerMaintenanceLease() { return null; }",
   "export function requestLocalOwnerMaintenance() { return null; }",
   "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
+  "export function acquireStoppedLocalOwnerMaintenanceLease() { globalThis.__morrowStoppedGuardCalls?.push('acquire'); return { leaseId: '00000000-0000-4000-8000-000000000001', leaseToken: 'morrow-stopped-maintenance-token-1234567890123456' }; }",
+  "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { return { leaseId: '00000000-0000-4000-8000-000000000002', leaseToken: 'morrow-stopped-maintenance-token-2345678901234567' }; }",
+  "export function removeExactLocalOwnerMaintenanceLease() { globalThis.__morrowStoppedGuardCalls?.push('release'); return true; }",
   ""
 ].join("\n");
 
@@ -727,6 +1129,7 @@ const RECORDING_MONITOR = [
   "  return {",
   "    start: async () => { await Promise.resolve(); observed = observedReady; return observedReady; },",
   "    snapshot: () => observed,",
+  "    maintenance: async ({ action }) => action === 'acquire' ? { status: 'held' } : action === 'release' ? { status: 'released' } : { status: 'closing' },",
   "    close: async () => { globalThis.__morrowRepairOrder.push('closed'); }",
   "  };",
   "}",
@@ -734,7 +1137,7 @@ const RECORDING_MONITOR = [
 ].join("\n");
 
 /** Writes a sealed Bridge release into the payload and returns its digest. */
-async function writeBridgeRelease(root, version = "1.0.0") {
+async function writeBridgeRelease(root, version = "1.0.0", workerSource = null) {
   const release = path.join(root, "Payload", "app", "bridge-release");
   const source = path.join(release, "extension");
   await fs.mkdir(path.join(source, "src"), { recursive: true });
@@ -749,7 +1152,7 @@ async function writeBridgeRelease(root, version = "1.0.0") {
     background: { service_worker: "src/service-worker.js", type: "module" }
   };
   await fs.writeFile(path.join(source, "manifest.json"), `${JSON.stringify(manifest)}\n`);
-  await fs.writeFile(path.join(source, "src", "service-worker.js"), `export const version = ${JSON.stringify(version)};\n`);
+  await fs.writeFile(path.join(source, "src", "service-worker.js"), workerSource || `export const version = ${JSON.stringify(version)};\n`);
   const files = [];
   for (const relative of ["manifest.json", "src/service-worker.js"]) {
     const content = await fs.readFile(path.join(source, relative));
@@ -793,12 +1196,16 @@ async function treeDigest(root, relative = "") {
  * file the runtime needs, as the real command does.
  */
 async function repairableController(root, overrides = {}) {
-  const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor: RECORDING_MONITOR });
+  const manifestSha256 = await completePayload(root, {
+    maintenance: overrides.maintenance || MAINTENANCE_MODULE,
+    runtimeMonitor: overrides.runtimeMonitor || RECORDING_MONITOR
+  });
   const bridgeReleaseSha256 = await writeBridgeRelease(root);
   const calls = [];
   const installer = controller(root, {
     trustedMcpRuntimeManifestSha256: () => manifestSha256,
     trustedBridgeReleaseManifestSha256: () => bridgeReleaseSha256,
+    detectAssistant: async () => true,
     runCli: async (executable, argumentsValue) => {
       calls.push(argumentsValue.slice(1));
       if (argumentsValue[1] === "setup") {
@@ -816,6 +1223,7 @@ async function repairableController(root, overrides = {}) {
 
 test("repair rebuilds a Bridge folder that was removed and re-issues its active-folder challenge", async () => {
   const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
   const { installer, calls } = await repairableController(root);
   const stateDirectory = path.join(root, "UserData", "State");
   const bridgeDirectory = path.join(root, "UserData", "Bridge");
@@ -904,6 +1312,42 @@ test("repair replaces an older app-owned Bridge from the sealed release", async 
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(stateDirectory, "Backups", backups[0]), "utf8")), before);
 });
 
+test("repair replaces changed sealed Bridge bytes even when the Chrome version is unchanged", async () => {
+  const root = await temporaryRoot();
+  const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor: RECORDING_MONITOR });
+  let bridgeReleaseSha256 = await writeBridgeRelease(root, "1.0.0");
+  const installer = controller(root, {
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
+    trustedBridgeReleaseManifestSha256: () => bridgeReleaseSha256,
+    runCli: async (executable, argumentsValue) => {
+      if (argumentsValue[1] === "setup") {
+        await fs.mkdir(path.join(root, "UserData", "State"), { recursive: true });
+        await fs.writeFile(path.join(root, "UserData", "State", "morrow.upstreams.json"), "{}\n");
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    }
+  });
+  const stateDirectory = path.join(root, "UserData", "State");
+  const bridgeDirectory = path.join(root, "UserData", "Bridge");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
+  await installer.initializeBridgeAtStartup();
+  const before = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
+
+  bridgeReleaseSha256 = await writeBridgeRelease(
+    root,
+    "1.0.0",
+    'export const version = "1.0.0";\nexport const releaseRevision = 2;\n'
+  );
+  await installer.repair();
+  const after = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
+  assert.equal(after.extensionVersion, "1.0.0");
+  assert.notEqual(after.releaseManifestSha256, before.releaseManifestSha256);
+  assert.equal(after.releaseManifestSha256, bridgeReleaseSha256);
+  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.0";\nexport const releaseRevision = 2;\n');
+  assert.notEqual(after.activeFolderChallenge.challengeId, before.activeFolderChallenge.challengeId);
+});
+
 test("state stops reporting a Bridge folder that was removed while Morrow stayed open", async () => {
   const root = await temporaryRoot();
   const { installer } = await repairableController(root);
@@ -982,11 +1426,11 @@ test("repair refuses to start while another operation holds the runtime", async 
   await assert.rejects(() => installer.repair(), (error) => error.code === "active_or_uncertain_operations");
   assert.equal(closed, false, "a refused repair never stops the runtime");
 
-  // The same fence admits the operation once the runtime reports that a restart
-  // is safe. Repair then stops the runtime before it reads the payload.
+  // A concurrent Bridge transaction stays authoritative even if the runtime
+  // would otherwise permit a restart.
   installer.runtimeMonitor = { close: async () => { closed = true; }, snapshot: () => ({ health: { canRestart: "yes" } }) };
-  await assert.rejects(() => installer.repair(), (error) => error.code === "runtime_repair_required");
-  assert.equal(closed, true);
+  await assert.rejects(() => installer.repair(), (error) => error.code === "active_or_uncertain_operations");
+  assert.equal(closed, false);
   installer.bridgeReconciliation = null;
 });
 
@@ -995,8 +1439,9 @@ test("repair keeps a malformed installer record in Backups and starts a fresh on
   const { installer, calls } = await repairableController(root);
   const stateDirectory = path.join(root, "UserData", "State");
   await fs.mkdir(stateDirectory, { recursive: true });
+  if (process.platform !== "win32") await fs.chmod(stateDirectory, 0o700);
   const stored = "{not-json\n";
-  await fs.writeFile(path.join(stateDirectory, "installer.json"), stored);
+  await fs.writeFile(path.join(stateDirectory, "installer.json"), stored, { mode: 0o600 });
   await assert.rejects(() => installer.record(), /JSON/);
 
   const state = await installer.repair();
@@ -1004,7 +1449,7 @@ test("repair keeps a malformed installer record in Backups and starts a fresh on
   const backups = await fs.readdir(path.join(stateDirectory, "Backups"));
   assert.equal(backups.length, 1);
   assert.equal(await fs.readFile(path.join(stateDirectory, "Backups", backups[0]), "utf8"), stored);
-  assert.equal(state.lifecycle, "ready_for_assistant");
+  assert.equal(state.lifecycle, "ready_for_workspace");
   assert.equal(state.selectedAssistantId, null);
   assert.deepEqual(calls.map((entry) => entry[0]), ["setup"], "a fresh record names no assistant to configure");
 });
@@ -1022,7 +1467,7 @@ test("repair leaves an installer record from another app version exactly as it i
     materialsFolder: path.join(root, "Materials from newer Morrow")
   })}\n`;
   const recordPath = path.join(stateDirectory, "installer.json");
-  await fs.writeFile(recordPath, stored);
+  await fs.writeFile(recordPath, stored, { mode: 0o600 });
 
   await assert.rejects(() => installer.repair(), (error) => {
     assert.equal(error.code, "installer_record_incompatible");
@@ -1037,6 +1482,7 @@ test("repair leaves an installer record from another app version exactly as it i
 
 test("repair writes the assistant configuration again when the file Morrow wrote is gone", async () => {
   const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
   const target = path.join(root, "Home", ".codex", "config.toml");
   const { installer, calls } = await repairableController(root, {
     writeClientConfiguration: async () => {
@@ -1065,6 +1511,7 @@ test("repair writes the assistant configuration again when the file Morrow wrote
 
 test("repair replaces an unchanged assistant configuration only through its recorded digest", async () => {
   const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
   const target = path.join(root, "Home", ".codex", "config.toml");
   await fs.mkdir(path.dirname(target), { recursive: true });
   await fs.writeFile(target, "[mcp_servers.morrow]\ncommand = \"morrow\"\n");
@@ -1089,8 +1536,8 @@ test("repair replaces an unchanged assistant configuration only through its reco
  * materials folder with a file in it, the Blackboard credential folder and
  * configuration file, and one assistant configuration file.
  */
-async function installationWithData(root, response) {
-  const { installer } = await repairableController(root);
+async function installationWithData(root, response, overrides = {}) {
+  const { installer } = await repairableController(root, overrides);
   const messageBoxes = [];
   installer.dialog = {
     showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
@@ -1107,8 +1554,21 @@ async function installationWithData(root, response) {
   await fs.writeFile(path.join(stateDirectory, "morrow.sqlite3"), "journal\n");
   await fs.mkdir(path.join(stateDirectory, "Backups"), { recursive: true });
   await fs.writeFile(path.join(stateDirectory, "Backups", "config.toml"), "an earlier assistant setting\n");
-  await installer.initializeBridgeAtStartup();
-  const materials = await installer.effectiveWorkspace();
+  // Fixture construction owns no runtime. Give only this setup call a stopped
+  // guard so tests below can choose their own live-owner behavior.
+  const acquireDesktopMutationGuard = installer.acquireDesktopMutationGuard;
+  const releaseDesktopMutationGuard = installer.releaseDesktopMutationGuard;
+  installer.acquireDesktopMutationGuard = async () => ({ kind: "stopped", leaseId: "fixture", leaseToken: "fixture" });
+  installer.releaseDesktopMutationGuard = async (guard) => {
+    if (installer.desktopMutationGuard === guard) installer.desktopMutationGuard = null;
+  };
+  try { await installer.initializeBridgeAtStartup(); }
+  finally {
+    installer.acquireDesktopMutationGuard = acquireDesktopMutationGuard;
+    installer.releaseDesktopMutationGuard = releaseDesktopMutationGuard;
+  }
+  const materials = path.join(userData, "Materials");
+  await fs.mkdir(materials, { recursive: true });
   await fs.writeFile(path.join(materials, "syllabus.md"), "week one\n");
   const assistantConfiguration = path.join(home, ".codex", "config.toml");
   await fs.mkdir(path.dirname(assistantConfiguration), { recursive: true });
@@ -1155,7 +1615,7 @@ test("the state names every place this installation keeps data, by its exact pat
   ]);
   assert.deepEqual(
     retention.locations.filter((location) => location.removable).map((location) => location.path),
-    [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials]
+    [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]
   );
   assert.equal(retention.locations.find((location) => location.path === paths.assistantConfiguration).keptReason, "assistant_configuration");
   assert.equal(retention.removal, null);
@@ -1184,10 +1644,10 @@ test("a data removal without an explicit confirmation removes nothing", async ()
   assert.deepEqual(options.buttons, ["Cancel", "Remove data"]);
   assert.equal(options.defaultId, 0, "the destructive button is not the default button");
   assert.equal(options.cancelId, 0, "Escape answers with Cancel");
-  for (const value of [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials]) {
+  for (const value of [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]) {
     assert.ok(options.detail.includes(value), `the confirmation names ${value} as removed`);
   }
-  for (const value of [paths.blackboardConfiguration, paths.assistantConfiguration]) {
+  for (const value of [paths.assistantConfiguration]) {
     assert.ok(options.detail.includes(value), `the confirmation names ${value} as kept`);
   }
   assert.ok(options.detail.includes("Morrow will not remove:"));
@@ -1195,6 +1655,20 @@ test("a data removal without an explicit confirmation removes nothing", async ()
   // The state carries that nothing was removed, so the panel never reports a
   // removal that did not happen.
   assert.equal((await installer.state()).retention.removal.status, "cancelled");
+});
+
+test("a data removal holds a stopped-runtime guard across its confirmation", async () => {
+  const root = await temporaryRoot();
+  const { installer, paths } = await installationWithData(root, 0);
+  await fs.rm(path.join(paths.state, "morrow.upstreams.json"), { force: true });
+  globalThis.__morrowStoppedGuardCalls = [];
+
+  const receipt = await installer.removeData(null);
+
+  assert.equal(receipt.status, "cancelled");
+  assert.deepEqual(globalThis.__morrowStoppedGuardCalls, ["acquire", "release"]);
+  assert.equal(await fs.lstat(paths.state).then(() => true, () => false), true);
+  delete globalThis.__morrowStoppedGuardCalls;
 });
 
 test("a data removal refuses to start while another operation holds the runtime", async () => {
@@ -1216,6 +1690,148 @@ test("a data removal refuses to start while another operation holds the runtime"
   assert.equal(installer.dataRemoval, null);
 });
 
+test("a data removal refuses an owner that will not grant authoritative maintenance", async () => {
+  const root = await temporaryRoot();
+  const maintenance = [
+    "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function readLocalOwnerMaintenanceLease() { return null; }",
+    "export function requestLocalOwnerMaintenance() { return null; }",
+    "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
+    "export function acquireStoppedLocalOwnerMaintenanceLease() { return null; }",
+    "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { return null; }",
+    "export function removeExactLocalOwnerMaintenanceLease() { return false; }",
+    ""
+  ].join("\n");
+  const runtimeMonitor = [
+    OBSERVED_MONITOR_SNAPSHOTS,
+    "const live = { ...ready, health: { ...ready.health, canRestart: 'unknown' } };",
+    "export function createRuntimeMonitor() {",
+    "  return {",
+    "    start: async () => live,",
+    "    snapshot: () => live,",
+    "    maintenance: async () => ({ status: 'unavailable' }),",
+    "    close: async () => {}",
+    "  };",
+    "}",
+    ""
+  ].join("\n");
+  const { installer, messageBoxes, paths } = await installationWithData(root, 1, { maintenance, runtimeMonitor });
+  const before = await treeDigest(paths.userData);
+
+  await assert.rejects(() => installer.removeData(null), (error) => error.code === "active_or_uncertain_operations");
+
+  assert.deepEqual(messageBoxes, [], "maintenance refusal happens before the destructive confirmation");
+  assert.deepEqual(await treeDigest(paths.userData), before);
+});
+
+test("a confirmed removal waits for an open SQLite owner to close before deleting State", async (t) => {
+  const root = await temporaryRoot();
+  const maintenance = [
+    "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+    "export function readLocalOwnerMaintenanceLease() { return null; }",
+    "export function requestLocalOwnerMaintenance() { return null; }",
+    "export function clearDeadLocalOwnerMaintenanceLease() { return false; }",
+    "export function acquireStoppedLocalOwnerMaintenanceLease() { return null; }",
+    "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() {",
+    "  try { process.kill(globalThis.__morrowRemovalOwner.pid, 0); return null; } catch {}",
+    "  globalThis.__morrowRemovalEvents.push('owner-dead');",
+    "  return { leaseId: '00000000-0000-4000-8000-000000000003', leaseToken: 'morrow-stopped-maintenance-token-3456789012345678' };",
+    "}",
+    "export function removeExactLocalOwnerMaintenanceLease() { return true; }",
+    ""
+  ].join("\n");
+  const runtimeMonitor = [
+    OBSERVED_MONITOR_SNAPSHOTS,
+    "const live = { ...ready, health: { ...ready.health, canRestart: 'unknown' } };",
+    "export function createRuntimeMonitor() {",
+    "  return {",
+    "    start: async () => live,",
+    "    snapshot: () => live,",
+    "    maintenance: async ({ action }) => {",
+    "      globalThis.__morrowRemovalEvents.push(action);",
+    "      if (action === 'acquire') return { status: 'held' };",
+    "      if (action === 'release') return { status: 'released' };",
+    "      globalThis.__morrowRemovalOwner.send({ action: 'close' });",
+    "      return { status: 'closing' };",
+    "    },",
+    "    close: async () => { globalThis.__morrowRemovalEvents.push('monitor-close'); }",
+    "  };",
+    "}",
+    ""
+  ].join("\n");
+  const { installer, paths } = await installationWithData(root, 1, { maintenance, runtimeMonitor });
+  const journalPath = path.join(paths.state, "morrow.sqlite3");
+  await fs.rm(journalPath, { force: true });
+  const childScript = [
+    "const fs = require('node:fs');",
+    "const { DatabaseSync } = require('node:sqlite');",
+    "const stateDirectory = process.argv[1];",
+    "const journalPath = process.argv[2];",
+    "const database = new DatabaseSync(journalPath);",
+    "database.exec('PRAGMA journal_mode=WAL; CREATE TABLE evidence (value INTEGER NOT NULL)');",
+    "const insert = database.prepare('INSERT INTO evidence (value) VALUES (?)');",
+    "let writes = 0;",
+    "let writeError = null;",
+    "let closing = false;",
+    "const timer = setInterval(() => { try { insert.run(++writes); } catch (error) { writeError ??= error.message; } }, 10);",
+    "process.send({ type: 'ready' });",
+    "process.on('message', (message) => {",
+    "  if (message?.action !== 'close' || closing) return;",
+    "  closing = true;",
+    "  setTimeout(() => {",
+    "    const statePresentBeforeClose = fs.existsSync(stateDirectory);",
+    "    try { insert.run(++writes); } catch (error) { writeError ??= error.message; }",
+    "    clearInterval(timer);",
+    "    database.close();",
+    "    process.send({ type: 'closed', statePresentBeforeClose, writes, writeError }, () => process.exit(writeError ? 1 : 0));",
+    "  }, 200);",
+    "});",
+    ""
+  ].join("\n");
+  const owner = spawn(process.execPath, ["-e", childScript, paths.state, journalPath], {
+    stdio: ["ignore", "ignore", "pipe", "ipc"]
+  });
+  let exited = false;
+  owner.once("exit", () => { exited = true; });
+  t.after(() => {
+    delete globalThis.__morrowRemovalOwner;
+    delete globalThis.__morrowRemovalEvents;
+    if (!exited) owner.kill("SIGKILL");
+  });
+  const message = (type) => new Promise((resolve, reject) => {
+    const onMessage = (value) => {
+      if (value?.type !== type) return;
+      owner.off("error", onError);
+      owner.off("message", onMessage);
+      resolve(value);
+    };
+    const onError = (error) => {
+      owner.off("message", onMessage);
+      reject(error);
+    };
+    owner.on("message", onMessage);
+    owner.once("error", onError);
+  });
+  await message("ready");
+  globalThis.__morrowRemovalOwner = owner;
+  globalThis.__morrowRemovalEvents = [];
+  installer.dialog.showMessageBox = async () => {
+    globalThis.__morrowRemovalEvents.push("confirm");
+    return { response: 1, checkboxChecked: false };
+  };
+  const closed = message("closed");
+
+  const receipt = await installer.removeData(null);
+  const ownerReport = await closed;
+
+  assert.equal(receipt.status, "removed");
+  assert.deepEqual(globalThis.__morrowRemovalEvents, ["acquire", "confirm", "commit", "monitor-close", "owner-dead"]);
+  assert.equal(ownerReport.statePresentBeforeClose, true, "State remained present while SQLite was open");
+  assert.equal(ownerReport.writeError, null, "the journal stayed writable until its owner closed it");
+  assert.ok(ownerReport.writes > 0);
+  assert.equal(await fs.lstat(paths.state).then(() => true, () => false), false);
+});
+
 test("a confirmed removal removes what it listed, keeps what it did not, and reads every path back", async () => {
   const root = await temporaryRoot();
   const { installer, paths } = await installationWithData(root, 1);
@@ -1227,9 +1843,9 @@ test("a confirmed removal removes what it listed, keeps what it did not, and rea
 
   assert.equal(receipt.schema, "morrow.installer-data-removal.v1");
   assert.equal(receipt.status, "removed");
-  assert.deepEqual(receipt.removed, [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials]);
+  assert.deepEqual(receipt.removed, [paths.state, paths.backups, paths.bridge, paths.materials, paths.credentials, paths.blackboardConfiguration]);
   assert.deepEqual(receipt.remaining, []);
-  assert.deepEqual(receipt.kept, [paths.blackboardConfiguration, paths.assistantConfiguration]);
+  assert.deepEqual(receipt.kept, [paths.assistantConfiguration]);
   assert.ok(globalThis.__morrowRepairOrder.includes("closed"), "the runtime holding the journal is stopped before its folder is removed");
 
   // A fresh read of the disk, not the removal's own report.
@@ -1239,7 +1855,8 @@ test("a confirmed removal removes what it listed, keeps what it did not, and rea
   assert.deepEqual(await treeDigest(paths.userData), [], "nothing Morrow owns is left behind");
   assert.deepEqual(
     await treeDigest(paths.home),
-    homeBefore.filter((entry) => !entry.startsWith(".morrow/credentials/blackboard")),
+    homeBefore.filter((entry) => !entry.startsWith(".morrow/blackboard-learn.json ")
+      && !entry.startsWith(".morrow/credentials/blackboard")),
     "every path outside the list is exactly as it was"
   );
 
@@ -1258,6 +1875,19 @@ test("a confirmed removal removes what it listed, keeps what it did not, and rea
   // this computer.
   await installer.writeRecord(freshRecord());
   assert.equal((await installer.state()).retention.removal, null);
+});
+
+test("a new desktop process does not recreate materials after confirmed removal", async () => {
+  const root = await temporaryRoot();
+  const { installer, paths } = await installationWithData(root, 1);
+  assert.equal((await installer.removeData(null)).status, "removed");
+
+  const { installer: relaunched } = await repairableController(root);
+  const state = await relaunched.state();
+
+  assert.equal(state.lifecycle, "ready_for_workspace");
+  assert.equal(state.materialsFolder, null);
+  assert.equal(await fs.lstat(paths.materials).then(() => true, () => false), false);
 });
 
 test("a path the removal could not remove is reported as remaining, never as removed", {
@@ -1280,7 +1910,7 @@ test("a path the removal could not remove is reported as remaining, never as rem
   assert.equal(receipt.status, "incomplete");
   assert.deepEqual(receipt.remaining, [paths.credentials]);
   assert.equal(receipt.removed.includes(paths.credentials), false);
-  assert.deepEqual(receipt.removed, [paths.state, paths.backups, paths.bridge, paths.materials]);
+  assert.deepEqual(receipt.removed, [paths.state, paths.backups, paths.bridge, paths.materials, paths.blackboardConfiguration]);
   assert.equal(await fs.lstat(path.join(paths.credentials, "default.secret")).then(() => true, () => false), true,
     "the secret Morrow could not remove is still on this computer");
   assert.equal((await installer.state()).retention.removal.status, "incomplete");

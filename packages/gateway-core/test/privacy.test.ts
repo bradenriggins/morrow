@@ -1,5 +1,16 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  linkSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -159,6 +170,40 @@ describe("privacy output boundary", () => {
     }
   });
 
+  it("admits only exact private bounded learner-vault state", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-learner-vault-state-"));
+    const path = join(directory, "vault.json");
+    try {
+      const vault = new LearnerVault(path);
+      vault.tokenize(scope, { id: "17", name: "Ada Lovelace" });
+      if (process.platform !== "win32") {
+        expect(lstatSync(path).mode & 0o077).toBe(0);
+        expect(lstatSync(`${path}.key`).mode & 0o077).toBe(0);
+
+        chmodSync(`${path}.key`, 0o644);
+        expect(() => new LearnerVault(path)).toThrow(/key is not one exact private file/);
+        chmodSync(`${path}.key`, 0o600);
+
+        const keyAlias = join(directory, "key-alias");
+        linkSync(`${path}.key`, keyAlias);
+        expect(() => new LearnerVault(path)).toThrow(/key is not one exact private file/);
+        rmSync(keyAlias);
+
+        const stored = join(directory, "stored-vault.json");
+        renameSync(path, stored);
+        symlinkSync(stored, path);
+        expect(() => new LearnerVault(path)).toThrow(/vault is not one exact private file/);
+        rmSync(path);
+        renameSync(stored, path);
+      }
+
+      truncateSync(path, 64 * 1024 * 1024 + 1);
+      expect(() => new LearnerVault(path)).toThrow(/vault is not one exact private file/);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
   it("migrates existing encrypted UUID mappings to stable readable labels across restarts", () => {
     const directory = mkdtempSync(join(tmpdir(), "morrow-learner-vault-migration-"));
     const path = join(directory, "vault.json");
@@ -304,6 +349,27 @@ describe("privacy output boundary", () => {
     expect(redactKnownLearnerText("가 Doe", context)).toBe(token);
     expect(redactKnownLearnerText("%E1%84%80%E1%85%A1%20Doe", context)).toBe(token);
   });
+
+  it("reuses one durable vault snapshot for repeated protected learner references", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-privacy-reference-index-"));
+    try {
+      const vault = new LearnerVault(join(directory, "vault.json"));
+      const learnerRoster = new LearnerRoster();
+      const identity = { id: "18", name: "Jane Doe" };
+      learnerRoster.register(scope, [identity]);
+      const label = vault.tokenize(scope, identity);
+      const source = `${label} completed the review. `.repeat(2_000);
+      const started = performance.now();
+
+      const output = redactKnownLearnerText(source, { learnerRoster, learnerVault: vault, learnerScope: scope });
+      const elapsed = performance.now() - started;
+
+      expect(output).toBe(source);
+      expect(elapsed).toBeLessThan(3_000);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 8_000);
 
   it("refuses encoded credentials and unrostered email after exact-scope alias redaction", () => {
     const context = learnerPrivacy();
@@ -618,6 +684,63 @@ describe("bidirectional roster dictionary", () => {
     expect(output.course_id).toBe(17); expect(output.course).toEqual({ id: 17 }); expect(output.score).toBe(17);
     expect(() => redactLearnerEgress({ content: [{ type: "image", data: Buffer.from("Ada Lovelace").toString("base64") }] }, ctx)).toThrow("privacy_opaque_artifact_refused");
   });
+
+  it("classifies identities by record meaning instead of an ID collision", () => {
+    const roster = new LearnerRoster(); roster.register(scope, [{ id: "17", name: "Ada Lovelace" }]);
+    const ctx = { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") };
+    expect(redactLearnerEgress({
+      assignment: { id: 17, name: "Essay" },
+      page: { id: "17", title: "Lesson" },
+      target: { kind: "page", id: "17", title: "Lesson" },
+      assignment_id: "17",
+      quiz_id: "17",
+      page_id: "17",
+      score: "17",
+    }, ctx)).toEqual({
+      assignment: { id: 17, name: "Essay" },
+      page: { id: "17", title: "Lesson" },
+      target: { kind: "page", id: "17", title: "Lesson" },
+      assignment_id: "17",
+      quiz_id: "17",
+      page_id: "17",
+      score: "17",
+    });
+  });
+
+  it("builds one roster index for a large projection", () => {
+    class CountingRoster extends LearnerRoster {
+      identityReads = 0;
+      readyChecks = 0;
+
+      override identities(scopeValue: typeof scope) {
+        this.identityReads += 1;
+        return super.identities(scopeValue);
+      }
+
+      override isReady(scopeValue: typeof scope) {
+        this.readyChecks += 1;
+        return super.isReady(scopeValue);
+      }
+    }
+    const roster = new CountingRoster();
+    const identities = Array.from({ length: 2_500 }, (_, index) => ({
+      id: String(index + 1),
+      name: `Learner Person ${index + 1}`,
+    }));
+    roster.register(scope, identities);
+    const started = performance.now();
+    const output = redactLearnerEgress({
+      users: identities.map((identity, score) => ({ ...identity, score, comment: "Good work." })),
+    }, { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") }) as {
+      users: readonly unknown[];
+    };
+    const elapsed = performance.now() - started;
+
+    expect(output.users).toHaveLength(2_500);
+    expect(roster.identityReads).toBe(1);
+    expect(roster.readyChecks).toBe(1);
+    expect(elapsed).toBeLessThan(5_000);
+  }, 10_000);
 
   it("preserves structural identifiers while redacting learner text", () => {
     const roster = new LearnerRoster();

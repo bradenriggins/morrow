@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -45,6 +45,18 @@ describe("Blackboard Learn configuration", () => {
       courseBindings: [{ courseId: "_22_1", sourceBindingId: deriveBlackboardSourceBindingId("https://learn.example.edu", "_11_1", "_22_1") }],
     });
     expect(JSON.stringify(tenants[0]?.courseBindings)).not.toContain("server-secret");
+  });
+
+  it("refuses malformed UTF-8 instead of changing configured application authority", async () => {
+    const input = await configuration();
+    await writeFile(input.path, Buffer.concat([
+      Buffer.from('{"schema":"morrow.blackboard-learn.config.v1","tenants":[{"id":"school","baseUrl":"https://learn.example.edu","applicationKey":"application-'),
+      Buffer.from([0xff]),
+      Buffer.from('key","credentialRef":"environment","principalId":"_11_1","courseBindings":[{"courseId":"_22_1"}]}]}'),
+    ]), { mode: 0o600 });
+
+    await expect(loadBlackboardLearnConfig(input.environment))
+      .rejects.toThrow("Blackboard configuration is not valid UTF-8");
   });
 
   it("reads the optional principal verification mode and refuses an unknown one", async () => {
@@ -153,6 +165,31 @@ describe("Blackboard Learn configuration", () => {
     await symlink(input.path, linked);
     await expect(loadBlackboardLearnConfig({ ...input.environment, MORROW_BLACKBOARD_CONFIG: linked }))
       .rejects.toThrow("configuration access is not private");
+  });
+
+  it("refuses a multiply linked configuration before it can select a Blackboard OAuth destination", async () => {
+    const input = await configuration();
+    await link(input.path, `${input.path}.alias`);
+    await expect(loadBlackboardLearnConfig(input.environment)).rejects.toThrow("not one exact private file");
+  });
+
+  it("refuses a multiply linked credential before returning its secret", async () => {
+    const input = await configuration();
+    const home = await mkdtemp(join(tmpdir(), "morrow-blackboard-home-"));
+    created.push(home); process.env.HOME = home;
+    const secretDirectory = join(home, ".morrow", "credentials", "blackboard");
+    await mkdir(secretDirectory, { recursive: true, mode: 0o700 });
+    const secretPath = join(secretDirectory, "school.secret");
+    await writeFile(secretPath, JSON.stringify({
+      schema: "morrow.blackboard-learn.credential.v1", credentialRevision: REVISION, applicationSecret: "file-secret",
+    }), { mode: 0o600 });
+    await link(secretPath, join(secretDirectory, "school.secret.alias"));
+    await writeFile(input.path, JSON.stringify({
+      schema: "morrow.blackboard-learn.config.v1",
+      tenants: [{ id: "school", baseUrl: "https://learn.example.edu", applicationKey: "application-key", credentialRef: "file", credentialRevision: REVISION, principalId: "_11_1", courseBindings: [{ courseId: "_22_1" }] }],
+    }), { mode: 0o600 });
+    await expect(loadBlackboardLearnConfig({ MORROW_BLACKBOARD_CONFIG: input.path }))
+      .rejects.toThrow("not one exact private file");
   });
 
   it("refuses an oversized configuration before parsing or contacting Blackboard", async () => {

@@ -198,11 +198,20 @@ function toolResult(value: JsonObject) {
   };
 }
 
+function canvasIdInputSchema(): JsonObject {
+  return {
+    anyOf: [
+      { type: "string", pattern: "^[1-9][0-9]{0,18}$" },
+      { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+    ],
+  };
+}
+
 export function privateMoodleEnrolmentCandidateInputSchema(): JsonObject {
   return augmentBridgeInputSchema({
     type: "object",
     properties: {
-      course_id: { type: "integer", minimum: 1 },
+      course_id: canvasIdInputSchema(),
       query: {
         type: "string",
         minLength: 1,
@@ -307,6 +316,11 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
       z.strictObject({ action: z.literal("quiesce") }),
       z.strictObject({ action: z.literal("readback") }),
       z.strictObject({
+        action: z.literal("commit"),
+        previousManifestVersion: z.string().min(1).max(64).regex(/^(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*)){0,3}$/),
+        quiesceEpoch: z.string().min(16).max(256).regex(/^[A-Za-z0-9._-]+$/),
+      }),
+      z.strictObject({
         action: z.literal("resume"),
         quiesceEpoch: z.string().min(16).max(256).regex(/^[A-Za-z0-9._-]+$/),
         fileLayerRestored: z.literal(true),
@@ -341,9 +355,10 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         evidence: { transport: { state: "known" }, credentialBoundary: { state: "known" } },
       },
     },
-  }, async (argumentsValue) => toolResult(await runtime.call(
+  }, async (argumentsValue, context) => toolResult(await runtime.call(
     PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
     isJsonObject(argumentsValue) ? argumentsValue : {},
+    context.mcpReq.signal,
   )));
   registerTool("canvas_send_private_conversation", {
     title: "Send reviewed Canvas Inbox message",
@@ -351,7 +366,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
     inputSchema: fromJsonSchema(augmentBridgeInputSchema({
       type: "object",
       properties: {
-        course_id: { type: "integer", minimum: 1 },
+        course_id: canvasIdInputSchema(),
         privateConversation: {
           type: "object",
           properties: {
@@ -400,15 +415,15 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         evidence: { transport: { state: "known" }, credentialBoundary: { state: "known" } },
       },
     },
-  }, async (argumentsValue) => toolResult(await runtime.call("canvas_send_private_conversation", isJsonObject(argumentsValue) ? argumentsValue : {})));
+  }, async (argumentsValue, context) => toolResult(await runtime.call("canvas_send_private_conversation", isJsonObject(argumentsValue) ? argumentsValue : {}, context.mcpReq.signal)));
   registerTool("canvas_transfer_course_file", {
     title: "Transfer reviewed Canvas course file",
     description: "Internal Morrow route that transfers one staged, reviewed material to one current Canvas course folder. File bytes are private transport data and cannot be supplied in public tool arguments.",
     inputSchema: fromJsonSchema(augmentBridgeInputSchema({
       type: "object",
       properties: {
-        course_id: { type: "integer", minimum: 1 },
-        folder_id: { type: "integer", minimum: 1 },
+        course_id: canvasIdInputSchema(),
+        folder_id: canvasIdInputSchema(),
         filename: { type: "string", minLength: 1, maxLength: 255 },
         size_bytes: { type: "integer", minimum: 1, maximum: 1024 * 1024 },
         sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
@@ -440,7 +455,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         evidence: { transport: { state: "known" }, credentialBoundary: { state: "known" } },
       },
     },
-  }, async (argumentsValue) => toolResult(await runtime.call("canvas_transfer_course_file", isJsonObject(argumentsValue) ? argumentsValue : {})));
+  }, async (argumentsValue, context) => toolResult(await runtime.call("canvas_transfer_course_file", isJsonObject(argumentsValue) ? argumentsValue : {}, context.mcpReq.signal)));
   registerTool("canvas_create_new_quiz_hot_spot", {
     title: "Create reviewed New Quiz Hot Spot question",
     description: "Internal Morrow route that creates one reviewed New Quizzes Hot Spot question with its reviewed image. Canvas requires a signed media upload URL, one PUT of the exact image bytes, and a create that carries that URL without its query string. Image bytes are private transport data and cannot be supplied in public tool arguments.",
@@ -483,7 +498,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         evidence: { transport: { state: "known" }, credentialBoundary: { state: "known" } },
       },
     },
-  }, async (argumentsValue) => toolResult(await runtime.call("canvas_create_new_quiz_hot_spot", isJsonObject(argumentsValue) ? argumentsValue : {})));
+  }, async (argumentsValue, context) => toolResult(await runtime.call("canvas_create_new_quiz_hot_spot", isJsonObject(argumentsValue) ? argumentsValue : {}, context.mcpReq.signal)));
 
   for (const tool of canvasCatalogTools(runtime.catalog)) {
     registerTool(tool.name, {
@@ -501,7 +516,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         ].includes(tool.name), false, tool.name === "canvas_update_create_page_courses")),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       _meta: { "io.morrow/capability": tool.capability },
-    }, async (argumentsValue) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {})));
+    }, async (argumentsValue, context) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {}, context.mcpReq.signal)));
   }
   for (const tool of canvasBrowserCatalogTools(runtime.canvasBrowserCatalog)) {
     registerTool(tool.name, {
@@ -510,7 +525,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
       inputSchema: fromJsonSchema(augmentBridgeInputSchema(tool.inputSchema, false, false)),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       _meta: { "io.morrow/capability": tool.capability },
-    }, async (argumentsValue) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {})));
+    }, async (argumentsValue, context) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {}, context.mcpReq.signal)));
   }
   for (const tool of moodleCatalogTools(runtime.moodleCatalog)) {
     registerTool(tool.name, {
@@ -525,7 +540,7 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
       )),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       _meta: { "io.morrow/capability": tool.capability },
-    }, async (argumentsValue) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {})));
+    }, async (argumentsValue, context) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {}, context.mcpReq.signal)));
   }
   return server;
 }

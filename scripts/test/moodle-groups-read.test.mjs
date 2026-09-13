@@ -25,7 +25,7 @@ test("Moodle group map uses the core group list and native GET member read with 
     if (mode === "member-limit" && groupId === "8") return [{ name: "Student", users: Array.from({ length: 10_001 }, (_, index) => ({ id: index + 1, name: `Student ${index + 1}` })) }];
     if (mode === "bad-members" && groupId === "8") return [{ name: "Student", users: [{ id: 7, name: "Student Name" }, { id: 7, name: "Student Name" }] }];
     return groupId === "8"
-      ? [{ name: "Student", users: [{ id: 7, name: "Student Name" }, { id: 3, name: "Course Teacher" }] }]
+      ? [{ name: "Student", users: [{ id: 7, name: "Student Name (student@example.edu)" }, { id: 3, name: "Course Teacher" }] }]
       : [{ name: "Teacher", users: [{ id: 3, name: "Course Teacher" }] }];
   };
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, async (request, reply) => {
@@ -55,9 +55,10 @@ test("Moodle group map uses the core group list and native GET member read with 
     const fixtureCount = () => requests.filter((request) => request.path !== "/favicon.ico").length;
     const beforeInvalid = memberCount(); assert.deepEqual(await run({ course_id: 2, extra: true }), { ok: false, sent: false, error: "moodle_arguments_invalid" }); assert.equal(memberCount(), beforeInvalid);
     const current = await run(); assert.equal(current.ok, true, JSON.stringify(current)); assert.deepEqual(current.data, { course_id: "2", groups: [
-      { id: "8", name: "Team A", visibility: 0, participation: true, membership: [{ user_id: "3", name: "Course Teacher" }, { user_id: "7", name: "Student Name" }] },
-      { id: "9", name: "Team B", visibility: 2, participation: false, membership: [{ user_id: "3", name: "Course Teacher" }] },
+      { id: "8", name: "Team A", visibility: 0, participation: true, membership: [{ user_id: "3" }, { user_id: "7" }] },
+      { id: "9", name: "Team B", visibility: 2, participation: false, membership: [{ user_id: "3" }] },
     ] });
+    assert.equal(JSON.stringify(current).includes("student@example.edu"), false);
     assert.equal(requests.filter((request) => request.method === "POST" && request.path !== "/lib/ajax/service.php").length, 0);
     assert.equal(requests.some((request) => request.path === "/group/members.php" || request.path.includes("/mod/")), false);
     const beforeExpired = fixtureCount();

@@ -9,19 +9,13 @@ const { app, BrowserWindow, dialog, ipcMain, session, shell } = require("electro
 const { assertAssistantId, envelope } = require("./shared/contract.cjs");
 const { createElectronUpdaterAdapter } = require("./shared/electron-updater-adapter.cjs");
 const { createUpdateAttemptStore, createUpdateController } = require("./shared/updates.cjs");
+const { UPDATE_FEED } = require("./shared/update-feed.cjs");
 const { createInstallerController, detectAssistant, errorDetails, repairRequiredState } = require("./shared/installer-controller.cjs");
 const { canonicalDirectory, exists, isComplete, mkdirPrivate, payloadLayout } = require("./shared/runtime.cjs");
 
 const PRODUCT_VERSION = app.getVersion();
 const BUILD_METADATA = require("./package.json").morrow || Object.freeze({});
 const UPDATE_METADATA = BUILD_METADATA.desktopUpdates || null;
-const UPDATE_FEED = Object.freeze({
-  id: "morrow-github-stable",
-  provider: "github",
-  owner: "bradenriggins",
-  repo: "morrow-downloads",
-  channel: "latest"
-});
 const TEST_ROOT_ARGUMENT = process.argv.find((value) => value.startsWith("--morrow-test-root="));
 const IS_TEST_MODE = process.env.MORROW_INSTALLER_TEST_MODE === "1";
 const testRoot = IS_TEST_MODE && TEST_ROOT_ARGUMENT
@@ -33,6 +27,18 @@ if (testRoot) app.setPath("userData", path.join(testRoot, "UserData"));
 let mainWindow = null;
 let installer = null;
 let updateController = null;
+let updateSubscription = null;
+let updatesStarted = false;
+const rendererSmokeReceipt = requestedArgument("morrow-renderer-smoke-receipt");
+let rendererSmokeWindowReady = false;
+let rendererSmokeStateDelivered = false;
+let rendererSmokeStateRendered = false;
+let rendererSmokeCompletion = null;
+
+const UPDATE_STATE_CHANNEL = "installer:update-state";
+const WINDOW_LOAD_TIMEOUT_MS = 15_000;
+const WINDOW_LOAD_FAILURE_TITLE = "Morrow could not open";
+const WINDOW_LOAD_FAILURE_MESSAGE = "Morrow could not open its setup window. Close Morrow and open it again. If Morrow still cannot open, reinstall Morrow.";
 
 function isStableReleaseVersion(value) {
   return typeof value === "string" && /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(value);
@@ -324,6 +330,38 @@ async function writeSmokeReceipt(destination, value) {
   if (process.platform !== "win32") await fs.chmod(destination, 0o600);
 }
 
+function rendererSmokeRequestIsValid() {
+  if (!rendererSmokeReceipt) return true;
+  return IS_TEST_MODE && testRoot && path.isAbsolute(rendererSmokeReceipt)
+    && isWithin(testRoot, rendererSmokeReceipt)
+    && !requestedArgument("morrow-smoke-receipt");
+}
+
+function completeRendererSmokeIfReady() {
+  if (!rendererSmokeReceipt || !rendererSmokeWindowReady || !rendererSmokeStateRendered || rendererSmokeCompletion) return;
+  rendererSmokeCompletion = writeSmokeReceipt(rendererSmokeReceipt, {
+    schema: "morrow.desktop-renderer-smoke.v1",
+    renderer: { loaded: true, stateRendered: true },
+    window: { visible: true }
+  }).then(() => desktopLifecycle.close()).catch(() => {
+    app.exitCode = 2;
+    return desktopLifecycle.close();
+  });
+}
+
+function markRendererSmokeWindowReady(window) {
+  if (!rendererSmokeReceipt) return;
+  if (window.isDestroyed() || typeof window.isVisible !== "function" || window.isVisible() !== true) return;
+  rendererSmokeWindowReady = true;
+  completeRendererSmokeIfReady();
+}
+
+function markRendererSmokeStateRendered() {
+  if (!rendererSmokeReceipt || !rendererSmokeStateDelivered) return;
+  rendererSmokeStateRendered = true;
+  completeRendererSmokeIfReady();
+}
+
 async function currentSmokeRuntimeTrace() {
   const monitor = installer?.runtimeMonitor;
   if (!IS_TEST_MODE || !monitor || typeof monitor.testDiagnostics !== "function") return unavailableSmokeRuntimeTrace();
@@ -446,8 +484,24 @@ async function respond(options) {
   try { return envelope(await installer.state(options), null); } catch { return failed(errorDetails("setup_failed")); }
 }
 
-function createWindow() {
-  mainWindow = new BrowserWindow({
+function loadWindowFile(window, file) {
+  let timer = null;
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error("renderer_load_timed_out")), WINDOW_LOAD_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  return Promise.race([
+    Promise.resolve().then(() => window.loadFile(file)),
+    deadline
+  ]).finally(() => clearTimeout(timer));
+}
+
+function showWindowLoadFailure() {
+  try { dialog.showErrorBox(WINDOW_LOAD_FAILURE_TITLE, WINDOW_LOAD_FAILURE_MESSAGE); } catch {}
+}
+
+async function createWindow() {
+  const window = new BrowserWindow({
     width: 940,
     height: 720,
     minWidth: 320,
@@ -463,11 +517,116 @@ function createWindow() {
       webSecurity: true
     }
   });
-  mainWindow.once("ready-to-show", () => mainWindow.show());
-  mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
-  mainWindow.webContents.on("will-attach-webview", (event) => event.preventDefault());
-  mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
-  mainWindow.loadFile(path.join(__dirname, "renderer", "index.html"));
+  mainWindow = window;
+  window.once("closed", () => { if (mainWindow === window) mainWindow = null; });
+  window.webContents.on("will-navigate", (event) => event.preventDefault());
+  window.webContents.on("will-attach-webview", (event) => event.preventDefault());
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  try {
+    await loadWindowFile(window, path.join(__dirname, "renderer", "index.html"));
+    if (window.isDestroyed()) {
+      if (mainWindow === window) mainWindow = null;
+      return null;
+    }
+    window.show();
+    markRendererSmokeWindowReady(window);
+    return window;
+  } catch {
+    if (mainWindow === window) mainWindow = null;
+    if (!window.isDestroyed()) window.destroy();
+    if (!desktopLifecycle.isClosing()) showWindowLoadFailure();
+    return null;
+  }
+}
+
+/** Owns bootstrap, activation, and quit as one closing lifecycle. */
+function createDesktopLifecycle({ target, initialize, currentWindow, openWindow, closeResources }) {
+  if (!target || typeof target.quit !== "function" || typeof initialize !== "function"
+    || typeof currentWindow !== "function" || typeof openWindow !== "function" || typeof closeResources !== "function") {
+    throw new TypeError("Desktop lifecycle needs an app and resource functions");
+  }
+  let bootstrap = null;
+  let opening = null;
+  let shutdown = null;
+  let closing = false;
+  let complete = false;
+  const state = Object.freeze({ isClosing: () => closing });
+  const initialized = () => {
+    bootstrap ??= Promise.resolve().then(() => closing ? false : initialize(state));
+    return bootstrap;
+  };
+  const close = () => {
+    if (shutdown) return shutdown;
+    closing = true;
+    shutdown = Promise.resolve()
+      .then(async () => {
+        const pending = [bootstrap, opening].filter(Boolean);
+        if (pending.length > 0) await Promise.allSettled(pending);
+        await closeResources();
+      })
+      .catch(() => undefined)
+      .then(() => {
+        complete = true;
+        target.quit();
+      });
+    return shutdown;
+  };
+  return Object.freeze({
+    open() {
+      if (closing) return Promise.resolve(null);
+      opening ??= initialized().then((showWindow) => {
+        if (closing || showWindow !== true) return null;
+        const current = currentWindow();
+        return current && !current.isDestroyed() ? current : openWindow();
+      }).finally(() => { opening = null; });
+      return opening;
+    },
+    close,
+    handleQuit(event) {
+      if (complete) return;
+      event.preventDefault();
+      void close();
+    },
+    isClosing: () => closing,
+    pending: () => shutdown
+  });
+}
+
+/** Starts optional network work after the desktop surface is ready to answer. */
+function startUpdatesInBackground(controller, allowed = () => true) {
+  return Promise.resolve().then(() => allowed() ? controller.start() : undefined).catch(() => undefined);
+}
+
+function publishUpdateSnapshot(snapshot) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  mainWindow.webContents.send(UPDATE_STATE_CHANNEL, snapshot);
+  return true;
+}
+
+async function openDesktopWindow() {
+  const window = await createWindow();
+  if (!window) return null;
+  updateSubscription ??= updateController.subscribe(publishUpdateSnapshot);
+  if (!updatesStarted) {
+    updatesStarted = true;
+    // Update discovery can wait on DNS, TLS, the release host, or a large
+    // download. The ready window and every IPC handler already exist before
+    // any of that optional network work starts.
+    void startUpdatesInBackground(updateController, () => !desktopLifecycle.isClosing());
+  }
+  return window;
+}
+
+async function closeDesktopResources() {
+  const unsubscribe = updateSubscription;
+  const updates = updateController;
+  const controller = installer;
+  updateSubscription = null;
+  updateController = null;
+  installer = null;
+  unsubscribe?.();
+  try { updates?.stop(); } catch {}
+  await controller?.closeRuntimeMonitor();
 }
 
 /**
@@ -491,7 +650,7 @@ function focusExistingWindow(window) {
  * that ownership, so every later start returns the focus to it and quits.
  *
  * `currentWindow` is read when a second instance starts, not now: the window
- * exists only after startMorrow() creates it. The second instance's command
+ * exists only after bootstrap opens it. The second instance's command
  * line stays unread, so one Morrow never takes an instruction from another.
  */
 function claimSingleInstance(target, currentWindow) {
@@ -500,7 +659,13 @@ function claimSingleInstance(target, currentWindow) {
   return true;
 }
 
-async function startMorrow() {
+async function startMorrow(lifecycle) {
+  if (lifecycle.isClosing()) return false;
+  if (!rendererSmokeRequestIsValid()) {
+    app.exitCode = 2;
+    app.quit();
+    return false;
+  }
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   session.defaultSession.setPermissionCheckHandler(() => false);
   installer = createInstallerController({
@@ -523,14 +688,22 @@ async function startMorrow() {
     updateSnapshot: () => updateController?.snapshot()
   });
   await installer.initializeBridgeAtStartup().catch(() => {});
+  if (lifecycle.isClosing()) return false;
   updateController = createAppUpdateController();
-  await updateController.start();
-  if (await runDesktopSmokeIfRequested()) return;
+  if (lifecycle.isClosing() || await runDesktopSmokeIfRequested()) return false;
+  if (lifecycle.isClosing()) return false;
   // Check status is the one state read that looks at this computer again. Every
   // other read, including the one on window focus, uses what Morrow already read.
   ipcMain.handle("installer:get-state", async (event, ...input) => {
     trusted(event);
-    return respond({ recheckAssistants: input[0]?.recheckAssistants === true });
+    const result = await respond({ recheckAssistants: input[0]?.recheckAssistants === true });
+    if (rendererSmokeReceipt) rendererSmokeStateDelivered = true;
+    return result;
+  });
+  ipcMain.handle("installer:renderer-ready", async (event, ...input) => {
+    trusted(event);
+    noInput(input);
+    markRendererSmokeStateRendered();
   });
   ipcMain.handle("installer:choose-workspace", async (event) => {
     trusted(event);
@@ -568,6 +741,16 @@ async function startMorrow() {
     trusted(event);
     try {
       await installer.removeBlackboardTenant(input);
+      return respond();
+    } catch {
+      return failed(errorDetails("blackboard_removal_failed"));
+    }
+  });
+  ipcMain.handle("installer:remove-blackboard-data", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+      await installer.removeBlackboardData();
       return respond();
     } catch {
       return failed(errorDetails("blackboard_removal_failed"));
@@ -668,7 +851,9 @@ async function startMorrow() {
       noInput(input);
       // Repair returns the state it reached, so the answer is that state and
       // never a separate claim that the repair succeeded.
-      return envelope(await installer.repair(), null);
+      const repaired = await installer.repair();
+      if (repaired?.runtime?.status === "ready") await updateController.reconcileAfterRepair();
+      return envelope(repaired, null);
     } catch (error) {
       return failed(error);
     }
@@ -686,11 +871,19 @@ async function startMorrow() {
       return failed(error);
     }
   });
-  createWindow();
+  return true;
 }
 
+const desktopLifecycle = createDesktopLifecycle({
+  target: app,
+  initialize: startMorrow,
+  currentWindow: () => mainWindow,
+  openWindow: openDesktopWindow,
+  closeResources: closeDesktopResources
+});
+
 if (claimSingleInstance(app, () => mainWindow)) {
-  app.whenReady().then(startMorrow);
+  app.whenReady().then(() => desktopLifecycle.open());
 } else {
   // A duplicate start builds no controller, starts no runtime monitor, and
   // writes nothing outside the bounded Windows-smoke receipt.
@@ -699,13 +892,10 @@ if (claimSingleInstance(app, () => mainWindow)) {
 }
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("activate", () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
-app.on("before-quit", () => {
-  updateController?.stop();
-  void installer?.closeRuntimeMonitor();
-});
+app.on("activate", () => { void desktopLifecycle.open(); });
+app.on("before-quit", (event) => desktopLifecycle.handleQuit(event));
 
 // Electron ignores these exports; the installer tests use them to run the real
 // guards, the real single-instance decision, and the real access-control
 // classification the Windows smoke receipt carries.
-module.exports = { claimSingleInstance, focusExistingWindow, smokeWindowsAclClassification, trusted };
+module.exports = { UPDATE_STATE_CHANNEL, claimSingleInstance, createDesktopLifecycle, focusExistingWindow, smokeWindowsAclClassification, startUpdatesInBackground, trusted };

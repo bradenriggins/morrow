@@ -27,6 +27,15 @@ async function waitFor(predicate: () => Promise<boolean> | boolean, detail: stri
   throw new Error(`Timed out waiting for ${detail}`);
 }
 
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
 async function readLog(path: string): Promise<readonly string[]> {
   try {
     return (await readFile(path, "utf8")).split("\n").filter(Boolean);
@@ -44,8 +53,12 @@ async function connect(
   configPath: string,
   cwd?: string,
   clientName = "morrow-local-owner-test",
+  negotiation: "legacy" | { readonly pin: string } = "legacy",
 ): Promise<ConnectedClient> {
-  const client = new Client({ name: clientName, version: "1.0.0" });
+  const client = new Client(
+    { name: clientName, version: "1.0.0" },
+    { versionNegotiation: { mode: negotiation } },
+  );
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [entryPath],
@@ -201,8 +214,16 @@ describe("Morrow local owner", () => {
 
     let first: ConnectedClient | null = null;
     let second: ConnectedClient | null = null;
+    let third: ConnectedClient | null = null;
     try {
-      [first, second] = await Promise.all([connect(configPath), connect(configPath)]);
+      [first, second, third] = await Promise.all([
+        connect(configPath),
+        connect(configPath, undefined, "morrow-local-owner-modern-test", { pin: "2026-07-28" }),
+        connect(configPath, undefined, "morrow-local-owner-modern-peer-test", { pin: "2026-07-28" }),
+      ]);
+      expect(first.client.getProtocolEra()).toBe("legacy");
+      expect(second.client.getProtocolEra()).toBe("modern");
+      expect(third.client.getProtocolEra()).toBe("modern");
       expect(existsSync(ownerPath)).toBe(true);
       const descriptor = JSON.parse(await readFile(ownerPath, "utf8")) as {
         pid?: unknown;
@@ -281,13 +302,22 @@ describe("Morrow local owner", () => {
       expect(typeof firstCatalog).toBe("string");
       expect(secondCatalog).toBe(firstCatalog);
 
-      const large = await first.client.callTool({
+      const large = await second.client.callTool({
         name: "canvas_page_get",
         arguments: { course_id: "101" },
       });
       const handle = (large.structuredContent as { data?: { handle?: unknown } }).data?.handle;
       expect(typeof handle).toBe("string");
-      const page = await second.client.callTool({
+      const ownPage = await second.client.callTool({
+        name: "morrow_result_page",
+        arguments: { handle, limit: 1_000 },
+      });
+      expect(ownPage.isError).not.toBe(true);
+      expect(ownPage.structuredContent).toMatchObject({
+        schema: "morrow.result-page.v1",
+        handle,
+      });
+      const page = await third.client.callTool({
         name: "morrow_result_page",
         arguments: { handle, limit: 1_000 },
       });
@@ -313,11 +343,18 @@ describe("Morrow local owner", () => {
       await new Promise((resolve) => setTimeout(resolve, 700));
       expect((await readLog(callLogPath)).filter((value) => value === "canvas_page_get")).toHaveLength(2);
       expect((await second.client.callTool({ name: "morrow_health", arguments: {} })).isError).not.toBe(true);
-      expect(second.transport.pid).not.toBeNull();
-      process.kill(second.transport.pid!, "SIGKILL");
+      const ownerPid = descriptor.pid as number;
+      const secondProxyPid = second.transport.pid;
+      expect(secondProxyPid).not.toBeNull();
+      process.kill(ownerPid, "SIGTERM");
+      await waitFor(() => !processIsAlive(ownerPid), "the failed owner connection");
+      await expect(Promise.race([
+        second.client.callTool({ name: "morrow_health", arguments: {} }),
+        new Promise<never>((_resolve, reject) => setTimeout(() => reject(new Error("proxy request did not settle")), 3_000)),
+      ])).rejects.toThrow();
+      await waitFor(() => !processIsAlive(secondProxyPid!), "the failed proxy to terminate");
     } finally {
-      await Promise.all([first?.client.close(), second?.client.close()]);
-      await waitFor(() => !existsSync(ownerPath), "local owner cleanup");
+      await Promise.all([first?.client.close(), second?.client.close(), third?.client.close()]);
       await rm(directory, { recursive: true, force: true });
     }
   }, 30_000);
@@ -428,9 +465,11 @@ describe("Morrow local owner", () => {
       ]);
       const firstSavedText = JSON.stringify(firstSaved);
       const secondSavedText = JSON.stringify(secondSaved);
-      expect(firstSavedText).toContain(firstDigest);
+      expect(JSON.stringify(firstPlan)).not.toContain(firstDigest);
+      expect(JSON.stringify(secondPlan)).not.toContain(secondDigest);
+      expect(firstSavedText).not.toContain(firstDigest);
       expect(firstSavedText).not.toContain(secondDigest);
-      expect(secondSavedText).toContain(secondDigest);
+      expect(secondSavedText).not.toContain(secondDigest);
       expect(secondSavedText).not.toContain(firstDigest);
       for (const value of [JSON.stringify(firstPlan), JSON.stringify(secondPlan), firstSavedText, secondSavedText]) {
         expect(value).not.toContain(projectA);
@@ -439,30 +478,43 @@ describe("Morrow local owner", () => {
         expect(value).not.toContain(secondBytes.toString());
       }
 
-      // Every saved request names the assistant that asked for it. The project is
-      // named and digested; the absolute path stays inside the owner.
+      // A browser-backed operation can outlive its authenticated learner scope.
+      // Its historical public record therefore contains control state only.
       const projectARoot = await realpath(projectA);
       const projectBRoot = await realpath(projectB);
       const projectADigest = createHash("sha256").update(projectARoot).digest("hex");
       const projectBDigest = createHash("sha256").update(projectBRoot).digest("hex");
-      expect(requestedByOf(firstSaved)).toMatchObject({
-        clientName: "assistant-a",
-        workspaceName: "project-a",
-        workspaceDigest: projectADigest,
+      expect(structured(firstSaved)).toMatchObject({
+        schema: "morrow.operation-control.v1",
+        operationId: firstOperation,
+        state: "awaiting_approval",
+        dispatchAttempt: 0,
+        contentOmittedReason: "historical_learner_scope_unavailable",
       });
-      expect(requestedByOf(secondSaved)).toMatchObject({
-        clientName: "assistant-b",
-        workspaceName: "project-b",
-        workspaceDigest: projectBDigest,
+      expect(structured(secondSaved)).toMatchObject({
+        schema: "morrow.operation-control.v1",
+        operationId: secondOperation,
+        state: "awaiting_approval",
+        dispatchAttempt: 0,
+        contentOmittedReason: "historical_learner_scope_unavailable",
       });
-      expect(requestedByOf(firstSaved)?.sessionId).not.toBe(requestedByOf(secondSaved)?.sessionId);
+      expect(requestedByOf(firstSaved)).toBeUndefined();
+      expect(requestedByOf(secondSaved)).toBeUndefined();
 
       const listed = await first.client.callTool({ name: "morrow_operation_list", arguments: { limit: 10 } });
       const listedOperations = (structured(listed).operations as Record<string, unknown>[] | undefined) || [];
       const listedFirst = listedOperations.find((entry) => entry.operationId === firstOperation);
       const listedSecond = listedOperations.find((entry) => entry.operationId === secondOperation);
-      expect(requestedByOf({ structuredContent: listedFirst })).toMatchObject({ clientName: "assistant-a", workspaceName: "project-a" });
-      expect(requestedByOf({ structuredContent: listedSecond })).toMatchObject({ clientName: "assistant-b", workspaceName: "project-b" });
+      expect(listedFirst).toMatchObject({
+        schema: "morrow.operation-control.v1",
+        operationId: firstOperation,
+        contentOmittedReason: "historical_learner_scope_unavailable",
+      });
+      expect(listedSecond).toMatchObject({
+        schema: "morrow.operation-control.v1",
+        operationId: secondOperation,
+        contentOmittedReason: "historical_learner_scope_unavailable",
+      });
       expect(JSON.stringify(listed)).not.toContain(await realpath(projectB));
 
       const batchRequest = (name: string, moduleId: number) => ({
@@ -775,6 +827,11 @@ describe("Morrow local owner", () => {
               ? {
                 schema: "morrow.bridge.update-readback.v1", extensionId, manifestVersion: "1.0.2", installType: "development", activeFolderProof,
               }
+              : command.maintenance.action === "commit"
+                ? {
+                  schema: "morrow.bridge.update-committed.v1", extensionId, previousManifestVersion: command.maintenance.previousManifestVersion,
+                  manifestVersion: "1.0.2", quiesceEpoch: command.maintenance.quiesceEpoch, committed: true, activeFolderProof,
+                }
               : {
                 schema: "morrow.bridge.update-resumed.v1", extensionId, manifestVersion: "1.0.2",
                 quiesceEpoch: command.maintenance.quiesceEpoch, resumed: true,
@@ -801,6 +858,11 @@ describe("Morrow local owner", () => {
       });
       const readback = await requestLocalOwnerMaintenance({ action: "bridge", ...bridgeLease, control: { action: "readback" } });
       expect(readback).toMatchObject({ status: "bridge", result: { schema: "morrow.bridge.update-readback.v1", extensionId } });
+      const committed = await requestLocalOwnerMaintenance({
+        action: "bridge", ...bridgeLease,
+        control: { action: "commit", previousManifestVersion: "1.0.1", quiesceEpoch: "local-owner-bridge-epoch" },
+      });
+      expect(committed).toMatchObject({ status: "bridge", result: { schema: "morrow.bridge.update-committed.v1", committed: true } });
       const resumed = await requestLocalOwnerMaintenance({
         action: "bridge", ...bridgeLease,
         control: { action: "resume", quiesceEpoch: "local-owner-bridge-epoch", fileLayerRestored: true },
@@ -808,7 +870,7 @@ describe("Morrow local owner", () => {
       expect(resumed).toMatchObject({ status: "bridge", result: { schema: "morrow.bridge.update-resumed.v1", resumed: true } });
       const released = await requestLocalOwnerMaintenance({ action: "release", ...bridgeLease });
       expect(released).toMatchObject({ status: "released", leaseId: held.leaseId });
-      expect(bridgeActions).toEqual(["status", "quiesce", "readback", "resume"]);
+      expect(bridgeActions).toEqual(["status", "quiesce", "readback", "commit", "resume"]);
       expect((await monitor.client.listTools()).tools.map((tool) => tool.name)).not.toContain("morrow_bridge_maintenance");
     } finally {
       await bridge?.close();

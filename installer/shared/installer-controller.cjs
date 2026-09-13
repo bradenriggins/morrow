@@ -1,18 +1,20 @@
 "use strict";
 
 const crypto = require("node:crypto");
+const fsConstants = require("node:fs").constants;
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { ASSISTANTS, errorDetails, installerState } = require("./contract.cjs");
-const { DATA_REMOVAL_SCHEMA, freshRecord, insideDirectory, inspectRecord, retentionSnapshot } = require("./state-policy.cjs");
+const { DATA_REMOVAL_SCHEMA, freshRecord, insideDirectory, inspectRecord, readPrivateRegularFile, retentionSnapshot } = require("./state-policy.cjs");
 const {
   bridgeInstallationStatus,
   compareChromeVersions,
   confirmBridgeUpdate,
   initializeBridgeDirectory,
+  inspectPendingBridgeUpdate,
   issueBridgeActiveFolderChallenge,
   parseChromeVersion,
   prepareBridgeUpdate,
@@ -20,10 +22,17 @@ const {
   readReleaseManifest
 } = require("./bridge-updates.cjs");
 const { completeBridgeUpdate, stageBridgeSwap } = require("./bridge-coordination.cjs");
-const { prepareClaudeDesktopBundle, inspectClaudeDesktopConnection, processAlive } = require("./claude-desktop.cjs");
-const { blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, readBlackboardHealth, removeBlackboardTenant, selectBlackboardCourses } = require("./blackboard.cjs");
-const { detectAssistantApplication } = require("./assistant-app-detection.cjs");
+const {
+  inspectClaudeDesktopConnection,
+  isCurrentClaudeDesktopSetup,
+  prepareClaudeDesktopBundle,
+  processAlive,
+} = require("./claude-desktop.cjs");
+const { processMatchesRecordedLifetime } = require("./process-lifetime.cjs");
+const { blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, readBlackboardHealth, removeBlackboardData, removeBlackboardTenant, selectBlackboardCourses } = require("./blackboard.cjs");
+const { detectAssistantApplication, detectAssistantCommand } = require("./assistant-app-detection.cjs");
 const { detectWindowsCodexPackage } = require("./windows-appx-detection.cjs");
+const { parseStrictJson } = require("./strict-utf8.cjs");
 const {
   canonicalDirectory,
   captureConfiguration,
@@ -89,6 +98,14 @@ function fileHash(content) {
 // state display. Four MiB is far above any real one; a larger file is refused
 // as unreadable rather than read whole.
 const ASSISTANT_CONFIG_READ_LIMIT = 4 * 1024 * 1024;
+const INSTALLER_RECORD_READ_LIMIT = 64 * 1024;
+const ASSISTANT_REMOVAL_READ_LIMIT = 16 * 1024;
+const ASSISTANT_REMOVAL_SCHEMA = "morrow.assistant-removal.v1";
+const CLAUDE_GENERATION_TRANSITION_READ_LIMIT = 64 * 1024;
+const CLAUDE_GENERATION_TRANSITION_SCHEMA = "morrow.claude-generation-transition.v1";
+const CLAUDE_SETUP_ROOT_LIMIT = 128;
+const SHA256 = /^[0-9a-f]{64}$/;
+const OPERATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 async function readConfigurationFile(file) {
   const info = await fs.lstat(file).then((value) => value, () => null);
@@ -113,36 +130,116 @@ function pause(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function limitedText(chunks) {
-  return Buffer.concat(chunks).subarray(0, 128 * 1024).toString("utf8");
+const DEFAULT_COMMAND_OUTPUT_LIMIT = 128 * 1024;
+const DEFAULT_TERMINATION_GRACE_MS = 500;
+const DEFAULT_CLOSE_GRACE_MS = 500;
+
+function killChild(child, signal) {
+  try {
+    if (process.platform !== "win32" && child.pid) {
+      process.kill(-child.pid, signal);
+      return;
+    }
+  } catch (error) {
+    if (error?.code === "ESRCH") return;
+  }
+  try { child.kill(signal); } catch {}
 }
 
-function run(executable, argumentsValue, options = {}) {
+/**
+ * Runs one command with finite time, retained output, and termination bounds.
+ * POSIX children own a process group so their descendants cannot outlive a
+ * timed-out installer command. Windows child.kill terminates the spawned
+ * process directly. The final deadline releases pipes and settles even when an
+ * operating-system process is stuck and never reports close.
+ */
+function runBoundedCommand(executable, argumentsValue, options = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, argumentsValue, {
-      cwd: options.cwd,
-      env: options.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true
-    });
-    const output = [];
-    const error = [];
+    const timeoutMs = options.timeoutMs ?? 60_000;
+    const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_COMMAND_OUTPUT_LIMIT;
+    const terminationGraceMs = options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS;
+    const closeGraceMs = options.closeGraceMs ?? DEFAULT_CLOSE_GRACE_MS;
+    if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0
+      || !Number.isSafeInteger(maxOutputBytes) || maxOutputBytes <= 0
+      || !Number.isSafeInteger(terminationGraceMs) || terminationGraceMs < 0
+      || !Number.isSafeInteger(closeGraceMs) || closeGraceMs < 0) {
+      reject(new TypeError("Invalid bounded command limits"));
+      return;
+    }
+
+    let child;
+    try {
+      child = spawn(executable, argumentsValue, {
+        cwd: options.cwd,
+        env: options.env,
+        stdio: ["ignore", "pipe", "pipe"],
+        windowsHide: true,
+        detached: process.platform !== "win32"
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    const stdout = [];
+    const stderr = [];
+    let retainedBytes = 0;
+    let observedBytes = 0;
     let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) child.kill();
-    }, options.timeoutMs ?? 60_000);
-    child.stdout.on("data", (chunk) => output.push(chunk));
-    child.stderr.on("data", (chunk) => error.push(chunk));
-    child.once("error", (reason) => {
-      clearTimeout(timer);
-      if (!settled) { settled = true; reject(reason); }
+    let termination = null;
+    let forceKillTimer = null;
+    let closeDeadlineTimer = null;
+
+    const clearTimers = () => {
+      clearTimeout(timeoutTimer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      if (closeDeadlineTimer) clearTimeout(closeDeadlineTimer);
+    };
+    const result = (code, signal) => ({
+      code,
+      signal: signal || null,
+      termination,
+      stdout: Buffer.concat(stdout).toString("utf8"),
+      stderr: Buffer.concat(stderr).toString("utf8")
     });
-    child.once("close", (code) => {
-      clearTimeout(timer);
+    const finish = (value) => {
       if (settled) return;
       settled = true;
-      resolve({ code, stdout: limitedText(output), stderr: limitedText(error) });
+      clearTimers();
+      resolve(value);
+    };
+    const terminate = (reason) => {
+      if (settled || termination) return;
+      termination = reason;
+      clearTimeout(timeoutTimer);
+      killChild(child, "SIGTERM");
+      forceKillTimer = setTimeout(() => killChild(child, "SIGKILL"), terminationGraceMs);
+      closeDeadlineTimer = setTimeout(() => {
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.unref();
+        finish(result(null, "SIGKILL"));
+      }, terminationGraceMs + closeGraceMs);
+    };
+    const retain = (destination, chunk) => {
+      observedBytes += chunk.length;
+      const available = maxOutputBytes - retainedBytes;
+      if (available > 0) {
+        const kept = chunk.length <= available ? chunk : chunk.subarray(0, available);
+        destination.push(Buffer.from(kept));
+        retainedBytes += kept.length;
+      }
+      if (observedBytes > maxOutputBytes) terminate("output_limit");
+    };
+    const timeoutTimer = setTimeout(() => terminate("timeout"), timeoutMs);
+    child.stdout.on("data", (chunk) => retain(stdout, chunk));
+    child.stderr.on("data", (chunk) => retain(stderr, chunk));
+    child.once("error", (reason) => {
+      if (settled) return;
+      settled = true;
+      clearTimers();
+      reject(reason);
     });
+    child.once("close", (code, signal) => finish(result(code, signal)));
   });
 }
 
@@ -152,39 +249,16 @@ function run(executable, argumentsValue, options = {}) {
  * more than `maxBytes`. Assistant detection runs on the Electron main process,
  * so this waits for the child asynchronously and never holds the window.
  */
-function readCommandOutput(executable, argumentsValue, { timeoutMs, maxBytes }) {
-  return new Promise((resolve) => {
-    let child;
-    try {
-      child = spawn(executable, argumentsValue, {
-        stdio: ["ignore", "pipe", "ignore"],
-        windowsHide: true,
-        timeout: timeoutMs
-      });
-    } catch {
-      resolve(null);
-      return;
-    }
-    const chunks = [];
-    let bytes = 0;
-    let settled = false;
-    const answer = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
-    child.stdout.on("data", (chunk) => {
-      bytes += chunk.length;
-      if (bytes > maxBytes) {
-        child.kill();
-        answer(null);
-        return;
-      }
-      chunks.push(chunk);
+async function readCommandOutput(executable, argumentsValue, { timeoutMs, maxBytes }) {
+  try {
+    const result = await runBoundedCommand(executable, argumentsValue, {
+      timeoutMs,
+      maxOutputBytes: maxBytes
     });
-    child.once("error", () => answer(null));
-    child.once("close", (code) => answer(code === 0 ? Buffer.concat(chunks).toString("utf8") : null));
-  });
+    return result.code === 0 && result.termination === null ? result.stdout : null;
+  } catch {
+    return null;
+  }
 }
 
 async function readMacApplicationBundleIdentifier(applicationPath) {
@@ -206,14 +280,13 @@ async function runWindowsPowerShell(script) {
 }
 
 async function commandFound(command) {
-  const directories = process.platform === "win32"
-    ? (process.env.PATH || "").split(path.delimiter)
-    : ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"];
-  const names = process.platform === "win32" ? [command, `${command}.cmd`, `${command}.exe`] : [command];
-  for (const directory of directories) {
-    for (const name of names) if (directory && await exists(path.join(directory, name))) return true;
-  }
-  return false;
+  return detectAssistantCommand({
+    command,
+    probe: async (candidate) => await readCommandOutput(candidate, ["--version"], {
+      timeoutMs: 2_000,
+      maxBytes: 4 * 1024,
+    }) !== null,
+  });
 }
 
 async function detectAssistant(assistant) {
@@ -258,39 +331,113 @@ function clientConfigTarget(assistant, home, project) {
 // every entry it wrote carries.
 const MORROW_SERVER_NAME = "morrow";
 
-/**
- * A Codex configuration file with the table Morrow appended removed, or `null`
- * when it carries no such table. Morrow appends its table at the end of the
- * file, so a table header after it is a shape Morrow did not write and the
- * removal refuses rather than guessing where its own table ends.
- */
-function withoutCodexMorrowTable(content) {
-  const lines = content.split("\n");
-  const start = lines.findLastIndex((line) => line.trim() === `[mcp_servers.${MORROW_SERVER_NAME}]`);
-  if (start === -1) return null;
-  if (lines.slice(start + 1).some((line) => line.trimStart().startsWith("["))) throw errorDetails("setup_failed");
-  const kept = lines.slice(0, start).join("\n").trimEnd();
-  return kept.length === 0 ? "" : `${kept}\n`;
+function exactObject(value, keys) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === keys.length
+    && Object.keys(value).every((key) => keys.includes(key)));
 }
 
-/**
- * One assistant configuration file with Morrow's own entry removed, or `null`
- * when the file carries no Morrow entry. This mirrors exactly what
- * packages/client-config writes: a `morrow` key inside the `mcpServers` object
- * of a JSON file, and a `[mcp_servers.morrow]` table at the end of a Codex TOML
- * file. Everything else in the file is kept as it is, so a change to what that
- * package writes needs a change here as well.
- */
-function withoutMorrowEntry(assistantId, content) {
-  if (assistantId === "codex") return withoutCodexMorrowTable(content);
-  let document;
-  try { document = JSON.parse(content); } catch { throw errorDetails("setup_failed"); }
-  if (!document || typeof document !== "object" || Array.isArray(document)) throw errorDetails("setup_failed");
-  const servers = document.mcpServers;
-  if (!servers || typeof servers !== "object" || Array.isArray(servers)
-    || !Object.hasOwn(servers, MORROW_SERVER_NAME)) return null;
-  delete servers[MORROW_SERVER_NAME];
-  return `${JSON.stringify(document, null, 2)}\n`;
+function canonicalAbsolutePath(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 4096
+    && !value.includes("\0") && path.isAbsolute(value) && path.normalize(value) === value;
+}
+
+function installerRecordDigest(record, home) {
+  const inspected = inspectRecord(record, { homeDirectory: home });
+  if (!inspected.compatible) throw new Error(inspected.reason);
+  return fileHash(Buffer.from(JSON.stringify(inspected.record), "utf8"));
+}
+
+function recordWithoutAssistant(record, assistantId) {
+  const configured = { ...(record.configured || {}) };
+  delete configured[assistantId];
+  const remaining = ASSISTANTS.map((candidate) => candidate.id).filter((id) => configured[id] !== undefined);
+  return {
+    ...record,
+    selectedAssistantId: record.selectedAssistantId === assistantId ? remaining[0] ?? null : record.selectedAssistantId,
+    configured,
+  };
+}
+
+function inspectAssistantRemovalTombstone(value, home) {
+  const keys = [
+    "schema", "operationId", "assistantId", "target", "beforeSha256", "afterSha256",
+    "recordBeforeSha256", "recordAfterSha256",
+  ];
+  if (!exactObject(value, keys) || value.schema !== ASSISTANT_REMOVAL_SCHEMA
+    || typeof value.operationId !== "string" || !OPERATION_ID.test(value.operationId)
+    || typeof value.assistantId !== "string"
+    || typeof value.target !== "string" || !canonicalAbsolutePath(value.target)
+    || typeof value.beforeSha256 !== "string" || !SHA256.test(value.beforeSha256)
+    || typeof value.afterSha256 !== "string" || !SHA256.test(value.afterSha256)
+    || value.beforeSha256 === value.afterSha256
+    || typeof value.recordBeforeSha256 !== "string" || !SHA256.test(value.recordBeforeSha256)
+    || typeof value.recordAfterSha256 !== "string" || !SHA256.test(value.recordAfterSha256)
+    || value.recordBeforeSha256 === value.recordAfterSha256) return null;
+  const assistant = ASSISTANTS.find((candidate) => candidate.id === value.assistantId);
+  if (!assistant || assistant.id === "claude-desktop" || !configuredProject(assistant, home, value.target)) return null;
+  return {
+    schema: value.schema,
+    operationId: value.operationId,
+    assistantId: value.assistantId,
+    target: value.target,
+    beforeSha256: value.beforeSha256,
+    afterSha256: value.afterSha256,
+    recordBeforeSha256: value.recordBeforeSha256,
+    recordAfterSha256: value.recordAfterSha256,
+  };
+}
+
+function directClaudeSetupRoot(candidate, setupRoot, prefix = "setup-") {
+  return canonicalAbsolutePath(candidate)
+    && path.dirname(candidate) === setupRoot
+    && path.basename(candidate).startsWith(prefix)
+    && path.basename(candidate).length > prefix.length;
+}
+
+function inspectClaudeGenerationTransition(value, stateDirectory, home) {
+  const keys = ["schema", "operationId", "mode", "recordBeforeSha256", "recordAfterSha256", "preparedEntry", "moves"];
+  if (!exactObject(value, keys) || value.schema !== CLAUDE_GENERATION_TRANSITION_SCHEMA
+    || typeof value.operationId !== "string" || !OPERATION_ID.test(value.operationId)
+    || !["replace", "remove", "prune"].includes(value.mode)
+    || typeof value.recordBeforeSha256 !== "string" || !SHA256.test(value.recordBeforeSha256)
+    || typeof value.recordAfterSha256 !== "string" || !SHA256.test(value.recordAfterSha256)
+    || !Array.isArray(value.moves) || value.moves.length > CLAUDE_SETUP_ROOT_LIMIT) return null;
+  const setupRoot = path.join(stateDirectory, "ClaudeDesktop");
+  const moves = [];
+  const sources = new Set();
+  const destinations = new Set();
+  for (let index = 0; index < value.moves.length; index += 1) {
+    const move = value.moves[index];
+    if (!exactObject(move, ["source", "destination"])
+      || !directClaudeSetupRoot(move.source, setupRoot)
+      || !directClaudeSetupRoot(move.destination, setupRoot, `.quarantine-${value.operationId}-${index}-`)
+      || sources.has(move.source) || destinations.has(move.destination)) return null;
+    sources.add(move.source);
+    destinations.add(move.destination);
+    moves.push({ source: move.source, destination: move.destination });
+  }
+  let preparedEntry = null;
+  if (value.mode === "replace") {
+    if (value.recordBeforeSha256 === value.recordAfterSha256 || !value.preparedEntry) return null;
+    const inspected = inspectRecord({ ...freshRecord(), configured: { "claude-desktop": value.preparedEntry } }, { homeDirectory: home });
+    preparedEntry = inspected.compatible ? inspected.record.configured["claude-desktop"] : null;
+    if (!preparedEntry || !directClaudeSetupRoot(path.dirname(preparedEntry.bundlePath), setupRoot)
+      || sources.has(path.dirname(preparedEntry.bundlePath))) return null;
+  } else {
+    if (value.preparedEntry !== null) return null;
+    if (value.mode === "remove" ? value.recordBeforeSha256 === value.recordAfterSha256
+      : value.recordBeforeSha256 !== value.recordAfterSha256) return null;
+  }
+  return {
+    schema: value.schema,
+    operationId: value.operationId,
+    mode: value.mode,
+    recordBeforeSha256: value.recordBeforeSha256,
+    recordAfterSha256: value.recordAfterSha256,
+    preparedEntry,
+    moves,
+  };
 }
 
 /**
@@ -320,15 +467,19 @@ class InstallerController {
     this.trustedMcpRuntimeManifestSha256 = deps.trustedMcpRuntimeManifestSha256;
     this.trustedMcpRuntimeNodeSha256 = deps.trustedMcpRuntimeNodeSha256 || (() => null);
     this.detectAssistant = deps.detectAssistant;
-    this.runCli = deps.runCli || run;
+    this.runCli = deps.runCli || runBoundedCommand;
     this.updateSnapshot = deps.updateSnapshot || (() => null);
     this.userData = this.app.getPath("userData");
     this.paths = payloadLayout(deps.payloadRoot, this.userData);
     this.home = deps.homeDirectory;
     this.recordPath = path.join(this.paths.state, "installer.json");
+    this.assistantRemovalPath = path.join(this.paths.state, "assistant-removal.json");
+    this.claudeGenerationTransitionPath = path.join(this.paths.state, "claude-generation-transition.json");
+    this.isCurrentClaudeDesktopSetup = deps.isCurrentClaudeDesktopSetup || isCurrentClaudeDesktopSetup;
     this.workspace = null;
     this.runtimeMonitor = null;
     this.runtimeWorkspace = null;
+    this.runtimeClosing = null;
     this.restartLeases = new Map();
     this.bridgeInstallation = null;
     this.bridgeInitialization = null;
@@ -340,7 +491,10 @@ class InstallerController {
     this.gatewayCoreModuleImport = null;
     this.blackboardClientModule = null;
     this.discoverBlackboardConnection = deps.discoverBlackboardConnection || ((input) => this.readBlackboardConnection(input));
-    this.repairInProgress = null;
+    this.desktopMutationInProgress = null;
+    this.desktopMutationGuard = null;
+    this.dataRemovalInProgress = null;
+    this.dataRemovalGuard = null;
     this.dataRemoval = null;
     // assistant id -> { at, answer }. See detectedAssistant().
     this.assistantDetection = new Map();
@@ -369,10 +523,14 @@ class InstallerController {
     return this.detectedAssistant(assistant);
   }
 
-  async record() {
+  async readInstallerRecord() {
     try {
-      const parsed = JSON.parse(await fs.readFile(this.recordPath, "utf8"));
-      const inspected = inspectRecord(parsed);
+      const content = await readPrivateRegularFile(this.recordPath, {
+        maxBytes: INSTALLER_RECORD_READ_LIMIT,
+        trustedRoot: this.paths.state,
+      });
+      const parsed = parseStrictJson(content, "installer record");
+      const inspected = inspectRecord(parsed, { homeDirectory: this.home });
       if (!inspected.compatible) throw new Error(inspected.reason);
       return inspected.record;
     } catch (error) {
@@ -381,17 +539,250 @@ class InstallerController {
     }
   }
 
-  async writeRecord(record) {
-    const inspected = inspectRecord({ ...freshRecord(), ...record });
-    if (!inspected.compatible) throw new Error(inspected.reason);
+  async record() {
+    const record = await this.readInstallerRecord();
+    if (await this.readAssistantRemovalTombstone()) throw new Error("assistant_removal_recovery_required");
+    if (await this.readClaudeGenerationTransition()) throw new Error("claude_generation_recovery_required");
+    return record;
+  }
+
+  async ensureInstallerStateDirectory() {
+    const existingDirectory = await fs.lstat(this.paths.state).catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    if (existingDirectory && (!existingDirectory.isDirectory() || existingDirectory.isSymbolicLink())) {
+      throw new Error("record_directory_invalid");
+    }
     await mkdirPrivate(this.paths.state);
+    const stateDirectory = await fs.lstat(this.paths.state);
+    if (!stateDirectory.isDirectory() || stateDirectory.isSymbolicLink()
+      || (this.platform !== "win32" && (stateDirectory.mode & 0o077) !== 0)) {
+      throw new Error("record_directory_invalid");
+    }
+  }
+
+  async syncInstallerStateDirectory() {
+    if (this.platform === "win32") return;
+    const directory = await fs.open(this.paths.state, fsConstants.O_RDONLY);
+    try { await directory.sync(); } finally { await directory.close(); }
+  }
+
+  async readAssistantRemovalTombstone() {
+    let content;
+    try {
+      content = await readPrivateRegularFile(this.assistantRemovalPath, {
+        maxBytes: ASSISTANT_REMOVAL_READ_LIMIT,
+        trustedRoot: this.paths.state,
+      });
+    } catch (error) {
+      if (error?.code === "ENOENT") return null;
+      throw new Error("assistant_removal_recovery_required");
+    }
+    let parsed;
+    try { parsed = parseStrictJson(content, "assistant removal recovery record"); }
+    catch { throw new Error("assistant_removal_recovery_required"); }
+    const inspected = inspectAssistantRemovalTombstone(parsed, this.home);
+    if (!inspected) throw new Error("assistant_removal_recovery_required");
+    return inspected;
+  }
+
+  async writeAssistantRemovalTombstone(tombstone) {
+    const inspected = inspectAssistantRemovalTombstone(tombstone, this.home);
+    if (!inspected) throw new Error("assistant_removal_recovery_required");
+    await this.ensureInstallerStateDirectory();
+    if (await fs.lstat(this.assistantRemovalPath).then(() => true, (error) => {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    })) throw new Error("assistant_removal_recovery_required");
+
+    const temporary = `${this.assistantRemovalPath}.tmp-${crypto.randomUUID()}`;
+    let handle = null;
+    try {
+      handle = await fs.open(temporary, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+      await handle.writeFile(`${JSON.stringify(inspected)}\n`, "utf8");
+      if (this.platform !== "win32") await handle.chmod(0o600);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await fs.link(temporary, this.assistantRemovalPath);
+      await fs.rm(temporary, { force: true });
+      await this.syncInstallerStateDirectory();
+    } finally {
+      await handle?.close().catch(() => {});
+      await fs.rm(temporary, { force: true }).catch(() => {});
+    }
+    const persisted = await this.readAssistantRemovalTombstone();
+    if (JSON.stringify(persisted) !== JSON.stringify(inspected)) {
+      throw new Error("assistant_removal_recovery_required");
+    }
+    return inspected;
+  }
+
+  async clearAssistantRemovalTombstone(expected) {
+    const current = await this.readAssistantRemovalTombstone();
+    if (!current || JSON.stringify(current) !== JSON.stringify(expected)) {
+      throw new Error("assistant_removal_recovery_required");
+    }
+    await fs.unlink(this.assistantRemovalPath);
+    await this.syncInstallerStateDirectory();
+    if (await this.readAssistantRemovalTombstone()) throw new Error("assistant_removal_recovery_required");
+  }
+
+  async readClaudeGenerationTransition() {
+    let content;
+    try {
+      content = await readPrivateRegularFile(this.claudeGenerationTransitionPath, {
+        maxBytes: CLAUDE_GENERATION_TRANSITION_READ_LIMIT,
+        trustedRoot: this.paths.state,
+      });
+    } catch (error) {
+      if (error?.code === "ENOENT") return null;
+      throw new Error("claude_generation_recovery_required");
+    }
+    let parsed;
+    try { parsed = parseStrictJson(content, "Claude generation recovery record"); }
+    catch { throw new Error("claude_generation_recovery_required"); }
+    const inspected = inspectClaudeGenerationTransition(parsed, await fs.realpath(this.paths.state), this.home);
+    if (!inspected) throw new Error("claude_generation_recovery_required");
+    return inspected;
+  }
+
+  async writeClaudeGenerationTransition(transition) {
+    const inspected = inspectClaudeGenerationTransition(transition, await fs.realpath(this.paths.state), this.home);
+    if (!inspected) throw new Error("claude_generation_recovery_required");
+    await this.ensureInstallerStateDirectory();
+    if (await fs.lstat(this.claudeGenerationTransitionPath).then(() => true, (error) => {
+      if (error?.code === "ENOENT") return false;
+      throw error;
+    })) throw new Error("claude_generation_recovery_required");
+    const temporary = `${this.claudeGenerationTransitionPath}.tmp-${crypto.randomUUID()}`;
+    let handle = null;
+    try {
+      handle = await fs.open(temporary, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+      await handle.writeFile(`${JSON.stringify(inspected)}\n`, "utf8");
+      if (this.platform !== "win32") await handle.chmod(0o600);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await fs.link(temporary, this.claudeGenerationTransitionPath);
+      await fs.rm(temporary, { force: true });
+      await this.syncInstallerStateDirectory();
+    } finally {
+      await handle?.close().catch(() => {});
+      await fs.rm(temporary, { force: true }).catch(() => {});
+    }
+    const persisted = await this.readClaudeGenerationTransition();
+    if (JSON.stringify(persisted) !== JSON.stringify(inspected)) throw new Error("claude_generation_recovery_required");
+    return inspected;
+  }
+
+  async clearClaudeGenerationTransition(expected) {
+    const current = await this.readClaudeGenerationTransition();
+    if (!current || JSON.stringify(current) !== JSON.stringify(expected)) throw new Error("claude_generation_recovery_required");
+    await fs.unlink(this.claudeGenerationTransitionPath);
+    await this.syncInstallerStateDirectory();
+    if (await this.readClaudeGenerationTransition()) throw new Error("claude_generation_recovery_required");
+  }
+
+  async ensureInstallerBackupDirectory() {
+    const backups = path.join(this.paths.state, "Backups");
+    const existingDirectory = await fs.lstat(backups).catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    if (existingDirectory && (!existingDirectory.isDirectory() || existingDirectory.isSymbolicLink())) {
+      throw new Error("record_backup_directory_invalid");
+    }
+    if (!existingDirectory) {
+      try { await fs.mkdir(backups, { mode: 0o700 }); }
+      catch (error) { if (error?.code !== "EEXIST") throw error; }
+    }
+    const backupDirectory = await fs.lstat(backups);
+    if (!backupDirectory.isDirectory() || backupDirectory.isSymbolicLink()) {
+      throw new Error("record_backup_directory_invalid");
+    }
+    if (this.platform !== "win32") {
+      const flags = fsConstants.O_RDONLY
+        | (typeof fsConstants.O_NOFOLLOW === "number" ? fsConstants.O_NOFOLLOW : 0)
+        | (typeof fsConstants.O_DIRECTORY === "number" ? fsConstants.O_DIRECTORY : 0);
+      const directory = await fs.open(backups, flags);
+      try {
+        const opened = await directory.stat();
+        if (!opened.isDirectory() || opened.dev !== backupDirectory.dev || opened.ino !== backupDirectory.ino) {
+          throw new Error("record_backup_directory_invalid");
+        }
+        await directory.chmod(0o700);
+        const hardened = await directory.stat();
+        const hardenedPath = await fs.lstat(backups);
+        if (!hardened.isDirectory() || (hardened.mode & 0o077) !== 0
+          || !hardenedPath.isDirectory() || hardenedPath.isSymbolicLink()
+          || hardenedPath.dev !== hardened.dev || hardenedPath.ino !== hardened.ino) {
+          throw new Error("record_backup_directory_invalid");
+        }
+      } finally {
+        await directory.close();
+      }
+    }
+    return backups;
+  }
+
+  async writeRecord(record) {
+    const inspected = inspectRecord({ ...freshRecord(), ...record }, { homeDirectory: this.home });
+    if (!inspected.compatible) throw new Error(inspected.reason);
+    await this.ensureInstallerStateDirectory();
     const temporary = `${this.recordPath}.tmp-${crypto.randomUUID()}`;
-    await fs.writeFile(temporary, `${JSON.stringify(inspected.record)}\n`, { mode: 0o600, flag: "wx" });
-    await fs.rename(temporary, this.recordPath);
-    if (this.platform !== "win32") await fs.chmod(this.recordPath, 0o600);
+    let handle = null;
+    let renamed = false;
+    try {
+      handle = await fs.open(temporary, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL, 0o600);
+      await handle.writeFile(`${JSON.stringify(inspected.record)}\n`, "utf8");
+      if (this.platform !== "win32") await handle.chmod(0o600);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await fs.rename(temporary, this.recordPath);
+      renamed = true;
+      if (this.platform !== "win32") {
+        const directory = await fs.open(this.paths.state, fsConstants.O_RDONLY);
+        try { await directory.sync(); } finally { await directory.close(); }
+      }
+    } finally {
+      await handle?.close().catch(() => {});
+      if (!renamed) await fs.rm(temporary, { force: true }).catch(() => {});
+    }
     // Morrow keeps its own record on this computer again, so a report from an
     // earlier data removal no longer describes what is here.
     this.dataRemoval = null;
+  }
+
+  /**
+   * Moves an unreadable record entry itself into Backups without reading
+   * through it. This preserves a normal malformed record for support while a
+   * symlink, directory, pipe, or device can never select bytes outside State.
+   */
+  async quarantineInstallerRecord() {
+    const info = await fs.lstat(this.recordPath).catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!info) return null;
+    const backups = await this.ensureInstallerBackupDirectory();
+    let destination = null;
+    if ((info.isFile() && !info.isSymbolicLink() && info.nlink === 1) || info.isDirectory()) {
+      destination = path.join(backups, `installer-${crypto.randomUUID()}${info.isDirectory() ? ".invalid" : ".json"}`);
+      await fs.rename(this.recordPath, destination);
+      if (this.platform !== "win32" && info.isFile()) await fs.chmod(destination, 0o600);
+    } else {
+      await fs.rm(this.recordPath, { force: true });
+    }
+    if (this.platform !== "win32") {
+      for (const directoryPath of [backups, this.paths.state]) {
+        const directory = await fs.open(directoryPath, fsConstants.O_RDONLY);
+        try { await directory.sync(); } finally { await directory.close(); }
+      }
+    }
+    return destination;
   }
 
   /** Whether a confirmed data removal already ran in this session. */
@@ -516,24 +907,26 @@ class InstallerController {
   }
 
   async blackboardHealth() {
+    let privateFileAccessAccepted;
     try {
-      const privateFileAccessAccepted = await this.privateFileAccessAccepted();
-      return await readBlackboardHealth(this.home, { privateFileAccessAccepted });
-    } catch {
-      return { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] };
-    }
+      privateFileAccessAccepted = await this.privateFileAccessAccepted();
+    } catch { /* Health distinguishes a missing route from saved data Morrow cannot safely open. */ }
+    return readBlackboardHealth(this.home, { privateFileAccessAccepted });
   }
 
   async configureBlackboard(input) {
     try {
-      const privateFileAccessAccepted = await this.privateFileAccessAccepted();
-      return configureBlackboard({
-        home: this.home,
-        input,
-        discoverConnection: this.discoverBlackboardConnection,
-        privateFileAccessAccepted,
-        prepareCredentialDirectory: ({ directory }) => this.prepareBlackboardCredentialDirectories(directory),
-        writeCredential: (value) => this.writeBlackboardCredential(value)
+      return await this.withDesktopMutation(async (transaction) => {
+        await transaction.stopRuntime();
+        const privateFileAccessAccepted = await this.privateFileAccessAccepted();
+        return configureBlackboard({
+          home: this.home,
+          input,
+          discoverConnection: this.discoverBlackboardConnection,
+          privateFileAccessAccepted,
+          prepareCredentialDirectory: ({ directory }) => this.prepareBlackboardCredentialDirectories(directory),
+          writeCredential: (value) => this.writeBlackboardCredential(value)
+        });
       });
     } finally {
       if (input && typeof input === "object" && typeof input.applicationSecret === "string") input.applicationSecret = "";
@@ -541,8 +934,11 @@ class InstallerController {
   }
 
   async selectBlackboardCourses(input) {
-    const privateFileAccessAccepted = await this.privateFileAccessAccepted();
-    return selectBlackboardCourses({ home: this.home, input, privateFileAccessAccepted });
+    return this.withDesktopMutation(async (transaction) => {
+      await transaction.stopRuntime();
+      const privateFileAccessAccepted = await this.privateFileAccessAccepted();
+      return selectBlackboardCourses({ home: this.home, input, privateFileAccessAccepted });
+    });
   }
 
   /**
@@ -552,8 +948,21 @@ class InstallerController {
    */
   async removeBlackboardTenant(input) {
     if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).length !== 1) throw new TypeError("Blackboard removal request is invalid");
-    const privateFileAccessAccepted = await this.privateFileAccessAccepted();
-    return removeBlackboardTenant({ home: this.home, tenantId: input.tenantId, privateFileAccessAccepted });
+    return this.withDesktopMutation(async (transaction) => {
+      await transaction.stopRuntime();
+      const privateFileAccessAccepted = await this.privateFileAccessAccepted();
+      return removeBlackboardTenant({ home: this.home, tenantId: input.tenantId, privateFileAccessAccepted });
+    });
+  }
+
+  /** Removes only saved Blackboard routes and credentials from this computer. */
+  async removeBlackboardData() {
+    return this.withDesktopMutation(async (transaction) => {
+      await transaction.stopRuntime();
+      const result = await removeBlackboardData({ home: this.home });
+      if (result.configuration !== "absent" || result.credentials !== "absent") throw new Error("Blackboard data removal is unconfirmed");
+      return result;
+    });
   }
 
   async effectiveWorkspace(record) {
@@ -562,14 +971,21 @@ class InstallerController {
     if (await exists(candidate)) {
       try { return await canonicalDirectory(candidate); } catch { return null; }
     }
-    // Morrow creates its own materials folder when it has none, but never
-    // after a removal took that folder away: a folder made again on its own
-    // would contradict the removal Morrow just reported.
-    if (candidate === this.paths.defaultMaterials && !this.removedOwnData()) {
-      await mkdirPrivate(candidate);
-      return canonicalDirectory(candidate);
-    }
     return null;
+  }
+
+  /**
+   * Creates the default materials folder only as part of the explicit assistant
+   * setup transaction. State reads stay observational, including after a new
+   * process starts with all app-owned data removed.
+   */
+  async workspaceForAssistantSetup(record) {
+    const current = await this.effectiveWorkspace(record);
+    if (current) return current;
+    const candidate = this.workspace || record.materialsFolder || this.paths.defaultMaterials;
+    if (candidate !== this.paths.defaultMaterials) return null;
+    await mkdirPrivate(candidate);
+    return canonicalDirectory(candidate);
   }
 
   /**
@@ -588,31 +1004,35 @@ class InstallerController {
     });
     if (result.canceled || result.filePaths.length !== 1) return false;
     const materials = await canonicalDirectory(result.filePaths[0]);
-    const record = await this.record();
-    // Read what the change has to write before it writes anything, so a record
-    // this computer cannot act on stops the change instead of leaving Morrow
-    // and its assistants in different folders.
-    const bindings = this.assistantBindings(record);
-    // Choosing the folder that is already in use is recorded as the choice it
-    // is and nothing else: rewriting each assistant would ask for the Claude
-    // Desktop approval again for a folder that did not change.
-    const changed = (await this.effectiveWorkspace(record)) !== materials;
-    if (changed) await this.closeRuntimeMonitor();
-    const staged = changed ? await this.bindConfiguredAssistants(bindings, materials) : [];
-    try {
-      const configured = { ...(record.configured || {}) };
-      for (const change of staged) {
-        await change.verify?.();
-        configured[change.assistant.id] = change.entry;
+    return this.withDesktopMutation(async (transaction) => {
+      const record = await this.record();
+      // Read what the change has to write before it writes anything, so a record
+      // this computer cannot act on stops the change instead of leaving Morrow
+      // and its assistants in different folders.
+      const bindings = this.assistantBindings(record);
+      // Choosing the folder that is already in use is recorded as the choice it
+      // is and nothing else: rewriting each assistant would ask for the Claude
+      // Desktop approval again for a folder that did not change.
+      const changed = (await this.effectiveWorkspace(record)) !== materials;
+      if (changed) await transaction.stopRuntime();
+      const staged = changed ? await this.bindConfiguredAssistants(bindings, materials) : [];
+      try {
+        const configured = { ...(record.configured || {}) };
+        for (const change of staged) {
+          await change.verify?.();
+          configured[change.assistant.id] = change.entry;
+        }
+        const updated = { ...record, materialsFolder: materials, configured };
+        for (const change of staged) await change.beforeRecordCommit?.(record, updated);
+        await this.writeRecord(updated);
+        this.workspace = materials;
+      } catch (error) {
+        await this.rollbackAssistantBindings(staged);
+        throw error;
       }
-      await this.writeRecord({ ...record, materialsFolder: materials, configured });
-      this.workspace = materials;
-    } catch (error) {
-      await this.rollbackAssistantBindings(staged);
-      throw error;
-    }
-    for (const change of staged) await change.commit?.().catch(() => {});
-    return true;
+      for (const change of staged) await change.commit?.().catch(() => {});
+      return true;
+    });
   }
 
   /**
@@ -742,9 +1162,22 @@ class InstallerController {
 
   async initializeBridgeAtStartup() {
     if (this.bridgeInitialization) return this.bridgeInitialization;
-    this.bridgeInitialization = (async () => {
-      await this.ensureRuntime();
-      let status = await this.readBridgeInstallation();
+    const pending = this.runBridgeInitialization();
+    this.bridgeInitialization = pending;
+    try {
+      return await pending;
+    } catch (error) {
+      if (this.bridgeInitialization === pending) this.bridgeInitialization = null;
+      throw error;
+    }
+  }
+
+  async runBridgeInitialization() {
+    await this.ensureRuntime();
+    await this.reconcileClaudeDesktopGenerationsAtStartup();
+    let status = await this.readBridgeInstallation();
+    const writeRequired = !status.installed || !status.activeFolderChallenge;
+    const writeBridge = async () => {
       if (!status.installed) {
         await initializeBridgeDirectory({ ...this.bridgeReleaseOptions(), initialChallenge: this.bridgeChallenge() });
         status = await this.readBridgeInstallation();
@@ -758,12 +1191,20 @@ class InstallerController {
         });
         status = await this.readBridgeInstallation();
       }
-      // Rollback copies an interrupted update left behind. A failed prune must
-      // not block startup; the next start repeats it.
-      await pruneBridgeRollbackCopies({ stateDirectory: this.paths.state }).catch(() => undefined);
       return status;
-    })();
-    return this.bridgeInitialization;
+    };
+    if (writeRequired && !this.desktopMutationGuard) {
+      status = await this.withDesktopMutation(async (transaction) => {
+        await transaction.stopRuntime();
+        return writeBridge();
+      });
+    } else if (writeRequired) {
+      status = await writeBridge();
+    }
+    // Rollback copies an interrupted update left behind. A failed prune must
+    // not block startup; the next start repeats it.
+    await pruneBridgeRollbackCopies({ stateDirectory: this.paths.state }).catch(() => undefined);
+    return status;
   }
 
   async verifiedBridgeInstallation() {
@@ -820,6 +1261,25 @@ class InstallerController {
       acquire: async () => this.acquireBridgeLease(monitor),
       readback: async () => monitor.bridgeMaintenance({ action: "readback" }),
       matchesChallenge: (readback) => sameBridgeChallenge(record, readback),
+      inspect: async (readback) => inspectPendingBridgeUpdate({
+        stateDirectory: this.paths.state,
+        bridgeDirectory: this.paths.bridgeDirectory,
+        expectedExtensionId: BRIDGE_EXTENSION_ID,
+        extensionReadback: readback
+      }),
+      commit: async (pending) => {
+        const result = await monitor.bridgeMaintenance({
+          action: "commit",
+          previousManifestVersion: pending.previousVersion,
+          quiesceEpoch: pending.quiesceEpoch
+        });
+        if (result?.schema !== "morrow.bridge.update-committed.v1"
+          || result.extensionId !== pending.extensionId
+          || result.previousManifestVersion !== pending.previousVersion
+          || result.manifestVersion !== pending.version
+          || result.quiesceEpoch !== pending.quiesceEpoch
+          || result.committed !== true) throw new Error("Morrow Bridge update commit is unconfirmed");
+      },
       confirm: async (readback) => confirmBridgeUpdate({
         stateDirectory: this.paths.state,
         bridgeDirectory: this.paths.bridgeDirectory,
@@ -855,6 +1315,8 @@ class InstallerController {
 
   async reconcileBridgeRelease() {
     if (this.bridgeReconciliation) return this.bridgeReconciliation;
+    const refused = this.maintenanceAdmission();
+    if (refused) throw errorDetails(refused);
     const pending = (async () => {
       const record = await this.verifiedBridgeInstallation();
       const release = await this.packagedBridgeRelease();
@@ -864,11 +1326,9 @@ class InstallerController {
       const comparison = compareChromeVersions(releaseVersion, installedVersion);
       const monitor = await this.bridgeMonitor();
       if (record.manualChromeReloadRequired) return this.completePendingBridgeUpdate(record, monitor);
-      if (comparison <= 0) {
-        if (comparison === 0) await this.currentBridgeStatus(record, monitor);
-        return record;
-      }
+      if (comparison < 0) return record;
       const status = await this.currentBridgeStatus(record, monitor);
+      if (comparison === 0 && record.releaseManifestSha256 === release.releaseManifestSha256) return record;
       if (status.installType !== "development") return record;
       return this.stageBridgeUpdate(record, release, monitor);
     })();
@@ -908,15 +1368,13 @@ class InstallerController {
   }
 
   async installAssistant(assistantId, parent) {
+    const refused = this.maintenanceAdmission();
+    if (refused) throw errorDetails(refused);
     const assistant = ASSISTANTS.find((candidate) => candidate.id === assistantId);
     // Setting up an assistant is an explicit step, so it reads this computer
     // again rather than trusting a cached answer from up to a minute ago.
     if (!assistant || (assistant.id !== "claude-desktop" && !(await this.freshlyDetectedAssistant(assistant)))) throw errorDetails("assistant_not_found");
     if (!assistant.supported) throw errorDetails("setup_failed");
-    const record = await this.record();
-    const materials = await this.effectiveWorkspace(record);
-    if (!materials) throw errorDetails("workspace_required");
-    await this.closeRuntimeMonitor();
     let project = null;
     if (assistant.needsProject) {
       const chosen = await this.dialog.showOpenDialog(parent, {
@@ -927,58 +1385,63 @@ class InstallerController {
       if (chosen.canceled || chosen.filePaths.length !== 1) throw errorDetails("cancelled");
       project = await canonicalDirectory(chosen.filePaths[0]);
     }
-    try {
-      await this.ensureRuntime();
-      await this.executeCli([
-        "setup", "--repository", this.paths.appRoot, "--upstreams", this.paths.upstreams, "--node", this.paths.node,
-        "--state-directory", this.paths.state, "--replace-generated", "--json"
-      ]);
-    } catch (error) {
-      if (error.code) throw error;
-      throw errorDetails("runtime_repair_required");
-    }
-
-    if (assistant.id === "claude-desktop") {
-      let setup;
+    const setup = await this.withDesktopMutation(async (transaction) => {
+      const record = await this.record();
+      const materials = await this.workspaceForAssistantSetup(record);
+      if (!materials) throw errorDetails("workspace_required");
+      await transaction.stopRuntime();
       try {
-        setup = await prepareClaudeDesktopBundle({
-          nodePath: this.paths.node,
-          serverEntryPath: this.paths.server,
-          upstreamsPath: this.paths.upstreams,
-          workspaceRoot: materials,
-          stateDirectory: this.paths.state,
-          version: this.productVersion,
-          platform: this.platform
-        });
+        await this.ensureRuntime();
+        await this.executeCli([
+          "setup", "--repository", this.paths.appRoot, "--upstreams", this.paths.upstreams, "--node", this.paths.node,
+          "--state-directory", this.paths.state, "--replace-generated", "--json"
+        ]);
+      } catch (error) {
+        if (error.code) throw error;
+        throw errorDetails("runtime_repair_required");
+      }
+
+      if (assistant.id === "claude-desktop") {
+        let prepared;
+        try {
+          const generation = await this.prepareClaudeGeneration(materials);
+          prepared = generation.setup;
+          const { entry } = generation;
+          const updated = {
+            ...record,
+            selectedAssistantId: assistant.id,
+            configured: {
+              ...(record.configured || {}),
+              [assistant.id]: entry,
+            }
+          };
+          await this.commitClaudeGeneration(record, updated, entry);
+        } catch (error) {
+          if (error.code) throw error;
+          throw errorDetails("setup_failed");
+        }
+        return prepared;
+      }
+
+      const target = clientConfigTarget(assistant, this.home, project);
+      if (!target) throw errorDetails("setup_failed");
+      await this.installClientConfiguration(assistant, target, project, materials);
+      return null;
+    });
+
+    if (setup) {
+      try {
         if (this.platform === "win32") {
           await this.shell.openExternal("claude://");
         } else {
           const openError = await this.shell.openPath(setup.bundlePath);
           if (openError) throw new Error("Claude Desktop did not open the Morrow bundle");
         }
-        const updated = await this.record();
-        await this.writeRecord({
-          ...updated,
-          selectedAssistantId: assistant.id,
-          configured: {
-            ...(updated.configured || {}),
-            [assistant.id]: {
-              bundlePath: setup.bundlePath,
-              installationId: setup.installationId,
-              receiptPath: setup.receiptPath
-            }
-          }
-        });
       } catch (error) {
         if (error.code) throw error;
         throw errorDetails("setup_failed");
       }
-      return;
     }
-
-    const target = clientConfigTarget(assistant, this.home, project);
-    if (!target) throw errorDetails("setup_failed");
-    await this.installClientConfiguration(assistant, target, project, materials);
   }
 
   /**
@@ -1039,14 +1502,35 @@ class InstallerController {
    * and the file is left untouched. The file is read again afterwards: the
    * removal is proven by what that file says, not by the write call.
    */
-  async removeClientConfiguration(assistant, entry) {
+  async configurationWithoutMorrow(assistant, content) {
+    const module = await this.clientConfigModule();
+    const remove = assistant.id === "codex" ? module.withoutMorrowCodexTable : module.withoutMorrowClientJson;
+    if (typeof remove !== "function") throw errorDetails("setup_failed");
+    try {
+      return assistant.id === "codex"
+        ? remove(content, MORROW_SERVER_NAME)
+        : remove(content, "mcpServers", MORROW_SERVER_NAME);
+    } catch {
+      throw errorDetails("setup_failed");
+    }
+  }
+
+  async confirmAssistantConfigurationRemoved(assistant, target, expectedSha256) {
+    const written = await readConfigurationFile(target);
+    if (written === null || fileHash(written) !== expectedSha256) throw errorDetails("setup_failed");
+    if (await this.configurationWithoutMorrow(assistant, written.toString("utf8")) !== null) {
+      throw errorDetails("setup_failed");
+    }
+  }
+
+  async removeClientConfiguration(assistant, entry, recordBefore, recordAfter) {
     const target = entry?.target;
     if (typeof target !== "string" || !path.isAbsolute(target) || typeof entry.sha256 !== "string") throw errorDetails("setup_failed");
     const content = await readConfigurationFile(target);
     // The file is gone, so no Morrow entry of this installation is in it. A
     // file Morrow cannot read whole is left exactly as it is and reported.
     if (content === null) {
-      if (!await exists(target)) return;
+      if (!await exists(target)) return null;
       throw {
         ...errorDetails("assistant_configuration_changed"),
         recovery: `Morrow left ${target} exactly as it is. Open it, remove the morrow entry yourself, then select Check status.`
@@ -1058,11 +1542,22 @@ class InstallerController {
         recovery: `Morrow left ${target} exactly as it is. Open it, remove the morrow entry yourself, then select Check status.`
       };
     }
-    const next = withoutMorrowEntry(assistant.id, content.toString("utf8"));
-    if (next === null) return;
+    const next = await this.configurationWithoutMorrow(assistant, content.toString("utf8"));
+    if (next === null) return null;
+    const afterSha256 = fileHash(Buffer.from(next, "utf8"));
+    const tombstone = await this.writeAssistantRemovalTombstone({
+      schema: ASSISTANT_REMOVAL_SCHEMA,
+      operationId: crypto.randomUUID(),
+      assistantId: assistant.id,
+      target,
+      beforeSha256: entry.sha256,
+      afterSha256,
+      recordBeforeSha256: installerRecordDigest(recordBefore, this.home),
+      recordAfterSha256: installerRecordDigest(recordAfter, this.home),
+    });
     await this.writeAssistantConfiguration(target, next, entry.sha256);
-    const written = await fs.readFile(target).catch(() => null);
-    if (written === null || withoutMorrowEntry(assistant.id, written.toString("utf8")) !== null) throw errorDetails("setup_failed");
+    await this.confirmAssistantConfigurationRemoved(assistant, target, afterSha256);
+    return tombstone;
   }
 
   /**
@@ -1091,9 +1586,262 @@ class InstallerController {
   }
 
   async restrictFileToThisAccount(file) {
-    const module = await import(pathToFileURL(path.join(this.paths.appRoot, "packages", "client-config", "dist", "index.js")).href);
+    const module = await this.clientConfigModule();
     if (typeof module.restrictToCurrentAccount !== "function") throw errorDetails("setup_failed");
     module.restrictToCurrentAccount(file);
+  }
+
+  async clientConfigModule() {
+    return import(pathToFileURL(path.join(this.paths.appRoot, "packages", "client-config", "dist", "index.js")).href);
+  }
+
+  async recoverAssistantRemoval(record, pending = undefined) {
+    const tombstone = pending === undefined ? await this.readAssistantRemovalTombstone() : pending;
+    if (!tombstone) return record;
+    const assistant = ASSISTANTS.find((candidate) => candidate.id === tombstone.assistantId);
+    if (!assistant || assistant.id === "claude-desktop") throw new Error("assistant_removal_recovery_required");
+
+    const recordSha256 = installerRecordDigest(record, this.home);
+    if (recordSha256 === tombstone.recordAfterSha256) {
+      await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, tombstone.afterSha256);
+      await this.clearAssistantRemovalTombstone(tombstone);
+      return record;
+    }
+    if (recordSha256 !== tombstone.recordBeforeSha256) {
+      throw new Error("assistant_removal_recovery_required");
+    }
+
+    const entry = record.configured?.[assistant.id];
+    if (!entry || entry.target !== tombstone.target || entry.sha256 !== tombstone.beforeSha256) {
+      throw new Error("assistant_removal_recovery_required");
+    }
+    const recordAfter = recordWithoutAssistant(record, assistant.id);
+    if (installerRecordDigest(recordAfter, this.home) !== tombstone.recordAfterSha256) {
+      throw new Error("assistant_removal_recovery_required");
+    }
+
+    const current = await readConfigurationFile(tombstone.target);
+    if (current === null) throw new Error("assistant_removal_recovery_required");
+    const currentSha256 = fileHash(current);
+    if (currentSha256 === tombstone.beforeSha256) {
+      const next = await this.configurationWithoutMorrow(assistant, current.toString("utf8"));
+      if (next === null || fileHash(Buffer.from(next, "utf8")) !== tombstone.afterSha256) {
+        throw new Error("assistant_removal_recovery_required");
+      }
+      await this.writeAssistantConfiguration(tombstone.target, next, tombstone.beforeSha256);
+    } else if (currentSha256 !== tombstone.afterSha256) {
+      throw new Error("assistant_removal_recovery_required");
+    }
+    await this.confirmAssistantConfigurationRemoved(assistant, tombstone.target, tombstone.afterSha256);
+
+    await this.writeRecord(recordAfter);
+    const committed = await this.readInstallerRecord();
+    if (installerRecordDigest(committed, this.home) !== tombstone.recordAfterSha256) {
+      throw new Error("assistant_removal_recovery_required");
+    }
+    await this.clearAssistantRemovalTombstone(tombstone);
+    return committed;
+  }
+
+  async claudeSetupDirectories(prefix = "setup-") {
+    const setupRoot = path.join(await fs.realpath(this.paths.state), "ClaudeDesktop");
+    const directory = await fs.opendir(setupRoot).catch((error) => {
+      if (error?.code === "ENOENT") return null;
+      throw error;
+    });
+    if (!directory) return [];
+    const answer = [];
+    try {
+      for await (const entry of directory) {
+        if (!entry.name.startsWith(prefix)) continue;
+        if (answer.length >= CLAUDE_SETUP_ROOT_LIMIT) throw new Error("claude_generation_recovery_required");
+        const candidate = path.join(setupRoot, entry.name);
+        const info = await fs.lstat(candidate);
+        if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("claude_generation_recovery_required");
+        answer.push(candidate);
+      }
+    } finally {
+      await directory.close().catch(() => {});
+    }
+    return answer.sort();
+  }
+
+  async syncClaudeSetupDirectory() {
+    if (this.platform === "win32") return;
+    const setupRoot = path.join(await fs.realpath(this.paths.state), "ClaudeDesktop");
+    const directory = await fs.open(setupRoot, fsConstants.O_RDONLY);
+    try { await directory.sync(); } finally { await directory.close(); }
+  }
+
+  async moveClaudeGenerationRoots(transition) {
+    for (const move of transition.moves) {
+      const source = await fs.lstat(move.source).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+      const destination = await fs.lstat(move.destination).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+      if (source && !destination) {
+        if (!source.isDirectory() || source.isSymbolicLink()) throw new Error("claude_generation_recovery_required");
+        await fs.rename(move.source, move.destination);
+      } else if (source || !destination || !destination.isDirectory() || destination.isSymbolicLink()) {
+        throw new Error("claude_generation_recovery_required");
+      }
+    }
+    if (transition.moves.length > 0) await this.syncClaudeSetupDirectory();
+  }
+
+  async restoreClaudeGenerationRoots(transition) {
+    for (const move of [...transition.moves].reverse()) {
+      const source = await fs.lstat(move.source).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+      const destination = await fs.lstat(move.destination).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+      if (!source && destination) {
+        if (!destination.isDirectory() || destination.isSymbolicLink()) throw new Error("claude_generation_recovery_required");
+        await fs.rename(move.destination, move.source);
+      } else if (!source || destination || !source.isDirectory() || source.isSymbolicLink()) {
+        throw new Error("claude_generation_recovery_required");
+      }
+    }
+    if (transition.moves.length > 0) await this.syncClaudeSetupDirectory();
+  }
+
+  async stageClaudeGenerationTransition(recordBefore, recordAfter, preparedEntry = null, preservedRoot = null) {
+    const preparedRoot = preparedEntry ? path.dirname(preparedEntry.bundlePath) : null;
+    const roots = (await this.claudeSetupDirectories())
+      .filter((candidate) => candidate !== preparedRoot && candidate !== preservedRoot);
+    if (roots.length === 0) return null;
+    const operationId = crypto.randomUUID();
+    const sameRecord = installerRecordDigest(recordBefore, this.home) === installerRecordDigest(recordAfter, this.home);
+    const mode = preparedEntry ? "replace" : sameRecord ? "prune" : "remove";
+    const transition = await this.writeClaudeGenerationTransition({
+      schema: CLAUDE_GENERATION_TRANSITION_SCHEMA,
+      operationId,
+      mode,
+      recordBeforeSha256: installerRecordDigest(recordBefore, this.home),
+      recordAfterSha256: installerRecordDigest(recordAfter, this.home),
+      preparedEntry,
+      moves: roots.map((source, index) => ({
+        source,
+        destination: path.join(path.dirname(source), `.quarantine-${operationId}-${index}-${path.basename(source)}`),
+      })),
+    });
+    try {
+      await this.moveClaudeGenerationRoots(transition);
+      return transition;
+    } catch (error) {
+      await this.recoverClaudeGenerationTransition(transition);
+      throw error;
+    }
+  }
+
+  async finishClaudeGenerationTransition(transition) {
+    await this.moveClaudeGenerationRoots(transition);
+    await this.clearClaudeGenerationTransition(transition);
+    for (const move of transition.moves) {
+      await this.removeClaudeDesktopSetup({ bundlePath: path.join(move.destination, "Morrow.mcpb") }).catch(() => {});
+    }
+  }
+
+  async rollbackClaudeGenerationTransition(transition) {
+    await this.restoreClaudeGenerationRoots(transition);
+    if (transition.preparedEntry) await this.removeClaudeDesktopSetup(transition.preparedEntry);
+    await this.clearClaudeGenerationTransition(transition);
+  }
+
+  async recoverClaudeGenerationTransition(pending = undefined) {
+    const transition = pending === undefined ? await this.readClaudeGenerationTransition() : pending;
+    if (!transition) return "none";
+    const record = await this.readInstallerRecord();
+    const currentSha256 = installerRecordDigest(record, this.home);
+    if (transition.mode === "prune") {
+      if (currentSha256 !== transition.recordBeforeSha256) throw new Error("claude_generation_recovery_required");
+      await this.finishClaudeGenerationTransition(transition);
+      return "committed";
+    }
+    if (currentSha256 === transition.recordAfterSha256) {
+      await this.finishClaudeGenerationTransition(transition);
+      return "committed";
+    }
+    if (currentSha256 !== transition.recordBeforeSha256) throw new Error("claude_generation_recovery_required");
+    await this.rollbackClaudeGenerationTransition(transition);
+    return "rolled_back";
+  }
+
+  async commitClaudeGeneration(recordBefore, recordAfter, preparedEntry = null) {
+    let transition;
+    try {
+      transition = await this.stageClaudeGenerationTransition(recordBefore, recordAfter, preparedEntry);
+    } catch (error) {
+      if (preparedEntry) await this.removeClaudeDesktopSetup(preparedEntry).catch(() => {});
+      throw error;
+    }
+    try {
+      if (installerRecordDigest(recordBefore, this.home) !== installerRecordDigest(recordAfter, this.home)) {
+        await this.writeRecord(recordAfter);
+      }
+    } catch (error) {
+      if (!transition) {
+        if (preparedEntry) await this.removeClaudeDesktopSetup(preparedEntry).catch(() => {});
+        throw error;
+      }
+      const outcome = await this.recoverClaudeGenerationTransition(transition);
+      if (outcome !== "committed") throw error;
+      return;
+    }
+    if (transition) await this.finishClaudeGenerationTransition(transition);
+  }
+
+  async pruneClaudeGenerations(record, preservedEntry = null) {
+    const preservedRoot = preservedEntry ? path.dirname(preservedEntry.bundlePath) : null;
+    const transition = await this.stageClaudeGenerationTransition(record, record, null, preservedRoot);
+    if (transition) await this.finishClaudeGenerationTransition(transition);
+    for (const directory of await this.claudeSetupDirectories(".quarantine-")) {
+      await this.removeClaudeDesktopSetup({ bundlePath: path.join(directory, "Morrow.mcpb") }).catch(() => {});
+    }
+  }
+
+  async prepareClaudeGeneration(materials) {
+    const setup = await prepareClaudeDesktopBundle({
+      nodePath: this.paths.node,
+      serverEntryPath: this.paths.server,
+      upstreamsPath: this.paths.upstreams,
+      workspaceRoot: materials,
+      stateDirectory: this.paths.state,
+      version: this.productVersion,
+      platform: this.platform,
+      homeDirectory: this.home,
+    });
+    return {
+      setup,
+      entry: { bundlePath: setup.bundlePath, installationId: setup.installationId, receiptPath: setup.receiptPath },
+    };
+  }
+
+  async reconcileClaudeDesktopGenerationsAtStartup() {
+    const pending = await this.readClaudeGenerationTransition();
+    const roots = await this.claudeSetupDirectories();
+    const quarantines = await this.claudeSetupDirectories(".quarantine-");
+    if (!pending && roots.length === 0 && quarantines.length === 0) return;
+    await this.withDesktopMutation(async (transaction) => {
+      await transaction.stopRuntime();
+      if (pending) await this.recoverClaudeGenerationTransition(pending);
+      const record = await this.readInstallerRecord();
+      const entry = record.configured?.["claude-desktop"];
+      if (entry && await this.isCurrentClaudeDesktopSetup(entry, { platform: this.platform, homeDirectory: this.home })) {
+        await this.pruneClaudeGenerations(record, entry);
+        return;
+      }
+      if (!entry) {
+        await this.pruneClaudeGenerations(record);
+        return;
+      }
+      const materials = await this.effectiveWorkspace(record);
+      let prepared = null;
+      if (materials) {
+        try { prepared = await this.prepareClaudeGeneration(materials); }
+        catch { /* Revocation below is the fail-closed migration result. */ }
+      }
+      const updated = prepared
+        ? { ...record, configured: { ...(record.configured || {}), "claude-desktop": prepared.entry } }
+        : recordWithoutAssistant(record, "claude-desktop");
+      await this.commitClaudeGeneration(record, updated, prepared?.entry || null);
+    });
   }
 
   /**
@@ -1106,7 +1854,7 @@ class InstallerController {
     const bundlePath = entry?.bundlePath;
     if (typeof bundlePath !== "string" || !path.isAbsolute(bundlePath)) return;
     const directory = path.dirname(bundlePath);
-    const setupRoot = path.join(this.paths.state, "ClaudeDesktop");
+    const setupRoot = path.join(await fs.realpath(this.paths.state), "ClaudeDesktop");
     if (!insideDirectory(setupRoot, directory) || path.resolve(directory) === path.resolve(setupRoot)) throw errorDetails("setup_failed");
     await fs.rm(directory, { recursive: true, force: true });
     if (await fs.lstat(directory).then(() => true, () => false)) throw errorDetails("setup_failed");
@@ -1114,26 +1862,21 @@ class InstallerController {
 
   /**
    * Generates the Claude Desktop bundle for a different materials folder. The
-   * caller records it only after every assistant rebind succeeds, then removes
-   * the old bundle. Until that commit, a failure removes only the new bundle.
+   * caller quarantines every older generation before it records the new one.
+   * A failed record commit restores those roots and removes the new bundle.
    */
   async stageClaudeDesktopSetup(assistant, previousEntry, materials) {
     let setup;
+    let entry;
     try {
-      setup = await prepareClaudeDesktopBundle({
-        nodePath: this.paths.node,
-        serverEntryPath: this.paths.server,
-        upstreamsPath: this.paths.upstreams,
-        workspaceRoot: materials,
-        stateDirectory: this.paths.state,
-        version: this.productVersion,
-        platform: this.platform
-      });
+      const generation = await this.prepareClaudeGeneration(materials);
+      setup = generation.setup;
+      entry = generation.entry;
     } catch (error) {
       if (error?.code) throw error;
       throw errorDetails("setup_failed");
     }
-    const entry = { bundlePath: setup.bundlePath, installationId: setup.installationId, receiptPath: setup.receiptPath };
+    let transition = null;
     return {
       assistant,
       entry,
@@ -1141,8 +1884,17 @@ class InstallerController {
         const info = await fs.lstat(entry.bundlePath).catch(() => null);
         if (!info?.isFile() || info.isSymbolicLink()) throw errorDetails("setup_failed");
       },
-      rollback: async () => this.removeClaudeDesktopSetup(entry),
-      commit: async () => this.removeClaudeDesktopSetup(previousEntry)
+      beforeRecordCommit: async (recordBefore, recordAfter) => {
+        transition = await this.stageClaudeGenerationTransition(recordBefore, recordAfter, entry);
+      },
+      rollback: async () => {
+        if (transition) await this.recoverClaudeGenerationTransition(transition);
+        else await this.removeClaudeDesktopSetup(entry);
+      },
+      commit: async () => {
+        if (transition) await this.recoverClaudeGenerationTransition(transition);
+        else await this.removeClaudeDesktopSetup(previousEntry);
+      }
     };
   }
 
@@ -1158,19 +1910,19 @@ class InstallerController {
     if (refused) throw errorDetails(refused);
     const assistant = ASSISTANTS.find((candidate) => candidate.id === assistantId);
     if (!assistant) throw errorDetails("assistant_not_found");
-    const record = await this.record();
-    const entry = record.configured?.[assistant.id];
-    if (!entry) return;
-    if (assistant.id === "claude-desktop") await this.removeClaudeDesktopSetup(entry);
-    else await this.removeClientConfiguration(assistant, entry);
-    const updated = await this.record();
-    const configured = { ...(updated.configured || {}) };
-    delete configured[assistant.id];
-    const remaining = ASSISTANTS.map((candidate) => candidate.id).filter((id) => configured[id] !== undefined);
-    await this.writeRecord({
-      ...updated,
-      selectedAssistantId: updated.selectedAssistantId === assistant.id ? remaining[0] ?? null : updated.selectedAssistantId,
-      configured
+    return this.withDesktopMutation(async (transaction) => {
+      const record = await this.record();
+      const entry = record.configured?.[assistant.id];
+      if (!entry) return;
+      const updated = recordWithoutAssistant(record, assistant.id);
+      if (assistant.id === "claude-desktop") {
+        await transaction.stopRuntime();
+        await this.commitClaudeGeneration(record, updated);
+        return;
+      }
+      const tombstone = await this.removeClientConfiguration(assistant, entry, record, updated);
+      await this.writeRecord(updated);
+      if (tombstone) await this.clearAssistantRemovalTombstone(tombstone);
     });
   }
 
@@ -1181,11 +1933,10 @@ class InstallerController {
    * interrupt work in flight that Morrow cannot confirm is safe to stop.
    */
   maintenanceAdmission() {
-    if (this.restartLeases.size !== 0 || this.bridgeLeaseId !== null) return "active_or_uncertain_operations";
-    const monitor = this.runtimeMonitor;
-    const canRestart = typeof monitor?.snapshot === "function" ? monitor.snapshot()?.health?.canRestart : "unknown";
-    const pending = this.repairInProgress !== null || this.bridgeReconciliation !== null;
-    if (pending && canRestart !== "yes") return "active_or_uncertain_operations";
+    if (this.restartLeases.size !== 0 || this.bridgeLeaseId !== null
+      || this.dataRemovalInProgress !== null || this.dataRemovalGuard !== null
+      || this.desktopMutationInProgress !== null || this.desktopMutationGuard !== null
+      || this.bridgeReconciliation !== null) return "active_or_uncertain_operations";
     return null;
   }
 
@@ -1201,36 +1952,28 @@ class InstallerController {
    * packaged installation is unverified on both macOS and Windows.
    */
   async repair() {
-    const refused = this.maintenanceAdmission();
-    if (refused) throw errorDetails(refused);
-    const pending = this.runRepair();
-    this.repairInProgress = pending;
     try {
-      return await pending;
-    } finally {
-      if (this.repairInProgress === pending) this.repairInProgress = null;
-    }
-  }
-
-  async runRepair() {
-    try {
-      // Closing the runtime monitor also releases the maintenance lease it holds.
-      await this.closeRuntimeMonitor();
-      // The payload lives in signed application resources and is never rewritten
-      // here, so its file verification runs again from disk rather than reusing
-      // the result of an earlier one.
-      this.mcpRuntimeVerification = null;
-      await this.ensureRuntime();
-      const record = await this.repairInstallerRecord();
-      await this.repairBridgeInstallation();
-      await this.repairAssistantConfiguration(record);
-      // Repair stopped the runtime, so this step waits for the restarted one
-      // rather than answering with a runtime it has not observed yet.
+      const record = await this.withDesktopMutation(async (transaction) => {
+        await transaction.stopRuntime();
+        return this.runRepair();
+      });
       await this.runtimeSnapshot(await this.effectiveWorkspace(record)).catch(() => {});
       return await this.state();
     } catch (error) {
       throw reportedError(error);
     }
+  }
+
+  async runRepair() {
+    // The payload lives in signed application resources and is never rewritten
+    // here, so its file verification runs again from disk rather than reusing
+    // the result of an earlier one.
+    this.mcpRuntimeVerification = null;
+    await this.ensureRuntime();
+    const record = await this.repairInstallerRecord();
+    await this.repairBridgeInstallation();
+    await this.repairAssistantConfiguration(record);
+    return record;
   }
 
   /**
@@ -1240,16 +1983,25 @@ class InstallerController {
    * or migrate it.
    */
   async repairInstallerRecord() {
-    await mkdirPrivate(this.paths.state);
+    await this.ensureInstallerStateDirectory();
+    const pending = await this.readAssistantRemovalTombstone();
+    const claudePending = await this.readClaudeGenerationTransition();
+    if (pending && claudePending) throw new Error("claude_generation_recovery_required");
+    let current;
     try {
-      return await this.record();
+      current = await this.readInstallerRecord();
     } catch (error) {
       if (error?.message === "migration_required") throw errorDetails("installer_record_incompatible");
-      await captureConfiguration(this.recordPath, path.join(this.paths.state, "Backups"));
-      const fresh = freshRecord();
-      await this.writeRecord(fresh);
-      return fresh;
+      if (pending || claudePending) throw error;
+      await this.quarantineInstallerRecord();
+      current = freshRecord();
+      await this.writeRecord(current);
     }
+    if (claudePending) {
+      await this.recoverClaudeGenerationTransition(claudePending);
+      current = await this.readInstallerRecord();
+    }
+    return this.recoverAssistantRemoval(current, pending);
   }
 
   /**
@@ -1268,7 +2020,10 @@ class InstallerController {
     const packagedVersion = parseChromeVersion(packaged.version);
     const packagedIsNewer = Boolean(installedVersion && packagedVersion
       && compareChromeVersions(packagedVersion, installedVersion) > 0);
-    if (installed?.installed !== true || packagedIsNewer) {
+    const sameVersionChanged = Boolean(installedVersion && packagedVersion
+      && compareChromeVersions(packagedVersion, installedVersion) === 0
+      && installed.releaseManifestSha256 !== packaged.releaseManifestSha256);
+    if (installed?.installed !== true || packagedIsNewer || sameVersionChanged) {
       await this.discardUnusableBridgeInstallation();
       return this.initializeBridgeAtStartup();
     }
@@ -1360,39 +2115,222 @@ class InstallerController {
   async removeData(parent) {
     const refused = this.maintenanceAdmission();
     if (refused) throw errorDetails(refused);
+    const pending = this.runDataRemoval(parent);
+    this.dataRemovalInProgress = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.dataRemovalInProgress === pending) this.dataRemovalInProgress = null;
+    }
+  }
+
+  async runDataRemoval(parent) {
     const retention = this.retention(await this.record());
     const removable = retention.locations.filter((location) => location.removable === true);
     const kept = retention.locations.filter((location) => location.removable !== true);
     const keptPaths = kept.map((location) => location.path);
+    const guard = await this.acquireDataRemovalGuard();
+    this.dataRemovalGuard = guard;
     if (!await this.confirmDataRemoval(parent, removable, kept)) {
+      await this.releaseDataRemovalGuard(guard);
       this.dataRemoval = { schema: DATA_REMOVAL_SCHEMA, status: "cancelled", removed: [], remaining: [], kept: keptPaths };
       return this.dataRemoval;
     }
-    // The runtime holds the journal inside State. Closing the monitor is also
-    // what releases the maintenance lease it holds.
+    const stoppedGuard = await this.stopRuntimeForDataRemoval(guard);
+    this.dataRemovalGuard = stoppedGuard;
+    try {
+      // Blackboard's configuration names its secret files. Remove and confirm
+      // that routing first. A route that remains keeps every credential, while
+      // a credential that remains after route removal is inert and is reported
+      // by the same fresh path readback below.
+      await removeBlackboardData({ home: this.home });
+      // State contains the durable maintenance guard. Removing it last keeps
+      // every runtime start fenced throughout all earlier mutations.
+      const blackboard = blackboardPaths(this.home, "default");
+      const ordered = removable
+        .filter((location) => location.path !== blackboard.config && location.path !== blackboard.credentialDirectory)
+        .sort((left, right) => Number(left.path === this.paths.state) - Number(right.path === this.paths.state));
+      for (const location of ordered) {
+        // A path Morrow cannot remove must not stop the rest. The readback below
+        // reports the result; this call does not.
+        await fs.rm(location.path, { recursive: true, force: true }).catch(() => {});
+      }
+      const removed = [];
+      const remaining = [];
+      for (const location of removable) {
+        const present = await fs.lstat(location.path).then(() => true, () => false);
+        (present ? remaining : removed).push(location.path);
+      }
+      if (remaining.includes(this.paths.state)) await this.releaseDataRemovalGuard(stoppedGuard);
+      else this.dataRemovalGuard = null;
+      this.workspace = null;
+      this.bridgeInstallation = null;
+      this.bridgeInitialization = null;
+      this.dataRemoval = {
+        schema: DATA_REMOVAL_SCHEMA,
+        status: remaining.length === 0 ? "removed" : "incomplete",
+        removed,
+        remaining,
+        kept: keptPaths
+      };
+      return this.dataRemoval;
+    } catch (error) {
+      if (await fs.lstat(this.paths.state).then(() => true, () => false)) {
+        await this.releaseDataRemovalGuard(stoppedGuard).catch(() => {});
+      } else {
+        this.dataRemovalGuard = null;
+      }
+      throw error;
+    }
+  }
+
+  /** The existing folder whose runtime authority a desktop mutation must fence. */
+  async desktopMutationWorkspace() {
+    let record = null;
+    try { record = await this.record(); } catch {}
+    const candidate = this.workspace || record?.materialsFolder || this.paths.defaultMaterials;
+    if (await exists(candidate)) {
+      try { return await canonicalDirectory(candidate); } catch {}
+    }
+    return canonicalDirectory(this.paths.userData);
+  }
+
+  /** Acquires authority from a live owner, or proves that no owner is running. */
+  async acquireDesktopMutationGuard() {
+    const workspaceRoot = await this.desktopMutationWorkspace();
+    const stateDirectory = await this.canonicalStateDirectory();
+    const journalPath = path.join(stateDirectory, "morrow.sqlite3");
+    const module = await this.localOwnerMaintenanceModule();
+    if (this.runtimeMonitor) {
+      const active = await this.acquireRestartLease();
+      if (active?.status !== "granted" || typeof active.leaseId !== "string") {
+        throw errorDetails("active_or_uncertain_operations");
+      }
+      const activeWorkspace = this.runtimeWorkspace ? await canonicalDirectory(this.runtimeWorkspace) : workspaceRoot;
+      return { kind: "owner", leaseId: active.leaseId, journalPath, workspaceRoot: activeWorkspace, module };
+    }
+    const stopped = module.acquireStoppedLocalOwnerMaintenanceLease(journalPath, {
+      holderPid: process.pid,
+      workspaceRoot
+    });
+    if (stopped && typeof stopped.leaseId === "string" && typeof stopped.leaseToken === "string") {
+      return { kind: "stopped", leaseId: stopped.leaseId, leaseToken: stopped.leaseToken, journalPath, workspaceRoot, module };
+    }
+    const active = await this.acquireRestartLease();
+    if (active?.status !== "granted" || typeof active.leaseId !== "string") {
+      throw errorDetails("active_or_uncertain_operations");
+    }
+    const activeWorkspace = this.runtimeWorkspace ? await canonicalDirectory(this.runtimeWorkspace) : workspaceRoot;
+    return { kind: "owner", leaseId: active.leaseId, journalPath, workspaceRoot: activeWorkspace, module };
+  }
+
+  /** Stops a live owner while preserving one unbroken durable maintenance guard. */
+  async stopRuntimeForDesktopMutation(guard) {
+    if (guard.kind === "stopped") return guard;
+    await this.commitRestartLease(guard.leaseId);
     await this.closeRuntimeMonitor();
-    for (const location of removable) {
-      // A path Morrow cannot remove must not stop the rest. The readback below
-      // reports the result; this call does not.
-      await fs.rm(location.path, { recursive: true, force: true }).catch(() => {});
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      const lease = guard.module.replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard(guard.journalPath, {
+        holderPid: process.pid,
+        workspaceRoot: guard.workspaceRoot
+      });
+      if (lease && typeof lease.leaseId === "string" && typeof lease.leaseToken === "string") {
+        return { ...guard, kind: "stopped", leaseId: lease.leaseId, leaseToken: lease.leaseToken };
+      }
+      await pause(50);
     }
-    const removed = [];
-    const remaining = [];
-    for (const location of removable) {
-      const present = await fs.lstat(location.path).then(() => true, () => false);
-      (present ? remaining : removed).push(location.path);
+    throw new Error("Morrow runtime shutdown did not finish");
+  }
+
+  async releaseDesktopMutationGuard(guard) {
+    if (guard.kind === "owner") {
+      await this.releaseRestartLease(guard.leaseId);
+    } else if (guard.module.removeExactLocalOwnerMaintenanceLease(guard.journalPath, guard.leaseId, guard.leaseToken) !== true) {
+      throw new Error("Morrow desktop maintenance release is unconfirmed");
     }
-    this.workspace = null;
-    this.bridgeInstallation = null;
-    this.bridgeInitialization = null;
-    this.dataRemoval = {
-      schema: DATA_REMOVAL_SCHEMA,
-      status: remaining.length === 0 ? "removed" : "incomplete",
-      removed,
-      remaining,
-      kept: keptPaths
-    };
-    return this.dataRemoval;
+    if (this.desktopMutationGuard === guard) this.desktopMutationGuard = null;
+  }
+
+  /** Serializes one file mutation under exact owner maintenance authority. */
+  async withDesktopMutation(action) {
+    const refused = this.maintenanceAdmission();
+    if (refused) throw errorDetails(refused);
+    const pending = (async () => {
+      let guard = await this.acquireDesktopMutationGuard();
+      this.desktopMutationGuard = guard;
+      const transaction = Object.freeze({
+        stopRuntime: async () => {
+          const stopped = await this.stopRuntimeForDesktopMutation(guard);
+          guard = stopped;
+          this.desktopMutationGuard = stopped;
+        }
+      });
+      try {
+        return await action(transaction);
+      } finally {
+        await this.releaseDesktopMutationGuard(guard);
+      }
+    })();
+    this.desktopMutationInProgress = pending;
+    try {
+      return await pending;
+    } finally {
+      if (this.desktopMutationInProgress === pending) this.desktopMutationInProgress = null;
+    }
+  }
+
+  async localOwnerMaintenanceModule() {
+    await this.ensureRuntime();
+    const module = await import(pathToFileURL(path.join(path.dirname(this.paths.server), "local-owner-maintenance.js")).href);
+    if (typeof module.acquireStoppedLocalOwnerMaintenanceLease !== "function"
+      || typeof module.replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard !== "function"
+      || typeof module.removeExactLocalOwnerMaintenanceLease !== "function") {
+      throw errorDetails("runtime_repair_required");
+    }
+    return module;
+  }
+
+  async acquireDataRemovalGuard() {
+    const record = await this.record();
+    const workspaceRoot = await this.effectiveWorkspace(record) || await canonicalDirectory(this.paths.userData);
+    const stateDirectory = await this.canonicalStateDirectory();
+    const journalPath = path.join(stateDirectory, "morrow.sqlite3");
+    const module = await this.localOwnerMaintenanceModule();
+    const active = await this.acquireRestartLease();
+    if (active?.status === "granted" && typeof active.leaseId === "string") {
+      return { kind: "owner", leaseId: active.leaseId, journalPath, workspaceRoot, module };
+    }
+    const lease = module.acquireStoppedLocalOwnerMaintenanceLease(journalPath, { holderPid: process.pid, workspaceRoot });
+    if (!lease || typeof lease.leaseId !== "string" || typeof lease.leaseToken !== "string") {
+      throw errorDetails("active_or_uncertain_operations");
+    }
+    return { kind: "stopped", leaseId: lease.leaseId, leaseToken: lease.leaseToken, journalPath, workspaceRoot, module };
+  }
+
+  async releaseDataRemovalGuard(guard) {
+    if (guard.kind === "owner") {
+      await this.releaseRestartLease(guard.leaseId);
+    } else if (guard.module.removeExactLocalOwnerMaintenanceLease(guard.journalPath, guard.leaseId, guard.leaseToken) !== true) {
+      throw new Error("Morrow data removal maintenance release is unconfirmed");
+    }
+    if (this.dataRemovalGuard === guard) this.dataRemovalGuard = null;
+  }
+
+  async stopRuntimeForDataRemoval(guard) {
+    if (guard.kind === "stopped") return guard;
+    await this.commitRestartLease(guard.leaseId);
+    await this.closeRuntimeMonitor();
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      const lease = guard.module.replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard(guard.journalPath, {
+        holderPid: process.pid,
+        workspaceRoot: guard.workspaceRoot
+      });
+      if (lease && typeof lease.leaseId === "string" && typeof lease.leaseToken === "string") {
+        return { ...guard, kind: "stopped", leaseId: lease.leaseId, leaseToken: lease.leaseToken };
+      }
+      await pause(50);
+    }
+    throw new Error("Morrow runtime shutdown did not finish");
   }
 
   /**
@@ -1423,10 +2361,19 @@ class InstallerController {
   }
 
   async closeRuntimeMonitor() {
+    if (this.runtimeClosing) return this.runtimeClosing;
     const active = this.runtimeMonitor;
     this.runtimeMonitor = null;
     this.runtimeWorkspace = null;
-    await active?.close().catch(() => {});
+    const closing = Promise.resolve()
+      .then(() => active?.close())
+      .catch(() => {})
+      .finally(() => {
+        this.restartLeases.clear();
+        if (this.runtimeClosing === closing) this.runtimeClosing = null;
+      });
+    this.runtimeClosing = closing;
+    return closing;
   }
 
   async recoverDeadMaintenance(journalPath, workspaceRoot) {
@@ -1439,7 +2386,9 @@ class InstallerController {
     }
     if (!module.localOwnerMaintenanceMarkerPresent(journalPath)) return;
     const previous = module.readLocalOwnerMaintenanceLease(journalPath);
-    if (!previous || processAlive(previous.holderPid)) throw new Error("Morrow maintenance recovery is not available");
+    if (!previous || await processMatchesRecordedLifetime(previous.holderPid, previous.acquiredAt) !== false) {
+      throw new Error("Morrow maintenance recovery is not available");
+    }
     if (module.clearDeadLocalOwnerMaintenanceLease(journalPath, { workspaceRoot }) === true) return;
     const recovered = await module.requestLocalOwnerMaintenance({
       action: "recover",
@@ -1468,6 +2417,7 @@ class InstallerController {
 
   /** The runtime monitor for this materials folder, or null when Morrow has none. */
   async runtimeMonitorFor(materials) {
+    if (this.runtimeClosing) await this.runtimeClosing;
     if (!materials || !await exists(this.paths.upstreams)) return null;
     try { await this.ensureRuntime(); } catch { return null; }
     const mcpRuntime = await this.mcpRuntimeVerification;
@@ -1519,6 +2469,9 @@ class InstallerController {
     const record = await this.record();
     const setup = record.configured?.["claude-desktop"];
     if (!setup || typeof setup.bundlePath !== "string" || !path.isAbsolute(setup.bundlePath)) throw errorDetails("setup_failed");
+    if (!await this.isCurrentClaudeDesktopSetup(setup, { platform: this.platform, homeDirectory: this.home })) {
+      throw errorDetails("setup_failed");
+    }
     if (this.platform === "win32") {
       await this.shell.openExternal("claude://");
     } else {
@@ -1529,10 +2482,15 @@ class InstallerController {
 
   async revealClaudeDesktopBundle() {
     const record = await this.record();
-    const bundle = record.configured?.["claude-desktop"]?.bundlePath;
+    const setup = record.configured?.["claude-desktop"];
+    const bundle = setup?.bundlePath;
+    const setupRoot = path.join(await fs.realpath(this.paths.state), "ClaudeDesktop");
     if (typeof bundle !== "string" || !path.isAbsolute(bundle)
-      || !insideDirectory(path.join(this.paths.state, "ClaudeDesktop"), bundle)
+      || !insideDirectory(setupRoot, bundle)
       || path.basename(bundle) !== "Morrow.mcpb") throw errorDetails("setup_failed");
+    if (!await this.isCurrentClaudeDesktopSetup(setup, { platform: this.platform, homeDirectory: this.home })) {
+      throw errorDetails("setup_failed");
+    }
     const info = await fs.lstat(bundle).catch(() => null);
     if (!info?.isFile() || info.isSymbolicLink()) throw errorDetails("setup_failed");
     const [realSetupRoot, realBundle] = await Promise.all([
@@ -1621,7 +2579,7 @@ class InstallerController {
       // separate fact, `claude.running`, and closing Claude must not make a
       // configured assistant look unconfigured.
       const claude = assistant.id === "claude-desktop" && entry
-        ? await inspectClaudeDesktopConnection(entry)
+        ? await inspectClaudeDesktopConnection(entry, { platform: this.platform, homeDirectory: this.home })
         : null;
       const present = claude ? claude.installed === true : entry && typeof entry.target === "string" && typeof entry.sha256 === "string"
         ? await readConfigurationFile(entry.target).then((value) => value !== null && fileHash(value) === entry.sha256)
@@ -1662,7 +2620,7 @@ class InstallerController {
     // Morrow can be set up in more than one assistant. Every configured
     // assistant keeps this installation ready, so adding a second one, which
     // starts as pending, never takes the first one's steps away.
-    const ready = assistants.some((assistant) => assistant.configured);
+    const ready = assistants.some((assistant) => assistant.configured && assistant.detected);
     const requestedAssistant = assistants.find((assistant) => assistant.selected) || null;
     const lifecycle = currentRuntimeStatus === "repair_required" ? "repair_required"
       : requestedAssistant?.pending && !ready ? "assistant_pending"
@@ -1718,4 +2676,4 @@ function createInstallerController(deps) {
   return new InstallerController(deps);
 }
 
-module.exports = { bridgeDeliveryMode, clientConfigTarget, createInstallerController, detectAssistant, errorDetails, processAlive, readCommandOutput, readMacApplicationBundleIdentifier, repairRequiredState };
+module.exports = { bridgeDeliveryMode, clientConfigTarget, createInstallerController, detectAssistant, errorDetails, processAlive, readCommandOutput, readMacApplicationBundleIdentifier, repairRequiredState, runBoundedCommand };

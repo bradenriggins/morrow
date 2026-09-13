@@ -1,4 +1,5 @@
 import { once } from "node:events";
+import { spawn } from "node:child_process";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
@@ -8,8 +9,10 @@ import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { deriveBlackboardSourceBindingId } from "../src/binding.js";
-import { signBlackboardEffectGrant, type BlackboardEffectGrant } from "../src/effect-grant.js";
+import { blackboardEffectGrantAccepted, signBlackboardEffectGrant, type BlackboardEffectGrant } from "../src/effect-grant.js";
 import { BlackboardEffectReceipts, blackboardEffectStatePath } from "../src/operations/effect-receipts.js";
+import { withDurableStateTransaction } from "../src/operations/durable-state.js";
+import { readProcessStartedAt } from "@morrow/gateway-core";
 import { BlackboardLearnRuntime } from "../src/runtime.js";
 import { createBlackboardLearnMcpServer } from "../src/server.js";
 import type { BlackboardTenant } from "../src/types.js";
@@ -45,16 +48,19 @@ function receiptId(index: number): string {
   return `effect:00000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
 }
 
-function unsignedGrant(input: { planDigest: string; receipt: string; operationId: string; processId: string }) {
+function unsignedGrant(input: { planDigest: string; receipt: string; operationId: string; processId: string; issuedAt?: number; notAfter?: number }) {
+  const issuedAt = input.issuedAt ?? Date.now();
   return {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: input.operationId,
     planDigest: input.planDigest,
     outerPlanDigest: "a".repeat(64),
     approvalGrantDigest: "b".repeat(64),
     effectReceiptId: input.receipt,
     dispatchAttempt: 1,
-    gatewayProcessId: input.processId,
+   gatewayProcessId: input.processId,
+    issuedAt,
+    notAfter: input.notAfter ?? issuedAt + 60_000,
   };
 }
 
@@ -64,6 +70,8 @@ function grantArguments(input: {
   operationId: string;
   processId: string;
   secret: string;
+  issuedAt?: number;
+  notAfter?: number;
 }): JsonObject {
   const grant = unsignedGrant(input);
   return {
@@ -75,6 +83,8 @@ function grantArguments(input: {
     effect_receipt_id: grant.effectReceiptId,
     dispatch_attempt: grant.dispatchAttempt,
     gateway_process_id: grant.gatewayProcessId,
+    issued_at: grant.issuedAt,
+    not_after: grant.notAfter,
     dispatch_token: signBlackboardEffectGrant(input.secret, grant),
   };
 }
@@ -90,6 +100,8 @@ interface Session {
     target?: string;
     processId?: string;
     secret?: string;
+    issuedAt?: number;
+    notAfter?: number;
   }) => Promise<JsonObject>;
   readonly verify: (target?: string) => Promise<JsonObject>;
   readonly unresolved: () => Promise<JsonObject>;
@@ -174,13 +186,14 @@ async function site() {
     await rm(directory, { recursive: true, force: true });
   };
 
-  async function start(startOptions: { readonly secret?: string } = {}): Promise<Session> {
+  async function start(startOptions: { readonly secret?: string; readonly now?: () => number } = {}): Promise<Session> {
     const tenant: BlackboardTenant = {
       id: "fixture", baseUrl, applicationKey, clientSecret, principalId,
       courseBindings: [{ sourceBindingId: binding, courseId }],
     };
     const runtime = new BlackboardLearnRuntime([tenant], {
       effectDispatchSecret: startOptions.secret || gatewaySecret,
+      effectGrantNow: startOptions.now,
       sessionStatePath,
       effectStatePath,
     });
@@ -214,6 +227,8 @@ async function site() {
               operationId: input.operationId,
               processId: input.processId || "gateway:first-process",
               secret: input.secret || startOptions.secret || gatewaySecret,
+              issuedAt: input.issuedAt,
+              notAfter: input.notAfter,
             }),
           },
         },
@@ -344,7 +359,7 @@ describe("Blackboard durable effect record", () => {
       expect(saved).not.toContain(value);
     }
     expect(JSON.parse(saved)).toMatchObject({
-      schema: "morrow.blackboard-learn.effects.v1",
+      schema: "morrow.blackboard-learn.effects.v3",
       effects: [{ receiptId: receiptId(4), operationId: "op:blackboard-record-contents", phase: "verified" }],
     });
     expect((await stat(learn.effectStatePath)).mode & 0o077).toBe(0);
@@ -385,6 +400,30 @@ describe("Blackboard durable effect record", () => {
     expect(learn.counts().patchCount).toBe(1);
   });
 
+  it("refuses an expired signed grant through the full apply route before any Blackboard request", async () => {
+    const learn = await site();
+    let clock = Date.UTC(2026, 8, 12);
+    const session = await learn.start({ now: () => clock });
+    const plan = await session.plan();
+    const issuedAt = clock;
+    const notAfter = issuedAt + 60_000;
+    clock = notAfter;
+    const refused = await session.apply({
+      planDigest: String(plan.planDigest),
+      receipt: receiptId(6),
+      operationId: "op:blackboard-expired-grant",
+      issuedAt,
+      notAfter,
+    });
+    expect(refused).toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "blackboard_patch_review_required" },
+    });
+    expect(learn.counts().patchCount).toBe(0);
+    await expect(readFile(learn.effectStatePath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("keeps reading, and refuses every change, when its own effect record cannot be used", async () => {
     const learn = await site();
     const first = await learn.start();
@@ -423,10 +462,41 @@ describe("Blackboard effect record retention", () => {
   const target = { tenantId: "fixture", courseId, contentId };
   const otherTarget = { tenantId: "fixture", courseId, contentId: otherContentId };
 
-  function grant(receipt: string, operationId: string): BlackboardEffectGrant {
-    const unsigned = unsignedGrant({ planDigest: "c".repeat(64), receipt, operationId, processId: "gateway:retention" });
+  function grant(receipt: string, operationId: string, issuedAt = Date.now(), notAfter = issuedAt + 60_000): BlackboardEffectGrant {
+    const unsigned = unsignedGrant({ planDigest: "c".repeat(64), receipt, operationId, processId: "gateway:retention", issuedAt, notAfter });
     return { ...unsigned, dispatchToken: signBlackboardEffectGrant(gatewaySecret, unsigned) };
   }
+
+  it("persists create identity under one exact receipt and refuses another receipt as evidence", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-create-evidence-"));
+    try {
+      const path = join(directory, "state", "blackboard-effects.json");
+      const record = new BlackboardEffectReceipts(path);
+      const effectGrant = grant(receiptId(19), "op:blackboard-owned-create");
+      const reference = {
+        gatewayProcessId: effectGrant.gatewayProcessId,
+        receiptId: effectGrant.effectReceiptId,
+        operationId: effectGrant.operationId,
+      };
+      const dispatch = record.claim(effectGrant, target);
+      dispatch.markSent();
+      dispatch.recordProviderEvidence({ kind: "ultra-assignment", contentId: "_71_1", gradeColumnId: "_88_1" });
+      dispatch.markUncertain();
+
+      const restarted = new BlackboardEffectReceipts(path);
+      expect(restarted.createEvidence(reference, target, "ultra-assignment")).toEqual({
+        kind: "ultra-assignment", contentId: "_71_1", gradeColumnId: "_88_1",
+      });
+      const wrong = { ...reference, receiptId: receiptId(20) };
+      expect(restarted.createEvidence(wrong, target, "ultra-assignment")).toBeNull();
+      restarted.recordCreateComparison(wrong, target, "ultra-assignment", true);
+      expect(restarted.unresolved()).toMatchObject({ count: 1 });
+      restarted.recordCreateComparison(reference, target, "ultra-assignment", true);
+      expect(restarted.unresolved()).toMatchObject({ count: 0 });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 
   it("persists and settles a hashed non-content target without exposing its key", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-generic-target-"));
@@ -468,7 +538,76 @@ describe("Blackboard effect record retention", () => {
     }
   });
 
-  it("drops a settled record after its retention window and keeps an unconfirmed one however old it is", async () => {
+  it("fresh-reads every replacement so separate state owners cannot erase each other's receipts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-concurrent-effects-"));
+    try {
+      const path = join(directory, "state", "blackboard-effects.json");
+      const first = new BlackboardEffectReceipts(path);
+      const second = new BlackboardEffectReceipts(path);
+      const firstDispatch = first.claim(grant(receiptId(16), "op:blackboard-first-owner"), target);
+      second.claim(grant(receiptId(17), "op:blackboard-second-owner"), otherTarget);
+      firstDispatch.markSent();
+      const saved = JSON.parse(await readFile(path, "utf8")) as { revision: number; effects: { receiptId: string }[] };
+      expect(saved.revision).toBe(3);
+      expect(saved.effects.map((effect) => effect.receiptId)).toEqual([receiptId(16), receiptId(17)]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("serializes the fresh-read transaction across operating-system processes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-process-lock-"));
+    const path = join(directory, "state", "blackboard-effects.json");
+    const moduleUrl = new URL("../dist/operations/durable-state.js", import.meta.url).href;
+    const script = `import { withDurableStateTransaction } from ${JSON.stringify(moduleUrl)};
+      const cell = new Int32Array(new SharedArrayBuffer(4));
+      withDurableStateTransaction(${JSON.stringify(path)}, () => {
+        process.stdout.write("locked\\n");
+        Atomics.wait(cell, 0, 0, 250);
+      });`;
+    const child = spawn(process.execPath, ["--input-type=module", "--eval", script], { stdio: ["ignore", "pipe", "pipe"] });
+    try {
+      await once(child.stdout!, "data");
+      const started = Date.now();
+      new BlackboardEffectReceipts(path).claim(grant(receiptId(18), "op:blackboard-cross-process"), target);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(100);
+      const [code] = await once(child, "exit");
+      expect(code).toBe(0);
+      expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
+        schema: "morrow.blackboard-learn.effects.v3",
+        effects: [{ receiptId: receiptId(18) }],
+      });
+    } finally {
+      if (child.exitCode === null) child.kill("SIGKILL");
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("reclaims a durable transaction lock whose live PID belongs to a later process", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-reused-pid-lock-"));
+    try {
+      const path = join(directory, "state", "blackboard-effects.json");
+      const lockPath = `${path}.transaction.lock`;
+      await (await import("node:fs/promises")).mkdir(join(directory, "state"), { recursive: true, mode: 0o700 });
+      const actualStartedAt = readProcessStartedAt(process.pid);
+      expect(actualStartedAt).not.toBeNull();
+      await writeFile(lockPath, `${JSON.stringify({
+        schema: "morrow.blackboard.state-transaction.v1",
+        nonce: "00000000-0000-4000-8000-000000000099",
+        pid: process.pid,
+        acquiredAt: Date.now() - 60_000,
+        processStartedAt: new Date(actualStartedAt! - 60_000).toISOString(),
+      })}\n`, { mode: 0o600 });
+      let entered = false;
+      withDurableStateTransaction(path, () => { entered = true; });
+      expect(entered).toBe(true);
+      await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("never drops a settled receipt while its grant deadline remains live", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-retention-"));
     try {
       const path = join(directory, "state", "blackboard-effects.json");
@@ -476,28 +615,46 @@ describe("Blackboard effect record retention", () => {
       let clock = Date.UTC(2026, 8, 7);
       const record = new BlackboardEffectReceipts(path, () => clock);
 
-      const settled = record.claim(grant(receiptId(11), "op:blackboard-settled"), target);
+      const settled = record.claim(grant(receiptId(11), "op:blackboard-settled", clock, clock + 40 * day), target);
       settled.markSent();
       settled.markVerified();
-      const holding = record.claim(grant(receiptId(12), "op:blackboard-holding"), otherTarget);
+      const holding = record.claim(grant(receiptId(12), "op:blackboard-holding", clock), otherTarget);
       holding.markSent();
 
       clock += 31 * day;
       // Any write rewrites the whole record, which is where the window applies.
-      record.claim(grant(receiptId(13), "op:blackboard-later"), target).markSent();
+      record.claim(grant(receiptId(13), "op:blackboard-later", clock), target);
 
       const saved = JSON.parse(await readFile(path, "utf8")) as { effects: { receiptId: string }[] };
-      expect(saved.effects.map((effect) => effect.receiptId)).toEqual([receiptId(12), receiptId(13)]);
+      expect(saved.effects.map((effect) => effect.receiptId)).toEqual([receiptId(11), receiptId(12), receiptId(13)]);
       expect((record.unresolved().effects as JsonObject[]).map((effect) => effect.operationId))
-        .toEqual(["op:blackboard-holding", "op:blackboard-later"]);
-      // The dropped record was settled, so its receipt is no longer refused.
-      // Nothing can present it again: the Gateway process that signed it minted
-      // its own dispatch secret and is long gone.
-      expect(() => record.assertUnspent(grant(receiptId(11), "op:blackboard-settled"))).not.toThrow();
+        .toEqual(["op:blackboard-holding"]);
+      expect(() => record.assertUnspent(grant(receiptId(11), "op:blackboard-settled", clock - 31 * day, clock + 9 * day)))
+        .toThrow(/already dispatched/);
       expect(() => record.assertUnspent(grant(receiptId(12), "op:blackboard-holding"))).toThrow(/already dispatched/);
+
+      clock += 10 * day;
+      record.claim(grant(receiptId(14), "op:blackboard-after-deadline", clock), target);
+      const afterDeadline = JSON.parse(await readFile(path, "utf8")) as { effects: { receiptId: string }[] };
+      expect(afterDeadline.effects.map((effect) => effect.receiptId)).toEqual([receiptId(12), receiptId(13), receiptId(14)]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it("authenticates only a bounded current grant", () => {
+    const issuedAt = Date.UTC(2026, 8, 12);
+    const unsigned = unsignedGrant({
+      planDigest: "c".repeat(64), receipt: receiptId(15), operationId: "op:blackboard-window",
+      processId: "gateway:retention", issuedAt, notAfter: issuedAt + 60_000,
+    });
+    const signed = { ...unsigned, dispatchToken: signBlackboardEffectGrant(gatewaySecret, unsigned) };
+    expect(blackboardEffectGrantAccepted(gatewaySecret, signed, issuedAt)).toBe(true);
+    expect(blackboardEffectGrantAccepted(gatewaySecret, signed, issuedAt - 1)).toBe(false);
+    expect(blackboardEffectGrantAccepted(gatewaySecret, signed, signed.notAfter)).toBe(false);
+    const unbounded = { ...unsigned, notAfter: issuedAt + 5 * 60 * 1_000 + 1 };
+    const unboundedSigned = { ...unbounded, dispatchToken: signBlackboardEffectGrant(gatewaySecret, unbounded) };
+    expect(blackboardEffectGrantAccepted(gatewaySecret, unboundedSigned, issuedAt)).toBe(false);
   });
 
   it("keeps the record in the app-private state directory, beside the Blackboard setup file", () => {

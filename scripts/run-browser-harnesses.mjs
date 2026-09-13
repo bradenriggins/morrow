@@ -18,15 +18,17 @@
  * re-run, not a proof that the product is wrong.
  */
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { once } from "node:events";
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, writeFileSync, writeSync } from "node:fs";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { BROWSER_HARNESS_RECEIPT_PATH, BROWSER_HARNESS_SCHEMA } from "./lib/release-candidate.mjs";
+import { runOwnedProcess } from "./lib/owned-process.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const MAX_HARNESS_LOG_BYTES = 4 * 1024 * 1024;
+const MAX_RETAINED_PROCESS_OUTPUT_BYTES = 128 * 1024;
 
 const USAGE = "Usage: node scripts/run-browser-harnesses.mjs [--attended] [--receipt <absolute path>]";
 
@@ -125,52 +127,61 @@ function receiptPath(argv) {
 }
 
 /**
- * Stops a harness that reached its limit. An unattended harness runs in its own process group, so
- * the browser it started stops with it; an attended one stays in this group to keep the terminal's
- * keyboard, so only the harness process is signalled.
+ * Runs one harness, writes bounded output to `logPath`, and returns the result the receipt records.
+ * The shared process owner settles even when a child or retained pipe never reports close. Output
+ * beyond the evidence limit makes the run fail instead of producing an incomplete passing proof.
  */
-function stopHarness(child, attended) {
-  const signal = (name) => {
-    try {
-      if (attended) child.kill(name);
-      else process.kill(-child.pid, name);
-    } catch {}
-  };
-  signal("SIGTERM");
-  setTimeout(() => signal("SIGKILL"), 10_000).unref();
-}
-
-/**
- * Runs one harness, writes its whole output to `logPath`, and returns the result the receipt
- * records. A harness that reaches its timeout is stopped and recorded as `timed-out`.
- */
-export async function runHarness(harness, { attended = false, logPath }) {
+export async function runHarness(harness, { attended = false, logPath, maxLogBytes = MAX_HARNESS_LOG_BYTES }) {
+  if (!Number.isSafeInteger(maxLogBytes) || maxLogBytes < 1 || maxLogBytes > MAX_HARNESS_LOG_BYTES) {
+    throw new TypeError("browser harness log limit is invalid");
+  }
   const startedAt = Date.now();
-  const output = [];
-  const child = spawn(process.execPath, [resolve(ROOT, harness.script)], {
-    cwd: ROOT,
-    stdio: [attended ? "inherit" : "ignore", "pipe", "pipe"],
-    detached: !attended,
-  });
-  child.stdout.on("data", (chunk) => { output.push(chunk); process.stdout.write(chunk); });
-  child.stderr.on("data", (chunk) => { output.push(chunk); process.stderr.write(chunk); });
-  let timedOut = false;
-  const limit = setTimeout(() => { timedOut = true; stopHarness(child, attended); }, harness.timeoutMs);
-  const [code, signal] = await once(child, "close");
-  clearTimeout(limit);
-  const log = Buffer.concat(output);
   mkdirSync(dirname(logPath), { recursive: true, mode: 0o700 });
-  writeFileSync(logPath, log, { mode: 0o600 });
+  const logDescriptor = openSync(logPath, "w", 0o600);
+  const logDigest = createHash("sha256");
+  let logBytes = 0;
+  let logTruncated = false;
+  const appendLog = (chunk, destination) => {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    destination.write(value);
+    const retainedBytes = Math.min(value.byteLength, maxLogBytes - logBytes);
+    if (retainedBytes > 0) {
+      const retained = value.subarray(0, retainedBytes);
+      let written = 0;
+      while (written < retained.byteLength) written += writeSync(logDescriptor, retained, written);
+      logDigest.update(retained);
+      logBytes += retained.byteLength;
+    }
+    if (retainedBytes < value.byteLength) logTruncated = true;
+  };
+  let result;
+  try {
+    result = await runOwnedProcess(process.execPath, [resolve(ROOT, harness.script)], {
+      workingDirectory: ROOT,
+      input: attended ? "inherit" : "ignore",
+      timeoutMs: harness.timeoutMs,
+      killGraceMs: 10_000,
+      finalGraceMs: 2_000,
+      maxOutputBytes: MAX_RETAINED_PROCESS_OUTPUT_BYTES,
+      onStdout: (chunk) => appendLog(chunk, process.stdout),
+      onStderr: (chunk) => appendLog(chunk, process.stderr),
+    });
+  } finally {
+    closeSync(logDescriptor);
+  }
+  const status = result.timedOut ? "timed-out" : result.code === 0 && !logTruncated ? "passed" : "failed";
   return {
     id: harness.id,
     script: harness.script,
-    status: timedOut ? "timed-out" : code === 0 ? "passed" : "failed",
-    exitCode: code,
-    ...(signal ? { signal } : {}),
+    status,
+    exitCode: result.code,
+    ...(result.signal ? { signal: result.signal } : {}),
     durationMs: Date.now() - startedAt,
     timeoutMs: harness.timeoutMs,
     log: basename(logPath),
-    logSha256: sha256(log),
+    logBytes,
+    logTruncated,
+    logSha256: logDigest.digest("hex"),
   };
 }
 

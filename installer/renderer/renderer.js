@@ -28,9 +28,11 @@ const actionCopy = document.querySelector("#action-copy");
 const actionBody = document.querySelector("#action-body");
 const problem = document.querySelector("#problem");
 const updatesPanel = document.querySelector("#updates-panel");
+const updatesTitle = document.querySelector("#updates-title");
 const updatesCopy = document.querySelector("#updates-copy");
 const updatesActions = document.querySelector("#updates-actions");
 const blackboardPanel = document.querySelector("#blackboard-panel");
+const blackboardSummary = document.querySelector("#blackboard-summary");
 const blackboardCopy = document.querySelector("#blackboard-copy");
 const blackboardAdminNote = document.querySelector("#blackboard-admin-note");
 const blackboardTenantRow = document.querySelector("#blackboard-tenant");
@@ -48,6 +50,7 @@ const blackboardCourses = document.querySelector("#blackboard-courses");
 const blackboardCoursesCopy = document.querySelector("#blackboard-courses-copy");
 const blackboardCourseList = document.querySelector("#blackboard-course-list");
 const retentionPanel = document.querySelector("#retention-panel");
+const retentionSummary = document.querySelector("#retention-summary");
 const retentionTitle = document.querySelector("#retention-title");
 const retentionCopy = document.querySelector("#retention-copy");
 const retentionBody = document.querySelector("#retention-body");
@@ -72,6 +75,7 @@ let latestProblem = null;
 let shownProblem = null;
 let loadAttempted = false;
 let heldFocusKey = null;
+let userActionFocusPending = false;
 let blackboardDisclosureTouched = false;
 let blackboardProblemsShown = false;
 let lastRefreshAt = 0;
@@ -87,6 +91,14 @@ function renderPlatformNote() {
 
 function focusKey(element) {
   if (!(element instanceof HTMLElement)) return null;
+  if (element.tagName === "SUMMARY") {
+    const disclosure = element.closest("details");
+    if (disclosure?.id) return `disclosure ${disclosure.id}`;
+    for (const className of ["advanced-assistants", "optional-setup"]) {
+      if (disclosure?.classList.contains(className)) return `disclosure ${className}`;
+    }
+  }
+  if (element.dataset.courseId) return `course ${element.dataset.courseId}`;
   const action = element.dataset.action;
   if (action) return element.dataset.assistantId ? `${action} ${element.dataset.assistantId}` : action;
   return element.id ? `#${element.id}` : null;
@@ -105,17 +117,44 @@ function controls() {
   ];
 }
 
+function focusTargets() {
+  return [
+    ...controls(),
+    actionTitle,
+    updatesTitle,
+    blackboardSummary,
+    retentionSummary,
+    ...actionBody.querySelectorAll("summary")
+  ];
+}
+
 function focusedKey() {
   const active = document.activeElement;
-  return controls().includes(active) ? focusKey(active) : null;
+  return focusTargets().includes(active) ? focusKey(active) : null;
 }
 
 function restoreFocus(key) {
   if (!key) return false;
-  const target = controls().find((element) => focusKey(element) === key);
+  const target = focusTargets().find((element) => focusKey(element) === key);
   if (!(target instanceof HTMLElement) || target.disabled === true) return false;
   target.focus();
   return document.activeElement === target;
+}
+
+function rememberUserActionFocus(target) {
+  if (!actionBody.querySelectorAll("[data-action]").includes(target)) return;
+  heldFocusKey = focusKey(target);
+  userActionFocusPending = true;
+}
+
+function focusActionTransition() {
+  const primary = actionBody.querySelector(".primary-button");
+  if (primary instanceof HTMLElement && primary.disabled !== true) {
+    primary.focus();
+    if (document.activeElement === primary) return true;
+  }
+  actionTitle.focus();
+  return document.activeElement === actionTitle;
 }
 
 function applyBusy() {
@@ -161,7 +200,7 @@ function renderUpdates(current) {
   if (!updates || updates.schema !== "morrow.desktop-update.v1" || updates.status === "unavailable") {
     updatesPanel.hidden = true;
     updatesCopy.textContent = "";
-    updatesActions.innerHTML = "";
+    renderUpdateActions("");
     return;
   }
   updatesPanel.hidden = false;
@@ -169,62 +208,98 @@ function renderUpdates(current) {
   const automatic = updates.automatic === true;
   if (updates.status === "idle") {
     updatesCopy.textContent = automatic ? "Morrow checks for updates automatically. You can also check now." : "Morrow is ready to check for an update.";
-    updatesActions.innerHTML = '<button class="secondary-button" type="button" data-action="check-for-updates">Check for updates</button>';
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Check for updates</button>');
     return;
   }
   if (updates.status === "checking") {
     updatesCopy.textContent = "Morrow is checking for an update.";
-    updatesActions.innerHTML = "";
+    renderUpdateActions("");
     return;
   }
   if (updates.status === "available" || updates.status === "downloading") {
     updatesCopy.textContent = updates.status === "available"
       ? `Morrow found${version} and will download it in the background.`
       : `Morrow is downloading${version} in the background. You can keep working while it finishes.`;
-    updatesActions.innerHTML = "";
+    renderUpdateActions("");
     return;
   }
   if (updates.status === "ready") {
     if (updates.reason === "active_or_uncertain_operations") {
       updatesCopy.textContent = "Morrow will restart after course work finishes or its current state is clear.";
-      updatesActions.innerHTML = "";
+      renderUpdateActions("");
       return;
     }
     if (updates.reason === "update_install_failed") {
       updatesCopy.textContent = "Morrow could not install the update. Try again when course work is idle.";
-      updatesActions.innerHTML = '<button class="secondary-button" type="button" data-action="install-update">Try restart again</button>';
+      renderUpdateActions('<button class="secondary-button" type="button" data-action="install-update">Try restart again</button>');
       return;
     }
     updatesCopy.textContent = `${updates.availableVersion ? `Version ${updates.availableVersion} is ready.` : "An update is ready."} Restart Morrow when course work is idle to finish the update.`;
-    updatesActions.innerHTML = '<button class="primary-button" type="button" data-action="install-update">Restart to update</button>';
+    renderUpdateActions('<button class="primary-button" type="button" data-action="install-update">Restart to update</button>');
     return;
   }
   if (updates.status === "installing") {
     updatesCopy.textContent = "Morrow is installing its update. It will reopen when the update is complete.";
-    updatesActions.innerHTML = "";
+    renderUpdateActions("");
     return;
   }
   if (updates.reason === "update_rolled_back") {
     updatesCopy.textContent = updates.currentVersion
       ? `The update did not start; Morrow is running version ${updates.currentVersion}.`
       : "The update did not start; Morrow is running the version it started from.";
-    updatesActions.innerHTML = '<button class="secondary-button" type="button" data-action="check-for-updates">Retry the update</button>';
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Retry the update</button>');
     return;
   }
   if (updates.reason === "disk_space_unavailable") {
     updatesCopy.textContent = "Morrow could not download the update: this computer does not have enough free space for it.";
-    updatesActions.innerHTML = '<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>';
+    renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
     return;
   }
   updatesCopy.textContent = "Morrow could not check for an update.";
-  updatesActions.innerHTML = '<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>';
+  renderUpdateActions('<button class="secondary-button" type="button" data-action="check-for-updates">Try again</button>');
+}
+
+function renderUpdateActions(html) {
+  if (updatesActions.innerHTML !== html) updatesActions.innerHTML = html;
+  for (const action of updatesActions.querySelectorAll("[data-action]")) action.disabled = busy;
+}
+
+const UPDATE_STATUSES = new Set(["unavailable", "idle", "checking", "available", "downloading", "ready", "installing", "error"]);
+
+function isUpdateSnapshot(value) {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value)
+    && value.schema === "morrow.desktop-update.v1"
+    && UPDATE_STATUSES.has(value.status)
+    && typeof value.currentVersion === "string" && value.currentVersion.length <= 160
+    && (value.availableVersion === null || (typeof value.availableVersion === "string" && value.availableVersion.length <= 160))
+    && typeof value.automatic === "boolean"
+    && (value.reason === null || (typeof value.reason === "string" && value.reason.length <= 160)));
+}
+
+function receiveUpdateSnapshot(snapshot) {
+  if (!state || !isUpdateSnapshot(snapshot)) return;
+  const active = document.activeElement;
+  const focus = [...updatesActions.querySelectorAll("[data-action]")].includes(active) ? focusKey(active) : null;
+  state = { ...state, updates: snapshot };
+  renderUpdates(state);
+  applyBusy();
+  if (focus && !restoreFocus(focus) && !updatesPanel.hidden) updatesTitle.focus();
+}
+
+function blackboardHealth(current) {
+  const blackboard = current?.blackboard;
+  return blackboard?.schema === "morrow.blackboard.health.v1" ? blackboard : null;
 }
 
 // Setup writes one Blackboard connection, so the courses belong to that one.
 function blackboardTenant(current) {
-  const blackboard = current?.blackboard;
-  if (blackboard?.schema !== "morrow.blackboard.health.v1" || blackboard.status !== "api_configured_live_untested") return null;
-  return blackboard.tenants[0] || null;
+  const blackboard = blackboardHealth(current);
+  return blackboard?.tenants[0] || null;
+}
+
+function blackboardNeedsRepair(current) {
+  const status = blackboardHealth(current)?.status;
+  return Boolean(status && status !== "not_configured" && status !== "api_configured_live_untested");
 }
 
 // A saved connection is the only place a person can see the site and account
@@ -252,18 +327,26 @@ function renderBlackboardReplacement(tenant) {
 // site, the account, and the name Morrow saved it under. Remove is offered here
 // because a connection saved for the wrong site or account is otherwise
 // permanent, and what removal takes away is written beside the button.
-function renderBlackboardTenant(tenant) {
-  blackboardTenantRow.hidden = !tenant;
-  blackboardTenantRow.innerHTML = !tenant ? "" : `
+function renderBlackboardTenant(tenant, needsRepair) {
+  blackboardTenantRow.hidden = !tenant && !needsRepair;
+  blackboardTenantRow.innerHTML = tenant ? `
     <div class="materials-row">
       <div>
         <h3>${escapeHtml(tenant.baseUrl)}</h3>
         <p>Blackboard verified account ${escapeHtml(tenant.principalId)} when Morrow saved this connection as ${escapeHtml(tenant.id)}.</p>
-        <p>Remove takes this connection and the secret saved for it off this computer. It changes nothing in Blackboard.</p>
+        <p>${needsRepair ? "Remove saved data takes this damaged connection and its secret off this computer." : "Remove takes this connection and the secret saved for it off this computer."} It changes nothing in Blackboard.</p>
       </div>
-      <button class="secondary-button" type="button" data-action="remove-blackboard-tenant" data-tenant-id="${escapeHtml(tenant.id)}" aria-label="Remove the Blackboard connection for ${escapeHtml(tenant.baseUrl)}">Remove connection</button>
+      <button class="secondary-button" type="button" data-action="${needsRepair ? "remove-blackboard-data" : "remove-blackboard-tenant"}" data-tenant-id="${escapeHtml(tenant.id)}" aria-label="Remove the Blackboard connection for ${escapeHtml(tenant.baseUrl)}">${needsRepair ? "Remove saved data" : "Remove connection"}</button>
     </div>
-  `;
+  ` : needsRepair ? `
+    <div class="materials-row">
+      <div>
+        <h3>Saved Blackboard data needs repair</h3>
+        <p>Morrow cannot safely read the saved connection. Remove saved data before you connect it again. This changes nothing in Blackboard.</p>
+      </div>
+      <button class="secondary-button" type="button" data-action="remove-blackboard-data">Remove saved data</button>
+    </div>
+  ` : "";
 }
 
 // Blackboard verifies the service account and its accessible courses before it
@@ -273,16 +356,31 @@ function renderBlackboard(current) {
   // issues, so setup offers it only once an assistant is configured.
   blackboardPanel.hidden = !blackboardSetupOffered(current);
   if (blackboardPanel.hidden) return;
+  const health = blackboardHealth(current);
   const tenant = blackboardTenant(current);
-  blackboardCopy.textContent = tenant
-    ? "Blackboard verified this account and its accessible courses when Morrow saved the connection. Morrow has not tested a course action."
-    : "Morrow verifies the Blackboard account and its accessible courses before it saves this connection on this computer.";
-  blackboardAdminNote.hidden = Boolean(tenant);
-  blackboardSavedNote.hidden = !tenant;
-  renderBlackboardTenant(tenant);
+  const needsRepair = blackboardNeedsRepair(current);
+  const removalOnly = health?.status === "configuration_repair_required" || health?.status === "private_access_refused";
+  if (health?.status === "credential_missing") {
+    blackboardCopy.textContent = "Morrow found the saved Blackboard connection, but its secret is missing. Paste the application key and secret to repair it, or remove the saved data.";
+  } else if (health?.status === "credential_mismatched") {
+    blackboardCopy.textContent = "Morrow found the saved Blackboard connection, but its secret no longer matches it. Paste the application key and secret to repair it, or remove the saved data.";
+  } else if (health?.status === "private_access_refused") {
+    blackboardCopy.textContent = "Morrow found saved Blackboard data that it cannot safely open. Repair the file access and check status again, or remove the saved data.";
+  } else if (health?.status === "configuration_repair_required") {
+    blackboardCopy.textContent = "Morrow found saved Blackboard data that it cannot safely read. Remove the saved data before you connect Blackboard again.";
+  } else {
+    blackboardCopy.textContent = tenant
+      ? "Blackboard verified this account and its accessible courses when Morrow saved the connection. Morrow has not tested a course action."
+      : "Morrow verifies the Blackboard account and its accessible courses before it saves this connection on this computer.";
+  }
+  blackboardAdminNote.hidden = removalOnly || (Boolean(tenant) && !needsRepair);
+  blackboardSavedNote.hidden = !tenant || needsRepair;
+  renderBlackboardTenant(tenant, needsRepair);
   fillStoredBlackboardIdentity(tenant);
   renderBlackboardReplacement(tenant);
-  blackboardCourses.hidden = !tenant;
+  blackboardForm.hidden = removalOnly;
+  blackboardSubmit.textContent = needsRepair ? "Repair Blackboard connection" : "Save Blackboard connection";
+  blackboardCourses.hidden = !tenant || needsRepair;
   const selected = new Set(tenant?.courseBindings.map((binding) => binding.courseId) || []);
   const courses = tenant?.availableCourses || [];
   blackboardCoursesCopy.textContent = !tenant ? ""
@@ -291,10 +389,13 @@ function renderBlackboard(current) {
       : `Select the Blackboard courses Morrow can work in on ${tenant.baseUrl}. Blackboard verified this list when you saved the connection.`;
   blackboardCourseList.innerHTML = courses.map((course) => {
     const connected = selected.has(course.courseId);
+    const actionLabel = connected
+      ? `Remove ${course.title} (${course.courseId}) from Morrow`
+      : `Allow Morrow to use ${course.title} (${course.courseId})`;
     return `
       <li class="materials-row">
         <span><strong>${escapeHtml(course.title)}</strong><span class="course-id">${escapeHtml(course.courseId)}</span></span>
-        <button class="secondary-button" type="button" data-action="${connected ? "remove-blackboard-course" : "select-blackboard-course"}" data-course-id="${escapeHtml(course.courseId)}">${connected ? "Remove" : "Allow Morrow"}</button>
+        <button class="secondary-button" type="button" data-action="${connected ? "remove-blackboard-course" : "select-blackboard-course"}" data-course-id="${escapeHtml(course.courseId)}" aria-label="${escapeHtml(actionLabel)}">${connected ? "Remove" : "Allow Morrow"}</button>
       </li>
     `;
   }).join("");
@@ -302,7 +403,7 @@ function renderBlackboard(current) {
   // A saved connection is what a person opens this panel to see, so Morrow
   // opens the disclosure once. After that the disclosure stays where the
   // person left it.
-  if (tenant && !blackboardDisclosureTouched) blackboardPanel.open = true;
+  if ((tenant || needsRepair) && !blackboardDisclosureTouched) blackboardPanel.open = true;
 }
 
 // The exact places this installation keeps data, and the one action that
@@ -364,7 +465,11 @@ function render(current) {
   announceRemoval(current);
   setProblem(latestProblem);
   applyBusy();
-  const restored = restoreFocus(restoreKey);
+  let restored = restoreFocus(restoreKey);
+  if (!busy && userActionFocusPending) {
+    if (!restored) restored = focusActionTransition();
+    userActionFocusPending = false;
+  }
   heldFocusKey = busy && !restored ? restoreKey : null;
 }
 
@@ -442,6 +547,7 @@ async function handleAction(event) {
   const target = event.target instanceof Element ? event.target.closest("[data-action]") : null;
   if (!(target instanceof HTMLElement) || busy) return;
   const action = target.dataset.action;
+  rememberUserActionFocus(target);
   if (action === "choose-assistant") {
     chosenAssistantId = target.dataset.assistantId || null;
     latestProblem = null;
@@ -535,6 +641,18 @@ async function handleAction(event) {
     // The site and account in the form were the ones Morrow saved. Once that
     // connection is gone they are not saved values any more, so the form no
     // longer offers them as if they were.
+    if (!blackboardTenant(state)) {
+      blackboardForm.reset();
+      blackboardProblemsShown = false;
+      clearFieldProblems(blackboardConnectionFields);
+      renderBlackboardReplacement(null);
+    }
+    return;
+  }
+  if (action === "remove-blackboard-data") {
+    const next = await invoke("installer:remove-blackboard-data");
+    if (next) render(next);
+    else render(state);
     if (!blackboardTenant(state)) {
       blackboardForm.reset();
       blackboardProblemsShown = false;
@@ -682,4 +800,8 @@ window.addEventListener("focus", () => {
   void refresh();
 });
 renderPlatformNote();
-void refresh();
+if (typeof API?.subscribeUpdates === "function") API.subscribeUpdates(receiveUpdateSnapshot);
+void (async () => {
+  await refresh();
+  if (typeof API?.rendererReady === "function") await API.rendererReady();
+})();

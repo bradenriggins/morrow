@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = "https://canvas.instructure.com/doc/api/";
 const INDEX_URL = `${ROOT}api-docs.json`;
+const DOCUMENT_TIMEOUT_MS = 30_000;
+const MAX_DOCUMENT_BYTES = 8 * 1024 * 1024;
 const DEFAULT_OUTPUT = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../artifacts/canvas-api/canvas-api-catalog.json",
@@ -212,6 +214,7 @@ function classicQuizAnswersParameter(parameter) {
           answer_text: { type: "string", maxLength: 16_384 },
           answer_weight: { type: "integer", minimum: 0, maximum: 100 },
           answer_comments: { type: "string", maxLength: 16_384 },
+          answer_comment_html: { type: "string", maxLength: 16_384 },
           answer_html: { type: "string", maxLength: 16_384 },
           text_after_answers: { type: "string", maxLength: 16_384 },
         },
@@ -351,10 +354,76 @@ function assignToolNames(operations) {
   }
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw new Error(`Canvas documentation returned HTTP ${response.status} for ${url}`);
-  return { value: await response.json(), lastModified: response.headers.get("last-modified") || null };
+export async function fetchJson(url, options = {}) {
+  const fetchImplementation = options.fetchImplementation || fetch;
+  const timeoutMs = options.timeoutMs ?? DOCUMENT_TIMEOUT_MS;
+  const maxBytes = options.maxBytes ?? MAX_DOCUMENT_BYTES;
+  if (typeof url !== "string" || !url.startsWith(ROOT)
+    || typeof fetchImplementation !== "function"
+    || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 300_000
+    || !Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_DOCUMENT_BYTES) {
+    throw new TypeError("Canvas documentation request is invalid");
+  }
+  const controller = new AbortController();
+  const timeoutError = new Error(`Canvas documentation request timed out for ${url}`);
+  let rejectAbort;
+  const aborted = new Promise((unused, reject) => { rejectAbort = reject; });
+  const onAbort = () => rejectAbort(timeoutError);
+  controller.signal.addEventListener("abort", onAbort, { once: true });
+  const timeout = setTimeout(() => controller.abort(timeoutError), timeoutMs);
+  let reader;
+  try {
+    const response = await Promise.race([
+      fetchImplementation(url, {
+        headers: { Accept: "application/json" },
+        redirect: "error",
+        signal: controller.signal,
+      }),
+      aborted,
+    ]);
+    if (!response?.ok) throw new Error(`Canvas documentation returned HTTP ${response?.status ?? "unknown"} for ${url}`);
+    const contentType = response.headers?.get?.("content-type") || "";
+    if (!/^application\/json(?:\s*;|$)/iu.test(contentType)) throw new Error(`Canvas documentation returned a non-JSON response for ${url}`);
+    const declared = response.headers.get("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/u.test(declared) || Number(declared) > maxBytes)) {
+      throw new Error(`Canvas documentation response exceeded ${maxBytes} bytes for ${url}`);
+    }
+    if (!response.body || typeof response.body.getReader !== "function") {
+      throw new Error(`Canvas documentation response was unreadable for ${url}`);
+    }
+    reader = response.body.getReader();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let bytes = 0;
+    let text = "";
+    for (;;) {
+      const next = await Promise.race([reader.read(), aborted]);
+      if (next.done) break;
+      if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > maxBytes) {
+        throw new Error(`Canvas documentation response exceeded ${maxBytes} bytes for ${url}`);
+      }
+      try {
+        text += decoder.decode(next.value, { stream: true });
+      } catch {
+        throw new Error(`Canvas documentation returned invalid UTF-8 for ${url}`);
+      }
+    }
+    try {
+      text += decoder.decode();
+    } catch {
+      throw new Error(`Canvas documentation returned invalid UTF-8 for ${url}`);
+    }
+    let value;
+    try { value = JSON.parse(text); } catch { throw new Error(`Canvas documentation returned invalid JSON for ${url}`); }
+    return { value, lastModified: response.headers.get("last-modified") || null };
+  } catch (error) {
+    controller.abort(error);
+    void reader?.cancel(error).catch(() => undefined);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    controller.signal.removeEventListener("abort", onAbort);
+    try { reader?.releaseLock(); } catch {}
+  }
 }
 
 async function mapConcurrent(values, concurrency, mapper) {
@@ -641,25 +710,30 @@ async function buildCatalog() {
   return { ...catalogBase, catalogDigest: sha256(canonicalJson(catalogBase)) };
 }
 
-const args = new Set(process.argv.slice(2));
-const outputArgument = process.argv.find((value) => value.startsWith("--output="));
-const outputPath = outputArgument ? resolve(outputArgument.slice("--output=".length)) : DEFAULT_OUTPUT;
-const catalog = await buildCatalog();
-const bytes = `${canonicalJson(catalog)}\n`;
-if (args.has("--check")) {
-  const current = await readFile(outputPath, "utf8").catch(() => "");
-  if (current !== bytes) {
-    process.stderr.write(`Canvas API catalog is stale: ${outputPath}\n`);
-    process.exitCode = 1;
-  }
-} else {
-  await mkdir(dirname(outputPath), { recursive: true });
-  await writeFile(outputPath, bytes, "utf8");
-  if (!outputArgument) {
-    for (const mirror of DEFAULT_MIRRORS) {
-      await mkdir(dirname(mirror), { recursive: true });
-      await writeFile(mirror, bytes, "utf8");
+export async function main(argv = process.argv.slice(2)) {
+  const args = new Set(argv);
+  const outputArgument = argv.find((value) => value.startsWith("--output="));
+  const outputPath = outputArgument ? resolve(outputArgument.slice("--output=".length)) : DEFAULT_OUTPUT;
+  const catalog = await buildCatalog();
+  const bytes = `${canonicalJson(catalog)}\n`;
+  if (args.has("--check")) {
+    const current = await readFile(outputPath, "utf8").catch(() => "");
+    if (current !== bytes) {
+      process.stderr.write(`Canvas API catalog is stale: ${outputPath}\n`);
+      process.exitCode = 1;
+    }
+  } else {
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, bytes, "utf8");
+    if (!outputArgument) {
+      for (const mirror of DEFAULT_MIRRORS) {
+        await mkdir(dirname(mirror), { recursive: true });
+        await writeFile(mirror, bytes, "utf8");
+      }
     }
   }
+  process.stdout.write(`${JSON.stringify({ path: outputPath, digest: catalog.catalogDigest, ...catalog.counts })}\n`);
+  return catalog;
 }
-process.stdout.write(`${JSON.stringify({ path: outputPath, digest: catalog.catalogDigest, ...catalog.counts })}\n`);
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

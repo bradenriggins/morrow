@@ -17,7 +17,7 @@ export const contentScopeInput = scopeInput.extend({ content_id: blackboardId })
 export const patchInput = z.record(z.string(), z.unknown());
 
 export const effectGrantInput = z.strictObject({
-  schema: z.literal("morrow.blackboard.effect-grant.v1"),
+  schema: z.literal("morrow.blackboard.effect-grant.v2"),
   operation_id: z.string().regex(/^op:[A-Za-z0-9_-]{1,160}$/),
   plan_digest: z.string().regex(/^[0-9a-f]{64}$/),
   outer_plan_digest: z.string().regex(/^[0-9a-f]{64}$/),
@@ -25,7 +25,16 @@ export const effectGrantInput = z.strictObject({
   effect_receipt_id: z.string().regex(/^effect:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
   dispatch_attempt: z.number().int().min(1),
   gateway_process_id: z.string().regex(/^[A-Za-z0-9:_-]{8,300}$/),
+  issued_at: z.number().int().nonnegative(),
+  not_after: z.number().int().positive(),
   dispatch_token: z.string().regex(/^[0-9a-f]{64}$/),
+});
+
+/** The private source receipt identity the Gateway adds only during create verification. */
+export const effectReceiptReferenceInput = z.strictObject({
+  gateway_process_id: z.string().regex(/^[A-Za-z0-9:_-]{8,300}$/),
+  effect_receipt_id: z.string().regex(/^effect:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+  operation_id: z.string().regex(/^op:[A-Za-z0-9_-]{1,160}$/),
 });
 
 /**
@@ -114,7 +123,8 @@ export function blackboardTool<Schema extends z.ZodType>(definition: BlackboardT
         schema: envelope.schema, operationId: envelope.operation_id, planDigest: envelope.plan_digest,
         outerPlanDigest: envelope.outer_plan_digest, approvalGrantDigest: envelope.approval_grant_digest,
         effectReceiptId: envelope.effect_receipt_id, dispatchAttempt: envelope.dispatch_attempt,
-        gatewayProcessId: envelope.gateway_process_id, dispatchToken: envelope.dispatch_token,
+        gatewayProcessId: envelope.gateway_process_id, issuedAt: envelope.issued_at,
+        notAfter: envelope.not_after, dispatchToken: envelope.dispatch_token,
       };
       runtime.assertReservedEffectGrant(grant);
       if (grant.planDigest !== input.expected_plan_digest) {

@@ -6,6 +6,13 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { decodeStrictUtf8, parseStrictJson } = require("./strict-utf8.cjs");
+const { DatabaseSync } = require("node:sqlite");
+const {
+  processMatchesExactStart,
+  processMatchesRecordedLifetime,
+  readProcessStartedAt,
+} = require("./process-lifetime.cjs");
 
 const RELEASE_SCHEMA = "morrow.bridge-release.v1";
 const INSTALLATION_SCHEMA = "morrow.bridge-installation.v1";
@@ -15,6 +22,9 @@ const QUIESCED_SCHEMA = "morrow.bridge.update-quiesced.v1";
 const RESUMED_SCHEMA = "morrow.bridge.update-resumed.v1";
 const READBACK_SCHEMA = "morrow.bridge.update-readback.v1";
 const LOCK_SCHEMA = "morrow.bridge.update-lock.v1";
+const LOCK_DATABASE_FILE = "bridge-update-lock.sqlite3";
+const UPDATE_TRANSACTION_SCHEMA = "morrow.bridge-update-transaction.v1";
+const UPDATE_TRANSACTION_FILE = "bridge-update-transaction.json";
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const INSTALLATION_RECORD_VERSION = 1;
 const ACTIVE_FOLDER_MARKER = "morrow-bridge-active-folder.json";
@@ -206,7 +216,8 @@ async function verifyExtensionManifest(root, release, code) {
   await regularFile(file, code);
   const bytes = await fs.readFile(file);
   if (sha256(bytes) !== release.manifestSha256) fail(code);
-  const manifest = json(bytes.toString("utf8"), code);
+  let manifest;
+  try { manifest = parseStrictJson(bytes, "Bridge extension manifest"); } catch { fail(code); }
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)
     || manifest.manifest_version !== 3 || manifest.version !== release.version
     || derivedExtensionId(manifest.key) !== release.extensionId
@@ -296,7 +307,9 @@ async function readReleaseManifest(options) {
   const bytes = await fs.readFile(releasePath);
   const releaseManifestSha256 = sha256(bytes);
   if (releaseManifestSha256 !== options.trustedReleaseManifestSha256) fail("bridge_release_manifest_untrusted");
-  const release = releaseMetadata(json(bytes.toString("utf8"), "bridge_release_manifest_invalid"));
+  let releaseValue;
+  try { releaseValue = parseStrictJson(bytes, "Bridge release manifest"); } catch { fail("bridge_release_manifest_invalid"); }
+  const release = releaseMetadata(releaseValue);
   if (options.expectedExtensionId !== undefined && release.extensionId !== options.expectedExtensionId) fail("bridge_extension_identity_changed");
   await verifyDirectoryReceipt(sourceDirectory, release.files, "bridge_release_files_invalid");
   await verifyExtensionManifest(sourceDirectory, release, "bridge_release_manifest_invalid");
@@ -322,16 +335,6 @@ async function exists(value) {
   try { await fs.lstat(value); return true; } catch { return false; }
 }
 
-function lockDocument() {
-  return `${JSON.stringify({ schema: LOCK_SCHEMA, pid: process.pid, startedAt: new Date().toISOString() })}\n`;
-}
-
-function livePid(pid) {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return false;
-  try { process.kill(pid, 0); return true; }
-  catch (error) { return error?.code === "EPERM"; }
-}
-
 // A lock is reclaimable only when it names no running process and was started
 // longer ago than the window. A lock file written by an earlier app version
 // names no process, so its modification time bounds it instead.
@@ -339,47 +342,143 @@ async function reclaimableLock(lockPath) {
   let info;
   try { info = await fs.lstat(lockPath); } catch { return false; }
   if (!info.isFile() || info.isSymbolicLink()) return false;
-  let content;
-  try { content = (await fs.readFile(lockPath)).toString("utf8"); } catch { return false; }
+  let content = null;
+  try { content = decodeStrictUtf8(await fs.readFile(lockPath), "Bridge update lock"); } catch { /* use its age as the damaged-lock bound */ }
   let startedAt = info.mtimeMs;
   let parsed = null;
-  try { parsed = JSON.parse(content); } catch { parsed = null; }
+  try { parsed = content === null ? null : JSON.parse(content); } catch { parsed = null; }
   if (objectKeys(parsed, ["pid", "schema", "startedAt"]) && parsed.schema === LOCK_SCHEMA) {
-    if (livePid(parsed.pid)) return false;
+    if (await processMatchesRecordedLifetime(parsed.pid, parsed.startedAt) !== false) return false;
     const recorded = Date.parse(parsed.startedAt);
     if (Number.isFinite(recorded)) startedAt = recorded;
   }
   return Date.now() - startedAt >= LOCK_STALE_MS;
 }
 
-async function openLock(lockPath) {
-  const handle = await fs.open(lockPath, "wx", 0o600);
-  try {
-    await handle.writeFile(lockDocument());
-  } catch (error) {
-    await handle.close().catch(() => undefined);
-    await fs.rm(lockPath, { force: true }).catch(() => undefined);
-    throw error;
-  }
-  return handle;
+async function databaseLockReclaimable(value) {
+  if (!value || typeof value !== "object"
+    || !identifier(value.lock_id, 36, 36)
+    || !Number.isSafeInteger(value.pid) || value.pid <= 0
+    || typeof value.started_at !== "string"
+    || !(value.process_started_at === null || typeof value.process_started_at === "string")) return false;
+  const startedAt = Date.parse(value.started_at);
+  if (!Number.isFinite(startedAt) || Date.now() - startedAt < LOCK_STALE_MS) return false;
+  const processMatch = value.process_started_at === null
+    ? await processMatchesRecordedLifetime(value.pid, value.started_at)
+    : await processMatchesExactStart(value.pid, value.process_started_at);
+  return processMatch === false;
 }
 
-async function acquireLock(lockPath) {
-  try { return await openLock(lockPath); }
-  catch (error) { if (error?.code !== "EEXIST") throw error; }
-  if (!await reclaimableLock(lockPath)) fail("bridge_update_busy");
-  await fs.rm(lockPath, { force: true }).catch(() => undefined);
-  try { return await openLock(lockPath); }
-  catch (error) { if (error?.code === "EEXIST") fail("bridge_update_busy"); throw error; }
+function sqliteContention(error) {
+  return typeof error?.message === "string" && /(?:busy|locked)/i.test(error.message);
+}
+
+async function openLockDatabase(stateDirectory) {
+  const file = path.join(stateDirectory, LOCK_DATABASE_FILE);
+  const info = await fs.lstat(file).catch((error) => error?.code === "ENOENT" ? null : Promise.reject(error));
+  if (info && (!info.isFile() || info.isSymbolicLink())) fail("bridge_state_directory_invalid");
+  let database;
+  try {
+    database = new DatabaseSync(file);
+    database.exec([
+      "PRAGMA busy_timeout = 250;",
+      "CREATE TABLE IF NOT EXISTS bridge_update_lock (",
+      "  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),",
+      "  lock_id TEXT NOT NULL CHECK (length(lock_id) = 36),",
+      "  pid INTEGER NOT NULL CHECK (pid > 0),",
+      "  started_at TEXT NOT NULL,",
+      "  process_started_at TEXT",
+      ") STRICT;"
+    ].join("\n"));
+    const columns = database.prepare("PRAGMA table_info(bridge_update_lock)").all();
+    if (!columns.some((column) => column.name === "process_started_at")) {
+      database.exec("ALTER TABLE bridge_update_lock ADD COLUMN process_started_at TEXT;");
+    }
+    if (process.platform !== "win32") await fs.chmod(file, 0o600);
+    return database;
+  } catch (error) {
+    try { database?.close(); } catch {}
+    if (sqliteContention(error)) fail("bridge_update_busy");
+    fail("bridge_state_directory_invalid");
+  }
+}
+
+async function releaseDatabaseLock(stateDirectory, lockId) {
+  const database = await openLockDatabase(stateDirectory);
+  let transaction = false;
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transaction = true;
+    const result = database.prepare("DELETE FROM bridge_update_lock WHERE singleton = 1 AND lock_id = ?").run(lockId);
+    database.exec("COMMIT;");
+    transaction = false;
+    return result.changes === 1;
+  } catch (error) {
+    if (transaction) try { database.exec("ROLLBACK;"); } catch {}
+    if (sqliteContention(error)) fail("bridge_update_busy");
+    fail("bridge_state_directory_invalid");
+  } finally {
+    try { database.close(); } catch {}
+  }
+}
+
+async function acquireDatabaseLock(stateDirectory) {
+  const processStartedAt = await readProcessStartedAt(process.pid);
+  if (processStartedAt === null) fail("bridge_process_identity_unavailable");
+  const database = await openLockDatabase(stateDirectory);
+  const ownership = {
+    lockId: crypto.randomUUID(),
+    pid: process.pid,
+    startedAt: new Date().toISOString(),
+    processStartedAt: new Date(processStartedAt).toISOString(),
+  };
+  let transaction = false;
+  try {
+    database.exec("BEGIN IMMEDIATE;");
+    transaction = true;
+    const existing = database.prepare("SELECT lock_id, pid, started_at, process_started_at FROM bridge_update_lock WHERE singleton = 1").get();
+    if (existing && !await databaseLockReclaimable(existing)) fail("bridge_update_busy");
+    database.prepare([
+      "INSERT INTO bridge_update_lock (singleton, lock_id, pid, started_at, process_started_at) VALUES (1, ?, ?, ?, ?)",
+      "ON CONFLICT(singleton) DO UPDATE SET lock_id = excluded.lock_id, pid = excluded.pid,",
+      "started_at = excluded.started_at, process_started_at = excluded.process_started_at"
+    ].join(" ")).run(ownership.lockId, ownership.pid, ownership.startedAt, ownership.processStartedAt);
+    database.exec("COMMIT;");
+    transaction = false;
+  } catch (error) {
+    if (transaction) try { database.exec("ROLLBACK;"); } catch {}
+    if (error instanceof BridgeUpdateError) throw error;
+    if (sqliteContention(error)) fail("bridge_update_busy");
+    fail("bridge_state_directory_invalid");
+  } finally {
+    try { database.close(); } catch {}
+  }
+
+  // Older Morrow versions used this JSON file. The database row is already
+  // ours, so migration of a dead legacy owner cannot race another new owner.
+  const legacyPath = path.join(stateDirectory, "bridge-update.lock");
+  if (await exists(legacyPath)) {
+    if (!await reclaimableLock(legacyPath)) {
+      await releaseDatabaseLock(stateDirectory, ownership.lockId);
+      fail("bridge_update_busy");
+    }
+    await fs.rm(legacyPath, { force: true }).catch(() => undefined);
+    if (await exists(legacyPath)) {
+      await releaseDatabaseLock(stateDirectory, ownership.lockId);
+      fail("bridge_update_busy");
+    }
+  }
+  return ownership;
 }
 
 async function lock(stateDirectory, callback) {
-  const lockPath = path.join(stateDirectory, "bridge-update.lock");
-  const handle = await acquireLock(lockPath);
-  try { return await callback(); }
+  const ownership = await acquireDatabaseLock(stateDirectory);
+  try {
+    await recoverBridgeUpdateTransaction(stateDirectory);
+    return await callback();
+  }
   finally {
-    await handle.close().catch(() => undefined);
-    await fs.rm(lockPath, { force: true }).catch(() => undefined);
+    if (!await releaseDatabaseLock(stateDirectory, ownership.lockId)) fail("bridge_update_busy");
   }
 }
 
@@ -451,22 +550,153 @@ async function loadRecord(stateDirectory) {
   const file = recordPath(stateDirectory);
   if (!await exists(file)) return null;
   await regularFile(file, "bridge_installation_record_invalid");
-  return inspectInstallationRecord(json((await fs.readFile(file)).toString("utf8"), "bridge_installation_record_invalid"), stateDirectory);
+  let value;
+  try { value = parseStrictJson(await fs.readFile(file), "Bridge installation record"); } catch { fail("bridge_installation_record_invalid"); }
+  return inspectInstallationRecord(value, stateDirectory);
 }
 
 async function writeRecord(stateDirectory, record) {
   const destination = recordPath(stateDirectory);
   const temporary = `${destination}.tmp-${crypto.randomUUID()}`;
   const content = `${JSON.stringify(record)}\n`;
+  let handle = null;
   try {
-    await fs.writeFile(temporary, content, { mode: 0o600, flag: "wx" });
+    handle = await fs.open(temporary, "wx", 0o600);
+    await handle.writeFile(content);
+    await handle.sync();
+    await handle.close();
+    handle = null;
     if (process.platform !== "win32") await fs.chmod(temporary, 0o600);
     await fs.rename(temporary, destination);
     if (process.platform !== "win32") await fs.chmod(destination, 0o600);
+    await syncDirectory(stateDirectory);
   } catch (error) {
+    await handle?.close().catch(() => undefined);
     await fs.rm(temporary, { force: true }).catch(() => undefined);
     throw error;
   }
+}
+
+function installationRecordDocument(record) {
+  return {
+    schema: record.schema,
+    recordVersion: record.recordVersion,
+    bridgeDirectory: record.bridgeDirectory,
+    extensionId: record.extensionId,
+    extensionVersion: record.extensionVersion,
+    releaseManifestSha256: record.releaseManifestSha256,
+    extensionManifestSha256: record.extensionManifestSha256,
+    permissions: [...record.permissions],
+    hostPermissions: [...record.hostPermissions],
+    optionalHostPermissions: [...record.optionalHostPermissions],
+    files: record.files.map((file) => ({ path: file.path, bytes: file.bytes, sha256: file.sha256 })),
+    activeFolderChallenge: record.activeFolderChallenge ? {
+      challengeId: record.activeFolderChallenge.challengeId,
+      nonce: record.activeFolderChallenge.nonce,
+      extensionId: record.activeFolderChallenge.extensionId,
+      manifestVersion: record.activeFolderChallenge.manifestVersion,
+      sha256: record.activeFolderChallenge.sha256
+    } : null,
+    pendingUpdate: record.pendingUpdate ? {
+      backupDirectory: record.pendingUpdate.backupDirectory,
+      fromVersion: record.pendingUpdate.fromVersion,
+      quiesceEpoch: record.pendingUpdate.quiesceEpoch
+    } : null
+  };
+}
+
+function sameInstallationRecord(left, right) {
+  return JSON.stringify(installationRecordDocument(left)) === JSON.stringify(installationRecordDocument(right));
+}
+
+function updateTransactionPath(stateDirectory) {
+  return path.join(stateDirectory, UPDATE_TRANSACTION_FILE);
+}
+
+function inspectBridgeUpdateTransaction(value, stateDirectory) {
+  if (!objectKeys(value, ["backupDirectory", "createdAt", "nextRecord", "previousRecord", "schema", "stageDirectory", "transactionId"])
+    || value.schema !== UPDATE_TRANSACTION_SCHEMA || !identifier(value.transactionId, 36, 36)
+    || typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))
+    || typeof value.stageDirectory !== "string" || !path.isAbsolute(value.stageDirectory)
+    || typeof value.backupDirectory !== "string" || !path.isAbsolute(value.backupDirectory)) {
+    fail("bridge_update_transaction_invalid");
+  }
+  const previousRecord = inspectInstallationRecord(value.previousRecord, stateDirectory);
+  const nextRecord = inspectInstallationRecord(value.nextRecord, stateDirectory);
+  const stageDirectory = path.resolve(value.stageDirectory);
+  const backupDirectory = path.resolve(value.backupDirectory);
+  const destination = previousRecord.bridgeDirectory;
+  const backupRoot = path.join(stateDirectory, "bridge-backups");
+  const nextVersion = parseChromeVersion(nextRecord.extensionVersion);
+  const previousVersion = parseChromeVersion(previousRecord.extensionVersion);
+  if (previousRecord.pendingUpdate !== null || !nextRecord.pendingUpdate
+    || nextRecord.bridgeDirectory !== destination
+    || nextRecord.extensionId !== previousRecord.extensionId
+    || nextRecord.pendingUpdate.backupDirectory !== backupDirectory
+    || nextRecord.pendingUpdate.fromVersion !== previousRecord.extensionVersion
+    || nextRecord.pendingUpdate.quiesceEpoch.length < 16
+    || nextRecord.releaseManifestSha256 === previousRecord.releaseManifestSha256
+    || compareChromeVersions(nextVersion, previousVersion) < 0
+    || !sameStrings(nextRecord.permissions, previousRecord.permissions)
+    || !sameStrings(nextRecord.hostPermissions, previousRecord.hostPermissions)
+    || !sameStrings(nextRecord.optionalHostPermissions, previousRecord.optionalHostPermissions)
+    || path.dirname(stageDirectory) !== path.dirname(destination)
+    || !path.basename(stageDirectory).startsWith(".morrow-bridge-stage-")
+    || !under(backupRoot, backupDirectory) || backupDirectory === backupRoot) {
+    fail("bridge_update_transaction_invalid");
+  }
+  return Object.freeze({
+    schema: UPDATE_TRANSACTION_SCHEMA,
+    transactionId: value.transactionId,
+    createdAt: value.createdAt,
+    stageDirectory,
+    backupDirectory,
+    previousRecord,
+    nextRecord
+  });
+}
+
+async function syncDirectory(directory) {
+  if (process.platform === "win32") return;
+  const handle = await fs.open(directory, "r");
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
+async function writeBridgeUpdateTransaction(stateDirectory, transaction) {
+  const destination = updateTransactionPath(stateDirectory);
+  if (await exists(destination)) fail("bridge_update_confirmation_pending");
+  const temporary = `${destination}.tmp-${crypto.randomUUID()}`;
+  let handle = null;
+  try {
+    handle = await fs.open(temporary, "wx", 0o600);
+    await handle.writeFile(`${JSON.stringify(transaction)}\n`);
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await fs.rename(temporary, destination);
+    if (process.platform !== "win32") await fs.chmod(destination, 0o600);
+    await syncDirectory(stateDirectory);
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await fs.rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function loadBridgeUpdateTransaction(stateDirectory) {
+  const file = updateTransactionPath(stateDirectory);
+  if (!await exists(file)) return null;
+  await regularFile(file, "bridge_update_transaction_invalid");
+  let value;
+  try { value = parseStrictJson(await fs.readFile(file), "Bridge update transaction"); } catch { fail("bridge_update_transaction_invalid"); }
+  return inspectBridgeUpdateTransaction(value, stateDirectory);
+}
+
+async function removeBridgeUpdateTransaction(stateDirectory) {
+  const file = updateTransactionPath(stateDirectory);
+  await fs.rm(file, { force: true });
+  await syncDirectory(stateDirectory);
+  if (await exists(file)) fail("bridge_update_transaction_invalid");
 }
 
 function releaseFromRecord(record) {
@@ -494,6 +724,80 @@ async function verifyInstalled(record, destination, stateDirectory) {
   if (record.pendingUpdate && !under(path.join(stateDirectory, "bridge-backups"), record.pendingUpdate.backupDirectory)) {
     fail("bridge_installation_record_invalid");
   }
+}
+
+async function recordMatchesDirectory(record, directory) {
+  try {
+    const actual = await lstatDirectory(directory, "bridge_update_transaction_invalid");
+    if (actual !== path.resolve(directory)) return false;
+    const release = releaseFromRecord(record);
+    const marker = await verifyDirectoryReceipt(actual, record.files, "bridge_update_transaction_invalid", true);
+    await verifyExtensionManifest(actual, release, "bridge_update_transaction_invalid");
+    if (record.activeFolderChallenge) {
+      return Boolean(marker && sha256(await fs.readFile(marker.full)) === record.activeFolderChallenge.sha256);
+    }
+    return marker === null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Converges a durable Bridge swap to the one post-swap state. Every rename is
+ * recoverable from the transaction written before the first directory moves.
+ */
+async function recoverBridgeUpdateTransaction(stateDirectory) {
+  const transaction = await loadBridgeUpdateTransaction(stateDirectory);
+  if (!transaction) return null;
+  const destination = transaction.previousRecord.bridgeDirectory;
+  let current = await loadRecord(stateDirectory);
+  if (!current) fail("bridge_update_transaction_invalid");
+
+  let destinationExists = await exists(destination);
+  let stageExists = await exists(transaction.stageDirectory);
+  let backupExists = await exists(transaction.backupDirectory);
+  let destinationIsPrevious = destinationExists && await recordMatchesDirectory(transaction.previousRecord, destination);
+  let destinationIsNext = destinationExists && await recordMatchesDirectory(transaction.nextRecord, destination);
+  let stageIsNext = stageExists && await recordMatchesDirectory(transaction.nextRecord, transaction.stageDirectory);
+  let backupIsPrevious = backupExists && await recordMatchesDirectory(transaction.previousRecord, transaction.backupDirectory);
+
+  if (sameInstallationRecord(current, transaction.previousRecord)
+    && destinationIsPrevious && !backupExists && stageIsNext) {
+    await fs.rename(destination, transaction.backupDirectory);
+    await syncDirectory(path.dirname(destination));
+    await syncDirectory(path.dirname(transaction.backupDirectory));
+  }
+
+  destinationExists = await exists(destination);
+  stageExists = await exists(transaction.stageDirectory);
+  backupExists = await exists(transaction.backupDirectory);
+  stageIsNext = stageExists && await recordMatchesDirectory(transaction.nextRecord, transaction.stageDirectory);
+  backupIsPrevious = backupExists && await recordMatchesDirectory(transaction.previousRecord, transaction.backupDirectory);
+  if (sameInstallationRecord(current, transaction.previousRecord)
+    && !destinationExists && stageIsNext && backupIsPrevious) {
+    await fs.rename(transaction.stageDirectory, destination);
+    await syncDirectory(path.dirname(destination));
+  }
+
+  destinationExists = await exists(destination);
+  stageExists = await exists(transaction.stageDirectory);
+  backupExists = await exists(transaction.backupDirectory);
+  destinationIsNext = destinationExists && await recordMatchesDirectory(transaction.nextRecord, destination);
+  backupIsPrevious = backupExists && await recordMatchesDirectory(transaction.previousRecord, transaction.backupDirectory);
+  if (sameInstallationRecord(current, transaction.previousRecord)
+    && destinationIsNext && !stageExists && backupIsPrevious) {
+    await writeRecord(stateDirectory, installationRecordDocument(transaction.nextRecord));
+    current = await loadRecord(stateDirectory);
+  }
+
+  if (!sameInstallationRecord(current, transaction.nextRecord)
+    || !await recordMatchesDirectory(transaction.nextRecord, destination)
+    || await exists(transaction.stageDirectory)
+    || !await recordMatchesDirectory(transaction.previousRecord, transaction.backupDirectory)) {
+    fail("bridge_update_transaction_invalid");
+  }
+  await removeBridgeUpdateTransaction(stateDirectory);
+  return transaction.nextRecord;
 }
 
 function challengeDocument(release, challenge) {
@@ -561,18 +865,6 @@ async function resumeIfSafe(resumeQuiescence, quiesced) {
       && result.resumed === true;
     return { attempted: true, resumed };
   } catch { return { attempted: true, resumed: false }; }
-}
-
-async function restoreOriginalBridge(destination, backup) {
-  const failed = path.join(path.dirname(destination), `.morrow-bridge-failed-${crypto.randomUUID()}`);
-  try {
-    if (await exists(destination)) await fs.rename(destination, failed);
-    await fs.rename(backup, destination);
-    await fs.rm(failed, { recursive: true, force: true });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function errorAfterQuiesce(code, details, resume) {
@@ -647,22 +939,30 @@ async function bridgeInstallationStatus(options = {}) {
   const destination = await readOnlyStableDestination(options.bridgeDirectory);
   if (!stateDirectory) {
     if (destination.exists) fail("bridge_installation_untrusted");
-    return Object.freeze({ installed: false, extensionId: null, version: null, activeFolderChallenge: null, manualChromeReloadRequired: false });
+    return Object.freeze({ installed: false, extensionId: null, version: null, releaseManifestSha256: null, activeFolderChallenge: null, manualChromeReloadRequired: false });
   }
-  const record = await loadRecord(stateDirectory);
-  if (!record) {
-    if (destination.exists) fail("bridge_installation_untrusted");
-    return Object.freeze({ installed: false, extensionId: null, version: null, activeFolderChallenge: null, manualChromeReloadRequired: false });
-  }
-  if (options.expectedExtensionId !== undefined && record.extensionId !== options.expectedExtensionId) fail("bridge_extension_identity_changed");
-  await verifyInstalled(record, destination, stateDirectory);
-  return Object.freeze({
-    installed: true,
-    extensionId: record.extensionId,
-    version: record.extensionVersion,
-    activeFolderChallenge: record.activeFolderChallenge ? Object.freeze({ ...record.activeFolderChallenge }) : null,
-    manualChromeReloadRequired: record.pendingUpdate !== null
-  });
+  const readStatus = async () => {
+    const currentDestination = await readOnlyStableDestination(options.bridgeDirectory);
+    const record = await loadRecord(stateDirectory);
+    if (!record) {
+      if (currentDestination.exists) fail("bridge_installation_untrusted");
+      return Object.freeze({ installed: false, extensionId: null, version: null, releaseManifestSha256: null, activeFolderChallenge: null, manualChromeReloadRequired: false });
+    }
+    if (options.expectedExtensionId !== undefined && record.extensionId !== options.expectedExtensionId) fail("bridge_extension_identity_changed");
+    await verifyInstalled(record, currentDestination, stateDirectory);
+    return Object.freeze({
+      installed: true,
+      extensionId: record.extensionId,
+      version: record.extensionVersion,
+      releaseManifestSha256: record.releaseManifestSha256,
+      activeFolderChallenge: record.activeFolderChallenge ? Object.freeze({ ...record.activeFolderChallenge }) : null,
+      manualChromeReloadRequired: record.pendingUpdate !== null
+    });
+  };
+  // Ordinary status remains read-only. A durable interrupted swap is the one
+  // startup state that status repairs before it reports the installed bytes.
+  if (await exists(updateTransactionPath(stateDirectory))) return lock(stateDirectory, readStatus);
+  return readStatus();
 }
 
 async function prepareBridgeUpdate(options = {}) {
@@ -678,7 +978,9 @@ async function prepareBridgeUpdate(options = {}) {
     if (options.expectedExtensionId !== undefined && record.extensionId !== options.expectedExtensionId) fail("bridge_extension_identity_changed");
     await verifyInstalled(record, destination, stateDirectory);
     if (record.pendingUpdate) fail("bridge_update_confirmation_pending");
-    if (release.extensionId !== record.extensionId || compareChromeVersions(parseChromeVersion(release.version), parseChromeVersion(record.extensionVersion)) <= 0) fail("bridge_update_not_newer");
+    const versionComparison = compareChromeVersions(parseChromeVersion(release.version), parseChromeVersion(record.extensionVersion));
+    if (release.extensionId !== record.extensionId || versionComparison < 0
+      || (versionComparison === 0 && release.releaseManifestSha256 === record.releaseManifestSha256)) fail("bridge_update_not_newer");
     if (!sameStrings(release.permissions, record.permissions) || !sameStrings(release.hostPermissions, record.hostPermissions)
       || !sameStrings(release.optionalHostPermissions, record.optionalHostPermissions)) fail("bridge_update_permission_changed");
     if (!record.activeFolderChallenge) fail("bridge_active_folder_unconfirmed");
@@ -695,29 +997,32 @@ async function prepareBridgeUpdate(options = {}) {
       try {
         await verifyDirectoryReceipt(stage, release.files, "bridge_stage_invalid", true);
         const backupRoot = await ensurePrivateDirectory(path.join(stateDirectory, "bridge-backups"), "bridge_backup_directory_invalid");
-        const backup = path.join(backupRoot, `${record.extensionVersion}-${crypto.randomUUID()}`);
-        await fs.rename(destination.path, backup);
-        try {
-          await fs.rename(stage, destination.path);
-          stage = null;
-        } catch (error) {
-          const restored = await restoreOriginalBridge(destination.path, backup);
-          const resume = restored ? await resumeIfSafe(options.resumeQuiescence, quiesced) : { attempted: false, resumed: false };
-          throw errorAfterQuiesce(restored ? "bridge_swap_failed" : "bridge_swap_recovery_required", { resume });
-        }
-        const installed = { ...await stableDestination(destination.path), exists: true };
-        const nextRecord = recordFromRelease(installed.path, release, nextChallenge, {
+        const transactionId = crypto.randomUUID();
+        const backup = path.join(backupRoot, `${record.extensionVersion}-${transactionId}`);
+        const nextRecord = recordFromRelease(destination.path, release, nextChallenge, {
           backupDirectory: backup,
           fromVersion: record.extensionVersion,
           quiesceEpoch: quiesced.quiesceEpoch
         });
+        const transaction = {
+          schema: UPDATE_TRANSACTION_SCHEMA,
+          transactionId,
+          createdAt: new Date().toISOString(),
+          stageDirectory: stage,
+          backupDirectory: backup,
+          previousRecord: installationRecordDocument(record),
+          nextRecord: installationRecordDocument(nextRecord)
+        };
+        await writeBridgeUpdateTransaction(stateDirectory, transaction);
+        // The durable transaction owns this stage now. Cleanup must preserve it
+        // if a rename or state write fails so the next start can converge it.
+        stage = null;
         try {
-          await writeRecord(stateDirectory, nextRecord);
-        } catch (error) {
-          const restored = await restoreOriginalBridge(destination.path, backup);
-          const resume = restored ? await resumeIfSafe(options.resumeQuiescence, quiesced) : { attempted: false, resumed: false };
-          throw errorAfterQuiesce(restored ? "bridge_state_write_failed" : "bridge_swap_recovery_required", { resume });
+          await recoverBridgeUpdateTransaction(stateDirectory);
+        } catch {
+          throw errorAfterQuiesce("bridge_swap_recovery_required", { resume: { attempted: false, resumed: false } });
         }
+        const installed = { ...await stableDestination(destination.path), exists: true };
         return Object.freeze({
           updated: true,
           bridgeDirectory: installed.path,
@@ -739,21 +1044,40 @@ async function prepareBridgeUpdate(options = {}) {
   });
 }
 
+async function verifiedPendingBridgeUpdate(options, stateDirectory, destination) {
+  const record = await loadRecord(stateDirectory);
+  if (!record?.pendingUpdate) fail("bridge_update_confirmation_missing");
+  if (options.expectedExtensionId !== undefined && record.extensionId !== options.expectedExtensionId) fail("bridge_extension_identity_changed");
+  await verifyInstalled(record, destination, stateDirectory);
+  const backup = await lstatDirectory(record.pendingUpdate.backupDirectory, "bridge_rollback_missing");
+  if (backup !== record.pendingUpdate.backupDirectory) fail("bridge_rollback_missing");
+  const status = options.extensionReadback;
+  if (!objectKeys(status, ["activeFolderProof", "extensionId", "installType", "manifestVersion", "schema"])
+    || status.schema !== READBACK_SCHEMA || status.extensionId !== record.extensionId
+    || status.manifestVersion !== record.extensionVersion || status.installType !== "development") fail("bridge_update_readback_unconfirmed");
+  proofMatches(status.activeFolderProof, record.activeFolderChallenge, record.extensionId, record.extensionVersion, "bridge_active_folder_unconfirmed");
+  return { record, backup };
+}
+
+async function inspectPendingBridgeUpdate(options = {}) {
+  const stateDirectory = await ensurePrivateDirectory(options.stateDirectory, "bridge_state_directory_invalid");
+  const destination = await stableDestination(options.bridgeDirectory);
+  return lock(stateDirectory, async () => {
+    const { record } = await verifiedPendingBridgeUpdate(options, stateDirectory, destination);
+    return Object.freeze({
+      extensionId: record.extensionId,
+      previousVersion: record.pendingUpdate.fromVersion,
+      version: record.extensionVersion,
+      quiesceEpoch: record.pendingUpdate.quiesceEpoch,
+    });
+  });
+}
+
 async function confirmBridgeUpdate(options = {}) {
   const stateDirectory = await ensurePrivateDirectory(options.stateDirectory, "bridge_state_directory_invalid");
   const destination = await stableDestination(options.bridgeDirectory);
   return lock(stateDirectory, async () => {
-    const record = await loadRecord(stateDirectory);
-    if (!record?.pendingUpdate) fail("bridge_update_confirmation_missing");
-    if (options.expectedExtensionId !== undefined && record.extensionId !== options.expectedExtensionId) fail("bridge_extension_identity_changed");
-    await verifyInstalled(record, destination, stateDirectory);
-    const backup = await lstatDirectory(record.pendingUpdate.backupDirectory, "bridge_rollback_missing");
-    if (backup !== record.pendingUpdate.backupDirectory) fail("bridge_rollback_missing");
-    const status = options.extensionReadback;
-    if (!objectKeys(status, ["activeFolderProof", "extensionId", "installType", "manifestVersion", "schema"])
-      || status.schema !== READBACK_SCHEMA || status.extensionId !== record.extensionId
-      || status.manifestVersion !== record.extensionVersion || status.installType !== "development") fail("bridge_update_readback_unconfirmed");
-    proofMatches(status.activeFolderProof, record.activeFolderChallenge, record.extensionId, record.extensionVersion, "bridge_active_folder_unconfirmed");
+    const { record, backup } = await verifiedPendingBridgeUpdate(options, stateDirectory, destination);
     const updated = { ...record, pendingUpdate: null };
     await writeRecord(stateDirectory, updated);
     const removed = await removeRollbackCopy(backup);
@@ -805,6 +1129,7 @@ module.exports = {
   bridgeInstallationStatus,
   compareChromeVersions,
   confirmBridgeUpdate,
+  inspectPendingBridgeUpdate,
   initializeBridgeDirectory,
   issueBridgeActiveFolderChallenge,
   parseChromeVersion,

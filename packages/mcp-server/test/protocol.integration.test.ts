@@ -127,6 +127,32 @@ async function connectPublic(
 }
 
 describe("Morrow public stdio protocol", () => {
+  it("keeps formerly omitted native collisions disjoint in both protocol eras and surfaces", async () => {
+    const collisions = ["morrow_inventory_courses", "morrow_plan_new_quiz_create", "morrow_plan_new_quiz_item_create"];
+    for (const surface of ["compact", "full"] as const) {
+      const directory = await temporaryDirectory();
+      const path = await publicConfig(directory, { FAKE_NATIVE_COLLISIONS: collisions.join(",") }, surface);
+      for (const negotiation of ["legacy", { pin: "2026-07-28" }] as const) {
+        const client = await connectPublic(path, negotiation);
+        try {
+          const names = (await client.listTools()).tools.map((tool) => tool.name);
+          expect(names.filter((name) => name === "morrow_inventory_courses")).toHaveLength(1);
+          for (const name of collisions) {
+            const alias = `fixture__${name}`;
+            if (surface === "full") expect(names).toContain(alias);
+            const capability = await client.callTool({ name: "morrow_capability_get", arguments: { name: alias } });
+            expect(capability.structuredContent).toMatchObject({ descriptor: { canonicalName: alias } });
+          }
+          for (const name of collisions.slice(1)) {
+            expect(names.filter((candidate) => candidate === name)).toHaveLength(1);
+          }
+        } finally {
+          await client.close();
+        }
+      }
+    }
+  }, 30_000);
+
   it("serves legacy and current SDK eras through the same public entry", async () => {
     const directory = await temporaryDirectory();
     const path = await publicConfig(directory);
@@ -368,6 +394,51 @@ describe("Morrow public stdio protocol", () => {
     } finally {
       await runtime.close();
     }
+  }, 20_000);
+
+  it("rejects duplicate canonical source ids before starting any upstream", async () => {
+    const directory = await temporaryDirectory();
+    const lifecycleLog = join(directory, "lifecycle.log");
+    const base = config({ FAKE_LIFECYCLE_LOG: lifecycleLog });
+    const directConfig = {
+      ...base,
+      upstreams: [
+        base.upstreams[0]!,
+        { ...base.upstreams[0]!, id: "Fixture" },
+      ],
+    };
+    const outcome = await GatewayRuntime.connect(directConfig, { journalPath: ":memory:" })
+      .then((runtime) => ({ runtime }), (error: unknown) => ({ error }));
+    if ("runtime" in outcome) await outcome.runtime.close();
+
+    expect(outcome).toHaveProperty("error");
+    expect(String("error" in outcome ? outcome.error : "")).toContain("Duplicate canonical upstream id fixture");
+    expect(await readLog(lifecycleLog)).toBe("");
+  }, 20_000);
+
+  it("closes every started upstream when a later required source fails", async () => {
+    const directory = await temporaryDirectory();
+    const lifecycleLog = join(directory, "lifecycle.log");
+    const base = config();
+    const first = {
+      ...base.upstreams[0]!,
+      priority: 2,
+      env: { ...base.upstreams[0]!.env, FAKE_LIFECYCLE_LOG: lifecycleLog },
+    };
+    const missing = {
+      ...base.upstreams[0]!,
+      id: "missing",
+      label: "Missing required fixture",
+      priority: 1,
+      command: join(directory, "missing-command"),
+      env: {},
+    };
+
+    await expect(GatewayRuntime.connect({ ...base, upstreams: [first, missing] }, {
+      journalPath: ":memory:",
+    })).rejects.toThrow("Required upstream missing failed to connect");
+    await waitFor(async () => (await readLog(lifecycleLog)).includes("stopped"), "started upstream rollback");
+    expect((await readLog(lifecycleLog)).trim().split("\n")).toEqual(["started", "stopped"]);
   }, 20_000);
 
   it("returns a typed malformed-message error and serves the next request", async () => {

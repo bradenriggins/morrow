@@ -463,25 +463,30 @@ export class BatchWindowScheduler {
       uncount();
       this.assertOpen();
       await this.acquireWindow(request);
-      this.runningBatches.set(batchId, {
+      const running = {
         batchId,
         holder: request.holder,
         mode: request.mode,
         concurrency: request.concurrency,
         startedAt: new Date().toISOString(),
-      });
+      };
+      this.runningBatches.set(batchId, running);
       try {
         return await work();
       } finally {
-        this.runningBatches.delete(batchId);
+        if (this.runningBatches.get(batchId) === running) this.runningBatches.delete(batchId);
         this.releaseWindow(request);
       }
     } finally {
       uncount();
       releaseKey();
-      if (this.tails.get(batchId) === currentTail) {
-        this.tails.delete(batchId);
-      }
+      // A cancelled waiter releases only its own gate. Its tail still includes
+      // the unfinished predecessor and remains the serialization barrier for a
+      // later caller. Remove the key only after that complete chain settles and
+      // only if no later caller has replaced it.
+      void currentTail.then(() => {
+        if (this.tails.get(batchId) === currentTail) this.tails.delete(batchId);
+      });
     }
   }
 

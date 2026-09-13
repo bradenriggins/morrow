@@ -65,7 +65,7 @@ async function execute(args: JsonObject, quiz: JsonObject = current) {
   runInNewContext(contentSource, {
     location: { origin, protocol: "https:", pathname: "/courses/42/quizzes" },
     document: { cookie: "_csrf_token=csrf-value" },
-    Headers, URL, URLSearchParams, TextEncoder, TextDecoder, AbortController, setTimeout, clearTimeout, crypto: webcrypto,
+    Headers, URL, URLSearchParams, TextEncoder, TextDecoder, AbortController, AbortSignal, setTimeout, clearTimeout, crypto: webcrypto,
     chrome: { runtime: { onMessage: { addListener: (value: typeof listener) => { listener = value; } } } },
     fetch: async (input: URL | string, options: RequestInit = {}) => {
       const url = new URL(String(input), origin);

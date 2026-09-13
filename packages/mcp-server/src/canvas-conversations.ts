@@ -6,7 +6,10 @@ export const CANVAS_CONVERSATION_PLAN_SCHEMA = "morrow.canvas-conversation.plan.
 export const CANVAS_CONVERSATION_TRANSFER_TOOL = "canvas_send_private_conversation";
 export const CANVAS_CONVERSATION_TRANSFER_OPERATION = "canvas.private.conversation.send.v1";
 
-const courseId = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+const courseId = z.preprocess(
+  (value) => typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? String(value) : value,
+  z.string().regex(/^[1-9][0-9]{0,18}$/),
+);
 const learnerToken = z.string().regex(/^Student A[1-9][0-9]*$/);
 const recipientContext = z.string().regex(/^(course|section|group)_[1-9][0-9]{0,18}(?:_(students|teachers|tas|observers|designers))?$/);
 const recipients = z.array(learnerToken).max(5_000).optional();

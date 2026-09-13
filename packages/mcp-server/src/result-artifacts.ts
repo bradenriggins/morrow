@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ServerContext } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 
 export const MAX_INLINE_RESULT_CHARACTERS = 64_000;
@@ -10,7 +11,6 @@ interface ResultArtifact {
   readonly handle: string;
   readonly text: string;
   readonly sha256: string;
-  readonly project?: (value: JsonObject) => JsonObject;
   audience?: string;
 }
 
@@ -23,6 +23,36 @@ export interface ResultArtifactPage {
   readonly totalCharacters: number;
   readonly sha256: string;
   readonly text: string;
+}
+
+export interface ResultArtifactConnectionContext {
+  readonly workspaceRoot?: string;
+  readonly proxyPid?: number;
+}
+
+/** Exact admitted MCP connection allowed to read one returned artifact. */
+export function resultArtifactAudience(
+  context: ServerContext,
+  connection: ResultArtifactConnectionContext = {},
+): string {
+  const session = typeof context.sessionId === "string" && context.sessionId ? context.sessionId : "stdio-single-client";
+  const client = typeof context.http?.authInfo?.clientId === "string" && context.http.authInfo.clientId
+    ? context.http.authInfo.clientId
+    : "local";
+  if (connection.proxyPid !== undefined
+    && (!Number.isSafeInteger(connection.proxyPid) || connection.proxyPid < 1)) {
+    throw new TypeError("result artifact proxy process is invalid");
+  }
+  if (connection.workspaceRoot !== undefined && connection.workspaceRoot.length === 0) {
+    throw new TypeError("result artifact workspace is invalid");
+  }
+  return sha256Text(JSON.stringify({
+    schema: "morrow.result-artifact-audience.v1",
+    session,
+    client,
+    proxyPid: connection.proxyPid ?? null,
+    workspaceDigest: connection.workspaceRoot === undefined ? null : sha256Text(connection.workspaceRoot),
+  }));
 }
 
 export function resolveResultArtifact(
@@ -71,6 +101,11 @@ export class ResultArtifactStore {
 
   bound(result: JsonObject, project?: (value: JsonObject) => JsonObject): JsonObject {
     const projected = project ? project(structuredClone(result)) : result;
+    if (projected.resultType === "input_required"
+      && isJsonObject(projected.inputRequests)
+      && typeof projected.requestState === "string") {
+      return projected;
+    }
     const text = JSON.stringify(projected);
     if (text.length <= MAX_INLINE_RESULT_CHARACTERS) return projected;
 
@@ -98,7 +133,6 @@ export class ResultArtifactStore {
       handle,
       text,
       sha256: sha256Text(text),
-      ...(project ? { project } : {}),
     };
     this.artifacts.set(handle, artifact);
     while (this.artifacts.size > MAX_RESULT_ARTIFACTS) {
@@ -150,12 +184,7 @@ export class ResultArtifactStore {
     if (artifact.audience && audience !== artifact.audience) {
       throw new Error("Morrow could not authorize the requested result artifact");
     }
-    let serialized = artifact.text;
-    if (artifact.project) {
-      const parsed: unknown = JSON.parse(serialized);
-      if (!isJsonObject(parsed)) throw new Error("Morrow could not read the requested result artifact");
-      serialized = JSON.stringify(artifact.project(parsed));
-    }
+    const serialized = artifact.text;
     const start = exactOffset(offset);
     const maximum = exactLimit(limit);
     const text = serialized.slice(start, start + maximum);

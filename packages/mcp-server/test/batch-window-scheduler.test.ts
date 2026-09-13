@@ -265,6 +265,57 @@ describe("BatchWindowScheduler", () => {
     scheduler.close();
   });
 
+  it("keeps the active batch tail when the last queued run is cancelled", async () => {
+    const scheduler = new BatchWindowScheduler({ maxConcurrentReadWindows: 2 });
+    const firstGate = deferred();
+    const thirdGate = deferred();
+    const events: string[] = [];
+    const first = scheduler.run("batch:same", async () => {
+      events.push("first:start");
+      await firstGate.promise;
+      events.push("first:end");
+    }, { mode: "read_only", concurrency: 1, holder: "session-a" });
+    await waitUntil(() => events.length === 1);
+
+    const cancel = new AbortController();
+    let cancelledStarted = false;
+    const cancelled = scheduler.run("batch:same", async () => {
+      cancelledStarted = true;
+    }, { mode: "read_only", concurrency: 1, signal: cancel.signal, holder: "session-b" });
+    await waitUntil(() => scheduler.health().queuedBatchOperationCount === 1);
+    cancel.abort();
+    await expect(cancelled).rejects.toBeInstanceOf(BatchWindowQueueAbortedError);
+
+    const third = scheduler.run("batch:same", async () => {
+      events.push("third:start");
+      await thirdGate.promise;
+      events.push("third:end");
+    }, { mode: "read_only", concurrency: 1, holder: "session-c" });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(cancelledStarted).toBe(false);
+    expect(events).toEqual(["first:start"]);
+    expect(scheduler.health()).toMatchObject({
+      activeWindows: 1,
+      runningBatchCount: 1,
+      queuedBatchOperationCount: 1,
+      activeBatches: [{ batchId: "batch:same", holder: "session-a" }],
+    });
+
+    firstGate.resolve();
+    await expect(first).resolves.toBeUndefined();
+    await waitUntil(() => events.includes("third:start"));
+    expect(scheduler.health()).toMatchObject({
+      activeWindows: 1,
+      runningBatchCount: 1,
+      activeBatches: [{ batchId: "batch:same", holder: "session-c" }],
+    });
+    thirdGate.resolve();
+    await expect(third).resolves.toBeUndefined();
+    expect(events).toEqual(["first:start", "first:end", "third:start", "third:end"]);
+    expect(scheduler.health()).toMatchObject({ activeWindows: 0, runningBatchCount: 0, queuedBatchOperationCount: 0 });
+    scheduler.close();
+  });
+
   it("refuses a run beyond the waiting-run cap instead of queueing without a bound", async () => {
     const scheduler = new BatchWindowScheduler({ maxConcurrentReadWindows: 1 });
     const holdingGate = deferred();

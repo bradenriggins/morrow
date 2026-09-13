@@ -156,6 +156,9 @@ test("each enrolment and role write binds one rostered person, sends one request
     candidateListTooLarge: false,
     changeOtherDuringWrite: false,
     suspendRefusesForm: false,
+    enrolRefusesForm: false,
+    enrolSavedRoleId: "",
+    enrolSavedMethod: "",
   });
   const participantsOf = () => (model.duplicateRow ? [...model.participants, model.participants[0]] : model.participants);
   const escape = (value) => String(value).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -281,6 +284,7 @@ test("each enrolment and role write binds one rostered person, sends one request
       assert.equal(target.searchParams.get("info"), call.methodname);
       if (call.methodname === "core_table_get_dynamic_table_content") {
         assert.equal(call.args.uniqueid, `user-index-participants-${COURSE_ID}`);
+        assert.deepEqual(call.args.filters, [{ name: "courseid", jointype: 1, values: [COURSE_ID] }]);
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify([{ index: 0, error: false, data: { html: participantsTable() } }]));
         return;
@@ -334,6 +338,19 @@ test("each enrolment and role write binds one rostered person, sends one request
         assert.equal(fields.get("add"), "Add");
         assert.equal(fields.get("remove"), null);
         assert.equal(fields.get("removeselect[]"), null);
+        if (model.enrolRefusesForm) {
+          const raced = model.candidates.find((entry) => entry.userId === fields.get("addselect[]"));
+          if (raced) {
+            model.candidates = model.candidates.filter((entry) => entry !== raced);
+            model.participants.push({
+              userId: raced.userId, fullname: raced.fullname, email: raced.email, roles: ["4"],
+              enrolments: [{ ueId: String(model.nextUe += 1), method: "Manual enrolments", status: "Active", start: "1700000000", end: "0" }],
+            });
+          }
+          response.writeHead(200, { "content-type": "text/html" });
+          response.end(manageForm());
+          return;
+        }
         for (const userId of fields.getAll("addselect[]")) {
           const candidate = model.candidates.find((entry) => entry.userId === userId);
           if (!candidate) continue;
@@ -342,11 +359,13 @@ test("each enrolment and role write binds one rostered person, sends one request
             userId: candidate.userId,
             fullname: candidate.fullname,
             email: candidate.email,
-            roles: [fields.get("roleid")],
-            enrolments: [{ ueId: String(model.nextUe += 1), method: "Manual enrolments", status: "Active", start: "1700000000", end: "0" }],
+            roles: [model.enrolSavedRoleId || fields.get("roleid")],
+            enrolments: [{ ueId: String(model.nextUe += 1), method: model.enrolSavedMethod || "Manual enrolments", status: "Active", start: "1700000000", end: "0" }],
           });
         }
         disturbOthers();
+        response.writeHead(302, { location: `/user/index.php?id=${COURSE_ID}` }).end();
+        return;
       }
       response.writeHead(200, { "content-type": "text/html" });
       response.end(manageForm());
@@ -603,13 +622,58 @@ test("each enrolment and role write binds one rostered person, sends one request
     await refuse(operations.suspend, { course_id: COURSE_ID, user_id: 11, expected_digest: "0".repeat(64) }, "moodle_expected_digest_mismatch");
     digest = await reviewedDigest();
 
+    // A concurrent enrolment through this same manual instance makes Moodle
+    // redisplay the form. It is a refusal even when the concurrent role differs.
+    model.enrolRefusesForm = true;
+    before = writes.length;
+    const racedEnrolment = await execute(operations.enrol, { course_id: COURSE_ID, user_id: 21, expected_digest: digest });
+    assert.deepEqual(
+      [racedEnrolment.ok, racedEnrolment.sent, racedEnrolment.outcomeUnknown, racedEnrolment.error],
+      [false, true, false, "moodle_form_validation_failed"],
+      JSON.stringify(racedEnrolment),
+    );
+    assert.equal(writes.length - before, 1);
+    model.enrolRefusesForm = false;
+    model.participants = model.participants.filter((entry) => entry.userId !== "21");
+    model.candidates = [{ userId: "21", fullname: "Mary Jackson", email: "mary@example.edu" }];
+    digest = await reviewedDigest();
+
+    // A redirect does not prove the requested role or method. Both exact saved
+    // identities must match the reviewed manual-enrolment form and method row.
+    model.enrolSavedRoleId = "4";
+    before = writes.length;
+    const wrongRole = await execute(operations.enrol, { course_id: COURSE_ID, user_id: 21, expected_digest: digest });
+    assert.deepEqual(
+      [wrongRole.ok, wrongRole.sent, wrongRole.outcomeUnknown, wrongRole.error],
+      [false, true, true, "moodle_enrolment_readback_mismatch"],
+      JSON.stringify(wrongRole),
+    );
+    assert.equal(writes.length - before, 1);
+    model.participants = model.participants.filter((entry) => entry.userId !== "21");
+    model.candidates = [{ userId: "21", fullname: "Mary Jackson", email: "mary@example.edu" }];
+    model.enrolSavedRoleId = "";
+    model.enrolSavedMethod = "Self enrolment";
+    digest = await reviewedDigest();
+    before = writes.length;
+    const wrongMethod = await execute(operations.enrol, { course_id: COURSE_ID, user_id: 21, expected_digest: digest });
+    assert.deepEqual(
+      [wrongMethod.ok, wrongMethod.sent, wrongMethod.outcomeUnknown, wrongMethod.error],
+      [false, true, true, "moodle_enrolment_readback_mismatch"],
+      JSON.stringify(wrongMethod),
+    );
+    assert.equal(writes.length - before, 1);
+    model.participants = model.participants.filter((entry) => entry.userId !== "21");
+    model.candidates = [{ userId: "21", fullname: "Mary Jackson", email: "mary@example.edu" }];
+    model.enrolSavedMethod = "";
+    digest = await reviewedDigest();
+
     // One enrolment: one POST of Moodle's own manual enrolment form, with the
-    // role that method gives, and the new participant record back.
+    // exact saved role and method identity read back.
     before = writes.length;
     const enrolled = await execute(operations.enrol, { course_id: COURSE_ID, user_id: 21, expected_digest: digest });
     assert.equal(enrolled.ok, true, JSON.stringify(enrolled));
     assert.equal(writes.length - before, 1, "an enrolment sends exactly one POST");
-    assert.equal(written("enrol"), 1);
+    assert.equal(written("enrol"), 4);
     assert.equal(enrolled.data.participant_before, null);
     assert.deepEqual(enrolled.data.participant_after.roles, ["Student"]);
     assert.deepEqual(enrolled.data.participant_after.enrolments.map((entry) => entry.method), ["Manual enrolments"]);
@@ -619,6 +683,7 @@ test("each enrolment and role write binds one rostered person, sends one request
     assert.deepEqual(enrolFields.filter(([name]) => name === "roleid"), [["roleid", "5"]]);
     assert.equal(enrolFields.some(([name]) => name === "remove" || name === "removeselect[]"), false);
     assert.equal(enrolFields.some(([name]) => name === "extendbase"), true, "the native form is carried through unchanged");
+    const enrolledUeId = model.participants.find((entry) => entry.userId === "21").enrolments[0].ueId;
     digest = await reviewedDigest();
     assert.equal(enrolled.snapshot_digest, digest);
 
@@ -676,7 +741,7 @@ test("each enrolment and role write binds one rostered person, sends one request
     assert.equal(unenrolled.data.proof.participant_absent_after, true);
     const unenrolFields = new Map(writes.at(-1).fields);
     assert.equal(unenrolFields.get("confirm"), "1");
-    assert.equal(unenrolFields.get("ue"), "201");
+    assert.equal(unenrolFields.get("ue"), enrolledUeId);
     assert.equal(model.participants.some((entry) => entry.userId === "21"), false);
 
     // Nothing any of these results carries names a person.

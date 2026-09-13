@@ -5,7 +5,11 @@ export const MAX_CANVAS_FILE_TRANSFER_BYTES = 1024 * 1024;
  * supplied function body for a MAIN-world injection.
  */
 export async function executeCanvasCourseFileTransferInPage(input) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const limit = 1024 * 1024;
+  const responseLimit = 2 * 1024 * 1024;
+  const COUNT = /^(?:0|[1-9][0-9]*)$/;
   const plainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   const decimalId = (value) => {
     const id = String(value || "");
@@ -50,6 +54,39 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     if (url.protocol !== "https:" || url.origin !== canvasOrigin || url.username || url.password || url.hash) throw new Error(code);
     return url;
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const boundedText = async (response) => {
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!COUNT.test(declared) || Number(declared) > responseLimit)) {
+      cancelBody(response.body);
+      throw new Error("canvas_file_transfer_response_too_large");
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") throw new Error("canvas_file_transfer_response_unavailable");
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > responseLimit) {
+          cancelBody(reader);
+          throw new Error("canvas_file_transfer_response_too_large");
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch (error) {
+      cancelBody(reader);
+      throw error;
+    }
+  };
   const canvasJson = async (pathname, canvasOrigin, options = {}) => {
     const response = await fetch(new URL(pathname, canvasOrigin), {
       credentials: "include",
@@ -57,12 +94,16 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       redirect: "error",
       ...options,
       headers: { Accept: "application/json+canvas-string-ids", ...(options.headers || {}) },
+      signal: requestSignal(input?.expiresAt),
     });
     if (!response.ok) throw new Error("canvas_file_transfer_http_" + response.status);
     let received;
     try { received = new URL(response.url); } catch { throw new Error("canvas_file_transfer_origin_changed"); }
     if (received.origin !== canvasOrigin) throw new Error("canvas_file_transfer_origin_changed");
-    return { status: response.status, value: await response.json() };
+    const text = await boundedText(response);
+    let value;
+    try { value = JSON.parse(text); } catch { throw new Error("canvas_file_transfer_response_invalid"); }
+    return { status: response.status, headers: response.headers, value };
   };
   const attachmentFrom = async (value) => {
     if (!plainObject(value)
@@ -94,7 +135,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     }
     if (!response.ok) throw new Error("canvas_file_upload_http_" + response.status);
     canvasUrl(response.url, canvasOrigin, "canvas_file_upload_confirmation_refused");
-    const text = await response.text();
+    const text = await boundedText(response);
     if (!text.trim()) throw new Error("canvas_file_upload_confirmation_missing");
     try { return JSON.parse(text); } catch { throw new Error("canvas_file_upload_confirmation_invalid"); }
   };
@@ -107,7 +148,10 @@ export async function executeCanvasCourseFileTransferInPage(input) {
   };
   const boundedBytes = async (response) => {
     const length = response.headers.get("content-length");
-    if (length !== null && (!/^(?:0|[1-9][0-9]*)$/.test(length) || Number(length) > limit)) throw new Error("canvas_file_download_too_large");
+    if (length !== null && (!/^(?:0|[1-9][0-9]*)$/.test(length) || Number(length) > limit)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      throw new Error("canvas_file_download_too_large");
+    }
     if (!response.body || typeof response.body.getReader !== "function") throw new Error("canvas_file_download_unreadable");
     const reader = response.body.getReader();
     const chunks = [];
@@ -117,13 +161,13 @@ export async function executeCanvasCourseFileTransferInPage(input) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > limit) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           throw new Error("canvas_file_download_too_large");
         }
         chunks.push(next.value);
       }
     } catch (error) {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       throw error;
     }
     const bytes = new Uint8Array(size);
@@ -180,6 +224,38 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       }
       return { upload_url: trustedUploadUrl.href, upload_params: Object.fromEntries(entries), entries };
     };
+    const filenameAvailable = async () => {
+      const query = new URLSearchParams({ search_term: attachment.filename, per_page: "100" });
+      query.append("only[]", "names");
+      const listed = await canvasJson("/api/v1/folders/" + encodeURIComponent(folderId) + "/files?" + query, canvasOrigin);
+      if (!Array.isArray(listed.value) || listed.value.length > 100) throw new Error("canvas_file_name_check_unavailable");
+      const names = listed.value.map((entry) => plainObject(entry) ? filename(entry.display_name || entry.filename) : "");
+      if (names.some((name) => !name)) throw new Error("canvas_file_name_check_unavailable");
+
+      const link = listed.headers.get("link");
+      if (link !== null && link.trim()) {
+        const parts = link.split(/,\s*(?=<)/);
+        if (!parts.length) throw new Error("canvas_file_name_check_unavailable");
+        for (const part of parts) {
+          const target = /^\s*<([^<>]+)>/.exec(part);
+          if (!target) throw new Error("canvas_file_name_check_unavailable");
+          canvasUrl(target[1], canvasOrigin, "canvas_file_name_check_unavailable");
+          let rest = part.slice(target[0].length);
+          const relations = [];
+          while (rest.trim()) {
+            const parameter = /^\s*;\s*([!#$%&'*+.^_`|~0-9A-Za-z-]+)\s*=\s*(?:"([^"]*)"|([^;\s,]+))/.exec(rest);
+            if (!parameter) throw new Error("canvas_file_name_check_unavailable");
+            if (parameter[1].toLowerCase() === "rel") relations.push(...String(parameter[2] ?? parameter[3]).toLowerCase().split(/\s+/));
+            rest = rest.slice(parameter[0].length);
+          }
+          if (!relations.length) throw new Error("canvas_file_name_check_unavailable");
+          if (relations.includes("next")) throw new Error("canvas_file_name_check_incomplete");
+        }
+      } else if (listed.value.length === 100) {
+        throw new Error("canvas_file_name_check_incomplete");
+      }
+      if (names.includes(attachment.filename)) throw new Error("canvas_file_name_already_exists");
+    };
     const finalFile = async (completed) => {
       const fileId = decimalId(completed?.id);
       if (!fileId) throw new Error("canvas_file_upload_result_invalid");
@@ -191,6 +267,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     };
 
     await currentBinding();
+    if (transferMode !== "complete") await filenameAvailable();
     if (transferMode === "initialize") {
       const started = await beginUpload();
       return {
@@ -198,7 +275,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
         ok: true,
         sent: false,
         outcomeUnknown: false,
-        data: { course_id: Number(courseId), folder_id: Number(folderId), upload_url: started.upload_url, upload_params: started.upload_params },
+        data: { course_id: courseId, folder_id: folderId, upload_url: started.upload_url, upload_params: started.upload_params },
       };
     }
     if (transferMode === "complete") {
@@ -213,7 +290,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
         ...(Number.isSafeInteger(input.upload_status) ? { status: input.upload_status } : {}),
         verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_file_download_pending" },
         data: {
-          course_id: Number(courseId), folder_id: Number(folderId), file: finalized.file,
+          course_id: courseId, folder_id: folderId, file: finalized.file,
           sha256: attachment.sha256, download_url: finalized.downloadUrl.href,
         },
       };
@@ -231,6 +308,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       redirect: "manual",
       referrerPolicy: "no-referrer",
       body: form,
+      signal: requestSignal(input?.expiresAt),
     });
     uploadStatus = uploaded.status;
     const finalized = await finalFile(await uploadResponse(uploaded, canvasOrigin));
@@ -239,6 +317,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       cache: "no-store",
       redirect: "follow",
       referrerPolicy: "no-referrer",
+      signal: requestSignal(input?.expiresAt),
     });
     if (!download.ok) throw new Error("canvas_file_download_http_" + download.status);
     const finalUrl = new URL(download.url);
@@ -257,7 +336,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
         { type: "canvas_folder", id: folderId },
         { type: "canvas_file", id: finalized.fileId },
       ] },
-      data: { course_id: Number(courseId), folder_id: Number(folderId), file: finalized.file, sha256: attachment.sha256 },
+      data: { course_id: courseId, folder_id: folderId, file: finalized.file, sha256: attachment.sha256 },
     };
   } catch (error) {
     const message = String(error?.message || error);

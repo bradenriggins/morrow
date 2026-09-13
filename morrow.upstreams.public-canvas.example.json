@@ -27,7 +27,13 @@
         "root": "${MORROW_REPOSITORY_ROOT}",
         "expectedRevision": "${MORROW_RELEASE_REVISION}",
         "requireTrackedClean": true,
-        "expectedToolCount": 1132
+        "expectedToolCount": 1132,
+        "launch": {
+          "entrypoint": "packages/canvas-connector-mcp/dist/index.js",
+          "entrypointArgumentIndex": 0,
+          "expectedEntrypointSha256": "${MORROW_CANVAS_ENTRYPOINT_SHA256}",
+          "runtime": { "kind": "current-node" }
+        }
       },
       "priority": 200,
       "required": true,

@@ -29,6 +29,7 @@ function createAdapter(options = {}) {
     checks: 0,
     downloads: 0,
     installs: 0,
+    cancellations: 0,
     on(event, listener) {
       const values = listeners.get(event) || new Set();
       values.add(listener);
@@ -46,6 +47,10 @@ function createAdapter(options = {}) {
       adapter.downloads += 1;
       return options.download ? options.download(adapter) : ["private-updater-cache"];
     },
+    cancelUpdate() {
+      adapter.cancellations += 1;
+      return options.cancel ? options.cancel(adapter) : undefined;
+    },
     async quitAndInstall() {
       adapter.installs += 1;
       return options.install ? options.install(adapter) : undefined;
@@ -61,21 +66,36 @@ function createAdapter(options = {}) {
  * The injected attempt store, held in memory. The record shape is the one the
  * real store on disk validates and returns.
  */
-function memoryAttempts(record = null, { onWrite = () => {}, unreadable = false } = {}) {
+function memoryAttempts(record = null, { onWrite = () => {}, unreadable = false, damaged = false } = {}) {
+  const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
   const store = {
     record,
     reads: 0,
+    clears: 0,
     async read() {
       store.reads += 1;
       if (unreadable) throw new Error("update attempt record is unreadable");
-      return store.record;
+      if (damaged) return { status: "damaged", record: null, reason: "update_attempt_invalid" };
+      return store.record === null
+        ? { status: "absent", record: null, reason: null }
+        : { status: "valid", record: store.record, reason: null };
     },
-    async write(attempt) {
+    async write(attempt, options = {}) {
       onWrite();
+      if (options.expected === undefined) {
+        if (store.record !== null) throw new Error("update attempt already exists");
+      } else if (!same(store.record, options.expected)) {
+        throw new Error("update attempt ownership changed");
+      }
       store.record = { schema: ATTEMPT_SCHEMA, ...attempt };
       return store.record;
     },
-    async clear() { store.record = null; }
+    async clear(expected) {
+      store.clears += 1;
+      if (!same(store.record, expected)) return false;
+      store.record = null;
+      return true;
+    }
   };
   return store;
 }
@@ -194,6 +214,62 @@ test("an updater availability event cannot start a download before its matching 
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(adapter.downloads, 1);
   assert.equal(controller.snapshot().status, "ready");
+});
+
+test("a premature downloaded event cannot expose ready before updater staging succeeds", async () => {
+  const staging = deferred();
+  let controller;
+  const adapter = createAdapter({
+    check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }),
+    download: (source) => {
+      source.emit("update-downloaded", { version: "1.0.1" });
+      return staging.promise;
+    }
+  });
+  controller = createUpdateController({ adapter, policy: enabledPolicy(), ...grantedRestartLease() });
+  await controller.check();
+  await settle();
+  assert.equal(controller.snapshot().status, "downloading");
+  assert.equal((await controller.installWhenIdle()).status, "downloading");
+  assert.equal(adapter.installs, 0);
+  staging.reject(new Error("cache finalization failed"));
+  await settle();
+  assert.equal(controller.snapshot().status, "error");
+  assert.equal(controller.snapshot().reason, "update_download_failed");
+  assert.equal(adapter.installs, 0);
+});
+
+test("a downloaded event from another candidate generation is refused", async () => {
+  const adapter = createAdapter({
+    check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }),
+    download: (source) => {
+      source.emit("update-downloaded", { version: "1.0.2" });
+      return ["private-updater-cache"];
+    }
+  });
+  const controller = createUpdateController({ adapter, policy: enabledPolicy(), ...grantedRestartLease() });
+  await controller.check();
+  await settle();
+  assert.equal(controller.snapshot().status, "error");
+  assert.equal(controller.snapshot().reason, "update_generation_mismatch");
+  assert.equal((await controller.installWhenIdle()).status, "error");
+  assert.equal(adapter.installs, 0);
+});
+
+test("stop revokes a pending check before it can start a download", async () => {
+  const discovery = deferred();
+  const adapter = createAdapter({ check: () => discovery.promise });
+  const controller = createUpdateController({ adapter, policy: enabledPolicy(), ...grantedRestartLease() });
+  const pending = controller.check();
+  await settle();
+  assert.equal(adapter.checks, 1);
+  controller.stop();
+  discovery.resolve({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } });
+  await pending;
+  await settle();
+  assert.equal(adapter.cancellations, 1);
+  assert.equal(adapter.downloads, 0);
+  assert.equal(controller.snapshot().status, "checking");
 });
 
 test("a controller rejects malformed, prerelease, stale, downgraded, and wrong-platform candidates before download", async (t) => {
@@ -350,6 +426,7 @@ test("a scheduled check never replaces a verified ready update with an offline o
 
 test("a failed commit releases the held lease and preserves the downloaded version for a later safe retry", async () => {
   const released = [];
+  const attempts = memoryAttempts();
   const adapter = createAdapter({
     check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }),
     install: () => { throw new Error("updater must not run before a committed lease"); }
@@ -359,7 +436,9 @@ test("a failed commit releases the held lease and preserves the downloaded versi
     policy: enabledPolicy(),
     acquireRestartLease: async () => ({ status: "granted", leaseId: "failed-install-lease" }),
     releaseRestartLease: async (leaseId) => { released.push(leaseId); },
-    commitRestartLease: async () => ({ status: "busy" })
+    commitRestartLease: async () => ({ status: "busy" }),
+    updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => ({ status: "verified" })
   });
   await controller.check();
   await new Promise((resolve) => setImmediate(resolve));
@@ -369,6 +448,7 @@ test("a failed commit releases the held lease and preserves the downloaded versi
   assert.equal(result.availableVersion, "1.0.1");
   assert.equal(adapter.installs, 0);
   assert.deepEqual(released, ["failed-install-lease"]);
+  assert.equal(attempts.record, null);
 });
 
 test("a failed release after a failed commit leaves the verified update deferred without an automatic retry", async () => {
@@ -413,16 +493,18 @@ test("a failed updater handoff after commit retains the closing lease and refuse
   await controller.check();
   await new Promise((resolve) => setImmediate(resolve));
   const result = await controller.installWhenIdle();
-  assert.equal(result.status, "ready");
-  assert.equal(result.reason, "active_or_uncertain_operations");
+  assert.equal(result.status, "installing");
+  assert.equal(result.reason, "update_install_failed");
   assert.equal(adapter.installs, 1);
   assert.deepEqual(released, []);
 });
 
 test("late updater events cannot invalidate an already verified ready update", async () => {
   const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
-  const controller = createUpdateController({ adapter, policy: enabledPolicy({ automatic: false }), ...grantedRestartLease() });
+  const controller = createUpdateController({ adapter, policy: enabledPolicy(), ...grantedRestartLease() });
   await controller.start();
+  await settle();
+  assert.equal(controller.snapshot().status, "ready");
   adapter.emit("update-downloaded", { version: "1.0.1" });
   assert.equal(controller.snapshot().status, "ready");
   adapter.emit("error", Object.assign(new Error("publisher signature invalid"), { code: "ERR_UPDATER_INVALID_SIGNATURE" }));
@@ -527,10 +609,10 @@ test("the update attempt store owns one private record it can write, read back, 
   const stateDirectory = path.join(root, "State");
   const store = createUpdateAttemptStore({ stateDirectory });
   const file = path.join(stateDirectory, "update-attempt.json");
-  assert.equal(await store.read(), null);
+  assert.deepEqual(await store.read(), { status: "absent", record: null, reason: null });
 
-  await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
-  assert.deepEqual(await store.read(), { schema: ATTEMPT_SCHEMA, fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  const first = await store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT });
+  assert.deepEqual(await store.read(), { status: "valid", record: first, reason: null });
   if (process.platform !== "win32") {
     assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     assert.equal(fs.statSync(stateDirectory).mode & 0o777, 0o700);
@@ -540,12 +622,50 @@ test("the update attempt store owns one private record it can write, read back, 
   // describes no attempt this app can act on.
   await assert.rejects(() => store.write({ fromVersion: "1.0.1", toVersion: "1.0.1", at: ATTEMPT_AT }), /invalid/);
   await assert.rejects(() => store.write({ fromVersion: "1.0.0", toVersion: "1.0.1", at: "whenever" }), /invalid/);
-  fs.writeFileSync(file, "{ not json");
-  assert.equal(await store.read(), null);
-
-  await store.clear();
+  await assert.rejects(
+    () => store.write({ fromVersion: "1.0.1", toVersion: "1.0.2", at: "2026-01-02T00:00:00.000Z" }),
+    /EEXIST/
+  );
+  assert.deepEqual(await store.read(), { status: "valid", record: first, reason: null });
+  const retried = await store.write(
+    { fromVersion: "1.0.0", toVersion: "1.0.1", at: "2026-01-02T00:00:00.000Z" },
+    { expected: first }
+  );
+  assert.deepEqual(await store.read(), { status: "valid", record: retried, reason: null });
+  assert.equal(await store.clear(first), false);
+  assert.deepEqual(await store.read(), { status: "valid", record: retried, reason: null });
+  assert.equal(await store.clear(retried), true);
   assert.equal(fs.existsSync(file), false);
-  await store.clear();
+
+  fs.writeFileSync(file, "{ not json");
+  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+  assert.equal((await store.read()).status, "damaged");
+  await assert.rejects(
+    () => store.write({ fromVersion: "1.0.1", toVersion: "1.0.2", at: "2026-01-02T00:00:00.000Z" }),
+    /EEXIST/
+  );
+  fs.rmSync(file);
+
+  fs.writeFileSync(file, Buffer.alloc(4 * 1024 + 1, 0x20));
+  if (process.platform !== "win32") fs.chmodSync(file, 0o600);
+  assert.deepEqual(await store.read(), { status: "damaged", record: null, reason: "update_attempt_too_large" });
+  fs.rmSync(file);
+
+  if (process.platform !== "win32") {
+    const external = path.join(root, "external-attempt.json");
+    fs.writeFileSync(external, `${JSON.stringify(first)}\n`, { mode: 0o600 });
+    fs.symlinkSync(external, file);
+    assert.equal((await store.read()).status, "damaged");
+    fs.rmSync(file);
+
+    fs.writeFileSync(file, `${JSON.stringify(first)}\n`, { mode: 0o644 });
+    assert.equal((await store.read()).status, "damaged");
+    fs.rmSync(file);
+
+    fs.chmodSync(stateDirectory, 0o755);
+    assert.deepEqual(await store.read(), { status: "damaged", record: null, reason: "update_attempt_state_not_private" });
+    fs.chmodSync(stateDirectory, 0o700);
+  }
   assert.throws(() => createUpdateAttemptStore({ stateDirectory: "State" }), /absolute/);
 });
 
@@ -585,24 +705,42 @@ test("a recorded update whose new version never started reports the rollback and
 
 test("a recorded update whose new version started completes only against a proven runtime", async (t) => {
   const record = { schema: ATTEMPT_SCHEMA, fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT };
-  for (const status of ["unverified", "unknown"]) {
-    await t.test(`a runtime reported ${status} keeps the record and never reports the update complete`, async () => {
+  for (const initialStatus of ["unverified", "unknown"]) {
+    await t.test(`a runtime reported ${initialStatus} can complete after repair in the same process`, async () => {
       const attempts = memoryAttempts({ ...record });
       const adapter = createAdapter({ currentVersion: "1.0.1" });
+      const clock = testClock();
+      let status = initialStatus;
+      let runtimeChecks = 0;
       const controller = createUpdateController({
         adapter,
         policy: enabledPolicy(),
         updateAttempts: attempts,
-        confirmUpdatedRuntime: async () => ({ status }),
+        confirmUpdatedRuntime: async () => { runtimeChecks += 1; return { status }; },
         ...grantedRestartLease(),
-        clock: testClock()
+        clock
       });
       const published = [];
       controller.subscribe((snapshot) => published.push(snapshot));
       await controller.start();
       await settle();
       assert.deepEqual(attempts.record, record);
+      assert.equal(adapter.checks, 0);
+      assert.equal(adapter.downloads, 0);
+      assert.equal(clock.intervals.length, 0);
+      assert.equal(controller.snapshot().availableVersion, null);
       assert.equal(published.some((snapshot) => snapshot.reason === "update_complete"), false);
+      await controller.check();
+      assert.equal(adapter.checks, 0);
+      assert.equal(runtimeChecks, 2);
+
+      status = "verified";
+      const recovered = await controller.reconcileAfterRepair();
+      assert.equal(recovered.status, "idle");
+      assert.equal(recovered.reason, "update_complete");
+      assert.equal(attempts.record, null);
+      assert.equal(runtimeChecks, 3);
+      assert.equal(adapter.checks, 0);
       controller.stop();
     });
   }
@@ -624,6 +762,43 @@ test("a recorded update whose new version started completes only against a prove
   assert.equal(attempts.record, null);
   assert.equal(published.some((snapshot) => snapshot.status === "idle" && snapshot.reason === "update_complete"), true);
   assert.equal(adapter.checks, 1);
+  controller.stop();
+});
+
+test("concurrent post-repair reconciliation shares one runtime confirmation and terminal result", async () => {
+  const record = { schema: ATTEMPT_SCHEMA, fromVersion: "1.0.0", toVersion: "1.0.1", at: ATTEMPT_AT };
+  const attempts = memoryAttempts({ ...record });
+  const confirmation = deferred();
+  let runtimeChecks = 0;
+  const controller = createUpdateController({
+    adapter: createAdapter({ currentVersion: "1.0.1" }),
+    policy: enabledPolicy(),
+    updateAttempts: attempts,
+    confirmUpdatedRuntime: async () => {
+      runtimeChecks += 1;
+      return runtimeChecks === 1 ? { status: "unknown" } : confirmation.promise;
+    },
+    ...grantedRestartLease(),
+    clock: testClock()
+  });
+  await controller.start();
+  assert.equal(runtimeChecks, 1);
+
+  const first = controller.reconcileAfterRepair();
+  const second = controller.reconcileAfterRepair();
+  assert.strictEqual(first, second);
+  await settle();
+  assert.equal(runtimeChecks, 2);
+  confirmation.resolve({ status: "verified" });
+  const [left, right] = await Promise.all([first, second]);
+  assert.deepEqual(left, right);
+  assert.equal(left.reason, "update_complete");
+  assert.equal(attempts.clears, 1);
+  assert.equal(attempts.record, null);
+
+  await controller.reconcileAfterRepair();
+  assert.equal(runtimeChecks, 2, "a terminal reconciliation repeated runtime confirmation");
+  assert.equal(attempts.clears, 1, "a terminal reconciliation repeated the exact clear");
   controller.stop();
 });
 
@@ -657,28 +832,33 @@ test("a restart records the attempt before it hands the update to the updater an
     policy: enabledPolicy(),
     updateAttempts: attempts,
     confirmUpdatedRuntime: async () => ({ status: "verified" }),
-    ...grantedRestartLease()
+    acquireRestartLease: async () => ({ status: "granted", leaseId: "ordered-lease" }),
+    releaseRestartLease: async () => undefined,
+    commitRestartLease: async () => { order.push("commit"); return { status: "closing" }; }
   });
   await controller.check();
   await settle();
   assert.equal((await controller.installWhenIdle()).status, "installing");
-  assert.deepEqual(order, ["record", "install"]);
+  assert.deepEqual(order, ["record", "commit", "install"]);
   assert.equal(attempts.record.fromVersion, "1.0.0");
   assert.equal(attempts.record.toVersion, "1.0.1");
   assert.equal(Number.isFinite(Date.parse(attempts.record.at)), true);
 
   const unwritable = {
-    read: async () => null,
+    read: async () => ({ status: "absent", record: null, reason: null }),
     write: async () => { throw new Error("state directory is unwritable"); },
-    clear: async () => undefined
+    clear: async () => false
   };
+  const leaseOrder = [];
   const secondAdapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
   const second = createUpdateController({
     adapter: secondAdapter,
     policy: enabledPolicy(),
     updateAttempts: unwritable,
     confirmUpdatedRuntime: async () => ({ status: "verified" }),
-    ...grantedRestartLease()
+    acquireRestartLease: async () => ({ status: "granted", leaseId: "unrecorded-lease" }),
+    releaseRestartLease: async (leaseId) => { leaseOrder.push(`release:${leaseId}`); },
+    commitRestartLease: async () => { leaseOrder.push("commit"); return { status: "closing" }; }
   });
   await second.check();
   await settle();
@@ -687,6 +867,7 @@ test("a restart records the attempt before it hands the update to the updater an
   assert.equal(deferredResult.reason, "active_or_uncertain_operations");
   assert.equal(deferredResult.availableVersion, "1.0.1");
   assert.equal(secondAdapter.installs, 0);
+  assert.deepEqual(leaseOrder, ["release:unrecorded-lease"]);
 });
 
 test("an attempt store without a runtime check, or missing an operation, is refused at construction", () => {
@@ -706,20 +887,27 @@ test("an attempt store without a runtime check, or missing an operation, is refu
   }), /update attempt store is incomplete/);
 });
 
-test("an unreadable attempt record leaves the update route working without a claim about the last attempt", async () => {
+test("an unreadable attempt record blocks checks and downloads with an explicit repair state", async () => {
   const attempts = memoryAttempts(null, { unreadable: true });
   const adapter = createAdapter();
+  const clock = testClock();
   const controller = createUpdateController({
     adapter,
     policy: enabledPolicy(),
     updateAttempts: attempts,
     confirmUpdatedRuntime: async () => ({ status: "verified" }),
     ...grantedRestartLease(),
-    clock: testClock()
+    clock
   });
   const result = await controller.start();
   assert.equal(attempts.reads, 1);
-  assert.equal(result.status, "idle");
-  assert.equal(result.reason, "up_to_date");
+  assert.equal(result.status, "error");
+  assert.equal(result.reason, "update_attempt_repair_required");
+  assert.equal(adapter.checks, 0);
+  assert.equal(adapter.downloads, 0);
+  assert.equal(clock.intervals.length, 0);
+  assert.equal((await controller.check()).reason, "update_attempt_repair_required");
+  assert.equal(attempts.reads, 2);
+  assert.equal(adapter.checks, 0);
   controller.stop();
 });

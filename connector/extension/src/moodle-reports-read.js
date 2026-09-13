@@ -65,6 +65,8 @@
  * serializes this function for MAIN-world injection.
  */
 export async function executeMoodleCourseReportReadInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
   const MAX_ACTIVITIES = 500;
@@ -198,11 +200,17 @@ export async function executeMoodleCourseReportReadInPage(rawInput) {
   };
   const boundedText = async (response, endpoint) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!COUNT.test(String(declared)) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!COUNT.test(String(declared)) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext() || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -210,14 +218,14 @@ export async function executeMoodleCourseReportReadInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -229,6 +237,7 @@ export async function executeMoodleCourseReportReadInPage(rawInput) {
     try {
       response = await fetch(endpoint, {
         method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" },
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return "failed"; }
     const html = await boundedText(response, endpoint);
@@ -249,6 +258,7 @@ export async function executeMoodleCourseReportReadInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname, args: methodArguments }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return "failed"; }
     const raw = await boundedText(response, endpoint);

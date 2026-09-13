@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
 import { sha256Json } from "@morrow/contracts";
 import {
@@ -58,6 +59,77 @@ describe("GatewayOperationJournal", () => {
     journal.close();
   });
 
+  it("retains complete read authority and successful-response evidence", () => {
+    const journal = new GatewayOperationJournal({ path: ":memory:" });
+    const authority = {
+      sourceBindingId: "canvas:course-42",
+      targetIdentityDigest: "d".repeat(64),
+      actorDigest: "e".repeat(64),
+    };
+    const prepared = journal.prepare({
+      ...input(),
+      publicToolName: "read_page",
+      sourceToolName: "read_page",
+      sourceOperationId: undefined,
+      idempotencyKey: undefined,
+      readOnly: true,
+      ...authority,
+    });
+    expect(prepared.record).toMatchObject({ ...authority, responseSucceeded: null });
+    journal.markDispatched(prepared.record.operationId);
+    const complete = journal.recordResponse(prepared.record.operationId, {
+      upstreamResultDigest: "b".repeat(64),
+      normalizedResultDigest: "c".repeat(64),
+      responseSucceeded: true,
+    });
+    expect(complete).toMatchObject({
+      ...authority,
+      responseSucceeded: true,
+      publicResultDelivered: false,
+      state: "response_received",
+    });
+    const delivered = journal.recordPublicReadDelivered(prepared.record.operationId);
+    expect(delivered).toMatchObject({ publicResultDelivered: true, responseSucceeded: true });
+    for (let index = 0; index < 201; index += 1) {
+      const decoy = journal.prepare({
+        ...input(),
+        publicToolName: "read_page",
+        sourceToolName: "read_page",
+        sourceOperationId: undefined,
+        idempotencyKey: undefined,
+        readOnly: true,
+        ...authority,
+        targetIdentityDigest: sha256Json({ decoy: index }),
+      });
+      journal.markDispatched(decoy.record.operationId);
+      journal.recordResponse(decoy.record.operationId, {
+        upstreamResultDigest: sha256Json({ decoy: index }),
+        normalizedResultDigest: sha256Json({ normalizedDecoy: index }),
+        responseSucceeded: true,
+      });
+    }
+    expect(journal.findSuccessfulReadEvidence({
+      sourceId: "morrow-legacy",
+      ...authority,
+      upstreamResultDigest: "b".repeat(64),
+      notBefore: complete.createdAt,
+    })?.operationId).toBe(prepared.record.operationId);
+    expect(journal.findSuccessfulReadEvidence({
+      sourceId: "morrow-legacy",
+      ...authority,
+      actorDigest: "f".repeat(64),
+      upstreamResultDigest: "b".repeat(64),
+      notBefore: complete.createdAt,
+    })).toBeNull();
+    expect(() => journal.prepare({
+      ...input(),
+      readOnly: true,
+      sourceBindingId: authority.sourceBindingId,
+    })).toThrow(/authority evidence must be complete/);
+    expect(() => journal.prepare({ ...input(), ...authority })).toThrow(/belongs only to a read-only operation/);
+    journal.close();
+  });
+
   it("recovers prepared and dispatched operations without replay", () => {
     const root = mkdtempSync(join(tmpdir(), "morrow-journal-"));
     roots.push(root);
@@ -73,6 +145,50 @@ describe("GatewayOperationJournal", () => {
     expect(recovered.get(dispatched.record.operationId).state).toBe("source_unknown");
     expect(recovered.health().unknownOperations).toBe(1);
     recovered.close();
+  });
+
+  it("adds read authority columns to an existing journal without changing old records", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-journal-authority-migration-"));
+    roots.push(root);
+    const path = join(root, "operations.sqlite3");
+    const database = new DatabaseSync(path);
+    database.exec(`
+      CREATE TABLE gateway_operations (
+        operation_id TEXT PRIMARY KEY,
+        public_tool_name TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        source_tool_name TEXT NOT NULL,
+        catalog_digest TEXT NOT NULL,
+        request_digest TEXT NOT NULL,
+        forwarded_request_digest TEXT NOT NULL,
+        source_operation_id TEXT,
+        idempotency_key TEXT,
+        read_only INTEGER NOT NULL CHECK(read_only IN (0,1)),
+        state TEXT NOT NULL CHECK(state IN ('prepared','dispatched','response_received','failed_before_send','source_unknown')),
+        upstream_result_digest TEXT,
+        normalized_result_digest TEXT,
+        source_result_state TEXT,
+        source_task_id TEXT,
+        error_digest TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        dispatched_at TEXT,
+        terminal_at TEXT,
+        revision INTEGER NOT NULL CHECK(revision >= 1)
+      ) STRICT;
+    `);
+    database.close();
+
+    const journal = new GatewayOperationJournal({ path });
+    const prepared = journal.prepare(input());
+    expect(prepared.record).toMatchObject({
+      sourceBindingId: null,
+      targetIdentityDigest: null,
+      actorDigest: null,
+      responseSucceeded: null,
+      publicResultDelivered: false,
+    });
+    journal.close();
   });
 
   it("classifies nested source task and uncertainty state", () => {

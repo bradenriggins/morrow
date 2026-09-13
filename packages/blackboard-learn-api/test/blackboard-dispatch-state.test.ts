@@ -34,14 +34,16 @@ function structured(result: unknown): JsonObject {
 
 function grantArguments(planDigest: string, receipt: string): JsonObject {
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-dispatch-state",
     planDigest,
     outerPlanDigest: "a".repeat(64),
     approvalGrantDigest: "b".repeat(64),
     effectReceiptId: receipt,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:dispatch-state",
+   gatewayProcessId: "gateway:dispatch-state",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return {
     schema: unsigned.schema,
@@ -52,6 +54,8 @@ function grantArguments(planDigest: string, receipt: string): JsonObject {
     effect_receipt_id: unsigned.effectReceiptId,
     dispatch_attempt: unsigned.dispatchAttempt,
     gateway_process_id: unsigned.gatewayProcessId,
+    issued_at: unsigned.issuedAt,
+    not_after: unsigned.notAfter,
     dispatch_token: signBlackboardEffectGrant(effectSecret, unsigned),
   };
 }

@@ -1,17 +1,16 @@
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
 import { describe, expect, it } from "vitest";
 import { buildLocalCanvasConfig } from "../../client-config/src/index.js";
 import { parseGatewayConfig } from "../src/config.js";
 import { GatewayRuntime } from "../src/runtime.js";
 import { createMorrowServer } from "../src/server.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
+import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 
 const ORIGIN = "https://moodle.example.edu";
 const SITE_URL = `${ORIGIN}/campus/`;
@@ -45,12 +44,6 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-function browserCatalogDigest(root: string): string {
-  const canvas = loadCanvasApiCatalog(resolve(root, "artifacts/canvas-api/canvas-api-catalog.json"));
-  const canvasBrowser = createHash("sha256").update(readFileSync(resolve(root, "connector/extension/generated/canvas-browser-catalog.json"))).digest("hex");
-  const moodle = createHash("sha256").update(readFileSync(resolve(root, "connector/extension/generated/moodle-browser-catalog.json"))).digest("hex");
-  return createHash("sha256").update(`${canvas.catalogDigest}\n${canvasBrowser}\n${moodle}`).digest("hex");
-}
 
 function configuration(root: string, directory: string, port: number) {
   const generated = structuredClone(buildLocalCanvasConfig(root, process.execPath)) as {
@@ -82,7 +75,7 @@ describe("Moodle write digest reachability", () => {
     const root = resolve("../..");
     const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-write-digest-"));
     const port = await availablePort();
-    const catalogDigest = browserCatalogDigest(root);
+    const catalogDigest = bridgeCatalogDigestForTests(root);
     const runtime = await GatewayRuntime.connect(configuration(root, directory, port));
     let bridge: BridgeTestClient | undefined;
     let server: ReturnType<typeof serveStdio> | undefined;

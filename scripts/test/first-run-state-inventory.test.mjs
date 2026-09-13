@@ -172,6 +172,7 @@ const POPUP_STATES = new Map([
   ["connecting", { status: { ...connection, paired: true, connecting: true } }],
   ["paired-not-connected", { status: { ...connection, paired: true } }],
   ["runtime-mismatch", { status: { ...connection, paired: true, connected: true, runtimeHealthy: false } }],
+  ["authentication-failed", { status: { ...connection, ...healthyPopup, authenticationFailed: true } }],
   ["connected-no-site", { status: { ...connection, ...healthyPopup } }],
   ["detected-platform", { status: { ...connection, ...healthyPopup }, detectedProvider: "moodle", sourceNeedle: "Morrow Bridge detected" }],
   ["site-ready-no-course", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor()] } }],

@@ -3,6 +3,8 @@
  * management member read endpoint. Session material and raw identities stay in Chrome.
  */
 export async function executeMoodleCourseGroupsInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const OPERATION = "moodle.page.group.membership_map.read.v1";
   const MAX_BYTES = 2_000_000;
@@ -55,30 +57,35 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
     let responseUrl;
     try { responseUrl = new URL(response.url); } catch { return null; }
     if (!response.ok || responseUrl.origin !== endpoint.origin || responseUrl.pathname !== endpoint.pathname || responseUrl.search !== endpoint.search
-      || !sameContext() || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
-    const reader = response.body.getReader(); const decoder = new TextDecoder(); let bytes = 0; let raw = "";
+      || !sameContext() || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
+    const reader = response.body.getReader(); const decoder = new TextDecoder("utf-8", { fatal: true }); let bytes = 0; let raw = "";
     try {
       for (;;) {
         const next = await reader.read();
         if (next.done) break;
-        if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_BYTES) { await reader.cancel(); return "limit"; }
+        if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_BYTES) { try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return "limit"; }
         raw += decoder.decode(next.value, { stream: true });
       }
       raw += decoder.decode();
       return raw;
-    } catch { try { await reader.cancel(); } catch {} return null; }
+    } catch { try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return null; }
   };
   const ajax = async (methodname, methodArgs) => {
     const endpoint = new URL(site.href); endpoint.pathname = `${basePath}/lib/ajax/service.php`;
     endpoint.search = new URLSearchParams({ sesskey: cfg.sesskey, info: methodname }).toString();
+    const signal = requestSignal(input.expiresAt);
     let response;
     try {
       response = await fetch(endpoint, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname, args: methodArgs }]),
+        signal: signal,
       });
-    } catch { return null; }
+    } catch { return signal.aborted ? "expired" : null; }
     const raw = await boundedText(response, endpoint);
     if (raw === "limit") return raw;
     try {
@@ -89,13 +96,15 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
   const members = async (groupId) => {
     const endpoint = new URL(site.href); endpoint.pathname = `${basePath}/group/index.php`;
     endpoint.search = new URLSearchParams({ id: courseId, group: groupId, action: "ajax_getmembersingroup" }).toString();
+    const signal = requestSignal(input.expiresAt);
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" } }); } catch { return null; }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" }, signal: signal }); } catch { return signal.aborted ? "expired" : null; }
     const raw = await boundedText(response, endpoint);
     if (raw === "limit") return raw;
     try { return JSON.parse(raw); } catch { return null; }
   };
   const rawGroups = await ajax("core_group_get_course_groups", { courseid: Number(courseId) });
+  if (rawGroups === "expired") return fail("moodle_groups_context_changed");
   if (rawGroups === "limit") return incomplete();
   if (!Array.isArray(rawGroups)) return fail("moodle_course_groups_unavailable");
   if (rawGroups.length > MAX_GROUPS) return incomplete();
@@ -111,23 +120,24 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
   for (const group of groups) {
     if (!approved()) return fail("moodle_groups_context_changed");
     const rawRoles = await members(group.id);
+    if (rawRoles === "expired") return fail("moodle_groups_context_changed");
     if (rawRoles === "limit") return incomplete();
     if (!Array.isArray(rawRoles)) return fail("moodle_course_groups_invalid");
     const membership = []; const memberIds = new Set();
     for (const rawRole of rawRoles) {
       if (!object(rawRole) || !Array.isArray(rawRole.users)) return fail("moodle_course_groups_invalid");
       for (const rawMember of rawRole.users) {
-        const userId = id(rawMember?.id); const name = collapsed(rawMember?.name, 2000);
-        if (!userId || !name || memberIds.has(userId)) return fail("moodle_course_groups_invalid");
-        memberIds.add(userId); membership.push({ user_id: userId, name });
+        const userId = id(rawMember?.id);
+        if (!userId || memberIds.has(userId)) return fail("moodle_course_groups_invalid");
+        memberIds.add(userId); membership.push({ user_id: userId });
         if (++memberCount > MAX_MEMBERS) return incomplete();
       }
     }
     group.membership = membership;
-    group.membership.sort((left, right) => Number(left.user_id) - Number(right.user_id));
+    group.membership.sort((left, right) => left.user_id.length - right.user_id.length || left.user_id.localeCompare(right.user_id, "en-US"));
   }
   if (!approved()) return fail("moodle_groups_context_changed");
-  groups.sort((left, right) => Number(left.id) - Number(right.id));
+  groups.sort((left, right) => left.id.length - right.id.length || left.id.localeCompare(right.id, "en-US"));
   const data = { course_id: courseId, groups };
   const snapshotDigest = await digest(data);
   return snapshotDigest

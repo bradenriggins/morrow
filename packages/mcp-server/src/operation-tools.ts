@@ -24,13 +24,16 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
     "morrow_operation_list",
     {
       title: "Review saved requests",
-      description: "List outer Morrow operations. Each record names the assistant that asked for it, as that assistant reported itself at connect time, and names its project without giving its path. This only reads the local durable operation record.",
-      inputSchema: z.object({ limit: z.number().int().min(1).max(200).default(50) }),
+      description: "List outer Morrow operations. Each page includes an opaque cursor for the next older page and complete saved-operation counts. Each record names the assistant that asked for it, as that assistant reported itself at connect time, and names its project without giving its path. This only reads the local durable operation record.",
+      inputSchema: z.object({
+        limit: z.number().int().min(1).max(200).default(50),
+        cursor: z.string().min(8).max(512).optional(),
+      }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ limit }) => ({
+    async ({ limit, cursor }) => ({
       content: [{ type: "text", text: "Here are the saved Morrow requests." }],
-      structuredContent: runtime.operationList(limit),
+      structuredContent: runtime.operationList(limit, cursor),
     }),
   );
 
@@ -42,7 +45,7 @@ export function registerOperationTools(server: McpServer, runtime: GatewayRuntim
       inputSchema: z.object({ operation_id: z.string().min(8).max(160) }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
-    async ({ operation_id }) => runtime.dispatchOperation(operation_id) as unknown as CallToolResult,
+    async ({ operation_id }, context) => runtime.dispatchOperation(operation_id, { signal: context.mcpReq.signal }) as unknown as CallToolResult,
   );
 
   server.registerTool(

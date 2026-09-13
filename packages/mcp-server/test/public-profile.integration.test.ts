@@ -1,14 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, truncate, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { publicationRuleForTool } from "@morrow/gateway-core";
 import { describe, expect, it } from "vitest";
 import { parseGatewayConfig } from "../src/config.js";
-import { GatewayRuntime } from "../src/runtime.js";
+import { GatewayRuntime, MAX_PUBLICATION_POLICY_BYTES } from "../src/runtime.js";
 
-const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
+const fixturePath = fileURLToPath(new URL("./fixtures/raw-attested-upstream.mjs", import.meta.url));
 
 function git(root: string, ...args: string[]): string {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
@@ -23,8 +23,8 @@ async function committedRepository(): Promise<{
   git(root, "init", "--quiet");
   git(root, "config", "user.name", "Morrow Test");
   git(root, "config", "user.email", "morrow-test@example.invalid");
-  await writeFile(join(root, "source.txt"), "fixture\n", "utf8");
-  git(root, "add", "source.txt");
+  await writeFile(join(root, "server.mjs"), await readFile(fixturePath));
+  git(root, "add", "server.mjs");
   git(root, "commit", "--quiet", "-m", "fixture");
   return {
     root,
@@ -33,7 +33,7 @@ async function committedRepository(): Promise<{
   };
 }
 
-function privateConfig() {
+function privateConfig(root: string) {
   return parseGatewayConfig({
     schema: "morrow.upstreams.v1",
     profile: "private-full",
@@ -42,7 +42,8 @@ function privateConfig() {
       label: "ExamplePlatform fixture",
       kind: "mcp-stdio",
       command: process.execPath,
-      args: [fixturePath],
+      args: [join(root, "server.mjs")],
+      cwd: root,
       env: { FAKE_SOURCE: "meridian" },
       priority: 100,
       required: true,
@@ -71,7 +72,8 @@ function publicConfig(input: {
       label: "ExamplePlatform fixture",
       kind: "mcp-stdio",
       command: process.execPath,
-      args: [fixturePath],
+      args: [join(input.root, "server.mjs")],
+      cwd: input.root,
       env: { FAKE_SOURCE: "meridian" },
       repository: "example/public-canvas-adapter",
       sourceDisposition: "clean_reimplementation",
@@ -82,6 +84,11 @@ function publicConfig(input: {
         expectedRevision: input.revision,
         requireTrackedClean: true,
         expectedToolCount: 6,
+        launch: {
+          entrypoint: "server.mjs",
+          entrypointArgumentIndex: 0,
+          runtime: { kind: "current-node" },
+        },
       },
       priority: 100,
       required: true,
@@ -113,7 +120,7 @@ async function publicationFixture(): Promise<{
 }> {
   const source = await committedRepository();
   const directory = await mkdtemp(join(tmpdir(), "morrow-public-profile-policy-"));
-  const privateRuntime = await GatewayRuntime.connect(privateConfig(), { journalPath: ":memory:" });
+  const privateRuntime = await GatewayRuntime.connect(privateConfig(source.root), { journalPath: ":memory:" });
   try {
     const sourceHealth = privateRuntime.health().sources[0];
     if (!sourceHealth?.catalogDigest) throw new Error("fixture source has no catalog digest");
@@ -263,6 +270,34 @@ describe("public-canvas runtime profile", () => {
         revision: fixture.revision,
         publicationPath: fixture.publicationPath,
       }), { journalPath: ":memory:" })).rejects.toThrow(/contract drift/);
+    } finally {
+      await fixture.dispose();
+    }
+  }, 30_000);
+
+  it("refuses linked and oversized publication policies before parsing", async () => {
+    const fixture = await publicationFixture();
+    try {
+      if (process.platform !== "win32") {
+        const target = join(fixture.directory, "target.json");
+        await writeFile(target, `${JSON.stringify(fixture.manifest)}\n`, "utf8");
+        await unlink(fixture.publicationPath);
+        await symlink(target, fixture.publicationPath);
+        await expect(GatewayRuntime.connect(publicConfig({
+          root: fixture.sourceRoot,
+          revision: fixture.revision,
+          publicationPath: fixture.publicationPath,
+        }), { journalPath: ":memory:" })).rejects.toThrow(/not a bounded regular file/);
+        await unlink(fixture.publicationPath);
+      }
+
+      await writeFile(fixture.publicationPath, "{}");
+      await truncate(fixture.publicationPath, MAX_PUBLICATION_POLICY_BYTES + 1);
+      await expect(GatewayRuntime.connect(publicConfig({
+        root: fixture.sourceRoot,
+        revision: fixture.revision,
+        publicationPath: fixture.publicationPath,
+      }), { journalPath: ":memory:" })).rejects.toThrow(/not a bounded regular file/);
     } finally {
       await fixture.dispose();
     }
