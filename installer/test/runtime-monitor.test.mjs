@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { hardenPrivateDirectory } from "../../packages/gateway-core/dist/private-file-access.js";
 import { createRuntimeMonitor } from "../shared/runtime-monitor.mjs";
 
@@ -37,11 +38,13 @@ async function waitFor(predicate, detail) {
 }
 
 function processIsAlive(pid) {
+  // Every process these tests spawn runs as this user, so a live pid this
+  // user cannot signal belongs to someone else and is never a monitor child.
   try {
     process.kill(pid, 0);
     return true;
-  } catch (error) {
-    return error?.code === "EPERM";
+  } catch {
+    return false;
   }
 }
 
@@ -94,6 +97,15 @@ const { serveStdio } = require("@modelcontextprotocol/server/stdio");
 const z = require("zod/v4");
 const mode = process.env.MORROW_RUNTIME_MONITOR_FIXTURE || "good";
 const log = process.env.MORROW_RUNTIME_MONITOR_LOG;
+// The stall regression records every spawned fixture pid here to prove the
+// monitor reclaimed each generation's child.
+const pidLog = process.env.MORROW_RUNTIME_MONITOR_PID_LOG;
+if (pidLog) fs.appendFileSync(pidLog, "pid:" + process.pid + "\n", "utf8");
+// A stall never settles its operation. A frozen fixture also ignores SIGTERM and
+// spins the event loop, so only a reclaim that escalates to SIGKILL ends it.
+const stall = () => new Promise(() => {});
+const freeze = () => { process.on("SIGTERM", () => {}); setTimeout(() => { for (;;) { /* spin */ } }, 0); return stall(); };
+if (mode === "stall-initialize") { process.stdin.resume(); setInterval(() => {}, 1000); }
 // Mirrors the packaged gateway: read the sealed manifest that sits beside the
 // payload this entrypoint was loaded from and hash its bytes. Nothing about the
 // runtime identity comes from the parent process.
@@ -116,6 +128,8 @@ const note = (value) => { if (log) fs.appendFileSync(log, value + "\n", "utf8");
 const server = new McpServer({ name: "runtime-monitor-fixture", version: "1" });
 server.registerTool("morrow_health", { inputSchema: z.object({}) }, async () => {
   note("morrow_health");
+  if (mode === "stall-health") return stall();
+  if (mode === "freeze-health") return freeze();
   healthCalls += 1;
   const busy = mode === "busy";
   const partial = mode === "partial";
@@ -127,9 +141,10 @@ server.registerTool("morrow_health", { inputSchema: z.object({}) }, async () => 
     },
   }};
 });
-server.registerResource("runtime-monitor-guidance", "morrow://guidance/course-audit-v1", { mimeType: "text/plain" }, async (uri) => ({
-  contents: [{ uri: uri.href, text: "Morrow runtime monitor fixture guidance." }],
-}));
+server.registerResource("runtime-monitor-guidance", "morrow://guidance/course-audit-v1", { mimeType: "text/plain" }, async (uri) => {
+  if (mode === "stall-resource") return stall();
+  return { contents: [{ uri: uri.href, text: "Morrow runtime monitor fixture guidance." }] };
+});
 const CANVAS = { sourceBindingId: "canvas:course-42", provider: "canvas", courseId: "42", runtimeVerified: true, sessionGeneration: 1, courseName: "Verified Course" };
 const MOODLE = { sourceBindingId: "moodle:course-77", provider: "moodle", courseId: "77", runtimeVerified: true, sessionGeneration: 1, courseName: "Second Course" };
 const BLACKBOARD = { sourceBindingId: "blackboard:course-1", provider: "blackboard", courseId: "_11_1", runtimeVerified: true, sessionGeneration: 1, courseName: "Blackboard Course" };
@@ -151,6 +166,8 @@ server.registerTool("morrow_capability_read", {
   inputSchema: z.object({ name: z.string(), arguments: z.record(z.string(), z.unknown()) }),
 }, async ({ name, arguments: input }) => {
   note(name);
+  if (name === "morrow_browser_bindings" && mode === "stall-bindings") return stall();
+  if (name !== "morrow_browser_bindings" && mode === "stall-read") return stall();
   if (name === "morrow_browser_bindings") {
     bindingCalls += 1;
     const bindings = connectedBindings();
@@ -182,7 +199,7 @@ server.registerTool("morrow_capability_read", {
   }
   return { isError: true, content: [{ type: "text", text: "unavailable" }], structuredContent: { schema: "morrow.problem.v1" } };
 });
-void serveStdio(() => server);
+if (mode !== "stall-initialize") void serveStdio(() => server);
 `;
   await writeFile(entry, script, { mode: 0o600 });
   return entry;
@@ -871,4 +888,137 @@ test("emits a bounded test-only startup trace without private runtime details", 
   assert.equal(JSON.stringify(trace).includes("morrow-runtime-monitor-trace"), false);
   assert.equal(JSON.stringify(trace).includes("fixture-private-token"), false);
   assert.equal(JSON.stringify(trace).includes("fixture-user"), false);
+});
+
+test("settles every stalled MCP operation within its bound, reclaims that generation's child, and reconnects", async (t) => {
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-stall-");
+  const workspaceRoot = await realpath(directory);
+  const log = path.join(directory, "pids.log");
+  const entry = await writeMockGateway(directory);
+  const tracePath = path.join(workspaceRoot, "runtime-startup-trace.json");
+  const originalMode = process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
+  const originalLog = process.env.MORROW_RUNTIME_MONITOR_PID_LOG;
+  process.env.MORROW_RUNTIME_MONITOR_PID_LOG = log;
+  const monitor = createRuntimeMonitor({
+    nodePath: process.execPath,
+    serverEntryPath: entry,
+    upstreamsPath: path.join(workspaceRoot, "upstreams.json"),
+    workspaceRoot,
+    journalPath: path.join(workspaceRoot, "gateway.sqlite3"),
+    diagnosticTracePath: tracePath,
+    operationTimeouts: { connectMs: 1_500, operationMs: 400, closeMs: 300, reclaimMs: 1_500 },
+  });
+  t.after(async () => {
+    if (originalMode === undefined) delete process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
+    else process.env.MORROW_RUNTIME_MONITOR_FIXTURE = originalMode;
+    if (originalLog === undefined) delete process.env.MORROW_RUNTIME_MONITOR_PID_LOG;
+    else process.env.MORROW_RUNTIME_MONITOR_PID_LOG = originalLog;
+    await monitor.close();
+    await rm(entry, { force: true });
+    await removeTemporaryDirectory(directory);
+  });
+  const childPids = async () => (await readFile(log, "utf8")).trim().split("\n")
+    .filter((line) => line.startsWith("pid:")).map((line) => Number(line.slice(4)));
+  const settled = async (operation, detail) => {
+    const marker = Symbol("deadline");
+    const outcome = await Promise.race([operation, new Promise((resolve) => setTimeout(() => resolve(marker), 8_000))]);
+    assert.notEqual(outcome, marker, `${detail} did not settle within its bound`);
+    return outcome;
+  };
+  const expectUnavailable = async (mode, run, detail) => {
+    process.env.MORROW_RUNTIME_MONITOR_FIXTURE = mode;
+    const before = (await childPids().catch(() => [])).length;
+    const snapshot = await settled(run(), detail);
+    const pids = await childPids();
+    assert.ok(pids.length > before, `${detail} spawned a child`);
+    const child = pids[pids.length - 1];
+    await waitFor(() => !processIsAlive(child), `${detail} child reclaim`);
+    assert.equal(monitor.lastGenerationReclaimed(), true, `${detail} reclaimed its generation`);
+    return snapshot;
+  };
+
+  const initialize = await expectUnavailable("stall-initialize", () => monitor.start(), "stalled initialize");
+  assert.equal(initialize.health.gatewayReady, "unknown");
+  const health = await expectUnavailable("stall-health", () => monitor.start(), "stalled health");
+  assert.equal(health.health.gatewayReady, "unknown");
+  assert.deepEqual(health.firstPreview, { available: "unknown", completed: false });
+  const bindings = await expectUnavailable("stall-bindings", () => monitor.start(), "stalled course binding discovery");
+  assert.equal(bindings.health.gatewayReady, true);
+  assert.equal(bindings.bindings.runtimeVerifiedCourseCount, 0);
+  const read = await expectUnavailable("stall-read", () => monitor.firstSafeRead(), "stalled first safe read");
+  assert.equal(read.schema, "morrow.installer-first-safe-read.v1");
+  assert.equal(read.completed, false);
+  assert.deepEqual(monitor.snapshot().firstPreview, { available: "unknown", completed: false });
+  const frozen = await expectUnavailable("freeze-health", () => monitor.start(), "frozen runtime that ignores SIGTERM");
+  assert.equal(frozen.health.gatewayReady, "unknown");
+
+  process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "stall-resource";
+  await settled(monitor.start(), "start before a stalled resource read");
+  const trace = await settled(monitor.testDiagnostics(), "stalled diagnostic resource read");
+  assert.equal(trace.upstream.listTools.ready, true);
+  assert.equal(trace.upstream.readResource.ready, false);
+  const resourcePids = await childPids();
+  await waitFor(() => !processIsAlive(resourcePids[resourcePids.length - 1]), "stalled resource child reclaim");
+
+  process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "good";
+  const recovered = await settled(monitor.start(), "reconnect after stalls");
+  assert.equal(recovered.health.gatewayReady, true);
+  assert.deepEqual(recovered.bindings, {
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "Verified Course",
+    firstPreviewCourseName: "Verified Course",
+  });
+  const firstRead = await settled(monitor.firstSafeRead(), "first read after reconnect");
+  assert.deepEqual(firstRead, {
+    schema: "morrow.installer-first-safe-read.v1",
+    completed: true,
+    runtimeVerifiedCourseCount: 1,
+    selectedCourseName: "Verified Course",
+    firstPreviewCourseName: "Verified Course",
+  });
+  assert.deepEqual(monitor.snapshot().firstPreview, { available: "yes", completed: true });
+  await settled(monitor.close(), "close");
+  const finalPids = await childPids();
+  await waitFor(() => !processIsAlive(finalPids[finalPids.length - 1]), "closed child reclaim");
+});
+
+test("every MCP SDK request in the runtime monitor runs under the owned operation boundary", async () => {
+  const monitorPath = fileURLToPath(new URL("../shared/runtime-monitor.mjs", import.meta.url));
+  const source = await readFile(monitorPath, "utf8");
+  const syntax = ts.createSourceFile("runtime-monitor.mjs", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const REQUESTS = new Set(["connect", "callTool", "listTools", "readResource"]);
+  const unbounded = [];
+  let requests = 0;
+  let closes = 0;
+  const location = (node) => `runtime-monitor.mjs:${syntax.getLineAndCharacterOfPosition(node.getStart(syntax)).line + 1}`;
+  const enclosingCallee = (node) => {
+    // The name of the call this node is a direct argument of, if any.
+    const parent = node.parent;
+    return parent && ts.isCallExpression(parent) && parent.arguments.includes(node) && ts.isIdentifier(parent.expression) ? parent.expression.text : null;
+  };
+  const visit = (node) => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const method = node.expression.name.text;
+      if (method === "close") {
+        closes += 1;
+        // A close settles within a bound, never directly.
+        if (enclosingCallee(node) !== "settleWithin") unbounded.push(`${location(node)}:close`);
+      } else if (REQUESTS.has(method)) {
+        requests += 1;
+        // A request receives the boundary's options as its last argument, from
+        // the arrow the boundary invokes, and nothing else may await it.
+        let owner = node.parent;
+        while (owner && !ts.isFunctionLike(owner)) owner = owner.parent;
+        const last = node.arguments[node.arguments.length - 1];
+        const parameter = owner && ts.isArrowFunction(owner) && owner.parameters.length === 1 ? owner.parameters[0].name.getText(syntax) : null;
+        const bound = Boolean(last) && ts.isIdentifier(last) && parameter !== null && last.text === parameter
+          && enclosingCallee(owner) === "operate";
+        if (!bound) unbounded.push(`${location(node)}:${method}`);
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(syntax);
+  assert.ok(requests >= 4 && closes >= 2, `the guard must see every SDK request and close, saw ${requests} and ${closes}`);
+  assert.deepEqual(unbounded, []);
 });

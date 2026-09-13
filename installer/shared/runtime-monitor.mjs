@@ -16,6 +16,19 @@ const BRIDGE_SHA256 = /^[0-9a-f]{64}$/;
 const SAFE_COURSE_NAME_LENGTH = 300;
 const INITIAL_GATEWAY_READY_RETRIES = 4;
 const INITIAL_GATEWAY_READY_RETRY_MS = 250;
+// Every MCP operation the monitor awaits runs inside one owned deadline, and
+// the monitor races settlement itself so a peer that ignores cancellation
+// still cannot hold a public method open. A stalled operation closes the
+// exact client and transport generation it ran against and reclaims that
+// generation's child process within a fixed bound.
+const MCP_CONNECT_TIMEOUT_MS = 15_000;
+const MCP_OPERATION_TIMEOUT_MS = 10_000;
+const MCP_CLOSE_TIMEOUT_MS = 5_000;
+const CHILD_RECLAIM_TIMEOUT_MS = 2_000;
+const CHILD_RECLAIM_POLL_MS = 25;
+// How long the diagnostic launcher gives its gateway to leave after SIGTERM
+// before it sends SIGKILL; well inside the monitor's own reclaim bound.
+const TEST_LAUNCHER_ESCALATION_MS = 500;
 const TEST_DIAGNOSTIC_SCHEMA = "morrow.desktop-runtime-trace.v1";
 const TEST_CHILD_DIAGNOSTIC_SCHEMA = "morrow.desktop-runtime-child.v1";
 const TEST_DIAGNOSTIC_RESOURCE_URI = "morrow://guidance/course-audit-v1";
@@ -124,6 +137,76 @@ function pause(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function boundedDuration(value, fallback, label) {
+  if (value === undefined) return fallback;
+  if (!Number.isSafeInteger(value) || value < 100 || value > 600_000) throw new TypeError(`${label} must be 100 through 600000 milliseconds`);
+  return value;
+}
+
+function operationTimeouts(value) {
+  const input = object(value) || {};
+  return Object.freeze({
+    connectMs: boundedDuration(input.connectMs, MCP_CONNECT_TIMEOUT_MS, "operationTimeouts.connectMs"),
+    operationMs: boundedDuration(input.operationMs, MCP_OPERATION_TIMEOUT_MS, "operationTimeouts.operationMs"),
+    closeMs: boundedDuration(input.closeMs, MCP_CLOSE_TIMEOUT_MS, "operationTimeouts.closeMs"),
+    reclaimMs: boundedDuration(input.reclaimMs, CHILD_RECLAIM_TIMEOUT_MS, "operationTimeouts.reclaimMs"),
+  });
+}
+
+/** Settles with the operation, or rejects as soon as the signal aborts, whichever comes first. */
+function settleWithAbort(operation, signal) {
+  if (signal.aborted) return Promise.reject(signal.reason || new Error("runtime monitor operation aborted"));
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const finish = (action) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      action();
+    };
+    const onAbort = () => finish(() => reject(signal.reason || new Error("runtime monitor operation aborted")));
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(operation).then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
+/** Waits for a promise for at most the given time; a late settlement is ignored. */
+function settleWithin(operation, milliseconds) {
+  let timer = null;
+  const deadline = new Promise((resolve) => { timer = setTimeout(resolve, milliseconds); });
+  return Promise.race([Promise.resolve(operation).catch(() => undefined), deadline]).finally(() => clearTimeout(timer));
+}
+
+function processAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+/** Ends the one stdio child of a generation within a fixed bound. Returns whether it is gone. */
+async function reclaimChildProcess(pid, timeoutMs) {
+  if (!validPid(pid) || !processAlive(pid)) return true;
+  const signalDeadline = Date.now() + Math.floor(timeoutMs / 2);
+  try { process.kill(pid, "SIGTERM"); } catch { return !processAlive(pid); }
+  while (Date.now() < signalDeadline) {
+    if (!processAlive(pid)) return true;
+    await pause(CHILD_RECLAIM_POLL_MS);
+  }
+  const finalDeadline = Date.now() + Math.floor(timeoutMs / 2);
+  try { process.kill(pid, "SIGKILL"); } catch { return !processAlive(pid); }
+  while (Date.now() < finalDeadline) {
+    if (!processAlive(pid)) return true;
+    await pause(CHILD_RECLAIM_POLL_MS);
+  }
+  return !processAlive(pid);
+}
+
 function diagnosticDuration(startedAt) {
   return Math.min(Math.max(0, Date.now() - startedAt), TEST_DIAGNOSTIC_DURATION_LIMIT_MS);
 }
@@ -212,6 +295,12 @@ if (child) {
   child.once("spawn", () => write("running", null));
   child.once("error", () => { write("spawn_failed", 1); process.exitCode = 1; });
   child.once("close", (code) => { const exitCode = Number.isSafeInteger(code) ? code : null; write("closed", exitCode); process.exitCode = exitCode === null ? 1 : exitCode; });
+  // The launcher is the only process the monitor can signal, so it carries
+  // termination to the gateway it started and escalates when that gateway
+  // ignores the request. It exits once the gateway has closed.
+  const forward = (signal) => { if (child.exitCode === null && child.signalCode === null) { try { child.kill(signal); } catch {} } };
+  process.on("SIGTERM", () => { forward("SIGTERM"); setTimeout(() => forward("SIGKILL"), ${TEST_LAUNCHER_ESCALATION_MS}).unref(); });
+  process.on("exit", () => forward("SIGKILL"));
 }
 `;
   writeFileSync(launcherPath, source, { mode: 0o600, flag: "w" });
@@ -406,7 +495,8 @@ async function maintenanceModules(serverEntryPath) {
  * Starts the packaged gateway's stdio proxy. It never starts the connector
  * directly, so each monitor joins the same local-owner runtime and journal.
  */
-export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath, workspaceRoot, journalPath, mcpRuntime, diagnosticTracePath }) {
+export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath, workspaceRoot, journalPath, mcpRuntime, diagnosticTracePath, operationTimeouts: timeoutInput }) {
+  const timeouts = operationTimeouts(timeoutInput);
   const paths = {
     nodePath: absolutePath(nodePath, "nodePath"),
     serverEntryPath: absolutePath(serverEntryPath, "serverEntryPath"),
@@ -417,8 +507,12 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     diagnosticTracePath: diagnosticPath(diagnosticTracePath),
   };
   if (mcpRuntime !== undefined && !paths.mcpRuntime) throw new TypeError("mcpRuntime is invalid");
-  let client = null;
-  let transport = null;
+  // The connected generation: one client, one transport, one child process.
+  // Every operation runs against the generation it started with, so a stalled
+  // call that fails later can only close its own generation, never a newer one.
+  let generation = null;
+  let generationCount = 0;
+  let lastClosed = null;
   let starting = null;
   let current = emptySnapshot();
   let previewBinding = null;
@@ -509,7 +603,7 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     holderPid: lease.holderPid,
   });
 
-  const monitorProxyPid = () => validPid(transport?.pid) ? transport.pid : null;
+  const monitorProxyPid = () => generation?.pid ?? null;
 
   const releaseHeldMaintenance = async () => {
     if (!maintenanceLease || maintenanceCommitted) return false;
@@ -532,38 +626,69 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     }
   };
 
-  const disconnect = async () => {
-    const activeClient = client;
-    const activeTransport = transport;
-    client = null;
-    transport = null;
-    await activeClient?.close().catch(() => {});
-    await activeTransport?.close().catch(() => {});
+  /** Closes exactly this generation once: client, transport, then the child process within a bound. */
+  const closeGeneration = (target) => {
+    if (!target) return Promise.resolve();
+    if (generation === target) generation = null;
+    if (!target.closing) {
+      // The transport forgets its child once closed, so the pid is fixed first.
+      const pid = target.pid;
+      target.closing = (async () => {
+        await settleWithin(target.client.close(), timeouts.closeMs);
+        await settleWithin(target.transport.close(), timeouts.closeMs);
+        target.reclaimed = await reclaimChildProcess(pid, timeouts.reclaimMs);
+        lastClosed = target;
+      })();
+    }
+    return target.closing;
   };
 
-  const readBindings = async () => {
+  const disconnect = () => closeGeneration(generation);
+
+  /**
+   * Runs one MCP operation against one generation under an owned deadline.
+   * The SDK receives the signal and timeout; settlement is raced regardless.
+   * Any failure, including a stall, closes that exact generation.
+   */
+  const operate = async (target, name, timeoutMs, action) => {
+    if (!target || target.closing) throw new Error(`${name} has no connected runtime generation`);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(new Error(`${name} did not settle within ${timeoutMs} ms`)), timeoutMs);
     try {
-      const result = await client.callTool({
+      return await settleWithAbort(action({ signal: controller.signal, timeout: timeoutMs }), controller.signal);
+    } catch (error) {
+      await closeGeneration(target);
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
+  const callTool = (target, name, params) => operate(target, name, timeouts.operationMs, (options) => target.client.callTool(params, options));
+
+  const readBindings = async () => {
+    const target = generation;
+    try {
+      const result = await callTool(target, "morrow_browser_bindings", {
         name: "morrow_capability_read",
         arguments: { name: "morrow_browser_bindings", arguments: {} },
       });
       return setBindingState(browserBindings(result));
     } catch {
-      await disconnect();
       return setBindingState({ kind: "unknown" });
     }
   };
 
   const refreshStatus = async () => {
     beginStatus();
+    const target = generation;
     try {
-      const health = await client.callTool({ name: "morrow_health", arguments: {} });
+      const health = await callTool(target, "morrow_health", { name: "morrow_health", arguments: {} });
       const portBinding = healthSnapshot(current, health, paths.mcpRuntime);
       if (testTrace && portBinding !== "not_observed") testTrace.value.portBinding = portBinding;
     } catch {
       current.firstPreview = { available: "unknown", completed: false };
       previewBinding = null;
-      await disconnect();
       return null;
     }
     return readBindings();
@@ -571,13 +696,12 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
 
   const connect = async () => {
     beginStatus();
-    let nextClient = null;
-    let nextTransport = null;
+    let next = null;
     const initializedAt = Date.now();
     try {
       const { Client, StdioClientTransport } = mcpModules(paths.serverEntryPath);
-      nextClient = new Client({ name: "morrow-installer-runtime-monitor", version: "1.0.0" });
-      nextTransport = new StdioClientTransport({
+      const nextClient = new Client({ name: "morrow-installer-runtime-monitor", version: "1.0.0" });
+      const nextTransport = new StdioClientTransport({
         command: paths.nodePath,
         args: testTraceLauncher ? [testTraceLauncher.launcherPath] : [paths.serverEntryPath],
         cwd: paths.workspaceRoot,
@@ -589,32 +713,38 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
         stderr: testTrace ? "pipe" : "ignore",
       });
       nextTransport.stderr?.on("data", captureTestStderr);
-      await nextClient.connect(nextTransport);
+      generationCount += 1;
+      next = {
+        id: generationCount,
+        client: nextClient,
+        transport: nextTransport,
+        get pid() { return validPid(nextTransport.pid) ? nextTransport.pid : null; },
+        closing: null,
+        reclaimed: null,
+      };
+      await operate(next, "initialize", timeouts.connectMs, (options) => nextClient.connect(nextTransport, options));
       if (testTrace) {
         testTrace.value.child.spawned = validPid(nextTransport.pid);
         testTrace.value.upstream.initialize = diagnosticPhase(true, diagnosticDuration(initializedAt));
       }
-      client = nextClient;
-      transport = nextTransport;
+      generation = next;
       await refreshStatus();
     } catch {
       if (testTrace) testTrace.value.upstream.initialize = diagnosticPhase(false, diagnosticDuration(initializedAt));
-      await nextClient?.close().catch(() => {});
-      await nextTransport?.close().catch(() => {});
-      await disconnect();
+      await closeGeneration(next);
     }
     return copied(current);
   };
 
   const refreshInitialGatewayReadiness = async () => {
-    if (!client) await connect();
+    if (!generation) await connect();
     else {
       await refreshStatus();
-      if (!client) await connect();
+      if (!generation) await connect();
     }
     // The owner can accept the proxy connection immediately before its required
     // upstream has reported ready. Re-read only that observed, transient state.
-    for (let attempt = 0; client && current.health.gatewayReady === false && attempt < INITIAL_GATEWAY_READY_RETRIES; attempt += 1) {
+    for (let attempt = 0; generation && current.health.gatewayReady === false && attempt < INITIAL_GATEWAY_READY_RETRIES; attempt += 1) {
       await pause(INITIAL_GATEWAY_READY_RETRY_MS);
       await refreshStatus();
     }
@@ -623,15 +753,16 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
 
   const runTestDiagnostics = async () => {
     if (!testTrace) return null;
-    if (!client) return testDiagnostic();
-    await runTestDiagnosticPhase("listTools", () => client.listTools());
-    await runTestDiagnosticPhase("readResource", () => client.readResource({ uri: TEST_DIAGNOSTIC_RESOURCE_URI }));
+    const target = generation;
+    if (!target) return testDiagnostic();
+    await runTestDiagnosticPhase("listTools", () => operate(target, "listTools", timeouts.operationMs, (options) => target.client.listTools(undefined, options)));
+    await runTestDiagnosticPhase("readResource", () => operate(target, "readResource", timeouts.operationMs, (options) => target.client.readResource({ uri: TEST_DIAGNOSTIC_RESOURCE_URI }, options)));
     // The connector starts its bridge listening port asynchronously and can
     // still be pending when the first health read answers, so that read
     // reports no bridge component at all. Re-read until the port binding is
     // observed or this bounded window closes, so the trace reports the state a
     // person would see a moment later instead of a startup race.
-    for (let attempt = 0; testTrace.value.portBinding === "not_observed" && attempt < 10; attempt += 1) {
+    for (let attempt = 0; generation && testTrace.value.portBinding === "not_observed" && attempt < 10; attempt += 1) {
       await pause(250);
       await refreshStatus();
     }
@@ -639,8 +770,8 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
   };
 
   const runFirstSafeRead = async () => {
-    if (!client) await connect();
-    if (!client) return safeFirstRead(current);
+    if (!generation) await connect();
+    if (!generation) return safeFirstRead(current);
     const selected = await refreshStatus();
     if (!selected) return safeFirstRead(current);
     const name = selected.provider === "canvas" ? "canvas_get_single_course_courses" : "moodle_get_course";
@@ -648,7 +779,7 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
       ? { id: selected.courseId, _morrow: { source_binding_id: selected.sourceBindingId } }
       : { course_id: selected.courseId, _morrow: { source_binding_id: selected.sourceBindingId } };
     try {
-      const preview = await client.callTool({
+      const preview = await callTool(generation, name, {
         name: "morrow_capability_read",
         arguments: { name, arguments: argumentsValue },
       });
@@ -664,7 +795,6 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     } catch {
       current.firstPreview = { available: "unknown", completed: false };
       previewBinding = null;
-      await disconnect();
     }
     return safeFirstRead(current);
   };
@@ -675,9 +805,9 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     }
     if (action === "acquire") {
       if (maintenanceLease || maintenanceCommitted) return maintenanceResult(action, "unavailable");
-      if (!client) await connect();
+      if (!generation) await connect();
       const proxyPid = monitorProxyPid();
-      if (!client || proxyPid === null) return maintenanceResult(action, "unavailable");
+      if (!generation || proxyPid === null) return maintenanceResult(action, "unavailable");
       try {
         const { requestLocalOwnerMaintenance } = await maintenanceModules(paths.serverEntryPath);
         const held = await requestLocalOwnerMaintenance({
@@ -775,6 +905,10 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
       if (starting) await starting.catch(() => {});
       await releaseHeldMaintenance();
       await disconnect();
+    },
+    /** Whether the last closed generation's child process was reclaimed; null before any close. */
+    lastGenerationReclaimed() {
+      return lastClosed ? lastClosed.reclaimed : null;
     },
   });
 }
