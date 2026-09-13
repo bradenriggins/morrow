@@ -1,11 +1,4 @@
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  type Stats,
-} from "node:fs";
+import { lstatSync, type Stats } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync, type DatabaseSyncOptions } from "node:sqlite";
 import { hardenPrivateFile, privateDirectoryAccessAccepted, privateFileAccessAccepted } from "./private-file-access.js";
@@ -20,6 +13,13 @@ function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+/**
+ * Proves one database path names a single-link owner-private regular file
+ * using path metadata only. It never opens a descriptor on the path: POSIX
+ * advisory locks belong to the process, so closing any descriptor for an
+ * inode this process already holds open through SQLite would silently drop
+ * the SHARED and shared-memory locks SQLite still believes it holds.
+ */
 function exactPrivateIdentity(path: string, label: string, repairAccess: boolean): Stats | null {
   let named: Stats;
   try { named = lstatSync(path); } catch (error) {
@@ -34,20 +34,13 @@ function exactPrivateIdentity(path: string, label: string, repairAccess: boolean
     if (!repairAccess || !hardenPrivateFile(path, { trustedRoot: dirname(path) })) {
       throw new Error(`${label} access is not private`);
     }
-    named = lstatSync(path);
-  }
-  const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-  const descriptor = openSync(path, constants.O_RDWR | noFollow);
-  try {
-    const opened = fstatSync(descriptor);
-    const current = lstatSync(path);
-    if (!opened.isFile() || opened.nlink !== 1 || !sameFile(named, opened) || !sameFile(opened, current)) {
+    const hardened = lstatSync(path);
+    if (!hardened.isFile() || hardened.isSymbolicLink() || hardened.nlink !== 1 || !sameFile(named, hardened)) {
       throw new Error(`${label} changed during admission`);
     }
-    return opened;
-  } finally {
-    closeSync(descriptor);
+    named = hardened;
   }
+  return named;
 }
 
 function verifySidecars(path: string, label: string, repairAccess: boolean): void {
@@ -86,6 +79,8 @@ export function openExactPrivateSqliteDatabase(
   }
   if (identity === null) throw new Error(`${label} could not be created`);
   verifySidecars(path, label, true);
+  // From here on SQLite owns descriptors on the database and its sidecars, so
+  // every later check reads path metadata only and repairs nothing in place.
   const database = new DatabaseSync(path, options);
   try {
     database.exec("PRAGMA journal_mode = WAL;");
