@@ -19,6 +19,7 @@ import {
   createExactPrivateStateFile,
   decodeExactUtf8,
   hardenPrivateDirectory,
+  hardenPrivateFile,
   privateFileAccessAccepted,
   processMatchesRecordedLifetime,
   readExactPrivateStateFile,
@@ -80,6 +81,13 @@ function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+/**
+ * Keeps every Morrow state file owner-private using path metadata and path
+ * permission changes only. SQLite holds the database, WAL, and shared-memory
+ * files open while the gateway runs, and POSIX advisory locks belong to the
+ * process, so opening and closing a raw descriptor on any of those paths
+ * would silently release the locks SQLite still believes it holds.
+ */
 export function hardenMorrowStateFiles(statePathValue: string): void {
   const statePath = String(statePathValue || "").trim();
   if (!statePath || statePath === ":memory:") return;
@@ -105,34 +113,20 @@ export function hardenMorrowStateFiles(statePathValue: string): void {
     if (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1) {
       throw new Error("Morrow runtime state contains an unsafe file");
     }
-    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
-    let descriptor: number;
+    if (privateFileAccessAccepted(candidate, named.mode, { trustedRoot: directory })) continue;
+    if (!hardenPrivateFile(candidate, { trustedRoot: directory })) {
+      throw new Error("Morrow runtime state file privacy could not be enforced");
+    }
+    let hardened: Stats;
     try {
-      descriptor = openSync(candidate, constants.O_RDONLY | noFollow);
+      hardened = lstatSync(candidate);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
       throw error;
     }
-    try {
-      const opened = fstatSync(descriptor);
-      if (!opened.isFile() || opened.nlink !== 1 || !sameFile(named, opened)) {
-        throw new Error("Morrow runtime state file changed during privacy hardening");
-      }
-      fchmodSync(descriptor, 0o600);
-      const hardened = fstatSync(descriptor);
-      let current: Stats;
-      try {
-        current = lstatSync(candidate);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-        throw error;
-      }
-      if (!sameFile(opened, hardened) || !sameFile(opened, current)
-        || !privateFileAccessAccepted(candidate, hardened.mode, { trustedRoot: directory })) {
-        throw new Error("Morrow runtime state file privacy could not be enforced");
-      }
-    } finally {
-      closeSync(descriptor);
+    if (!hardened.isFile() || hardened.isSymbolicLink() || hardened.nlink !== 1 || !sameFile(named, hardened)
+      || !privateFileAccessAccepted(candidate, hardened.mode, { trustedRoot: directory })) {
+      throw new Error("Morrow runtime state file privacy could not be enforced");
     }
   }
 }

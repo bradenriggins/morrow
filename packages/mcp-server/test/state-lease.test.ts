@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import {
   chmod,
   mkdir,
@@ -14,6 +15,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
 import {
   RuntimeStateLease,
   hardenMorrowStateFiles,
@@ -269,5 +271,45 @@ describe("RuntimeStateLease", () => {
       expect((await stat(victim)).mode & 0o777).toBe(0o644);
     }
     await rm(directory, { recursive: true, force: true });
+  });
+
+  it("keeps SQLite's process locks intact while hardening the live database and its WAL sidecars", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-state-locks-"));
+    const statePath = join(directory, "morrow.sqlite3");
+    const secondProcessJournalMode = (): string => {
+      const probe = spawnSync(process.execPath, ["--input-type=module", "-e", [
+        'import { DatabaseSync } from "node:sqlite";',
+        `const database = new DatabaseSync(${JSON.stringify(statePath)});`,
+        'try { process.stdout.write(String(database.prepare("PRAGMA journal_mode = DELETE").get().journal_mode)); }',
+        'catch (error) { process.stdout.write(`refused:${error.message}`); }',
+        "database.close();",
+      ].join("\n")], { encoding: "utf8", timeout: 20_000 });
+      if (probe.status !== 0) throw new Error(`journal probe failed: ${probe.stderr}`);
+      return probe.stdout;
+    };
+    try {
+      const opened = openExactPrivateSqliteDatabase(statePath, "test state");
+      try {
+        opened.database.exec("CREATE TABLE effects(value TEXT); INSERT INTO effects VALUES ('first');");
+        await chmod(`${statePath}-wal`, 0o644);
+        expect(secondProcessJournalMode()).toMatch(/^refused:.*locked/);
+        hardenMorrowStateFiles(statePath);
+        if (process.platform !== "win32") {
+          for (const candidate of [statePath, `${statePath}-wal`, `${statePath}-shm`]) {
+            expect((await stat(candidate)).mode & 0o077).toBe(0);
+          }
+        }
+        expect(secondProcessJournalMode()).toMatch(/^refused:.*locked/);
+        opened.database.exec("INSERT INTO effects VALUES ('second');");
+        hardenMorrowStateFiles(statePath);
+        expect(secondProcessJournalMode()).toMatch(/^refused:.*locked/);
+        expect(opened.database.prepare("SELECT count(*) AS count FROM effects").get()).toMatchObject({ count: 2 });
+      } finally {
+        opened.database.close();
+      }
+      expect(secondProcessJournalMode()).toBe("delete");
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

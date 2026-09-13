@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { chmodSync, closeSync, constants, linkSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,6 +15,24 @@ function fixture(): { root: string; path: string } {
   const root = mkdtempSync(join(tmpdir(), "morrow-private-sqlite-"));
   roots.push(root);
   return { root, path: join(root, "state.sqlite3") };
+}
+
+/**
+ * Asks a second operating-system process to leave WAL mode. SQLite grants that
+ * only when no other connection holds its SHARED lock on the database, so the
+ * answer proves whether this process still holds the locks SQLite believes it
+ * holds.
+ */
+export function secondProcessJournalMode(path: string): string {
+  const probe = spawnSync(process.execPath, ["--input-type=module", "-e", [
+    'import { DatabaseSync } from "node:sqlite";',
+    `const database = new DatabaseSync(${JSON.stringify(path)});`,
+    'try { process.stdout.write(String(database.prepare("PRAGMA journal_mode = DELETE").get().journal_mode)); }',
+    'catch (error) { process.stdout.write(`refused:${error.message}`); }',
+    "database.close();",
+  ].join("\n")], { encoding: "utf8", timeout: 20_000 });
+  if (probe.status !== 0) throw new Error(`journal probe failed: ${probe.stderr}`);
+  return probe.stdout;
 }
 
 function emptyPrivateFile(path: string): void {
@@ -37,6 +56,27 @@ describe("exact private SQLite state", () => {
     } finally {
       process.umask(previous);
     }
+  });
+
+  it("keeps SQLite's process locks intact after reopening an existing journal so a second process cannot leave WAL mode", () => {
+    const { path } = fixture();
+    const first = openExactPrivateSqliteDatabase(path, "test database");
+    first.database.exec("CREATE TABLE effects(value TEXT); INSERT INTO effects VALUES ('first');");
+    first.database.close();
+    // Reopening a populated database opens the WAL and shared memory at once,
+    // so SQLite holds its SHARED and shared-memory locks before admission ends.
+    const opened = openExactPrivateSqliteDatabase(path, "test database");
+    try {
+      expect(lstatSync(`${path}-wal`).isFile()).toBe(true);
+      expect(lstatSync(`${path}-shm`).isFile()).toBe(true);
+      expect(secondProcessJournalMode(path)).toMatch(/^refused:.*locked/);
+      opened.database.exec("INSERT INTO effects VALUES ('second');");
+      expect(secondProcessJournalMode(path)).toMatch(/^refused:.*locked/);
+      expect(opened.database.prepare("SELECT count(*) AS count FROM effects").get()).toMatchObject({ count: 2 });
+    } finally {
+      opened.database.close();
+    }
+    expect(secondProcessJournalMode(path)).toBe("delete");
   });
 
   it.runIf(process.platform !== "win32")("tightens one legacy broadly readable database before opening it", () => {
