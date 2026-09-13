@@ -493,6 +493,7 @@ interface PreparedLearnerTextRedactionContext extends LearnerTextRedactionContex
   readonly aliases: ReadonlyMap<string, LearnerAlias>;
   readonly aliasMatcher: RegExp | null;
   readonly referenceLabels: ReadonlyMap<string, string>;
+  readonly identityByLabel: ReadonlyMap<string, LearnerIdentity>;
 }
 
 function mergeLearnerIdentity(left: LearnerIdentity, right: LearnerIdentity): LearnerIdentity {
@@ -791,11 +792,13 @@ function preparedLearnerTextContext(
   const { context, scope, identities } = preparation;
   const identityById = new Map(identities.map((identity) => [identity.id, identity]));
   const tokensById = new Map<string, LearnerAlias>();
+  const identityByLabel = new Map<string, LearnerIdentity>();
   const aliases = new Map<string, LearnerAlias>();
   const labels = preparedReferences.labels;
   for (const [index, identity] of identities.entries()) {
     const token = labels[index]!;
     tokensById.set(identity.id, { token });
+    identityByLabel.set(token, identity);
     // A bare numeric alias has no person meaning in prose. Typed identity fields
     // and contextual references still resolve it through identityById.
     if (!/^[0-9]+$/u.test(identity.id)) addAlias(aliases, identity.id, token);
@@ -815,6 +818,7 @@ function preparedLearnerTextContext(
     aliases,
     aliasMatcher: buildAliasMatcher(aliases),
     referenceLabels: preparedReferences.referenceLabels,
+    identityByLabel,
   };
 }
 
@@ -855,7 +859,23 @@ export function redactKnownLearnerText(value: string, context: LearnerTextRedact
   return redactKnownLearnerTextPrepared(value, prepareLearnerTextContext(context));
 }
 
-function redactKnownLearnerTextPrepared(value: string, exactContext: PreparedLearnerTextRedactionContext): string {
+interface LearnerTextRedactionShape {
+  /**
+   * Whether a string that is exactly a numeric platform id names a person.
+   * A value under a measure-shaped key such as `score` or `page` is a number
+   * that happens to equal an id, never a bare person reference.
+   */
+  readonly wholeNumericIdIsIdentity: boolean;
+}
+
+const DEFAULT_TEXT_SHAPE: LearnerTextRedactionShape = Object.freeze({ wholeNumericIdIsIdentity: true });
+const NON_IDENTITY_TEXT_SHAPE: LearnerTextRedactionShape = Object.freeze({ wholeNumericIdIsIdentity: false });
+
+function redactKnownLearnerTextPrepared(
+  value: string,
+  exactContext: PreparedLearnerTextRedactionContext,
+  shape: LearnerTextRedactionShape = DEFAULT_TEXT_SHAPE,
+): string {
   if (/^(?:moodle|mod|block|enrol|report)\/[a-z_]+:[a-z_]+$/u.test(value)) return value;
   if (/^\s*[\[{]/u.test(value)) {
     let parsed: unknown;
@@ -870,7 +890,7 @@ function redactKnownLearnerTextPrepared(value: string, exactContext: PreparedLea
   // A string that is exactly a numeric platform id names a person: a recipient list entry or a
   // cache value carries people that way, with nothing around the number to say so.
   const wholeId = value.trim();
-  if (/^[0-9]+$/u.test(wholeId) && exactContext.tokensById.has(wholeId)) {
+  if (shape.wholeNumericIdIsIdentity && /^[0-9]+$/u.test(wholeId) && exactContext.tokensById.has(wholeId)) {
     return value.replace(wholeId, exactContext.tokensById.get(wholeId)!.token ?? "[learner]");
   }
   return replaceKnownIdentityReferences(
@@ -879,21 +899,50 @@ function redactKnownLearnerTextPrepared(value: string, exactContext: PreparedLea
   );
 }
 
+/**
+ * A string under a measure- or status-shaped key is still text a provider
+ * controls. Its key shape only says a bare number there is not a person; it
+ * never exempts the value from roster redaction or the sensitive-text
+ * refusal, so `grading_status: "Submitted by jane@school.test"` cannot leave.
+ */
+function projectNonIdentityText(value: string, exactContext: PreparedLearnerTextRedactionContext | undefined): string {
+  const output = exactContext ? redactKnownLearnerTextPrepared(value, exactContext, NON_IDENTITY_TEXT_SHAPE) : value;
+  if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
+  return output;
+}
+
 function nonIdentityScalar(key: string): boolean {
   return /^(?:(?:course|assignment|quiz|module|section|file|page|discussion|topic|question|item|group|rubric|context|account|target)[_.]?(?:id|count)|.*(?:score|grade|points|count|total|rows|limit|size|length|percent|status|generation|revision|index|timestamp|duration|attempt|page)|depth)$/iu.test(key);
+}
+
+/**
+ * The label the prepared snapshot already published for one roster identity.
+ * Vault labels are keyed by scope and id alone, so a record's extra identity
+ * fields never change the answer, and no durable transaction reopens per
+ * record. Only an identity outside the snapshot asks the vault.
+ */
+function snapshotLearnerToken(context: PreparedLearnerTextRedactionContext, identity: LearnerIdentity): string {
+  return context.tokensById.get(identity.id)?.token ?? context.learnerVault.tokenize(context.learnerScope, identity);
+}
+
+/** The roster identity a token or label names in the prepared snapshot; the vault answers only for one outside it. */
+function snapshotLearnerIdentity(context: PreparedLearnerTextRedactionContext, token: string): LearnerIdentity {
+  const label = context.referenceLabels.get(token);
+  const known = label === undefined ? undefined : context.identityByLabel.get(label);
+  return known ?? context.learnerVault.resolve(context.learnerScope, token);
 }
 
 function redactLearnerNumber(value: number, key: string, context: PreparedLearnerTextRedactionContext): number | string {
   // Numeric measures and explicitly typed course resources are not user IDs.
   if (nonIdentityScalar(key)) return value;
   const identity = context.identityById.get(String(value));
-  return identity ? context.learnerVault.tokenize(context.learnerScope, identity) : value;
+  return identity ? snapshotLearnerToken(context, identity) : value;
 }
 
 function redactLearnerKey(key: string, context: PreparedLearnerTextRedactionContext): string {
   if (["schema", "provider", "course", "name", "id", "title", "type", "tool", "code", "status", "data", "result", "content", "text", "learnerToken", "student", "user", "author", "participant", "students", "users", "authors", "participants", "grade", "score"].includes(key)) return key;
   const identity = context.identityById.get(key);
-  const output = identity ? context.learnerVault.tokenize(context.learnerScope, identity) : redactKnownLearnerTextPrepared(key, context);
+  const output = identity ? snapshotLearnerToken(context, identity) : redactKnownLearnerTextPrepared(key, context);
   if (containsSensitiveText(output)) throw new Error("privacy_sensitive_text_refused");
   return output;
 }
@@ -1030,7 +1079,7 @@ function learnerIdentity(value: JsonObject, kind?: IdentityRecordKind, context?:
   const fields = normalizedIdentityFields(value);
   const existingToken = fields.get("learnertoken");
   if (context && typeof existingToken === "string") {
-    const identity = context.learnerVault.resolve(context.learnerScope, existingToken);
+    const identity = snapshotLearnerIdentity(context, existingToken);
     const current = context.identityById.get(identity.id);
     if (!current) throw new Error("learner_roster_identity_unavailable");
     return current;
@@ -1104,8 +1153,7 @@ function projectValue(
       || Boolean(context.learnerRoster && context.learnerVault && context.learnerScope));
   if (typeof value === "string") {
     if (nonIdentityScalar(scalarKey)) {
-      if (containsSensitiveText(value)) throw new Error("privacy_sensitive_text_refused");
-      return value;
+      return projectNonIdentityText(value, requiresLearnerRedaction ? preparedTextContext ?? learnerTextContext(context) : undefined);
     }
     return projectText(value, descriptor, context, requiresLearnerRedaction, preparedTextContext);
   }
@@ -1133,7 +1181,7 @@ function projectValue(
   }
   const output: JsonObject = {};
   if (learner && descriptor.learnerTokens) {
-    output.learnerToken = textContext!.learnerVault.tokenize(textContext!.learnerScope, learner);
+    output.learnerToken = snapshotLearnerToken(textContext!, learner);
   }
   const resourceKind = typeof value.kind === "string" && /^(?:course|assignment|quiz|module|section|file|page|discussion|topic|question|item|group|rubric|context|account)$/iu.test(value.kind)
     ? value.kind
@@ -1193,7 +1241,11 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
     if (depth > 12) throw new Error("privacy_output_depth_exceeded");
     if (typeof candidate === "number") return redactLearnerNumber(candidate, scalarKey, exactContext);
     if (typeof candidate === "string") {
-      if (STRUCTURAL_REFERENCE_FIELDS.has(scalarKey) || nonIdentityScalar(scalarKey)) return candidate;
+      if (STRUCTURAL_REFERENCE_FIELDS.has(scalarKey)) {
+        if (containsSensitiveText(candidate)) throw new Error("privacy_sensitive_text_refused");
+        return candidate;
+      }
+      if (nonIdentityScalar(scalarKey)) return projectNonIdentityText(candidate, exactContext);
       if (scalarKey === "schema" && /^morrow\.[a-z0-9.-]+\.v[0-9]+$/u.test(candidate)) return candidate;
       if (scalarKey === "provider" && ["canvas", "moodle", "blackboard"].includes(candidate)) return candidate;
       if (scalarKey === "roles" && ["Student", "Teacher", "TA", "Observer", "Designer", "Non-editing teacher"].includes(candidate)) return candidate;
@@ -1218,7 +1270,7 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
       ? candidate.kind
       : scalarKey;
     const output: JsonObject = {};
-    if (learner) output.learnerToken = exactContext.learnerVault.tokenize(exactContext.learnerScope, learner);
+    if (learner) output.learnerToken = snapshotLearnerToken(exactContext, learner);
     for (const [key, child] of Object.entries(candidate)) {
       const normalizedKey = normalizePrivacyKey(key);
       if (isSecretField(key) || isIdentityValueField(key, learner !== null) || (learner && normalizedKey === "learnertoken")) continue;

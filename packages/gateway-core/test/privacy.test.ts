@@ -13,7 +13,21 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// Counts every durable vault transaction, so a regression that reopens the
+// vault per reference or per scope fails on the count, not on the clock.
+const vaultTransactions = vi.hoisted(() => ({ count: 0 }));
+vi.mock("../src/private-state-file.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/private-state-file.js")>();
+  return {
+    ...actual,
+    withExactPrivateStateFileTransaction: (...args: Parameters<typeof actual.withExactPrivateStateFileTransaction>) => {
+      vaultTransactions.count += 1;
+      return actual.withExactPrivateStateFileTransaction(...args);
+    },
+  };
+});
 import {
   ArtifactGenerationRegistry,
   LearnerRoster,
@@ -289,6 +303,35 @@ describe("privacy output boundary", () => {
       .toEqual({ established_at: stamp, note: token });
   });
 
+  it("redacts or refuses learner data under status, rows, score, and grade keys on the egress path", () => {
+    const vault = new LearnerVault(":memory:");
+    const learnerRoster = new LearnerRoster();
+    learnerRoster.register(scope, [{ id: "17", name: "Jane Doe", email: "jane.doe@school.test" }]);
+    const token = vault.tokenize(scope, { id: "17", name: "Jane Doe", email: "jane.doe@school.test" });
+    const context = { learnerRoster, learnerVault: vault, learnerScope: scope };
+
+    expect(redactLearnerEgress({ grading_status: "Submitted by Jane Doe", rows: ["Jane Doe, 95"], score: "Jane Doe: 95" }, context))
+      .toEqual({ grading_status: `Submitted by ${token}`, rows: [`${token}, 95`], score: `${token}: 95` });
+    // A bare number under a measure key stays a number, while the same text under a note is a person.
+    expect(redactLearnerEgress({ score: "17", page: "17", note: "17" }, context)).toEqual({ score: "17", page: "17", note: token });
+    for (const key of ["grading_status", "grade", "score", "rows", "page", "attempt", "workflow_status", "course_id", "operation_id"]) {
+      expect(() => redactLearnerEgress({ [key]: "Submitted by unknown.person@school.test" }, context), key).toThrow("privacy_sensitive_text_refused");
+      expect(() => redactLearnerEgress({ [key]: ["Bearer secret-token"] }, context), key).toThrow("privacy_sensitive_text_refused");
+    }
+    expect(() => redactLearnerEgress({ note: "Submitted by unknown.person@school.test" }, context)).toThrow("privacy_sensitive_text_refused");
+  });
+
+  it("redacts roster identities under measure keys in projected output too", () => {
+    const context = learnerPrivacy();
+    const descriptor = { ...learnerDescriptor, allowedFields: ["grading_status", "score"], freeText: "allow" as const };
+    const projected = normalize({ structuredContent: { grading_status: "Submitted by Ada Lovelace", score: "95" } }, { ...context, descriptor });
+    expect(JSON.stringify(projected)).not.toContain("Ada Lovelace");
+    expect(projected.structuredContent).toMatchObject({ score: "95" });
+    expect((projected.structuredContent as { grading_status: string }).grading_status).toMatch(/^Submitted by /);
+    const refused = normalize({ structuredContent: { grading_status: "unknown.person@school.test" } }, { ...context, descriptor });
+    expect(refused.structuredContent).toMatchObject({ code: "privacy_sensitive_text_refused" });
+  });
+
   it("redacts known roster aliases in Unicode and HTML text while preserving course IDs", () => {
     const vault = new LearnerVault(":memory:");
     const learnerRoster = new LearnerRoster();
@@ -359,13 +402,13 @@ describe("privacy output boundary", () => {
       learnerRoster.register(scope, [identity]);
       const label = vault.tokenize(scope, identity);
       const source = `${label} completed the review. `.repeat(2_000);
-      const started = performance.now();
+      vaultTransactions.count = 0;
 
       const output = redactKnownLearnerText(source, { learnerRoster, learnerVault: vault, learnerScope: scope });
-      const elapsed = performance.now() - started;
 
       expect(output).toBe(source);
-      expect(elapsed).toBeLessThan(3_000);
+      // 2,000 protected references resolve through one durable snapshot, never one transaction each.
+      expect(vaultTransactions.count).toBe(1);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -728,18 +771,24 @@ describe("bidirectional roster dictionary", () => {
       name: `Learner Person ${index + 1}`,
     }));
     roster.register(scope, identities);
-    const started = performance.now();
-    const output = redactLearnerEgress({
-      users: identities.map((identity, score) => ({ ...identity, score, comment: "Good work." })),
-    }, { learnerRoster: roster, learnerScope: scope, learnerVault: new LearnerVault(":memory:") }) as {
-      users: readonly unknown[];
-    };
-    const elapsed = performance.now() - started;
+    const directory = mkdtempSync(join(tmpdir(), "morrow-privacy-egress-snapshot-"));
+    try {
+      const vault = new LearnerVault(join(directory, "vault.json"));
+      vaultTransactions.count = 0;
+      const output = redactLearnerEgress({
+        users: identities.map((identity, score) => ({ ...identity, score, comment: "Good work." })),
+      }, { learnerRoster: roster, learnerScope: scope, learnerVault: vault }) as {
+        users: readonly unknown[];
+      };
 
-    expect(output.users).toHaveLength(2_500);
-    expect(roster.identityReads).toBe(1);
-    expect(roster.readyChecks).toBe(1);
-    expect(elapsed).toBeLessThan(5_000);
+      expect(output.users).toHaveLength(2_500);
+      expect(roster.identityReads).toBe(1);
+      expect(roster.readyChecks).toBe(1);
+      // 2,500 learners publish through one durable vault transaction, never one per learner.
+      expect(vaultTransactions.count).toBe(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   }, 10_000);
 
   it("preserves structural identifiers while redacting learner text", () => {
