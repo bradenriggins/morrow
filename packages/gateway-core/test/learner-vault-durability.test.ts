@@ -3,6 +3,7 @@ import {
   chmodSync,
   existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -152,6 +153,75 @@ describe("learner vault durable ownership", () => {
       expect(existsSync(lockPath)).toBe(false);
       expect(existsSync(claimPath)).toBe(false);
       expect(readdirSync(dirname(path))).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("finishes an interrupted release whose owner died between linking its release claim and unlinking the lock", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-private-state-interrupted-release-"));
+    try {
+      const path = join(directory, "state", "record.json");
+      const lockPath = `${path}.transaction.lock`;
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      const worker = spawn(process.execPath, [join(import.meta.dirname, "fixtures", "interrupted-release-worker.mjs"), path], {
+        stdio: ["ignore", "pipe", "pipe"],
+      }) as WorkerProcess;
+      let stdout = "";
+      worker.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+      worker.stderr.setEncoding("utf8").on("data", () => undefined);
+      const signal = await new Promise<NodeJS.Signals | null>((resolve, reject) => {
+        const timer = setTimeout(() => { worker.kill("SIGKILL"); reject(new Error("release worker did not stop")); }, 5_000);
+        worker.once("error", (error) => { clearTimeout(timer); reject(error); });
+        worker.once("close", (_code, value) => { clearTimeout(timer); resolve(value); });
+      });
+      expect(signal).toBe("SIGKILL");
+      const nonce = stdout.match(/^claimed (\S+)/)?.[1];
+      expect(nonce).toBeDefined();
+      const claimPath = `${lockPath}.release-${nonce}`;
+      expect(lstatSync(lockPath).nlink).toBe(2);
+      expect(lstatSync(claimPath).ino).toBe(lstatSync(lockPath).ino);
+
+      let entered = false;
+      withExactPrivateStateFileTransaction(
+        path,
+        { label: "test state", timeoutMs: 200, pollIntervalMs: 5 },
+        () => { entered = true; },
+      );
+
+      expect(entered).toBe(true);
+      expect(existsSync(lockPath)).toBe(false);
+      expect(existsSync(claimPath)).toBe(false);
+      expect(readdirSync(dirname(path))).toEqual([]);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("does not adopt a release name that is not the stale owner's exact inode", () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-private-state-false-release-"));
+    try {
+      const path = join(directory, "record.json");
+      const lockPath = `${path}.transaction.lock`;
+      const claimPath = `${lockPath}.release-00000000-0000-4000-8000-000000000099`;
+      const startedAt = readProcessStartedAt(process.pid);
+      expect(startedAt).not.toBeNull();
+      const owner = transactionOwner(process.pid, new Date(startedAt! - 60_000).toISOString());
+      writeFileSync(lockPath, owner, { mode: 0o600, flag: "wx" });
+      linkSync(lockPath, join(directory, "lock-alias"));
+      writeFileSync(claimPath, owner, { mode: 0o600, flag: "wx" });
+
+      let entered = false;
+      expect(() => withExactPrivateStateFileTransaction(
+        path,
+        { label: "test state", timeoutMs: 50, pollIntervalMs: 5 },
+        () => { entered = true; },
+      )).toThrow(/release claim is invalid/);
+
+      expect(entered).toBe(false);
+      expect(existsSync(lockPath)).toBe(true);
+      expect(existsSync(claimPath)).toBe(true);
+      expect(lstatSync(lockPath).nlink).toBe(2);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }

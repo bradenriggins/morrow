@@ -48,6 +48,7 @@ import {
   localOwnerMaintenanceMatches,
   normalizeLocalOwnerBridgeMaintenanceControl,
   processMatchesRecordedLifetime,
+  requestPathProcessMatches,
   readLocalOwnerMaintenanceLease,
   recoverExactLocalOwnerMaintenanceLease,
   removeExactLocalOwnerMaintenanceLease,
@@ -671,10 +672,10 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     if (closing || !hasClientPresence() || sessionReapTimer) return;
     sessionReapTimer = setTimeout(() => {
       sessionReapTimer = null;
-      const dead = [...sessions.values()].filter((session) => processMatchesRecordedLifetime(session.proxyPid, session.observedAt) === false);
+      const dead = [...sessions.values()].filter((session) => requestPathProcessMatches(session.proxyPid, session.observedAt) === false);
       for (const session of dead) removeSession(session);
       for (const presence of [...modernProxies.values()]) {
-        if (processMatchesRecordedLifetime(presence.proxyPid, presence.observedAt) === false) {
+        if (requestPathProcessMatches(presence.proxyPid, presence.observedAt) === false) {
           removeModernProxy(presence);
         }
       }
@@ -695,7 +696,7 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
   const recordModernProxy = (proxyPid: number, workspace: WorkspaceAdmission): ProxyPresence | null => {
     const existing = modernProxies.get(proxyPid);
     if (existing) {
-      const sameProcess = processMatchesRecordedLifetime(existing.proxyPid, existing.observedAt);
+      const sameProcess = requestPathProcessMatches(existing.proxyPid, existing.observedAt);
       if (sameProcess !== false) return existing.workspace.encoded === workspace.encoded ? existing : null;
       removeModernProxy(existing);
     }
@@ -786,10 +787,10 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
       if (input.action === "recover") {
         const marker = readLocalOwnerMaintenanceLease(journalPath);
         for (const session of [...sessions.values()]) {
-          if (processMatchesRecordedLifetime(session.proxyPid, session.observedAt) === false) removeSession(session);
+          if (requestPathProcessMatches(session.proxyPid, session.observedAt) === false) removeSession(session);
         }
         for (const presence of [...modernProxies.values()]) {
-          if (processMatchesRecordedLifetime(presence.proxyPid, presence.observedAt) === false) {
+          if (requestPathProcessMatches(presence.proxyPid, presence.observedAt) === false) {
             removeModernProxy(presence);
           }
         }
@@ -856,10 +857,10 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
       maintenanceState = "acquiring";
       runtime.approval.setMaintenanceAdmission(false);
       for (const session of [...sessions.values()]) {
-        if (processMatchesRecordedLifetime(session.proxyPid, session.observedAt) === false) removeSession(session);
+        if (requestPathProcessMatches(session.proxyPid, session.observedAt) === false) removeSession(session);
       }
       for (const presence of [...modernProxies.values()]) {
-        if (processMatchesRecordedLifetime(presence.proxyPid, presence.observedAt) === false) {
+        if (requestPathProcessMatches(presence.proxyPid, presence.observedAt) === false) {
           removeModernProxy(presence);
         }
       }
@@ -868,7 +869,7 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
       const monitorPresent = monitorSessions.some((session) => session.proxyPid === monitorProxyPid);
       const monitorAlive = monitorSessions
         .filter((session) => session.proxyPid === monitorProxyPid)
-        .every((session) => processMatchesRecordedLifetime(session.proxyPid, session.observedAt) === true);
+        .every((session) => requestPathProcessMatches(session.proxyPid, session.observedAt) === true);
       if (activeMcpRequests !== 0 || !monitorPresent || !monitorOnly || !monitorAlive || !runtime.maintenanceQuiescent()) {
         reopenAfterFailedMaintenance();
         maintenanceError(response, "local_owner_maintenance_work_active");

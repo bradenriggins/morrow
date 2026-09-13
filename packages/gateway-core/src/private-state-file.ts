@@ -258,25 +258,41 @@ function readTransactionOwner(path: string, label: string, linkCount = 1): Trans
   return content ? parseTransactionOwner(content, label) : null;
 }
 
-function readInterruptedReclaimOwner(path: string, label: string): TransactionOwner | null {
+type InterruptedClaimKind = "reclaim" | "release";
+
+interface InterruptedClaim {
+  readonly kind: InterruptedClaimKind;
+  readonly owner: TransactionOwner;
+}
+
+/**
+ * Recognises a two-link owner whose nonce-derived reclaim or release claim
+ * is the same private inode. Either claim proves a reaper or the owner itself
+ * had already decided to remove this lock before it stopped, so a later
+ * acquirer may finish that exact interrupted step.
+ */
+function readInterruptedClaim(path: string, label: string): InterruptedClaim | null {
   const current = lstatSync(path);
   if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 2) return null;
   const owner = readTransactionOwner(path, label, 2);
   if (!owner) return null;
-  const claimPath = `${path}.reclaim-${owner.nonce}`;
-  let claim: Stats;
-  try { claim = lstatSync(claimPath); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
+  for (const kind of ["reclaim", "release"] as const) {
+    const claimPath = `${path}.${kind}-${owner.nonce}`;
+    let claim: Stats;
+    try { claim = lstatSync(claimPath); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw error;
+    }
+    if (!sameFile(current, claim) || claim.nlink !== 2) {
+      throw new Error(`${label} transaction ${kind} claim is invalid`);
+    }
+    const claimedOwner = readTransactionOwner(claimPath, label, 2);
+    if (!claimedOwner || !sameTransactionOwner(claimedOwner, owner)) {
+      throw new Error(`${label} transaction ${kind} claim is invalid`);
+    }
+    return { kind, owner };
   }
-  if (!sameFile(current, claim) || claim.nlink !== 2) {
-    throw new Error(`${label} transaction reclaim claim is invalid`);
-  }
-  const claimedOwner = readTransactionOwner(claimPath, label, 2);
-  if (!claimedOwner || !sameTransactionOwner(claimedOwner, owner)) {
-    throw new Error(`${label} transaction reclaim claim is invalid`);
-  }
-  return owner;
+  return null;
 }
 
 function unlinkExactName(path: string, expected: Stats, label: string): void {
@@ -336,6 +352,37 @@ function reclaimTransactionOwner(path: string, owner: TransactionOwner, label: s
   }
 }
 
+/**
+ * Finishes a release that its owner started but did not complete: the owner
+ * linked `<lock>.release-<nonce>` and then stopped before unlinking the lock.
+ * Only a lock whose owner process no longer runs is finished here; a live
+ * owner completes its own release.
+ */
+function finishInterruptedRelease(path: string, owner: TransactionOwner, label: string): boolean {
+  if (processMatchesExactStart(owner.pid, owner.processStartedAt) !== false) return false;
+  const claimPath = `${path}.release-${owner.nonce}`;
+  try {
+    const claim = lstatSync(claimPath);
+    const current = lstatSync(path);
+    if (!sameFile(claim, current) || claim.nlink !== 2 || current.nlink !== 2) return false;
+    const claimedOwner = readTransactionOwner(claimPath, label, 2);
+    if (!claimedOwner || !sameTransactionOwner(claimedOwner, owner)) return false;
+    unlinkSync(path);
+    unlinkExactName(claimPath, claim, `${label} transaction release claim`);
+    syncDirectory(dirname(path));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function finishInterruptedClaim(path: string, claim: InterruptedClaim, label: string): boolean {
+  return claim.kind === "release"
+    ? finishInterruptedRelease(path, claim.owner, label)
+    : reclaimTransactionOwner(path, claim.owner, label);
+}
+
 function publishTransactionOwner(path: string, preparedPath: string, owner: TransactionOwner, label: string): boolean {
   let linked = false;
   try {
@@ -362,7 +409,22 @@ function publishTransactionOwner(path: string, preparedPath: string, owner: Tran
   }
 }
 
-function acquireTransaction(pathValue: string, options: ExactPrivateStateTransactionOptions): HeldTransaction {
+interface TransactionAdmission {
+  readonly owner: TransactionOwner;
+  readonly path: string;
+  readonly preparedPath: string;
+  readonly label: string;
+  readonly deadline: number;
+  readonly pollIntervalMs: number;
+  admissionFailure: unknown;
+}
+
+type TransactionAdmissionStep =
+  | { readonly kind: "held"; readonly held: HeldTransaction }
+  | { readonly kind: "retry" }
+  | { readonly kind: "wait"; readonly milliseconds: number };
+
+function prepareTransactionAdmission(pathValue: string, options: ExactPrivateStateTransactionOptions): TransactionAdmission {
   const target = canonicalPrivateStateFilePath(pathValue, options.label);
   const parent = lstatSync(dirname(target));
   if ((typeof process.getuid === "function" && parent.uid !== process.getuid())
@@ -386,51 +448,80 @@ function acquireTransaction(pathValue: string, options: ExactPrivateStateTransac
     Buffer.from(`${JSON.stringify(owner)}\n`, "utf8"),
     transactionOptions(options.label),
   )) throw new Error(`${options.label} transaction preparation already exists`);
-  const deadline = performance.now() + timeoutMs;
-  let admissionFailure: unknown = null;
+  return { owner, path, preparedPath, label: options.label, deadline: performance.now() + timeoutMs, pollIntervalMs, admissionFailure: null };
+}
+
+/** One admission attempt: publish this owner, or resolve the conflict that blocks it. */
+function admitTransactionOnce(admission: TransactionAdmission): TransactionAdmissionStep {
+  const { path, preparedPath, owner, label } = admission;
+  if (publishTransactionOwner(path, preparedPath, owner, label)) {
+    return { kind: "held", held: { ...owner, path, label } };
+  }
+  let current: TransactionOwner | null;
+  try {
+    current = readTransactionOwner(path, label);
+    admission.admissionFailure = null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { kind: "retry" };
+    let interrupted: InterruptedClaim | null;
+    try {
+      interrupted = readInterruptedClaim(path, label);
+    } catch (claimError) {
+      if ((claimError as NodeJS.ErrnoException).code === "ENOENT") return { kind: "retry" };
+      admission.admissionFailure = claimError;
+      interrupted = null;
+    }
+    current = null;
+    if (interrupted) {
+      admission.admissionFailure = null;
+      if (finishInterruptedClaim(path, interrupted, label)) return { kind: "retry" };
+    }
+    let metadata: Stats | null = null;
+    try { metadata = lstatSync(path); } catch (inspectionError) {
+      if ((inspectionError as NodeJS.ErrnoException).code === "ENOENT") return { kind: "retry" };
+      throw inspectionError;
+    }
+    if (!metadata.isFile() || metadata.isSymbolicLink()) throw error;
+    admission.admissionFailure ??= error;
+  }
+  if (current && reclaimTransactionOwner(path, current, label)) return { kind: "retry" };
+  const remaining = admission.deadline - performance.now();
+  if (remaining <= 0) {
+    if (admission.admissionFailure) throw admission.admissionFailure;
+    throw new Error(`${label} is busy in another process`);
+  }
+  return { kind: "wait", milliseconds: Math.min(admission.pollIntervalMs, Math.max(1, remaining)) };
+}
+
+function discardTransactionPreparation(admission: TransactionAdmission): void {
+  try { unlinkSync(admission.preparedPath); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+}
+
+function acquireTransaction(pathValue: string, options: ExactPrivateStateTransactionOptions): HeldTransaction {
+  const admission = prepareTransactionAdmission(pathValue, options);
   try {
     for (;;) {
-      if (publishTransactionOwner(path, preparedPath, owner, options.label)) {
-        return { ...owner, path, label: options.label };
-      }
-      let current: TransactionOwner | null;
-      try {
-        current = readTransactionOwner(path, options.label);
-        admissionFailure = null;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT") continue;
-        try {
-          current = readInterruptedReclaimOwner(path, options.label);
-        } catch (reclaimError) {
-          if ((reclaimError as NodeJS.ErrnoException).code === "ENOENT") continue;
-          admissionFailure = reclaimError;
-          current = null;
-        }
-        if (current) {
-          admissionFailure = null;
-          if (reclaimTransactionOwner(path, current, options.label)) continue;
-        }
-        let metadata: Stats | null = null;
-        try { metadata = lstatSync(path); } catch (inspectionError) {
-          if ((inspectionError as NodeJS.ErrnoException).code === "ENOENT") continue;
-          throw inspectionError;
-        }
-        if (!metadata.isFile() || metadata.isSymbolicLink()) throw error;
-        admissionFailure ??= error;
-        current = null;
-      }
-      if (current && reclaimTransactionOwner(path, current, options.label)) continue;
-      const remaining = deadline - performance.now();
-      if (remaining <= 0) {
-        if (admissionFailure) throw admissionFailure;
-        throw new Error(`${options.label} is busy in another process`);
-      }
-      Atomics.wait(waitCell, 0, 0, Math.min(pollIntervalMs, Math.max(1, remaining)));
+      const step = admitTransactionOnce(admission);
+      if (step.kind === "held") return step.held;
+      if (step.kind === "wait") Atomics.wait(waitCell, 0, 0, step.milliseconds);
     }
   } finally {
-    try { unlinkSync(preparedPath); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    discardTransactionPreparation(admission);
+  }
+}
+
+async function acquireTransactionAsync(pathValue: string, options: ExactPrivateStateTransactionOptions): Promise<HeldTransaction> {
+  const admission = prepareTransactionAdmission(pathValue, options);
+  try {
+    for (;;) {
+      const step = admitTransactionOnce(admission);
+      if (step.kind === "held") return step.held;
+      if (step.kind === "wait") await new Promise<void>((resolve) => setTimeout(resolve, step.milliseconds));
     }
+  } finally {
+    discardTransactionPreparation(admission);
   }
 }
 
@@ -455,6 +546,24 @@ function releaseTransaction(lock: HeldTransaction): void {
     unlinkSync(lock.path);
   } finally {
     try { unlinkSync(claimPath); } finally { syncDirectory(dirname(lock.path)); }
+  }
+}
+
+/**
+ * Runs one asynchronous decision under the same bounded process-shared
+ * ownership as {@link withExactPrivateStateFileTransaction}. Waiting between
+ * admission attempts yields to the event loop instead of blocking it.
+ */
+export async function withExactPrivateStateFileTransactionAsync<T>(
+  pathValue: string,
+  options: ExactPrivateStateTransactionOptions,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const lock = await acquireTransactionAsync(pathValue, options);
+  try {
+    return await operation();
+  } finally {
+    releaseTransaction(lock);
   }
 }
 
