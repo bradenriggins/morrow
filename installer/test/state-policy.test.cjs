@@ -1,4 +1,6 @@
 const assert = require("node:assert/strict");
+const fs = require("node:fs/promises");
+const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const {
@@ -6,6 +8,7 @@ const {
   STATE_VERSION,
   insideDirectory,
   inspectRecord,
+  readPrivateRegularFile,
   retentionSnapshot,
   uninstallPolicy,
   uninstallStep
@@ -45,6 +48,84 @@ test("only the current installer record schema can authorize state use", () => {
   assert.deepEqual(inspectRecord({ schema: "unexpected", version: 1 }).reason, "migration_required");
 });
 
+test("installer records admit only exact assistant identities, canonical paths, and canonical digests", () => {
+  const home = at("Home");
+  const target = at("Home", ".codex", "config.toml");
+  const bundleRoot = at("UserData", "State", "ClaudeDesktop", "install-1");
+  const record = {
+    schema: STATE_SCHEMA,
+    version: STATE_VERSION,
+    selectedAssistantId: "codex",
+    materialsFolder: at("Materials"),
+    configured: {
+      codex: { target, sha256: "a".repeat(64) },
+      "claude-desktop": {
+        bundlePath: path.join(bundleRoot, "Morrow.mcpb"),
+        installationId: "install-1",
+        receiptPath: path.join(bundleRoot, "connection.json"),
+      },
+    },
+  };
+  assert.deepEqual(inspectRecord(record, { homeDirectory: home }), { compatible: true, record });
+
+  const invalid = [
+    { ...record, unknown: true },
+    { ...record, selectedAssistantId: "other" },
+    { ...record, materialsFolder: `${at("Materials")}${path.sep}..${path.sep}Other` },
+    { ...record, configured: { other: { target, sha256: "a".repeat(64) } } },
+    { ...record, configured: { codex: { target: "relative/config.toml", sha256: "a".repeat(64) } } },
+    { ...record, configured: { codex: { target: at("Home", ".mcp.json"), sha256: "a".repeat(64) } } },
+    { ...record, configured: { "claude-code": { target, sha256: "a".repeat(64) } } },
+    { ...record, configured: { "gemini-cli": { target: at("Project", "settings.json"), sha256: "a".repeat(64) } } },
+    { ...record, configured: { codex: { target, sha256: "A".repeat(64) } } },
+    { ...record, configured: { codex: { target, sha256: "a".repeat(64), extra: true } } },
+    { ...record, configured: { "claude-desktop": {
+      bundlePath: path.join(bundleRoot, "Other.mcpb"), installationId: "install-1",
+      receiptPath: path.join(bundleRoot, "connection.json"),
+    } } },
+    { ...record, configured: { "claude-desktop": {
+      bundlePath: path.join(bundleRoot, "Morrow.mcpb"), installationId: "../other",
+      receiptPath: path.join(bundleRoot, "connection.json"),
+    } } },
+  ];
+  for (const value of invalid) assert.equal(inspectRecord(value, { homeDirectory: home }).reason, "record_invalid");
+});
+
+test("the private regular-file reader bounds bytes and rejects non-files", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-state-policy-read-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "installer.json");
+  await fs.writeFile(file, "private record", { mode: 0o600 });
+  assert.equal((await readPrivateRegularFile(file, { maxBytes: 32, platform: process.platform })).toString(), "private record");
+  await assert.rejects(() => readPrivateRegularFile(file, { maxBytes: 4, platform: process.platform }), /private_file_not_admitted/);
+  await assert.rejects(() => readPrivateRegularFile(root, { maxBytes: 32, platform: process.platform }), /private_file_not_admitted/);
+});
+
+test("the private regular-file reader refuses links and nonprivate mode before reading", {
+  skip: process.platform === "win32" ? "POSIX link and mode admission needs a POSIX host" : false,
+}, async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-state-policy-private-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const outside = path.join(root, "outside.json");
+  const link = path.join(root, "installer.json");
+  await fs.writeFile(outside, "outside", { mode: 0o600 });
+  await fs.symlink(outside, link);
+  await assert.rejects(() => readPrivateRegularFile(link, { maxBytes: 32, platform: process.platform }), /private_file_not_admitted/);
+  await fs.rm(link);
+  await fs.writeFile(link, "shared", { mode: 0o644 });
+  await assert.rejects(() => readPrivateRegularFile(link, { maxBytes: 32, platform: process.platform }), /private_file_not_admitted/);
+
+  const privateRoot = path.join(root, "private");
+  const linkedRoot = path.join(root, "linked");
+  await fs.mkdir(privateRoot, { mode: 0o700 });
+  await fs.writeFile(path.join(privateRoot, "installer.json"), "private", { mode: 0o600 });
+  await fs.symlink(privateRoot, linkedRoot);
+  await assert.rejects(
+    () => readPrivateRegularFile(path.join(linkedRoot, "installer.json"), { maxBytes: 32, trustedRoot: linkedRoot }),
+    /private_file_ancestor_not_admitted/,
+  );
+});
+
 test("uninstall retains learning state, backups, and the Blackboard secret until a separate explicit removal", () => {
   const policy = uninstallPolicy();
   assert.equal(policy.appRemoval, "removes_application_only");
@@ -75,16 +156,16 @@ test("the retention snapshot names every place this installation keeps data, by 
   for (const entry of current.locations) assert.ok(entry.label.length > 0, `${entry.id} is named in plain language`);
 });
 
-test("only a place inside Morrow's own folders is removable, and every other one carries its reason", () => {
+test("only app-owned data is removable, and every other place carries its reason", () => {
   const current = snapshot();
   for (const id of ["state", "backups", "bridge", "materials", "blackboard_credentials"]) {
     assert.equal(location(current, id).removable, true, `${id} is inside the folders Morrow owns`);
     assert.equal(location(current, id).keptReason, null);
   }
-  // The Blackboard site file sits beside the credential folder, not inside it,
-  // so the removal boundary leaves it alone.
-  assert.equal(location(current, "blackboard_configuration").removable, false);
-  assert.equal(location(current, "blackboard_configuration").keptReason, "outside_morrow_data");
+  // The Blackboard route is app-owned even though it sits beside the secret
+  // folder. It must be removed with the secret so no dangling pair remains.
+  assert.equal(location(current, "blackboard_configuration").removable, true);
+  assert.equal(location(current, "blackboard_configuration").keptReason, null);
   // An assistant's own configuration file is never removable here, even when a
   // person keeps that file inside Morrow's own folder.
   const inside = snapshot({ assistantConfigurations: [{ title: "ChatGPT", path: path.join(USER_DATA, "config.toml") }] });

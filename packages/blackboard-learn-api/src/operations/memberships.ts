@@ -323,6 +323,8 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
     effectReceiptId: value.effect_receipt_id,
     dispatchAttempt: value.dispatch_attempt,
     gatewayProcessId: value.gateway_process_id,
+    issuedAt: value.issued_at,
+    notAfter: value.not_after,
     dispatchToken: value.dispatch_token,
   };
 }

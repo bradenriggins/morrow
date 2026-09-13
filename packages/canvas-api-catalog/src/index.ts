@@ -1,4 +1,13 @@
-import { readFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  type BigIntStats,
+} from "node:fs";
+import { resolve } from "node:path";
 import { isJsonObject, sha256Json, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
 import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
 
@@ -8,6 +17,8 @@ export { evaluateBrowserReadback, matchesReadbackAssertions, planBrowserReadback
 export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
 export { CANVAS_MULTI_CONTEXT_REFUSAL, CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS, canvasContextCodeCourseId, canvasCourseContextCode, canvasLearnerScopeObjectRoute, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "./semantic-target.js";
 export type { CanvasSemanticContextInputState, CanvasSemanticCourseCollectionState, CanvasSemanticCourseTarget, CanvasSemanticObjectContext, CanvasSemanticOperation, CanvasSemanticResolutionExpectation, CanvasSemanticResolutionProof, CanvasSemanticResolutionRefusal, CanvasSemanticVersionState } from "./semantic-target.js";
+export { CLASSIC_QUIZ_SUPPORTED_QUESTION_TYPES, classicQuizQuestionContract } from "./classic-quiz-question-contract.js";
+export type { ClassicQuizQuestionContractIssue, ClassicQuizQuestionContractResult, ClassicQuizQuestionRequestAnswer } from "./classic-quiz-question-contract.js";
 
 export type CanvasApiService = "canvas" | "item_bank" | "course_file_content";
 export type CanvasApiRisk = "read" | "write" | "sensitive_write" | "destructive";
@@ -66,6 +77,141 @@ export interface CanvasApiCatalog {
   readonly catalogDigest: string;
 }
 
+export const CANVAS_API_COMPATIBILITY_SCHEMA = "morrow.canvas-api-compatibility.v1";
+
+const JSON_SCHEMA_ANNOTATION_KEYS = new Set(["$comment", "description", "examples", "title"]);
+const JSON_SCHEMA_MAP_KEYS = new Set(["$defs", "definitions", "dependentSchemas", "patternProperties", "properties"]);
+const JSON_SCHEMA_ARRAY_KEYS = new Set(["allOf", "anyOf", "oneOf", "prefixItems"]);
+const JSON_SCHEMA_SINGLE_KEYS = new Set([
+  "additionalItems", "additionalProperties", "contains", "contentSchema", "else", "if", "items", "not",
+  "propertyNames", "then", "unevaluatedItems", "unevaluatedProperties",
+]);
+
+/** Removes JSON Schema annotations that cannot change admission or wire behavior. */
+export function operationalJsonSchema(value: JsonSchema): JsonSchema {
+  const project = (entry: unknown): unknown => {
+    if (!isJsonObject(entry)) return structuredClone(entry);
+    const output: JsonObject = {};
+    for (const [key, child] of Object.entries(entry)) {
+      if (JSON_SCHEMA_ANNOTATION_KEYS.has(key)) continue;
+      if (JSON_SCHEMA_MAP_KEYS.has(key) && isJsonObject(child)) {
+        output[key] = Object.fromEntries(Object.entries(child).map(([name, schema]) => [name, project(schema)]));
+      } else if (JSON_SCHEMA_ARRAY_KEYS.has(key) && Array.isArray(child)) {
+        output[key] = child.map(project);
+      } else if (JSON_SCHEMA_SINGLE_KEYS.has(key)) {
+        output[key] = Array.isArray(child) ? child.map(project) : isJsonObject(child) ? project(child) : structuredClone(child);
+      } else {
+        output[key] = structuredClone(child);
+      }
+    }
+    return output;
+  };
+  return project(value) as JsonSchema;
+}
+
+/** The Canvas contract that must match for MCP and Bridge execution to interoperate. */
+export function canvasApiCompatibilityContract(catalog: CanvasApiCatalog): JsonObject {
+  return {
+    schema: CANVAS_API_COMPATIBILITY_SCHEMA,
+    operations: catalog.operations.map((operation) => ({
+      key: operation.key,
+      toolName: operation.toolName,
+      service: operation.service,
+      family: operation.family,
+      nickname: operation.nickname,
+      method: operation.method,
+      path: operation.path,
+      deprecated: operation.deprecated,
+      risk: operation.risk,
+      readOnly: operation.readOnly,
+      parameters: operation.parameters.map((parameter) => ({
+        inputName: parameter.inputName,
+        wireName: parameter.wireName,
+        location: parameter.location,
+        required: parameter.required,
+        deprecated: parameter.deprecated,
+        schema: operationalJsonSchema(parameter.schema),
+      })),
+      inputSchema: operationalJsonSchema(operation.inputSchema),
+      responseType: operation.responseType,
+    })),
+  };
+}
+
+export function canvasApiCompatibilityDigest(catalog: CanvasApiCatalog): string {
+  return sha256Json(canvasApiCompatibilityContract(catalog));
+}
+
+/** Maximum accepted size for command-authoritative and packaged public catalogs. */
+export const MAX_PUBLIC_CATALOG_BYTES = 16 * 1024 * 1024;
+
+export interface ExactCatalogBytes {
+  readonly bytes: Buffer;
+  readonly text: string;
+}
+
+function sameCatalogFile(left: BigIntStats, right: BigIntStats): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function sameCatalogSnapshot(left: BigIntStats, right: BigIntStats): boolean {
+  return sameCatalogFile(left, right)
+    && left.size === right.size
+    && left.mtimeNs === right.mtimeNs
+    && left.ctimeNs === right.ctimeNs;
+}
+
+/** Reads one stable regular public catalog through a bounded, non-following descriptor. */
+export function readExactCatalogBytes(pathValue: string, label = "Public catalog"): ExactCatalogBytes {
+  const path = resolve(pathValue);
+  const invalid = (): Error => new Error(`${label} must name one stable regular file from 1 byte through 16 MiB`);
+  let descriptor: number | undefined;
+  try {
+    const namedBefore = lstatSync(path, { bigint: true });
+    if (!namedBefore.isFile() || namedBefore.isSymbolicLink()
+      || namedBefore.size < 1n || namedBefore.size > BigInt(MAX_PUBLIC_CATALOG_BYTES)) {
+      throw invalid();
+    }
+    const noFollow = typeof constants.O_NOFOLLOW === "number" ? constants.O_NOFOLLOW : 0;
+    const nonblocking = typeof constants.O_NONBLOCK === "number" ? constants.O_NONBLOCK : 0;
+    descriptor = openSync(path, constants.O_RDONLY | noFollow | nonblocking);
+    const openedBefore = fstatSync(descriptor, { bigint: true });
+    if (!openedBefore.isFile() || !sameCatalogSnapshot(namedBefore, openedBefore)
+      || openedBefore.size < 1n || openedBefore.size > BigInt(MAX_PUBLIC_CATALOG_BYTES)) {
+      throw invalid();
+    }
+
+    const bytes = Buffer.allocUnsafe(Number(openedBefore.size));
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(descriptor, bytes, offset, bytes.length - offset, null);
+      if (count === 0) break;
+      offset += count;
+    }
+    const openedAfter = fstatSync(descriptor, { bigint: true });
+    const namedAfter = lstatSync(path, { bigint: true });
+    if (offset !== bytes.length || !sameCatalogSnapshot(openedBefore, openedAfter)
+      || !sameCatalogSnapshot(openedAfter, namedAfter)) {
+      throw invalid();
+    }
+
+    let text: string;
+    try {
+      text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    } catch {
+      throw new TypeError(`${label} must contain strict UTF-8`);
+    }
+    return { bytes, text };
+  } catch (error) {
+    if (error instanceof Error && (error.message === invalid().message || error.message === `${label} must contain strict UTF-8`)) {
+      throw error;
+    }
+    throw invalid();
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
 function exactCatalog(value: unknown): CanvasApiCatalog {
   if (!isJsonObject(value) || value.schema !== "morrow.canvas-api-catalog.v1") {
     throw new TypeError("Expected morrow.canvas-api-catalog.v1");
@@ -98,7 +244,8 @@ export function parseCanvasApiCatalog(value: unknown): CanvasApiCatalog {
 }
 
 export function loadCanvasApiCatalog(path: string): CanvasApiCatalog {
-  return exactCatalog(JSON.parse(readFileSync(path, "utf8")) as unknown);
+  const catalog = readExactCatalogBytes(path, "Canvas API catalog");
+  return exactCatalog(JSON.parse(catalog.text) as unknown);
 }
 
 export function canvasOperationMap(catalog: CanvasApiCatalog): ReadonlyMap<string, CanvasApiOperation> {
@@ -216,6 +363,7 @@ const CLASSIC_QUIZ_ANSWER_FIELDS = [
   "answer_text",
   "answer_weight",
   "answer_comments",
+  "answer_comment_html",
   "answer_html",
   "text_after_answers",
 ] as const;

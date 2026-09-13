@@ -106,7 +106,7 @@ describe("reviewed Canvas file dispatch", () => {
       expect(runtime.operationGet(id)).toMatchObject({
         state: "awaiting_approval",
         plan: { authorization: { kind: "review" }, arguments: {
-          course_id: 2, folder_id: 71, filename: "guide.txt", size_bytes: bytes.length, sha256: digest, content_type: "text/plain",
+          course_id: "2", folder_id: "71", filename: "guide.txt", size_bytes: bytes.length, sha256: digest, content_type: "text/plain",
         } },
       });
       expect(JSON.stringify(runtime.operationGet(id))).not.toContain(bytes.toString("base64"));
@@ -120,7 +120,7 @@ describe("reviewed Canvas file dispatch", () => {
         toolName: "canvas_transfer_course_file",
         operationKey: "canvas.private.course_file.transfer.v1",
         sourceBindingId,
-        arguments: { course_id: 2, folder_id: 71, filename: "guide.txt", size_bytes: bytes.length, sha256: digest, content_type: "text/plain" },
+        arguments: { course_id: "2", folder_id: "71", filename: "guide.txt", size_bytes: bytes.length, sha256: digest, content_type: "text/plain" },
         privateAttachment: { manifest: { filename: "guide.txt", size_bytes: bytes.length, sha256: digest }, content_type: "text/plain" },
       });
       expect(JSON.stringify(writes[0]?.arguments)).not.toContain(bytes.toString("base64"));

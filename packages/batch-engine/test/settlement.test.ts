@@ -76,11 +76,13 @@ describe("BatchSourceSettlementStore", () => {
     expect(sourceSettlementStateFromTask({
       taskId: "task-1",
       status: "failed",
+      terminal: true,
       resultCounts: { done: 1 },
     })).toBe("failed_effect_possible");
     expect(sourceSettlementStateFromTask({
       taskId: "task-2",
       status: "failed",
+      terminal: true,
       resultCounts: {},
     })).toBe("failed_no_effect");
     expect(sourceSettlementStateFromTask({
@@ -88,6 +90,22 @@ describe("BatchSourceSettlementStore", () => {
       status: "completed",
       resultCounts: { unconfirmed: 1 },
     })).toBe("inspection_required");
+    expect(sourceSettlementStateFromTask({
+      taskId: "task-4",
+      status: "completed",
+      outcome: "succeeded",
+      terminal: true,
+      verificationStatus: "unconfirmed",
+      resultCounts: { done: 1, unconfirmed: 1 },
+    })).toBe("inspection_required");
+    expect(sourceSettlementStateFromTask({
+      taskId: "task-5",
+      status: "completed",
+      outcome: "succeeded",
+      terminal: true,
+      verificationStatus: "verified",
+      resultCounts: { done: 1 },
+    })).toBe("succeeded");
   });
 
   it("settles a directly verified connector child without a second approval task", () => {

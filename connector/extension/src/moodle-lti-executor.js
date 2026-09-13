@@ -102,6 +102,11 @@ export async function executeMoodleLtiInPage(rawInput) {
   };
   const input = parseInput();
   let dispatched = false;
+  const requestController = new AbortController();
+  const requestTimeout = setTimeout(
+    () => requestController.abort(),
+    Math.max(1, Math.min(Number.isFinite(input?.expiresAt) ? input.expiresAt - Date.now() : 1, 2_147_483_647)),
+  );
   const object = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   const failure = (error, status) => ({ ok: false, sent: false, ...(Number.isInteger(status) ? { status } : {}), error });
   const unconfirmedWrite = (error, status) => ({
@@ -235,17 +240,55 @@ export async function executeMoodleLtiInPage(rawInput) {
     return stable(sort([...received.searchParams.entries()])) === stable(sort([...expected.searchParams.entries()]));
   };
   const boundedText = async (response) => {
+    const cancel = (body) => {
+      try {
+        const cancellation = body?.cancel?.();
+        if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {});
+      } catch { /* The response is already refused. */ }
+    };
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && declared !== undefined && (!COUNT.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return null;
-    let text;
-    try { text = await response.text(); } catch { return null; }
-    return typeof text === "string" && text.length <= MAX_RESPONSE_BYTES ? text : null;
+    if (declared !== null && declared !== undefined && (!COUNT.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      cancel(response?.body);
+      throw new Error("moodle_lti_response_too_large");
+    }
+    if (response?.body === null) return "";
+    const reader = response?.body?.getReader?.();
+    if (!reader) return null;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let text = "";
+    let received = 0;
+    try {
+      while (true) {
+        const remaining = Number(input?.expiresAt) - Date.now();
+        if (remaining <= 0 || requestController.signal.aborted) throw new Error("moodle_execution_expired");
+        let timer;
+        const chunk = await Promise.race([
+          reader.read(),
+          new Promise((unused, reject) => {
+            timer = setTimeout(() => reject(new Error("moodle_execution_expired")), Math.max(1, Math.min(remaining, 2_147_483_647)));
+          }),
+        ]).finally(() => clearTimeout(timer));
+        if (chunk.done) break;
+        if (!(chunk.value instanceof Uint8Array)) throw new Error("moodle_lti_response_unreadable");
+        received += chunk.value.byteLength;
+        if (received > MAX_RESPONSE_BYTES) throw new Error("moodle_lti_response_too_large");
+        text += decoder.decode(chunk.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch (error) {
+      cancel(reader);
+      if (["moodle_execution_expired", "moodle_lti_response_too_large"].includes(String(error?.message))) throw error;
+      return null;
+    }
   };
   const readPage = async (context, endpoint) => {
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
-    } catch { return { error: "moodle_lti_read_unavailable" }; }
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestController.signal, headers: { Accept: "text/html" } });
+    } catch {
+      if (requestController.signal.aborted) throw new Error("moodle_execution_expired");
+      return { error: "moodle_lti_read_unavailable" };
+    }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())) {
       return { error: "moodle_lti_read_unavailable", status: response.status };
     }
@@ -260,10 +303,14 @@ export async function executeMoodleLtiInPage(rawInput) {
     try {
       response = await fetch(endpoint, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
+        signal: requestController.signal,
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname: method, args }]),
       });
-    } catch { return { error: code }; }
+    } catch {
+      if (requestController.signal.aborted) throw new Error("moodle_execution_expired");
+      return { error: code };
+    }
     if (!response.ok || !sameContext(context, currentContext())) return { error: code, status: response.status };
     const raw = await boundedText(response);
     if (raw === null) return { error: code, status: response.status };
@@ -608,6 +655,7 @@ export async function executeMoodleLtiInPage(rawInput) {
       dispatched = true;
       response = await fetch(form.action, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual",
+        signal: requestController.signal,
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" }, body,
       });
     } catch { return { error: "unconfirmed" }; }
@@ -750,5 +798,7 @@ export async function executeMoodleLtiInPage(rawInput) {
   } catch (error) {
     if (dispatched) return unconfirmedWrite("moodle_lti_write_unconfirmed");
     return failure(String(error?.message || error).startsWith("moodle_") ? String(error.message) : "moodle_lti_execution_failed");
+  } finally {
+    clearTimeout(requestTimeout);
   }
 }

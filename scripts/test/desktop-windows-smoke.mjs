@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 import { createHash, randomUUID } from "node:crypto";
-import { access, chmod, lstat, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { access, chmod, lstat, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { tmpdir } from "node:os";
-import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { runOwnedProcess } from "../lib/owned-process.mjs";
+import { assertDesktopRendererSmokeReceipt } from "../lib/desktop-renderer-smoke.mjs";
+import { electronAsarReleaseIdentity, readElectronAsarPackage } from "../lib/electron-asar-package.mjs";
+import { withTemporaryDirectory } from "../lib/temporary-directory.mjs";
+import { bindWindowsSmokeObservation, createWindowsSmokeBindingFromPackage } from "../lib/windows-smoke-evidence.mjs";
 
 const MAX_OUTPUT_BYTES = 128 * 1024;
 // Both limits are machine limits, not contract limits. The NSIS installer
@@ -46,25 +49,30 @@ const SEALED_GATEWAY_ENTRY = Object.freeze(["resources", "MorrowPayload", "app",
 function usage() {
   return [
     "Usage:",
-    "  node scripts/test/desktop-windows-smoke.mjs --installer <absolute setup.exe> --install-dir <absolute directory> --receipt <absolute receipt.json>"
+    "  node scripts/test/desktop-windows-smoke.mjs --installer <absolute setup.exe> --package-receipt <absolute package-receipt.json> --install-dir <absolute directory> --receipt <absolute receipt.json> --source <40-hex commit> --run-id <32-hex id>"
   ].join("\n");
 }
 
 function parseArguments(values) {
   const parsed = new Map();
+  const pathFlags = new Set(["--installer", "--package-receipt", "--install-dir", "--receipt"]);
   for (let index = 0; index < values.length; index += 1) {
     const flag = values[index];
-    if (!new Set(["--installer", "--install-dir", "--receipt"]).has(flag) || parsed.has(flag)) throw new Error(usage());
+    if (!new Set([...pathFlags, "--source", "--run-id"]).has(flag) || parsed.has(flag)) throw new Error(usage());
     const value = values[index + 1];
-    if (!value || !isAbsolute(value)) throw new Error(`${flag} requires one absolute path.\n${usage()}`);
-    parsed.set(flag, resolve(value));
+    if (!value) throw new Error(usage());
+    if (pathFlags.has(flag) && !isAbsolute(value)) throw new Error(`${flag} requires one absolute path.\n${usage()}`);
+    parsed.set(flag, pathFlags.has(flag) ? resolve(value) : value);
     index += 1;
   }
-  if (parsed.size !== 3) throw new Error(usage());
+  if (parsed.size !== 6 || !/^[a-f0-9]{40,64}$/i.test(parsed.get("--source")) || !/^[a-f0-9]{32}$/i.test(parsed.get("--run-id"))) throw new Error(usage());
   return Object.freeze({
     installer: parsed.get("--installer"),
+    packageReceipt: parsed.get("--package-receipt"),
     installDirectory: parsed.get("--install-dir"),
-    receipt: parsed.get("--receipt")
+    receipt: parsed.get("--receipt"),
+    sourceCommit: parsed.get("--source").toLowerCase(),
+    runId: parsed.get("--run-id").toLowerCase()
   });
 }
 
@@ -92,38 +100,11 @@ function digestOf(content) {
   return createHash("sha256").update(content).digest("hex");
 }
 
-function boundedOutput(chunks) {
-  return Buffer.concat(chunks).subarray(0, MAX_OUTPUT_BYTES).toString("utf8");
-}
-
 async function run(executable, argumentsValue, { timeoutMs, environment } = {}) {
-  return new Promise((resolveResult, reject) => {
-    const child = spawn(executable, argumentsValue, {
-      env: environment ?? process.env,
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true
-    });
-    const stdout = [];
-    const stderr = [];
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (!settled) child.kill();
-    }, timeoutMs ?? INSTALL_TIMEOUT_MS);
-    child.stdout.on("data", (chunk) => stdout.push(chunk));
-    child.stderr.on("data", (chunk) => stderr.push(chunk));
-    child.once("error", (error) => {
-      clearTimeout(timer);
-      if (!settled) {
-        settled = true;
-        reject(error);
-      }
-    });
-    child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      if (settled) return;
-      settled = true;
-      resolveResult({ code, signal, stdout: boundedOutput(stdout), stderr: boundedOutput(stderr) });
-    });
+  return runOwnedProcess(executable, argumentsValue, {
+    timeoutMs: timeoutMs ?? INSTALL_TIMEOUT_MS,
+    environment,
+    maxOutputBytes: MAX_OUTPUT_BYTES,
   });
 }
 
@@ -473,11 +454,28 @@ async function startInstalledMorrow(application, { testRoot, receiptPath, label 
   return waitForReceipt(receiptPath, RECEIPT_TIMEOUT_MS);
 }
 
+async function startInstalledRenderer(application, { testRoot, receiptPath }) {
+  ensureSuccess(await run(application, [
+    `--morrow-test-root=${testRoot}`,
+    `--morrow-renderer-smoke-receipt=${receiptPath}`
+  ], {
+    timeoutMs: APP_TIMEOUT_MS,
+    environment: { ...process.env, MORROW_INSTALLER_TEST_MODE: "1" }
+  }), "Installed Morrow renderer startup");
+  return waitForReceipt(receiptPath, RECEIPT_TIMEOUT_MS);
+}
+
 async function main() {
   if (process.platform !== "win32") throw new Error("This smoke harness must run on native Windows.");
   const input = parseArguments(process.argv.slice(2));
   const installerInfo = await stat(input.installer);
   if (!installerInfo.isFile()) throw new Error("--installer must name a regular file.");
+  const binding = createWindowsSmokeBindingFromPackage({
+    runId: input.runId,
+    sourceCommit: input.sourceCommit,
+    packageReceipt: input.packageReceipt,
+    installer: input.installer,
+  });
   if (await exists(input.receipt)) throw new Error("--receipt must not already exist.");
   await mkdir(dirname(input.receipt), { recursive: true });
   if (await exists(input.installDirectory)) {
@@ -487,7 +485,9 @@ async function main() {
     await mkdir(input.installDirectory, { recursive: true });
   }
 
-  const testRoot = await mkdtemp(join(tmpdir(), "morrow-desktop-windows-smoke-"));
+  let harnessReceipt;
+  try {
+    harnessReceipt = await withTemporaryDirectory("morrow-desktop-windows-smoke-", async (testRoot) => {
   const unrelatedMarker = join(testRoot, "unrelated-marker.txt");
   const markerContents = `preserve-${randomUUID()}\n`;
   await writeFile(unrelatedMarker, markerContents, { encoding: "utf8", flag: "wx" });
@@ -495,15 +495,24 @@ async function main() {
   const installArguments = ["/S", `/D=${input.installDirectory}`];
   ensureSuccess(await run(input.installer, installArguments, { timeoutMs: INSTALL_TIMEOUT_MS }), "Morrow NSIS installation");
   const app = await onlyInstalledFile(input.installDirectory, "Morrow.exe", (name) => name === "Morrow.exe");
+  const asar = join(dirname(app), "resources", "app.asar");
+  if (!insideDirectory(input.installDirectory, asar)) throw new Error("Installed Morrow ASAR is outside the chosen installation directory.");
+  const installedPackage = electronAsarReleaseIdentity(readElectronAsarPackage(asar), binding);
   const appHashBeforeRepair = digestOf(await readFile(app));
 
-  const appReceipt = await startInstalledMorrow(app, {
+  const appObservation = await startInstalledMorrow(app, {
     testRoot,
     receiptPath: join(testRoot, "app-receipt.json"),
     label: "Installed Morrow startup"
   });
-  assertAppReceipt(appReceipt);
+  assertAppReceipt(appObservation);
+  const appReceipt = bindWindowsSmokeObservation(appObservation, binding);
   await writeFile(input.receipt, `${JSON.stringify(appReceipt, null, 2)}\n`, { encoding: "utf8", flag: "wx" });
+  const rendererReceipt = await startInstalledRenderer(app, {
+    testRoot,
+    receiptPath: join(testRoot, "renderer-receipt.json")
+  });
+  assertDesktopRendererSmokeReceipt(rendererReceipt);
 
   // Repair is measured against real damage. Without it, re-running the same
   // installer proves only that an unchanged installation stays unchanged.
@@ -511,12 +520,13 @@ async function main() {
   let damagedReceipt = null;
   let repairedSha256 = null;
   try {
-    damagedReceipt = await startInstalledMorrow(app, {
+    const damagedObservation = await startInstalledMorrow(app, {
       testRoot,
       receiptPath: join(testRoot, "damaged-app-receipt.json"),
       label: "Installed Morrow startup with a damaged sealed payload"
     });
-    assertDamagedAppReceipt(damagedReceipt);
+    assertDamagedAppReceipt(damagedObservation);
+    damagedReceipt = bindWindowsSmokeObservation(damagedObservation, binding);
 
     ensureSuccess(await run(input.installer, installArguments, { timeoutMs: INSTALL_TIMEOUT_MS }), "Morrow NSIS repair installation");
     if (!await exists(app)) throw new Error("Morrow repair installation did not preserve the installed application.");
@@ -528,12 +538,13 @@ async function main() {
     throw error;
   }
 
-  const repairedReceipt = await startInstalledMorrow(app, {
+  const repairedObservation = await startInstalledMorrow(app, {
     testRoot,
     receiptPath: join(testRoot, "repaired-app-receipt.json"),
     label: "Installed Morrow startup after the repair installation"
   });
-  assertAppReceipt(repairedReceipt);
+  assertAppReceipt(repairedObservation);
+  const repairedReceipt = bindWindowsSmokeObservation(repairedObservation, binding);
 
   const targets = retentionTargets(testRoot);
   const retainedBefore = await captureRetention(targets);
@@ -547,11 +558,18 @@ async function main() {
   const retainedAfter = await captureRetention(targets);
   assertRetainedData(retainedBefore, retainedAfter, input.installDirectory);
 
-  const harnessReceipt = {
-    schema: "morrow.desktop-windows-harness.v2",
-    installer: { fileName: basename(input.installer) },
+  return {
+    schema: "morrow.desktop-windows-harness.v5",
+    binding,
+    installer: binding.installer,
     installation: { completed: true, repairCompleted: true },
-    application: { startupCompleted: true, receipt: appReceipt },
+    application: {
+      runtimeDiagnosticCompleted: true,
+      rendererStartupCompleted: true,
+      receipt: appReceipt,
+      rendererReceipt,
+      installedPackage
+    },
     repair: {
       damagedFile: SEALED_GATEWAY_ENTRY.join("/"),
       damage: "truncated to zero bytes",
@@ -586,8 +604,14 @@ async function main() {
       "machine-wide installation",
       "upgrade from a different installed version",
       "retention of a real per-user AppData installation: this run keeps every file it wrote inside its own test root"
-    ]
+    ],
+    cleanup: { temporaryStateRemoved: true, installationDirectoryRemoved: true }
   };
+    });
+  } finally {
+    await rm(input.installDirectory, { recursive: true, force: true });
+  }
+  if (await exists(input.installDirectory)) throw new Error("Morrow smoke installation directory remained after cleanup.");
   await writeHarnessReceipt(receiptSidecarPath(input.receipt), harnessReceipt);
   process.stdout.write(`${JSON.stringify(harnessReceipt)}\n`);
 }

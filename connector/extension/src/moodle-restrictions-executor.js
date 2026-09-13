@@ -42,6 +42,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleRestrictionsInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const MAX_FORM_ENTRIES = 600;
   // An activity settings form carries the activity description, so it needs the
@@ -237,16 +239,57 @@ export async function executeMoodleRestrictionsInPage(rawInput) {
     return received.origin === section.origin && received.pathname === section.pathname
       && received.searchParams.get("id") === targetId;
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const boundedResponseText = async (response) => {
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      cancelBody(response.body);
+      return null;
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") return null;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const remaining = Number.isFinite(input?.expiresAt) ? input.expiresAt - Date.now() : Infinity;
+        if (remaining <= 0) throw new Error("moodle_execution_expired");
+        let timeout;
+        const next = Number.isFinite(remaining)
+          ? await Promise.race([
+              reader.read(),
+              new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+            ]).finally(() => clearTimeout(timeout))
+          : await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_RESPONSE_BYTES) {
+          cancelBody(reader);
+          return null;
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch {
+      cancelBody(reader);
+      return null;
+    }
+  };
   const readPage = async (context, endpoint, prefix) => {
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error: `${prefix}_read_unavailable` }; }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())) {
       return { error: `${prefix}_read_unavailable`, status: response.status };
     }
     let html;
-    try { html = await response.text(); } catch { return { error: `${prefix}_read_unavailable`, status: response.status }; }
+    html = await boundedResponseText(response);
     if (typeof html !== "string" || html.length > MAX_RESPONSE_BYTES || typeof globalThis.DOMParser !== "function") {
       return { error: `${prefix}_read_unavailable`, status: response.status };
     }
@@ -308,11 +351,12 @@ export async function executeMoodleRestrictionsInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: new URLSearchParams({ sesskey: context.sesskey, itemid: itemId, filepath: "/" }),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return null; }
     if (!response.ok) return null;
     let payload;
-    try { payload = JSON.parse(await response.text()); } catch { return null; }
+    try { payload = JSON.parse(await boundedResponseText(response)); } catch { return null; }
     return object(payload) ? payload : null;
   };
   /**
@@ -833,6 +877,7 @@ export async function executeMoodleRestrictionsInPage(rawInput) {
       response = await fetch(state.action, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" }, body,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return unconfirmedWrite(`${route.prefix}_write_unconfirmed`); }
     if (!sameContext(context, currentContext())) return unconfirmedWrite(`${route.prefix}_write_unconfirmed`, response.status);

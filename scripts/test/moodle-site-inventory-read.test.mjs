@@ -101,7 +101,14 @@ test("the Moodle system administration reads fail closed without an administrato
     const classes = [`type-${plugin.type}`, `name-${component}`, `status-${plugin.status}`];
     if (plugin.deprecated) classes.push("deprecatedtype");
     if (plugin.availability) classes.push(plugin.availability);
+    if (component === "mod_assign") classes.push("standard", "missing");
+    if (component === "auth_manual") classes.push("additional", "newplugin");
+    if (component === "auth_cas") classes.push("updatable");
     if (mode === "plugins-unknown-class" && component === "auth_cas") classes.push("sitecontrol-experimental");
+    if (mode === "plugins-duplicate-type" && component === "auth_cas") classes.push("type-auth");
+    if (mode === "plugins-duplicate-name" && component === "auth_cas") classes.push("name-auth_cas");
+    if (mode === "plugins-duplicate-status" && component === "auth_cas") classes.push("status-uptodate");
+    if (mode === "plugins-conflicting-availability" && component === "auth_cas") classes.push("enabled");
     classes.push("r0");
     if (last) classes.push("lastrow");
     const componentName = mode === "plugins-component-mismatch" && component === "enrol_self" ? "enrol_other" : component;
@@ -387,9 +394,14 @@ test("the Moodle system administration reads fail closed without an administrato
     mode = "environment-missing-select";
     assert.deepEqual(await call(inventory, { course_id: 2 }), { ok: false, sent: false, error: "moodle_site_inventory_administration_required" });
 
-    // A control this read does not recognise is refused, never guessed.
+    // Presentation, source and update metadata classes do not change the fixed
+    // result. Semantic identity conflicts still fail closed.
     mode = "plugins-unknown-class";
-    assert.deepEqual(await call(inventory, { course_id: 2 }), { ok: false, sent: false, error: "moodle_site_inventory_page_control_unrecognised" });
+    assert.equal((await call(inventory, { course_id: 2 })).ok, true);
+    for (const invalidMode of ["plugins-duplicate-type", "plugins-duplicate-name", "plugins-duplicate-status", "plugins-conflicting-availability"]) {
+      mode = invalidMode;
+      assert.deepEqual(await call(inventory, { course_id: 2 }), { ok: false, sent: false, error: "moodle_site_inventory_response_invalid" });
+    }
     mode = "plugins-bad-version";
     assert.deepEqual(await call(inventory, { course_id: 2 }), { ok: false, sent: false, error: "moodle_site_inventory_page_control_unrecognised" });
     mode = "environment-bad-release";

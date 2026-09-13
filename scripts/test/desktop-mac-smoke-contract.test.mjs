@@ -1,9 +1,18 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import test from "node:test";
-import { assertAppReceipt } from "./desktop-mac-smoke.mjs";
+import { assertAppReceipt, createMacSmokeBinding } from "./desktop-mac-smoke.mjs";
 
 const PORT_FREE = Object.freeze({ bridgePortFree: true });
 const PORT_HELD = Object.freeze({ bridgePortFree: false });
+const SOURCE = "a".repeat(40);
+
+function sha256(value) {
+  return createHash("sha256").update(value).digest("hex");
+}
 
 /**
  * The receipt an installed Morrow wrote on macOS on 2026-09-06, kept verbatim
@@ -59,6 +68,55 @@ function rejects(receipt, precondition = PORT_FREE) {
 
 test("accepts the receipt a contained run writes when the Chrome bridge port was free", () => {
   assertAppReceipt(boundReceipt(), PORT_FREE);
+});
+
+test("macOS smoke evidence binds the retained package graph, DMG, ZIP, source, and run", async (t) => {
+  const root = mkdtempSync(resolve(tmpdir(), "morrow-mac-smoke-binding-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const diskImage = resolve(root, "Morrow-1.0.4-mac-arm64.dmg");
+  const archive = resolve(root, "Morrow-1.0.4-mac-arm64.zip");
+  const packageReceipt = resolve(root, "package-receipt.json");
+  const imageBytes = Buffer.from("retained disk image");
+  const archiveBytes = Buffer.from("retained archive");
+  writeFileSync(diskImage, imageBytes);
+  writeFileSync(archive, archiveBytes);
+  writeFileSync(packageReceipt, JSON.stringify({
+    schema: "morrow.desktop-installer.v1",
+    version: "1.0.4",
+    target: "darwin-arm64",
+    source: { head: SOURCE, dirty: false },
+    payload: { releaseGraph: { schema: "morrow.desktop-packager-admission.v1", sha256: "c".repeat(64) } },
+    signing: { mode: "unsigned_private_qa", target: "darwin-arm64", publicRelease: false },
+    artifacts: [
+      { name: "Morrow-1.0.4-mac-arm64.dmg", sha256: sha256(imageBytes) },
+      { name: "Morrow-1.0.4-mac-arm64.zip", sha256: sha256(archiveBytes) },
+    ],
+  }));
+
+  const binding = await createMacSmokeBinding({
+    diskImage,
+    packageReceipt,
+    source: SOURCE,
+    runId: "b".repeat(32),
+  });
+  assert.equal(binding.sourceCommit, SOURCE);
+  assert.equal(binding.diskImage.sha256, sha256(imageBytes));
+  assert.equal(binding.artifacts.length, 2);
+
+  writeFileSync(diskImage, "substituted disk image");
+  await assert.rejects(createMacSmokeBinding({
+    diskImage,
+    packageReceipt,
+    source: SOURCE,
+    runId: "b".repeat(32),
+  }), /artifact changed/);
+  writeFileSync(diskImage, imageBytes);
+  await assert.rejects(createMacSmokeBinding({
+    diskImage,
+    packageReceipt,
+    source: "d".repeat(40),
+    runId: "b".repeat(32),
+  }), /not the expected unsigned QA release graph/);
 });
 
 test("accepts the named unbound state when another program held the Chrome bridge port", () => {

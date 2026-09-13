@@ -57,9 +57,13 @@ test("the plan forbids live dispatch under the current assignment", () => {
 test("the frame and secret boundary matches the implementation", () => {
   const credential = read("connector/extension/src/item-bank-credential.js");
   const executor = read("connector/extension/src/item-bank-executor.js");
-  assert.match(credential, /ITEM_BANK_EXTERNAL_TOOL_ID = "54065"/);
+  assert.match(credential, /itemBankLaunchFromCourseTabs/);
+  assert.doesNotMatch(credential, /ITEM_BANK_EXTERNAL_TOOL_ID|external_tools\/54065/);
   assert.match(credential, /contextUuid/);
+  assert.doesNotMatch(executor, /external_tools\/54065/);
   assert.match(executor, /credential\.canvasLocalContextId !== input\.courseId/);
+  assert.match(executor, /credential\.externalToolId !== externalToolId/);
+  assert.match(plan, /course's current Canvas Tabs record/);
   assert.match(plan, /Never record an `Authorization` value/);
   assert.match(plan, /Do not record a digest, prefix, or length for the credential/);
   assert.match(plan, /service-worker memory/);

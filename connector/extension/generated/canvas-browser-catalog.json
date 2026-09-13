@@ -30,8 +30,8 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "course_id": { "type": "integer", "minimum": 1 },
-          "assignment_id": { "type": "integer", "minimum": 1 }
+          "course_id": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
+          "assignment_id": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" }
         },
         "required": ["course_id", "assignment_id"],
         "additionalProperties": false
@@ -48,7 +48,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "course_id": { "type": "integer", "minimum": 1 }
+          "course_id": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" }
         },
         "required": ["course_id"],
         "additionalProperties": false
@@ -65,7 +65,7 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "course_id": { "type": "integer", "minimum": 1 },
+          "course_id": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
           "days": { "type": "integer", "minimum": 1, "maximum": 365 }
         },
         "required": ["course_id", "days"],

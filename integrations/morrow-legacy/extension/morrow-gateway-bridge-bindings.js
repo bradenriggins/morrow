@@ -3,8 +3,11 @@ import {
   getLiveProviderBindings,
 } from './state.js';
 import { buildExecutionRuntimeSnapshot } from './execution-runtime.js';
+import { getCanvasSession } from './providers/canvas/session-registry.js';
 import { classifyOperationResult } from './chat-task-manager/helpers.js';
-import { bridgeError } from './morrow-gateway-bridge-protocol.js';
+import { bridgeError, getMorrowGatewayBridgeConfig } from './morrow-gateway-bridge-protocol.js';
+
+export const LEGACY_BRIDGE_OVERLAY_DIGEST = 'c08c88dee4a3f526109b03a1f88341beb6277d7b41dcd57d47f8972dd0a6bf15';
 
 export function normalizeMorrowBridgeExactId(value) {
   const text = String(value ?? '').trim();
@@ -28,19 +31,44 @@ function bindingCourseId(binding) {
   );
 }
 
-function bindingProjection(binding) {
+async function principalFingerprint(origin, principalId) {
+  const bytes = new TextEncoder().encode(JSON.stringify([
+    'morrow.legacy-bridge.canvas-principal.v1',
+    origin,
+    principalId,
+  ]));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function bindingProjection(binding) {
   const sourceBindingId = String(binding?.bindingId || '').trim();
   if (!sourceBindingId || binding?.runtimeVerified !== true) return null;
   const courseId = bindingCourseId(binding);
-  const origin = canonicalOrigin(binding?.canvasBase || binding?.canvasUrl || binding?.origin);
+  const sessionId = String(binding?.sessionId || '').trim();
+  const session = sessionId ? getCanvasSession(sessionId) : null;
+  const origin = canonicalOrigin(
+    session?.canvasBase || session?.canvasUrl || binding?.canvasBase || binding?.canvasUrl || binding?.origin,
+  );
+  const principalId = String(session?.userProfile?.id ?? binding?.principalId ?? '').trim();
+  const sessionGeneration = Number(session?.authorityEpoch ?? binding?.authorityEpoch);
+  const catalogDigest = getMorrowGatewayBridgeConfig()?.catalogDigest || '';
+  if (
+    !courseId || !session || session.runtimeVerified !== true || !origin || !principalId
+    || principalId.length > 512 || !Number.isSafeInteger(sessionGeneration) || sessionGeneration < 1
+    || !/^[0-9a-f]{64}$/.test(catalogDigest)
+  ) return null;
   return {
     sourceBindingId,
     provider: 'canvas',
-    ...(courseId ? { courseId } : {}),
+    courseId,
     ...(typeof binding?.courseName === 'string' && binding.courseName.trim()
       ? { courseName: binding.courseName.trim().slice(0, 300) }
       : {}),
-    ...(origin ? { origin } : {}),
+    origin,
+    principalFingerprint: await principalFingerprint(origin, principalId),
+    sessionGeneration,
+    catalogDigest,
     runtimeVerified: true,
     ...(Number.isFinite(Number(binding?.lastBoundAt || binding?.lastSeenAt))
       ? { lastSeenAt: Number(binding.lastBoundAt || binding.lastSeenAt) }
@@ -48,9 +76,8 @@ function bindingProjection(binding) {
   };
 }
 
-export function currentMorrowBridgeBindings() {
-  return getLiveProviderBindings('canvas')
-    .map(bindingProjection)
+export async function currentMorrowBridgeBindings() {
+  return (await Promise.all(getLiveProviderBindings('canvas').map(bindingProjection)))
     .filter(Boolean)
     .sort((left, right) => (
       left.sourceBindingId < right.sourceBindingId ? -1 : left.sourceBindingId > right.sourceBindingId ? 1 : 0

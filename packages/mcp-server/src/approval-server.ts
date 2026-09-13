@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { brandHead, brandHeader, serveBrandAsset } from "@morrow/bridge-loopback";
 import type { ApprovalReviewContext, ApprovalReviewReadCache } from "./approval-context.js";
@@ -8,13 +8,109 @@ import { escapeHtml, formattedTextPreview } from "./approval-preview.js";
 import { BLACKBOARD_CONTENT_PATCH_APPLY_TOOL } from "./blackboard-content-patch.js";
 
 const LOOPBACK_HOST = "127.0.0.1";
+const MAX_APPROVAL_NONCES = 128;
+const MAX_APPROVAL_NONCES_PER_TARGET = 8;
+const HTTP_HEADERS_TIMEOUT_MS = 10_000;
+const HTTP_REQUEST_TIMEOUT_MS = 30_000;
+const HTTP_KEEP_ALIVE_TIMEOUT_MS = 1_000;
+const HTTP_SHUTDOWN_GRACE_MS = 250;
+
+interface AcceptedHttpRequest {
+  readonly signal: AbortSignal;
+  readonly release: () => void;
+}
+
+interface TrackedHttpRequest {
+  readonly controller: AbortController;
+  readonly release: () => void;
+}
+
+export class BoundedHttpServerLifecycle {
+  private readonly sockets = new Set<Socket>();
+  private readonly requests = new Map<IncomingMessage, TrackedHttpRequest>();
+  private closing = false;
+  private closePromise: Promise<void> | null = null;
+
+  constructor(
+    private readonly server: Server,
+    private readonly shutdownGraceMs = HTTP_SHUTDOWN_GRACE_MS,
+  ) {
+    server.headersTimeout = HTTP_HEADERS_TIMEOUT_MS;
+    server.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
+    server.keepAliveTimeout = HTTP_KEEP_ALIVE_TIMEOUT_MS;
+    server.on("connection", (socket) => {
+      if (this.closing) {
+        socket.destroy();
+        return;
+      }
+      this.sockets.add(socket);
+      socket.once("close", () => this.sockets.delete(socket));
+    });
+  }
+
+  accept(request: IncomingMessage, response: ServerResponse): AcceptedHttpRequest | null {
+    if (this.closing) return null;
+    const controller = new AbortController();
+    let released = false;
+    const abort = (): void => controller.abort();
+    const release = (): void => {
+      if (released) return;
+      released = true;
+      request.off("aborted", abort);
+      response.off("finish", release);
+      response.off("close", close);
+      this.requests.delete(request);
+    };
+    const close = (): void => {
+      if (!response.writableEnded) controller.abort();
+      release();
+    };
+    request.once("aborted", abort);
+    response.once("finish", release);
+    response.once("close", close);
+    this.requests.set(request, { controller, release });
+    return { signal: controller.signal, release };
+  }
+
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
+    this.closing = true;
+    this.closePromise = this.closeBounded();
+    return this.closePromise;
+  }
+
+  private async closeBounded(): Promise<void> {
+    const closed = new Promise<void>((resolve, reject) => {
+      this.server.close((error) => {
+        if (error && (error as NodeJS.ErrnoException).code !== "ERR_SERVER_NOT_RUNNING") reject(error);
+        else resolve();
+      });
+    });
+    for (const [request, tracked] of this.requests) {
+      tracked.controller.abort();
+      if (!request.complete) request.destroy();
+    }
+    const forceClose = setTimeout(() => {
+      for (const socket of this.sockets) socket.destroy();
+      this.server.closeAllConnections?.();
+    }, this.shutdownGraceMs);
+    try {
+      await closed;
+    } finally {
+      clearTimeout(forceClose);
+      for (const tracked of this.requests.values()) tracked.release();
+      this.requests.clear();
+      this.sockets.clear();
+    }
+  }
+}
 
 export interface ApprovalOperationController {
   operationGet(operationId: string): JsonObject;
   operationList(limit?: number): JsonObject;
   operationReviewContext?(operationId: string, cache?: ApprovalReviewReadCache): Promise<ApprovalReviewContext>;
   approveOperation(operationId: string): JsonObject;
-  runApprovedOperation(operationId: string): Promise<unknown>;
+  runApprovedOperation(operationId: string, signal: AbortSignal): Promise<unknown>;
   cancelOperation(operationId: string): JsonObject;
   setApprovalBaseUrl(baseUrl: string): void;
   batchApprovalGet?(batchId: string): JsonObject;
@@ -139,9 +235,22 @@ document.querySelectorAll(".question-preview").forEach((preview) => {
 });
 const status = document.getElementById("work-status");
 const statusNodes = document.querySelectorAll("[data-operation-status]");
+let statusTimer;
+function scheduleStatusRefresh(delay) {
+  clearTimeout(statusTimer);
+  statusTimer = setTimeout(refreshStatus, delay);
+}
 async function refreshStatus() {
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 5000);
   try {
-    const response = await fetch(location.pathname + "/status", { cache: "no-store" });
+    const response = await fetch(location.pathname + "/status", {
+      cache: "no-store",
+      credentials: "same-origin",
+      redirect: "error",
+      headers: { accept: "application/json" },
+      signal: controller.signal,
+    });
     if (!response.ok) throw new Error("status unavailable");
     const result = await response.json();
     if (status.innerHTML !== result.html) status.innerHTML = result.html;
@@ -149,10 +258,13 @@ async function refreshStatus() {
       const element = statusNodes[Number(index)];
       if (element && typeof text === "string" && element.textContent !== text) element.textContent = text;
     });
-    if (result.active) setTimeout(refreshStatus, 1000);
+    if (result.active) scheduleStatusRefresh(1000);
     else document.getElementById("stop-work")?.remove();
   } catch {
     status.textContent = "Morrow cannot refresh this result. Reload this page to check it. Do not repeat the change.";
+    scheduleStatusRefresh(5000);
+  } finally {
+    clearTimeout(deadline);
   }
 }
 if (status && document.body.dataset.polling === "true") void refreshStatus();`;
@@ -866,6 +978,10 @@ function exactSecret(actual: string | null, expected: string): boolean {
   return left.length === right.length && timingSafeEqual(left, right);
 }
 
+function approvalCookieName(nonce: string): string {
+  return `morrow_approval_${nonce}`;
+}
+
 async function readFormNonce(request: IncomingMessage): Promise<string | null> {
   if (!String(request.headers["content-type"] || "").toLowerCase().startsWith("application/x-www-form-urlencoded")) {
     return null;
@@ -883,7 +999,8 @@ async function readFormNonce(request: IncomingMessage): Promise<string | null> {
 
 export class LoopbackApprovalServer {
   private readonly server: Server;
-  private readonly nonces = new Map<string, { value: string; expiresAt: number; canApprove: boolean }>();
+  private readonly httpLifecycle: BoundedHttpServerLifecycle;
+  private readonly nonces = new Map<string, { targetKey: string; expiresAt: number; canApprove: boolean }>();
   private readonly work = new Map<string, Promise<unknown>>();
   private readonly stopping = new AbortController();
   private port: number | null = null;
@@ -892,8 +1009,14 @@ export class LoopbackApprovalServer {
 
   constructor(private readonly controller: ApprovalOperationController) {
     this.server = createServer((request, response) => {
-      void this.handle(request, response);
+      const accepted = this.httpLifecycle.accept(request, response);
+      if (!accepted) {
+        sendJson(response, 503, { schema: "morrow.problem.v1", code: "approval_server_closing" });
+        return;
+      }
+      void this.handle(request, response, accepted.signal).finally(accepted.release);
     });
+    this.httpLifecycle = new BoundedHttpServerLifecycle(this.server);
   }
 
   get baseUrl(): string | null {
@@ -910,6 +1033,29 @@ export class LoopbackApprovalServer {
 
   maintenanceQuiescent(): boolean {
     return !this.approvalAdmissionOpen && this.approvalPosts === 0 && this.work.size === 0;
+  }
+
+  private issueNonce(targetKey: string, canApprove: boolean): string {
+    const now = Date.now();
+    for (const [nonce, grant] of this.nonces) if (grant.expiresAt <= now) this.nonces.delete(nonce);
+    const targetNonces = [...this.nonces].filter(([, grant]) => grant.targetKey === targetKey);
+    while (targetNonces.length >= MAX_APPROVAL_NONCES_PER_TARGET) {
+      const oldest = targetNonces.shift();
+      if (oldest) this.nonces.delete(oldest[0]);
+    }
+    while (this.nonces.size >= MAX_APPROVAL_NONCES) {
+      const oldest = this.nonces.keys().next().value as string | undefined;
+      if (!oldest) break;
+      this.nonces.delete(oldest);
+    }
+    let nonce: string;
+    do nonce = randomBytes(32).toString("base64url"); while (this.nonces.has(nonce));
+    this.nonces.set(nonce, { targetKey, expiresAt: now + 15 * 60_000, canApprove });
+    return nonce;
+  }
+
+  private revokeTargetNonces(targetKey: string): void {
+    for (const [nonce, grant] of this.nonces) if (grant.targetKey === targetKey) this.nonces.delete(nonce);
   }
 
   async start(): Promise<string> {
@@ -930,7 +1076,7 @@ export class LoopbackApprovalServer {
     return baseUrl;
   }
 
-  private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  private async handle(request: IncomingMessage, response: ServerResponse, signal: AbortSignal): Promise<void> {
     const method = request.method || "GET";
     const url = new URL(request.url || "/", `http://${LOOPBACK_HOST}`);
     try {
@@ -982,17 +1128,17 @@ export class LoopbackApprovalServer {
                 contexts.set(operationId, await this.controller.operationReviewContext!(operationId, readCache));
               } catch { /* keep the exact request visible when Canvas cannot provide its name */ }
             }));
+            signal.throwIfAborted();
           }
         }
-        const nonce = randomBytes(32).toString("base64url");
         const nonceKey = `${target.kind}:${target.id}`;
-        this.nonces.set(nonceKey, { value: nonce, expiresAt: Date.now() + 15 * 60_000, canApprove: !namedTargetsMissing(operations, contexts) });
+        const nonce = this.issueNonce(nonceKey, !namedTargetsMissing(operations, contexts));
         const cookiePath = `/${target.kind}/${encodeURIComponent(target.id)}`;
         sendHtml(
           response,
           200,
           html(target, snapshot, nonce, contexts, active),
-          `morrow_approval=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900`,
+          `${approvalCookieName(nonce)}=${nonce}; HttpOnly; SameSite=Strict; Path=${cookiePath}; Max-Age=900`,
         );
         return;
       }
@@ -1004,27 +1150,28 @@ export class LoopbackApprovalServer {
         this.approvalPosts += 1;
         try {
         const nonceKey = `${target.kind}:${target.id}`;
-        const expected = this.nonces.get(nonceKey);
         const requestOrigin = String(request.headers.origin || "");
         const requestReferer = String(request.headers.referer || "");
         const baseUrl = this.baseUrl;
         const originValid = requestOrigin === baseUrl;
         const refererValid = requestReferer === `${baseUrl}/${target.kind}/${encodeURIComponent(target.id)}`;
         const formNonce = await readFormNonce(request);
-        const cookieNonce = cookieValue(request, "morrow_approval");
+        signal.throwIfAborted();
+        const expected = formNonce ? this.nonces.get(formNonce) : undefined;
+        const cookieNonce = formNonce && expected ? cookieValue(request, approvalCookieName(formNonce)) : null;
         if (
           !expected
+          || expected.targetKey !== nonceKey
           || (target.action === "approve" && !expected.canApprove)
           || expected.expiresAt <= Date.now()
           || !originValid
           || !refererValid
-          || !exactSecret(formNonce, expected.value)
-          || !exactSecret(cookieNonce, expected.value)
+          || !exactSecret(cookieNonce, formNonce!)
         ) {
-          this.nonces.delete(nonceKey);
+          if (formNonce && expected?.expiresAt && expected.expiresAt <= Date.now()) this.nonces.delete(formNonce);
           throw new Error("approval nonce is missing, expired, or invalid");
         }
-        this.nonces.delete(nonceKey);
+        this.revokeTargetNonces(nonceKey);
         if (this.stopping.signal.aborted || (target.action === "approve" && target.kind === "batches" && !this.controller.runApprovedBatch)) {
           throw new Error("review execution is unavailable");
         }
@@ -1038,7 +1185,7 @@ export class LoopbackApprovalServer {
         if (!result) throw new Error("batch approval action is unavailable");
         const resultState = reviewState(target, result);
         const approved = target.action === "approve" && resultState === "approved";
-        const cookie = `morrow_approval=; HttpOnly; SameSite=Strict; Path=/${target.kind}/${encodeURIComponent(target.id)}; Max-Age=0`;
+        const cookie = `${approvalCookieName(formNonce!)}=; HttpOnly; SameSite=Strict; Path=/${target.kind}/${encodeURIComponent(target.id)}; Max-Age=0`;
         if (target.action === "approve" && !approved) {
           sendHtml(response, 409, statePage(resultState, snapshotPlatform(result)), cookie);
           return;
@@ -1046,7 +1193,7 @@ export class LoopbackApprovalServer {
         if (approved) {
           const work = Promise.resolve().then(() => target.kind === "batches"
             ? this.controller.runApprovedBatch!(target.id, this.stopping.signal)
-            : this.controller.runApprovedOperation(target.id));
+            : this.controller.runApprovedOperation(target.id, this.stopping.signal));
           this.work.set(nonceKey, work.catch(() => undefined).finally(() => this.work.delete(nonceKey)));
         }
         response.writeHead(303, {
@@ -1062,6 +1209,7 @@ export class LoopbackApprovalServer {
       }
       sendJson(response, 405, { schema: "morrow.problem.v1", code: "method_not_allowed" });
     } catch (error) {
+      if (response.destroyed || response.writableEnded) return;
       const message = error instanceof Error ? error.message : "approval action failed";
       if (String(request.headers.accept || "").includes("text/html")) {
         sendHtml(response, 409, pageShell("Review unavailable", '<section class="outcome"><h1>Review unavailable</h1><p>This review may have expired or the request may have changed. Return to your assistant and ask Morrow to check its current status.</p><p>Do not repeat the change until Morrow checks the saved result.</p></section>'));
@@ -1072,9 +1220,7 @@ export class LoopbackApprovalServer {
   async close(): Promise<void> {
     if (this.port === null) return;
     this.stopping.abort();
-    await new Promise<void>((resolve, reject) => {
-      this.server.close((error) => error ? reject(error) : resolve());
-    });
+    await this.httpLifecycle.close();
     await Promise.all(this.work.values());
     this.port = null;
     this.nonces.clear();

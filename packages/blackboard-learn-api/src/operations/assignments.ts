@@ -1,9 +1,10 @@
 import { canonicalJson, isJsonObject, sha256Text, type JsonObject, type SourceCapabilityMetadata } from "@morrow/contracts";
 import * as z from "zod/v4";
 import type { BlackboardEffectGrant } from "../effect-grant.js";
+import { assignmentCreateIdentity, assertPathScopedContent, pathScopedContentMatches } from "../provider-contract.js";
 import { safeContent, type BlackboardCourseRead, type BlackboardLearnRuntime } from "../runtime.js";
 import { BLACKBOARD_ID, BlackboardApiError, withBlackboardDispatchState, type BlackboardDispatchState } from "../types.js";
-import { blackboardTool, contentScopeInput, effectGrantInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
+import { blackboardTool, contentScopeInput, effectGrantInput, effectReceiptReferenceInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
 import { READ_ANNOTATIONS, READ_BEHAVIOR, READ_PROFILES } from "./course-read.js";
 // Morrow changes an assignment's points possible and its due date through the
 // gradebook column routes in `gradebook.ts`, and adds no second writer for
@@ -57,7 +58,7 @@ const INSTRUCTIONS_FIELD = "instructions";
 const SCORE_FIELD = "score";
 const GRADING_FIELD = "grading";
 const CREATED_CONTENT_FIELD = "contentId";
-const CREATED_COLUMN_FIELD = "gradebookColumnId";
+const CREATED_COLUMN_FIELD = "gradeColumnId";
 
 /**
  * Morrow's own bounds on one reviewed assignment. They are not tenant limits: no
@@ -112,6 +113,7 @@ const assignmentInput = {
 
 const assessmentInput = contentScopeInput;
 const assignmentPlanInput = scopeInput.extend(assignmentInput);
+const assignmentVerifyInput = assignmentPlanInput.extend({ _morrow_receipt: effectReceiptReferenceInput.optional() });
 const assignmentApplyInput = assignmentPlanInput.extend({
   expected_plan_digest: z.string().regex(SHA256),
   _morrow: z.strictObject({ outer_grant: effectGrantInput }),
@@ -280,12 +282,7 @@ function safeAssessment(record: JsonObject, read: BlackboardCourseRead): JsonObj
  * what it is worth; it does not claim to read or author anything inside it.
  */
 function assertAssessment(record: JsonObject, courseId: string, contentId: string): JsonObject {
-  if (record.id !== contentId) {
-    throw new BlackboardApiError("blackboard_content_mismatch", "Blackboard returned a different content item than the one Morrow asked for.");
-  }
-  if (record.courseId !== courseId) {
-    throw new BlackboardApiError("blackboard_scope_binding_mismatch", "Blackboard did not return this content item as part of the selected course.");
-  }
+  assertPathScopedContent(record, courseId, contentId);
   const handler = isJsonObject(record.contentHandler) && typeof record.contentHandler.id === "string" ? record.contentHandler.id : "";
   if (handler !== TEST_LINK_HANDLER) {
     throw new BlackboardApiError(
@@ -407,6 +404,8 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
     effectReceiptId: value.effect_receipt_id,
     dispatchAttempt: value.dispatch_attempt,
     gatewayProcessId: value.gateway_process_id,
+    issuedAt: value.issued_at,
+    notAfter: value.not_after,
     dispatchToken: value.dispatch_token,
   };
 }
@@ -462,20 +461,21 @@ async function applyReviewedUltraAssignment(
   dispatch.markSent();
   try {
     dispatchState = "applied_or_unknown";
-    const created = await write.client.post(createAssignmentPath(write.courseId), createRequest(assignment), signal);
-    const contentId = created ? exactId(created[CREATED_CONTENT_FIELD]) : null;
+    const created = assignmentCreateIdentity(await write.client.post(createAssignmentPath(write.courseId), createRequest(assignment), signal));
+    const contentId = created.contentId;
     if (!contentId) {
       throw mismatch(`Blackboard did not name the content item it created (${CREATED_CONTENT_FIELD}), so Morrow could not read the assignment back.`, dispatchState);
     }
-    const columnId = created ? exactId(created[CREATED_COLUMN_FIELD]) : null;
+    const columnId = created.gradeColumnId;
     if (!columnId) {
       throw mismatch(`Blackboard did not name the gradebook column it generated for this assignment (${CREATED_COLUMN_FIELD}), so Morrow could not read the points possible and the due date back.`, dispatchState);
     }
     if (existingColumns.includes(columnId)) {
       throw mismatch("Blackboard named a gradebook column that was already in this course before this change.", dispatchState);
     }
+    dispatch.recordProviderEvidence({ kind: "ultra-assignment", contentId, gradeColumnId: columnId });
     const record = await write.client.get(contentPath(write.courseId, contentId), signal);
-    if (record.id !== contentId || record.courseId !== write.courseId) {
+    if (!pathScopedContentMatches(record, write.courseId, contentId)) {
       throw mismatch("Blackboard did not return the created assignment as an item of the selected course.", dispatchState);
     }
     if (record[TITLE_FIELD] !== assignment.title) {
@@ -558,27 +558,41 @@ async function applyReviewedUltraAssignment(
  */
 async function verifyUltraAssignment(
   runtime: BlackboardLearnRuntime,
-  input: AssignmentPlanInput,
+  input: z.output<typeof assignmentVerifyInput>,
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const assignment = reviewedAssignment(input);
-  const comparator = await runtime.beginComparatorRead({
-    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
-  }, signal);
-  const columns = await comparator.client.collect(columnsPath(comparator.courseId), { label: "gradebook column", fields: COLUMN_FIELDS, signal });
-  const matches = columns.filter((column) => (
-    column.name === assignment.title
-    && isJsonObject(column[SCORE_FIELD]) && column[SCORE_FIELD].possible === assignment.pointsPossible
-    && isJsonObject(column[GRADING_FIELD]) && instant(column[GRADING_FIELD].due) === assignment.due
-  ));
-  const verified = matches.length === 1;
-  runtime.recordEffectComparison(assignmentEffectTarget(runtime, input), verified);
+  const target = assignmentEffectTarget(runtime, input);
+  const reference = input._morrow_receipt ? {
+    gatewayProcessId: input._morrow_receipt.gateway_process_id,
+    receiptId: input._morrow_receipt.effect_receipt_id,
+    operationId: input._morrow_receipt.operation_id,
+  } : null;
+  const evidence = reference ? runtime.effectCreateEvidence(reference, target, "ultra-assignment") : null;
+  let verified = false;
+  if (reference && evidence?.kind === "ultra-assignment") {
+    const comparator = await runtime.beginComparatorRead({
+      tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+    }, signal);
+    const record = await comparator.client.get(contentPath(comparator.courseId, evidence.contentId), signal);
+    const column = await comparator.client.get(withFields(columnPath(comparator.courseId, evidence.gradeColumnId), COLUMN_FIELDS), signal);
+    const instructions = record[INSTRUCTIONS_FIELD];
+    const gradedItem = exactId(column.contentId);
+    verified = pathScopedContentMatches(record, comparator.courseId, evidence.contentId)
+      && record[TITLE_FIELD] === assignment.title
+      && (instructions === undefined || instructions === assignment.instructions)
+      && column.id === evidence.gradeColumnId
+      && isJsonObject(column[SCORE_FIELD]) && column[SCORE_FIELD].possible === assignment.pointsPossible
+      && isJsonObject(column[GRADING_FIELD]) && instant(column[GRADING_FIELD].due) === assignment.due
+      && (gradedItem === null || gradedItem === evidence.contentId);
+    runtime.recordEffectCreateComparison(reference, target, "ultra-assignment", verified);
+  }
   return {
-    schema: "morrow.blackboard.ultra-assignment.comparator.v1",
+    schema: "morrow.blackboard.ultra-assignment.comparator.v2",
     ok: true,
-    tenantId: comparator.tenantId,
-    sourceBindingId: comparator.sourceBindingId,
-    courseId: comparator.courseId,
+    tenantId: input.tenant_id,
+    sourceBindingId: input.source_binding_id,
+    courseId: input.course_id,
     verified,
     readback: READBACK_STATE,
     status: "api_configured_live_untested",
@@ -712,7 +726,7 @@ export const blackboardAssignmentsModule: BlackboardOperationModule = {
       description: "Internal Morrow fresh-read comparator for one reviewed Blackboard Ultra assignment. It re-reads the course gradebook and states whether exactly one column carries the reviewed title, points possible, and due date.",
       private: true,
       gatewayDispatchOnly: true,
-      inputSchema: assignmentPlanInput,
+      inputSchema: assignmentVerifyInput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       capability: {
         family: "course-read",

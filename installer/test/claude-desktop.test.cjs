@@ -1,4 +1,5 @@
 const assert = require("node:assert/strict");
+const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
@@ -6,17 +7,25 @@ const { spawn } = require("node:child_process");
 const { once } = require("node:events");
 const test = require("node:test");
 const {
-  inspectClaudeDesktopConnection,
+  claudeDesktopLauncherPath,
+  inspectClaudeDesktopConnection: inspectClaudeDesktopConnectionRaw,
   isCurrentClaudeDesktopSetup,
   parseUnixProcessStartTimes,
   parseWindowsProcessStartTimes,
   prepareClaudeDesktopBundle,
   processAlive,
   sameCanonicalPath,
+  verifyClaudeProcessProof,
   windowsProcessStartQuery
 } = require("../shared/claude-desktop.cjs");
 const installerController = require("../shared/installer-controller.cjs");
 const { freshRecord } = require("../shared/state-policy.cjs");
+
+const inspectionOptionsBySetup = new WeakMap();
+
+function inspectClaudeDesktopConnection(setup, options = inspectionOptionsBySetup.get(setup)) {
+  return inspectClaudeDesktopConnectionRaw(setup, options);
+}
 
 async function fixture(t, options = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-claude-desktop-"));
@@ -24,19 +33,32 @@ async function fixture(t, options = {}) {
   const workspace = path.join(root, "Materials with spaces");
   const state = path.join(root, "State");
   await fs.mkdir(workspace);
-  await fs.mkdir(state);
+  await fs.mkdir(state, { mode: 0o700 });
   const server = path.join(root, "server.cjs");
+  const node = path.join(root, "node");
+  const runtimeManifest = path.join(root, "mcp-runtime-manifest.json");
   const upstreams = path.join(state, "upstreams.json");
+  const descendantPath = path.join(root, "server-descendant.pid");
   await fs.writeFile(upstreams, JSON.stringify({ privateFixtureValue: "must-not-be-bundled" }));
+  const stubbornServer = options.stubbornTree ? [
+    'const { spawn } = require("node:child_process");',
+    `const descendant = spawn(process.execPath, ["-e", ${JSON.stringify("process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)")}], { stdio: "ignore" });`,
+    `fs.writeFileSync(${JSON.stringify(descendantPath)}, String(descendant.pid));`,
+    'process.on("SIGTERM", () => {});',
+    'setInterval(() => {}, 1000);',
+  ].join("\n") : "";
   await fs.writeFile(server, `const readline = require("node:readline");
 const fs = require("node:fs");
+${stubbornServer}
 readline.createInterface({ input: process.stdin }).on("line", (line) => {
   const message = JSON.parse(line);
   if (message.method === "initialize") {
     const response = { ${options.invalidJsonRpc ? "" : 'jsonrpc: "2.0",'} id: message.id,
       result: { protocolVersion: "2025-11-25", capabilities: {}, serverInfo: { name: ${JSON.stringify(options.fragmentUnicode ? "mor🌾row" : "morrow")}, version: "1.0.0" } } };
     const bytes = Buffer.from(JSON.stringify(response) + "\\n");
-    if (${options.fragmentUnicode === true}) {
+    if (${options.invalidUtf8 === true}) {
+      process.stdout.write(Buffer.concat([Buffer.from('{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"'), Buffer.from([0xff]), Buffer.from('"}}\\n')]));
+    } else if (${options.fragmentUnicode === true}) {
       const split = bytes.indexOf(Buffer.from("🌾")) + 1;
       process.stdout.write(bytes.subarray(0, split));
       setTimeout(() => process.stdout.write(bytes.subarray(split)), 30);
@@ -45,12 +67,43 @@ readline.createInterface({ input: process.stdin }).on("line", (line) => {
   if (message.method === "test/paths") process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id,
     result: { workspace: process.cwd(), upstreams: process.env.MORROW_UPSTREAMS_FILE } }) + "\\n");
 });`);
-  const setup = await prepareClaudeDesktopBundle({ nodePath: process.execPath, serverEntryPath: server,
-    upstreamsPath: upstreams, workspaceRoot: workspace, stateDirectory: state, version: "1.0.0-rc.0", platform: "darwin" });
+  await fs.writeFile(node, "#!/bin/sh\nexec " + JSON.stringify(process.execPath) + " \"$@\"\n", { mode: 0o700 });
+  const serverBytes = await fs.readFile(server);
+  await fs.writeFile(runtimeManifest, JSON.stringify({
+    schema: "morrow.mcp-runtime-manifest.v2",
+    entrypoint: {
+      path: "server.cjs",
+      bytes: serverBytes.length,
+      sha256: crypto.createHash("sha256").update(serverBytes).digest("hex")
+    },
+    dependencies: [],
+    directFiles: []
+  }) + "\n");
+  const extracted = path.join(root, "Claude", "Claude Extensions", "local.mcpb.morrow.morrow");
+  const managedLauncherPath = path.join(extracted, "server", "launch.cjs");
+  const setup = await prepareClaudeDesktopBundle({ nodePath: node, serverEntryPath: server,
+    runtimeManifestPath: runtimeManifest, upstreamsPath: upstreams, workspaceRoot: workspace,
+    stateDirectory: state, version: "1.0.0-rc.0", platform: "darwin", managedLauncherPath });
+  const installerRecordPath = path.join(state, "installer.json");
+  await fs.writeFile(installerRecordPath, `${JSON.stringify({ ...freshRecord(), configured: { "claude-desktop": setup } })}\n`, { mode: 0o600 });
   const { unpackExtension } = await import("@anthropic-ai/mcpb");
-  const extracted = path.join(root, "Extracted by assistant");
   assert.equal(await unpackExtension({ mcpbPath: setup.bundlePath, outputDir: extracted, silent: true }), true);
-  return { root, workspace: await fs.realpath(workspace), upstreams: await fs.realpath(upstreams), setup, extracted };
+  const result = {
+    root,
+    workspace: await fs.realpath(workspace),
+    node: await fs.realpath(node),
+    server: await fs.realpath(server),
+    runtimeManifest: await fs.realpath(runtimeManifest),
+    upstreams: await fs.realpath(upstreams),
+    descendantPath,
+    setup,
+    extracted,
+    managedLauncherPath,
+    installerRecordPath,
+    inspectionOptions: { platform: "darwin", managedLauncherPath, verifyClaudeProcessProof: async () => true }
+  };
+  inspectionOptionsBySetup.set(setup, result.inspectionOptions);
+  return result;
 }
 
 const CONNECTION_OBSERVATION_TIMEOUT_MS = 5_000;
@@ -82,10 +135,24 @@ function runningProcess(t) {
 async function writeReceipt(input, receipt) {
   const { setup } = input;
   const metadata = JSON.parse(await fs.readFile(path.join(path.dirname(setup.receiptPath), "setup.json"), "utf8"));
-  return fs.writeFile(setup.receiptPath, `${JSON.stringify({ schema: "morrow.claude-desktop-connection.v2",
+  return fs.writeFile(setup.receiptPath, `${JSON.stringify({ schema: "morrow.claude-desktop-connection.v4",
     installationId: setup.installationId, launcherSha256: metadata.launcherSha256,
     launcherPath: await fs.realpath(path.join(input.extracted, "server", "launch.cjs")),
     clientInfo: { name: "morrow-extension-test", version: "1.0.0" }, protocolVersion: "2025-11-25", ...receipt })}\n`);
+}
+
+async function inspect(input, options = {}) {
+  return inspectClaudeDesktopConnection(input.setup, { ...input.inspectionOptions, ...options });
+}
+
+async function activateSetup(input, setup, extra = {}) {
+  const record = {
+    ...freshRecord(),
+    ...extra,
+    configured: setup ? { ...(extra.configured || {}), "claude-desktop": setup } : { ...(extra.configured || {}) },
+  };
+  await fs.writeFile(input.installerRecordPath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  if (process.platform !== "win32") await fs.chmod(input.installerRecordPath, 0o600);
 }
 
 async function handshake(child, { complete = true } = {}) {
@@ -101,7 +168,7 @@ async function handshake(child, { complete = true } = {}) {
 }
 
 /** An installer controller over a temporary user-data root, as main.cjs builds one. */
-function controller(root) {
+function controller(root, overrides = {}) {
   return installerController.createInstallerController({
     app: { getPath: (name) => (name === "userData" ? path.join(root, "UserData") : root) },
     dialog: { showOpenDialog: async () => ({ canceled: true, filePaths: [] }) },
@@ -115,7 +182,8 @@ function controller(root) {
     trustedBridgeReleaseManifestSha256: () => null,
     trustedMcpRuntimeManifestSha256: () => null,
     detectAssistant: async () => false,
-    runCli: async () => ({ code: 0, stdout: "", stderr: "" })
+    runCli: async () => ({ code: 0, stdout: "", stderr: "" }),
+    ...overrides,
   });
 }
 
@@ -155,53 +223,85 @@ test("native Claude bundle uses the client Node runtime and requires a completed
   assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: true, running: false });
 });
 
-test("a closed Claude Desktop stays configured in the installer state", async (t) => {
+test("the managed Claude launcher terminates its complete stubborn server process tree", async (t) => {
+  if (process.platform === "win32") return t.skip("the POSIX process-group regression is not available on Windows");
+  const input = await fixture(t, { stubbornTree: true });
+  const launcher = path.join(input.extracted, "server", "launch.cjs");
+  const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
+  child.stdout.resume();
+  child.stderr.resume();
+  await handshake(child);
+  await waitFor(async () => (await inspectClaudeDesktopConnection(input.setup)).installed);
+  await waitFor(async () => {
+    try { return Number.isSafeInteger(Number(await fs.readFile(input.descendantPath, "utf8"))); } catch { return false; }
+  });
+  const receipt = JSON.parse(await fs.readFile(input.setup.receiptPath, "utf8"));
+  const descendantPid = Number(await fs.readFile(input.descendantPath, "utf8"));
+  assert.equal(processAlive(receipt.proxyPid), true);
+  assert.equal(processAlive(descendantPid), true);
+  const stopped = once(child, "close");
+  child.stdin.end();
+  await Promise.race([
+    stopped,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("managed launcher process tree did not stop")), 5_000).unref()),
+  ]);
+  await waitFor(() => !processAlive(receipt.proxyPid) && !processAlive(descendantPid));
+});
+
+test("the managed Claude launcher refuses malformed UTF-8 before recording a connection", async (t) => {
+  const input = await fixture(t, { invalidUtf8: true });
+  const launcher = path.join(input.extracted, "server", "launch.cjs");
+  const child = spawn(process.execPath, [launcher], { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => { if (child.exitCode === null) child.kill("SIGKILL"); });
+  child.stderr.resume();
+  const stopped = once(child, "close");
+  await handshake(child, { complete: false });
+  await Promise.race([
+    stopped,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("malformed launcher stream stayed active")), 4_000).unref()),
+  ]);
+  await assert.rejects(() => fs.stat(input.setup.receiptPath), { code: "ENOENT" });
+});
+
+test("a closed verified Claude Desktop receipt preserves the installed fact", async (t) => {
   const input = await fixture(t);
   await writeReceipt(input, { launcherPid: await endedProcessId(), proxyPid: await endedProcessId(),
     connectedAt: new Date().toISOString() });
   assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: true, running: false });
-
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-claude-desktop-state-"));
-  t.after(() => fs.rm(root, { recursive: true, force: true }));
-  await fs.mkdir(path.join(root, "UserData"), { recursive: true });
-  await fs.mkdir(path.join(root, "Home"), { recursive: true });
-  await fs.mkdir(path.join(root, "Payload"), { recursive: true });
-  const installer = controller(root);
-  await installer.writeRecord({
-    ...freshRecord(),
-    selectedAssistantId: "claude-desktop",
-    configured: { "claude-desktop": { bundlePath: input.setup.bundlePath, installationId: input.setup.installationId, receiptPath: input.setup.receiptPath } }
-  });
-
-  const state = await installer.state();
-  const claude = state.assistants.find((assistant) => assistant.id === "claude-desktop");
-  assert.equal(claude.configured, true);
-  assert.equal(claude.pending, false);
-  assert.notEqual(state.lifecycle, "assistant_pending");
 });
 
 test("Windows Claude setup opens the registered app and reveals only its own extension file", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-claude-desktop-open-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
-  const installer = controller(root);
+  const installer = controller(root, { isCurrentClaudeDesktopSetup: async () => true });
   installer.platform = "win32";
-  const bundle = path.join(installer.paths.state, "ClaudeDesktop", "setup-fixture", "Morrow.mcpb");
+  let bundle = path.join(installer.paths.state, "ClaudeDesktop", "setup-fixture", "Morrow.mcpb");
   await fs.mkdir(path.dirname(bundle), { recursive: true });
   await fs.writeFile(bundle, "extension fixture");
+  bundle = await fs.realpath(bundle);
   const calls = [];
   installer.shell = {
     openExternal: async (value) => calls.push(["application", value]),
     openPath: async () => assert.fail("Windows must not depend on a .mcpb file association"),
     showItemInFolder: (value) => calls.push(["file", value])
   };
-  await installer.writeRecord({ ...freshRecord(), configured: { "claude-desktop": { bundlePath: bundle } } });
+  await installer.writeRecord({ ...freshRecord(), configured: { "claude-desktop": {
+    bundlePath: bundle,
+    installationId: "windows-open-test",
+    receiptPath: path.join(path.dirname(bundle), "connection.json")
+  } } });
   await installer.openClaudeDesktop();
   await installer.revealClaudeDesktopBundle();
   assert.deepEqual(calls, [["application", "claude://"], ["file", bundle]]);
 
   const outside = path.join(root, "Morrow.mcpb");
   await fs.writeFile(outside, "unrelated file");
-  await installer.writeRecord({ ...freshRecord(), configured: { "claude-desktop": { bundlePath: outside } } });
+  await installer.writeRecord({ ...freshRecord(), configured: { "claude-desktop": {
+    bundlePath: outside,
+    installationId: "windows-outside-test",
+    receiptPath: path.join(path.dirname(outside), "connection.json")
+  } } });
   await assert.rejects(installer.revealClaudeDesktopBundle(), { code: "setup_failed" });
   assert.equal(calls.length, 2);
 });
@@ -321,7 +421,7 @@ test("a closed client's receipt stops proving installation when its launcher is 
   assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: false, running: false });
 });
 
-test("reopening refreshes the receipt and an older removed copy cannot clear the new connection", async (t) => {
+test("an arbitrary copied launcher cannot refresh the managed connection receipt", async (t) => {
   const input = await fixture(t);
   const firstLauncher = path.join(input.extracted, "server", "launch.cjs");
   const first = spawn(process.execPath, [firstLauncher], { stdio: ["pipe", "pipe", "pipe"] });
@@ -335,16 +435,14 @@ test("reopening refreshes the receipt and an older removed copy cannot clear the
   await fs.copyFile(firstLauncher, secondLauncher);
   const second = spawn(process.execPath, [secondLauncher], { stdio: ["pipe", "pipe", "pipe"] });
   t.after(() => { if (second.exitCode === null) second.kill(); });
-  second.stderr.resume();
-  await handshake(second);
-  await waitFor(async () => JSON.parse(await fs.readFile(input.setup.receiptPath, "utf8")).launcherPid === second.pid);
-  const stopped = once(first, "close");
-  await fs.unlink(firstLauncher);
-  await stopped;
+  const errors = [];
+  second.stderr.on("data", (chunk) => errors.push(chunk));
+  assert.equal((await once(second, "close"))[0], 1);
+  assert.match(Buffer.concat(errors).toString(), /Morrow setup changed/);
   assert.deepEqual(await inspectClaudeDesktopConnection(input.setup), { installed: true, running: true });
-  assert.equal(JSON.parse(await fs.readFile(input.setup.receiptPath, "utf8")).launcherPid, second.pid);
-  const closed = once(second, "close");
-  second.stdin.end();
+  assert.equal(JSON.parse(await fs.readFile(input.setup.receiptPath, "utf8")).launcherPid, first.pid);
+  const closed = once(first, "close");
+  first.stdin.end();
   await closed;
 });
 
@@ -367,6 +465,85 @@ test("replacing Morrow setup revokes the running old workspace and prevents its 
   assert.match(Buffer.concat(errors).toString(), /Morrow setup changed/);
 });
 
+test("the installer record alone activates one generation and revokes a stale receipt and process", async (t) => {
+  const input = await fixture(t);
+  const launcherA = input.managedLauncherPath;
+  const processA = spawn(process.execPath, [launcherA], { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => { if (processA.exitCode === null) processA.kill(); });
+  processA.stdout.resume();
+  processA.stderr.resume();
+  await handshake(processA);
+  await waitFor(async () => (await inspect(input)).installed);
+
+  await activateSetup(input, input.setup, { selectedAssistantId: "claude-desktop" });
+  await new Promise((resolve) => setTimeout(resolve, 1_200));
+  assert.equal(processA.exitCode, null, "an unrelated valid record update preserves the active generation");
+
+  const extractedB = path.join(input.root, "Claude B", "Claude Extensions", "local.mcpb.morrow.morrow");
+  const launcherB = path.join(extractedB, "server", "launch.cjs");
+  const setupB = await prepareClaudeDesktopBundle({
+    nodePath: input.node,
+    serverEntryPath: input.server,
+    runtimeManifestPath: input.runtimeManifest,
+    upstreamsPath: input.upstreams,
+    workspaceRoot: input.workspace,
+    stateDirectory: path.dirname(input.installerRecordPath),
+    version: "1.0.0-rc.0",
+    platform: "darwin",
+    managedLauncherPath: launcherB,
+  });
+  const { unpackExtension } = await import("@anthropic-ai/mcpb");
+  assert.equal(await unpackExtension({ mcpbPath: setupB.bundlePath, outputDir: extractedB, silent: true }), true);
+
+  const inactiveB = spawn(process.execPath, [launcherB], { stdio: ["pipe", "pipe", "pipe"] });
+  inactiveB.stderr.resume();
+  assert.equal((await once(inactiveB, "close"))[0], 1, "a prepared but unrecorded generation cannot start");
+
+  const stoppedA = once(processA, "close");
+  await activateSetup(input, setupB, { selectedAssistantId: "claude-desktop" });
+  assert.deepEqual(await inspect(input), { installed: false, running: false }, "A's valid receipt became stale at the record commit");
+  await Promise.race([stoppedA, new Promise((_, reject) => setTimeout(() => reject(new Error("stale generation A stayed active")), 4_000).unref())]);
+
+  const reopenedA = spawn(process.execPath, [launcherA], { stdio: ["pipe", "pipe", "pipe"] });
+  reopenedA.stderr.resume();
+  assert.equal((await once(reopenedA, "close"))[0], 1, "generation A cannot reopen while B is active");
+
+  const processB = spawn(process.execPath, [launcherB], { stdio: ["pipe", "pipe", "pipe"] });
+  t.after(() => { if (processB.exitCode === null) processB.kill(); });
+  processB.stdout.resume();
+  processB.stderr.resume();
+  await handshake(processB);
+  const optionsB = { ...input.inspectionOptions, managedLauncherPath: launcherB };
+  await waitFor(async () => (await inspectClaudeDesktopConnectionRaw(setupB, optionsB)).installed);
+
+  const stoppedB = once(processB, "close");
+  await activateSetup(input, null);
+  assert.deepEqual(await inspectClaudeDesktopConnectionRaw(setupB, optionsB), { installed: false, running: false });
+  await Promise.race([stoppedB, new Promise((_, reject) => setTimeout(() => reject(new Error("removed generation B stayed active")), 4_000).unref())]);
+});
+
+test("a missing, linked, malformed, or oversized installer record fails before server spawn", async (t) => {
+  for (const state of ["missing", "linked", "malformed", "oversized"]) {
+    const input = await fixture(t);
+    const admitted = await fs.readFile(input.installerRecordPath);
+    if (state === "missing") await fs.unlink(input.installerRecordPath);
+    if (state === "linked") {
+      const target = `${input.installerRecordPath}.target`;
+      await fs.rename(input.installerRecordPath, target);
+      await fs.symlink(target, input.installerRecordPath);
+    }
+    if (state === "malformed") await fs.writeFile(input.installerRecordPath, "{not-json}\n");
+    if (state === "oversized") await fs.writeFile(input.installerRecordPath, Buffer.alloc(64 * 1024 + 1, 0x78));
+    const child = spawn(process.execPath, [input.managedLauncherPath], { stdio: ["pipe", "pipe", "pipe"] });
+    const errors = [];
+    child.stderr.on("data", (chunk) => errors.push(chunk));
+    assert.equal((await once(child, "close"))[0], 1, state);
+    assert.match(Buffer.concat(errors).toString(), /Morrow setup changed/, state);
+    assert.equal((await inspect(input)).installed, false, state);
+    if (state !== "linked") await fs.writeFile(input.installerRecordPath, admitted, { mode: 0o600 });
+  }
+});
+
 test("a generated source launcher or unavailable runtime cannot prove an installed connection", async (t) => {
   const input = await fixture(t);
   await writeReceipt(input, { launcherPid: await endedProcessId(), proxyPid: await endedProcessId(), connectedAt: new Date().toISOString() });
@@ -383,9 +560,116 @@ test("a generated source launcher or unavailable runtime cannot prove an install
 test("legacy bundles and changed runtime or workspace paths require fresh extension preparation", async (t) => {
   const input = await fixture(t);
   assert.equal(await isCurrentClaudeDesktopSetup(input.setup), true);
-  assert.equal(await isCurrentClaudeDesktopSetup(input.setup, { nodePath: process.execPath, workspaceRoot: input.workspace }), true);
+  assert.equal(await isCurrentClaudeDesktopSetup(input.setup, {
+    nodePath: input.node,
+    runtimeManifestPath: input.runtimeManifest,
+    workspaceRoot: input.workspace
+  }), true);
   assert.equal(await isCurrentClaudeDesktopSetup(input.setup, { workspaceRoot: input.root }), false);
   assert.equal(await isCurrentClaudeDesktopSetup(input.setup, { serverEntryPath: path.join(input.root, "unavailable.cjs") }), false);
   await fs.unlink(path.join(path.dirname(input.setup.receiptPath), "setup.json"));
+  assert.equal(await isCurrentClaudeDesktopSetup(input.setup), false);
+});
+
+test("Claude-managed launcher locations are exact on macOS and Windows", () => {
+  assert.equal(claudeDesktopLauncherPath({ platform: "darwin", homeDirectory: "/Users/Teacher" }),
+    "/Users/Teacher/Library/Application Support/Claude/Claude Extensions/local.mcpb.morrow.morrow/server/launch.cjs");
+  assert.equal(claudeDesktopLauncherPath({ platform: "win32", appDataDirectory: "C:\\Users\\Teacher\\AppData\\Roaming" }),
+    "C:\\Users\\Teacher\\AppData\\Roaming\\Claude\\Claude Extensions\\local.mcpb.morrow.morrow\\server\\launch.cjs");
+});
+
+test("macOS and Windows process proof require the recorded Claude ancestor", async () => {
+  const cases = [{
+    platform: "darwin",
+    proof: {
+      platform: "darwin",
+      processId: 41,
+      executablePath: "/Applications/Claude.app/Contents/MacOS/Claude",
+      bundleId: "com.anthropic.claudefordesktop",
+      teamId: "Q6L2SF6YDW"
+    }
+  }, {
+    platform: "win32",
+    proof: {
+      platform: "win32",
+      processId: 52,
+      executablePath: "C:\\Users\\Teacher\\AppData\\Local\\AnthropicClaude\\Claude.exe",
+      signerThumbprint: "A".repeat(40)
+    }
+  }];
+  for (const { platform, proof } of cases) {
+    const receipt = { launcherPid: 99, claudeProcess: proof };
+    const dependencies = {
+      platform,
+      running: true,
+      resolveExecutable: async (value) => value,
+      verifyExecutableIdentity: async () => true,
+      readProcessAncestry: async () => [{ processId: proof.processId, executablePath: proof.executablePath }]
+    };
+    assert.equal(await verifyClaudeProcessProof(receipt, dependencies), true, platform);
+    assert.equal(await verifyClaudeProcessProof(receipt, {
+      ...dependencies,
+      readProcessAncestry: async () => [{ processId: proof.processId + 1, executablePath: proof.executablePath }]
+    }), false, platform);
+  }
+});
+
+test("clientInfo metadata and an arbitrary copied launcher cannot prove Claude installation", async (t) => {
+  const input = await fixture(t);
+  const ended = await endedProcessId();
+  await writeReceipt(input, {
+    launcherPid: ended,
+    proxyPid: ended,
+    connectedAt: new Date().toISOString(),
+    clientInfo: { name: "Claude Desktop", version: "999" }
+  });
+  assert.deepEqual(await inspect(input, { verifyClaudeProcessProof: async () => false }),
+    { installed: false, running: false });
+
+  await writeReceipt(input, {
+    launcherPid: ended,
+    proxyPid: ended,
+    connectedAt: new Date().toISOString(),
+    clientInfo: undefined
+  });
+  assert.deepEqual(await inspect(input), { installed: true, running: false },
+    "verified process proof does not depend on clientInfo");
+
+  const copiedLauncher = path.join(input.root, "copied-launch.cjs");
+  await fs.copyFile(input.managedLauncherPath, copiedLauncher);
+  await writeReceipt(input, {
+    launcherPid: ended,
+    proxyPid: ended,
+    connectedAt: new Date().toISOString(),
+    launcherPath: copiedLauncher
+  });
+  assert.deepEqual(await inspect(input), { installed: false, running: false });
+});
+
+test("every setup check binds the runtime manifest, Node, server, and upstream bytes", async (t) => {
+  for (const field of ["runtimeManifest", "node", "server", "upstreams"]) {
+    const input = await fixture(t);
+    const original = await fs.readFile(input[field]);
+    await fs.writeFile(input[field], Buffer.concat([original, Buffer.from("\nchanged")]));
+    assert.equal(await isCurrentClaudeDesktopSetup(input.setup), false, field);
+    await fs.writeFile(input[field], original);
+    assert.equal(await isCurrentClaudeDesktopSetup(input.setup), true, field);
+  }
+});
+
+test("the launcher fails closed before spawn when a bound file changes", async (t) => {
+  const input = await fixture(t);
+  await fs.appendFile(input.upstreams, "\nchanged");
+  const child = spawn(process.execPath, [input.managedLauncherPath], { stdio: ["pipe", "pipe", "pipe"] });
+  const errors = [];
+  child.stderr.on("data", (chunk) => errors.push(chunk));
+  assert.equal((await once(child, "close"))[0], 1);
+  assert.match(Buffer.concat(errors).toString(), /Morrow setup changed/);
+  assert.equal(await isCurrentClaudeDesktopSetup(input.setup), false);
+});
+
+test("setup inspection rejects a bound file above its byte limit", async (t) => {
+  const input = await fixture(t);
+  await fs.writeFile(input.upstreams, Buffer.alloc(8 * 1024 * 1024 + 1, 0x78));
   assert.equal(await isCurrentClaudeDesktopSetup(input.setup), false);
 });

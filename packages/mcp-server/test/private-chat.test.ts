@@ -98,6 +98,13 @@ describe("Morrow Private Chat", () => {
       };
       expect(secondRound.inputRequests.private_chat_reply.params.messages.at(-1)!.content.text).toBe("Compare Student A1 with Student A2.");
       expect(calls).toHaveLength(2);
+      const replay = await retry(round.requestState);
+      expect(replay).toMatchObject({
+        isError: true,
+        structuredContent: { schema: "morrow.problem.v1", code: "private_chat_unavailable" },
+      });
+      expect(replay.content?.[0]).toMatchObject({ type: "text", text: expect.stringContaining("already used") });
+      expect(calls).toHaveLength(2);
       const result = await retry(secondRound.requestState);
       expect(result.isError).not.toBe(true);
       expect((result.structuredContent as JsonObject).status).toBe("closed");
@@ -116,6 +123,34 @@ describe("Morrow Private Chat", () => {
       expect(result.isError).not.toBe(true);
       expect(result.structuredContent).toMatchObject({ status: "closed", turns: 0 });
       expect(calls).toHaveLength(1);
+    } finally { await client.close(); await server.close(); }
+  });
+
+  it("relays a concurrently replayed continuation exactly once", async () => {
+    const { runtime, calls } = fixture({ continueOnce: true });
+    const client = new Client({ name: "Codex", version: "1" }, { capabilities: { sampling: {} }, versionNegotiation: { mode: { pin: "2026-07-28" } } });
+    const [a, b] = InMemoryTransport.createLinkedPair();
+    const server = serveStdio(() => createMorrowServer(runtime), { transport: b });
+    await client.connect(a);
+    try {
+      const round = await client.callTool({ name: "morrow_private_chat", arguments: {} }, { allowInputRequired: true }) as unknown as { requestState: string };
+      const continueRound = () => client.callTool({
+        name: "morrow_private_chat",
+        arguments: {},
+        requestState: round.requestState,
+        inputResponses: {
+          private_chat_reply: {
+            model: "local-test",
+            role: "assistant",
+            content: { type: "text", text: "Student A1 needs feedback." },
+          },
+        },
+      } as Parameters<Client["callTool"]>[0], { allowInputRequired: true });
+
+      const results = await Promise.all([continueRound(), continueRound()]);
+      expect(results.filter((result) => result.isError === true)).toHaveLength(1);
+      expect(results.filter((result) => result.resultType === "input_required")).toHaveLength(1);
+      expect(calls).toHaveLength(2);
     } finally { await client.close(); await server.close(); }
   });
 });

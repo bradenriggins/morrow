@@ -1,10 +1,10 @@
 export const ITEM_BANK_CREDENTIAL_MAX_AGE_MS = 10 * 60 * 1_000;
-export const ITEM_BANK_EXTERNAL_TOOL_ID = "54065";
 
 const API_HOST = /^[^.]+\.quiz-api(?:-[^.]+)*\.instructure\.com$/i;
 const LTI_HOST = /^[^.]+\.quiz-lti(?:-[^.]+)*\.instructure\.com$/i;
 const CONTEXT_UUID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
 const COURSE_ID = /^[1-9][0-9]{0,18}$/;
+const EXTERNAL_TOOL_ID = /^[1-9][0-9]{0,18}$/;
 const LAUNCH_NONCE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function parsedHttpsUrl(value) {
@@ -29,14 +29,38 @@ export function itemBankApiOriginForFrameUrl(value) {
   return host ? `https://${host}` : "";
 }
 
-export function itemBankLaunchUrl(tabUrl, canvasOrigin, courseId) {
+export function itemBankLaunchUrl(tabUrl, canvasOrigin, courseId, externalToolId) {
   const url = parsedHttpsUrl(tabUrl);
   const origin = parsedHttpsUrl(canvasOrigin);
   const pathCourse = url?.pathname.match(/^\/courses\/([1-9][0-9]{0,18})(?:\/|$)/)?.[1] || "";
+  const pathTool = url?.pathname.match(/^\/courses\/[1-9][0-9]{0,18}\/external_tools\/([1-9][0-9]{0,18})\/?$/)?.[1] || "";
   const course = String(courseId || pathCourse);
+  const tool = String(externalToolId || pathTool);
   if (!url || !origin || origin.href !== `${origin.origin}/` || url.origin !== origin.origin
-    || !COURSE_ID.test(course) || pathCourse !== course) return "";
-  return `${url.origin}/courses/${course}/external_tools/${ITEM_BANK_EXTERNAL_TOOL_ID}`;
+    || !COURSE_ID.test(course) || pathCourse !== course || !EXTERNAL_TOOL_ID.test(tool)) return "";
+  return `${url.origin}/courses/${course}/external_tools/${tool}`;
+}
+
+/**
+ * Resolve one course's Item Banks placement from Canvas's course Tabs response.
+ * Both the placement id and its URL must name the same numeric external-tool
+ * deployment. Missing and ambiguous placements are refused.
+ */
+export function itemBankLaunchFromCourseTabs(tabs, canvasOrigin, courseId) {
+  const origin = parsedHttpsUrl(canvasOrigin);
+  const course = String(courseId || "");
+  if (!origin || origin.href !== `${origin.origin}/` || !COURSE_ID.test(course)
+    || !Array.isArray(tabs) || tabs.length > 1_000) return null;
+  const matches = [];
+  for (const tab of tabs) {
+    if (!tab || typeof tab !== "object" || Array.isArray(tab) || tab.type !== "external"
+      || String(tab.label || "").trim().toLowerCase() !== "item banks") continue;
+    const externalToolId = String(tab.id || "").match(/^context_external_tool_([1-9][0-9]{0,18})$/)?.[1] || "";
+    const launchUrl = itemBankLaunchUrl(`${origin.origin}/courses/${course}`, origin.origin, course, externalToolId);
+    if (!launchUrl || tab.html_url !== launchUrl) continue;
+    matches.push({ externalToolId, launchUrl });
+  }
+  return matches.length === 1 ? Object.freeze(matches[0]) : null;
 }
 
 /**
@@ -82,9 +106,10 @@ export function itemBankCredentialFromRequest(details, launch, now = Date.now())
   if (!launch || launch.tabId !== details.tabId || !Number.isFinite(launch.launchedAt)
     || launch.launchedAt > now || now - launch.launchedAt > 45_000
     || typeof launch.launchNonce !== "string" || !LAUNCH_NONCE.test(launch.launchNonce)
-    || !COURSE_ID.test(String(launch.canvasLocalContextId || ""))) return null;
+    || !COURSE_ID.test(String(launch.canvasLocalContextId || ""))
+    || !EXTERNAL_TOOL_ID.test(String(launch.externalToolId || ""))) return null;
   const launchedUrl = parsedHttpsUrl(launch.launchUrl);
-  if (!launchedUrl || itemBankLaunchUrl(launch.launchUrl, launchedUrl.origin, launch.canvasLocalContextId) !== launch.launchUrl) return null;
+  if (!launchedUrl || itemBankLaunchUrl(launch.launchUrl, launchedUrl.origin, launch.canvasLocalContextId, launch.externalToolId) !== launch.launchUrl) return null;
   const requestUrl = parsedHttpsUrl(details.url);
   if (!requestUrl || !API_HOST.test(requestUrl.hostname) || requestUrl.pathname !== "/api/banks") return null;
   const contextClaims = requestUrl.searchParams.getAll("course_id");
@@ -103,6 +128,7 @@ export function itemBankCredentialFromRequest(details, launch, now = Date.now())
     authType: "Signature",
     contextUuid,
     canvasLocalContextId: String(launch.canvasLocalContextId),
+    externalToolId: launch.externalToolId,
     launchUrl: launch.launchUrl,
     launchNonce: launch.launchNonce,
     launchedAt: launch.launchedAt,
@@ -116,6 +142,7 @@ export function usableItemBankCredential(credential, expected, now = Date.now())
   if (credential.tabId !== expected.tabId || credential.frameId !== expected.frameId
     || credential.apiOrigin !== expected.apiOrigin
     || credential.canvasLocalContextId !== expected.canvasLocalContextId
+    || credential.externalToolId !== expected.externalToolId
     || credential.launchUrl !== expected.launchUrl
     || credential.launchNonce !== expected.launchNonce
     || credential.launchedAt !== expected.launchedAt
@@ -123,8 +150,9 @@ export function usableItemBankCredential(credential, expected, now = Date.now())
     || credential.capturedAt > now
     || now - credential.capturedAt > ITEM_BANK_CREDENTIAL_MAX_AGE_MS
     || !COURSE_ID.test(String(credential.canvasLocalContextId || ""))
+    || !EXTERNAL_TOOL_ID.test(String(credential.externalToolId || ""))
     || !LAUNCH_NONCE.test(String(credential.launchNonce || ""))
-    || !launchedUrl || itemBankLaunchUrl(credential.launchUrl, launchedUrl.origin, credential.canvasLocalContextId) !== credential.launchUrl
+    || !launchedUrl || itemBankLaunchUrl(credential.launchUrl, launchedUrl.origin, credential.canvasLocalContextId, credential.externalToolId) !== credential.launchUrl
     || itemBankApiOriginForFrameUrl(credential.apiOrigin) !== credential.apiOrigin
     || typeof credential.token !== "string" || credential.token.length < 51 || credential.token.length > 8192
     || credential.authType !== "Signature" || !CONTEXT_UUID.test(String(credential.contextUuid || ""))) return null;

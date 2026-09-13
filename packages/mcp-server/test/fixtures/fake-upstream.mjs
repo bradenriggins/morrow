@@ -7,12 +7,33 @@ const source = String(process.env.FAKE_SOURCE || "fake").trim().toLowerCase();
 const sourceToolName = `${source.replace(/[^a-z0-9]+/g, "_")}_only`;
 const sourceToolIsWrite = source === "morrow-legacy";
 const callLogPath = String(process.env.FAKE_CALL_LOG || "").trim();
+const lifecycleLogPath = String(process.env.FAKE_LIFECYCLE_LOG || "").trim();
 const delayMilliseconds = Number(process.env.FAKE_DELAY_MS || 0);
 const largeResultCharacters = Number(process.env.FAKE_LARGE_RESULT_CHARS || 0);
 
 function note(value) {
   if (callLogPath) appendFileSync(callLogPath, `${value}\n`, "utf8");
 }
+
+let lifecycleStopped = false;
+function noteLifecycle(value) {
+  if (lifecycleLogPath) appendFileSync(lifecycleLogPath, `${value}\n`, "utf8");
+}
+
+function stopFromSignal() {
+  if (!lifecycleStopped) {
+    lifecycleStopped = true;
+    noteLifecycle("stopped");
+  }
+  process.exit(0);
+}
+
+noteLifecycle("started");
+process.once("SIGTERM", stopFromSignal);
+process.once("SIGINT", stopFromSignal);
+process.once("exit", () => {
+  if (!lifecycleStopped) noteLifecycle("stopped");
+});
 
 async function waitForDelay(signal) {
   if (!Number.isFinite(delayMilliseconds) || delayMilliseconds <= 0) return;
@@ -125,7 +146,75 @@ function createServer() {
     );
   }
 
-  const internalNames = ["morrow_browser_edit_policy_set", "morrow_private_chat_exchange"];
+  const nativeCollisions = String(process.env.FAKE_NATIVE_COLLISIONS || "")
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
+  for (const name of nativeCollisions) {
+    server.registerTool(
+      name,
+      { description: "A source collision with a Morrow native tool.", inputSchema: z.object({}), annotations: { readOnlyHint: true } },
+      async () => ({ content: [{ type: "text", text: `source-collision:${name}` }] }),
+    );
+  }
+
+  if (process.env.FAKE_PRIVATE_CHAT === "1") {
+    server.registerTool(
+      "morrow_browser_bindings",
+      {
+        description: "Expose one exact fake browser binding for Private Chat.",
+        inputSchema: z.object({}),
+        annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      },
+      async () => ({
+        content: [{ type: "text", text: "fake browser binding" }],
+        structuredContent: {
+          schema: "morrow.browser-bindings.v1",
+          bindings: [],
+        },
+      }),
+    );
+    server.registerTool(
+      "morrow_private_chat_exchange",
+      {
+        description: "Relay a deterministic protected Private Chat exchange.",
+        inputSchema: z.object({
+          action: z.enum(["listen", "reply_and_listen"]),
+          sessionId: z.string(),
+          assistantName: z.string(),
+          sourceBindingId: z.string().optional(),
+          courseId: z.string().optional(),
+          assistantReply: z.string().optional(),
+        }),
+        annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      },
+      async ({ action, sessionId, sourceBindingId, courseId }) => {
+        note(`morrow_private_chat_exchange:${action}`);
+        if (action === "reply_and_listen") {
+          return {
+            content: [{ type: "text", text: "closed" }],
+            structuredContent: { schema: "morrow.private-chat.exchange.v1", status: "closed" },
+          };
+        }
+        return {
+          content: [{ type: "text", text: "protected message" }],
+          structuredContent: {
+            schema: "morrow.private-chat.exchange.v1",
+            status: "message",
+            sessionId,
+            sourceBindingId: sourceBindingId || "canvas:course-42",
+            courseId: courseId || "42",
+            protectedText: "Review Student A1's latest work.",
+          },
+        };
+      },
+    );
+  }
+
+  const internalNames = [
+    "morrow_browser_edit_policy_set",
+    ...(process.env.FAKE_PRIVATE_CHAT === "1" ? [] : ["morrow_private_chat_exchange"]),
+  ];
   if (process.env.FAKE_INTERNAL_BRIDGE_MAINTENANCE === "1") {
     internalNames.push("morrow_bridge_maintenance");
   }

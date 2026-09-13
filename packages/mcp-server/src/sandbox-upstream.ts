@@ -1,26 +1,54 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { randomUUID } from "node:crypto";
-import { dirname, resolve } from "node:path";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import {
+  canonicalPrivateStateFilePath,
+  readExactPrivateStateFile,
+  replaceExactPrivateStateFile,
+} from "@morrow/gateway-core";
 import * as z from "zod/v4";
 
-type Page = {
-  course_id: string;
-  page_slug: string;
-  title: string;
-  body: string;
-  revision: number;
-};
+const MAX_ESTATE_FILE_BYTES = 16 * 1024 * 1024;
+const ESTATE_FILE_OPTIONS = {
+  label: "sandbox estate",
+  minBytes: 1,
+  maxBytes: MAX_ESTATE_FILE_BYTES,
+} as const;
 
-type Estate = {
-  schema: "morrow.sandbox-estate.v1";
-  pages: Record<string, Page>;
-};
+const PageSchema = z.strictObject({
+  course_id: z.string().regex(/^90[0-9]{3}$/),
+  page_slug: z.string().regex(/^[a-z0-9][a-z0-9-]{0,79}$/),
+  title: z.string().min(1).max(200),
+  body: z.string().max(20_000),
+  revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+});
+
+const EstateSchema = z.strictObject({
+  schema: z.literal("morrow.sandbox-estate.v1"),
+  pages: z.record(z.string(), PageSchema),
+}).superRefine((value, context) => {
+  const keys = Object.keys(value.pages);
+  if (keys.length !== 100) {
+    context.addIssue({ code: "custom", path: ["pages"], message: "expected the deterministic 100-page estate" });
+    return;
+  }
+  for (let course = 1; course <= 100; course += 1) {
+    const courseId = String(90_000 + course);
+    const key = pageKey(courseId, "welcome");
+    const page = value.pages[key];
+    if (!page || page.course_id !== courseId || page.page_slug !== "welcome") {
+      context.addIssue({ code: "custom", path: ["pages", key], message: "page identity does not match its estate key" });
+    }
+  }
+});
+
+type Page = z.infer<typeof PageSchema>;
+type Estate = z.infer<typeof EstateSchema>;
 
 const estatePathValue = String(process.env.MORROW_SANDBOX_ESTATE_PATH || ":memory:").trim();
-const estatePath = estatePathValue === ":memory:" ? estatePathValue : resolve(estatePathValue);
+const estatePath = estatePathValue === ":memory:"
+  ? estatePathValue
+  : canonicalPrivateStateFilePath(estatePathValue, ESTATE_FILE_OPTIONS.label);
 
 function pageKey(courseId: string, pageSlug: string): string {
   return `${courseId}\0${pageSlug}`;
@@ -43,22 +71,26 @@ function initialEstate(): Estate {
 }
 
 function loadEstate(): Estate {
-  if (estatePath === ":memory:" || !existsSync(estatePath)) return initialEstate();
-  const value = JSON.parse(readFileSync(estatePath, "utf8")) as Estate;
-  if (value.schema !== "morrow.sandbox-estate.v1" || !value.pages || typeof value.pages !== "object") {
-    throw new Error("sandbox estate has an unsupported format");
-  }
-  return value;
+  if (estatePath === ":memory:") return initialEstate();
+  const content = readExactPrivateStateFile(estatePath, ESTATE_FILE_OPTIONS);
+  if (!content) return initialEstate();
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(content);
+    const parsed = EstateSchema.safeParse(JSON.parse(text));
+    if (parsed.success) return parsed.data;
+  } catch { /* report one stable format error below */ }
+  throw new Error("sandbox estate has an unsupported format");
 }
 
 let estate = loadEstate();
 
-function persist(): void {
+function persist(nextEstate: Estate): void {
   if (estatePath === ":memory:") return;
-  mkdirSync(dirname(estatePath), { recursive: true, mode: 0o700 });
-  const temporary = `${estatePath}.tmp-${process.pid}-${randomUUID()}`;
-  writeFileSync(temporary, `${JSON.stringify(estate)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-  renameSync(temporary, estatePath);
+  replaceExactPrivateStateFile(
+    estatePath,
+    Buffer.from(`${JSON.stringify(nextEstate)}\n`, "utf8"),
+    ESTATE_FILE_OPTIONS,
+  );
 }
 
 function notSent(code: string, text: string) {
@@ -162,11 +194,12 @@ function createSandboxServer(): McpServer {
         return notSent("sandbox_rejected_before_apply", "The synthetic provider rejected the request before apply.");
       }
       const updated: Page = { course_id, page_slug, title, body, revision: current.revision + 1 };
-      estate = {
+      const nextEstate: Estate = {
         ...estate,
         pages: { ...estate.pages, [pageKey(course_id, page_slug)]: updated },
       };
-      persist();
+      persist(nextEstate);
+      estate = nextEstate;
       if (fault === "throw_after_apply") throw new Error("sandbox_ambiguous_after_apply");
       return {
         content: [{ type: "text", text: `Updated ${course_id}/${page_slug} in the synthetic estate.` }],

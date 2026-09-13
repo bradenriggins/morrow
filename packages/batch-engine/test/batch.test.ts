@@ -1,4 +1,13 @@
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  chmodSync,
+  linkSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -27,6 +36,45 @@ function child(index: number, readOnly = true) {
 }
 
 describe("DurableBatchStore", () => {
+  it("creates and reloads one exact private batch encryption key", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-batch-key-"));
+    roots.push(root);
+    const path = join(root, "state.key");
+    const first = loadOrCreateBatchEncryptionKey(path);
+    const second = loadOrCreateBatchEncryptionKey(path);
+    expect(Buffer.from(second)).toEqual(Buffer.from(first));
+    expect(lstatSync(path).isFile()).toBe(true);
+    if (process.platform !== "win32") expect(lstatSync(path).mode & 0o077).toBe(0);
+  });
+
+  it("refuses linked, multiply linked, oversized, and broadly readable batch keys", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-batch-key-admission-"));
+    roots.push(root);
+    const valid = `${Buffer.alloc(32, 7).toString("base64url")}\n`;
+
+    const oversized = join(root, "oversized.key");
+    writeFileSync(oversized, "x".repeat(129), { mode: 0o600 });
+    expect(() => loadOrCreateBatchEncryptionKey(oversized)).toThrow(/exact private file/);
+
+    if (process.platform !== "win32") {
+      const target = join(root, "target.key");
+      writeFileSync(target, valid, { mode: 0o600 });
+      const linked = join(root, "linked.key");
+      symlinkSync(target, linked);
+      expect(() => loadOrCreateBatchEncryptionKey(linked)).toThrow(/exact private file/);
+
+      const alias = join(root, "alias.key");
+      linkSync(target, alias);
+      expect(() => loadOrCreateBatchEncryptionKey(target)).toThrow(/exact private file/);
+      expect(() => loadOrCreateBatchEncryptionKey(alias)).toThrow(/exact private file/);
+
+      const broad = join(root, "broad.key");
+      writeFileSync(broad, valid, { mode: 0o600 });
+      chmodSync(broad, 0o644);
+      expect(() => loadOrCreateBatchEncryptionKey(broad)).toThrow(/exact private file/);
+    }
+  });
+
   it("freezes, encrypts, runs, and reports a read batch", async () => {
     const root = mkdtempSync(join(tmpdir(), "morrow-batch-"));
     roots.push(root);

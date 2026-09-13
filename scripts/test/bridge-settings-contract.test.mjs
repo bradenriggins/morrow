@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
 import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
-import { categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, validEditPermission } from "../../connector/extension/src/edit-policy.js";
+import { categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditPermission } from "../../connector/extension/src/edit-policy.js";
 import { PROBLEM_CODES, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
 import { courseValue, detailText, primaryLabel, statusValue } from "../../connector/extension/popup/popup-view.js";
 
@@ -528,6 +528,41 @@ test("the scope digest follows the derived rule set", async () => {
   assert.deepEqual(widenedPermission.rules[0].allowedChangedFields, ["points", "title"]);
   assert.notEqual(permission.scopeDigest, widenedPermission.scopeDigest);
   assert.equal(await validEditPermission({ permission, binding: canvasBinding, catalogDigest: "b".repeat(64), operations: [widened] }), null);
+});
+
+test("one exact legacy catalog permission migrates to a new revision", async () => {
+  const operation = {
+    provider: "canvas", key: "PUT /v1/courses/{course_id}/widgets/{id}#update_widget", toolName: "canvas_update_widget",
+    path: "/v1/courses/{course_id}/widgets/{id}", readOnly: false, summary: "Update a widget", description: "Update one widget.",
+    inputSchema: { properties: { course_id: { type: "string" }, id: { type: "string" }, title: { type: "string" } } },
+  };
+  const legacyCatalogDigest = "a".repeat(64);
+  const catalogDigest = "b".repeat(64);
+  const legacy = await createEditPermission({
+    binding: canvasBinding,
+    catalogDigest: legacyCatalogDigest,
+    revision: 2,
+    enabledCategories: ["action:canvas:canvas_update_widget"],
+    operations: [operation],
+  });
+  const migrated = await migrateLegacyEditPermission({
+    permission: legacy,
+    binding: canvasBinding,
+    legacyCatalogDigest,
+    catalogDigest,
+    policyRevision: 4,
+    operations: [operation],
+  });
+  assert.equal(migrated?.revision, 5);
+  assert.equal(migrated?.catalogDigest, catalogDigest);
+  assert.deepEqual(migrated?.enabledCategories, legacy.enabledCategories);
+  assert.notEqual(migrated?.scopeDigest, legacy.scopeDigest);
+  assert.equal(await validEditPermission({ permission: legacy, binding: canvasBinding, catalogDigest, operations: [operation] }), null);
+  assert.deepEqual(await validEditPermission({ permission: migrated, binding: canvasBinding, catalogDigest, operations: [operation] }), migrated);
+  assert.equal(await migrateLegacyEditPermission({
+    permission: { ...legacy, catalogDigest: "c".repeat(64) }, binding: canvasBinding, legacyCatalogDigest, catalogDigest,
+    policyRevision: 4, operations: [operation],
+  }), null);
 });
 
 test("Canvas New Quiz nested image repairs require one exact guarded action", async () => {

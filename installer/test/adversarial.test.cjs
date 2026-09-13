@@ -66,21 +66,28 @@ function plant(id, exports) {
  * make. The controller and the update controller are recorders, so a refusal
  * that still performed the step is visible as a recorded call.
  */
-async function startedMorrow() {
+async function startedMorrow(options = {}) {
   const calls = [];
   const updateCalls = [];
-  const recorded = { calls, updateCalls, handlers: new Map(), events: new Map(), window: null, windowOpen: null, started: null };
+  const recorded = { calls, updateCalls, handlers: new Map(), events: new Map(), appEvents: new Map(), windows: [], window: null, windowOpen: null, started: null };
   const mainFrame = { url: canonicalPage };
   const webContents = {
     mainFrame,
     on(event, handler) { recorded.events.set(event, handler); return webContents; },
-    setWindowOpenHandler(handler) { recorded.windowOpen = handler; }
+    setWindowOpenHandler(handler) { recorded.windowOpen = handler; },
+    send() {}
   };
-  const setupState = { schema: "morrow.installer-state.v1", lifecycle: "ready_for_workspace" };
+  const setupState = options.repairState || { schema: "morrow.installer-state.v1", lifecycle: "ready_for_workspace" };
   const answer = (name, value) => async (...args) => { calls.push({ name, args }); return value; };
   const installer = {
     paths: { state: path.join(os.tmpdir(), "morrow-adversarial-start", "State") },
-    initializeBridgeAtStartup: answer("initializeBridgeAtStartup", undefined),
+    initializeBridgeAtStartup: async (...args) => {
+      calls.push({ name: "initializeBridgeAtStartup", args });
+      if (options.activateDuringBootstrap === true) {
+        await Promise.resolve();
+        recorded.appEvents.get("activate")?.();
+      }
+    },
     state: answer("state", setupState),
     configureWorkspace: answer("configureWorkspace", true),
     configureBlackboard: answer("configureBlackboard", undefined),
@@ -101,9 +108,11 @@ async function startedMorrow() {
   };
   const updateController = {
     snapshot: () => null,
+    subscribe() { return () => {}; },
     async start() { updateCalls.push("start"); },
     async check() { updateCalls.push("check"); },
     async installWhenIdle() { updateCalls.push("installWhenIdle"); },
+    async reconcileAfterRepair() { updateCalls.push("reconcileAfterRepair"); },
     stop() { updateCalls.push("stop"); }
   };
   const undo = [
@@ -118,11 +127,12 @@ async function startedMorrow() {
         // drops that promise. Holding it here is what lets the test await the
         // start instead of racing it.
         whenReady: () => ({ then(onReady) { recorded.started = Promise.resolve().then(onReady); return recorded.started; } }),
-        on() {},
+        on(name, handler) { recorded.appEvents.set(name, handler); },
         quit() {}
       },
       BrowserWindow: class {
-        constructor(options) { this.options = options; this.webContents = webContents; recorded.window = this; }
+        constructor(windowOptions) { this.options = windowOptions; this.webContents = webContents; recorded.window = this; recorded.windows.push(this); }
+        isDestroyed() { return false; }
         once() {}
         show() {}
         loadFile() {}
@@ -208,7 +218,7 @@ function nodeRuntimePinFor(root) {
 }
 
 function controller(root, overrides = {}) {
-  return createInstallerController({
+  const installer = createInstallerController({
     app: { getPath: (name) => (name === "userData" ? path.join(root, "UserData") : root) },
     dialog: {
       showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
@@ -231,6 +241,15 @@ function controller(root, overrides = {}) {
         : overrides
     )
   });
+  installer.acquireDesktopMutationGuard = async () => ({ kind: "owner", leaseId: "test-desktop-mutation" });
+  installer.stopRuntimeForDesktopMutation = async (guard) => {
+    await installer.closeRuntimeMonitor();
+    return { ...guard, kind: "stopped", leaseToken: "test-desktop-mutation-token" };
+  };
+  installer.releaseDesktopMutationGuard = async (guard) => {
+    if (installer.desktopMutationGuard === guard) installer.desktopMutationGuard = null;
+  };
+  return installer;
 }
 
 /**
@@ -267,10 +286,17 @@ async function completePayload(root, options = {}) {
   const gatewayFiles = [
     ["package.json", JSON.stringify({ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", type: "module" })],
     ["dist/index.js", "gateway entrypoint"],
-    ["dist/local-owner-maintenance.js", "export function localOwnerMaintenanceMarkerPresent() { return false; }\n"],
+    ["dist/local-owner-maintenance.js", [
+      "export function localOwnerMaintenanceMarkerPresent() { return false; }",
+      "export function acquireStoppedLocalOwnerMaintenanceLease() { return { leaseId: '00000000-0000-4000-8000-000000000001', leaseToken: 'morrow-stopped-maintenance-token-1234567890123456' }; }",
+      "export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard() { return null; }",
+      "export function removeExactLocalOwnerMaintenanceLease() { return true; }",
+      ""
+    ].join("\n")],
     ["dist/local-owner-sidecar-access.js", "sidecar fixture"]
   ];
   const files = [];
+  const directFiles = [];
   for (const [relative, content] of gatewayFiles) {
     const direct = path.join(app, "packages", "mcp-server", relative);
     const installed = path.join(app, "node_modules", "@morrow-lms", "gateway", relative);
@@ -279,19 +305,31 @@ async function completePayload(root, options = {}) {
     await fs.writeFile(direct, content);
     await fs.writeFile(installed, content);
     files.push({ path: `node_modules/@morrow-lms/gateway/${relative}`, bytes: Buffer.byteLength(content), sha256: sha256(content) });
+    directFiles.push({ path: `packages/mcp-server/${relative}`, bytes: Buffer.byteLength(content), sha256: sha256(content) });
   }
+  for (const relative of [
+    "packages/client-config/dist/cli.js",
+    "packages/client-config/dist/index.js",
+    "packages/canvas-connector-mcp/dist/index.js",
+    "installer/runtime-monitor.mjs",
+  ]) {
+    const content = await fs.readFile(path.join(app, relative));
+    directFiles.push({ path: relative, bytes: content.byteLength, sha256: sha256(content) });
+  }
+  directFiles.sort((left, right) => left.path.localeCompare(right.path));
   const entrypoint = gatewayFiles[1][1];
   const manifest = {
-    schema: "morrow.mcp-runtime-manifest.v1",
+    schema: "morrow.mcp-runtime-manifest.v2",
     package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
     entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: Buffer.byteLength(entrypoint), sha256: sha256(entrypoint) },
-    dependencies: [{ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", packageJson: files[0], files }]
+    dependencies: [{ name: "@morrow-lms/gateway", version: "1.0.0-rc.0", packageJson: files[0], files }],
+    directFiles,
   };
   const bytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
   const manifestSha256 = sha256(bytes);
   await fs.writeFile(path.join(app, "mcp-runtime-manifest.json"), bytes);
   await fs.writeFile(path.join(app, "package-input-manifest.json"), `${JSON.stringify({
-    schema: "morrow.desktop-package-input.v1",
+    schema: "morrow.desktop-package-input.v2",
     mcpRuntime: { path: "app/mcp-runtime-manifest.json", sha256: manifestSha256 }
   })}\n`);
   if (options.privateFileAccess) {
@@ -401,6 +439,20 @@ test("every action that takes no input refuses one, and performs its step only w
   }
 });
 
+test("a successful runtime repair retries the durable update reconciliation", async () => {
+  const repaired = {
+    schema: "morrow.installer-state.v1",
+    lifecycle: "ready_for_workspace",
+    runtime: { status: "ready" }
+  };
+  const started = await startedMorrow({ repairState: repaired });
+  const answer = await started.handlers.get("installer:repair")(trustedRequest(started));
+  assert.equal(answer.ok, true);
+  assert.deepEqual(answer.state, repaired);
+  assert.deepEqual(started.calls.map((call) => call.name), ["repair"]);
+  assert.deepEqual(started.updateCalls, ["reconcileAfterRepair"]);
+});
+
 test("the setup window navigates nowhere, opens nothing, and embeds nothing, whatever the address", async () => {
   const started = await startedMorrow();
   const addresses = [
@@ -421,6 +473,13 @@ test("the setup window navigates nowhere, opens nothing, and embeds nothing, wha
     }
   }
   for (const address of addresses) assert.deepEqual(started.windowOpen({ url: address }), { action: "deny" }, `a new window was allowed for ${address}`);
+});
+
+test("a macOS activation during desktop bootstrap creates one trusted window", async () => {
+  const started = await startedMorrow({ activateDuringBootstrap: true });
+  assert.equal(started.windows.length, 1);
+  const answer = await started.handlers.get("installer:get-state")(trustedRequest(started));
+  assert.equal(answer.ok, true);
 });
 
 test("a duplicate start registers no setup action at all", async (t) => {
@@ -501,7 +560,9 @@ test("a sealed payload file replaced by a link to identical bytes is refused", {
 
 test("the data removal removes the folder Morrow named and never a folder a link points at", async (t) => {
   const root = await temporaryRoot(t, "materials-link");
+  const manifestSha256 = await completePayload(root, { privateFileAccess: true });
   const installer = controller(root, {
+    trustedMcpRuntimeManifestSha256: () => manifestSha256,
     dialog: {
       showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
       showMessageBox: async () => ({ response: 1 })
@@ -712,7 +773,7 @@ function updateAdapter(options = {}) {
 }
 
 function enabledPolicy() {
-  return { enabled: true, automatic: false, feed: { id: "morrow-desktop-stable" } };
+  return { enabled: true, automatic: true, feed: { id: "morrow-desktop-stable" } };
 }
 
 function settled() {
@@ -729,8 +790,7 @@ test("an update announced for another computer, another architecture, or an unre
     [{ version: "1.0.1.1", platform: "darwin", arch: "arm64" }, "update_version_invalid"]
   ];
   for (const [candidate, reason] of cases) {
-    // The updater's own event, which arrives without a check of Morrow's.
-    const announced = updateAdapter();
+    const announced = updateAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: candidate }) });
     const controllerForEvent = createUpdateController({
       adapter: announced,
       policy: enabledPolicy(),
@@ -739,12 +799,12 @@ test("an update announced for another computer, another architecture, or an unre
       commitRestartLease: async () => ({ status: "closing" })
     });
     await controllerForEvent.start();
-    announced.emit("update-available", { updateInfo: candidate });
     assert.equal(controllerForEvent.snapshot().status, "error", `${candidate.version} was accepted`);
     assert.equal(controllerForEvent.snapshot().reason, reason);
     assert.equal(announced.downloads, 0, `${candidate.version} started a download`);
 
-    // The same candidate delivered as a finished download.
+    // An unsolicited downloaded event has no active controller generation and
+    // cannot activate even a candidate-shaped payload.
     const delivered = updateAdapter();
     const controllerForDownload = createUpdateController({
       adapter: delivered,
@@ -755,9 +815,9 @@ test("an update announced for another computer, another architecture, or an unre
     });
     await controllerForDownload.start();
     delivered.emit("update-downloaded", candidate);
-    assert.equal(controllerForDownload.snapshot().status, "error", `${candidate.version} was accepted as downloaded`);
+    assert.equal(controllerForDownload.snapshot().status, "idle", `${candidate.version} was accepted as downloaded`);
     assert.equal(controllerForDownload.snapshot().availableVersion, null);
-    assert.equal((await controllerForDownload.installWhenIdle()).status, "error");
+    assert.equal((await controllerForDownload.installWhenIdle()).status, "idle");
     assert.equal(delivered.installs, 0, `${candidate.version} was handed to the updater`);
     controllerForEvent.stop();
     controllerForDownload.stop();
@@ -774,7 +834,7 @@ test("a verified update stays ready through a later no-update answer, error, or 
     commitRestartLease: async () => ({ status: "closing" })
   });
   await controllerForUpdate.start();
-  adapter.emit("update-downloaded", { version: "1.0.1" });
+  await settled();
   assert.equal(controllerForUpdate.snapshot().status, "ready");
 
   adapter.emit("update-not-available", { version: "1.0.0" });
@@ -800,7 +860,7 @@ test("work Morrow cannot confirm is idle keeps a verified update ready and hands
     commitRestartLease: async () => { leases.push("commit"); return { status: "closing" }; }
   });
   await controllerForUpdate.start();
-  adapter.emit("update-downloaded", { version: "1.0.1" });
+  await settled();
 
   const deferred = await controllerForUpdate.installWhenIdle();
   assert.equal(deferred.status, "ready");
@@ -811,7 +871,7 @@ test("work Morrow cannot confirm is idle keeps a verified update ready and hands
   controllerForUpdate.stop();
 });
 
-test("a committed restart lease is never released and never handed over twice", async () => {
+test("an unrecorded update releases its still-reversible restart lease and never commits", async () => {
   const leases = [];
   const adapter = updateAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
   const controllerForUpdate = createUpdateController({
@@ -828,17 +888,16 @@ test("a committed restart lease is never released and never handed over twice", 
     confirmUpdatedRuntime: async () => ({ status: "unknown" })
   });
   await controllerForUpdate.start();
-  adapter.emit("update-downloaded", { version: "1.0.1" });
+  await settled();
 
-  // Without a recorded attempt Morrow cannot tell a new version that never
-  // started from an ordinary start, so it keeps the update and hands over
-  // nothing. The lease it committed stays committed.
+  // Without a durable attempt Morrow keeps the update and releases the lease
+  // before the owner crosses its closing boundary.
   const deferred = await controllerForUpdate.installWhenIdle();
   assert.equal(deferred.status, "ready");
   assert.equal(deferred.reason, "active_or_uncertain_operations");
   assert.equal(adapter.installs, 0);
-  assert.deepEqual(leases, ["acquire", "commit:known-idle-lease"]);
+  assert.deepEqual(leases, ["acquire", "release:known-idle-lease"]);
   await settled();
-  assert.deepEqual(leases, ["acquire", "commit:known-idle-lease"], "the committed lease was released after the fact");
+  assert.deepEqual(leases, ["acquire", "release:known-idle-lease"]);
   controllerForUpdate.stop();
 });

@@ -5,6 +5,7 @@ import {
   BRIDGE_TEST_RUNTIME_REVISION,
   BRIDGE_TEST_WAIT_MS,
   BridgeClosedError,
+  BridgeServerAuthenticationError,
   BridgeTimeoutError,
   connectBridgeTestClient,
 } from "./fixtures/bridge-client.js";
@@ -98,12 +99,13 @@ describe("Bridge handshake", () => {
     });
   }, 15_000);
 
-  it("refuses a wrong token with close code 4403", async () => {
+  it("refuses a server proof made with a different token", async () => {
     await withBridge(async (port) => {
       const refused = connectBridgeTestClient({
         port, token: WRONG_TOKEN, extensionId: EXTENSION_ID, catalogDigest: CATALOG_DIGEST, bindings: BINDINGS,
       });
-      await expect(refused).rejects.toMatchObject({ code: 4403, reason: "bridge_identity_refused" });
+      await expect(refused).rejects.toThrow(BridgeServerAuthenticationError);
+      await expect(refused).rejects.toMatchObject({ code: 4403, reason: "bridge_server_identity_refused" });
     });
   }, 15_000);
 

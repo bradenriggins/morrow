@@ -10,10 +10,15 @@ export const CANVAS_COURSE_FILE_TRANSFER_TOOL = "canvas_transfer_course_file";
 export const CANVAS_COURSE_FILE_TRANSFER_OPERATION = "canvas.private.course_file.transfer.v1";
 export const CANVAS_FILE_APPROVAL_TTL_MS = 15 * 60_000;
 
+const canvasId = z.preprocess(
+  (value) => typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? String(value) : value,
+  z.string().regex(/^[1-9][0-9]{0,18}$/),
+);
+
 export const canvasCourseFileUploadInputSchema = z.strictObject({
   source_binding_id: z.string().regex(/^[A-Za-z0-9_.:@-]{1,160}$/),
-  course_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-  folder_id: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  course_id: canvasId,
+  folder_id: canvasId,
   material_path: z.string().min(11).max(4096),
 });
 
@@ -29,9 +34,9 @@ export function isCanvasCourseFileTransfer(mapping: CatalogTool): boolean {
     ));
 }
 
-export function canvasFileScope(binding: JsonObject, sourceBindingId: string, courseId: number, contentType: string): FileStageScope {
+export function canvasFileScope(binding: JsonObject, sourceBindingId: string, courseId: string, contentType: string): FileStageScope {
   if (binding.provider !== "canvas" || binding.sourceBindingId !== sourceBindingId
-    || binding.courseId !== String(courseId) || binding.runtimeVerified !== true
+    || binding.courseId !== courseId || binding.runtimeVerified !== true
     || typeof binding.origin !== "string"
     || typeof binding.principalFingerprint !== "string" || !/^[a-f0-9]{64}$/.test(binding.principalFingerprint)
     || typeof binding.sessionGeneration !== "number" || !Number.isSafeInteger(binding.sessionGeneration) || binding.sessionGeneration < 1
@@ -42,7 +47,7 @@ export function canvasFileScope(binding: JsonObject, sourceBindingId: string, co
   return {
     provider: "canvas",
     sourceBindingId,
-    courseId: String(courseId),
+    courseId,
     origin: binding.origin,
     siteUrl: binding.origin + "/",
     principalFingerprint: binding.principalFingerprint,

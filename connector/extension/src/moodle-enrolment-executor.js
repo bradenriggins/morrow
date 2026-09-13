@@ -59,6 +59,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleEnrolmentInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const SCHEMA = "morrow.moodle-enrolment-write.v1";
   const PARTICIPANTS_SCHEMA = "morrow.moodle-course-participants.v1";
@@ -228,12 +230,46 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
         && !received.hash && !received.username && !received.password;
     } catch { return false; }
   };
-  const boundedText = async (response) => {
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const boundedText = async (response, expiresAt) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return null;
-    let value;
-    try { value = await response.text(); } catch { return null; }
-    return typeof value === "string" && value.length <= MAX_RESPONSE_BYTES ? value : null;
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      cancelBody(response?.body);
+      return null;
+    }
+    const reader = response?.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") return null;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let value = "";
+    try {
+      for (;;) {
+        const remaining = Number.isFinite(expiresAt) ? expiresAt - Date.now() : Infinity;
+        if (remaining <= 0) throw new Error("moodle_execution_expired");
+        let timeout;
+        const next = Number.isFinite(remaining)
+          ? await Promise.race([
+              reader.read(),
+              new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+            ]).finally(() => clearTimeout(timeout))
+          : await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_RESPONSE_BYTES) {
+          cancelBody(reader);
+          return null;
+        }
+        value += decoder.decode(next.value, { stream: true });
+      }
+      return value + decoder.decode();
+    } catch {
+      cancelBody(reader);
+      return null;
+    }
   };
   const parseHtml = (html) => {
     if (typeof html !== "string" || typeof globalThis.DOMParser !== "function") return null;
@@ -251,10 +287,11 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname: method, args: methodArgs }]),
+        signal: requestSignal(expiresAt),
       });
     } catch { return { error: "moodle_enrolment_request_failed" }; }
     if (!response.ok || !sameRoute(response.url, endpoint)) return { error: "moodle_enrolment_service_unavailable", status: response.status };
-    const raw = await boundedText(response);
+    const raw = await boundedText(response, expiresAt);
     if (raw === null) return { error: "moodle_enrolment_response_unavailable", status: response.status };
     let payload;
     try { payload = JSON.parse(raw); } catch { return { error: "moodle_enrolment_response_invalid", status: response.status }; }
@@ -397,6 +434,10 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
    * beside it. A course past the bound is incomplete, never a partial list.
    */
   const participantsScan = async (context, courseId, expiresAt) => {
+    const ajaxCourseId = Number(courseId);
+    if (!Number.isSafeInteger(ajaxCourseId) || String(ajaxCourseId) !== courseId) {
+      return { error: "moodle_enrolment_course_id_unsupported" };
+    }
     const participants = [];
     const rows = new Map();
     let totalRows = null;
@@ -407,7 +448,7 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
         handler: "participants",
         uniqueid: `user-index-participants-${courseId}`,
         sortdata: [{ sortby: "lastname", sortorder: 4 }],
-        filters: [{ name: "courseid", jointype: 1, values: [Number(courseId)] }],
+        filters: [{ name: "courseid", jointype: 1, values: [ajaxCourseId] }],
         jointype: 1,
         firstinitial: "",
         lastinitial: "",
@@ -463,15 +504,15 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
   /** Everyone except the person this change names, as the digest sees them. */
   const othersDigest = (scan, userId) => digest(scan.data.participants.filter((entry) => entry.user_id !== userId));
 
-  const readPage = async (context, endpoint) => {
+  const readPage = async (context, endpoint, expiresAt) => {
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(expiresAt) });
     } catch { return { error: "moodle_enrolment_page_unavailable" }; }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())) {
       return { error: "moodle_enrolment_page_unavailable", status: response.status };
     }
-    const html = await boundedText(response);
+    const html = await boundedText(response, expiresAt);
     const documentValue = parseHtml(html);
     return documentValue ? { status: response.status, document: documentValue } : { error: "moodle_enrolment_page_unavailable", status: response.status };
   };
@@ -514,7 +555,7 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
    * The loaded form, carried through unchanged except for the controls one
    * reviewed change names, and sent exactly once.
    */
-  const postForm = async (context, action, entries, changes, submit) => {
+  const postForm = async (context, action, entries, changes, submit, expiresAt) => {
     const preflight = currentContext();
     if (!sameContext(context, preflight)) return { error: "moodle_enrolment_context_changed" };
     const body = new URLSearchParams();
@@ -534,13 +575,14 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual",
         headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", Accept: "text/html" },
         body,
+        signal: requestSignal(expiresAt),
       });
     } catch { return { lost: true }; }
     if (response.type === "opaqueredirect") return { sent: true, redirected: true };
     const status = response.status;
     if ([301, 302, 303, 307, 308].includes(status)) return { sent: true, redirected: true, status };
     if (!response.ok) return { sent: true, status };
-    const html = await boundedText(response);
+    const html = await boundedText(response, expiresAt);
     const documentValue = parseHtml(html);
     // A submission Moodle refuses comes back as the same form again, and that
     // saved nothing.
@@ -553,9 +595,9 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
    * enrolment methods page renders for it. A course with no such link, or with
    * more than one, is refused: Morrow cannot state which method it would use.
    */
-  const manualEnrolmentPage = async (context, courseId) => {
+  const manualEnrolmentPage = async (context, courseId, expiresAt) => {
     const instances = urlFor(context, INSTANCES_PATH, { id: courseId });
-    const page = await readPage(context, instances);
+    const page = await readPage(context, instances, expiresAt);
     if (page.error) return { error: "moodle_enrolment_methods_unavailable", status: page.status };
     const links = [];
     for (const link of page.document.querySelectorAll("a[href]")) {
@@ -564,11 +606,19 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
       if (target.origin !== context.origin || target.pathname !== `${context.basePath}${MANUAL_MANAGE_PATH}`) continue;
       const enrolId = id(target.searchParams.get("enrolid") || "");
       if (!enrolId || id(target.searchParams.get("id") || "") !== courseId) continue;
-      if (!links.some((entry) => entry.enrolId === enrolId)) links.push({ enrolId, href: target.href });
+      const row = link.closest("tr");
+      const methodCell = row ? [...row.children].find((cell) => ["TD", "TH"].includes(cell.tagName) && !cell.contains(link)) : null;
+      const method = label(methodCell?.textContent);
+      if (!method) continue;
+      const prior = links.find((entry) => entry.enrolId === enrolId);
+      if (prior && (prior.href !== target.href || prior.method !== method)) {
+        return { error: "moodle_enrolment_manual_method_ambiguous", status: page.status };
+      }
+      if (!prior) links.push({ enrolId, href: target.href, method });
     }
     if (links.length === 0) return { error: "moodle_enrolment_manual_method_unavailable", status: page.status };
     if (links.length > 1) return { error: "moodle_enrolment_manual_method_ambiguous", status: page.status };
-    const manage = await readPage(context, new URL(links[0].href));
+    const manage = await readPage(context, new URL(links[0].href), expiresAt);
     if (manage.error) return { error: "moodle_enrolment_page_unavailable", status: manage.status };
     const form = nativeForm(manage.document, new URL(links[0].href));
     if (!form) return { error: "moodle_enrolment_form_unavailable", status: manage.status };
@@ -589,6 +639,7 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
     return {
       status: manage.status,
       enrolId: links[0].enrolId,
+      method: links[0].method,
       action,
       entries,
       add,
@@ -660,7 +711,7 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
   const runEnrol = async (context, definition, args, expiresAt) => {
     const bound = await boundState(context, args, expiresAt, "absent");
     if (bound.error) return failure(bound.error, bound.status);
-    const page = await manualEnrolmentPage(context, args.courseId);
+    const page = await manualEnrolmentPage(context, args.courseId, expiresAt);
     if (page.error) return failure(page.error, page.status);
     if (!page.role.role_id || !page.role.name) return failure("moodle_enrolment_form_invalid", page.status);
     // Moodle's own candidate list for this exact enrolment method is what binds
@@ -673,13 +724,18 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
     const refreshed = await refreshedState(context, args, expiresAt);
     if (refreshed.error) return failure(refreshed.error, refreshed.status);
     const before = await othersDigest(refreshed.fresh, args.userId);
-    const posted = await postForm(context, page.action, page.entries, new Map([["addselect[]", [args.userId]]]), page.add);
+    const posted = await postForm(context, page.action, page.entries, new Map([["addselect[]", [args.userId]]]), page.add, expiresAt);
     if (posted.error) return failure(posted.error, page.status);
     if (posted.lost) return unconfirmedWrite("moodle_enrolment_write_unconfirmed");
+    if (posted.redisplayed) return refusedWrite(posted.status);
     const after = await participantsScan(context, args.courseId, expiresAt);
     if (after.error) return unconfirmedWrite(after.error, posted.status);
+    const saved = after.rows.get(args.userId)?.anchor;
     const record = participantResult(after, args.userId);
-    if (!record || record.enrolments.length === 0) return unconfirmedWrite("moodle_enrolment_readback_mismatch", posted.status);
+    if (!record || !saved || saved.role.values.length !== 1 || saved.role.values[0] !== page.role.role_id
+      || saved.enrolments.length !== 1 || saved.enrolments[0].method !== page.method) {
+      return unconfirmedWrite("moodle_enrolment_readback_mismatch", posted.status);
+    }
     if (await othersDigest(after, args.userId) !== before) return unconfirmedWrite("moodle_enrolment_other_participants_changed", posted.status);
     return verified(definition, args, posted.status ?? after.status, after, {
       participant_before: null,
@@ -696,7 +752,7 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
     if (sole.error) return failure(sole.error, bound.reviewed.status);
     if (!sole.enrolment.editId) return failure("moodle_enrolment_action_unavailable", bound.reviewed.status);
     const endpoint = urlFor(context, EDIT_ENROLMENT_PATH, { ue: sole.enrolment.editId });
-    const page = await readPage(context, endpoint);
+    const page = await readPage(context, endpoint, expiresAt);
     if (page.error) return failure(page.error, page.status);
     const form = nativeForm(page.document, endpoint);
     const entries = form ? entriesFor(form) : null;
@@ -718,13 +774,13 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
     const refreshed = await refreshedState(context, args, expiresAt);
     if (refreshed.error) return failure(refreshed.error, refreshed.status);
     const before = await othersDigest(refreshed.fresh, args.userId);
-    const posted = await postForm(context, action, entries, new Map([[STATUS_FIELD, [STATUS_SUSPENDED]]]), submit);
+    const posted = await postForm(context, action, entries, new Map([[STATUS_FIELD, [STATUS_SUSPENDED]]]), submit, expiresAt);
     if (posted.error) return failure(posted.error, page.status);
     if (posted.lost) return unconfirmedWrite("moodle_enrolment_write_unconfirmed");
     if (posted.redisplayed) return refusedWrite(posted.status);
     // The saved status is read from the same native control the change used, so
     // the answer does not depend on the words the site renders for a status.
-    const saved = await readPage(context, endpoint);
+    const saved = await readPage(context, endpoint, expiresAt);
     const savedForm = saved.document ? nativeForm(saved.document, endpoint) : null;
     const savedEntries = savedForm ? entriesFor(savedForm) : null;
     if (!savedEntries || !savedEntries.some(([name, value]) => name === STATUS_FIELD && value === STATUS_SUSPENDED)) {
@@ -753,7 +809,7 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
     if (sole.error) return failure(sole.error, bound.reviewed.status);
     if (!sole.enrolment.unenrolId) return failure("moodle_enrolment_action_unavailable", bound.reviewed.status);
     const endpoint = urlFor(context, UNENROL_PATH, { ue: sole.enrolment.unenrolId });
-    const page = await readPage(context, endpoint);
+    const page = await readPage(context, endpoint, expiresAt);
     if (page.error) return failure(page.error, page.status);
     // Moodle's own confirmation. Its continue button is the request this
     // operation sends, and it is the only form on that page that submits back
@@ -772,7 +828,7 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
     if (refreshed.error) return failure(refreshed.error, refreshed.status);
     const record = participantResult(refreshed.fresh, args.userId);
     const before = await othersDigest(refreshed.fresh, args.userId);
-    const posted = await postForm(context, action, entries, new Map(), null);
+    const posted = await postForm(context, action, entries, new Map(), null, expiresAt);
     if (posted.error) return failure(posted.error, page.status);
     if (posted.lost) return unconfirmedWrite("moodle_enrolment_write_unconfirmed");
     const after = await participantsScan(context, args.courseId, expiresAt);
@@ -919,6 +975,8 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
  * injection, so every dependency remains inside the function body.
  */
 export async function executeMoodleEnrolmentCandidateInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const OPERATION = "moodle.private.enrolment_candidate.find.v1";
   const TOOL = "morrow_private_moodle_find_enrolment_candidate";
@@ -991,7 +1049,10 @@ export async function executeMoodleEnrolmentCandidateInPage(rawInput) {
   };
   const boundedText = async (response) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return null;
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return null;
+    }
     const reader = response?.body?.getReader?.();
     if (!reader) return null;
     const chunks = [];
@@ -1003,7 +1064,7 @@ export async function executeMoodleEnrolmentCandidateInPage(rawInput) {
         if (!(next.value instanceof Uint8Array)) return null;
         size += next.value.byteLength;
         if (size > MAX_RESPONSE_BYTES) {
-          await reader.cancel().catch(() => undefined);
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return null;
         }
         chunks.push(next.value);
@@ -1031,6 +1092,7 @@ export async function executeMoodleEnrolmentCandidateInPage(rawInput) {
         cache: "no-store",
         redirect: "error",
         headers: { Accept: "text/html" },
+        signal: requestSignal(expiresAt),
       });
     } catch { return { error: "moodle_enrolment_candidate_request_failed" }; }
     const contentType = String(response.headers?.get?.("content-type") || "").toLowerCase();
@@ -1157,7 +1219,7 @@ export async function executeMoodleEnrolmentCandidateInPage(rawInput) {
       data: {
         schema: SCHEMA,
         provider: PROVIDER,
-        course_id: Number(courseId),
+        course_id: courseId,
         candidate: { user_id: matches[0].userId },
         match: { kind: "exact_native_query", candidate_count: 1 },
         proof: {

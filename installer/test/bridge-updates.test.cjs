@@ -7,11 +7,14 @@ const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
 const { spawnSync } = require("node:child_process");
+const { DatabaseSync } = require("node:sqlite");
+const { readProcessStartedAt } = require("../shared/process-lifetime.cjs");
 const {
   ACTIVE_FOLDER_MARKER,
   BridgeUpdateError,
   bridgeInstallationStatus,
   confirmBridgeUpdate,
+  inspectPendingBridgeUpdate,
   initializeBridgeDirectory,
   issueBridgeActiveFolderChallenge,
   prepareBridgeUpdate,
@@ -41,7 +44,7 @@ async function fixture(root, version, options = {}) {
     background: { service_worker: "src/service-worker.js", type: "module" }
   };
   await fs.writeFile(path.join(sourceDirectory, "manifest.json"), `${JSON.stringify(manifest)}\n`);
-  await fs.writeFile(path.join(sourceDirectory, "src", "service-worker.js"), `export const version = ${JSON.stringify(version)};\n`);
+  await fs.writeFile(path.join(sourceDirectory, "src", "service-worker.js"), options.workerSource || `export const version = ${JSON.stringify(version)};\n`);
   await fs.writeFile(path.join(sourceDirectory, "settings.html"), "<main>Morrow Bridge</main>\n");
   const paths = ["manifest.json", "settings.html", "src/service-worker.js"];
   const files = [];
@@ -84,8 +87,39 @@ async function record(stateDirectory) {
   return JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
 }
 
+async function writeRecord(stateDirectory, value) {
+  await fs.writeFile(path.join(stateDirectory, "bridge-installation.json"), `${JSON.stringify(value)}\n`, { mode: 0o600 });
+}
+
+function transactionPath(stateDirectory) {
+  return path.join(stateDirectory, "bridge-update-transaction.json");
+}
+
 function lockPath(stateDirectory) {
   return path.join(stateDirectory, "bridge-update.lock");
+}
+
+function lockDatabasePath(stateDirectory) {
+  return path.join(stateDirectory, "bridge-update-lock.sqlite3");
+}
+
+function seedDatabaseLock(stateDirectory, { lockId = crypto.randomUUID(), pid, startedAt, processStartedAt = null }) {
+  const database = new DatabaseSync(lockDatabasePath(stateDirectory));
+  try {
+    database.exec([
+      "CREATE TABLE IF NOT EXISTS bridge_update_lock (",
+      "  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),",
+      "  lock_id TEXT NOT NULL CHECK (length(lock_id) = 36),",
+      "  pid INTEGER NOT NULL CHECK (pid > 0),",
+      "  started_at TEXT NOT NULL,",
+      "  process_started_at TEXT",
+      ") STRICT;"
+    ].join("\n"));
+    database.prepare("INSERT OR REPLACE INTO bridge_update_lock (singleton, lock_id, pid, started_at, process_started_at) VALUES (1, ?, ?, ?, ?)")
+      .run(lockId, pid, startedAt, processStartedAt);
+  } finally {
+    database.close();
+  }
 }
 
 function backupRoot(stateDirectory) {
@@ -103,8 +137,8 @@ function exitedPid() {
   return child.pid;
 }
 
-async function stageUpdate(root, stateDirectory, bridgeDirectory, activeFolderChallenge, fromVersion, toVersion) {
-  const next = await fixture(root, toVersion);
+async function stageUpdate(root, stateDirectory, bridgeDirectory, activeFolderChallenge, fromVersion, toVersion, fixtureOptions = {}) {
+  const next = await fixture(root, toVersion, fixtureOptions);
   const quiesceEpoch = `epoch-for-the-${fromVersion}-worker`;
   return prepareBridgeUpdate({
     ...next,
@@ -147,6 +181,7 @@ test("read-only installation status does not create a Bridge or rotate its activ
     installed: false,
     extensionId: null,
     version: null,
+    releaseManifestSha256: null,
     activeFolderChallenge: null,
     manualChromeReloadRequired: false
   });
@@ -161,6 +196,7 @@ test("read-only installation status does not create a Bridge or rotate its activ
     installed: true,
     extensionId,
     version: "1.0.2",
+    releaseManifestSha256: release.trustedReleaseManifestSha256,
     activeFolderChallenge: initial.activeFolderChallenge,
     manualChromeReloadRequired: false
   });
@@ -231,10 +267,10 @@ test("a newer unpacked Bridge is staged before quiescence, swaps once, and keeps
       assert.equal(manifestVersion, "1.0.2");
       assert.equal((await fs.readdir(path.dirname(bridgeDirectory))).some((name) => name.startsWith(".morrow-bridge-stage-")), true);
       assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\n');
-      const held = JSON.parse(await fs.readFile(lockPath(stateDirectory), "utf8"));
-      assert.equal(held.schema, "morrow.bridge.update-lock.v1");
-      assert.equal(held.pid, process.pid);
-      assert.equal(Number.isFinite(Date.parse(held.startedAt)), true);
+      await assertBridgeError(
+        () => issueBridgeActiveFolderChallenge({ stateDirectory, bridgeDirectory, challenge: challenge("concurrent") }),
+        "bridge_update_busy"
+      );
       return {
         schema: "morrow.bridge.update-quiesced.v1",
         extensionId,
@@ -261,12 +297,19 @@ test("a newer unpacked Bridge is staged before quiescence, swaps once, and keeps
     installed: true,
     extensionId,
     version: "1.0.3",
+    releaseManifestSha256: staged.releaseManifestSha256,
     activeFolderChallenge: staged.activeFolderChallenge,
     manualChromeReloadRequired: true
   });
 
   const extensionReadback = readback(staged.activeFolderChallenge);
   assert.equal(extensionReadback.manifestVersion, "1.0.3");
+  assert.deepEqual(await inspectPendingBridgeUpdate({ stateDirectory, bridgeDirectory, expectedExtensionId: extensionId, extensionReadback }), {
+    extensionId,
+    previousVersion: "1.0.2",
+    version: "1.0.3",
+    quiesceEpoch: "epoch-for-the-exact-old-worker",
+  });
   const confirmed = await confirmBridgeUpdate({ stateDirectory, bridgeDirectory, expectedExtensionId: extensionId, extensionReadback });
   assert.equal(confirmed.confirmed, true);
   assert.equal(confirmed.backupDirectory, updated.backupDirectory);
@@ -277,6 +320,107 @@ test("a newer unpacked Bridge is staged before quiescence, swaps once, and keeps
   assert.equal((await bridgeInstallationStatus({ stateDirectory, bridgeDirectory })).manualChromeReloadRequired, false);
   assert.equal(await present(lockPath(stateDirectory)), false);
   await assertBridgeError(() => confirmBridgeUpdate({ stateDirectory, bridgeDirectory, expectedExtensionId: extensionId, extensionReadback }), "bridge_update_confirmation_missing");
+});
+
+test("changed sealed Bridge bytes at the same Chrome version use the full quiesced swap", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-same-version-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const bridgeDirectory = path.join(root, "Bridge");
+  const original = await fixture(root, "1.0.2");
+  const initial = await initializeBridgeDirectory({ ...original, stateDirectory, bridgeDirectory, initialChallenge: challenge("same-original") });
+  const originalRecord = await record(stateDirectory);
+
+  const updated = await stageUpdate(
+    root,
+    stateDirectory,
+    bridgeDirectory,
+    initial.activeFolderChallenge,
+    "1.0.2",
+    "1.0.2",
+    { workerSource: 'export const version = "1.0.2";\nexport const releaseRevision = 2;\n' }
+  );
+  assert.equal(updated.previousVersion, "1.0.2");
+  assert.equal(updated.version, "1.0.2");
+  assert.equal(updated.manualChromeReloadRequired, true);
+  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\nexport const releaseRevision = 2;\n');
+  assert.equal(await fs.readFile(path.join(updated.backupDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\n');
+  const pending = await record(stateDirectory);
+  assert.notEqual(pending.releaseManifestSha256, originalRecord.releaseManifestSha256);
+
+  const confirmed = await confirmBridgeUpdate({
+    stateDirectory,
+    bridgeDirectory,
+    expectedExtensionId: extensionId,
+    extensionReadback: readback(pending.activeFolderChallenge)
+  });
+  assert.equal(confirmed.version, "1.0.2");
+  assert.equal(confirmed.confirmed, true);
+  assert.equal((await bridgeInstallationStatus({ stateDirectory, bridgeDirectory })).manualChromeReloadRequired, false);
+  assert.equal(await present(updated.backupDirectory), false);
+});
+
+test("startup converges every durable Bridge swap cut point and retains the rollback", async (t) => {
+  for (const phase of ["prepared", "backup_moved", "new_installed", "recorded"]) {
+    await t.test(phase, async (t) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), `morrow-bridge-recovery-${phase}-`));
+      t.after(() => fs.rm(root, { recursive: true, force: true }));
+      const stateDirectory = path.join(root, "State");
+      const bridgeDirectory = path.join(root, "Bridge");
+      const original = await fixture(root, "1.0.2");
+      const initialized = await initializeBridgeDirectory({
+        ...original,
+        stateDirectory,
+        bridgeDirectory,
+        initialChallenge: challenge(`${phase}-old`)
+      });
+      const previousRecord = await record(stateDirectory);
+      const updated = await stageUpdate(
+        root,
+        stateDirectory,
+        bridgeDirectory,
+        initialized.activeFolderChallenge,
+        "1.0.2",
+        "1.0.3"
+      );
+      const nextRecord = await record(stateDirectory);
+      const stageDirectory = path.join(path.dirname(previousRecord.bridgeDirectory), `.morrow-bridge-stage-${crypto.randomUUID()}`);
+
+      if (phase === "prepared" || phase === "backup_moved") {
+        await fs.rename(bridgeDirectory, stageDirectory);
+      }
+      if (phase === "prepared") {
+        await fs.rename(updated.backupDirectory, bridgeDirectory);
+      }
+      if (phase !== "recorded") await writeRecord(stateDirectory, previousRecord);
+
+      assert.equal(previousRecord.pendingUpdate, null);
+      assert.notEqual(nextRecord.releaseManifestSha256, previousRecord.releaseManifestSha256);
+      assert.equal(nextRecord.pendingUpdate.backupDirectory, updated.backupDirectory);
+      assert.equal(nextRecord.pendingUpdate.fromVersion, previousRecord.extensionVersion);
+      assert.equal(path.dirname(stageDirectory), path.dirname(previousRecord.bridgeDirectory));
+
+      await fs.writeFile(transactionPath(stateDirectory), `${JSON.stringify({
+        schema: "morrow.bridge-update-transaction.v1",
+        transactionId: crypto.randomUUID(),
+        createdAt: new Date().toISOString(),
+        stageDirectory,
+        backupDirectory: updated.backupDirectory,
+        previousRecord,
+        nextRecord
+      })}\n`, { mode: 0o600 });
+
+      const status = await bridgeInstallationStatus({ stateDirectory, bridgeDirectory, expectedExtensionId: extensionId });
+      assert.equal(status.version, "1.0.3");
+      assert.equal(status.manualChromeReloadRequired, true);
+      assert.equal(await present(transactionPath(stateDirectory)), false);
+      assert.equal(await present(stageDirectory), false);
+      assert.equal(await present(updated.backupDirectory), true);
+      assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.3";\n');
+      assert.equal(await fs.readFile(path.join(updated.backupDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\n');
+      assert.deepEqual(await record(stateDirectory), nextRecord);
+    });
+  }
 });
 
 test("the update refuses target drift, permissions, Store status, and old versions without a Bridge replacement", async (t) => {
@@ -306,6 +450,8 @@ test("the update refuses target drift, permissions, Store status, and old versio
 
   const permissionChanged = await fixture(root, "1.0.3", { permissions: ["storage", "tabs", "alarms"] });
   await assertBridgeError(() => prepareBridgeUpdate({ ...permissionChanged, stateDirectory, bridgeDirectory, ...callbackOptions }), "bridge_update_permission_changed");
+  const unchanged = await fixture(root, "1.0.2");
+  await assertBridgeError(() => prepareBridgeUpdate({ ...unchanged, stateDirectory, bridgeDirectory, ...callbackOptions }), "bridge_update_not_newer");
   const old = await fixture(root, "1.0.1");
   await assertBridgeError(() => prepareBridgeUpdate({ ...old, stateDirectory, bridgeDirectory, ...callbackOptions }), "bridge_update_not_newer");
 
@@ -326,7 +472,7 @@ test("Bridge maintenance reclaims a lock whose process is gone and is older than
   const blocked = () => issueBridgeActiveFolderChallenge({ stateDirectory, bridgeDirectory, challenge: challenge("blocked") });
   const writeLock = async (value) => fs.writeFile(lockPath(stateDirectory), `${JSON.stringify(value)}\n`, { mode: 0o600 });
 
-  await writeLock({ schema: "morrow.bridge.update-lock.v1", pid: process.pid, startedAt: outsideWindow.toISOString() });
+  await writeLock({ schema: "morrow.bridge.update-lock.v1", pid: process.pid, startedAt: insideWindow.toISOString() });
   await assertBridgeError(blocked, "bridge_update_busy");
   assert.equal(JSON.parse(await fs.readFile(lockPath(stateDirectory), "utf8")).pid, process.pid);
 
@@ -346,6 +492,72 @@ test("Bridge maintenance reclaims a lock whose process is gone and is older than
   const legacy = await issueBridgeActiveFolderChallenge({ stateDirectory, bridgeDirectory, challenge: challenge("afterlegacy") });
   assert.equal(legacy.activeFolderChallenge.challengeId, "afterlegacy-challenge-id");
   assert.equal(await present(lockPath(stateDirectory)), false);
+});
+
+test("Bridge maintenance distinguishes a reused PID from the exact database-lock process", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-lock-pid-reuse-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const bridgeDirectory = path.join(root, "Bridge");
+  const release = await fixture(root, "1.0.2");
+  await initializeBridgeDirectory({ ...release, stateDirectory, bridgeDirectory, initialChallenge: challenge("pid-initial") });
+  const actualProcessStart = await readProcessStartedAt(process.pid);
+  assert.notEqual(actualProcessStart, null);
+  const oldLockTime = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+  const blocked = () => issueBridgeActiveFolderChallenge({ stateDirectory, bridgeDirectory, challenge: challenge("pid-blocked") });
+
+  seedDatabaseLock(stateDirectory, {
+    pid: process.pid,
+    startedAt: oldLockTime,
+    processStartedAt: new Date(actualProcessStart).toISOString(),
+  });
+  await assertBridgeError(blocked, "bridge_update_busy");
+
+  seedDatabaseLock(stateDirectory, {
+    pid: process.pid,
+    startedAt: oldLockTime,
+    processStartedAt: new Date(actualProcessStart - 60_000).toISOString(),
+  });
+  const reclaimed = await issueBridgeActiveFolderChallenge({
+    stateDirectory,
+    bridgeDirectory,
+    challenge: challenge("pid-reused"),
+  });
+  assert.equal(reclaimed.activeFolderChallenge.challengeId, "pid-reused-challenge-id");
+});
+
+test("two contenders cannot both replace one stale Bridge database lock", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-lock-race-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const bridgeDirectory = path.join(root, "Bridge");
+  const release = await fixture(root, "1.0.2");
+  await initializeBridgeDirectory({ ...release, stateDirectory, bridgeDirectory, initialChallenge: challenge("race-initial") });
+  seedDatabaseLock(stateDirectory, {
+    pid: exitedPid(),
+    startedAt: new Date(Date.now() - 11 * 60 * 1000).toISOString()
+  });
+
+  const contenders = ["race-one", "race-two"].map((label) => issueBridgeActiveFolderChallenge({
+    stateDirectory,
+    bridgeDirectory,
+    challenge: challenge(label)
+  }));
+  const results = await Promise.allSettled(contenders);
+  const fulfilled = results.filter((result) => result.status === "fulfilled");
+  const rejected = results.filter((result) => result.status === "rejected");
+  assert.equal(fulfilled.length, 1);
+  assert.equal(rejected.length, 1);
+  assert.equal(rejected[0].reason?.code, "bridge_update_busy");
+  const installed = await record(stateDirectory);
+  assert.equal(installed.activeFolderChallenge.challengeId, fulfilled[0].value.activeFolderChallenge.challengeId);
+
+  const database = new DatabaseSync(lockDatabasePath(stateDirectory), { readOnly: true });
+  try {
+    assert.equal(database.prepare("SELECT COUNT(*) AS count FROM bridge_update_lock").get().count, 0);
+  } finally {
+    database.close();
+  }
 });
 
 test("startup pruning removes a rollback copy the record does not reference and keeps the one it does", async (t) => {

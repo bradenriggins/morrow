@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import { parseGatewayConfig } from "../src/config.js";
 import { GatewayRuntime } from "../src/runtime.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
+const attestedFixturePath = fileURLToPath(new URL("./fixtures/raw-attested-upstream.mjs", import.meta.url));
 
 function git(root: string, ...args: string[]): string {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
@@ -22,8 +23,8 @@ async function committedRepository(): Promise<{
   git(root, "init");
   git(root, "config", "user.name", "Morrow Test");
   git(root, "config", "user.email", "morrow-test@example.invalid");
-  await writeFile(join(root, "source.txt"), "fixture\n", "utf8");
-  git(root, "add", "source.txt");
+  await writeFile(join(root, "server.mjs"), await readFile(attestedFixturePath));
+  git(root, "add", "server.mjs");
   git(root, "commit", "-m", "fixture");
   return {
     root,
@@ -46,7 +47,8 @@ function attestedConfig(
       label: "Attested fixture",
       kind: "mcp-stdio",
       command: process.execPath,
-      args: [fixturePath],
+      args: [join(root, "server.mjs")],
+      cwd: root,
       env: { FAKE_SOURCE: "meridian" },
       repository: "example-owner/example-attestation-repo",
       revision: expectedRevision,
@@ -56,6 +58,11 @@ function attestedConfig(
         expectedRevision,
         requireTrackedClean: true,
         expectedToolCount,
+        launch: {
+          entrypoint: "server.mjs",
+          entrypointArgumentIndex: 0,
+          runtime: { kind: "current-node" },
+        },
       },
       priority: 100,
       required: true,
@@ -120,6 +127,21 @@ describe("GatewayRuntime source attestations", () => {
         attestedConfig(fixture.root, differentRevision),
         { journalPath: ":memory:" },
       )).rejects.toThrow(/not the configured revision/);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  it("refuses a clean decoy repository when the launched entrypoint is in another tree", async () => {
+    const fixture = await committedRepository();
+    try {
+      const config = attestedConfig(fixture.root, fixture.revision);
+      const source = config.upstreams[0];
+      if (!source || source.kind !== "mcp-stdio") throw new Error("fixture source missing");
+      await expect(GatewayRuntime.connect({
+        ...config,
+        upstreams: [{ ...source, args: [fixturePath] }],
+      }, { journalPath: ":memory:" })).rejects.toThrow(/Required upstream meridian failed to connect/);
     } finally {
       await fixture.dispose();
     }

@@ -9,15 +9,22 @@ export type WindowsPrivateFileAccessClassification =
   | "unresolved_identity"
   | "unavailable";
 
+export type MacPrivateFileAccessClassification =
+  | "private"
+  | "extended_acl"
+  | "unavailable";
+
 export interface PrivateFileAccessOptions {
   readonly platform?: NodeJS.Platform;
   readonly classifyWindowsAcl?: (path: string) => WindowsPrivateFileAccessClassification;
+  readonly classifyMacAcl?: (path: string) => MacPrivateFileAccessClassification;
   /**
    * When set, every existing path component from this root through the file's
    * immediate parent must be a real directory inside the root, never a link.
    */
   readonly trustedRoot?: string;
   readonly applyWindowsPrivateAcl?: (path: string) => boolean;
+  readonly removeMacAcl?: (path: string) => boolean;
 }
 
 const WINDOWS_ACL_RESULTS = new Set<WindowsPrivateFileAccessClassification>([
@@ -27,6 +34,30 @@ const WINDOWS_ACL_RESULTS = new Set<WindowsPrivateFileAccessClassification>([
   "unresolved_identity",
   "unavailable",
 ]);
+
+function classifyMacPrivateAcl(path: string): MacPrivateFileAccessClassification {
+  const result = spawnSync("/bin/ls", ["-lde", resolve(path)], {
+    encoding: "utf8",
+    env: { ...process.env, LC_ALL: "C" },
+    timeout: 30_000,
+    maxBuffer: 16 * 1024,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  if (result.status !== 0) return "unavailable";
+  const output = String(result.stdout || "");
+  const mode = output.match(/^(\S+)/)?.[1];
+  if (!mode) return "unavailable";
+  return mode.includes("+") || /\n\s*\d+:\s/u.test(output) ? "extended_acl" : "private";
+}
+
+function removeMacPrivateAcl(path: string): boolean {
+  const result = spawnSync("/bin/chmod", ["-N", resolve(path)], {
+    timeout: 30_000,
+    maxBuffer: 4 * 1024,
+    stdio: ["ignore", "ignore", "ignore"],
+  });
+  return result.status === 0;
+}
 
 function windowsPowerShell() {
   const systemRoot = process.env.SystemRoot || "C:\\Windows";
@@ -83,6 +114,25 @@ function applyWindowsPrivateAcl(path: string): boolean {
   return result.status === 0;
 }
 
+function applyWindowsPrivateFileAcl(path: string): boolean {
+  const encodedPath = Buffer.from(path, "utf16le").toString("base64");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    `$target = [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String('${encodedPath}'))`,
+    "$current = [Security.Principal.WindowsIdentity]::GetCurrent().User",
+    "$system = New-Object Security.Principal.SecurityIdentifier('S-1-5-18')",
+    "$admins = New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')",
+    "$acl = [IO.File]::GetAccessControl($target)",
+    "$acl.SetAccessRuleProtection($true, $false)",
+    "$acl.SetOwner($current)",
+    "foreach ($sid in @($current, $system, $admins)) { $rule = [Security.AccessControl.FileSystemAccessRule]::new($sid, [Security.AccessControl.FileSystemRights]::FullControl, [Security.AccessControl.InheritanceFlags]::None, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow); $acl.AddAccessRule($rule) }",
+    "[IO.File]::SetAccessControl($target, $acl)",
+  ].join("; ");
+  const powershell = windowsPowerShell();
+  const result = spawnSync(powershell.executable, ["-NoLogo", "-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf8", env: powershell.environment, timeout: 30_000, maxBuffer: 4 * 1024, windowsHide: true, stdio: ["ignore", "ignore", "ignore"] });
+  return result.status === 0;
+}
+
 function trustedAncestorChainAccepted(filePath: string, trustedRoot: string): boolean {
   const root = resolve(trustedRoot);
   const file = resolve(filePath);
@@ -122,15 +172,21 @@ export function privateDirectoryAccessAccepted(
   if (options.trustedRoot && !trustedAncestorChainAccepted(resolve(directoryPath, ".morrow-directory-probe"), options.trustedRoot)) {
     return false;
   }
-  if (platform !== "win32") return (directory.mode & 0o077) === 0;
+  if (platform !== "win32") {
+    if ((directory.mode & 0o077) !== 0) return false;
+    if (platform !== "darwin") return true;
+    const classify = options.classifyMacAcl ?? classifyMacPrivateAcl;
+    return classify(directoryPath) === "private";
+  }
   const classify = options.classifyWindowsAcl ?? classifyWindowsPrivateAcl;
   return classify(directoryPath) === "private";
 }
 
 /**
  * Accepts a sensitive regular file only when its access control is private.
- * POSIX proves this from mode bits. Windows uses owner-restricted DACLs for
- * the file and its immediate parent because mode bits there are synthetic.
+ * POSIX proves this from mode bits. macOS also rejects extended ACLs on the
+ * file and parent. Windows uses owner-restricted DACLs for both paths because
+ * mode bits there are synthetic.
  */
 export function privateFileAccessAccepted(
   filePath: string,
@@ -148,7 +204,12 @@ export function privateFileAccessAccepted(
   }
   if (!file.isFile() || file.isSymbolicLink() || !parent.isDirectory() || parent.isSymbolicLink()) return false;
   if (options.trustedRoot && !trustedAncestorChainAccepted(filePath, options.trustedRoot)) return false;
-  if (platform !== "win32") return (mode & 0o077) === 0 && (parent.mode & 0o022) === 0;
+  if (platform !== "win32") {
+    if ((mode & 0o077) !== 0 || (parent.mode & 0o022) !== 0) return false;
+    if (platform !== "darwin") return true;
+    const classify = options.classifyMacAcl ?? classifyMacPrivateAcl;
+    return classify(filePath) === "private" && classify(dirname(filePath)) === "private";
+  }
   const classify = options.classifyWindowsAcl ?? classifyWindowsPrivateAcl;
   return classify(filePath) === "private" && classify(dirname(filePath)) === "private";
 }
@@ -161,12 +222,41 @@ export function hardenPrivateDirectory(directory: string, options: PrivateFileAc
     if (!info.isDirectory() || info.isSymbolicLink()) return false;
     if (platform !== "win32") {
       chmodSync(directory, 0o700);
+      if (platform === "darwin") {
+        const remove = options.removeMacAcl ?? removeMacPrivateAcl;
+        if (!remove(directory)) return false;
+      }
       const refreshed = lstatSync(directory);
-      return refreshed.isDirectory() && !refreshed.isSymbolicLink() && (refreshed.mode & 0o077) === 0;
+      if (!refreshed.isDirectory() || refreshed.isSymbolicLink() || (refreshed.mode & 0o077) !== 0) return false;
+      if (platform !== "darwin") return true;
+      const classify = options.classifyMacAcl ?? classifyMacPrivateAcl;
+      return classify(directory) === "private";
     }
     const apply = options.applyWindowsPrivateAcl ?? applyWindowsPrivateAcl;
     const classify = options.classifyWindowsAcl ?? classifyWindowsPrivateAcl;
     return apply(directory) === true && classify(directory) === "private";
+  } catch {
+    return false;
+  }
+}
+
+/** Tightens one singly linked app-owned regular file and verifies the result. */
+export function hardenPrivateFile(filePath: string, options: PrivateFileAccessOptions = {}): boolean {
+  const platform = options.platform ?? process.platform;
+  try {
+    const before = lstatSync(filePath);
+    if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
+      || (typeof process.getuid === "function" && before.uid !== process.getuid())) return false;
+    if (platform !== "win32") {
+      chmodSync(filePath, 0o600);
+      if (platform === "darwin") {
+        const remove = options.removeMacAcl ?? removeMacPrivateAcl;
+        if (!remove(filePath)) return false;
+      }
+    } else if (!applyWindowsPrivateFileAcl(filePath)) return false;
+    const after = lstatSync(filePath);
+    return before.dev === after.dev && before.ino === after.ino && after.nlink === 1
+      && privateFileAccessAccepted(filePath, after.mode, options);
   } catch {
     return false;
   }

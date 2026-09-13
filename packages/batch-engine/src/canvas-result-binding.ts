@@ -3,6 +3,11 @@ import {
   isJsonObject,
   type JsonObject,
 } from "@morrow/contracts";
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+} from "node:crypto";
 
 export const CANVAS_RESULT_BINDING_SCHEMA = "morrow.canvas-result-binding.v1" as const;
 
@@ -23,6 +28,34 @@ export const CANVAS_RESULT_BINDING_KINDS = Object.freeze([
 ] as const);
 
 export type CanvasResultBindingKind = typeof CANVAS_RESULT_BINDING_KINDS[number];
+
+export const CANVAS_RESULT_BINDING_ARTIFACT_SCHEMA = "morrow.canvas-result-binding-artifact.v1" as const;
+export const CANVAS_RESULT_BINDING_ARTIFACT_ENVELOPE_SCHEMA = "morrow.canvas-result-binding-artifact-envelope.v1" as const;
+
+export interface CanvasResultBindingArtifact {
+  readonly schema: typeof CANVAS_RESULT_BINDING_ARTIFACT_SCHEMA;
+  readonly kind: CanvasResultBindingKind;
+  readonly value: string;
+}
+
+export interface CanvasResultBindingArtifactEnvelope {
+  readonly schema: typeof CANVAS_RESULT_BINDING_ARTIFACT_ENVELOPE_SCHEMA;
+  readonly ciphertext: string;
+  readonly iv: string;
+  readonly tag: string;
+}
+
+export interface CanvasResultBindingArtifactContext {
+  readonly operationId: string;
+  readonly publicToolName: string;
+  readonly sourceId: string;
+  readonly sourceToolName: string;
+  readonly sourceOperationId: string | null;
+  readonly sourceBindingId: string | null;
+  readonly targetIdentityDigest: string | null;
+  readonly upstreamResultDigest: string;
+  readonly readbackDigest: string;
+}
 
 export interface CanvasResultBinding {
   readonly schema: typeof CANVAS_RESULT_BINDING_SCHEMA;
@@ -120,6 +153,154 @@ function exactAssignmentId(value: unknown): string {
   return value;
 }
 
+function exactKey(value: Uint8Array): Buffer {
+  const key = Buffer.from(value);
+  if (key.length !== 32) throw new TypeError("batch encryption key must contain exactly 32 bytes");
+  return key;
+}
+
+function exactDigest(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[0-9a-f]{64}$/u.test(value)) {
+    throw new TypeError(`${label} must be a SHA-256 digest`);
+  }
+  return value;
+}
+
+function exactNullableIdentifier(value: unknown, label: string): string | null {
+  if (value === null) return null;
+  if (typeof value !== "string" || !IDENTIFIER.test(value)) throw new TypeError(`${label} is invalid`);
+  return value;
+}
+
+function normalizedArtifact(value: unknown): CanvasResultBindingArtifact {
+  if (!exactObject(value, ["schema", "kind", "value"])
+    || value.schema !== CANVAS_RESULT_BINDING_ARTIFACT_SCHEMA
+    || typeof value.kind !== "string"
+    || !CANVAS_RESULT_BINDING_KINDS.includes(value.kind as CanvasResultBindingKind)) {
+    throw new TypeError("Canvas result binding artifact is invalid");
+  }
+  return {
+    schema: CANVAS_RESULT_BINDING_ARTIFACT_SCHEMA,
+    kind: value.kind as CanvasResultBindingKind,
+    value: value.kind === "canvas_page_url_to_module_item_page_url"
+      ? exactPageUrl(value.value)
+      : exactAssignmentId(value.value),
+  };
+}
+
+function normalizedArtifactContext(value: CanvasResultBindingArtifactContext): CanvasResultBindingArtifactContext {
+  if (!IDENTIFIER.test(value.operationId)
+    || !IDENTIFIER.test(value.publicToolName)
+    || !IDENTIFIER.test(value.sourceId)
+    || !IDENTIFIER.test(value.sourceToolName)) {
+    throw new TypeError("Canvas result binding artifact effect identity is invalid");
+  }
+  return {
+    operationId: value.operationId,
+    publicToolName: value.publicToolName,
+    sourceId: value.sourceId,
+    sourceToolName: value.sourceToolName,
+    sourceOperationId: exactNullableIdentifier(value.sourceOperationId, "source operation id"),
+    sourceBindingId: exactNullableIdentifier(value.sourceBindingId, "source binding id"),
+    targetIdentityDigest: value.targetIdentityDigest === null
+      ? null : exactDigest(value.targetIdentityDigest, "target identity digest"),
+    upstreamResultDigest: exactDigest(value.upstreamResultDigest, "upstream result digest"),
+    readbackDigest: exactDigest(value.readbackDigest, "readback digest"),
+  };
+}
+
+function artifactAad(
+  context: CanvasResultBindingArtifactContext,
+): Buffer {
+  return Buffer.from(canonicalJson({
+    schema: CANVAS_RESULT_BINDING_ARTIFACT_ENVELOPE_SCHEMA,
+    context: normalizedArtifactContext(context),
+  }), "utf8");
+}
+
+/**
+ * Extract only the provider-assigned field needed by a later Canvas module-item
+ * request. The connector result must already carry its verified readback.
+ */
+export function canvasResultBindingArtifactFromVerifiedConnector(
+  publicToolName: string,
+  value: JsonObject,
+): CanvasResultBindingArtifact | null {
+  const kind = publicToolName === "canvas_create_page_courses"
+    ? "canvas_page_url_to_module_item_page_url"
+    : publicToolName === "canvas_create_assignment"
+      ? "canvas_assignment_id_to_module_item_content_id"
+      : null;
+  if (!kind) return null;
+  const connector = isJsonObject(value.structuredContent) ? value.structuredContent : null;
+  const browser = connector && isJsonObject(connector.result) ? connector.result : null;
+  const verification = browser && isJsonObject(browser.verification) ? browser.verification : null;
+  const data = browser && isJsonObject(browser.data) ? browser.data : null;
+  if (!connector || connector.schema !== "morrow.canvas-connector.result.v1"
+    || connector.ok !== true || connector.provider !== "canvas"
+    || connector.toolName !== publicToolName || connector.commandKind !== "invoke_write"
+    || !browser || browser.schema !== "morrow.canvas-browser-result.v1"
+    || browser.ok !== true || browser.sent !== true
+    || verification?.schema !== "morrow.browser-verification.v1"
+    || verification.status !== "verified" || !data) return null;
+  try {
+    return normalizedArtifact({
+      schema: CANVAS_RESULT_BINDING_ARTIFACT_SCHEMA,
+      kind,
+      value: kind === "canvas_page_url_to_module_item_page_url" ? data.url : data.id,
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** Encrypt and bind one minimal artifact to the exact verified provider effect. */
+export function encryptCanvasResultBindingArtifact(
+  keyValue: Uint8Array,
+  contextValue: CanvasResultBindingArtifactContext,
+  artifactValue: CanvasResultBindingArtifact,
+): CanvasResultBindingArtifactEnvelope {
+  const key = exactKey(keyValue);
+  const context = normalizedArtifactContext(contextValue);
+  const artifact = normalizedArtifact(artifactValue);
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(artifactAad(context));
+  const ciphertext = Buffer.concat([
+    cipher.update(Buffer.from(canonicalJson(artifact), "utf8")),
+    cipher.final(),
+  ]);
+  return {
+    schema: CANVAS_RESULT_BINDING_ARTIFACT_ENVELOPE_SCHEMA,
+    ciphertext: ciphertext.toString("base64url"),
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+  };
+}
+
+/** Authenticate and decrypt one artifact only for the effect that verified it. */
+export function decryptCanvasResultBindingArtifact(
+  keyValue: Uint8Array,
+  contextValue: CanvasResultBindingArtifactContext,
+  envelopeValue: unknown,
+): CanvasResultBindingArtifact {
+  if (!exactObject(envelopeValue, ["schema", "ciphertext", "iv", "tag"])
+    || envelopeValue.schema !== CANVAS_RESULT_BINDING_ARTIFACT_ENVELOPE_SCHEMA
+    || typeof envelopeValue.ciphertext !== "string"
+    || typeof envelopeValue.iv !== "string"
+    || typeof envelopeValue.tag !== "string") {
+    throw new TypeError("Canvas result binding artifact envelope is invalid");
+  }
+  const decipher = createDecipheriv("aes-256-gcm", exactKey(keyValue), Buffer.from(envelopeValue.iv, "base64url"));
+  decipher.setAAD(artifactAad(normalizedArtifactContext(contextValue)));
+  decipher.setAuthTag(Buffer.from(envelopeValue.tag, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(envelopeValue.ciphertext, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+  return normalizedArtifact(JSON.parse(plaintext) as unknown);
+}
+
 export function normalizeCanvasResultBinding(value: unknown): CanvasResultBinding {
   if (!exactObject(value, ["schema", "sourceChildId", "kind"])
     || value.schema !== CANVAS_RESULT_BINDING_SCHEMA
@@ -187,14 +368,32 @@ export function bindCanvasResultArguments(
   dependent: CanvasBindingChild,
   sourceResult: JsonObject,
 ): JsonObject {
+  const sourceArtifact = connectorArtifact(source, sourceResult);
+  return bindCanvasResultArtifactArguments(binding, source, dependent, {
+    schema: CANVAS_RESULT_BINDING_ARTIFACT_SCHEMA,
+    kind: binding.kind,
+    value: binding.kind === "canvas_page_url_to_module_item_page_url"
+      ? exactPageUrl(sourceArtifact.url)
+      : exactAssignmentId(sourceArtifact.id),
+  });
+}
+
+/** Derive the same frozen request from an authenticated minimal recovery artifact. */
+export function bindCanvasResultArtifactArguments(
+  binding: CanvasResultBinding,
+  source: CanvasBindingChild,
+  dependent: CanvasBindingChild,
+  artifactValue: CanvasResultBindingArtifact,
+): JsonObject {
   validateCanvasResultBinding(binding, source, dependent);
-  const artifact = connectorArtifact(source, sourceResult);
+  const artifact = normalizedArtifact(artifactValue);
+  if (artifact.kind !== binding.kind) {
+    throw new Error("Canvas result binding artifact kind does not match the frozen binding");
+  }
   const field = binding.kind === "canvas_page_url_to_module_item_page_url"
-    ? "module_item_page_url"
-    : "module_item_content_id";
+    ? "module_item_page_url" : "module_item_content_id";
   const value = binding.kind === "canvas_page_url_to_module_item_page_url"
-    ? exactPageUrl(artifact.url)
-    : exactAssignmentId(artifact.id);
+    ? exactPageUrl(artifact.value) : exactAssignmentId(artifact.value);
   const bound = { ...structuredClone(dependent.arguments), [field]: value } as JsonObject;
   if (!sameRequestExceptTarget(dependent.arguments, bound, field)) {
     throw new Error("Canvas bound request changed frozen fields");

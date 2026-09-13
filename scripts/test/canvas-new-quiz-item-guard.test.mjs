@@ -39,6 +39,7 @@ function digest(value) {
  */
 async function sendQuizItem(args, {
   item = ESSAY_ITEM,
+  savedItem = item,
   itemStatus = 200,
   listReads = [],
   patchStatus = 200,
@@ -65,7 +66,10 @@ async function sendQuizItem(args, {
           if (read.throws) throw new TypeError("connection closed");
           return jsonResponse(read.value, read.status ?? 200, read.link ? { Link: read.link } : {});
         }
-        return itemStatus === 200 ? jsonResponse(item) : jsonResponse({ errors: [{ message: "no" }] }, itemStatus);
+        const afterWrite = requests.slice(0, -1).some((request) => request.method === "PATCH");
+        return itemStatus === 200
+          ? jsonResponse(afterWrite ? savedItem : item)
+          : jsonResponse({ errors: [{ message: "no" }] }, itemStatus);
       }
       if (patchThrows) throw new TypeError("connection closed");
       return jsonResponse(item, patchStatus);
@@ -468,20 +472,52 @@ test("a content update refuses a locked or stimulus-linked item before PATCH", a
   }
 });
 
-test("a combined move and content update reads the target item once", async () => {
+test("a combined move and content update verifies the saved order and prompt", async () => {
   const before = [ITEM_ID, "89"];
   const expected = ["89", ITEM_ID];
+  const itemBody = "<p>Explain ATP synthesis.</p>";
+  const savedItem = { ...ESSAY_ITEM, position: 2, entry: { ...ESSAY_ITEM.entry, item_body: itemBody } };
   const { result, requests } = await sendQuizItem({
     item_position: 2,
-    item_entry_item_body: "<p>Explain ATP synthesis.</p>",
+    item_entry_item_body: itemBody,
     morrow_new_quiz_item_position_guard: positionGuard(before, expected),
   }, {
     item: ESSAY_ITEM,
+    savedItem,
     listReads: [{ value: orderRows(before) }, { value: orderRows(expected) }],
   });
   assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(requests.filter((request) => request.method === "GET" && request.pathname === ITEM_PATH).length, 1);
+  assert.equal(result.verification.status, "verified");
+  assert.equal(result.verification.evidence, "complete_new_quiz_item_order_and_requested_fields_reread_after_write");
+  assert.equal(requests.filter((request) => request.method === "GET" && request.pathname === ITEM_PATH).length, 2);
   assert.equal(requests.filter((request) => request.method === "PATCH").length, 1);
+});
+
+test("a guarded move cannot verify while its requested prompt remains stale", async () => {
+  const before = [ITEM_ID, "89"];
+  const expected = ["89", ITEM_ID];
+  const args = {
+    item_position: 2,
+    item_entry_item_body: "<p>Explain ATP synthesis.</p>",
+    morrow_new_quiz_item_position_guard: positionGuard(before, expected),
+  };
+  for (const response of [
+    { name: "normal response" },
+    { name: "lost response", patchThrows: true },
+  ]) {
+    const { result, requests } = await sendQuizItem(args, {
+      item: ESSAY_ITEM,
+      savedItem: ESSAY_ITEM,
+      listReads: [{ value: orderRows(before) }, { value: orderRows(expected) }],
+      ...response,
+    });
+    assert.equal(result.ok, response.patchThrows ? false : true, response.name);
+    assert.equal(result.verification.status, "mismatch", response.name);
+    assert.equal(result.verification.reason, "new_quiz_item_requested_fields_readback_mismatch", response.name);
+    if (response.patchThrows) assert.equal(result.outcomeUnknown, true, response.name);
+    assert.equal(requests.filter((request) => request.method === "PATCH").length, 1, response.name);
+    assert.equal(requests.filter((request) => request.method === "GET" && request.pathname === ITEM_PATH).length, 2, response.name);
+  }
 });
 
 test("a stale order digest refuses the move before PATCH", async () => {

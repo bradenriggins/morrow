@@ -2,7 +2,8 @@ import { canonicalJson, isJsonObject, sha256Text, type JsonObject, type SourceCa
 import * as z from "zod/v4";
 import type { BlackboardLearnClient } from "../client.js";
 import type { BlackboardEffectGrant } from "../effect-grant.js";
-import { safeContent, safeCourse, type BlackboardCourseRead, type BlackboardLearnRuntime, type PreparedRoster } from "../runtime.js";
+import { assertPathScopedContent } from "../provider-contract.js";
+import { identityOnlyCourse, safeContent, safeCourseWithRoster, type BlackboardCourseRead, type BlackboardLearnRuntime, type PreparedRoster } from "../runtime.js";
 import { BLACKBOARD_ID, BlackboardApiError, withBlackboardDispatchState, type BlackboardDispatchState } from "../types.js";
 import { blackboardTool, contentScopeInput, effectGrantInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
 import { READ_ANNOTATIONS, READ_BEHAVIOR } from "./course-read.js";
@@ -96,7 +97,6 @@ const DURATION_DEPENDENT_FIELDS = [
 const PROTECTED_CONTENT_FIELDS: readonly (readonly string[])[] = [
   ["id"],
   ["parentId"],
-  ["courseId"],
   ["contentHandler", "id"],
   ["title"],
   ["description"],
@@ -402,7 +402,7 @@ function expectedProtectedCourse(frozen: JsonObject, change: ReviewedCourseAvail
  * and dates.
  */
 function safeCourseAvailability(record: JsonObject, roster: PreparedRoster): JsonObject {
-  const output = safeCourse(record, roster);
+  const output = record.id === roster.courseId ? safeCourseWithRoster(record, roster) : identityOnlyCourse(record);
   const availability = record[AVAILABILITY_FIELD];
   const available = isJsonObject(availability) ? providerValue(availability.available) : null;
   const duration = durationOf(record);
@@ -526,10 +526,8 @@ function safeDatedContent(record: JsonObject, roster: PreparedRoster): JsonObjec
  * one document inside the selected course: not a folder, not the Ultra wrapper
  * around a document, and not an item whose handler it cannot read.
  */
-function assertDatedContent(record: JsonObject, courseId: string): void {
-  if (record.courseId !== courseId) {
-    throw new BlackboardApiError("blackboard_scope_binding_mismatch", "Blackboard did not return this content item as part of the selected course.");
-  }
+function assertDatedContent(record: JsonObject, courseId: string, contentId: string): void {
+  assertPathScopedContent(record, courseId, contentId);
   const handler = record.contentHandler;
   if (!isJsonObject(handler) || typeof handler.id !== "string" || !handler.id) {
     throw new BlackboardApiError("blackboard_operation_unavailable", "Blackboard did not name a content handler for this item, so Morrow cannot tell what a date would apply to.");
@@ -564,8 +562,7 @@ async function readContentRecord(
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const record = await client.get(contentPath(courseId, contentId), signal);
-  if (record.id !== contentId) throw new BlackboardApiError("blackboard_content_mismatch", "Blackboard returned a different content item.");
-  assertDatedContent(record, courseId);
+  assertDatedContent(record, courseId, contentId);
   return record;
 }
 
@@ -626,6 +623,8 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
     effectReceiptId: value.effect_receipt_id,
     dispatchAttempt: value.dispatch_attempt,
     gatewayProcessId: value.gateway_process_id,
+    issuedAt: value.issued_at,
+    notAfter: value.not_after,
     dispatchToken: value.dispatch_token,
   };
 }

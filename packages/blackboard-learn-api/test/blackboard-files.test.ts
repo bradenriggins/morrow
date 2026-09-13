@@ -144,16 +144,16 @@ async function harness(options: FixtureOptions = {}) {
   if (options.duplicateName) attachments.set("att-9", { id: "att-9", fileName: filename, mimeType: "text/plain" });
   const content = new Map<string, JsonObject>([
     [documentId, {
-      id: documentId, courseId, parentId: "_55_1", title: "Week 1", position: 1,
+      id: documentId, parentId: "_55_1", title: "Week 1", position: 1,
       contentHandler: options.contentHandler || { id: "resource/x-bb-document" },
       availability: { available: "Yes" },
     }],
     [folderId, {
-      id: folderId, courseId, title: "Module 1", position: 2,
+      id: folderId, title: "Module 1", position: 2,
       contentHandler: { id: "resource/x-bb-folder" }, availability: { available: "Yes" },
     }],
     [wrapperId, {
-      id: wrapperId, courseId, title: "Ultra document", position: 3,
+      id: wrapperId, title: "Ultra document", position: 3,
       contentHandler: { id: "resource/x-bb-folder", isBbPage: true }, availability: { available: "Yes" },
     }],
   ]);
@@ -273,14 +273,16 @@ let receipts = 0;
 function effectGrant(planDigest: string): BlackboardEffectGrant {
   receipts += 1;
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-files-test",
     planDigest,
     outerPlanDigest: "b".repeat(64),
     approvalGrantDigest: "c".repeat(64),
     effectReceiptId: `effect:00000000-0000-4000-8000-${String(receipts).padStart(12, "0")}`,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:test",
+   gatewayProcessId: "gateway:test",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return { ...unsigned, dispatchToken: signBlackboardEffectGrant(effectSecret, unsigned) };
 }
@@ -295,6 +297,8 @@ function grantArguments(grant: BlackboardEffectGrant): JsonObject {
     effect_receipt_id: grant.effectReceiptId,
     dispatch_attempt: grant.dispatchAttempt,
     gateway_process_id: grant.gatewayProcessId,
+    issued_at: grant.issuedAt,
+    not_after: grant.notAfter,
     dispatch_token: grant.dispatchToken,
   };
 }

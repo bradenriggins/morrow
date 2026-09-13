@@ -1,19 +1,18 @@
 "use strict";
 
-async function completeBridgeUpdate({ acquire, readback, matchesChallenge, confirm, refresh, release }) {
+async function completeBridgeUpdate({ acquire, readback, matchesChallenge, inspect, commit, confirm, refresh, release }) {
   await acquire();
-  let confirmed = false;
   try {
     const result = await readback();
     if (matchesChallenge(result) !== true) throw new Error("Morrow Bridge reload is not confirmed");
+    const pending = await inspect(result);
+    await commit(pending);
     await confirm(result);
-    confirmed = true;
     const completed = await refresh();
     if (completed?.manualChromeReloadRequired === true) throw new Error("Morrow Bridge update confirmation is incomplete");
     await release();
     return completed;
   } catch (error) {
-    if (confirmed) await release().catch(() => {});
     throw error;
   }
 }

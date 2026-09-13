@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import test, { after } from "node:test";
 import { clearExtensionGlobals, loadExtensionPage } from "./lib/extension-dom.mjs";
 import {
@@ -115,6 +116,17 @@ test("local protection covers structured identity fields and more than one learn
   });
 });
 
+test("local protection preserves an ordinary score that equals a learner ID", () => {
+  const protectedText = protect(
+    "Michaela Brook scored 42 out of 50; student #7 needs review.",
+    ["Michaela Brook"],
+  );
+  assert.equal(protectedText, "Student A1 scored 42 out of 50; student #Student A1 needs review.");
+
+  const explicitId = protect("Compare student #42 with Michaela Brook.", ["42", "Michaela Brook"]);
+  assert.equal(explicitId, "Compare student #Student A2 with Student A1.");
+});
+
 test("Canvas roster protection keeps a matching deleted learner and rejects mismatched history", () => {
   const deleted = [{
     course_id: 89585,
@@ -187,10 +199,30 @@ test("the tucked-away drawer sends through an active relay and closing it clears
     },
   });
   assert.equal(page.hidden("#private-chat-drawer"), true);
+  const opener = page.query("#private-chat-open");
+  const background = page.query("main");
+  opener.focus();
   await page.click("#private-chat-open");
   assert.equal(page.hidden("#private-chat-drawer"), false);
+  assert.equal(background.hasAttribute("inert"), true);
+  assert.equal(opener.getAttribute("aria-expanded"), "true");
+  assert.equal(page.document.activeElement, page.query("#private-chat-close"));
   assert.equal(page.query("#private-chat-send").disabled, false);
   assert.match(page.text("#private-chat-status"), /^Ready\./u);
+  const backwards = {
+    type: "keydown", key: "Tab", shiftKey: true, prevented: false,
+    preventDefault() { this.prevented = true; }, stopPropagation() {},
+  };
+  page.document.dispatchEvent(backwards);
+  assert.equal(backwards.prevented, true);
+  assert.equal(page.document.activeElement, page.query("#private-chat-send"));
+  const forwards = {
+    type: "keydown", key: "Tab", shiftKey: false, prevented: false,
+    preventDefault() { this.prevented = true; }, stopPropagation() {},
+  };
+  page.document.dispatchEvent(forwards);
+  assert.equal(forwards.prevented, true);
+  assert.equal(page.document.activeElement, page.query("#private-chat-close"));
   await page.type("#private-chat-identifiers", "Michaela Brook");
   await page.type("#private-chat-message", "Review Michaela Brook.");
   await page.click("#private-chat-send");
@@ -203,6 +235,9 @@ test("the tucked-away drawer sends through an active relay and closing it clears
   });
   await page.click("#private-chat-close");
   assert.equal(page.hidden("#private-chat-drawer"), true);
+  assert.equal(background.hasAttribute("inert"), false);
+  assert.equal(opener.getAttribute("aria-expanded"), "false");
+  assert.equal(page.document.activeElement, opener);
   assert.equal(page.query("#private-chat-identifiers").value, "");
   assert.equal(page.query("#private-chat-message").value, "");
   assert.equal(page.text("#private-chat-history"), "No messages in this local conversation.");
@@ -216,4 +251,58 @@ test("the service worker exposes only the authenticated Private chat relay and p
   assert.match(worker, /message\?\.type === "morrow_private_chat_send" \? \(\) => submitPrivateChatMessage/u);
   assert.match(worker, /privateChatClosed[\s\S]*status: "closed"/u);
   assert.doesNotMatch(worker, /chrome\.storage\.local\.(?:set|remove)\([^\n]*privateChat/u);
+});
+
+test("the service worker clears only the exact cancelled Private Chat request", () => {
+  const worker = readFileSync(new URL("connector/extension/src/service-worker.js", root), "utf8");
+  const start = worker.indexOf("function handleBridgeCancellation(message)");
+  const end = worker.indexOf("\nasync function privateChatRoster", start);
+  assert.ok(start >= 0 && end > start);
+  const pending = {
+    requestId: "bridge:request-1234",
+    operationId: "private-chat:operation-1234",
+    generation: 7,
+  };
+  const context = {
+    state: { generation: 7, privateChat: { pending }, bridgeCommands: new Map() },
+    PROTOCOL_VERSION: 1,
+    cleared: 0,
+    results: [],
+    problem(code, message, recoverable) { return { code, message, recoverable }; },
+    sendResult(command, ok, result, failure) { context.results.push({ command, ok, result, failure }); },
+    clearPrivateChat() {
+      context.cleared += 1;
+      context.state.privateChat = null;
+    },
+  };
+  vm.runInNewContext(`${worker.slice(start, end)}\nglobalThis.cancel = handleBridgeCancellation;`, context);
+  const exact = {
+    schema: "morrow.bridge.cancel.v1",
+    protocolVersion: 1,
+    requestId: pending.requestId,
+    operationId: pending.operationId,
+    generation: 7,
+    cancelledAt: Date.now(),
+  };
+  context.cancel({ ...exact, requestId: "bridge:different-1234" });
+  assert.equal(context.cleared, 0);
+  assert.ok(context.state.privateChat);
+  context.cancel(exact);
+  assert.equal(context.cleared, 1);
+  assert.equal(context.state.privateChat, null);
+  assert.equal(context.results.at(-1).failure.code, "bridge_request_cancelled");
+
+  const queuedWrite = { ...pending, operationId: "operation:queued-write-1234", kind: "invoke_write" };
+  const queued = { command: queuedWrite, cancelled: false, effectPossible: false, resultSent: false };
+  context.state.bridgeCommands.set(queuedWrite.requestId, queued);
+  context.cancel({ ...exact, operationId: queuedWrite.operationId });
+  assert.equal(queued.cancelled, true);
+  assert.equal(context.results.at(-1).failure.code, "request_cancelled_before_dispatch");
+
+  const startedWrite = { ...pending, requestId: "bridge:started-1234", operationId: "operation:started-write-1234", kind: "invoke_write" };
+  const started = { command: startedWrite, cancelled: false, effectPossible: true, resultSent: false };
+  context.state.bridgeCommands.set(startedWrite.requestId, started);
+  context.cancel({ ...exact, requestId: startedWrite.requestId, operationId: startedWrite.operationId });
+  assert.equal(started.cancelled, true);
+  assert.equal(context.results.at(-1).failure.code, "write_outcome_unknown");
 });

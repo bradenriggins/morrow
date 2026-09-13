@@ -3,6 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
   cpSync,
+  createWriteStream,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -18,9 +19,22 @@ import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = resolve(ROOT, "installer");
+const requireInstaller = createRequire(import.meta.url);
+const { parseChromeVersion } = requireInstaller(resolve(INSTALLER, "shared", "bridge-updates.cjs"));
+const { PACKAGED_BRIDGE_DELIVERY } = requireInstaller(resolve(INSTALLER, "shared", "bridge-delivery.cjs"));
+const {
+  PACKAGER_ADMISSION_ENV,
+  PACKAGER_ADMISSION_SCHEMA,
+  REVIEWED_GRAPH_SHA256_ENV,
+  createPackagerAdmission,
+  verifyPackagerAdmission,
+  writePackagerAdmission,
+} = requireInstaller(resolve(INSTALLER, "shared", "packager-admission.cjs"));
 const PACKAGE = JSON.parse(readFileSync(resolve(ROOT, "package.json"), "utf8"));
 const VERSION = String(PACKAGE.version);
 const NODE_VERSION = "22.23.2";
@@ -34,7 +48,7 @@ const BRIDGE_SOURCE_FILES = Object.freeze([
   "render-check/render-check-host.html", "render-check/render-check-host.js", "render-check/render-check.html", "render-check/render-check.js",
   "settings/settings.css", "settings/settings.html", "settings/settings.js",
   "src/bridge-maintenance.js", "src/bridge-problem-copy.js", "src/bridge-transport.js", "src/canvas-classic-quiz-submission-read.js", "src/canvas-content.js", "src/canvas-conversations.js", "src/canvas-course-summary-read.js", "src/canvas-file-content.js",
-  "src/canvas-file-signals.js", "src/canvas-file-transfer.js", "src/canvas-new-quiz-hot-spot.js", "src/canvas-operation-readback.js", "src/canvas-write-outcome.js", "src/course-connection-intent.js", "src/course-data-consent.js", "src/edit-policy.js", "src/item-bank-credential.js", "src/item-bank-executor.js", "src/item-bank-fan-out.js", "src/item-bank-frames.js", "src/item-bank-guard.js",
+  "src/canvas-file-signals.js", "src/canvas-file-transfer.js", "src/canvas-new-quiz-hot-spot.js", "src/canvas-operation-readback.js", "src/canvas-write-outcome.js", "src/catalog-compatibility.js", "src/course-connection-intent.js", "src/course-data-consent.js", "src/edit-policy.js", "src/item-bank-credential.js", "src/item-bank-executor.js", "src/item-bank-fan-out.js", "src/item-bank-frames.js", "src/item-bank-guard.js",
   "src/moodle-activity-content-executor.js", "src/moodle-activity-content-read.js", "src/moodle-activity-lifecycle-executor.js", "src/moodle-assignment-submission-read.js", "src/moodle-backup-executor.js", "src/moodle-bbb-executor.js", "src/moodle-calendar-executor.js", "src/moodle-completion-executor.js", "src/moodle-course-settings-executor.js", "src/moodle-enrolment-executor.js", "src/moodle-executor.js", "src/moodle-forum-activity-summary-read.js", "src/moodle-forum-post-executor.js", "src/moodle-forum-read.js", "src/moodle-glossary-wiki-executor.js", "src/moodle-grade-report-read.js", "src/moodle-gradebook-executor.js", "src/moodle-groups-executor.js", "src/moodle-groups-read.js", "src/moodle-h5p-executor.js", "src/moodle-learner-submission-read.js", "src/moodle-lesson-executor.js", "src/moodle-lesson-read.js", "src/moodle-lti-executor.js", "src/moodle-participants-read.js", "src/moodle-privacy.js", "src/moodle-qbank-executor.js", "src/moodle-qbank-question-executor.js", "src/moodle-question-impact-read.js", "src/moodle-quiz-attempt-detail-read.js", "src/moodle-quiz-attempt-summary-read.js", "src/moodle-quiz-structure-executor.js", "src/moodle-reports-read.js", "src/moodle-restrictions-executor.js", "src/moodle-scorm-executor.js",
   "src/moodle-scorm-report-read.js", "src/moodle-section-executor.js", "src/moodle-site-inventory-read.js", "src/moodle-subsection-executor.js", "src/moodle-workshop-executor.js", "src/new-quiz-item-guard.js", "src/new-quiz-write-contract.js", "src/protected-request.js", "src/quiz-bank-draw-executor.js", "src/quiz-item-payload.js", "src/service-worker.js", "src/verification.js"
 ]);
@@ -55,6 +69,17 @@ const SECRET_MARKERS = Object.freeze([
   ["github_token", /\b(?:ghp|gho|ghu|ghs|github_pat)_[A-Za-z0-9_=-]{20,}\b/],
   ["aws_access_key", /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/]
 ]);
+const SIGNING_ENVIRONMENT_NAMES = Object.freeze([
+  "CSC_LINK", "CSC_KEY_PASSWORD", "CSC_NAME", "CSC_KEYCHAIN",
+  "CSC_INSTALLER_LINK", "CSC_INSTALLER_KEY_PASSWORD",
+  "WIN_CSC_LINK", "WIN_CSC_KEY_PASSWORD",
+  "AZURE_TENANT_ID", "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET",
+  "AZURE_CLIENT_CERTIFICATE_PATH", "AZURE_CLIENT_SEND_CERTIFICATE_CHAIN",
+  "AZURE_USERNAME", "AZURE_PASSWORD", "AZURE_FEDERATED_TOKEN_FILE",
+  "APPLE_ID", "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_TEAM_ID",
+  "APPLE_API_KEY", "APPLE_API_KEY_ID", "APPLE_API_ISSUER",
+  "GH_TOKEN", "GITHUB_TOKEN", "MORROW_CHROME_STORE_LIVE"
+]);
 const TARGETS = Object.freeze({
   "darwin-arm64": Object.freeze({
     platform: "darwin", arch: "arm64", extension: "tar.xz",
@@ -69,6 +94,12 @@ const TARGETS = Object.freeze({
     electron: ["package:win"], label: "Windows on x64"
   })
 });
+
+function desktopTargetEnvironment(target) {
+  const descriptor = TARGETS[target];
+  if (!descriptor) throw new Error(`No desktop target is configured for ${target}`);
+  return Object.freeze({ MORROW_TARGET_PLATFORM: descriptor.platform });
+}
 
 function die(message, exitCode = 1) {
   process.stderr.write(`[morrow desktop package] ${message}\n`);
@@ -170,7 +201,7 @@ export function captureBridgeRelease(extensionRoot = resolve(ROOT, "connector", 
   ], "Morrow Bridge manifest");
   if (extensionId(extensionManifest.key) !== BRIDGE_EXTENSION_ID) throw new Error("Morrow Bridge extension identity is not the fixed release identity.");
   if (extensionManifest.manifest_version !== 3 || extensionManifest.name !== "Morrow Bridge" || extensionManifest.minimum_chrome_version !== "116"
-    || typeof extensionManifest.version !== "string" || !/^\d+\.\d+\.\d+(?:\.[0-9A-Za-z-]+)?$/.test(extensionManifest.version)) {
+    || !parseChromeVersion(extensionManifest.version)) {
     throw new Error("Morrow Bridge extension version is invalid.");
   }
   exactList(extensionManifest.permissions, ["activeTab", "alarms", "offscreen", "scripting", "storage", "tabs", "webNavigation", "webRequest"], "Morrow Bridge permissions");
@@ -234,8 +265,8 @@ function ensureEmptyDestination(destination, replace) {
 
 function packageManifest(directory) { return JSON.parse(readFileSync(resolve(directory, "package.json"), "utf8")); }
 
-function workspacePackages() {
-  const directory = resolve(ROOT, "packages");
+function workspacePackages(root = ROOT) {
+  const directory = resolve(root, "packages");
   const directories = readdirSync(directory, { withFileTypes: true })
     .filter((entry) => entry.isDirectory() && existsSync(resolve(directory, entry.name, "package.json")))
     .map((entry) => entry.name)
@@ -289,6 +320,117 @@ function runtimeDependencies(packagesByName) {
   }
   exactList([...resolved.keys()].sort(), [...RUNTIME_DEPENDENCY_NAMES].sort(), "Runtime dependency release scope");
   return resolved;
+}
+
+function capture(command, args, options = {}) {
+  const result = spawnSync(command, args, { cwd: ROOT, encoding: "utf8", maxBuffer: 8 * 1024 * 1024, ...options });
+  if (result.error) throw new Error(`${command} could not start: ${result.error.message}`);
+  if (result.status !== 0) {
+    const detail = String(result.stderr || result.stdout || "").trim();
+    throw new Error(`${command} failed with exit status ${result.status ?? 1}${detail ? `: ${detail}` : ""}`);
+  }
+  return String(result.stdout || "").trim();
+}
+
+function lockfileIntegrity(lockfile, name, version) {
+  const packagesStart = lockfile.indexOf("\npackages:\n");
+  const snapshotsStart = lockfile.indexOf("\nsnapshots:\n", packagesStart + 1);
+  if (packagesStart < 0 || snapshotsStart < 0) throw new Error("pnpm lockfile does not contain bounded package integrity records.");
+  const packages = lockfile.slice(packagesStart, snapshotsStart);
+  const escaped = `${name}@${version}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const header = new RegExp(`^  (?:'${escaped}'|${escaped}):\\s*$`, "m").exec(packages);
+  if (!header) throw new Error(`Runtime dependency is absent from the frozen lockfile: ${name}@${version}`);
+  const bodyStart = header.index + header[0].length;
+  const rest = packages.slice(bodyStart);
+  const next = /\n  (?:'[^'\n]+'|[^ \n][^:\n]*):\s*(?:\n|$)/.exec(rest);
+  const body = next ? rest.slice(0, next.index) : rest;
+  const integrity = /^\s{4}resolution:\s+\{[^}\n]*\bintegrity:\s*([^,}\s]+)[^}\n]*\}\s*$/m.exec(body)?.[1];
+  if (!integrity || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(integrity)) {
+    throw new Error(`Runtime dependency has no SHA-512 integrity in the frozen lockfile: ${name}@${version}`);
+  }
+  return integrity;
+}
+
+function assertDependencyMaterialization(value) {
+  assertObjectKeys(value, ["dependencies", "install", "lockfile", "packageManager", "schema"], "Runtime dependency materialization");
+  if (value.schema !== "morrow.runtime-dependency-materialization.v1") throw new Error("Runtime dependency materialization schema is invalid.");
+  assertObjectKeys(value.packageManager, ["declared", "observed"], "Runtime dependency package manager");
+  if (value.packageManager.declared !== `pnpm@${value.packageManager.observed}` || !/^\d+\.\d+\.\d+$/.test(value.packageManager.observed)) {
+    throw new Error("Runtime dependencies were not materialized with the pinned pnpm version.");
+  }
+  assertObjectKeys(value.lockfile, ["integritySource", "path", "sha256"], "Runtime dependency lockfile");
+  if (value.lockfile.path !== "pnpm-lock.yaml" || value.lockfile.integritySource !== "pnpm-lock.yaml packages resolution.integrity"
+    || !/^[0-9a-f]{64}$/.test(value.lockfile.sha256)) throw new Error("Runtime dependency lockfile binding is invalid.");
+  assertObjectKeys(value.install, ["flags", "mode", "network", "scripts"], "Runtime dependency install");
+  if (value.install.mode !== "isolated_frozen_install" || value.install.network !== "offline" || value.install.scripts !== "disabled") {
+    throw new Error("Runtime dependency install mode is invalid.");
+  }
+  exactList(value.install.flags, ["--prod", "--frozen-lockfile", "--offline", "--ignore-scripts", "--verify-store-integrity"], "Runtime dependency install flags");
+  if (!Array.isArray(value.dependencies)) throw new Error("Runtime dependency version bindings are invalid.");
+  exactList(value.dependencies.map((item) => item?.name), [...RUNTIME_DEPENDENCY_NAMES].sort(), "Runtime dependency version binding scope");
+  for (const item of value.dependencies) {
+    assertObjectKeys(item, ["integrity", "name", "version"], `Runtime dependency version binding ${item?.name || "unknown"}`);
+    if (typeof item.version !== "string" || item.version.length === 0 || !/^sha512-[A-Za-z0-9+/]+={0,2}$/.test(item.integrity)) {
+      throw new Error(`Runtime dependency version binding is invalid: ${item.name}`);
+    }
+  }
+}
+
+function materializeRuntimeDependencies(packages, workDirectory, sourceRoot = ROOT) {
+  const directory = `${workDirectory}.runtime-dependencies-${process.pid}-${randomUUID()}`;
+  mkdirSync(directory, { recursive: false, mode: 0o700 });
+  try {
+    for (const path of ["package.json", "pnpm-lock.yaml", "pnpm-workspace.yaml", ".npmrc"]) {
+      const source = resolve(sourceRoot, path);
+      if (!existsSync(source) || lstatSync(source).isSymbolicLink() || !statSync(source).isFile()) {
+        throw new Error(`Runtime dependency materialization input is invalid: ${path}`);
+      }
+      copy(source, resolve(directory, path));
+    }
+    for (const entry of packages) {
+      const source = resolve(entry.source, "package.json");
+      if (lstatSync(source).isSymbolicLink() || !statSync(source).isFile()) {
+        throw new Error(`Workspace dependency manifest is invalid: ${entry.name}`);
+      }
+      copy(source, resolve(directory, "packages", entry.directory, "package.json"));
+    }
+
+    const rootManifest = packageManifest(directory);
+    const packageManager = /^pnpm@(\d+\.\d+\.\d+)$/.exec(String(rootManifest.packageManager || ""));
+    if (!packageManager) throw new Error("Root packageManager must pin one exact pnpm version.");
+    const observedVersion = capture("pnpm", ["--version"], { cwd: directory });
+    if (observedVersion !== packageManager[1]) {
+      throw new Error(`Release dependency materialization requires ${rootManifest.packageManager}; found pnpm@${observedVersion || "unknown"}.`);
+    }
+    const flags = ["--prod", "--frozen-lockfile", "--offline", "--ignore-scripts", "--verify-store-integrity"];
+    capture("pnpm", ["install", ...flags], { cwd: directory, env: { ...process.env, CI: "true" } });
+
+    const isolatedPackages = packages.map((entry) => {
+      const source = resolve(directory, "packages", entry.directory);
+      return { ...entry, source, manifest: packageManifest(source) };
+    });
+    const dependencies = runtimeDependencies(new Map(isolatedPackages.map((entry) => [entry.name, entry])));
+    const lockfile = readFileSync(resolve(directory, "pnpm-lock.yaml"), "utf8");
+    const provenance = {
+      schema: "morrow.runtime-dependency-materialization.v1",
+      packageManager: { declared: String(rootManifest.packageManager), observed: observedVersion },
+      lockfile: {
+        path: "pnpm-lock.yaml",
+        sha256: digest(resolve(directory, "pnpm-lock.yaml")),
+        integritySource: "pnpm-lock.yaml packages resolution.integrity"
+      },
+      install: { mode: "isolated_frozen_install", network: "offline", scripts: "disabled", flags },
+      dependencies: [...dependencies.entries()].map(([name, source]) => {
+        const version = String(packageManifest(source).version);
+        return { name, version, integrity: lockfileIntegrity(lockfile, name, version) };
+      }).sort((left, right) => left.name.localeCompare(right.name))
+    };
+    assertDependencyMaterialization(provenance);
+    return { directory, dependencies, provenance };
+  } catch (error) {
+    rmSync(directory, { recursive: true, force: true });
+    throw error;
+  }
 }
 
 function copy(source, destination, filter) {
@@ -360,16 +502,30 @@ function mcpRuntimeManifest(stage, records, packages, dependencies) {
     ...packages.map((item) => packageNode(item.name, `packages/${item.directory}`, packageManifest(resolve(stage, "packages", item.directory)))),
     ...[...dependencies.entries()].map(([name, source]) => packageNode(name, `node_modules/${name}`, packageManifest(source)))
   ].sort((left, right) => left.name.localeCompare(right.name));
+  const directFiles = records.flatMap((record) => record.destinations
+    .filter((destination) => destination.startsWith("app/packages/") || destination.startsWith("app/installer/"))
+    .map((destination) => ({ path: destination.slice("app/".length), bytes: record.bytes, sha256: record.sha256 })))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  const requiredDirectFiles = [
+    "packages/client-config/dist/cli.js",
+    "packages/mcp-server/dist/index.js",
+    "packages/canvas-connector-mcp/dist/index.js",
+    "installer/runtime-monitor.mjs",
+  ];
+  if (!requiredDirectFiles.every((required) => directFiles.some((file) => file.path === required))) {
+    throw new Error("Sealed runtime manifest is missing a direct executable root.");
+  }
   const manifest = {
-    schema: "morrow.mcp-runtime-manifest.v1",
+    schema: "morrow.mcp-runtime-manifest.v2",
     package: { name: mcp.name, version: String(packageManifest(resolve(stage, "packages", mcp.directory)).version) },
     entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: entry.bytes, sha256: entry.sha256 },
-    dependencies: nodes
+    dependencies: nodes,
+    directFiles,
   };
   return { manifest, bytes: Buffer.from(json(manifest)) };
 }
 
-function stagePayloadInput(staging, packages, dependencies, checkpoint) {
+function stagePayloadInput(staging, packages, dependencies, checkpoint, dependencyMaterialization) {
   const stage = `${staging}.source-${process.pid}-${randomUUID()}`;
   mkdirSync(stage, { recursive: false, mode: 0o700 });
   try {
@@ -410,8 +566,9 @@ function stagePayloadInput(staging, packages, dependencies, checkpoint) {
     records.sort((left, right) => left.path.localeCompare(right.path));
     const mcpRuntime = mcpRuntimeManifest(stage, records, stagedPackages, stagedDependencies);
     const manifest = {
-      schema: "morrow.desktop-package-input.v1",
+      schema: "morrow.desktop-package-input.v2",
       source: checkpoint,
+      dependencyMaterialization,
       files: records,
       mcpRuntime: { path: "app/mcp-runtime-manifest.json", sha256: digestBytes(mcpRuntime.bytes) }
     };
@@ -433,17 +590,52 @@ function copyWorkspacePackage(entry, appRoot) {
   copy(resolve(appRoot, "packages", entry.directory), resolve(appRoot, "node_modules", ...entry.name.split("/")));
 }
 
+function verifiedCachedFile(file, expectedSha256) {
+  if (!existsSync(file)) return false;
+  const info = lstatSync(file);
+  return info.isFile() && !info.isSymbolicLink() && digest(file) === expectedSha256;
+}
+
+async function cacheVerifiedArchive(file, expectedSha256, download, description = basename(file)) {
+  if (!/^[0-9a-f]{64}$/.test(expectedSha256)) throw new TypeError("archive checksum is invalid");
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  if (verifiedCachedFile(file, expectedSha256)) return file;
+  rmSync(file, { force: true });
+  const partial = `${file}.partial-${process.pid}-${randomUUID()}`;
+  try {
+    const response = await download();
+    if (!response?.ok || !response.body) throw new Error(`Official Node download failed: HTTP ${response?.status ?? "unknown"}`);
+    await pipeline(
+      Readable.fromWeb(response.body),
+      createWriteStream(partial, { flags: "wx", mode: 0o600 }),
+    );
+    if (digest(partial) !== expectedSha256) throw new Error(`Official Node checksum mismatch: ${description}`);
+
+    // Another package process may have completed the same archive while this
+    // process downloaded. Keep its verified file and discard this duplicate.
+    if (verifiedCachedFile(file, expectedSha256)) return file;
+    rmSync(file, { force: true });
+    try {
+      renameSync(partial, file);
+    } catch (error) {
+      if (!verifiedCachedFile(file, expectedSha256)) throw error;
+    }
+    if (!verifiedCachedFile(file, expectedSha256)) throw new Error(`Official Node checksum mismatch: ${description}`);
+    return file;
+  } finally {
+    rmSync(partial, { force: true });
+  }
+}
+
 async function nodeArchive(target, cache) {
   const descriptor = TARGETS[target];
-  const path = resolve(cache, descriptor.archive);
-  mkdirSync(cache, { recursive: true, mode: 0o700 });
-  if (!existsSync(path)) {
-    const response = await fetch(`https://nodejs.org/download/release/v${NODE_VERSION}/${descriptor.archive}`);
-    if (!response.ok || !response.body) throw new Error(`Official Node download failed: HTTP ${response.status}`);
-    writeFileSync(path, Buffer.from(await response.arrayBuffer()), { mode: 0o600 });
-  }
-  if (digest(path) !== descriptor.sha256) throw new Error(`Official Node checksum mismatch: ${descriptor.archive}`);
-  return path;
+  const file = resolve(cache, descriptor.archive);
+  return cacheVerifiedArchive(
+    file,
+    descriptor.sha256,
+    () => fetch(`https://nodejs.org/download/release/v${NODE_VERSION}/${descriptor.archive}`),
+    descriptor.archive,
+  );
 }
 
 function expectedNodePath(payload) {
@@ -462,8 +654,17 @@ function assertPayloadSnapshot(payload, input) {
     throw new Error("Prepared desktop payload MCP runtime manifest differs from the sealed source snapshot.");
   }
   const mcp = JSON.parse(mcpBytes.toString("utf8"));
-  if (mcp.schema !== "morrow.mcp-runtime-manifest.v1" || mcp.package?.name !== "@morrow-lms/gateway"
+  if (input.manifest.schema !== "morrow.desktop-package-input.v2") throw new Error("Prepared desktop payload input manifest schema is invalid.");
+  assertDependencyMaterialization(input.manifest.dependencyMaterialization);
+  if (mcp.schema !== "morrow.mcp-runtime-manifest.v2" || mcp.package?.name !== "@morrow-lms/gateway"
     || mcp.entrypoint?.path !== "packages/mcp-server/dist/index.js") throw new Error("Prepared desktop payload MCP runtime manifest is invalid.");
+  const expectedDirectFiles = input.manifest.files.flatMap((record) => record.destinations
+    .filter((destination) => destination.startsWith("app/packages/") || destination.startsWith("app/installer/"))
+    .map((destination) => ({ path: destination.slice("app/".length), bytes: record.bytes, sha256: record.sha256 })))
+    .sort((left, right) => left.path.localeCompare(right.path));
+  if (JSON.stringify(mcp.directFiles) !== JSON.stringify(expectedDirectFiles)) {
+    throw new Error("Prepared desktop payload direct runtime inventory differs from the sealed source snapshot.");
+  }
   const mcpPackage = JSON.parse(readFileSync(resolve(payload, "app/packages/mcp-server/package.json"), "utf8"));
   if (mcpPackage.name !== mcp.package.name || String(mcpPackage.version) !== mcp.package.version) {
     throw new Error("Prepared desktop payload MCP package version does not match its sealed manifest.");
@@ -585,18 +786,43 @@ function sourceCheckpoint() {
   return { head: head.stdout.trim(), dirty: result.stdout.length > 0, statusSha256: digestBytes(result.stdout) };
 }
 
+function sameSourceCheckpoint(left, right) {
+  return left.head === right.head && left.dirty === right.dirty && left.statusSha256 === right.statusSha256;
+}
+
+function rebuildWorkspaceReleaseOutputs(root = ROOT, execute = () => capture("pnpm", ["build"])) {
+  const packages = workspacePackages(root);
+  for (const entry of packages) rmSync(resolve(entry.source, "dist"), { recursive: true, force: true });
+  execute(packages);
+  for (const entry of packages) {
+    const output = resolve(entry.source, "dist");
+    if (!existsSync(output) || !statSync(output).isDirectory() || regularFiles(output).length === 0) {
+      throw new Error(`Compiled output is missing after the release rebuild: ${entry.name}`);
+    }
+  }
+  return packages;
+}
+
 async function preparePayload(target, destination, replace) {
   ensureEmptyDestination(destination, replace);
   const staging = `${destination}.staging-${process.pid}-${randomUUID()}`;
-  const checkpoint = sourceCheckpoint();
+  const beforeBuild = sourceCheckpoint();
   let input;
+  let materialization;
   try {
-    const packages = workspacePackages();
-    const packageMap = new Map(packages.map((entry) => [entry.name, entry]));
-    const dependencies = runtimeDependencies(packageMap);
+    const packages = rebuildWorkspaceReleaseOutputs();
+    const checkpoint = sourceCheckpoint();
+    if (!sameSourceCheckpoint(beforeBuild, checkpoint)) {
+      throw new Error("Tracked source changed while Morrow rebuilt desktop release outputs.");
+    }
+    materialization = materializeRuntimeDependencies(packages, staging);
+    const dependencies = materialization.dependencies;
     const archive = await nodeArchive(target, resolve(ROOT, "artifacts", "desktop-runtime-cache"));
     mkdirSync(staging, { recursive: false, mode: 0o700 });
-    input = stagePayloadInput(staging, packages, dependencies, checkpoint);
+    input = stagePayloadInput(staging, packages, dependencies, checkpoint, materialization.provenance);
+    if (!sameSourceCheckpoint(checkpoint, sourceCheckpoint())) {
+      throw new Error("Tracked source changed while Morrow captured the desktop package input.");
+    }
     copyRuntime(archive, staging, target);
     const appRoot = resolve(staging, "app");
     for (const entry of input.packages) copyWorkspacePackage(entry, appRoot);
@@ -611,6 +837,8 @@ async function preparePayload(target, destination, replace) {
     assertPayload(staging, target, sealedInput, { executable: target === `${process.platform}-${process.arch}` });
     removeStage(input.stage);
     input = undefined;
+    rmSync(materialization.directory, { recursive: true, force: true });
+    materialization = undefined;
     renameSync(staging, destination);
     const receipt = {
       schema: "morrow.desktop-payload.v1",
@@ -626,6 +854,7 @@ async function preparePayload(target, destination, replace) {
         inputManifestSha256: digestBytes(readFileSync(resolve(destination, "app/package-input-manifest.json"))),
         inputManifestFileCount: JSON.parse(readFileSync(resolve(destination, "app/package-input-manifest.json"), "utf8")).files.length,
         mcpRuntimeManifestSha256: digestBytes(readFileSync(resolve(destination, "app/mcp-runtime-manifest.json"))),
+        dependencyMaterialization: JSON.parse(readFileSync(resolve(destination, "app/package-input-manifest.json"), "utf8")).dependencyMaterialization,
         reproducibleFrom: "app/package-input-manifest.json",
         note: "When dirty is true, the commit in head does not identify the delivered source by itself, and inputManifestSha256 is the binding record of every file sealed into this payload."
       },
@@ -637,6 +866,7 @@ async function preparePayload(target, destination, replace) {
     return receipt;
   } catch (error) {
     if (input) removeStage(input.stage);
+    if (materialization) rmSync(materialization.directory, { recursive: true, force: true });
     rmSync(staging, { recursive: true, force: true });
     throw error;
   }
@@ -648,16 +878,56 @@ function signingState(target, unsignedQa, unsignedRelease) {
   return { mode: "unsigned_private_qa", target, publicRelease: false };
 }
 
+function unsignedBuilderEnvironment(base = process.env) {
+  const environment = { ...base };
+  for (const name of SIGNING_ENVIRONMENT_NAMES) delete environment[name];
+  environment.CSC_IDENTITY_AUTO_DISCOVERY = "false";
+  environment.MORROW_SIGNED_RELEASE = "0";
+  return environment;
+}
+
+function windowsAuthenticodeCertificateTable(file) {
+  const data = readFileSync(file);
+  if (data.byteLength < 64 || data.readUInt16LE(0) !== 0x5a4d) throw new Error("Windows installer is not a valid PE file.");
+  const pe = data.readUInt32LE(0x3c);
+  if (!Number.isSafeInteger(pe) || pe < 64 || pe + 24 > data.byteLength || data.readUInt32LE(pe) !== 0x00004550) {
+    throw new Error("Windows installer is not a valid PE file.");
+  }
+  const optional = pe + 24;
+  const optionalBytes = data.readUInt16LE(pe + 20);
+  if (optional + optionalBytes > data.byteLength) throw new Error("Windows installer PE optional header is truncated.");
+  const magic = data.readUInt16LE(optional);
+  const numberOffset = magic === 0x10b ? 92 : magic === 0x20b ? 108 : -1;
+  const directoryOffset = magic === 0x10b ? 96 : magic === 0x20b ? 112 : -1;
+  if (numberOffset < 0 || numberOffset + 4 > optionalBytes) throw new Error("Windows installer PE optional header is invalid.");
+  const count = data.readUInt32LE(optional + numberOffset);
+  if (count <= 4) return Object.freeze({ present: false, offset: 0, bytes: 0 });
+  const certificateEntry = optional + directoryOffset + (4 * 8);
+  if (certificateEntry + 8 > optional + optionalBytes) throw new Error("Windows installer PE certificate directory is truncated.");
+  const offset = data.readUInt32LE(certificateEntry);
+  const bytes = data.readUInt32LE(certificateEntry + 4);
+  if ((offset === 0) !== (bytes === 0) || (bytes > 0 && (offset < optional + optionalBytes || offset + bytes > data.byteLength))) {
+    throw new Error("Windows installer PE certificate directory is invalid.");
+  }
+  return Object.freeze({ present: bytes > 0, offset, bytes });
+}
+
+function assertUnsignedWindowsExecutable(file) {
+  const certificate = windowsAuthenticodeCertificateTable(file);
+  if (certificate.present) throw new Error("Unsigned Windows packaging produced an Authenticode-signed installer.");
+  return "authenticode_absent";
+}
+
 function installerArtifacts(output, target) {
   const files = readdirSync(output).filter((name) => statSync(resolve(output, name)).isFile());
   if (target === "darwin-arm64") {
     const dmg = files.filter((name) => name.startsWith("Morrow-") && name.endsWith("-mac-arm64.dmg"));
     const zip = files.filter((name) => name.startsWith("Morrow-") && name.endsWith("-mac-arm64.zip"));
     const metadata = files.filter((name) => name === "latest-mac.yml");
-    if (dmg.length !== 1 || zip.length !== 1 || metadata.length !== 1) {
-      throw new Error("Electron builder did not create exactly one Morrow DMG, ZIP, and latest-mac.yml update metadata file.");
+    if (dmg.length !== 1 || zip.length !== 1 || metadata.length !== 0) {
+      throw new Error("Unsigned Electron builder output must contain exactly one Morrow DMG and ZIP and no production update metadata.");
     }
-    return [...dmg, ...zip, ...metadata];
+    return [...dmg, ...zip];
   }
   const executable = files.filter((name) => name.startsWith("Morrow-") && name.endsWith("-win-x64.exe"));
   if (executable.length !== 1) throw new Error("Electron builder did not create exactly one Windows NSIS installer.");
@@ -691,43 +961,91 @@ function readAsarPackage(archive) {
   return JSON.parse(data.subarray(offset, offset + entry.size).toString("utf8"));
 }
 
-function assertFinalElectronPayload(electronOutput, target, receipt) {
+function assertFinalElectronPayload(electronOutput, target, receipt, releaseGraph) {
   const asars = findAppAsar(electronOutput);
   if (asars.length !== 1) throw new Error(`Electron builder produced ${asars.length} app.asar files instead of one.`);
   const payload = resolve(dirname(asars[0]), "MorrowPayload");
   if (!existsSync(payload) || !statSync(payload).isDirectory()) throw new Error("Electron builder output is missing MorrowPayload.");
+  verifyPackagerAdmission({ payload, target, admission: releaseGraph });
   assertPayload(payload, target, receipt.sealedInput);
   const appPackage = readAsarPackage(asars[0]);
   if (appPackage?.morrow?.bridgeRelease?.manifestSha256 !== receipt.bridgeRelease.manifestSha256
-    || appPackage?.morrow?.mcpRuntime?.manifestSha256 !== receipt.sealedInput.manifest.mcpRuntime.sha256) {
-    throw new Error("Electron ASAR does not bind the verified Bridge and MCP manifests.");
+    || appPackage?.morrow?.mcpRuntime?.manifestSha256 !== receipt.sealedInput.manifest.mcpRuntime.sha256
+    || appPackage?.morrow?.packageInput?.manifestSha256 !== receipt.source.inputManifestSha256
+    || appPackage?.morrow?.releaseGraph?.schema !== releaseGraph.schema
+    || appPackage?.morrow?.releaseGraph?.sha256 !== releaseGraph.graphSha256
+    || appPackage?.morrow?.releaseGraph?.sourceHead !== releaseGraph.source.head) {
+    throw new Error("Electron ASAR does not bind the reviewed payload release graph.");
   }
+}
+
+function desktopInstallerReceipt({ target, artifacts, payloadReceipt, signing, releaseGraph }) {
+  const source = payloadReceipt?.source;
+  if (!source || !/^[0-9a-f]{40,64}$/.test(source.head) || typeof source.dirty !== "boolean"
+    || !/^[0-9a-f]{64}$/.test(source.statusSha256)
+    || !/^[0-9a-f]{64}$/.test(source.inputManifestSha256)
+    || !/^[0-9a-f]{64}$/.test(source.mcpRuntimeManifestSha256)) {
+    throw new Error("Desktop installer receipt requires the immutable payload source checkpoint.");
+  }
+  if (!releaseGraph || releaseGraph.schema !== PACKAGER_ADMISSION_SCHEMA || releaseGraph.target !== target
+    || releaseGraph.source?.head !== source.head || releaseGraph.source?.dirty !== source.dirty
+    || releaseGraph.source?.statusSha256 !== source.statusSha256
+    || !/^[0-9a-f]{64}$/.test(releaseGraph.graphSha256)) {
+    throw new Error("Desktop installer receipt requires the reviewed payload release graph.");
+  }
+  return {
+    schema: "morrow.desktop-installer.v1",
+    version: VERSION,
+    target,
+    artifacts,
+    payload: {
+      node: payloadReceipt.node,
+      workspaceModulesMaterialized: true,
+      containsMutableState: false,
+      releaseGraph: { schema: releaseGraph.schema, sha256: releaseGraph.graphSha256 },
+    },
+    source: structuredClone(source),
+    signing,
+    bridgeDelivery: PACKAGED_BRIDGE_DELIVERY,
+    verification: { payloadStatic: true, packagerAdmission: true, installerLaunch: "not_run", electronAsarAndBridge: true, electronAsarAndMcp: true }
+  };
 }
 
 async function packageDesktop(request) {
   const output = request.output;
   ensureEmptyDestination(output, request.replace);
   const staging = `${output}.staging-${process.pid}-${randomUUID()}`;
+  const admissionPath = `${staging}.packager-admission.json`;
   const payload = resolve(staging, "MorrowPayload");
   try {
     mkdirSync(staging, { recursive: false, mode: 0o700 });
     const payloadReceipt = await preparePayload(request.target, payload, false);
-    const signing = signingState(request.target, request.unsignedQa, request.unsignedRelease);
+    const releaseGraph = createPackagerAdmission({ payload, target: request.target });
+    writePackagerAdmission(admissionPath, releaseGraph);
+    const requestedSigning = signingState(request.target, request.unsignedQa, request.unsignedRelease);
     const electronOutput = resolve(staging, "electron-output");
     run("pnpm", ["--dir", INSTALLER, "--ignore-workspace", `run`, TARGETS[request.target].electron[0]], {
-      env: { ...process.env, MORROW_INSTALLER_PAYLOAD: payload, MORROW_INSTALLER_OUTPUT: electronOutput, MORROW_SIGNED_RELEASE: "0" }
+      env: unsignedBuilderEnvironment({
+        ...process.env,
+        ...desktopTargetEnvironment(request.target),
+        MORROW_INSTALLER_PAYLOAD: payload,
+        MORROW_INSTALLER_OUTPUT: electronOutput,
+        [PACKAGER_ADMISSION_ENV]: admissionPath,
+        [REVIEWED_GRAPH_SHA256_ENV]: releaseGraph.graphSha256,
+      })
     });
-    assertFinalElectronPayload(electronOutput, request.target, payloadReceipt);
+    assertFinalElectronPayload(electronOutput, request.target, payloadReceipt, releaseGraph);
     const artifacts = installerArtifacts(electronOutput, request.target);
-    const receipt = {
-      schema: "morrow.desktop-installer.v1",
-      version: VERSION,
+    const signing = request.target === "win32-x64"
+      ? { ...requestedSigning, artifactSignature: assertUnsignedWindowsExecutable(resolve(electronOutput, artifacts[0])) }
+      : requestedSigning;
+    const receipt = desktopInstallerReceipt({
       target: request.target,
       artifacts: artifacts.map((name) => ({ name, sha256: digest(resolve(electronOutput, name)) })),
-      payload: { node: payloadReceipt.node, workspaceModulesMaterialized: true, containsMutableState: false },
+      payloadReceipt,
       signing,
-      verification: { payloadStatic: true, installerLaunch: "not_run", electronAsarAndBridge: true, electronAsarAndMcp: true }
-    };
+      releaseGraph,
+    });
     for (const artifact of artifacts) copy(resolve(electronOutput, artifact), resolve(staging, artifact));
     writeFileSync(resolve(staging, "receipt.json"), json(receipt), { mode: 0o600 });
     rmSync(payload, { recursive: true, force: true });
@@ -737,6 +1055,8 @@ async function packageDesktop(request) {
   } catch (error) {
     rmSync(staging, { recursive: true, force: true });
     throw error;
+  } finally {
+    rmSync(admissionPath, { force: true });
   }
 }
 
@@ -759,4 +1079,4 @@ async function main() {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
 
-export { BRIDGE_SOURCE_FILES, WORKSPACE_PACKAGE_DIRECTORIES, RUNTIME_DEPENDENCY_NAMES, assertPayloadSnapshot };
+export { BRIDGE_SOURCE_FILES, WORKSPACE_PACKAGE_DIRECTORIES, RUNTIME_DEPENDENCY_NAMES, assertPayloadSnapshot, assertUnsignedWindowsExecutable, cacheVerifiedArchive, desktopInstallerReceipt, desktopTargetEnvironment, materializeRuntimeDependencies, rebuildWorkspaceReleaseOutputs, unsignedBuilderEnvironment, windowsAuthenticodeCertificateTable, workspacePackages };

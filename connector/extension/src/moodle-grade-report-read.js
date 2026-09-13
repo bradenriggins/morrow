@@ -47,6 +47,8 @@
  * statistics only, with no learner row, name, ID, or grade value.
  */
 export async function executeMoodleGradeReportSummaryInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const OPERATION = "moodle.form.grade.report.summary.read.v1";
   const TOOL = "moodle_get_grade_report_summary";
@@ -105,11 +107,17 @@ export async function executeMoodleGradeReportSummaryInPage(rawInput) {
   };
   const boundedText = async (response, endpoint) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext() || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -117,14 +125,14 @@ export async function executeMoodleGradeReportSummaryInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -159,6 +167,7 @@ export async function executeMoodleGradeReportSummaryInPage(rawInput) {
     try {
       response = await fetch(endpoint, {
         method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" },
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_grade_report_summary_request_failed" }; }
     const html = await boundedText(response, endpoint);
@@ -335,6 +344,8 @@ export async function executeMoodleGradeReportSummaryInPage(rawInput) {
  * No name, no free text and no feedback leaves the page.
  */
 export async function executeMoodleLearnerGradeReportInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const OPERATION = "moodle.form.grade.report.learner.read.v1";
   const TOOL = "moodle_get_learner_grade_report";
@@ -394,11 +405,17 @@ export async function executeMoodleLearnerGradeReportInPage(rawInput) {
   };
   const boundedText = async (response, endpoint) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext() || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -406,14 +423,14 @@ export async function executeMoodleLearnerGradeReportInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -441,6 +458,7 @@ export async function executeMoodleLearnerGradeReportInPage(rawInput) {
     try {
       response = await fetch(endpoint, {
         method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" },
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_learner_grade_report_request_failed" }; }
     const html = await boundedText(response, endpoint);

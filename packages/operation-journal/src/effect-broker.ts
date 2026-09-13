@@ -1,8 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import { normalizeRequestedBy, sha256Json, type JsonObject, type RequestedByIdentity } from "@morrow/contracts";
+import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
 
 export const EFFECT_OPERATION_STATES = Object.freeze([
   "awaiting_approval",
@@ -94,6 +93,7 @@ export interface EffectOperationRecord {
   readonly sourceResultState: string | null;
   readonly sourceTaskId: string | null;
   readonly readbackDigest: string | null;
+  readonly hasResultBindingArtifact: boolean;
   readonly personObservedStateDigest: string | null;
   readonly verificationStatus: "not_requested" | "unconfirmed" | "verified" | null;
   readonly attention: readonly string[];
@@ -105,6 +105,19 @@ export interface EffectOperationRecord {
 export interface ProviderEffectBrokerOptions {
   readonly path: string;
   readonly now?: () => Date;
+}
+
+export interface EffectOperationListPage {
+  readonly operations: readonly EffectOperationRecord[];
+  readonly nextCursor: string | null;
+  readonly hasMore: boolean;
+}
+
+export interface EffectOperationStats {
+  readonly totalOperationCount: number;
+  readonly unresolvedOperationCount: number;
+  readonly appliedOrUnknownCount: number;
+  readonly dispatchingCount: number;
 }
 
 interface EffectRow {
@@ -136,6 +149,7 @@ interface EffectRow {
   source_result_state: string | null;
   source_task_id: string | null;
   readback_digest: string | null;
+  result_binding_artifact_json: string | null;
   person_observed_state_digest: string | null;
   verification_status: "not_requested" | "unconfirmed" | "verified" | null;
   attention_json: string;
@@ -162,6 +176,37 @@ const TARGET_HOLDING_STATES = "'dispatching','awaiting_inner_approval','awaiting
  * closed by a person.
  */
 const UNRESOLVED_STATES: readonly EffectOperationState[] = ["awaiting_verification", "applied_or_unknown"];
+
+function encodeOperationListCursor(row: Pick<EffectRow, "created_at" | "operation_id">): string {
+  return Buffer.from(JSON.stringify({ createdAt: row.created_at, operationId: row.operation_id }), "utf8").toString("base64url");
+}
+
+function parseOperationListCursor(value: string): { readonly createdAt: string; readonly operationId: string } {
+  if (typeof value !== "string" || value.length < 8 || value.length > 512 || !/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new TypeError("operation list cursor is invalid");
+  }
+  let text: string;
+  try {
+    const bytes = Buffer.from(value, "base64url");
+    if (bytes.toString("base64url") !== value) throw new Error("non-canonical cursor");
+    text = bytes.toString("utf8");
+  } catch {
+    throw new TypeError("operation list cursor is invalid");
+  }
+  let parsed: unknown;
+  try { parsed = JSON.parse(text); } catch { throw new TypeError("operation list cursor is invalid"); }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)
+    || Object.keys(parsed).sort().join(",") !== "createdAt,operationId") {
+    throw new TypeError("operation list cursor is invalid");
+  }
+  const { createdAt, operationId } = parsed as { createdAt?: unknown; operationId?: unknown };
+  let canonicalCreatedAt = "";
+  try { if (typeof createdAt === "string") canonicalCreatedAt = new Date(createdAt).toISOString(); } catch { /* invalid below */ }
+  if (typeof createdAt !== "string" || canonicalCreatedAt !== createdAt) {
+    throw new TypeError("operation list cursor is invalid");
+  }
+  return { createdAt, operationId: identifier(operationId, "operation list cursor operation id") };
+}
 
 export class ProviderEffectTargetConflictError extends Error {
   readonly code = "provider_effect_target_conflict";
@@ -200,6 +245,28 @@ export interface DispatchReservationOptions {
   readonly enforceHistoricalTargetScopeBarrier?: boolean;
 }
 
+export interface EffectBatchOperationBinding {
+  readonly batchId: string;
+  readonly childId: string;
+  readonly operation: EffectOperationRecord;
+}
+
+export interface EffectBatchRevocation {
+  readonly schema: "morrow.effect-batch-revocation.v1";
+  readonly batchId: string;
+  readonly reason: string;
+  readonly operations: readonly EffectBatchOperationBinding[];
+}
+
+export class ProviderEffectParentAuthorityError extends Error {
+  readonly code = "provider_effect_parent_batch_inactive";
+
+  constructor() {
+    super("The parent batch no longer authorizes this operation.");
+    this.name = "ProviderEffectParentAuthorityError";
+  }
+}
+
 function identifier(value: unknown, label: string): string {
   const text = typeof value === "string" ? value.trim() : "";
   if (!IDENTIFIER.test(text)) throw new TypeError(`${label} has an invalid format`);
@@ -221,6 +288,31 @@ function jsonObject(value: unknown, label: string): JsonObject {
 
 function parseJsonObject(value: string, label: string): JsonObject {
   return jsonObject(JSON.parse(value) as unknown, label);
+}
+
+function normalizeResultBindingArtifactEnvelope(value: unknown): JsonObject {
+  const envelope = jsonObject(value, "result binding artifact envelope");
+  if (Object.keys(envelope).sort().join(",") !== "ciphertext,iv,schema,tag"
+    || envelope.schema !== "morrow.canvas-result-binding-artifact-envelope.v1") {
+    throw new TypeError("result binding artifact envelope is invalid");
+  }
+  const encoded = (field: "ciphertext" | "iv" | "tag", expectedBytes?: number): string => {
+    const text = envelope[field];
+    if (typeof text !== "string" || text.length < 2 || text.length > 4_096 || !/^[A-Za-z0-9_-]+$/u.test(text)) {
+      throw new TypeError("result binding artifact envelope is invalid");
+    }
+    const bytes = Buffer.from(text, "base64url");
+    if (bytes.toString("base64url") !== text || (expectedBytes !== undefined && bytes.length !== expectedBytes)) {
+      throw new TypeError("result binding artifact envelope is invalid");
+    }
+    return text;
+  };
+  return {
+    schema: envelope.schema,
+    ciphertext: encoded("ciphertext"),
+    iv: encoded("iv", 12),
+    tag: encoded("tag", 16),
+  };
 }
 
 function parseReadback(value: string | null): FrozenReadbackPlan | null {
@@ -280,6 +372,16 @@ function effectAuthorization(value: unknown): EffectAuthorization {
   return { kind: "edit_scope", policyDigest, policyRevision: Number(object.policyRevision) };
 }
 
+/**
+ * The complete frozen identity of a caller-supplied source operation. The
+ * self-reported requester is display context and is the only plan field that
+ * the contract declares non-authoritative.
+ */
+function sourceIdempotencyPlanDigest(plan: JsonObject): string {
+  const { requestedBy: _requestedBy, ...frozenIdentity } = plan;
+  return sha256Json(frozenIdentity);
+}
+
 function rowRecord(row: EffectRow): EffectOperationRecord {
   const attention = JSON.parse(row.attention_json) as unknown;
   return {
@@ -313,6 +415,7 @@ function rowRecord(row: EffectRow): EffectOperationRecord {
     sourceResultState: row.source_result_state,
     sourceTaskId: row.source_task_id,
     readbackDigest: row.readback_digest,
+    hasResultBindingArtifact: row.result_binding_artifact_json !== null,
     personObservedStateDigest: row.person_observed_state_digest,
     verificationStatus: row.verification_status,
     attention: Array.isArray(attention) ? attention.filter((entry): entry is string => typeof entry === "string") : [],
@@ -334,7 +437,7 @@ const EFFECT_OPERATION_COLUMNS = Object.freeze([
   "source_operation_id", "source_binding_id", "readback_json", "connector_read_descriptor_json",
   "correction_of", "state", "approval_grant_digest", "approval_expires_at", "approval_consumed_at",
   "effect_receipt_id", "dispatch_attempt", "upstream_result_digest", "source_result_state",
-  "source_task_id", "readback_digest", "person_observed_state_digest", "verification_status",
+  "source_task_id", "readback_digest", "result_binding_artifact_json", "person_observed_state_digest", "verification_status",
   "attention_json", "created_at", "updated_at", "terminal_at",
 ] as const);
 
@@ -380,6 +483,7 @@ function effectOperationsTableDdl(name: string, options: EffectOperationsTableOp
         source_result_state TEXT,
         source_task_id TEXT,
         readback_digest TEXT,
+        result_binding_artifact_json TEXT,
         person_observed_state_digest TEXT,
         verification_status TEXT CHECK(verification_status IN ('not_requested','unconfirmed','verified')),
         attention_json TEXT NOT NULL,
@@ -396,13 +500,13 @@ export class ProviderEffectBroker {
   private closed = false;
 
   constructor(options: ProviderEffectBrokerOptions) {
-    this.path = options.path === ":memory:" ? ":memory:" : resolve(options.path);
-    this.now = options.now ?? (() => new Date());
-    if (this.path !== ":memory:") mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-    this.database = new DatabaseSync(this.path, {
+    const opened = openExactPrivateSqliteDatabase(options.path, "Morrow provider-effect journal", {
       enableForeignKeyConstraints: true,
       enableDoubleQuotedStringLiterals: false,
     });
+    this.path = opened.path;
+    this.now = options.now ?? (() => new Date());
+    this.database = opened.database;
     this.database.exec(`
       PRAGMA busy_timeout = 5000;
       PRAGMA synchronous = FULL;
@@ -416,6 +520,23 @@ export class ProviderEffectBroker {
     this.ensureTargetIdentityColumns();
     this.ensureOperationStateConstraint();
     this.database.exec(`
+      CREATE TABLE IF NOT EXISTS provider_effect_batches (
+        batch_id TEXT PRIMARY KEY,
+        state TEXT NOT NULL CHECK(state IN ('active','revoked')),
+        reason TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK(revision >= 1)
+      ) STRICT;
+      CREATE TABLE IF NOT EXISTS provider_effect_batch_bindings (
+        operation_id TEXT PRIMARY KEY REFERENCES provider_effect_operations(operation_id) ON DELETE CASCADE,
+        batch_id TEXT NOT NULL REFERENCES provider_effect_batches(batch_id) ON DELETE CASCADE,
+        child_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(batch_id, child_id)
+      ) STRICT;
+      CREATE INDEX IF NOT EXISTS provider_effect_batch_bindings_batch
+        ON provider_effect_batch_bindings(batch_id, child_id);
       DROP INDEX IF EXISTS provider_effect_operations_target_state;
       CREATE INDEX IF NOT EXISTS provider_effect_operations_target_state
         ON provider_effect_operations(target_identity_digest, state);
@@ -447,6 +568,9 @@ export class ProviderEffectBroker {
     }
     if (!names.has("person_observed_state_digest")) {
       this.database.exec("ALTER TABLE provider_effect_operations ADD COLUMN person_observed_state_digest TEXT");
+    }
+    if (!names.has("result_binding_artifact_json")) {
+      this.database.exec("ALTER TABLE provider_effect_operations ADD COLUMN result_binding_artifact_json TEXT");
     }
     const legacy = this.database.prepare(`
       SELECT operation_id, plan_json FROM provider_effect_operations
@@ -604,14 +728,7 @@ export class ProviderEffectBroker {
         `).get(sourceOperationId) as EffectRow | undefined;
         if (existing) {
           const record = rowRecord(existing);
-          if (
-            record.publicToolName !== publicToolName
-            || record.sourceId !== sourceId
-            || record.sourceToolName !== sourceToolName
-            || record.catalogDigest !== catalogDigest
-            || record.requestDigest !== sha256Json(request)
-            || record.forwardedRequestDigest !== sha256Json(forwardedRequest)
-          ) {
+          if (sourceIdempotencyPlanDigest(record.plan) !== sourceIdempotencyPlanDigest(plan)) {
             throw new Error("source operation identity is already bound to a different frozen plan");
           }
           return record;
@@ -667,11 +784,55 @@ export class ProviderEffectBroker {
   }
 
   list(limitValue = 50): readonly EffectOperationRecord[] {
+    return this.listPage({ limit: limitValue }).operations;
+  }
+
+  listPage(input: { readonly limit?: number; readonly cursor?: string } = {}): EffectOperationListPage {
     this.assertOpen();
+    const limitValue = input.limit ?? 50;
     const limit = Math.max(1, Math.min(Math.trunc(limitValue), 200));
-    return (this.database.prepare(`
-      SELECT * FROM provider_effect_operations ORDER BY created_at DESC, operation_id DESC LIMIT ?
-    `).all(limit) as unknown as EffectRow[]).map(rowRecord);
+    if (!Number.isFinite(limitValue)) throw new TypeError("operation list limit must be finite");
+    const cursor = input.cursor === undefined ? null : parseOperationListCursor(input.cursor);
+    const rows = (cursor
+      ? this.database.prepare(`
+          SELECT * FROM provider_effect_operations
+          WHERE created_at < ? OR (created_at = ? AND operation_id < ?)
+          ORDER BY created_at DESC, operation_id DESC LIMIT ?
+        `).all(cursor.createdAt, cursor.createdAt, cursor.operationId, limit + 1)
+      : this.database.prepare(`
+          SELECT * FROM provider_effect_operations
+          ORDER BY created_at DESC, operation_id DESC LIMIT ?
+        `).all(limit + 1)) as unknown as EffectRow[];
+    const hasMore = rows.length > limit;
+    const page = hasMore ? rows.slice(0, limit) : rows;
+    return {
+      operations: page.map(rowRecord),
+      nextCursor: hasMore && page.length ? encodeOperationListCursor(page[page.length - 1]!) : null,
+      hasMore,
+    };
+  }
+
+  stats(): EffectOperationStats {
+    this.assertOpen();
+    const row = this.database.prepare(`
+      SELECT
+        COUNT(*) AS total_operation_count,
+        SUM(CASE WHEN state NOT IN ('verified','failed','cancelled','closed_by_person') THEN 1 ELSE 0 END) AS unresolved_operation_count,
+        SUM(CASE WHEN state='applied_or_unknown' THEN 1 ELSE 0 END) AS applied_or_unknown_count,
+        SUM(CASE WHEN state='dispatching' THEN 1 ELSE 0 END) AS dispatching_count
+      FROM provider_effect_operations
+    `).get() as {
+      total_operation_count: number;
+      unresolved_operation_count: number | null;
+      applied_or_unknown_count: number | null;
+      dispatching_count: number | null;
+    };
+    return {
+      totalOperationCount: Number(row.total_operation_count),
+      unresolvedOperationCount: Number(row.unresolved_operation_count || 0),
+      appliedOrUnknownCount: Number(row.applied_or_unknown_count || 0),
+      dispatchingCount: Number(row.dispatching_count || 0),
+    };
   }
 
   hasActiveOperations(): boolean {
@@ -681,6 +842,103 @@ export class ProviderEffectBroker {
       WHERE state='dispatching' LIMIT 1
     `).get();
     return row !== undefined;
+  }
+
+  /** Creates the durable parent authority before any operation in a write batch can be exposed. */
+  registerBatch(batchIdValue: string): "active" | "revoked" {
+    const batchId = identifier(batchIdValue, "batch id");
+    const now = this.instant();
+    return this.transaction(() => {
+      this.database.prepare(`
+        INSERT OR IGNORE INTO provider_effect_batches(
+          batch_id, state, reason, created_at, updated_at, revision
+        ) VALUES (?, 'active', NULL, ?, ?, 1)
+      `).run(batchId, now, now);
+      const row = this.database.prepare(`
+        SELECT state FROM provider_effect_batches WHERE batch_id=?
+      `).get(batchId) as { state: "active" | "revoked" } | undefined;
+      if (!row) throw new Error("effect batch authority was not created");
+      return row.state;
+    });
+  }
+
+  /** Binds one exact child to one effect. A revoked parent cancels an unsent legacy effect immediately. */
+  bindBatchOperation(
+    batchIdValue: string,
+    childIdValue: string,
+    operationIdValue: string,
+  ): EffectBatchOperationBinding {
+    const batchId = identifier(batchIdValue, "batch id");
+    const childId = identifier(childIdValue, "batch child id");
+    const operationId = identifier(operationIdValue, "operation id");
+    const now = this.instant();
+    return this.transaction(() => {
+      const parent = this.database.prepare(`
+        SELECT state, reason FROM provider_effect_batches WHERE batch_id=?
+      `).get(batchId) as { state: "active" | "revoked"; reason: string | null } | undefined;
+      if (!parent) throw new Error("effect batch authority does not exist");
+      this.get(operationId);
+      const existing = this.database.prepare(`
+        SELECT batch_id, child_id FROM provider_effect_batch_bindings WHERE operation_id=?
+      `).get(operationId) as { batch_id: string; child_id: string } | undefined;
+      if (existing && (existing.batch_id !== batchId || existing.child_id !== childId)) {
+        throw new Error("effect operation is already bound to another batch child");
+      }
+      this.database.prepare(`
+        INSERT OR IGNORE INTO provider_effect_batch_bindings(
+          operation_id, batch_id, child_id, created_at
+        ) VALUES (?, ?, ?, ?)
+      `).run(operationId, batchId, childId, now);
+      if (parent.state === "revoked") {
+        this.database.prepare(`
+          UPDATE provider_effect_operations
+          SET state='cancelled', attention_json=?, updated_at=?, terminal_at=?
+          WHERE operation_id=? AND state IN ('awaiting_approval','approved')
+        `).run(JSON.stringify([parent.reason || "parent_batch_inactive"]), now, now, operationId);
+      }
+      return { batchId, childId, operation: this.get(operationId) };
+    });
+  }
+
+  /**
+   * Revokes the complete parent chain in the same transaction used by dispatch reservation.
+   * A reservation that wins first remains visible through dispatchAttempt; every unsent effect is cancelled.
+   */
+  revokeBatch(batchIdValue: string, reasonValue = "parent_batch_inactive"): EffectBatchRevocation {
+    const batchId = identifier(batchIdValue, "batch id");
+    const reason = identifier(reasonValue, "batch revocation reason");
+    const now = this.instant();
+    return this.transaction(() => {
+      this.database.prepare(`
+        INSERT OR IGNORE INTO provider_effect_batches(
+          batch_id, state, reason, created_at, updated_at, revision
+        ) VALUES (?, 'revoked', ?, ?, ?, 1)
+      `).run(batchId, reason, now, now);
+      this.database.prepare(`
+        UPDATE provider_effect_batches
+        SET state='revoked', reason=COALESCE(reason, ?), updated_at=?, revision=revision+1
+        WHERE batch_id=? AND state='active'
+      `).run(reason, now, batchId);
+      this.database.prepare(`
+        UPDATE provider_effect_operations
+        SET state='cancelled', attention_json=?, updated_at=?, terminal_at=?
+        WHERE operation_id IN (
+          SELECT operation_id FROM provider_effect_batch_bindings WHERE batch_id=?
+        ) AND state IN ('awaiting_approval','approved')
+      `).run(JSON.stringify([reason]), now, now, batchId);
+      const rows = this.database.prepare(`
+        SELECT binding.child_id, operation.*
+        FROM provider_effect_batch_bindings AS binding
+        JOIN provider_effect_operations AS operation ON operation.operation_id=binding.operation_id
+        WHERE binding.batch_id=? ORDER BY binding.child_id ASC
+      `).all(batchId) as unknown as (EffectRow & { child_id: string })[];
+      return {
+        schema: "morrow.effect-batch-revocation.v1",
+        batchId,
+        reason,
+        operations: rows.map((row) => ({ batchId, childId: row.child_id, operation: rowRecord(row) })),
+      };
+    });
   }
 
   approve(operationIdValue: string): EffectOperationRecord {
@@ -757,6 +1015,13 @@ export class ProviderEffectBroker {
       if (current.state !== "approved" || !current.approvalGrantDigest) {
         throw new Error(`operation cannot dispatch from ${current.state}`);
       }
+      const parent = this.database.prepare(`
+        SELECT batch.state
+        FROM provider_effect_batch_bindings AS binding
+        JOIN provider_effect_batches AS batch ON batch.batch_id=binding.batch_id
+        WHERE binding.operation_id=?
+      `).get(operationId) as { state: "active" | "revoked" } | undefined;
+      if (parent && parent.state !== "active") throw new ProviderEffectParentAuthorityError();
       const frozenAuthority = authoritySnapshot(current.plan.authority);
       const currentAuthority = authoritySnapshot(currentAuthorityValue || frozenAuthority);
       if (sha256Json(currentAuthority) !== sha256Json(frozenAuthority)) {
@@ -886,6 +1151,24 @@ export class ProviderEffectBroker {
   }
 
   /**
+   * Records a caller cancellation after dispatch ownership was reserved but
+   * before the source proved that provider I/O could start.
+   */
+  settleCancelledBeforeSend(operationIdValue: string): EffectOperationRecord {
+    const operationId = identifier(operationIdValue, "operation id");
+    const now = this.instant();
+    return this.transaction(() => {
+      const current = this.get(operationId);
+      if (current.state !== "dispatching") throw new Error(`operation cannot be cancelled before send from ${current.state}`);
+      this.database.prepare(`
+        UPDATE provider_effect_operations
+        SET state='cancelled', attention_json=?, updated_at=?, terminal_at=? WHERE operation_id=?
+      `).run(JSON.stringify(["cancelled_before_dispatch"]), now, now, operationId);
+      return this.get(operationId);
+    });
+  }
+
+  /**
    * Keeps the connector's read-only comparator with the operation record once
    * dispatch is reserved. It is written once and never replaces an existing
    * one. Persisting it before the transport call lets a later process reconcile
@@ -938,8 +1221,21 @@ export class ProviderEffectBroker {
     });
   }
 
-  recordReadback(operationIdValue: string, readbackDigestValue: string, verified: boolean): EffectOperationRecord {
+  recordReadback(
+    operationIdValue: string,
+    readbackDigestValue: string,
+    verified: boolean,
+    resultBindingArtifactEnvelope?: JsonObject,
+  ): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
+    if (resultBindingArtifactEnvelope !== undefined && !verified) {
+      throw new Error("a result binding artifact requires verified readback");
+    }
+    const artifactJson = resultBindingArtifactEnvelope === undefined
+      ? null : JSON.stringify(normalizeResultBindingArtifactEnvelope(resultBindingArtifactEnvelope));
+    if (artifactJson && Buffer.byteLength(artifactJson, "utf8") > 8 * 1024) {
+      throw new RangeError("result binding artifact envelope is too large");
+    }
     const now = this.instant();
     return this.transaction(() => {
       const current = this.get(operationId);
@@ -949,11 +1245,12 @@ export class ProviderEffectBroker {
       const state: EffectOperationState = verified ? "verified" : current.state;
       this.database.prepare(`
         UPDATE provider_effect_operations
-        SET state=?, readback_digest=?, verification_status=?, attention_json=?,
+        SET state=?, readback_digest=?, result_binding_artifact_json=?, verification_status=?, attention_json=?,
             updated_at=?, terminal_at=? WHERE operation_id=?
       `).run(
         state,
         digest(readbackDigestValue, "readback digest"),
+        artifactJson,
         verified ? "verified" : "unconfirmed",
         JSON.stringify(verified ? [] : ["readback_did_not_match_frozen_comparator"]),
         now,

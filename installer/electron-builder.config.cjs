@@ -1,7 +1,13 @@
 const { execFileSync } = require("node:child_process");
-const crypto = require("node:crypto");
-const fs = require("node:fs");
 const path = require("node:path");
+const { PACKAGED_BRIDGE_DELIVERY } = require("./shared/bridge-delivery.cjs");
+const {
+  PACKAGER_ADMISSION_ENV,
+  REVIEWED_GRAPH_SHA256_ENV,
+  admitPackagerPayload,
+  verifyPackagerAdmission,
+} = require("./shared/packager-admission.cjs");
+const { desktopUpdateMetadata, electronBuilderPublish } = require("./shared/update-feed.cjs");
 
 const seed = process.env.MORROW_INSTALLER_PAYLOAD;
 if (!seed || !path.isAbsolute(seed)) {
@@ -10,52 +16,24 @@ if (!seed || !path.isAbsolute(seed)) {
 
 const manifest = require("./package.json");
 const signedRelease = process.env.MORROW_SIGNED_RELEASE === "1";
-const bridgeReleaseManifest = path.join(seed, "app", "bridge-release", "manifest.json");
-if (!fs.existsSync(bridgeReleaseManifest)) {
-  throw new Error("Prepared Morrow payload is missing its Bridge release manifest.");
-}
-const mcpRuntimeManifest = path.join(seed, "app", "mcp-runtime-manifest.json");
-const packageInputManifest = path.join(seed, "app", "package-input-manifest.json");
-if (!fs.existsSync(mcpRuntimeManifest) || !fs.existsSync(packageInputManifest)) {
-  throw new Error("Prepared Morrow payload is missing its MCP runtime manifest binding.");
-}
 if (signedRelease && !/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(manifest.version)) {
   throw new Error("A signed Morrow release must use a stable SemVer version.");
 }
-const bridgeReleaseManifestSha256 = crypto.createHash("sha256").update(fs.readFileSync(bridgeReleaseManifest)).digest("hex");
-const mcpRuntimeManifestSha256 = crypto.createHash("sha256").update(fs.readFileSync(mcpRuntimeManifest)).digest("hex");
 // Cross-building from another host sets MORROW_TARGET_PLATFORM, because the
 // payload carries the target's runtime layout while this process may not run
 // on the target.
 const targetPlatform = process.env.MORROW_TARGET_PLATFORM || process.platform;
-const nodeBinaryPath = targetPlatform === "win32"
-  ? path.join(seed, "runtime", "node", "node.exe")
-  : path.join(seed, "runtime", "node", "bin", "node");
-if (!fs.existsSync(nodeBinaryPath)) {
-  throw new Error("Prepared Morrow payload is missing its Node runtime binary.");
-}
-const nodeRuntimeSha256 = crypto.createHash("sha256").update(fs.readFileSync(nodeBinaryPath)).digest("hex");
-let packageInput;
-try { packageInput = JSON.parse(fs.readFileSync(packageInputManifest, "utf8")); } catch { throw new Error("Prepared Morrow payload has an invalid package input manifest."); }
-if (!packageInput || packageInput.schema !== "morrow.desktop-package-input.v1"
-  || !packageInput.mcpRuntime || packageInput.mcpRuntime.path !== "app/mcp-runtime-manifest.json"
-  || packageInput.mcpRuntime.sha256 !== mcpRuntimeManifestSha256) {
-  throw new Error("Prepared Morrow payload MCP runtime manifest is not bound by its package input manifest.");
-}
-// Which Chrome route the packaged app asks a person to take for Morrow Bridge.
-// Set MORROW_CHROME_STORE_LIVE=1 only for a build made after the Chrome Web
-// Store listing is published; every other build keeps the temporary unpacked
-// route. The route changes the setup instructions alone and relaxes no Bridge
-// identity check.
-const bridgeDelivery = process.env.MORROW_CHROME_STORE_LIVE === "1" ? "available" : "developer_temporary";
-const desktopUpdates = Object.freeze({
-  enabled: signedRelease,
-  feedId: "morrow-github-stable",
-  provider: "github",
-  owner: "bradenriggins",
-  repo: "morrow-downloads",
-  channel: "latest"
+if (!["darwin", "win32"].includes(targetPlatform)) throw new Error(`Morrow desktop packaging does not support ${targetPlatform}.`);
+const desktopTarget = targetPlatform === "win32" ? "win32-x64" : "darwin-arm64";
+const packagerAdmission = admitPackagerPayload({
+  payload: seed,
+  target: desktopTarget,
+  signedRelease,
+  admissionPath: process.env[PACKAGER_ADMISSION_ENV],
+  reviewedGraphSha256: process.env[REVIEWED_GRAPH_SHA256_ENV],
 });
+const releaseGraph = packagerAdmission.binding;
+const desktopUpdates = desktopUpdateMetadata(signedRelease);
 const mac = {
   category: "public.app-category.education",
   icon: "assets/morrow.icns",
@@ -65,6 +43,11 @@ const mac = {
   ]
 };
 if (!signedRelease) mac.identity = null;
+const win = {
+  icon: "assets/morrow.ico",
+  target: [{ target: "nsis", arch: ["x64"] }]
+};
+if (!signedRelease) win.sign = false;
 
 // With identity null, electron-builder skips signing and the bundle keeps only
 // Electron's linker-signed binary with no sealed resources. Gatekeeper reads a
@@ -72,8 +55,21 @@ if (!signedRelease) mac.identity = null;
 // An ad-hoc signature carries no Apple identity, so the release stays unsigned,
 // but it seals the bundle so macOS shows the documented Open Anyway route. It
 // signs nested code only; the payload under Resources is sealed by hash, not
-// changed, and the packager's payload verification confirms that afterwards.
-async function adHocSignUnsignedMacBuild(context) {
+// changed. The verification below checks its bytes immediately before sealing.
+function packagedPayload(context) {
+  const resources = typeof context.packager?.getResourcesDir === "function"
+    ? context.packager.getResourcesDir(context.appOutDir)
+    : context.electronPlatformName === "darwin"
+      ? path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, "Contents", "Resources")
+      : path.join(context.appOutDir, "resources");
+  return path.join(resources, "MorrowPayload");
+}
+
+async function verifyPayloadAndAdHocSign(context) {
+  const builtTarget = context.electronPlatformName === "win32" ? "win32-x64"
+    : context.electronPlatformName === "darwin" ? "darwin-arm64" : null;
+  if (builtTarget !== desktopTarget) throw new Error("Electron builder target does not match the reviewed desktop release graph.");
+  verifyPackagerAdmission({ payload: packagedPayload(context), target: desktopTarget, admission: packagerAdmission.admission });
   if (signedRelease || context.electronPlatformName !== "darwin") return;
   const bundle = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
   execFileSync("/usr/bin/codesign", ["--force", "--deep", "--sign", "-", "--timestamp=none", bundle], { stdio: "inherit" });
@@ -81,7 +77,7 @@ async function adHocSignUnsignedMacBuild(context) {
 }
 
 module.exports = {
-  afterPack: adHocSignUnsignedMacBuild,
+  afterPack: verifyPayloadAndAdHocSign,
   appId: "app.meetmorrow.installer",
   productName: "Morrow",
   copyright: "Copyright © 2026 Braden Riggins",
@@ -104,19 +100,15 @@ module.exports = {
   forceCodeSigning: signedRelease,
   extraMetadata: {
     morrow: {
-      bridgeDelivery,
+      bridgeDelivery: PACKAGED_BRIDGE_DELIVERY,
       desktopUpdates,
-      bridgeRelease: { manifestSha256: bridgeReleaseManifestSha256 },
-      mcpRuntime: { manifestSha256: mcpRuntimeManifestSha256, nodeSha256: nodeRuntimeSha256 }
+      releaseGraph: { schema: releaseGraph.schema, sha256: releaseGraph.graphSha256, sourceHead: releaseGraph.source.head },
+      bridgeRelease: { manifestSha256: releaseGraph.bridgeReleaseManifestSha256 },
+      mcpRuntime: { manifestSha256: releaseGraph.mcpRuntimeManifestSha256, nodeSha256: releaseGraph.nodeSha256 },
+      packageInput: { manifestSha256: releaseGraph.packageInputManifestSha256 }
     }
   },
-  publish: [{
-    provider: "github",
-    owner: "bradenriggins",
-    repo: "morrow-downloads",
-    channel: "latest",
-    releaseType: "release"
-  }],
+  publish: signedRelease ? [electronBuilderPublish()] : [],
   mac,
   dmg: {
     title: "Morrow",
@@ -129,10 +121,7 @@ module.exports = {
     ],
     window: { width: 660, height: 430 }
   },
-  win: {
-    icon: "assets/morrow.ico",
-    target: [{ target: "nsis", arch: ["x64"] }]
-  },
+  win,
   nsis: {
     oneClick: true,
     perMachine: false,

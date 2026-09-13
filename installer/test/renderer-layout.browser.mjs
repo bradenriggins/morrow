@@ -56,6 +56,16 @@ const WELCOME = installerState({
   assistants: [{ id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true }],
   selectedAssistantId: null
 });
+const DISCLOSURES = installerState({
+  ...BASE,
+  lifecycle: "ready_for_assistant",
+  assistants: [
+    { id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true },
+    { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, detected: true, needsWorkspace: true }
+  ],
+  selectedAssistantId: null,
+  materialsFolder: null
+});
 
 function serveInstaller() {
   const server = createServer((request, response) => {
@@ -76,9 +86,17 @@ async function openSetup(browser, platform, state) {
   const page = await browser.newPage();
   page.on("pageerror", (error) => assert.fail(`the renderer failed: ${error.message}`));
   await page.addInitScript(([snapshot, reported]) => {
+    window.__morrowTestClock = 100_000;
+    Date.now = () => window.__morrowTestClock;
+    let updateListener = null;
     window.morrowInstaller = {
       platform: reported,
-      invoke: async () => ({ schema: "morrow.installer-result.v1", ok: true, state: snapshot })
+      invoke: async () => ({ schema: "morrow.installer-result.v1", ok: true, state: snapshot }),
+      subscribeUpdates(listener) {
+        updateListener = listener;
+        window.__morrowPublishUpdate = (value) => updateListener?.(value);
+        return () => { if (updateListener === listener) updateListener = null; };
+      }
     };
   }, [state, platform]);
   await page.goto(INDEX);
@@ -152,6 +170,32 @@ try {
   assert.equal(busy.animation, "working");
   assert.equal(busy.cursor, "progress");
   console.log(`busy    bar ${busy.height} ${busy.animation}, cursor ${busy.cursor}`);
+
+  const updateAction = page.locator("#updates-actions [data-action]");
+  await updateAction.focus();
+  await page.evaluate(() => window.__morrowPublishUpdate({
+    schema: "morrow.desktop-update.v1",
+    status: "checking",
+    currentVersion: "1.0.0",
+    availableVersion: null,
+    automatic: true,
+    reason: null
+  }));
+  await page.waitForFunction(() => document.activeElement === document.querySelector("#updates-title"));
+  assert.equal(await page.locator("#updates-actions [data-action]").count(), 0);
+  console.log("focus   removed update action moves to the Updates heading");
+
+  const disclosures = await openSetup(browser, "darwin", DISCLOSURES);
+  for (const selector of [".advanced-assistants > summary", ".optional-setup > summary"]) {
+    const summary = disclosures.locator(selector);
+    await summary.focus();
+    await disclosures.evaluate(() => {
+      window.__morrowTestClock += 5_000;
+      window.dispatchEvent(new Event("focus"));
+    });
+    await disclosures.waitForFunction((expected) => document.activeElement === document.querySelector(expected), selector);
+  }
+  console.log("focus   passive refresh restores both disclosure summaries");
 
   for (const [platform, shown, hidden] of [["darwin", "#macos-note", "#windows-note"], ["win32", "#windows-note", "#macos-note"]]) {
     const welcome = await openSetup(browser, platform, WELCOME);

@@ -62,6 +62,10 @@ const QUESTION = Object.freeze({
   quiz_id: QUIZ_ID,
   quiz_group_id: null,
   assessment_question_id: "9001",
+  assessment_question_bank_id: null,
+  created_at: "2026-09-01T12:00:00Z",
+  updated_at: "2026-09-02T12:00:00Z",
+  regrade_option: null,
   position: 1,
   question_name: "Cell structure",
   question_type: "multiple_choice_question",
@@ -73,9 +77,15 @@ const QUESTION = Object.freeze({
   correct_comments_html: "<p>Correct.</p>",
   incorrect_comments_html: "<p>Review the diagram.</p>",
   neutral_comments_html: "",
+  variables: null,
+  formulas: null,
+  answer_tolerance: null,
+  formula_decimal_places: null,
+  matches: null,
+  matching_answer_incorrect_matches: null,
   answers: [
-    { id: "6656", answer_text: `<p>Nucleus</p>${MISSING_ALT_IMAGE}`, answer_weight: 100, answer_comments: "Correct." },
-    { id: "6657", answer_text: "<p>Cell wall</p>", answer_weight: 0, answer_comments: "Review the diagram." },
+    { id: "6656", text: "Nucleus", html: `<p>Nucleus</p>${MISSING_ALT_IMAGE}`, weight: 100, comments: "Correct.", comments_html: "<p>Correct.</p>" },
+    { id: "6657", text: "Cell wall", html: "<p>Cell wall</p>", weight: 0, comments: "Review the diagram.", comments_html: "<p>Review the diagram.</p>" },
   ],
 });
 
@@ -190,7 +200,7 @@ test("a complete question read reaches the alternative-text rewrite with every c
 
 test("an answer image is selected by its own answer id and field", async () => {
   const record = question();
-  const error = await refusal(repairArguments(guardFor(record, { answer: { id: "6656", field: "answer_text" } })), record);
+  const error = await refusal(repairArguments(guardFor(record, { answer: { id: "6656", field: "html" } })), record);
   assert.match(error, new RegExp(DOM_MARKER));
 });
 
@@ -219,11 +229,15 @@ test("a documented field the write must resend, absent from the read, is refused
   }
 });
 
-test("a question read that carries state this write cannot resend is refused by name", async () => {
+test("official nullable response state passes while nonempty unsupported state is refused by name", async () => {
+  const official = question();
+  assert.match(await refusal(repairArguments(guardFor(official)), official), new RegExp(DOM_MARKER));
   const record = question({ regrade_option: "current_and_previous_submissions" });
   const error = await refusal(repairArguments(guardFor(question())), record);
   assert.match(error, /^classic_quiz_question_unmodelled_state: /);
   assert.match(error, /regrade_option/);
+  const calculatedState = question({ variables: [] });
+  assert.match(await refusal(repairArguments(guardFor(question())), calculatedState), /^classic_quiz_question_unmodelled_state: /);
 });
 
 test("an answer that carries state this write cannot resend is refused", async () => {
@@ -234,7 +248,12 @@ test("an answer that carries state this write cannot resend is refused", async (
   assert.match(error, /blank_id/);
 });
 
-test("an essay question with answers, and a scored question without them, are both refused", async () => {
+test("an essay question accepts null answers but refuses populated answers, and a scored question requires answers", async () => {
+  const essayWithoutAnswers = question({ question_type: "essay_question", answers: null });
+  assert.match(
+    await refusal(repairArguments(guardFor(essayWithoutAnswers)), essayWithoutAnswers),
+    new RegExp(DOM_MARKER),
+  );
   const essayWithAnswers = question({ question_type: "essay_question" });
   assert.match(
     await refusal(repairArguments(guardFor(essayWithAnswers)), essayWithAnswers),
@@ -269,16 +288,16 @@ test("a question or answer that changed since the plan is refused before anythin
   const staleProtectedState = { ...record, points_possible: 5 };
   assert.match(await refusal(repairArguments(guardFor(record)), staleProtectedState), /^canvas_content_changed: /);
   const staleAnswerComment = structuredClone(record);
-  staleAnswerComment.answers[0].answer_comments = "Changed in Canvas.";
+  staleAnswerComment.answers[0].comments = "Changed in Canvas.";
   assert.match(
-    await refusal(repairArguments(guardFor(record, { answer: { id: "6656", field: "answer_text" } })), staleAnswerComment),
+    await refusal(repairArguments(guardFor(record, { answer: { id: "6656", field: "html" } })), staleAnswerComment),
     /^canvas_content_changed: /,
   );
 });
 
 test("a selected answer that is no longer in the question is refused", async () => {
   const record = question();
-  const guard = guardFor(record, { answer: { id: "6656", field: "answer_text" } });
+  const guard = guardFor(record, { answer: { id: "6656", field: "html" } });
   const withoutSelected = structuredClone(record);
   withoutSelected.answers = [withoutSelected.answers[1]];
   const error = await refusal(repairArguments(guard), withoutSelected);
@@ -287,17 +306,16 @@ test("a selected answer that is no longer in the question is refused", async () 
 
 test("a selected answer field the read does not carry is refused", async () => {
   const record = question();
-  record.answers[0].answer_html = `<p>Nucleus</p>${MISSING_ALT_IMAGE}`;
-  const guard = guardFor(record, { answer: { id: "6656", field: "answer_html" } });
+  const guard = guardFor(record, { answer: { id: "6656", field: "html" } });
   const withoutHtml = structuredClone(record);
-  delete withoutHtml.answers[0].answer_html;
+  delete withoutHtml.answers[0].html;
   const error = await refusal(repairArguments(guard), withoutHtml);
   assert.match(error, /^classic_quiz_question_answer_unavailable: /);
 });
 
 test("a half-stated answer selector is not a valid guard", async () => {
   const record = question();
-  for (const overrides of [{ answer_id: "6656" }, { answer_field: "answer_text" }, { answer_id: "6656", answer_field: "answer_comments" }, { answer_id: "not-an-id", answer_field: "answer_text" }]) {
+  for (const overrides of [{ answer_id: "6656" }, { answer_field: "html" }, { answer_id: "6656", answer_field: "comments" }, { answer_id: "not-an-id", answer_field: "html" }]) {
     const guard = { ...guardFor(record), ...overrides };
     assert.match(await refusal(repairArguments(guard), record), /^canvas_content_guard_invalid$/, JSON.stringify(overrides));
   }

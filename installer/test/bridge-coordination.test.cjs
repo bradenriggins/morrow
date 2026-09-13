@@ -10,6 +10,8 @@ test("an unconfirmed Bridge reload keeps its maintenance lease", async () => {
     acquire: async () => undefined,
     readback: async () => ({ version: "old" }),
     matchesChallenge: () => false,
+    inspect: async () => assert.fail("inspection must not run"),
+    commit: async () => assert.fail("commit must not run"),
     confirm: async () => assert.fail("confirmation must not run"),
     refresh: async () => assert.fail("refresh must not run"),
     release: async () => { releases += 1; }
@@ -23,12 +25,29 @@ test("a confirmed Bridge update releases only after durable confirmation", async
     acquire: async () => { calls.push("acquire"); },
     readback: async () => { calls.push("readback"); return { proof: true }; },
     matchesChallenge: () => true,
+    inspect: async () => { calls.push("inspect"); return { quiesceEpoch: "epoch", previousVersion: "1.0.2", version: "1.0.3" }; },
+    commit: async () => { calls.push("commit"); },
     confirm: async () => { calls.push("confirm"); },
     refresh: async () => { calls.push("refresh"); return { manualChromeReloadRequired: false }; },
     release: async () => { calls.push("release"); }
   });
   assert.deepEqual(completed, { manualChromeReloadRequired: false });
-  assert.deepEqual(calls, ["acquire", "readback", "confirm", "refresh", "release"]);
+  assert.deepEqual(calls, ["acquire", "readback", "inspect", "commit", "confirm", "refresh", "release"]);
+});
+
+test("a failed or uncertain new-layer commit keeps its maintenance lease and local pending record", async () => {
+  const calls = [];
+  await assert.rejects(() => completeBridgeUpdate({
+    acquire: async () => { calls.push("acquire"); },
+    readback: async () => { calls.push("readback"); return { proof: true }; },
+    matchesChallenge: () => true,
+    inspect: async () => { calls.push("inspect"); return { quiesceEpoch: "epoch", previousVersion: "1.0.2", version: "1.0.3" }; },
+    commit: async () => { calls.push("commit"); throw new Error("transport lost"); },
+    confirm: async () => assert.fail("local confirmation must remain pending"),
+    refresh: async () => assert.fail("refresh must not run"),
+    release: async () => { calls.push("release"); },
+  }), /transport lost/);
+  assert.deepEqual(calls, ["acquire", "readback", "inspect", "commit"]);
 });
 
 test("a quiesce dispatch that fails keeps its maintenance lease", async () => {

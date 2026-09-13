@@ -57,6 +57,7 @@ function fixture(options = {}) {
     values,
     calls,
     create: () => createBridgeMaintenance({ chromeApi, fetchImpl, randomUUID: () => "12345678-1234-1234-1234-123456789abc" }),
+    createWithNativeUuid: () => createBridgeMaintenance({ chromeApi, fetchImpl }),
   };
 }
 
@@ -144,6 +145,13 @@ test("quiesce installs its in-memory admission fence before waiting for the acti
   await quiescing;
 });
 
+test("the production UUID default preserves the browser receiver", async () => {
+  const testFixture = fixture();
+  const quiesced = await testFixture.createWithNativeUuid().control({ action: "quiesce" });
+  assert.match(quiesced.quiesceEpoch, /^quiesce-[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+  assert.equal(testFixture.values.has("morrowBridgeQuiesceFence"), true);
+});
+
 test("a durable quiesce fence blocks writes after service-worker restart and resumes only with its exact restored epoch", async () => {
   const testFixture = fixture();
   const firstWorker = testFixture.create();
@@ -186,6 +194,74 @@ test("a resume refuses a swapped file layer until the app restores the exact qui
   await rejectsCode(
     () => testFixture.create().control({ action: "resume", quiesceEpoch: quiesced.quiesceEpoch, fileLayerRestored: true }),
     "bridge_resume_file_layer_unconfirmed",
+  );
+});
+
+test("a proven newer Bridge commits the exact old epoch once and admits its first write", async () => {
+  let version = VERSION;
+  const fetchImpl = async () => {
+    const bytes = marker({ manifestVersion: version });
+    return { ok: true, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+  };
+  const testFixture = fixture({ fetchImpl });
+  const quiesced = await testFixture.create().control({ action: "quiesce" });
+  version = "1.0.3";
+  testFixture.chromeApi.runtime.getManifest = () => ({ version });
+  testFixture.chromeApi.management.getSelf = async () => ({ id: EXTENSION_ID, version, installType: "development" });
+  const nextWorker = testFixture.create();
+  const control = { action: "commit", previousManifestVersion: VERSION, quiesceEpoch: quiesced.quiesceEpoch };
+  const committed = await nextWorker.control(control);
+  assert.deepEqual(committed, {
+    schema: "morrow.bridge.update-committed.v1",
+    extensionId: EXTENSION_ID,
+    previousManifestVersion: VERSION,
+    manifestVersion: version,
+    quiesceEpoch: quiesced.quiesceEpoch,
+    committed: true,
+    activeFolderProof: {
+      schema: "morrow.bridge.active-folder-proof.v1",
+      extensionId: EXTENSION_ID,
+      manifestVersion: version,
+      challengeId: CHALLENGE_ID,
+      nonce: NONCE,
+      challengeSha256: createHash("sha256").update(marker({ manifestVersion: version })).digest("hex"),
+    },
+  });
+  assert.equal(testFixture.values.has("morrowBridgeQuiesceFence"), false);
+  assert.equal((await nextWorker.control(control)).committed, true, "a retry after an uncertain response is idempotent");
+  await nextWorker.beginWrite({ operationId: "operation:first-new-write", effectReceiptId: "effect:first-new-write" });
+  await nextWorker.finishWrite("operation:first-new-write", "known");
+  await rejectsCode(
+    () => nextWorker.control({ ...control, quiesceEpoch: "quiesce-stale-epoch-value" }),
+    "bridge_update_commit_stale",
+  );
+});
+
+test("new-layer commit refuses the old version, wrong epoch, and unproved active folder", async () => {
+  const sameVersion = fixture();
+  const quiesced = await sameVersion.create().control({ action: "quiesce" });
+  await rejectsCode(
+    () => sameVersion.create().control({ action: "commit", previousManifestVersion: VERSION, quiesceEpoch: quiesced.quiesceEpoch }),
+    "bridge_update_commit_unconfirmed",
+  );
+
+  let version = VERSION;
+  const wrongEpoch = fixture({ fetchImpl: async () => {
+    const bytes = marker({ manifestVersion: version });
+    return { ok: true, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+  } });
+  const exact = await wrongEpoch.create().control({ action: "quiesce" });
+  version = "1.0.3";
+  wrongEpoch.chromeApi.runtime.getManifest = () => ({ version });
+  wrongEpoch.chromeApi.management.getSelf = async () => ({ id: EXTENSION_ID, version, installType: "development" });
+  await rejectsCode(
+    () => wrongEpoch.create().control({ action: "commit", previousManifestVersion: VERSION, quiesceEpoch: "quiesce-wrong-epoch-value" }),
+    "bridge_update_commit_unconfirmed",
+  );
+  wrongEpoch.chromeApi.runtime.id = "b".repeat(32);
+  await rejectsCode(
+    () => wrongEpoch.create().control({ action: "commit", previousManifestVersion: VERSION, quiesceEpoch: exact.quiesceEpoch }),
+    "bridge_identity_unavailable",
   );
 });
 

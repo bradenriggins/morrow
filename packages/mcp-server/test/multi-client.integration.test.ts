@@ -935,7 +935,7 @@ describe("two assistants through one local Morrow owner", () => {
     expect(writeCommands).toBe(writesBefore);
   }, 180_000);
 
-  it("8 · names the assistant that asked for every saved request and group, without its project path", async () => {
+  it("8 · keeps historical browser operations control-only and names the assistant that asked for each group", async () => {
     const projectADigest = createHash("sha256").update(projectARoot).digest("hex");
     const projectBDigest = createHash("sha256").update(projectBRoot).digest("hex");
 
@@ -943,24 +943,37 @@ describe("two assistants through one local Morrow owner", () => {
     const fromB = await planPageCorrection(clientB(), "lesson-identity-b", "Cells have membranes.", "Cells have outer membranes.");
     const savedA = await operationRecord(clientA(), fromA);
     const savedB = await operationRecord(clientB(), fromB);
-    expect(requestedBy(savedA)).toMatchObject({
-      clientName: "assistant-a",
-      workspaceName: "project-a",
-      workspaceDigest: projectADigest,
+    expect(savedA).toMatchObject({
+      schema: "morrow.operation-control.v1",
+      operationId: fromA,
+      state: "approved",
+      dispatchAttempt: 0,
+      contentOmittedReason: "historical_learner_scope_unavailable",
     });
-    expect(requestedBy(savedB)).toMatchObject({
-      clientName: "assistant-b",
-      workspaceName: "project-b",
-      workspaceDigest: projectBDigest,
+    expect(savedB).toMatchObject({
+      schema: "morrow.operation-control.v1",
+      operationId: fromB,
+      state: "approved",
+      dispatchAttempt: 0,
+      contentOmittedReason: "historical_learner_scope_unavailable",
     });
-    expect(requestedBy(savedA)?.sessionId).not.toBe(requestedBy(savedB)?.sessionId);
+    expect(requestedBy(savedA)).toBeUndefined();
+    expect(requestedBy(savedB)).toBeUndefined();
 
     const listed = ok(await clientA().callTool({ name: "morrow_operation_list", arguments: { limit: 50 } }, { timeout: 30_000 }));
     const operations = Array.isArray(listed.operations) ? listed.operations : [];
     const listedA = operations.find((entry) => isJsonObject(entry) && entry.operationId === fromA);
     const listedB = operations.find((entry) => isJsonObject(entry) && entry.operationId === fromB);
-    expect(requestedBy(listedA)).toMatchObject({ clientName: "assistant-a", workspaceName: "project-a" });
-    expect(requestedBy(listedB)).toMatchObject({ clientName: "assistant-b", workspaceName: "project-b" });
+    expect(listedA).toMatchObject({
+      schema: "morrow.operation-control.v1",
+      operationId: fromA,
+      contentOmittedReason: "historical_learner_scope_unavailable",
+    });
+    expect(listedB).toMatchObject({
+      schema: "morrow.operation-control.v1",
+      operationId: fromB,
+      contentOmittedReason: "historical_learner_scope_unavailable",
+    });
 
     const groupA = await createReadBatch(clientA(), "Assistant A named group", 1, [slowCourseChild(400)]);
     const groupB = await createReadBatch(clientB(), "Assistant B named group", 1, [slowCourseChild(401)]);

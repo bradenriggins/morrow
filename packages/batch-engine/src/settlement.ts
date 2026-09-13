@@ -1,11 +1,10 @@
-import { dirname, resolve } from "node:path";
-import { mkdirSync } from "node:fs";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
 import {
   isJsonObject,
   sha256Json,
   type JsonObject,
 } from "@morrow/contracts";
+import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
 
 export const BATCH_SOURCE_SETTLEMENT_STATES = Object.freeze([
   "not_started",
@@ -215,33 +214,49 @@ export function sourceSettlementStateFromTask(
 ): BatchSourceSettlementState {
   const status = boundedStateText(task.status) || "unknown";
   const outcome = boundedStateText(task.outcome);
-  if (outcome && BATCH_SOURCE_SETTLEMENT_STATES.includes(outcome as BatchSourceSettlementState)) {
-    return outcome as BatchSourceSettlementState;
-  }
-  if (["awaiting_confirmation", "awaiting_approval", "pending_approval"].includes(status)) {
-    return "awaiting_approval";
-  }
-  if (["running", "approved", "resuming", "undoing"].includes(status)) return "running";
-  if (["cancelled", "denied"].includes(status)) return "cancelled";
-  if (status === "undone") return "reverted";
-  if (status === "paused") return "inspection_required";
   const counts = normalizedCounts(task.resultCounts);
   const effectPossible = counts.done > 0
     || counts.unconfirmed > 0
     || counts.rollbackFailed > 0
     || counts.undone > 0;
-  if (status === "failed") return effectPossible ? "failed_effect_possible" : "failed_no_effect";
-  if (status === "completed") {
-    if (
-      counts.unconfirmed > 0
-      || counts.failed > 0
-      || counts.rollbackFailed > 0
-      || counts.skipped > 0
-      || counts.notStarted > 0
-    ) return "inspection_required";
-    if (counts.undone > 0 && counts.done === 0) return "reverted";
-    return "succeeded";
+  const exactSuccess = status === "completed"
+    && outcome === "succeeded"
+    && task.terminal === true
+    && boundedStateText(task.verificationStatus) === "verified"
+    && counts.done > 0
+    && counts.unconfirmed === 0
+    && counts.failed === 0
+    && counts.rollbackFailed === 0
+    && counts.skipped === 0
+    && counts.undone === 0
+    && counts.notStarted === 0;
+  if (exactSuccess) return "succeeded";
+  if (outcome === "succeeded" || status === "completed") {
+    if (task.terminal === true && outcome === "reverted" && counts.undone > 0 && counts.done === 0
+      && counts.unconfirmed === 0 && counts.failed === 0 && counts.rollbackFailed === 0 && counts.notStarted === 0) {
+      return "reverted";
+    }
+    return "inspection_required";
   }
+  if (["awaiting_confirmation", "awaiting_approval", "pending_approval"].includes(status)) {
+    return !outcome || outcome === "awaiting_approval" ? "awaiting_approval" : "inspection_required";
+  }
+  if (["running", "approved", "resuming", "undoing"].includes(status)) {
+    return !outcome || outcome === "running" ? "running" : "inspection_required";
+  }
+  if (["cancelled", "denied"].includes(status)) {
+    return task.terminal === true && (!outcome || outcome === "cancelled") ? "cancelled" : "inspection_required";
+  }
+  if (status === "undone") {
+    return task.terminal === true && (!outcome || outcome === "reverted") ? "reverted" : "inspection_required";
+  }
+  if (status === "paused") return "inspection_required";
+  if (status === "failed") {
+    if (task.terminal !== true) return "inspection_required";
+    const expected = effectPossible ? "failed_effect_possible" : "failed_no_effect";
+    return !outcome || outcome === expected ? expected : "inspection_required";
+  }
+  if (outcome && BATCH_SOURCE_SETTLEMENT_STATES.includes(outcome as BatchSourceSettlementState)) return "inspection_required";
   return "unknown";
 }
 
@@ -267,13 +282,13 @@ export class BatchSourceSettlementStore {
   private closed = false;
 
   constructor(options: BatchSourceSettlementStoreOptions) {
-    this.path = options.path === ":memory:" ? ":memory:" : resolve(options.path);
-    this.now = options.now ?? (() => new Date());
-    if (this.path !== ":memory:") mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
-    this.database = new DatabaseSync(this.path, {
+    const opened = openExactPrivateSqliteDatabase(options.path, "Morrow batch settlement database", {
       enableForeignKeyConstraints: true,
       enableDoubleQuotedStringLiterals: false,
     });
+    this.path = opened.path;
+    this.now = options.now ?? (() => new Date());
+    this.database = opened.database;
     this.database.exec(`
       PRAGMA busy_timeout = 5000;
       PRAGMA synchronous = FULL;
@@ -444,6 +459,42 @@ export class BatchSourceSettlementStore {
         WHERE batch_id=? AND child_id=?
       `).run(settlementState, settlementState, gateway, now, now, batchId, childId);
       return this.get(batchId, childId);
+    });
+  }
+
+  cancelBeforeDispatch(
+    batchIdValue: string,
+    childIdValue: string,
+    gatewayOperationId?: string,
+  ): BatchSourceSettlementRecord {
+    const batchId = exactIdentifier(batchIdValue, "batch id");
+    const childId = exactIdentifier(childIdValue, "child id");
+    const gateway = optionalIdentifier(gatewayOperationId, "gateway operation id");
+    const now = this.instant();
+    return this.transaction(() => {
+      const existing = this.get(batchId, childId);
+      if (existing.state !== "not_started") return existing;
+      this.database.prepare(`
+        UPDATE gateway_batch_source_settlements
+        SET state='cancelled', task_status='cancelled_before_dispatch', task_outcome='cancelled',
+            stage_gateway_operation_id=COALESCE(stage_gateway_operation_id, ?),
+            updated_at=?, checked_at=?, revision=revision+1
+        WHERE batch_id=? AND child_id=? AND state='not_started'
+      `).run(gateway, now, now, batchId, childId);
+      return this.get(batchId, childId);
+    });
+  }
+
+  cancelNotStarted(batchIdValue: string): void {
+    const batchId = exactIdentifier(batchIdValue, "batch id");
+    const now = this.instant();
+    this.transaction(() => {
+      this.database.prepare(`
+        UPDATE gateway_batch_source_settlements
+        SET state='cancelled', task_status='cancelled_before_dispatch', task_outcome='cancelled',
+            updated_at=?, checked_at=?, revision=revision+1
+        WHERE batch_id=? AND state='not_started'
+      `).run(now, now, batchId);
     });
   }
 

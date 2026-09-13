@@ -9,7 +9,7 @@ import {
   type McpServer,
   type ServerContext,
 } from "@modelcontextprotocol/server";
-import { isJsonObject, type JsonObject } from "@morrow/contracts";
+import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
 import type { GatewayRuntime } from "./runtime.js";
 
@@ -30,7 +30,35 @@ export type PrivateChatRequestState = {
   readonly courseId: string;
   readonly messages: readonly ChatMessage[];
   readonly turns: number;
+  readonly roundId?: string;
+  readonly roundExpiresAt?: number;
 };
+
+const CONTINUATION_TTL_MS = 10 * 60 * 1_000;
+const MAX_CONTINUATION_CLAIMS = 2_048;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+
+type ContinuationClaim = { readonly replyDigest: string; readonly expiresAt: number };
+
+export class PrivateChatContinuationLedger {
+  private readonly claims = new Map<string, ContinuationClaim>();
+
+  claim(roundId: string, reply: string, expiresAt: number, now = Date.now()): "accepted" | "duplicate" | "conflict" {
+    for (const [id, claim] of this.claims) {
+      if (claim.expiresAt <= now) this.claims.delete(id);
+    }
+    const replyDigest = sha256Text(reply);
+    const prior = this.claims.get(roundId);
+    if (prior) return prior.replyDigest === replyDigest ? "duplicate" : "conflict";
+    if (this.claims.size >= MAX_CONTINUATION_CLAIMS) throw new PrivateChatError("Private Chat reached its protected continuation limit. Close this connection and start a new session.");
+    this.claims.set(roundId, { replyDigest, expiresAt });
+    return "accepted";
+  }
+
+  clear(): void {
+    this.claims.clear();
+  }
+}
 
 class PrivateChatError extends Error {}
 function requireChat(value: unknown, message: string): asserts value {
@@ -87,6 +115,14 @@ function stateFromMessage(exchange: JsonObject, assistantName: string): PrivateC
   };
 }
 
+function stateForNextRound(state: PrivateChatRequestState): PrivateChatRequestState {
+  return {
+    ...state,
+    roundId: randomUUID(),
+    roundExpiresAt: Date.now() + CONTINUATION_TTL_MS,
+  };
+}
+
 async function nextExchange(runtime: GatewayRuntime, state: PrivateChatRequestState, reply: string, signal: AbortSignal) {
   return runtime.privateChatExchange({
     schema: "morrow.private-chat.exchange.v1",
@@ -103,6 +139,7 @@ export function registerPrivateChatTool(
   server: McpServer,
   runtime: GatewayRuntime,
   codec: { mint(payload: PrivateChatRequestState, context: ServerContext): Promise<string> },
+  continuations = new PrivateChatContinuationLedger(),
 ): void {
   server.registerTool("morrow_private_chat", {
     title: "Start Morrow Private Chat",
@@ -143,9 +180,10 @@ export function registerPrivateChatTool(
 
       if (modern) {
         if (!Object.keys(context.mcpReq.inputResponses ?? {}).length) {
+          const nextState = stateForNextRound(state);
           return inputRequired({
-            inputRequests: { private_chat_reply: inputRequired.createMessage(samplingRequest(state)) },
-            requestState: await codec.mint(state, context),
+            inputRequests: { private_chat_reply: inputRequired.createMessage(samplingRequest(nextState)) },
+            requestState: await codec.mint(nextState, context),
           });
         }
         requireChat(!context.mcpReq.droppedInputResponseKeys?.length
@@ -153,6 +191,13 @@ export function registerPrivateChatTool(
           && Object.hasOwn(context.mcpReq.inputResponses ?? {}, "private_chat_reply"),
           "The assistant response does not match this Private Chat round.");
         const reply = sampleFromInput(context).content.text;
+        requireChat(typeof state.roundId === "string" && UUID.test(state.roundId)
+          && Number.isSafeInteger(state.roundExpiresAt) && state.roundExpiresAt! > Date.now(),
+          "The Private Chat continuation is missing or expired.");
+        const claim = continuations.claim(state.roundId, reply, state.roundExpiresAt!);
+        requireChat(claim === "accepted", claim === "conflict"
+          ? "This Private Chat continuation was already answered with different content."
+          : "This Private Chat continuation was already used.");
         const next = await nextExchange(runtime, state, reply, context.mcpReq.signal);
         const replied: PrivateChatRequestState = {
           ...state,
@@ -164,9 +209,10 @@ export function registerPrivateChatTool(
           && next.sourceBindingId === state.sourceBindingId && next.courseId === state.courseId
           && typeof next.protectedText === "string", "The Private Chat course changed or the next protected message is invalid.");
         const continued: PrivateChatRequestState = { ...replied, messages: [...replied.messages, { role: "user", text: next.protectedText }] };
+        const nextState = stateForNextRound(continued);
         return inputRequired({
-          inputRequests: { private_chat_reply: inputRequired.createMessage(samplingRequest(continued)) },
-          requestState: await codec.mint(continued, context),
+          inputRequests: { private_chat_reply: inputRequired.createMessage(samplingRequest(nextState)) },
+          requestState: await codec.mint(nextState, context),
         });
       }
 

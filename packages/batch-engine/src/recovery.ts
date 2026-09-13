@@ -1,8 +1,24 @@
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
-import { DatabaseSync } from "node:sqlite";
-import { sha256Text } from "@morrow/contracts";
-import type { BatchMode, BatchState } from "./index.js";
+import { resolve } from "node:path";
+import type { DatabaseSync } from "node:sqlite";
+import {
+  createCipheriv,
+  createDecipheriv,
+  randomBytes,
+} from "node:crypto";
+import {
+  canonicalJson,
+  isJsonObject,
+  sha256Json,
+  sha256Text,
+  type JsonObject,
+} from "@morrow/contracts";
+import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
+import {
+  bindCanvasResultArtifactArguments,
+  decryptCanvasResultBindingArtifact,
+  type CanvasBindingChild,
+} from "./canvas-result-binding.js";
+import type { BatchMode, BatchState, FrozenBatchManifest } from "./index.js";
 
 export const BATCH_RECOVERY_MODES = Object.freeze(["inspect", "apply_safe"] as const);
 export type BatchRecoveryMode = typeof BATCH_RECOVERY_MODES[number];
@@ -23,6 +39,7 @@ export interface RecoverBatchStateInput {
   readonly afterOrdinal?: number;
   readonly maxChildren?: number;
   readonly now?: () => Date;
+  readonly encryptionKey?: Uint8Array;
 }
 
 export interface BatchRecoveryChild {
@@ -73,11 +90,28 @@ interface ChildRow {
   batch_id: string;
   child_id: string;
   ordinal: number;
+  public_tool_name: string;
   source_id: string;
   source_tool_name: string;
   source_operation_id: string | null;
   gateway_operation_id: string | null;
   state: string;
+  request_digest: string;
+  request_ciphertext: string;
+  request_iv: string;
+  request_tag: string;
+  bound_request_digest: string | null;
+  bound_request_ciphertext: string | null;
+  bound_request_iv: string | null;
+  bound_request_tag: string | null;
+}
+
+interface ManifestRow {
+  batch_id: string;
+  manifest_digest: string;
+  manifest_ciphertext: string;
+  manifest_iv: string;
+  manifest_tag: string;
 }
 
 interface OperationRow {
@@ -92,9 +126,28 @@ interface OperationRow {
 
 interface VerifiedDirectEffectRow {
   operation_id: string;
+  public_tool_name: string;
+  source_id: string;
+  source_tool_name: string;
+  source_operation_id: string | null;
+  source_binding_id: string | null;
+  target_identity_digest: string | null;
+  upstream_result_digest: string;
   source_result_state: string | null;
   readback_digest: string;
+  result_binding_artifact_json: string | null;
 }
+
+interface BoundDependent {
+  readonly childId: string;
+  readonly digest: string;
+  readonly arguments: JsonObject;
+}
+
+type ResultBindingRecovery =
+  | { readonly status: "none" }
+  | { readonly status: "ready"; readonly dependents: readonly BoundDependent[] }
+  | { readonly status: "inspection_required"; readonly dependentChildIds: readonly string[] };
 
 interface CountRow {
   total: number;
@@ -115,6 +168,80 @@ const TERMINAL_BATCH_STATES = new Set<BatchState>([
   "cancelled",
   "inspection_required",
 ]);
+
+function exactKey(value: Uint8Array | undefined): Buffer | null {
+  if (value === undefined) return null;
+  const key = Buffer.from(value);
+  if (key.length !== 32) throw new TypeError("batch encryption key must contain exactly 32 bytes");
+  return key;
+}
+
+function decryptJson(
+  key: Buffer,
+  ciphertext: string,
+  iv: string,
+  tag: string,
+  aad: string,
+  digest: string,
+  label: string,
+): JsonObject {
+  const decipher = createDecipheriv("aes-256-gcm", key, Buffer.from(iv, "base64url"));
+  decipher.setAAD(Buffer.from(aad, "utf8"));
+  decipher.setAuthTag(Buffer.from(tag, "base64url"));
+  const plaintext = Buffer.concat([
+    decipher.update(Buffer.from(ciphertext, "base64url")),
+    decipher.final(),
+  ]).toString("utf8");
+  const parsed = JSON.parse(plaintext) as unknown;
+  if (!isJsonObject(parsed) || sha256Json(parsed) !== digest) {
+    throw new Error(`${label} failed authenticated readback`);
+  }
+  return parsed;
+}
+
+function decryptedManifest(key: Buffer, row: ManifestRow): FrozenBatchManifest {
+  return decryptJson(
+    key,
+    row.manifest_ciphertext,
+    row.manifest_iv,
+    row.manifest_tag,
+    `${row.batch_id}\0manifest\0${row.manifest_digest}`,
+    row.manifest_digest,
+    "batch manifest",
+  ) as unknown as FrozenBatchManifest;
+}
+
+function decryptedRequest(key: Buffer, row: ChildRow): JsonObject {
+  return decryptJson(
+    key,
+    row.request_ciphertext,
+    row.request_iv,
+    row.request_tag,
+    `${row.batch_id}\0${row.child_id}\0${row.request_digest}`,
+    row.request_digest,
+    "batch child request",
+  );
+}
+
+function encryptedBoundRequest(
+  key: Buffer,
+  batchId: string,
+  childId: string,
+  requestDigest: string,
+  value: JsonObject,
+): { readonly ciphertext: string; readonly iv: string; readonly tag: string } {
+  const plaintext = Buffer.from(canonicalJson(value), "utf8");
+  if (plaintext.length > 64 * 1024) throw new RangeError("batch child bound request is too large");
+  const iv = randomBytes(12);
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(`${batchId}\0${childId}\0bound-request\0${requestDigest}`, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return {
+    ciphertext: ciphertext.toString("base64url"),
+    iv: iv.toString("base64url"),
+    tag: cipher.getAuthTag().toString("base64url"),
+  };
+}
 
 function exactIdentifier(value: unknown, label: string): string {
   if (typeof value !== "string") throw new TypeError(`${label} must be a string`);
@@ -157,11 +284,10 @@ function databasePath(value: string): string {
 }
 
 function openDatabase(path: string): DatabaseSync {
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const database = new DatabaseSync(path, {
+  const database = openExactPrivateSqliteDatabase(path, "Morrow batch recovery database", {
     enableForeignKeyConstraints: true,
     enableDoubleQuotedStringLiterals: false,
-  });
+  }).database;
   database.exec(`
     PRAGMA busy_timeout = 5000;
     PRAGMA synchronous = FULL;
@@ -273,8 +399,15 @@ function verifiedDirectEffectForChild(
     WHERE type='table' AND name='provider_effect_operations'
   `).get() as unknown as { present: number } | undefined;
   if (!table) return null;
+  const effectColumns = new Set((database.prepare("PRAGMA table_info(provider_effect_operations)")
+    .all() as { name: string }[]).map((column) => column.name));
+  const artifactColumn = effectColumns.has("result_binding_artifact_json")
+    ? "result_binding_artifact_json" : "NULL AS result_binding_artifact_json";
   const row = database.prepare(`
-    SELECT operation_id, source_result_state, readback_digest
+    SELECT operation_id, public_tool_name, source_id, source_tool_name,
+           source_operation_id, source_binding_id, target_identity_digest,
+           upstream_result_digest, source_result_state, readback_digest,
+           ${artifactColumn}
     FROM provider_effect_operations
     WHERE operation_id=?
       AND source_id=?
@@ -283,6 +416,7 @@ function verifiedDirectEffectForChild(
       AND source_task_id IS NULL
       AND state='verified'
       AND verification_status='verified'
+      AND upstream_result_digest IS NOT NULL
       AND readback_digest IS NOT NULL
     LIMIT 1
   `).get(
@@ -292,6 +426,104 @@ function verifiedDirectEffectForChild(
     child.source_operation_id,
   ) as unknown as VerifiedDirectEffectRow | undefined;
   return row || null;
+}
+
+function resultBindingRecovery(
+  database: DatabaseSync,
+  batchId: string,
+  sourceRow: ChildRow,
+  effect: VerifiedDirectEffectRow,
+  key: Buffer | null,
+): ResultBindingRecovery {
+  const manifestRow = database.prepare(`
+    SELECT * FROM gateway_batch_manifests WHERE batch_id=?
+  `).get(batchId) as unknown as ManifestRow | undefined;
+  if (!manifestRow || !key) {
+    // We cannot know whether this source has result-bound dependents without
+    // authenticating the frozen manifest. Keep a verified create unresolved.
+    return sourceRow.public_tool_name === "canvas_create_page_courses"
+      || sourceRow.public_tool_name === "canvas_create_assignment"
+      ? { status: "inspection_required", dependentChildIds: [] }
+      : { status: "none" };
+  }
+  let manifest: FrozenBatchManifest;
+  try {
+    manifest = decryptedManifest(key, manifestRow);
+  } catch {
+    return { status: "inspection_required", dependentChildIds: [] };
+  }
+  const dependentManifests = manifest.children.filter(
+    (child) => child.resultBinding?.sourceChildId === sourceRow.child_id,
+  );
+  if (dependentManifests.length === 0) return { status: "none" };
+  const dependentChildIds = dependentManifests.map((child) => child.childId);
+  if (!effect.result_binding_artifact_json) {
+    return { status: "inspection_required", dependentChildIds };
+  }
+  try {
+    const artifact = decryptCanvasResultBindingArtifact(
+      key,
+      {
+        operationId: effect.operation_id,
+        publicToolName: effect.public_tool_name,
+        sourceId: effect.source_id,
+        sourceToolName: effect.source_tool_name,
+        sourceOperationId: effect.source_operation_id,
+        sourceBindingId: effect.source_binding_id,
+        targetIdentityDigest: effect.target_identity_digest,
+        upstreamResultDigest: effect.upstream_result_digest,
+        readbackDigest: effect.readback_digest,
+      },
+      JSON.parse(effect.result_binding_artifact_json) as unknown,
+    );
+    const sourceManifest = manifest.children.find((child) => child.childId === sourceRow.child_id);
+    if (!sourceManifest) throw new Error("batch source child is absent from its manifest");
+    const source: CanvasBindingChild = {
+      childId: sourceRow.child_id,
+      courseId: sourceManifest.courseId,
+      publicToolName: sourceRow.public_tool_name,
+      sourceId: sourceRow.source_id,
+      sourceToolName: sourceRow.source_tool_name,
+      arguments: decryptedRequest(key, sourceRow),
+      dependencyChildIds: sourceManifest.dependencyChildIds,
+    };
+    const dependents = dependentManifests.map((dependentManifest): BoundDependent => {
+      const dependentRow = database.prepare(`
+        SELECT * FROM gateway_batch_children WHERE batch_id=? AND child_id=?
+      `).get(batchId, dependentManifest.childId) as unknown as ChildRow | undefined;
+      if (!dependentRow || dependentRow.state !== "pending"
+        || dependentRow.gateway_operation_id !== null
+        || dependentRow.bound_request_digest !== null
+        || dependentRow.bound_request_ciphertext !== null
+        || dependentRow.bound_request_iv !== null
+        || dependentRow.bound_request_tag !== null) {
+        throw new Error("batch result-bound child cannot be recovered from its current state");
+      }
+      const dependent: CanvasBindingChild = {
+        childId: dependentRow.child_id,
+        courseId: dependentManifest.courseId,
+        publicToolName: dependentRow.public_tool_name,
+        sourceId: dependentRow.source_id,
+        sourceToolName: dependentRow.source_tool_name,
+        arguments: decryptedRequest(key, dependentRow),
+        dependencyChildIds: dependentManifest.dependencyChildIds,
+      };
+      const argumentsValue = bindCanvasResultArtifactArguments(
+        dependentManifest.resultBinding!,
+        source,
+        dependent,
+        artifact,
+      );
+      return {
+        childId: dependent.childId,
+        digest: sha256Json(argumentsValue),
+        arguments: argumentsValue,
+      };
+    });
+    return { status: "ready", dependents };
+  } catch {
+    return { status: "inspection_required", dependentChildIds };
+  }
 }
 
 function childDecision(
@@ -386,6 +618,8 @@ function applyDecision(
   batchId: string,
   decision: Omit<BatchRecoveryChild, "schema" | "applied">,
   now: string,
+  bindingRecovery: ResultBindingRecovery = { status: "none" },
+  key: Buffer | null = null,
 ): boolean {
   if (decision.action === "inspection_required") {
     if (!decision.gatewayOperationId) return false;
@@ -405,6 +639,23 @@ function applyDecision(
       batchId,
       decision.childId,
     );
+    if (bindingRecovery.status === "inspection_required") {
+      if (Number(result.changes) !== 1) {
+        throw new Error("batch result-binding source changed during recovery");
+      }
+      const markDependent = database.prepare(`
+        UPDATE gateway_batch_children
+        SET state='unknown', gateway_operation_state='result_binding_inspection_required',
+            error_digest=?, updated_at=?, terminal_at=?, revision=revision+1
+        WHERE batch_id=? AND child_id=? AND state='pending'
+      `);
+      for (const childId of bindingRecovery.dependentChildIds) {
+        const marked = markDependent.run(decision.detailDigest, now, now, batchId, childId);
+        if (Number(marked.changes) !== 1) {
+          throw new Error("batch result-bound dependent changed during recovery");
+        }
+      }
+    }
     return Number(result.changes) === 1;
   }
 
@@ -451,6 +702,38 @@ function applyDecision(
   }
 
   if (decision.action === "direct_effect_verified") {
+    if (bindingRecovery.status === "ready") {
+      if (!key) throw new Error("batch result binding recovery requires its encryption key");
+      const saveBound = database.prepare(`
+        UPDATE gateway_batch_children
+        SET bound_request_digest=?, bound_request_ciphertext=?, bound_request_iv=?, bound_request_tag=?,
+            updated_at=?, revision=revision+1
+        WHERE batch_id=? AND child_id=? AND state='pending'
+          AND bound_request_digest IS NULL AND bound_request_ciphertext IS NULL
+          AND bound_request_iv IS NULL AND bound_request_tag IS NULL
+      `);
+      for (const dependent of bindingRecovery.dependents) {
+        const encrypted = encryptedBoundRequest(
+          key,
+          batchId,
+          dependent.childId,
+          dependent.digest,
+          dependent.arguments,
+        );
+        const saved = saveBound.run(
+          dependent.digest,
+          encrypted.ciphertext,
+          encrypted.iv,
+          encrypted.tag,
+          now,
+          batchId,
+          dependent.childId,
+        );
+        if (Number(saved.changes) !== 1) {
+          throw new Error("batch result-bound dependent changed during recovery");
+        }
+      }
+    }
     const result = database.prepare(`
       UPDATE gateway_batch_children
       SET state='succeeded', gateway_operation_id=?, gateway_operation_state='verified',
@@ -466,6 +749,9 @@ function applyDecision(
       batchId,
       decision.childId,
     );
+    if (bindingRecovery.status === "ready" && Number(result.changes) !== 1) {
+      throw new Error("batch result-binding source changed during recovery");
+    }
     return Number(result.changes) === 1;
   }
 
@@ -494,6 +780,7 @@ export function recoverBatchState(input: RecoverBatchStateInput): BatchRecoveryR
   const mode = exactMode(input.mode);
   const afterOrdinal = exactAfterOrdinal(input.afterOrdinal);
   const maxChildren = exactLimit(input.maxChildren);
+  const key = exactKey(input.encryptionKey);
   const now = (input.now ?? (() => new Date()))().toISOString();
   const database = openDatabase(path);
 
@@ -509,8 +796,7 @@ export function recoverBatchState(input: RecoverBatchStateInput): BatchRecoveryR
 
     const before = countRow(database, batchId);
     const rows = database.prepare(`
-      SELECT batch_id, child_id, ordinal, source_id, source_tool_name,
-             source_operation_id, gateway_operation_id, state
+      SELECT *
       FROM gateway_batch_children
       WHERE batch_id=? AND state='unknown' AND ordinal>?
       ORDER BY ordinal ASC LIMIT ?
@@ -518,14 +804,26 @@ export function recoverBatchState(input: RecoverBatchStateInput): BatchRecoveryR
 
     const children: BatchRecoveryChild[] = [];
     for (const row of rows) {
-      const decision = childDecision(
+      const directEffect = verifiedDirectEffectForChild(database, row);
+      let decision = childDecision(
         batch.mode,
         row,
         operationForChild(database, row),
-        verifiedDirectEffectForChild(database, row),
+        directEffect,
       );
+      const bindingRecovery = directEffect && decision.action === "direct_effect_verified"
+        ? resultBindingRecovery(database, batchId, row, directEffect, key)
+        : { status: "none" as const };
+      if (bindingRecovery.status === "inspection_required") {
+        decision = {
+          ...decision,
+          action: "inspection_required",
+          gatewayOperationState: "verified_result_binding_inspection_required",
+          detailDigest: sha256Text("result_binding_artifact_unavailable"),
+        };
+      }
       const applied = mode === "apply_safe"
-        ? applyDecision(database, batchId, decision, now)
+        ? applyDecision(database, batchId, decision, now, bindingRecovery, key)
         : false;
       children.push({ schema: "morrow.batch-recovery-child.v1", ...decision, applied });
     }

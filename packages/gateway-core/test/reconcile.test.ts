@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ToolAnnotations } from "@morrow/contracts";
 import {
   buildSourceCatalog,
   parseSourceCatalog,
@@ -12,7 +13,11 @@ const idSchema = {
   required: ["id"],
 };
 
-function catalog(id: string, tools: { name: string; inputSchema?: Record<string, unknown> }[]) {
+function catalog(id: string, tools: {
+  name: string;
+  inputSchema?: Record<string, unknown>;
+  annotations?: ToolAnnotations;
+}[]) {
   return buildSourceCatalog({
     id,
     label: id,
@@ -22,6 +27,7 @@ function catalog(id: string, tools: { name: string; inputSchema?: Record<string,
   }, tools.map((tool) => ({
     name: tool.name,
     inputSchema: tool.inputSchema ?? emptySchema,
+    ...(tool.annotations ? { annotations: tool.annotations } : {}),
   })));
 }
 
@@ -87,6 +93,37 @@ describe("reconcileCatalogs", () => {
     });
   });
 
+  it.each([
+    ["read-only", { readOnlyHint: true }, { readOnlyHint: false }],
+    ["destructive", { destructiveHint: false }, { destructiveHint: true }],
+    ["idempotence", { idempotentHint: true }, { idempotentHint: false }],
+  ] as const)("leaves exact-name %s annotation drift unresolved and unselected", (_label, first, second) => {
+    const report = reconcileCatalogs([
+      catalog("meridian", [{ name: "canvas_page_get", annotations: first }]),
+      catalog("morrow-legacy", [{ name: "canvas_page_get", annotations: second }]),
+    ]);
+    expect(report.rows[0]).toMatchObject({
+      status: "contract_drift",
+      selected: null,
+      reviewRequired: true,
+      annotationsAligned: false,
+    });
+    expect(report.counts.reviewRequired).toBe(1);
+  });
+
+  it("keeps an open-world-only annotation difference compatible", () => {
+    const report = reconcileCatalogs([
+      catalog("meridian", [{ name: "canvas_page_get", annotations: { readOnlyHint: true, openWorldHint: false } }]),
+      catalog("morrow-legacy", [{ name: "canvas_page_get", annotations: { readOnlyHint: true, openWorldHint: true } }]),
+    ]);
+    expect(report.rows[0]).toMatchObject({
+      status: "compatible",
+      selected: { sourceId: "meridian", toolName: "canvas_page_get" },
+      reviewRequired: false,
+      annotationsAligned: false,
+    });
+  });
+
   it("joins differently named tools only through an explicit alias rule", () => {
     const report = reconcileCatalogs([
       catalog("meridian", [{ name: "canvas_pages_list" }]),
@@ -110,6 +147,59 @@ describe("reconcileCatalogs", () => {
       status: "compatible",
       publicName: "canvas_pages_list",
       selected: { sourceId: "meridian", toolName: "canvas_pages_list" },
+    });
+  });
+
+  it("does not let a schema-drift rule override authority annotation drift", () => {
+    const report = reconcileCatalogs([
+      catalog("meridian", [{ name: "canvas_pages_list", annotations: { readOnlyHint: true } }]),
+      catalog("morrow-legacy", [{ name: "list_pages", annotations: { readOnlyHint: false } }]),
+    ], {
+      aliases: [{
+        id: "canvas.pages.list",
+        publicName: "canvas_pages_list",
+        preferredSourceId: "meridian",
+        reason: "Both tools list Canvas pages in one course.",
+        allowContractDrift: true,
+        members: [
+          { sourceId: "meridian", toolName: "canvas_pages_list" },
+          { sourceId: "morrow-legacy", toolName: "list_pages" },
+        ],
+      }],
+    });
+
+    expect(report.rows[0]).toMatchObject({
+      kind: "alias",
+      status: "contract_drift",
+      selected: null,
+      reviewRequired: true,
+      annotationsAligned: false,
+    });
+  });
+
+  it("still permits an explicit schema-only drift when authority annotations align", () => {
+    const report = reconcileCatalogs([
+      catalog("meridian", [{ name: "canvas_pages_list", inputSchema: emptySchema, annotations: { readOnlyHint: true } }]),
+      catalog("morrow-legacy", [{ name: "list_pages", inputSchema: idSchema, annotations: { readOnlyHint: true } }]),
+    ], {
+      aliases: [{
+        id: "canvas.pages.list",
+        publicName: "canvas_pages_list",
+        preferredSourceId: "meridian",
+        reason: "The reviewed alias accounts for the schema difference.",
+        allowContractDrift: true,
+        members: [
+          { sourceId: "meridian", toolName: "canvas_pages_list" },
+          { sourceId: "morrow-legacy", toolName: "list_pages" },
+        ],
+      }],
+    });
+
+    expect(report.rows[0]).toMatchObject({
+      status: "compatible_by_rule",
+      selected: { sourceId: "meridian", toolName: "canvas_pages_list" },
+      reviewRequired: false,
+      annotationsAligned: true,
     });
   });
 

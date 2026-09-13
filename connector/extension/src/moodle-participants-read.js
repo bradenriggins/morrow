@@ -17,6 +17,8 @@
  * that placed the user in the course. No status, no dates, no identity text.
  */
 export async function executeMoodleCourseParticipantsInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const OPERATION = "moodle.form.enrol.participants.read.v1";
   const TOOL = "moodle_get_course_participants";
@@ -87,11 +89,17 @@ export async function executeMoodleCourseParticipantsInPage(rawInput) {
   };
   const boundedText = async (response, endpoint) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext() || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -99,14 +107,14 @@ export async function executeMoodleCourseParticipantsInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -119,6 +127,7 @@ export async function executeMoodleCourseParticipantsInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname: METHOD, args: methodArgs }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_course_participants_request_failed" }; }
     const raw = await boundedText(response, endpoint);
@@ -259,6 +268,8 @@ export async function executeMoodleCourseParticipantsInPage(rawInput) {
  * per method with its name, whether it is enabled, and how many users it holds.
  */
 export async function executeMoodleEnrolmentMethodsInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const OPERATION = "moodle.form.enrol.methods.read.v1";
   const TOOL = "moodle_get_enrolment_methods";
@@ -320,11 +331,17 @@ export async function executeMoodleEnrolmentMethodsInPage(rawInput) {
   };
   const boundedText = async (response, endpoint) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext() || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -332,14 +349,14 @@ export async function executeMoodleEnrolmentMethodsInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -401,6 +418,7 @@ export async function executeMoodleEnrolmentMethodsInPage(rawInput) {
   try {
     response = await fetch(endpoint, {
       method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" },
+      signal: requestSignal(input?.expiresAt),
     });
   } catch { return fail("moodle_enrolment_methods_request_failed"); }
   const raw = await boundedText(response, endpoint);
@@ -467,6 +485,8 @@ export async function executeMoodleEnrolmentMethodsInPage(rawInput) {
  * `learner` so the runtime can project it through the participant roster.
  */
 export async function executeMoodleParticipantEnrolmentInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const OPERATION = "moodle.form.enrol.participant.read.v1";
   const TOOL = "moodle_get_participant_enrolment";
@@ -538,11 +558,17 @@ export async function executeMoodleParticipantEnrolmentInPage(rawInput) {
   };
   const boundedText = async (response, endpoint) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext() || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -550,14 +576,14 @@ export async function executeMoodleParticipantEnrolmentInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -570,6 +596,7 @@ export async function executeMoodleParticipantEnrolmentInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname: METHOD, args: methodArgs }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_participant_enrolment_request_failed" }; }
     const raw = await boundedText(response, endpoint);

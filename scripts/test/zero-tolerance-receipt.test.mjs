@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import test from "node:test";
 import { validateTestOutput } from "../create-zero-tolerance-receipt.mjs";
+import { bindWindowsSmokeObservation, createWindowsSmokeBinding } from "../lib/windows-smoke-evidence.mjs";
 
 const COMMIT = "a".repeat(40);
 const SKIP_LOG = [
@@ -17,19 +18,33 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function writeFixture() {
+function writeFixture({ installer = Buffer.from("native Windows installer"), runId = "1".repeat(32) } = {}) {
   const root = mkdtempSync(resolve(tmpdir(), "morrow-zero-tolerance-"));
   const evidence = resolve(root, "output/final-pass-20260907");
   mkdirSync(evidence, { recursive: true });
-  const installer = Buffer.from("native Windows installer");
   const installerSha256 = sha256(installer);
-  const smoke = {
+  const packageReceipt = JSON.stringify({
+    schema: "morrow.desktop-installer.v1",
+    version: "1.0.4",
+    target: "win32-x64",
+    source: { head: COMMIT, dirty: false },
+    payload: { releaseGraph: { schema: "morrow.desktop-packager-admission.v1", sha256: "c".repeat(64) } },
+    signing: {
+      mode: "unsigned_private_qa",
+      target: "win32-x64",
+      publicRelease: false,
+      artifactSignature: "authenticode_absent",
+    },
+    artifacts: [{ name: "Morrow-1.0.4-win-x64.exe", sha256: installerSha256 }],
+  });
+  const smokeObservation = {
     schema: "morrow.desktop-windows-smoke.v1",
     runtime: { ready: true },
     payload: { withinResources: true },
     health: { attempted: true, gatewayReady: true },
     state: { withinTestRoot: true },
     codexConfig: { withinTestRoot: true, exists: true },
+    runtimeTrace: { schema: "morrow.desktop-runtime-trace.v1" },
     stateSecurity: {
       schema: "morrow.desktop-windows-state-security.v1",
       state: { underUserData: true, acl: "current_user_system_admin_sensitive_access_only" },
@@ -42,15 +57,37 @@ function writeFixture() {
       },
     },
   };
+  const binding = createWindowsSmokeBinding({
+    runId,
+    sourceCommit: COMMIT,
+    packageReceiptSha256: sha256(packageReceipt),
+    releaseGraphSha256: "c".repeat(64),
+    installerFileName: "Morrow-1.0.4-win-x64.exe",
+    installerSha256,
+  });
+  const smoke = bindWindowsSmokeObservation(smokeObservation, binding);
   writeFileSync(resolve(evidence, "Morrow-1.0.4-win-x64.exe"), installer);
+  writeFileSync(resolve(evidence, "package-receipt.json"), packageReceipt);
   writeFileSync(resolve(evidence, "smoke.json"), JSON.stringify(smoke));
   writeFileSync(resolve(evidence, "smoke.harness.json"), JSON.stringify({
-    schema: "morrow.desktop-windows-harness.v2",
-    installer: { fileName: "Morrow-1.0.4-win-x64.exe" },
+    schema: "morrow.desktop-windows-harness.v5",
+    binding,
+    installer: binding.installer,
     installation: { completed: true, repairCompleted: true },
-    application: { receipt: smoke },
-    repair: { restoredExactly: true },
+    application: {
+      runtimeDiagnosticCompleted: true,
+      rendererStartupCompleted: true,
+      receipt: smoke,
+      rendererReceipt: {
+        schema: "morrow.desktop-renderer-smoke.v1",
+        renderer: { loaded: true, stateRendered: true },
+        window: { visible: true },
+      },
+      installedPackage: { sourceCommit: COMMIT, releaseGraphSha256: "c".repeat(64) },
+    },
+    repair: { restoredExactly: true, receiptWhileDamaged: smoke, receiptAfterRepair: smoke },
     uninstall: { completed: true, applicationRemoved: true, unrelatedDataPreserved: true },
+    cleanup: { temporaryStateRemoved: true, installationDirectoryRemoved: true },
   }));
   writeFileSync(resolve(evidence, "upgrade.json"), JSON.stringify({
     schema: "morrow.native-windows-upgrade.v1",
@@ -151,7 +188,7 @@ test("only the native-Windows ACL skip is accepted, and only with bound evidence
     host: "darwin",
     test: "the smoke access-control classification reads a real Windows access-control list",
     reason: "Windows access control needs a Windows host",
-    evidenceIds: ["installer", "smoke", "harness", "upgrade"],
+    evidenceIds: ["installer", "packageReceipt", "smoke", "harness", "upgrade"],
   });
   assert.throws(() => validateTestOutput({
     id: "workspace-test",
@@ -197,7 +234,7 @@ test("only the native-Windows ACL skip is accepted, and only with bound evidence
     commit: COMMIT,
     platform: "darwin",
     windowsEvidenceDirectory: evidence,
-  }), /not bound to this installer and source/);
+  }), /Retained Windows installer changed after packaging/);
 });
 
 test("native Windows upgrade evidence fails closed when any release boundary is weakened", (t) => {
@@ -230,4 +267,38 @@ test("native Windows upgrade evidence fails closed when any release boundary is 
       windowsEvidenceDirectory: evidence,
     }), /not bound to this installer and source/, label);
   }
+});
+
+test("native Windows smoke and harness evidence must come from the retained installer and the same run", (t) => {
+  const first = writeFixture({ installer: Buffer.from("installer A"), runId: "1".repeat(32) });
+  const second = writeFixture({ installer: Buffer.from("installer B"), runId: "2".repeat(32) });
+  t.after(() => rmSync(first.root, { recursive: true, force: true }));
+  t.after(() => rmSync(second.root, { recursive: true, force: true }));
+
+  for (const name of ["smoke.json", "smoke.harness.json"]) {
+    writeFileSync(resolve(second.evidence, name), readFileSync(resolve(first.evidence, name)));
+  }
+  assert.throws(() => validateTestOutput({
+    id: "workspace-test",
+    output: SKIP_LOG,
+    repositoryRoot: second.root,
+    commit: COMMIT,
+    platform: "darwin",
+    windowsEvidenceDirectory: second.evidence,
+  }), /smoke receipt is not bound to this installer and source/);
+
+  const smoke = JSON.parse(readFileSync(resolve(first.evidence, "smoke.json"), "utf8"));
+  const harnessPath = resolve(first.evidence, "smoke.harness.json");
+  const harness = JSON.parse(readFileSync(harnessPath, "utf8"));
+  harness.binding.runId = "2".repeat(32);
+  writeFileSync(harnessPath, JSON.stringify(harness));
+  assert.throws(() => validateTestOutput({
+    id: "workspace-test",
+    output: SKIP_LOG,
+    repositoryRoot: first.root,
+    commit: COMMIT,
+    platform: "darwin",
+    windowsEvidenceDirectory: first.evidence,
+  }), /harness receipt is not a completed smoke, repair, and uninstall proof/);
+  assert.equal(smoke.binding.runId, "1".repeat(32));
 });

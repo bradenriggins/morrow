@@ -70,13 +70,15 @@ function plant(id, exports) {
  * packaged, so the update policy is disabled and the update controller stops
  * before its first check.
  */
-async function startedMorrow(controller = {}) {
-  const recorded = { channels: [], handlers: new Map(), events: new Map(), permissions: {}, window: null, loadedFile: null, windowOpen: null, started: null };
+async function startedMorrow(controller = {}, updateController = null) {
+  const recorded = { channels: [], handlers: new Map(), events: new Map(), permissions: {}, sent: [], window: null, loadedFile: null, windowOpen: null, started: null };
   const webContents = {
     mainFrame: { url: pathToFileURL(fs.realpathSync(path.join(installerRoot, "renderer", "index.html"))).href },
     on(event, handler) { recorded.events.set(event, handler); return webContents; },
-    setWindowOpenHandler(handler) { recorded.windowOpen = handler; }
+    setWindowOpenHandler(handler) { recorded.windowOpen = handler; },
+    send(channel, value) { recorded.sent.push([channel, value]); }
   };
+  const updatesModule = require("../shared/updates.cjs");
   const undo = [
     plant(electronPath, {
       app: {
@@ -94,6 +96,7 @@ async function startedMorrow(controller = {}) {
       },
       BrowserWindow: class {
         constructor(options) { this.options = options; this.webContents = webContents; recorded.window = this; }
+        isDestroyed() { return false; }
         once() {}
         show() {}
         loadFile(file) { recorded.loadedFile = file; }
@@ -114,6 +117,10 @@ async function startedMorrow(controller = {}) {
         identity: { currentVersion: "1.0.0-rc.0", platform: process.platform, arch: process.arch, feedId: "morrow-github-stable" },
         checkForUpdates() {}, downloadUpdate() {}, quitAndInstall() {}, on() {}, removeListener() {}
       })
+    }),
+    plant(require.resolve("../shared/updates.cjs"), {
+      ...updatesModule,
+      createUpdateController: (...args) => updateController || updatesModule.createUpdateController(...args)
     }),
     plant(require.resolve("../shared/installer-controller.cjs"), {
       ...require("../shared/installer-controller.cjs"),
@@ -143,14 +150,20 @@ async function startedMorrow(controller = {}) {
  */
 function loadedPreload() {
   const invoked = [];
+  const listeners = new Map();
   let exposed = null;
   const restore = plant(electronPath, {
     contextBridge: { exposeInMainWorld(key, value) { exposed = { key, value }; } },
-    ipcRenderer: { invoke: (...call) => { invoked.push(call); return Promise.resolve("delivered"); } }
+    ipcRenderer: {
+      invoke: (...call) => { invoked.push(call); return Promise.resolve("delivered"); },
+      on(channel, listener) { listeners.set(channel, listener); },
+      removeListener(channel, listener) { if (listeners.get(channel) === listener) listeners.delete(channel); }
+    }
   });
   delete require.cache[preloadPath];
   try {
-    return { methods: require(preloadPath).METHODS, exposed, invoked };
+    const loaded = require(preloadPath);
+    return { methods: loaded.METHODS, updateChannel: loaded.UPDATE_STATE_CHANNEL, exposed, invoked, listeners };
   } finally {
     delete require.cache[preloadPath];
     restore();
@@ -242,7 +255,7 @@ test("Check Bridge returns safe installer errors even when the runtime or state 
 });
 
 test("installer state exposes only public Blackboard tenant fields", () => {
-  const state = installerState({
+  const input = {
     lifecycle: "ready_for_assistant",
     assistants: [],
     selectedAssistantId: null,
@@ -269,7 +282,8 @@ test("installer state exposes only public Blackboard tenant fields", () => {
         sourcePath: "/private/secret.txt",
       }],
     },
-  });
+  };
+  const state = installerState(input);
   assert.deepEqual(state.blackboard, {
     schema: "morrow.blackboard.health.v1",
     status: "api_configured_live_untested",
@@ -279,6 +293,12 @@ test("installer state exposes only public Blackboard tenant fields", () => {
   for (const forbidden of ["must-not-reach-renderer", "credentialRef", "sourcePath", "/private/secret.txt", "clientSecret", "applicationKey"]) {
     assert.equal(serialized.includes(forbidden), false, `${forbidden} reached renderer state`);
   }
+  const repair = installerState({ ...input, blackboard: { ...input.blackboard, status: "credential_missing" } });
+  assert.equal(repair.blackboard.status, "credential_missing");
+  assert.deepEqual(repair.blackboard.tenants, state.blackboard.tenants, "safe tenant identity survives a credential repair state");
+  assert.equal(JSON.stringify(repair).includes("must-not-reach-renderer"), false);
+  const damagedConfig = installerState({ ...input, blackboard: { ...input.blackboard, status: "configuration_repair_required" } });
+  assert.deepEqual(damagedConfig.blackboard.tenants, [], "an unreadable config publishes no inferred tenant");
 });
 
 test("a runtime-verified account alone is not a selected course", () => {
@@ -314,6 +334,7 @@ test("the setup page declares a Content-Security-Policy that admits only the fil
   const html = fs.readFileSync(path.join(installerRoot, "renderer", "index.html"), "utf8");
   const styles = fs.readFileSync(path.join(installerRoot, "renderer", "styles.css"), "utf8");
   const policy = declaredPolicy(html);
+  assert.match(html, /<h2 id="action-title" tabindex="-1"><\/h2>/, "the changing step heading must accept programmatic focus");
   assert.notEqual(policy, null, "the setup page declares no Content-Security-Policy");
   assert.deepEqual(Object.fromEntries(policy.directives), {
     "default-src": ["'none'"],
@@ -384,8 +405,76 @@ test("main registers exactly the channels the renderer bridge admits", async () 
     assert.equal(await preload.exposed.value.invoke(channel), "delivered", `${channel} does not reach main through the bridge`);
   }
   assert.deepEqual(preload.invoked, started.channels.map((channel) => [channel]));
+  assert.equal(await preload.exposed.value.rendererReady(), "delivered");
+  assert.deepEqual(preload.invoked.at(-1), ["installer:renderer-ready"]);
   await assert.rejects(() => preload.exposed.value.invoke("installer:remove-data-now"), /Unsupported Morrow action\./);
-  assert.equal(preload.invoked.length, started.channels.length, "a refused action still reached main");
+  assert.equal(preload.invoked.length, started.channels.length + 1, "a refused action still reached main");
+});
+
+test("automatic update I/O starts only after the window and every IPC handler are ready", async () => {
+  let releaseStart;
+  let startCalls = 0;
+  const blockedStart = new Promise((resolve) => { releaseStart = resolve; });
+  const snapshot = {
+    schema: "morrow.desktop-update.v1",
+    status: "checking",
+    currentVersion: "1.0.0",
+    availableVersion: null,
+    automatic: true,
+    reason: null
+  };
+  const updates = {
+    snapshot: () => snapshot,
+    subscribe(listener) { listener(snapshot); return () => {}; },
+    start() { startCalls += 1; return blockedStart; },
+    check: async () => snapshot,
+    installWhenIdle: async () => snapshot,
+    stop() {}
+  };
+  let deadline = null;
+  try {
+    const started = await Promise.race([
+      startedMorrow({}, updates),
+      new Promise((_resolve, reject) => { deadline = setTimeout(() => reject(new Error("desktop start waited for update I/O")), 1_000); })
+    ]);
+    assert.notEqual(started.window, null);
+    assert.equal(started.loadedFile, path.join(installerRoot, "renderer", "index.html"));
+    assert.equal(started.handlers.size, started.channels.length);
+    assert.equal(started.handlers.has("installer:get-state"), true);
+    assert.equal(startCalls, 1);
+  } finally {
+    clearTimeout(deadline);
+    releaseStart(snapshot);
+  }
+});
+
+test("main and preload deliver background update snapshots through one removable event channel", async () => {
+  const started = await startedMorrow();
+  const preload = loadedPreload();
+  assert.equal(started.sent.length > 0, true, "the update subscription published no initial state");
+  assert.equal(started.sent[0][0], preload.updateChannel);
+
+  const received = [];
+  const unsubscribe = preload.exposed.value.subscribeUpdates((snapshot) => received.push(snapshot));
+  const snapshot = {
+    schema: "morrow.desktop-update.v1",
+    status: "ready",
+    currentVersion: "1.0.0",
+    availableVersion: "1.0.1",
+    automatic: true,
+    reason: null
+  };
+  preload.listeners.get(preload.updateChannel)({}, snapshot);
+  assert.deepEqual(received, [snapshot]);
+  unsubscribe();
+  assert.equal(preload.listeners.has(preload.updateChannel), false);
+  assert.throws(() => preload.exposed.value.subscribeUpdates(null), /listener/);
+
+  const html = fs.readFileSync(path.join(installerRoot, "renderer", "index.html"), "utf8");
+  const updateStatus = html.match(/<p id="updates-copy"[^>]*>/)?.[0] || "";
+  assert.match(updateStatus, /role="status"/);
+  assert.match(updateStatus, /aria-live="polite"/);
+  assert.match(updateStatus, /aria-atomic="true"/);
 });
 
 test("the setup window opens sandboxed and refuses navigation, webviews, new windows and permissions", async () => {
@@ -563,12 +652,13 @@ test("the Blackboard request clears FormData and reaches only the trusted filesy
   assert.match(preload, /"installer:configure-blackboard"/);
   assert.match(main, /ipcMain\.handle\("installer:configure-blackboard"/);
   assert.match(main, /await installer\.configureBlackboard\(input\);/);
-  for (const channel of ["installer:configure-blackboard", "installer:select-blackboard-courses"]) {
+  for (const channel of ["installer:configure-blackboard", "installer:select-blackboard-courses", "installer:remove-blackboard-data"]) {
     assert.match(preload, new RegExp(`"${channel}"`));
     assert.match(main, new RegExp(`ipcMain\\.handle\\("${channel}"`));
     assert.match(renderer, new RegExp(`invoke\\("${channel}"`));
   }
   assert.match(main, /errorDetails\("blackboard_configuration_invalid"\)/);
+  assert.match(main, /await installer\.removeBlackboardData\(\);/);
   assert.match(controller, /hardenPrivateDirectory\(candidate, \{ trustedRoot: this\.home \}\)/);
   assert.match(controller, /privateDirectoryAccessAccepted\(candidate, \{ trustedRoot: this\.home \}\)/);
   assert.match(renderer, /fields\.get\("applicationSecret"\);\r?\n  fields\.delete\("applicationSecret"\);/);

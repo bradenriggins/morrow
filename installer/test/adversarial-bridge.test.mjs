@@ -354,7 +354,7 @@ test("startup pruning removes only what is inside the backups folder and never f
   await untouched(documents);
 });
 
-test("the Bridge record and the update lock are private files inside a private folder", {
+test("the Bridge record and transactional update database are private files inside a private folder", {
   skip: process.platform === "win32" ? "POSIX modes; the Windows access-control classification needs a Windows host" : false
 }, async (t) => {
   const root = await temporaryRoot(t, "bridge-modes");
@@ -376,7 +376,7 @@ test("the Bridge record and the update lock are private files inside a private f
     bridgeDirectory,
     nextChallenge: challenge("locked"),
     requestQuiescence: async () => {
-      lockMode = await mode(path.join(stateDirectory, "bridge-update.lock"));
+      lockMode = await mode(path.join(stateDirectory, "bridge-update-lock.sqlite3"));
       return {
         schema: "morrow.bridge.update-quiesced.v1",
         extensionId,

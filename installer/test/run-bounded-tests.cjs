@@ -2,7 +2,6 @@
 
 const fs = require("node:fs");
 const path = require("node:path");
-const { spawn, spawnSync } = require("node:child_process");
 
 // Windows' real ACL and file-system operations run measurably slower than the
 // same calls on macOS: this suite's win32-only paths were never exercised for
@@ -17,39 +16,22 @@ function usage() {
   return "Usage: node test/run-bounded-tests.cjs --per-file|--suite";
 }
 
-function stopProcessTree(child) {
-  if (!Number.isSafeInteger(child.pid)) return;
-  if (process.platform === "win32") {
-    spawnSync("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
-      stdio: "ignore",
-      windowsHide: true,
-      timeout: 10_000,
+async function runNode(argumentsValue, label, timeoutMs) {
+  try {
+    const { runOwnedProcess } = await import("../../scripts/lib/owned-process.mjs");
+    const result = await runOwnedProcess(process.execPath, argumentsValue, {
+      workingDirectory: path.resolve(__dirname, ".."),
+      timeoutMs,
+      killGraceMs: 2_000,
+      finalGraceMs: 2_000,
+      maxOutputBytes: 1_024,
+      onStdout: (chunk) => process.stdout.write(chunk),
+      onStderr: (chunk) => process.stderr.write(chunk),
     });
-    return;
+    return { label, code: result.code, signal: result.signal, timedOut: result.timedOut, spawnError: null };
+  } catch (spawnError) {
+    return { label, code: null, signal: null, timedOut: false, spawnError };
   }
-  try { process.kill(-child.pid, "SIGKILL"); } catch { try { child.kill("SIGKILL"); } catch {} }
-}
-
-function runNode(argumentsValue, label, timeoutMs) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, argumentsValue, {
-      cwd: path.resolve(__dirname, ".."),
-      detached: process.platform !== "win32",
-      stdio: "inherit",
-      windowsHide: true,
-    });
-    let timedOut = false;
-    let spawnError = null;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      stopProcessTree(child);
-    }, timeoutMs);
-    child.once("error", (error) => { spawnError = error; });
-    child.once("close", (code, signal) => {
-      clearTimeout(timer);
-      resolve({ label, code, signal, timedOut, spawnError });
-    });
-  });
 }
 
 function assertPassed(result, timeoutMs) {

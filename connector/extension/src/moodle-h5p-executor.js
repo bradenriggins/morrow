@@ -41,6 +41,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleH5pInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const MODULE = "h5pactivity";
   const SCHEMA = "morrow.moodle-h5pactivity.v1";
@@ -220,19 +222,80 @@ export async function executeMoodleH5pInPage(rawInput) {
     if (id(value.course_id) !== courseId || !id(value[targetKey])) return null;
     return creating ? { courseId, sectionId: id(value.section_id) } : { courseId, moduleId: id(value.module_id) };
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const readNext = async (reader) => {
+    const remaining = Number.isFinite(input?.expiresAt) ? input.expiresAt - Date.now() : Infinity;
+    if (remaining <= 0) throw new Error("moodle_execution_expired");
+    if (!Number.isFinite(remaining)) return await reader.read();
+    let timeout;
+    return await Promise.race([
+      reader.read(),
+      new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+    ]).finally(() => clearTimeout(timeout));
+  };
   const readText = async (response) => {
-    const declared = Number(response.headers?.get?.("content-length") || 0);
-    if (Number.isSafeInteger(declared) && declared > MAX_BYTES) throw new Error("moodle_h5pactivity_response_too_large");
-    const text = await response.text();
-    if (typeof text !== "string" || text.length > MAX_BYTES) throw new Error("moodle_h5pactivity_response_too_large");
-    return text;
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) {
+      cancelBody(response.body);
+      throw new Error("moodle_h5pactivity_response_too_large");
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") throw new Error("moodle_h5pactivity_response_unavailable");
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const next = await readNext(reader);
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_BYTES) {
+          cancelBody(reader);
+          throw new Error("moodle_h5pactivity_response_too_large");
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch (error) {
+      cancelBody(reader);
+      throw error;
+    }
   };
   const readLimitedBytes = async (response, maximum = MAX_PACKAGE_BYTES) => {
-    const declared = Number(response.headers?.get?.("content-length") || 0);
-    if (Number.isSafeInteger(declared) && declared > maximum) throw new Error("moodle_h5pactivity_response_too_large");
-    const buffer = await response.arrayBuffer();
-    if (buffer.byteLength > maximum) throw new Error("moodle_h5pactivity_response_too_large");
-    return new Uint8Array(buffer);
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > maximum)) {
+      cancelBody(response.body);
+      throw new Error("moodle_h5pactivity_response_too_large");
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader) throw new Error("moodle_h5pactivity_response_unavailable");
+    const chunks = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const next = await readNext(reader);
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > maximum) {
+          cancelBody(reader);
+          throw new Error("moodle_h5pactivity_response_too_large");
+        }
+        chunks.push(next.value);
+      }
+    } catch (error) {
+      cancelBody(reader);
+      throw error;
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return bytes;
   };
   const draftItemId = (value) => typeof value === "string" && ID.test(value) && Number.isSafeInteger(Number(value)) ? value : "";
   const draftFilesAjax = async (context, action, body) => {
@@ -245,6 +308,7 @@ export async function executeMoodleH5pInPage(rawInput) {
         redirect: "error",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: new URLSearchParams({ sesskey: context.sesskey, ...body }),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return null; }
     let text;
@@ -446,6 +510,7 @@ export async function executeMoodleH5pInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname: STATE_METHOD, args: { courseid: Number(courseId) } }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_h5pactivity_course_state_unavailable" }; }
     if (!response.ok || !sameContext(context, currentContext())) return { error: "moodle_h5pactivity_course_state_unavailable", status: response.status };
@@ -487,7 +552,7 @@ export async function executeMoodleH5pInPage(rawInput) {
   const loadForm = async (context, endpoint, route, identity, creating) => {
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error: "moodle_h5pactivity_form_read_failed" }; }
     let text;
     try { text = await readText(response); } catch { return { error: "moodle_h5pactivity_form_read_failed", status: response.status }; }
@@ -752,6 +817,7 @@ export async function executeMoodleH5pInPage(rawInput) {
     try {
       response = await fetch(urlFor(context, "/repository/repository_ajax.php", { action: "upload" }), {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" }, body,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_h5pactivity_package_upload_refused" }; }
     let text;
@@ -765,7 +831,7 @@ export async function executeMoodleH5pInPage(rawInput) {
   };
   const bytesMatch = async (endpoint, manifest) => {
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error" }); } catch { return false; }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return false; }
     if (!response.ok || response.url !== endpoint) return false;
     let bytes;
     try { bytes = await readLimitedBytes(response); } catch { return false; }
@@ -816,6 +882,7 @@ export async function executeMoodleH5pInPage(rawInput) {
       response = await fetch(form.action, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual",
         headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: params,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { unconfirmed: "moodle_h5pactivity_save_unknown" }; }
     // The redirect is never followed. That is what keeps /mod/h5pactivity/view.php,

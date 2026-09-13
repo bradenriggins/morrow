@@ -71,6 +71,7 @@ test("the popup requires one clear agreement before it reads connection or cours
   assert.equal(page.hidden("#consent-action"), true);
   assert.equal(page.hidden("#connection-content"), false);
   assert.equal(page.text("#status-value"), "Not connected");
+  assert.equal(page.document.activeElement?.getAttribute("id"), "primary");
 });
 
 test("before a course site is connected the popup names the state it is in", async () => {

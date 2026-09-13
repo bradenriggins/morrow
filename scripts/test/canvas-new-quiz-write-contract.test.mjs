@@ -349,7 +349,10 @@ test("New Quiz writes preserve IP ranges, null resets and empty instructions", a
   // An update merges the reviewed change into the complete saved block.
   const { result: updated, requests: updateRequests } = await sendCanvas("canvas_update_single_quiz", {
     course_id: COURSE_ID, assignment_id: QUIZ_ID, ...guard(), ...settingsArguments,
-  }, { quiz: NEW_QUIZ, savedQuiz: { ...NEW_QUIZ, quiz_settings: mergeQuizSettings(CURRENT_SETTINGS, requested).merged } });
+  }, {
+    quiz: NEW_QUIZ,
+    savedQuiz: { ...NEW_QUIZ, instructions: "", quiz_settings: mergeQuizSettings(CURRENT_SETTINGS, requested).merged },
+  });
   assert.equal(updated.ok, true, JSON.stringify(updated));
   assert.equal(updated.verification.status, "verified");
   const update = updateRequests.find((request) => request.method !== "GET");
@@ -430,6 +433,41 @@ test("the settings check rejects changed protected settings and cannot confirm a
   assert.equal(result.sent, false);
   assert.match(result.error, /^new_quiz_settings_target_changed:/);
   assert.equal(requests.filter((request) => request.method === "PATCH").length, 0);
+});
+
+test("a mixed settings and title change verifies every requested field after normal and uncertain responses", async () => {
+  const requestedTitle = "Cell structures mastery check";
+  const args = {
+    course_id: COURSE_ID,
+    assignment_id: QUIZ_ID,
+    quiz_title: requestedTitle,
+    quiz_quiz_settings_shuffle_answers: true,
+    ...guard(),
+  };
+  const savedSettings = mergeQuizSettings(CURRENT_SETTINGS, { shuffle_answers: true }).merged;
+  const exact = { ...NEW_QUIZ, title: requestedTitle, quiz_settings: savedSettings };
+  const staleTitle = { ...exact, title: NEW_QUIZ.title };
+
+  for (const response of [
+    { name: "normal response" },
+    { name: "lost response", writeError: new TypeError("response lost") },
+  ]) {
+    const matched = await sendCanvas("canvas_update_single_quiz", args, { quiz: NEW_QUIZ, savedQuiz: exact, ...response });
+    assert.equal(matched.result.ok, true, response.name);
+    assert.equal(matched.result.verification.status, "verified", response.name);
+    assert.equal(
+      matched.result.verification.evidence,
+      "complete_settings_and_requested_quiz_fields_reread_after_write",
+      response.name,
+    );
+    assert.deepEqual(matched.requests.map((request) => request.method), ["GET", "PATCH", "GET"], response.name);
+
+    const mismatched = await sendCanvas("canvas_update_single_quiz", args, { quiz: NEW_QUIZ, savedQuiz: staleTitle, ...response });
+    assert.equal(mismatched.result.ok, response.writeError ? false : true, response.name);
+    assert.equal(mismatched.result.verification.status, "mismatch", response.name);
+    assert.equal(mismatched.result.verification.reason, "new_quiz_requested_fields_readback_mismatch", response.name);
+    if (response.writeError) assert.equal(mismatched.result.outcomeUnknown, true, response.name);
+  }
 });
 
 test("an uncertain settings response is recovered only by an exact complete-settings reread", async () => {
@@ -626,11 +664,22 @@ test("empty instructions are sent as empty, and are never treated as absent", as
   assert.equal(sent.instructions, "");
 });
 
-test("a Canvas REST write still drops an empty value, so only New Quizzes keeps one", async () => {
-  // The same empty value on a Canvas REST route is absent, which is what that
-  // API means by it. Only the /quiz/v1/ JSON routes preserve null and empty.
+test("a Canvas REST form keeps an explicit empty value", async () => {
   const restOperation = catalogOperation("canvas_edit_assignment");
-  const empty = restOperation.parameters.find((parameter) => parameter.inputName === "assignment_name");
-  assert.ok(empty, "canvas_edit_assignment no longer carries assignment_name");
+  const empty = restOperation.parameters.find((parameter) => parameter.inputName === "assignment_description");
+  assert.ok(empty, "canvas_edit_assignment no longer carries assignment_description");
   assert.equal(newQuizUsesJsonBody(restOperation), false);
+  const { requests } = await sendCanvas("canvas_edit_assignment", {
+    course_id: COURSE_ID,
+    id: QUIZ_ID,
+    assignment_name: "Cell structures check",
+    assignment_description: "",
+  }, { writeData: { id: QUIZ_ID, name: "Cell structures check", description: "" } });
+  const write = requests.find((request) => request.method === "PUT");
+  assert.ok(write, "the assignment update was never sent");
+  assert.equal(write.contentType, "application/x-www-form-urlencoded;charset=UTF-8");
+  const body = new URLSearchParams(write.body);
+  assert.equal(body.get("assignment[name]"), "Cell structures check");
+  assert.equal(body.has("assignment[description]"), true);
+  assert.equal(body.get("assignment[description]"), "");
 });

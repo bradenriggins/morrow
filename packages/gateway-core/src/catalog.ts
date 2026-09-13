@@ -81,6 +81,38 @@ function sourceSystem(sourceId: string): "morrow" | "meridian" {
   return sourceId === "meridian" ? "meridian" : "morrow";
 }
 
+function assertAccessClassification(
+  tool: Omit<CatalogTool, "capability">,
+  source: CatalogSource,
+  sourceMetadata: SourceCapabilityMetadata | undefined,
+): void {
+  const readOnly = tool.annotations?.readOnlyHint === true;
+  const destructive = tool.annotations?.destructiveHint === true;
+  const behavior = sourceMetadata?.behavior;
+  const label = `${source.id}:${tool.upstreamName}`;
+  for (const [field, expected] of [
+    ["readOnly", readOnly],
+    ["mutating", !readOnly],
+    ["destructive", destructive],
+  ] as const) {
+    if (behavior?.[field] !== undefined && behavior[field] !== expected) {
+      throw new Error(`${label} capability behavior.${field} conflicts with its tool annotations`);
+    }
+  }
+  const approvalClass = sourceMetadata?.authority?.approvalClass;
+  if (approvalClass !== undefined) {
+    if (!readOnly && approvalClass === "none") {
+      throw new Error(`${label} mutating capability cannot bypass mutation approval`);
+    }
+    if (!readOnly && destructive !== (approvalClass === "destructive")) {
+      throw new Error(`${label} destructive classification conflicts with its approval class`);
+    }
+  }
+  if (!readOnly && sourceMetadata?.profiles?.["read-only"]?.state === "supported") {
+    throw new Error(`${label} mutating capability cannot be supported by the read-only profile`);
+  }
+}
+
 function descriptorFor(
   tool: Omit<CatalogTool, "capability">,
   source: CatalogSource,
@@ -88,7 +120,9 @@ function descriptorFor(
 ): MorrowCapabilityDescriptorV1 {
   const readOnly = tool.annotations?.readOnlyHint === true;
   const destructive = tool.annotations?.destructiveHint === true;
+  assertAccessClassification(tool, source, sourceMetadata);
   const behavior = {
+    ...(sourceMetadata?.behavior || {}),
     readOnly,
     mutating: !readOnly,
     destructive,
@@ -110,6 +144,8 @@ function descriptorFor(
     ...(sourceMetadata?.profiles || {}),
   };
   if (readOnly) profiles["read-only"] = profile("supported");
+  const approvalClass = sourceMetadata?.authority?.approvalClass
+    || (destructive ? "destructive" : readOnly ? "none" : "standard");
   return {
     schema: "morrow.capability.v1",
     canonicalName: tool.publicName,
@@ -133,12 +169,12 @@ function descriptorFor(
       }),
       schemaDigest: sha256Json(tool.inputSchema),
     }],
-    behavior: { ...behavior, ...(sourceMetadata?.behavior || {}) },
+    behavior,
     authority: {
       scopeClass: sourceMetadata?.authority?.scopeClass || "unknown",
-      approvalClass: destructive ? "destructive" : readOnly ? "none" : "standard",
       dataClass: sourceMetadata?.authority?.dataClass || "unknown",
       ...(sourceMetadata?.authority || {}),
+      approvalClass,
     },
     route: {
       backend: routeBackend,
@@ -188,6 +224,11 @@ export function mergeCatalog(
   const orderedSources = [...sources]
     .map((source) => ({ ...source, id: normalizeSourceId(source.id) }))
     .sort((left, right) => right.priority - left.priority || compareAscii(left.id, right.id));
+  const sourceIds = new Set<string>();
+  for (const source of orderedSources) {
+    if (sourceIds.has(source.id)) throw new Error(`Duplicate canonical source id ${source.id}`);
+    sourceIds.add(source.id);
+  }
 
   const used = new Map<string, CatalogTool>();
   const tools: CatalogTool[] = [];

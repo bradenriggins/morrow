@@ -6,11 +6,14 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   MACOS_IDENTITY_INPUT,
+  MACOS_NOTARIZATION_STRATEGY_INPUT,
+  MACOS_SIGNING_NOTARIZATION_WORKFLOW_INPUT,
+  MACOS_SIGNING_STRATEGY_INPUT,
   MACOS_SIGNING_VARIABLES,
   PUBLIC_RELEASE_BLOCKED_MESSAGE,
   SIGNING_INPUTS_PRESENT_MESSAGE,
   WINDOWS_SIGNING_VARIABLES,
-  WORKFLOW_SECRET_INPUT,
+  WINDOWS_SIGNING_STRATEGY_INPUT,
   buildReleaseSigningPreflight,
   developerIdApplicationCount,
   referencedSecretNames
@@ -50,6 +53,7 @@ const SECRET_ENVIRONMENT = Object.freeze({
 const SIGNED_WORKFLOW = [
   "      - name: Package the signed disk image",
   "        env:",
+  "          MORROW_SIGNED_RELEASE: \"1\"",
   "          CSC_LINK: ${{ secrets.CSC_LINK }}",
   "          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}",
   "          APPLE_ID: ${{ secrets.APPLE_ID }}",
@@ -58,7 +62,32 @@ const SIGNED_WORKFLOW = [
   "          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}",
   "          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}",
   "          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}",
+  "        run: pnpm --dir installer --ignore-workspace package:mac && pnpm --dir installer --ignore-workspace package:win",
   ""
+].join("\n");
+
+const API_KEY_ENVIRONMENT = Object.freeze({
+  CSC_LINK: SECRET_ENVIRONMENT.CSC_LINK,
+  CSC_KEY_PASSWORD: SECRET_ENVIRONMENT.CSC_KEY_PASSWORD,
+  APPLE_API_KEY: "private/AuthKey_1234567890.p8",
+  APPLE_API_KEY_ID: "KEYID1234567890",
+  APPLE_API_ISSUER: "12345678-1234-1234-1234-123456789012",
+  WIN_CSC_LINK: SECRET_ENVIRONMENT.WIN_CSC_LINK,
+  WIN_CSC_KEY_PASSWORD: SECRET_ENVIRONMENT.WIN_CSC_KEY_PASSWORD,
+});
+
+const API_KEY_WORKFLOW = [
+  "      - name: Package the signed installers",
+  "        env:",
+  "          MORROW_SIGNED_RELEASE: \"1\"",
+  "          CSC_LINK: ${{ secrets.CSC_LINK }}",
+  "          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}",
+  "          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}",
+  "          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}",
+  "          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}",
+  "          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}",
+  "          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}",
+  "        run: pnpm --dir installer --ignore-workspace package:mac && pnpm --dir installer --ignore-workspace package:win",
 ].join("\n");
 
 /** Every string the receipt actually carries, so a secret check reads values and not field names. */
@@ -95,24 +124,18 @@ test("a Mac with no Developer ID identity and no signing variables blocks a publ
     workflow: releaseWorkflow
   });
 
-  assert.equal(receipt.schema, "morrow.release-signing-preflight.v1");
+  assert.equal(receipt.schema, "morrow.release-signing-preflight.v2");
   assert.equal(receipt.publicReleaseBlocked, true);
   assert.equal(receipt.mode, "unsigned_private_qa");
   assert.equal(receipt.message, PUBLIC_RELEASE_BLOCKED_MESSAGE);
   assert.deepEqual(receipt.missing, [
-    MACOS_IDENTITY_INPUT,
-    "CSC_LINK",
-    "CSC_KEY_PASSWORD",
-    "APPLE_ID",
-    "APPLE_APP_SPECIFIC_PASSWORD",
-    "APPLE_TEAM_ID",
-    "WIN_CSC_LINK",
-    "WIN_CSC_KEY_PASSWORD",
-    WORKFLOW_SECRET_INPUT
+    MACOS_SIGNING_STRATEGY_INPUT,
+    MACOS_NOTARIZATION_STRATEGY_INPUT,
+    WINDOWS_SIGNING_STRATEGY_INPUT,
   ]);
   assert.deepEqual(receipt.notInspected, []);
   assert.equal(receipt.macos.identities.developerIdApplication, 0);
-  assert.deepEqual(Object.values(receipt.macos.environment), [false, false, false, false, false]);
+  assert.deepEqual(Object.values(receipt.macos.environment), MACOS_SIGNING_VARIABLES.map(() => false));
   assert.deepEqual(Object.values(receipt.windows.environment), [false, false]);
   assertCarriesNoSecret(receipt, []);
 });
@@ -133,7 +156,12 @@ test("a host holding every signing input is not blocked, and the receipt still c
   assert.equal(receipt.mode, "signing_inputs_present");
   assert.equal(receipt.message, SIGNING_INPUTS_PRESENT_MESSAGE);
   assert.equal(receipt.repository.referencesSigningSecret, true);
-  assert.deepEqual(receipt.macos.environment, { CSC_LINK: true, CSC_KEY_PASSWORD: true, APPLE_ID: true, APPLE_APP_SPECIFIC_PASSWORD: true, APPLE_TEAM_ID: true });
+  assert.equal(receipt.macos.signing.selected, "certificate");
+  assert.equal(receipt.macos.notarization.selected, "apple_id");
+  assert.equal(receipt.windows.signing.selected, "certificate");
+  assert.equal(receipt.macos.environment.CSC_LINK, true);
+  assert.equal(receipt.macos.environment.APPLE_ID, true);
+  assert.equal(receipt.macos.environment.APPLE_API_KEY, false);
   assert.deepEqual(receipt.windows.environment, { WIN_CSC_LINK: true, WIN_CSC_KEY_PASSWORD: true });
 
   assertCarriesNoSecret(receipt, [
@@ -152,24 +180,196 @@ test("a variable set to an empty string is not a present signing input", () => {
     workflow: SIGNED_WORKFLOW
   });
   assert.equal(receipt.macos.environment.APPLE_TEAM_ID, false);
-  assert.deepEqual(receipt.missing, ["APPLE_TEAM_ID"]);
+  assert.deepEqual(receipt.missing, [MACOS_NOTARIZATION_STRATEGY_INPUT]);
   assert.equal(receipt.publicReleaseBlocked, true);
 });
 
-test("an identity list this host cannot read is reported as uninspected, never as absent", () => {
+test("a complete certificate strategy does not require a preinstalled keychain identity", () => {
   const receipt = buildReleaseSigningPreflight({
     platform: "win32",
     identities: { inspected: false, reason: "host_is_not_macos" },
     environment: SECRET_ENVIRONMENT,
     workflow: SIGNED_WORKFLOW
   });
-  assert.deepEqual(receipt.notInspected, [MACOS_IDENTITY_INPUT]);
+  assert.deepEqual(receipt.notInspected, []);
   assert.deepEqual(receipt.missing, []);
-  assert.equal(receipt.publicReleaseBlocked, true, "an input nobody could read here cannot clear a public release");
+  assert.equal(receipt.publicReleaseBlocked, false);
   assert.equal(receipt.macos.identities.inspected, false);
   assert.equal(receipt.macos.identities.reason, "host_is_not_macos");
   assert.equal(receipt.macos.identities.developerIdApplication, undefined);
   assertCarriesNoSecret(receipt, Object.values(SECRET_ENVIRONMENT));
+});
+
+test("a keychain-identity strategy remains unknown when this host cannot inspect identities", () => {
+  const environment = {
+    CSC_NAME: SECRET_ENVIRONMENT.CSC_NAME,
+    APPLE_ID: SECRET_ENVIRONMENT.APPLE_ID,
+    APPLE_APP_SPECIFIC_PASSWORD: SECRET_ENVIRONMENT.APPLE_APP_SPECIFIC_PASSWORD,
+    APPLE_TEAM_ID: SECRET_ENVIRONMENT.APPLE_TEAM_ID,
+    WIN_CSC_LINK: SECRET_ENVIRONMENT.WIN_CSC_LINK,
+    WIN_CSC_KEY_PASSWORD: SECRET_ENVIRONMENT.WIN_CSC_KEY_PASSWORD,
+  };
+  const workflow = SIGNED_WORKFLOW.replace(
+    "          CSC_LINK: ${{ secrets.CSC_LINK }}\n          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}",
+    "          CSC_NAME: ${{ secrets.CSC_NAME }}",
+  );
+  const receipt = buildReleaseSigningPreflight({
+    platform: "win32",
+    identities: { inspected: false, reason: "host_is_not_macos" },
+    environment,
+    workflow,
+  });
+  assert.deepEqual(receipt.notInspected, [MACOS_IDENTITY_INPUT]);
+  assert.deepEqual(receipt.missing, [MACOS_SIGNING_STRATEGY_INPUT]);
+  assert.equal(receipt.publicReleaseBlocked, true);
+});
+
+test("a complete API-key notarization strategy is accepted without Apple-ID credentials", () => {
+  const receipt = buildReleaseSigningPreflight({
+    platform: "darwin",
+    identities: { inspected: true, developerIdApplication: 0 },
+    environment: API_KEY_ENVIRONMENT,
+    workflow: API_KEY_WORKFLOW,
+  });
+  assert.equal(receipt.publicReleaseBlocked, false);
+  assert.deepEqual(receipt.missing, []);
+  assert.equal(receipt.macos.signing.selected, "certificate");
+  assert.equal(receipt.macos.notarization.selected, "api_key");
+  assert.equal(receipt.windows.signing.selected, "certificate");
+  assertCarriesNoSecret(receipt, Object.values(API_KEY_ENVIRONMENT));
+});
+
+test("a complete keychain signing and notarization strategy is accepted with exact workflow secrets", () => {
+  const environment = {
+    CSC_NAME: SECRET_ENVIRONMENT.CSC_NAME,
+    APPLE_KEYCHAIN_PROFILE: "morrow-release-profile",
+    APPLE_KEYCHAIN: "private/release.keychain-db",
+    WIN_CSC_LINK: SECRET_ENVIRONMENT.WIN_CSC_LINK,
+    WIN_CSC_KEY_PASSWORD: SECRET_ENVIRONMENT.WIN_CSC_KEY_PASSWORD,
+  };
+  const workflow = [
+    "      - name: Package the signed installers",
+    "        env:",
+    "          MORROW_SIGNED_RELEASE: \"1\"",
+    "          CSC_NAME: ${{ secrets.CSC_NAME }}",
+    "          APPLE_KEYCHAIN_PROFILE: ${{ secrets.APPLE_KEYCHAIN_PROFILE }}",
+    "          APPLE_KEYCHAIN: ${{ secrets.APPLE_KEYCHAIN }}",
+    "          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}",
+    "          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}",
+    "        run: pnpm --dir installer --ignore-workspace package:mac && pnpm --dir installer --ignore-workspace package:win",
+  ].join("\n");
+  const receipt = buildReleaseSigningPreflight({
+    platform: "darwin",
+    identities: { inspected: true, developerIdApplication: 1 },
+    environment,
+    workflow,
+  });
+  assert.equal(receipt.publicReleaseBlocked, false);
+  assert.equal(receipt.macos.signing.selected, "keychain_identity");
+  assert.equal(receipt.macos.notarization.selected, "keychain_profile");
+  assert.equal(receipt.windows.signing.selected, "certificate");
+  assertCarriesNoSecret(receipt, Object.values(environment));
+});
+
+test("one arbitrary workflow secret cannot stand in for three complete strategies", () => {
+  const receipt = buildReleaseSigningPreflight({
+    platform: "darwin",
+    identities: { inspected: true, developerIdApplication: 1 },
+    environment: SECRET_ENVIRONMENT,
+    workflow: [
+      "      - name: Package incomplete signed installers",
+      "        env:",
+      "          MORROW_SIGNED_RELEASE: \"1\"",
+      "          CSC_LINK: ${{ secrets.CSC_LINK }}",
+      "        run: pnpm --dir installer --ignore-workspace package:mac && pnpm --dir installer --ignore-workspace package:win",
+    ].join("\n"),
+  });
+  assert.equal(receipt.publicReleaseBlocked, true);
+  assert.deepEqual(receipt.missing, [
+    MACOS_SIGNING_STRATEGY_INPUT,
+    MACOS_NOTARIZATION_STRATEGY_INPUT,
+    WINDOWS_SIGNING_STRATEGY_INPUT,
+  ]);
+  assert.deepEqual(receipt.repository.referencedSecrets, ["CSC_LINK"]);
+});
+
+test("signing secrets outside the signed package step do not satisfy workflow wiring", () => {
+  const detachedSecrets = SIGNED_WORKFLOW
+    .replace("        run: pnpm --dir installer --ignore-workspace package:mac && pnpm --dir installer --ignore-workspace package:win", "        run: echo credentials")
+    .concat("\n      - name: Package without credential wiring\n        env:\n          MORROW_SIGNED_RELEASE: \"1\"\n        run: pnpm --dir installer --ignore-workspace package:mac && pnpm --dir installer --ignore-workspace package:win");
+  const receipt = buildReleaseSigningPreflight({
+    platform: "darwin",
+    identities: { inspected: true, developerIdApplication: 1 },
+    environment: SECRET_ENVIRONMENT,
+    workflow: detachedSecrets,
+  });
+  assert.deepEqual(receipt.missing, [
+    MACOS_SIGNING_STRATEGY_INPUT,
+    MACOS_NOTARIZATION_STRATEGY_INPUT,
+    WINDOWS_SIGNING_STRATEGY_INPUT,
+  ]);
+  assert.equal(receipt.publicReleaseBlocked, true);
+});
+
+test("macOS signing and notarization bindings must reach the same package step", () => {
+  const workflow = SIGNED_WORKFLOW
+    .replace("          APPLE_ID: ${{ secrets.APPLE_ID }}\n          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}\n          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}", "")
+    .concat([
+      "",
+      "      - name: Package a second signed disk image",
+      "        env:",
+      "          MORROW_SIGNED_RELEASE: \"1\"",
+      "          APPLE_ID: ${{ secrets.APPLE_ID }}",
+      "          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}",
+      "          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}",
+      "        run: pnpm --dir installer --ignore-workspace package:mac",
+    ].join("\n"));
+  const receipt = buildReleaseSigningPreflight({
+    platform: "darwin",
+    identities: { inspected: true, developerIdApplication: 1 },
+    environment: SECRET_ENVIRONMENT,
+    workflow,
+  });
+  assert.equal(receipt.macos.signing.selected, "certificate");
+  assert.equal(receipt.macos.notarization.selected, "apple_id");
+  assert.equal(receipt.macos.signedWorkflowTargetReady, false);
+  assert.deepEqual(receipt.missing, [MACOS_SIGNING_NOTARIZATION_WORKFLOW_INPUT]);
+});
+
+test("complete secret bindings do not satisfy a package step that keeps signed mode disabled", () => {
+  const receipt = buildReleaseSigningPreflight({
+    platform: "darwin",
+    identities: { inspected: true, developerIdApplication: 1 },
+    environment: SECRET_ENVIRONMENT,
+    workflow: SIGNED_WORKFLOW.replace("MORROW_SIGNED_RELEASE: \"1\"", "MORROW_SIGNED_RELEASE: \"0\""),
+  });
+  assert.deepEqual(receipt.missing, [
+    MACOS_SIGNING_STRATEGY_INPUT,
+    MACOS_NOTARIZATION_STRATEGY_INPUT,
+    WINDOWS_SIGNING_STRATEGY_INPUT,
+  ]);
+  assert.equal(receipt.repository.signedTargets.macos[0].signedRelease, false);
+  assert.equal(receipt.repository.signedTargets.windows[0].signedRelease, false);
+});
+
+test("workflow secrets may use repository-specific names when each required environment key is bound", () => {
+  const workflow = SIGNED_WORKFLOW
+    .replaceAll("secrets.CSC_LINK", "secrets.MAC_CERTIFICATE")
+    .replaceAll("secrets.CSC_KEY_PASSWORD", "secrets.MAC_CERTIFICATE_PASSWORD")
+    .replaceAll("secrets.APPLE_ID", "secrets.NOTARY_ACCOUNT")
+    .replaceAll("secrets.APPLE_APP_SPECIFIC_PASSWORD", "secrets.NOTARY_PASSWORD")
+    .replaceAll("secrets.APPLE_TEAM_ID", "secrets.NOTARY_TEAM")
+    .replaceAll("secrets.WIN_CSC_LINK", "secrets.WINDOWS_CERTIFICATE")
+    .replaceAll("secrets.WIN_CSC_KEY_PASSWORD", "secrets.WINDOWS_CERTIFICATE_PASSWORD");
+  const receipt = buildReleaseSigningPreflight({
+    platform: "darwin",
+    identities: { inspected: true, developerIdApplication: 1 },
+    environment: SECRET_ENVIRONMENT,
+    workflow,
+  });
+  assert.equal(receipt.publicReleaseBlocked, false);
+  assert.deepEqual(receipt.missing, []);
+  assert.deepEqual(receipt.macos.signing.options[0].workflowSecrets, ["MAC_CERTIFICATE", "MAC_CERTIFICATE_PASSWORD"]);
 });
 
 test("the receipt refuses an inspection result it cannot describe exactly", () => {
@@ -197,7 +397,11 @@ test("clearing a signing variable in a shell step is not a repository secret ref
   assert.deepEqual(receipt.repository.referencedSecrets, referencedSecretNames(releaseWorkflow));
   assert.equal(receipt.repository.referencesSigningSecret, false, `${workflowPath} names signing variables only to clear them, which is not a secret reference`);
   assert.equal(receipt.repository.present, true);
-  assert.ok(receipt.missing.includes(WORKFLOW_SECRET_INPUT));
+  assert.deepEqual(receipt.missing, [
+    MACOS_SIGNING_STRATEGY_INPUT,
+    MACOS_NOTARIZATION_STRATEGY_INPUT,
+    WINDOWS_SIGNING_STRATEGY_INPUT,
+  ]);
 
   assert.deepEqual(referencedSecretNames(SIGNED_WORKFLOW), [
     "APPLE_APP_SPECIFIC_PASSWORD", "APPLE_ID", "APPLE_TEAM_ID", "CSC_KEY_PASSWORD", "CSC_LINK", "GITHUB_TOKEN", "WIN_CSC_KEY_PASSWORD", "WIN_CSC_LINK"
@@ -213,7 +417,11 @@ test("a repository without the release workflow reports the file as absent inste
   });
   assert.equal(receipt.repository.present, false);
   assert.deepEqual(receipt.repository.referencedSecrets, []);
-  assert.deepEqual(receipt.missing, [WORKFLOW_SECRET_INPUT]);
+  assert.deepEqual(receipt.missing, [
+    MACOS_SIGNING_STRATEGY_INPUT,
+    MACOS_NOTARIZATION_STRATEGY_INPUT,
+    WINDOWS_SIGNING_STRATEGY_INPUT,
+  ]);
 });
 
 test("the command runs on this host, prints one receipt, and exits 0 while a public release is blocked", () => {
@@ -225,15 +433,16 @@ test("the command runs on this host, prints one receipt, and exits 0 while a pub
   assert.equal(run.stderr, "");
   assert.ok(run.stdout.endsWith("\n"));
   const receipt = JSON.parse(run.stdout);
-  assert.equal(receipt.schema, "morrow.release-signing-preflight.v1");
+  assert.equal(receipt.schema, "morrow.release-signing-preflight.v2");
   assert.equal(receipt.host.platform, process.platform);
   assert.equal(receipt.macos.identities.query, "security find-identity -v -p codesigning");
   assert.equal(receipt.publicReleaseBlocked, true);
   assert.equal(receipt.message, PUBLIC_RELEASE_BLOCKED_MESSAGE);
-  assert.deepEqual(
-    receipt.missing.filter((input) => input !== MACOS_IDENTITY_INPUT && input !== WORKFLOW_SECRET_INPUT),
-    [...MACOS_SIGNING_VARIABLES, ...WINDOWS_SIGNING_VARIABLES]
-  );
+  assert.deepEqual(receipt.missing, [
+    MACOS_SIGNING_STRATEGY_INPUT,
+    MACOS_NOTARIZATION_STRATEGY_INPUT,
+    WINDOWS_SIGNING_STRATEGY_INPUT,
+  ]);
   if (process.platform === "darwin") {
     assert.equal(receipt.macos.identities.inspected, true, "security find-identity has to answer on macOS");
     assert.equal(typeof receipt.macos.identities.developerIdApplication, "number");

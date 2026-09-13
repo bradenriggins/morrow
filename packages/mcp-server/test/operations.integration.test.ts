@@ -73,6 +73,121 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<v
 }
 
 describe("outer provider effects", () => {
+  it("cancels before planning or source dispatch and keeps a post-dispatch abort uncertain", async () => {
+    const runtime = await GatewayRuntime.connect(config({ delayMs: 200 }), { journalPath: ":memory:" });
+    const request = (suffix: string) => ({
+      value: suffix,
+      _morrow: {
+        operation_id: `operation:cancel-${suffix}-1234`,
+        readback: {
+          tool: "canvas_page_get",
+          arguments: { course_id: "101" },
+          expected_digest: sha256Json({ source: "morrow-legacy", course_id: "101" }),
+        },
+      },
+    });
+    try {
+      const beforePlan = new AbortController();
+      beforePlan.abort();
+      expect(await runtime.call("morrow_legacy_only", request("before-plan"), { signal: beforePlan.signal })).toMatchObject({
+        isError: true,
+        structuredContent: { data: { code: "request_cancelled_before_dispatch" } },
+      });
+      expect(runtime.operationList(200)).toMatchObject({ returned: 0, operations: [] });
+
+      const planned = runtime.planOperation("morrow_legacy_only", request("before-send"));
+      const plannedId = operationId(planned);
+      runtime.approveOperation(plannedId);
+      const beforeSend = new AbortController();
+      beforeSend.abort();
+      expect(await runtime.dispatchOperation(plannedId, { signal: beforeSend.signal })).toMatchObject({
+        structuredContent: { effectState: "cancelled" },
+      });
+      expect(runtime.operationGet(plannedId)).toMatchObject({ state: "cancelled", dispatchAttempt: 0 });
+
+      const possible = runtime.planOperation("morrow_legacy_only", request("after-send"));
+      const possibleId = operationId(possible);
+      runtime.approveOperation(possibleId);
+      const afterSend = new AbortController();
+      const running = runtime.dispatchOperation(possibleId, { signal: afterSend.signal });
+      await waitUntil(() => runtime.effects.get(possibleId).state === "dispatching");
+      afterSend.abort();
+      await running;
+      expect(runtime.operationGet(possibleId)).toMatchObject({
+        state: "applied_or_unknown",
+        attention: expect.arrayContaining(["provider_effect_may_have_landed"]),
+      });
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+
+  it("pages every saved effect and reports complete health counts beyond the recent window", async () => {
+    const runtime = await GatewayRuntime.connect(config(), { journalPath: ":memory:" });
+    const request = (suffix: string) => ({
+      value: suffix,
+      _morrow: {
+        operation_id: `operation:page-${suffix}-1234`,
+        readback: {
+          tool: "canvas_page_get",
+          arguments: { course_id: "101" },
+          expected_digest: sha256Json({ source: "morrow-legacy", course_id: "101" }),
+        },
+      },
+    });
+    try {
+      const oldest = runtime.planOperation("morrow_legacy_only", request("oldest-unresolved"));
+      const oldestId = operationId(oldest);
+      runtime.effects.approve(oldestId);
+      runtime.effects.reserveDispatch(oldestId);
+      runtime.effects.settleResponse(oldestId, { upstreamResultDigest: "a".repeat(64) });
+
+      for (let index = 0; index < 205; index += 1) {
+        const planned = runtime.planOperation("morrow_legacy_only", request(`decoy-${String(index).padStart(3, "0")}`));
+        runtime.cancelOperation(operationId(planned));
+      }
+
+      const discovered = new Set<string>();
+      let cursor: string | undefined;
+      let firstPage = true;
+      do {
+        const page = runtime.operationList(50, cursor) as {
+          returned: number;
+          total: number;
+          unresolved: number;
+          hasMore: boolean;
+          nextCursor: string | null;
+          operations: Array<{ operationId: string }>;
+        };
+        expect(page.returned).toBeGreaterThan(0);
+        expect(page.total).toBe(206);
+        expect(page.unresolved).toBe(1);
+        if (firstPage) expect(page.operations.map((operation) => operation.operationId)).not.toContain(oldestId);
+        for (const operation of page.operations) {
+          expect(discovered.has(operation.operationId)).toBe(false);
+          discovered.add(operation.operationId);
+        }
+        cursor = page.nextCursor ?? undefined;
+        firstPage = false;
+        if (!page.hasMore) expect(page.nextCursor).toBeNull();
+      } while (cursor);
+
+      expect(discovered.size).toBe(206);
+      expect(discovered.has(oldestId)).toBe(true);
+      expect(runtime.effectHealth()).toMatchObject({
+        totalOperationCount: 206,
+        recentOperationCount: 200,
+        recentCoverageComplete: false,
+        unresolvedOperationCount: 1,
+        appliedOrUnknownCount: 0,
+        dispatchingCount: 0,
+      });
+      expect(() => runtime.operationList(50, "")).toThrow("operation list cursor is invalid");
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+
   it("plans, separately approves, dispatches once, verifies fresh evidence, and corrects with a new operation", async () => {
     const runtime = await GatewayRuntime.connect(config(), { journalPath: ":memory:" });
     try {

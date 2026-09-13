@@ -39,7 +39,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -61,7 +62,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -83,7 +85,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -105,7 +108,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -127,11 +131,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -154,15 +160,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "slot_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -186,11 +195,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -213,7 +224,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -235,11 +247,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -262,11 +276,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -289,11 +305,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -316,11 +334,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -343,11 +363,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -370,11 +392,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -397,11 +421,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -424,11 +450,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -451,11 +479,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -479,11 +509,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -534,11 +566,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -561,11 +595,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -588,11 +624,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -616,11 +654,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -671,11 +711,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -698,11 +740,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -725,11 +769,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -745,18 +791,20 @@
       "toolName": "moodle_get_assignment",
       "provider": "moodle",
       "summary": "Read a Moodle Assignment",
-      "description": "Read one standard Moodle Assignment and create the digest required for a later Assignment edit. The result carries every Assignment control Morrow can write \u2014 availability dates, submission types and their limits, feedback types, submission settings, group submission settings, notifications, grade type, scale and category, marking workflow, and blind marking \u2014 together with the values each native list offers. A control the site does not have, because it disabled that submission or feedback plugin, is returned as null or an empty value and cannot be written. submissions_or_grades_exist is true when the native form has frozen blind marking, which Moodle does once the Assignment has submissions or grades. Returned availability, due, cutoff, and grading due dates are civil times in the Moodle user's configured timezone.",
+      "description": "Read one standard Moodle Assignment and create the digest required for a later Assignment edit. The result carries every Assignment control Morrow can write: availability dates, submission types and their limits, feedback types, submission settings, group submission settings, notifications, grade type, scale and category, marking workflow, and blind marking, together with the values each native list offers. A control the site does not have, because it disabled that submission or feedback plugin, is returned as null or an empty value and cannot be written. submissions_or_grades_exist is true when the native form has frozen blind marking, which Moodle does once the Assignment has submissions or grades. Returned availability, due, cutoff, and grading due dates are civil times in the Moodle user's configured timezone.",
       "readOnly": true,
       "inputSchema": {
         "type": "object",
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -779,11 +827,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -806,11 +856,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -834,7 +886,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "summary": {
             "type": "string",
@@ -867,11 +920,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -920,11 +975,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -973,11 +1030,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "content": {
             "type": "string",
@@ -1011,11 +1070,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -1056,11 +1117,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -1121,11 +1184,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -1172,11 +1237,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -1217,11 +1284,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -1453,21 +1522,25 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID of the one person this override is for. Give this or group_id, not both."
+            "description": "The Moodle user ID of the one person this override is for. Give this or group_id, not both.",
+            "maximum": 9007199254740991
           },
           "group_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle group ID this override is for. Give this or user_id, not both."
+            "description": "The Moodle group ID this override is for. Give this or user_id, not both.",
+            "maximum": 9007199254740991
           },
           "available_from": {
             "anyOf": [
@@ -1652,26 +1725,31 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "override_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The ID of the existing override, from moodle_get_assignment_overrides."
+            "description": "The ID of the existing override, from moodle_get_assignment_overrides.",
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID this override already names. Give this or group_id, not both."
+            "description": "The Moodle user ID this override already names. Give this or group_id, not both.",
+            "maximum": 9007199254740991
           },
           "group_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle group ID this override already names. Give this or user_id, not both."
+            "description": "The Moodle group ID this override already names. Give this or user_id, not both.",
+            "maximum": 9007199254740991
           },
           "available_from": {
             "anyOf": [
@@ -1857,11 +1935,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -1997,11 +2077,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -2577,11 +2659,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -3240,21 +3324,25 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID of the one person this override is for. Give this or group_id, not both."
+            "description": "The Moodle user ID of the one person this override is for. Give this or group_id, not both.",
+            "maximum": 9007199254740991
           },
           "group_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle group ID this override is for. Give this or user_id, not both."
+            "description": "The Moodle group ID this override is for. Give this or user_id, not both.",
+            "maximum": 9007199254740991
           },
           "open_at": {
             "anyOf": [
@@ -3413,26 +3501,31 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "override_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The ID of the existing override, from moodle_get_quiz_overrides."
+            "description": "The ID of the existing override, from moodle_get_quiz_overrides.",
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID this override already names. Give this or group_id, not both."
+            "description": "The Moodle user ID this override already names. Give this or group_id, not both.",
+            "maximum": 9007199254740991
           },
           "group_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle group ID this override already names. Give this or user_id, not both."
+            "description": "The Moodle group ID this override already names. Give this or user_id, not both.",
+            "maximum": 9007199254740991
           },
           "open_at": {
             "anyOf": [
@@ -3592,7 +3685,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -3620,7 +3714,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -3647,7 +3742,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -3670,7 +3766,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "full_name": {
             "type": "string",
@@ -3968,7 +4065,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "format": {
             "type": "string",
@@ -4011,15 +4109,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "target_section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -4049,11 +4150,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -4082,11 +4185,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -4115,11 +4220,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -4148,11 +4255,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -4180,11 +4289,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -4207,11 +4318,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -4234,11 +4347,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -4261,11 +4376,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -4289,11 +4406,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -4516,11 +4635,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -4709,11 +4830,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -4983,11 +5106,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -5193,7 +5318,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5217,7 +5343,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5241,7 +5368,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5265,11 +5393,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5292,11 +5422,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5319,11 +5451,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5347,11 +5481,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -5419,11 +5555,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -5472,11 +5610,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5499,11 +5639,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5527,11 +5669,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -5673,11 +5817,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -5800,11 +5946,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5827,15 +5975,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "chapter_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -5859,15 +6010,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "after_chapter_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "subchapter": {
             "type": "boolean"
@@ -5894,15 +6048,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "after_chapter_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "subchapter": {
             "type": "boolean"
@@ -5947,15 +6104,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "chapter_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "title": {
             "type": "string",
@@ -6006,15 +6166,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "chapter_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "direction": {
             "type": "string",
@@ -6044,7 +6207,7 @@
       "toolName": "moodle_show_book_chapter",
       "provider": "moodle",
       "summary": "Show a Moodle Book chapter",
-      "description": "Show one hidden Book chapter after review of the complete Book structure. Showing a main chapter also shows its direct subchapters. It uses Moodle\u2019s sesskey-protected native action once and verifies the exact saved visibility scope.",
+      "description": "Show one hidden Book chapter after review of the complete Book structure. Showing a main chapter also shows its direct subchapters. It uses Moodle’s sesskey-protected native action once and verifies the exact saved visibility scope.",
       "readOnly": false,
       "reviewTool": "moodle_list_book_chapters",
       "inputSchema": {
@@ -6052,15 +6215,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "chapter_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -6082,7 +6248,7 @@
       "toolName": "moodle_hide_book_chapter",
       "provider": "moodle",
       "summary": "Hide a Moodle Book chapter",
-      "description": "Hide one visible Book chapter after review of the complete Book structure. Hiding a main chapter also hides its direct subchapters. It uses Moodle\u2019s sesskey-protected native action once and verifies the exact saved visibility scope.",
+      "description": "Hide one visible Book chapter after review of the complete Book structure. Hiding a main chapter also hides its direct subchapters. It uses Moodle’s sesskey-protected native action once and verifies the exact saved visibility scope.",
       "readOnly": false,
       "reviewTool": "moodle_list_book_chapters",
       "inputSchema": {
@@ -6090,15 +6256,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "chapter_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -6120,7 +6289,7 @@
       "toolName": "moodle_delete_book_chapter",
       "provider": "moodle",
       "summary": "Delete a Moodle Book chapter",
-      "description": "Delete one Book chapter after review of the complete Book structure. Deleting a main chapter also deletes its direct subchapters and their chapter files. It uses Moodle\u2019s sesskey-protected native action once and verifies the exact remaining structure.",
+      "description": "Delete one Book chapter after review of the complete Book structure. Deleting a main chapter also deletes its direct subchapters and their chapter files. It uses Moodle’s sesskey-protected native action once and verifies the exact remaining structure.",
       "readOnly": false,
       "reviewTool": "moodle_list_book_chapters",
       "destructive": true,
@@ -6130,15 +6299,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "chapter_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -6167,11 +6339,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -6194,11 +6368,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -6221,11 +6397,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -6248,11 +6426,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -6275,11 +6455,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -6302,11 +6484,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -6329,11 +6513,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -6356,11 +6542,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -6384,11 +6572,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -6454,11 +6644,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -6506,11 +6698,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -6578,11 +6772,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -6644,11 +6840,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -6812,11 +7010,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -6958,11 +7158,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -7124,11 +7326,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -7269,11 +7473,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7298,15 +7504,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7332,15 +7541,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7366,11 +7578,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7395,11 +7609,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7424,7 +7640,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7448,11 +7665,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "forum_module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7475,7 +7694,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7497,11 +7717,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "category_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7524,11 +7746,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "grade_item_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7551,11 +7775,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "category_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "fullname": {
             "type": "string",
@@ -7590,11 +7816,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "grade_item_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "item_name": {
             "type": "string",
@@ -7629,11 +7857,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "category_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "aggregation": {
             "type": "integer",
@@ -7677,11 +7907,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "grade_item_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "grade_type": {
             "type": "integer",
@@ -7710,7 +7942,8 @@
           },
           "parent_category_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "rescale_existing_grades": {
             "type": "string",
@@ -7746,7 +7979,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7768,7 +8002,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7790,7 +8025,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7812,11 +8048,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7839,11 +8077,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7867,11 +8107,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -7923,11 +8165,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7950,11 +8194,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -7978,11 +8224,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -8035,11 +8283,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -8215,11 +8465,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "filename": {
             "type": "string",
@@ -8265,11 +8517,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -8292,11 +8546,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -8320,11 +8576,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -8548,11 +8806,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -8821,11 +9081,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -8850,11 +9112,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -8879,15 +9143,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -8912,7 +9179,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -8934,11 +9202,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -8962,11 +9232,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -9000,11 +9272,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9028,11 +9302,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -9062,7 +9338,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9086,11 +9363,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9113,22 +9392,26 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The hidden mod_qbank activity Morrow created for this bank."
+            "description": "The hidden mod_qbank activity Morrow created for this bank.",
+            "maximum": 9007199254740991
           },
           "category_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The bank category Morrow realized in that activity's own question context."
+            "description": "The bank category Morrow realized in that activity's own question context.",
+            "maximum": 9007199254740991
           },
           "question_bank_context_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The question context of that bank category."
+            "description": "The question context of that bank category.",
+            "maximum": 9007199254740991
           },
           "qtype": {
             "type": "string",
@@ -9163,22 +9446,26 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The hidden mod_qbank activity Morrow created for this bank."
+            "description": "The hidden mod_qbank activity Morrow created for this bank.",
+            "maximum": 9007199254740991
           },
           "category_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The bank category Morrow realized in that activity's own question context."
+            "description": "The bank category Morrow realized in that activity's own question context.",
+            "maximum": 9007199254740991
           },
           "question_bank_context_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The question context of that bank category."
+            "description": "The question context of that bank category.",
+            "maximum": 9007199254740991
           },
           "qtype": {
             "type": "string",
@@ -9283,32 +9570,38 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The hidden mod_qbank activity Morrow created for this bank."
+            "description": "The hidden mod_qbank activity Morrow created for this bank.",
+            "maximum": 9007199254740991
           },
           "category_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The bank category Morrow realized in that activity's own question context."
+            "description": "The bank category Morrow realized in that activity's own question context.",
+            "maximum": 9007199254740991
           },
           "question_bank_context_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The question context of that bank category."
+            "description": "The question context of that bank category.",
+            "maximum": 9007199254740991
           },
           "question_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The bank entry moodle_create_qbank_question created in that category."
+            "description": "The bank entry moodle_create_qbank_question created in that category.",
+            "maximum": 9007199254740991
           },
           "quiz_module_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Quiz course module that receives the new slot."
+            "description": "The Quiz course module that receives the new slot.",
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9336,32 +9629,38 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The hidden mod_qbank activity Morrow created for this bank."
+            "description": "The hidden mod_qbank activity Morrow created for this bank.",
+            "maximum": 9007199254740991
           },
           "category_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The bank category Morrow realized in that activity's own question context."
+            "description": "The bank category Morrow realized in that activity's own question context.",
+            "maximum": 9007199254740991
           },
           "question_bank_context_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The question context of that bank category."
+            "description": "The question context of that bank category.",
+            "maximum": 9007199254740991
           },
           "question_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The bank entry moodle_create_qbank_question created in that category."
+            "description": "The bank entry moodle_create_qbank_question created in that category.",
+            "maximum": 9007199254740991
           },
           "quiz_module_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Quiz course module that receives the new slot."
+            "description": "The Quiz course module that receives the new slot.",
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -9393,11 +9692,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9420,23 +9721,27 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "slot_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The slot ID of the question to move, from moodle_get_quiz_structure."
+            "description": "The slot ID of the question to move, from moodle_get_quiz_structure.",
+            "maximum": 9007199254740991
           },
           "after_slot_id": {
             "anyOf": [
               {
                 "type": "integer",
                 "minimum": 1,
-                "description": "The slot ID the moved question must follow. It must be in the same Quiz section."
+                "description": "The slot ID the moved question must follow. It must be in the same Quiz section.",
+                "maximum": 9007199254740991
               },
               {
                 "type": "null",
@@ -9473,16 +9778,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "slot_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The slot ID of the question, from moodle_get_quiz_structure."
+            "description": "The slot ID of the question, from moodle_get_quiz_structure.",
+            "maximum": 9007199254740991
           },
           "max_mark": {
             "type": "string",
@@ -9518,16 +9826,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "slot_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The slot ID of the question the page break comes before, from moodle_get_quiz_structure."
+            "description": "The slot ID of the question the page break comes before, from moodle_get_quiz_structure.",
+            "maximum": 9007199254740991
           },
           "starts_new_page": {
             "type": "boolean",
@@ -9563,16 +9874,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "slot_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The slot ID of the question to remove, from moodle_get_quiz_structure."
+            "description": "The slot ID of the question to remove, from moodle_get_quiz_structure.",
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -9595,7 +9909,7 @@
       "toolName": "moodle_get_forum_post_target",
       "provider": "moodle",
       "summary": "Read a Moodle Forum posting target",
-      "description": "Read the exact Moodle Forum that a discussion or post change will bind to, and optionally one exact discussion in it. The bridge binds the selected course module to its native Forum instance through the course/modedit.php Forum form and reports whether learners can see the Forum. When a discussion is named, it reads that discussion through Moodle's own mod_forum_get_discussion_posts service, which states the Forum and the course the discussion belongs to, and returns each post's ID, parent post, subject, deleted state, private-reply state, and attachment count. It requires mod/forum:viewdiscussion at that exact module context. It returns no author name, no author ID, and no post body, and it never opens /mod/forum/view.php or /mod/forum/discuss.php. Its digest covers the course, module, Forum, learner visibility, and discussion identity only, so a new reply between the review and the approval does not invalidate an approved change.",
+      "description": "Read the exact Moodle Forum that a discussion or post change will bind to, and optionally one exact discussion in it. The bridge binds the selected course module to its native Forum instance through the course/modedit.php Forum form and reports whether learners can see the Forum. When a discussion is named, it uses Moodle's native bounded CSV export, which does not change Forum unread tracking, and returns each post's ID, parent post, subject, deleted state, private-reply state, and attachment presence. It requires mod/forum:viewdiscussion at that exact module context. It returns no author name, no author ID, and no post body, and it never opens /mod/forum/view.php or /mod/forum/discuss.php. Its digest covers the course, module, Forum, learner visibility, and discussion identity only, so a new reply between the review and the approval does not invalidate an approved change.",
       "readOnly": true,
       "dataClass": "learner",
       "family": "learner-data",
@@ -9604,15 +9918,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "discussion_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9628,7 +9945,7 @@
       "toolName": "moodle_create_forum_discussion",
       "provider": "moodle",
       "summary": "Start a Moodle Forum discussion",
-      "description": "Start one discussion in one exact Moodle Forum through the native /mod/forum/post.php form. The subject and the HTML message are written by the approving person; Morrow never composes them from course content. It requires mod/forum:startdiscussion at that exact module context, refuses any draft file area on the native form that is not proven empty, refuses a message that names a Moodle file, reloads the form immediately before dispatch, and sends exactly one POST. It then reads back the discussions the signed-in person has posted in and requires exactly one new discussion whose single post carries the approved subject and message with no attachment. learner_visibility_confirmed must be true. A lost or unreadable response is reported as sent with an unknown outcome, and Morrow never sends it again.",
+      "description": "Start one discussion in one exact Moodle Forum through the native /mod/forum/post.php form. The subject and the HTML message are written by the approving person; Morrow never composes them from course content. It requires mod/forum:startdiscussion at that exact module context, refuses any draft file area on the native form that is not proven empty, refuses a message that names a Moodle file, reloads the form immediately before dispatch, and sends exactly one state-changing POST. It then uses Moodle's native bounded CSV export, which preserves Forum unread tracking, and requires exactly one new discussion whose single post carries the approved subject and message with no attachment. learner_visibility_confirmed must be true. A lost or unreadable response is reported as sent with an unknown outcome, and Morrow never sends it again.",
       "readOnly": false,
       "reviewTool": "moodle_get_forum_post_target",
       "irreversible": true,
@@ -9637,11 +9954,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "subject": {
             "type": "string",
@@ -9681,7 +10000,7 @@
       "toolName": "moodle_reply_to_forum_post",
       "provider": "moodle",
       "summary": "Reply to a Moodle Forum post",
-      "description": "Reply once to one exact post in one exact Moodle Forum discussion through the native /mod/forum/post.php form. The subject and the HTML message are written by the approving person; Morrow never composes them from course content. It requires mod/forum:replypost at that exact module context, refuses a parent post that is deleted, private, or outside the approved discussion, refuses any draft file area that is not proven empty, refuses a message that names a Moodle file, and sends exactly one POST. It then reads the discussion's post list back and requires exactly one new post, with the approved parent, subject, and message, no attachment, and every other post unchanged. learner_visibility_confirmed must be true. A lost or unreadable response is reported as sent with an unknown outcome, and Morrow never sends it again.",
+      "description": "Reply once to one exact post in one exact Moodle Forum discussion through the native /mod/forum/post.php form. The subject and the HTML message are written by the approving person; Morrow never composes them from course content. It requires mod/forum:replypost at that exact module context, refuses a parent post that is deleted, private, or outside the approved discussion, refuses any draft file area that is not proven empty, refuses a message that names a Moodle file, and sends exactly one state-changing POST. It then uses Moodle's native bounded CSV export, which preserves Forum unread tracking, and requires exactly one new post with the approved parent, subject, and message, no attachment, and every other post unchanged. learner_visibility_confirmed must be true. A lost or unreadable response is reported as sent with an unknown outcome, and Morrow never sends it again.",
       "readOnly": false,
       "reviewTool": "moodle_get_forum_post_target",
       "irreversible": true,
@@ -9690,19 +10009,23 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "discussion_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "parent_post_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "subject": {
             "type": "string",
@@ -9744,7 +10067,7 @@
       "toolName": "moodle_lock_forum_discussion",
       "provider": "moodle",
       "summary": "Lock or unlock a Moodle Forum discussion",
-      "description": "Lock or unlock one exact discussion in one exact Moodle Forum through Moodle's own mod_forum_set_lock_state service. A locked discussion accepts no new learner reply. It binds the module to its native Forum instance through the course/modedit.php Forum form, binds the discussion to that Forum through Moodle's post-list read, requires moodle/course:manageactivities at that exact module context, and sends exactly one POST. Moodle 5.2.2 has no browser-callable read of a discussion's locked, pinned, or subscribed state, so the saved state in the result is the one Moodle's own set-state method returned after it saved; the separate readback proves only that the discussion still belongs to the approved Forum and that no post in it changed. A lost or unreadable response is reported as sent with an unknown outcome, and Morrow never sends it again.",
+      "description": "Lock or unlock one exact discussion in one exact Moodle Forum through Moodle's own mod_forum_set_lock_state service. A locked discussion accepts no new learner reply. It binds the module through the course/modedit.php Forum form, binds the discussion through Moodle's native bounded CSV export without changing unread tracking, requires moodle/course:manageactivities at that exact module context, and sends exactly one state-changing POST. Moodle 5.2.2 has no browser-callable read of a discussion's locked, pinned, or subscribed state, so the saved state in the result is the one Moodle's own set-state method returned after it saved; the export readback proves only that the discussion still belongs to the approved Forum and that no post in it changed. A lost or unreadable response is reported as sent with an unknown outcome, and Morrow never sends it again.",
       "readOnly": false,
       "reviewTool": "moodle_get_forum_post_target",
       "inputSchema": {
@@ -9752,15 +10075,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "discussion_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "locked": {
             "type": "boolean"
@@ -9786,7 +10112,7 @@
       "toolName": "moodle_pin_forum_discussion",
       "provider": "moodle",
       "summary": "Pin or unpin a Moodle Forum discussion",
-      "description": "Pin or unpin one exact discussion in one exact Moodle Forum through Moodle's own mod_forum_set_pin_state service. A pinned discussion stays at the top of the Forum for every learner. It binds the module to its native Forum instance through the course/modedit.php Forum form, binds the discussion to that Forum through Moodle's post-list read, requires mod/forum:pindiscussions at that exact module context, and sends exactly one POST. Moodle 5.2.2 has no browser-callable read of a discussion's locked, pinned, or subscribed state, so the saved state in the result is the one Moodle's own set-state method returned after it saved; the separate readback proves only that the discussion still belongs to the approved Forum and that no post in it changed. A lost or unreadable response is reported as sent with an unknown outcome, and Morrow never sends it again.",
+      "description": "Pin or unpin one exact discussion in one exact Moodle Forum through Moodle's own mod_forum_set_pin_state service. A pinned discussion stays at the top of the Forum for every learner. It binds the module through the course/modedit.php Forum form, binds the discussion through Moodle's native bounded CSV export without changing unread tracking, requires mod/forum:pindiscussions at that exact module context, and sends exactly one state-changing POST. Moodle 5.2.2 has no browser-callable read of a discussion's locked, pinned, or subscribed state, so the saved state in the result is the one Moodle's own set-state method returned after it saved; the export readback proves only that the discussion still belongs to the approved Forum and that no post in it changed. A lost or unreadable response is reported as sent with an unknown outcome, and Morrow never sends it again.",
       "readOnly": false,
       "reviewTool": "moodle_get_forum_post_target",
       "inputSchema": {
@@ -9794,15 +10120,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "discussion_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "pinned": {
             "type": "boolean"
@@ -9828,7 +10157,7 @@
       "toolName": "moodle_set_forum_subscription",
       "provider": "moodle",
       "summary": "Set your own subscription to a Moodle Forum discussion",
-      "description": "Subscribe or unsubscribe the signed-in person to one exact discussion in one exact Moodle Forum through Moodle's own mod_forum_set_subscription_state service. It changes only that person's own notifications, no other person's subscription, and no Forum setting; the Forum subscription mode for everyone stays on moodle_update_forum. It binds the module to its native Forum instance through the course/modedit.php Forum form, binds the discussion to that Forum through Moodle's post-list read, and sends exactly one POST. Moodle refuses when the Forum allows no subscription choice. Moodle 5.2.2 has no browser-callable read of a discussion's locked, pinned, or subscribed state, so the saved state in the result is the one Moodle's own set-state method returned after it saved; the separate readback proves only that the discussion still belongs to the approved Forum and that no post in it changed.",
+      "description": "Subscribe or unsubscribe the signed-in person to one exact discussion in one exact Moodle Forum through Moodle's own mod_forum_set_subscription_state service. It changes only that person's own notifications, no other person's subscription, and no Forum setting; the Forum subscription mode for everyone stays on moodle_update_forum. It binds the module through the course/modedit.php Forum form, binds the discussion through Moodle's native bounded CSV export without changing unread tracking, and sends exactly one state-changing POST. Moodle refuses when the Forum allows no subscription choice. Moodle 5.2.2 has no browser-callable read of a discussion's locked, pinned, or subscribed state, so the saved state in the result is the one Moodle's own set-state method returned after it saved; the export readback proves only that the discussion still belongs to the approved Forum and that no post in it changed.",
       "readOnly": false,
       "reviewTool": "moodle_get_forum_post_target",
       "inputSchema": {
@@ -9836,15 +10165,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "discussion_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "subscribed": {
             "type": "boolean"
@@ -9879,16 +10211,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "attempt_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle quiz attempt ID, as the Quiz report and review addresses carry it."
+            "description": "The Moodle quiz attempt ID, as the Quiz report and review addresses carry it.",
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9914,11 +10249,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9943,11 +10280,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9970,11 +10309,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -9999,11 +10340,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -10026,11 +10369,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -10055,11 +10400,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -10082,11 +10429,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -10111,11 +10460,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -10139,11 +10490,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -10167,15 +10520,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "page_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -10201,15 +10557,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "after_page_id": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "page_type": {
             "type": "string",
@@ -10272,7 +10631,8 @@
                     },
                     "page_id": {
                       "type": "integer",
-                      "minimum": 1
+                      "minimum": 1,
+                      "maximum": 9007199254740991
                     }
                   },
                   "required": [
@@ -10295,7 +10655,8 @@
             "maxItems": 100,
             "items": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 9007199254740991
             }
           },
           "expected_digest": {
@@ -10332,15 +10693,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "page_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "title": {
             "type": "string",
@@ -10394,7 +10758,8 @@
                     },
                     "page_id": {
                       "type": "integer",
-                      "minimum": 1
+                      "minimum": 1,
+                      "maximum": 9007199254740991
                     }
                   },
                   "required": [
@@ -10417,7 +10782,8 @@
             "maxItems": 100,
             "items": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 9007199254740991
             }
           },
           "expected_digest": {
@@ -10453,26 +10819,31 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "page_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "after_page_id": {
             "type": "integer",
-            "minimum": 0
+            "minimum": 0,
+            "maximum": 9007199254740991
           },
           "expected_jump_changes": {
             "type": "array",
             "maxItems": 100,
             "items": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 9007199254740991
             }
           },
           "expected_digest": {
@@ -10508,22 +10879,26 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "page_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_jump_changes": {
             "type": "array",
             "maxItems": 100,
             "items": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 9007199254740991
             }
           },
           "expected_invalid_jumps": {
@@ -10531,7 +10906,8 @@
             "maxItems": 100,
             "items": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 9007199254740991
             }
           },
           "expected_digest": {
@@ -10566,11 +10942,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "filename": {
             "type": "string",
@@ -10618,11 +10996,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "filename": {
             "type": "string",
@@ -10657,11 +11037,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "folder_path": {
             "type": "string",
@@ -10729,11 +11111,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "parent_path": {
             "type": "string",
@@ -10775,11 +11159,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -10810,11 +11196,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -10843,15 +11231,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "target_section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "position": {
             "type": "integer",
@@ -10888,7 +11279,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -10918,11 +11310,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -10951,11 +11345,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "position": {
             "type": "integer",
@@ -10990,11 +11386,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -11018,11 +11416,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "completion_tracking": {
             "type": "integer",
@@ -11155,7 +11555,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -11178,7 +11579,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "conditions": {
             "type": "array",
@@ -11279,11 +11681,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -11307,11 +11711,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "restrictions": {
             "anyOf": [
@@ -11385,7 +11791,8 @@
                             "grade_item_id": {
                               "type": "integer",
                               "minimum": 1,
-                              "description": "The Moodle grade item ID. moodle_get_gradebook_setup lists them."
+                              "description": "The Moodle grade item ID. moodle_get_gradebook_setup lists them.",
+                              "maximum": 9007199254740991
                             },
                             "min": {
                               "type": "number",
@@ -11419,7 +11826,8 @@
                             "group_id": {
                               "type": "integer",
                               "minimum": 1,
-                              "description": "The Moodle group ID. moodle_get_course_groups lists them. Leave it out to accept any group in the course."
+                              "description": "The Moodle group ID. moodle_get_course_groups lists them. Leave it out to accept any group in the course.",
+                              "maximum": 9007199254740991
                             },
                             "hidden_entirely": {
                               "type": "boolean",
@@ -11444,7 +11852,8 @@
                             "grouping_id": {
                               "type": "integer",
                               "minimum": 1,
-                              "description": "The Moodle grouping ID."
+                              "description": "The Moodle grouping ID.",
+                              "maximum": 9007199254740991
                             },
                             "activity_grouping": {
                               "type": "boolean",
@@ -11476,7 +11885,8 @@
                             "module_id": {
                               "type": "integer",
                               "minimum": 1,
-                              "description": "The course module ID of the other activity."
+                              "description": "The course module ID of the other activity.",
+                              "maximum": 9007199254740991
                             },
                             "required": {
                               "type": "string",
@@ -11625,7 +12035,8 @@
                                       "grade_item_id": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "description": "The Moodle grade item ID. moodle_get_gradebook_setup lists them."
+                                        "description": "The Moodle grade item ID. moodle_get_gradebook_setup lists them.",
+                                        "maximum": 9007199254740991
                                       },
                                       "min": {
                                         "type": "number",
@@ -11655,7 +12066,8 @@
                                       "group_id": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "description": "The Moodle group ID. moodle_get_course_groups lists them. Leave it out to accept any group in the course."
+                                        "description": "The Moodle group ID. moodle_get_course_groups lists them. Leave it out to accept any group in the course.",
+                                        "maximum": 9007199254740991
                                       }
                                     },
                                     "required": [
@@ -11676,7 +12088,8 @@
                                       "grouping_id": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "description": "The Moodle grouping ID."
+                                        "description": "The Moodle grouping ID.",
+                                        "maximum": 9007199254740991
                                       },
                                       "activity_grouping": {
                                         "type": "boolean",
@@ -11704,7 +12117,8 @@
                                       "module_id": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "description": "The course module ID of the other activity."
+                                        "description": "The course module ID of the other activity.",
+                                        "maximum": 9007199254740991
                                       },
                                       "required": {
                                         "type": "string",
@@ -11842,11 +12256,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -11870,11 +12286,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "restrictions": {
             "anyOf": [
@@ -11948,7 +12366,8 @@
                             "grade_item_id": {
                               "type": "integer",
                               "minimum": 1,
-                              "description": "The Moodle grade item ID. moodle_get_gradebook_setup lists them."
+                              "description": "The Moodle grade item ID. moodle_get_gradebook_setup lists them.",
+                              "maximum": 9007199254740991
                             },
                             "min": {
                               "type": "number",
@@ -11982,7 +12401,8 @@
                             "group_id": {
                               "type": "integer",
                               "minimum": 1,
-                              "description": "The Moodle group ID. moodle_get_course_groups lists them. Leave it out to accept any group in the course."
+                              "description": "The Moodle group ID. moodle_get_course_groups lists them. Leave it out to accept any group in the course.",
+                              "maximum": 9007199254740991
                             },
                             "hidden_entirely": {
                               "type": "boolean",
@@ -12007,7 +12427,8 @@
                             "grouping_id": {
                               "type": "integer",
                               "minimum": 1,
-                              "description": "The Moodle grouping ID."
+                              "description": "The Moodle grouping ID.",
+                              "maximum": 9007199254740991
                             },
                             "activity_grouping": {
                               "type": "boolean",
@@ -12039,7 +12460,8 @@
                             "module_id": {
                               "type": "integer",
                               "minimum": 1,
-                              "description": "The course module ID of the other activity."
+                              "description": "The course module ID of the other activity.",
+                              "maximum": 9007199254740991
                             },
                             "required": {
                               "type": "string",
@@ -12188,7 +12610,8 @@
                                       "grade_item_id": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "description": "The Moodle grade item ID. moodle_get_gradebook_setup lists them."
+                                        "description": "The Moodle grade item ID. moodle_get_gradebook_setup lists them.",
+                                        "maximum": 9007199254740991
                                       },
                                       "min": {
                                         "type": "number",
@@ -12218,7 +12641,8 @@
                                       "group_id": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "description": "The Moodle group ID. moodle_get_course_groups lists them. Leave it out to accept any group in the course."
+                                        "description": "The Moodle group ID. moodle_get_course_groups lists them. Leave it out to accept any group in the course.",
+                                        "maximum": 9007199254740991
                                       }
                                     },
                                     "required": [
@@ -12239,7 +12663,8 @@
                                       "grouping_id": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "description": "The Moodle grouping ID."
+                                        "description": "The Moodle grouping ID.",
+                                        "maximum": 9007199254740991
                                       },
                                       "activity_grouping": {
                                         "type": "boolean",
@@ -12267,7 +12692,8 @@
                                       "module_id": {
                                         "type": "integer",
                                         "minimum": 1,
-                                        "description": "The course module ID of the other activity."
+                                        "description": "The course module ID of the other activity.",
+                                        "maximum": 9007199254740991
                                       },
                                       "required": {
                                         "type": "string",
@@ -12406,16 +12832,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "option_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The option's own ID, exactly as moodle_get_choice_options reported it."
+            "description": "The option's own ID, exactly as moodle_get_choice_options reported it.",
+            "maximum": 9007199254740991
           },
           "position": {
             "type": "integer",
@@ -12476,11 +12905,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "type": {
             "type": "string",
@@ -12551,16 +12982,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "item_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The question's own ID, exactly as moodle_get_feedback_items reported it."
+            "description": "The question's own ID, exactly as moodle_get_feedback_items reported it.",
+            "maximum": 9007199254740991
           },
           "position": {
             "type": "integer",
@@ -12627,11 +13061,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "type": {
             "type": "string",
@@ -12695,16 +13131,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "field_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The field's own ID, exactly as moodle_get_database_fields reported it."
+            "description": "The field's own ID, exactly as moodle_get_database_fields reported it.",
+            "maximum": 9007199254740991
           },
           "position": {
             "type": "integer",
@@ -12770,11 +13209,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -12797,16 +13238,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "entry_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The entry ID, which Moodle carries in the id parameter of that entry's Edit link."
+            "description": "The entry ID, which Moodle carries in the id parameter of that entry's Edit link.",
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -12832,11 +13276,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "concept": {
             "type": "string",
@@ -12885,16 +13331,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "entry_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The entry ID, exactly as moodle_get_glossary_entry reported it."
+            "description": "The entry ID, exactly as moodle_get_glossary_entry reported it.",
+            "maximum": 9007199254740991
           },
           "concept": {
             "type": "string",
@@ -12947,11 +13396,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -12974,16 +13425,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "page_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The page ID, exactly as moodle_list_wiki_pages reported it."
+            "description": "The page ID, exactly as moodle_list_wiki_pages reported it.",
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13008,16 +13462,19 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "page_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The page ID, exactly as moodle_get_wiki_page reported it."
+            "description": "The page ID, exactly as moodle_get_wiki_page reported it.",
+            "maximum": 9007199254740991
           },
           "content": {
             "type": "string",
@@ -13060,11 +13517,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13087,11 +13546,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13115,11 +13576,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -13174,11 +13637,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "filename": {
             "type": "string",
@@ -13225,11 +13690,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -13296,11 +13763,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13323,15 +13792,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "tool_type_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13356,15 +13828,18 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "tool_type_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "tool_name": {
             "type": "string",
@@ -13406,11 +13881,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -13450,11 +13927,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13477,11 +13956,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13505,11 +13986,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -13627,11 +14110,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -13780,11 +14265,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13807,11 +14294,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -13835,11 +14324,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "section_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -13876,12 +14367,14 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it."
+            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it.",
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -13912,12 +14405,14 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it."
+            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it.",
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -13950,12 +14445,14 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it."
+            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it.",
+            "maximum": 9007199254740991
           },
           "acknowledge_removes_learner_record": {
             "type": "boolean",
@@ -13991,12 +14488,14 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it."
+            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it.",
+            "maximum": 9007199254740991
           },
           "role_name": {
             "type": "string",
@@ -14034,12 +14533,14 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "user_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it."
+            "description": "The Moodle user ID of one exact person on this course's participant list, as the participant reads report it.",
+            "maximum": 9007199254740991
           },
           "role_name": {
             "type": "string",
@@ -14075,7 +14576,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "year": {
             "type": "integer",
@@ -14119,7 +14621,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "year": {
             "type": "integer",
@@ -14163,11 +14666,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "event_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -14192,7 +14697,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -14282,11 +14788,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "event_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -14379,11 +14887,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "event_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -14412,7 +14922,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -14436,7 +14947,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -14487,11 +14999,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "group_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_group_name": {
             "type": "string",
@@ -14552,11 +15066,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "group_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_group_name": {
             "type": "string",
@@ -14602,11 +15118,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "group_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_group_name": {
             "type": "string",
@@ -14616,7 +15134,8 @@
           },
           "user_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -14650,11 +15169,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "group_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_group_name": {
             "type": "string",
@@ -14664,7 +15185,8 @@
           },
           "user_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -14697,7 +15219,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -14733,11 +15256,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "grouping_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "name": {
             "type": "string",
@@ -14774,18 +15299,21 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "grouping_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "group_ids": {
             "type": "array",
             "maxItems": 500,
             "items": {
               "type": "integer",
-              "minimum": 1
+              "minimum": 1,
+              "maximum": 9007199254740991
             },
             "description": "The complete set of course group IDs this grouping should hold."
           },
@@ -14818,11 +15346,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "group_mode": {
             "type": "integer",
@@ -14862,7 +15392,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -14886,11 +15417,13 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "module_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "action": {
             "type": "string",
@@ -14932,7 +15465,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -14956,7 +15490,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -14980,7 +15515,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "year": {
             "type": "integer",
@@ -15020,7 +15556,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -15042,7 +15579,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "operation_id": {
             "type": "string",
@@ -15070,7 +15608,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "operation_id": {
             "type": "string",
@@ -15099,7 +15638,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "expected_digest": {
             "type": "string",
@@ -15129,7 +15669,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "source_file_name": {
             "type": "string",
@@ -15194,12 +15735,14 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "source_course_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "The course to copy content from. It cannot be the approved course itself."
+            "description": "The course to copy content from. It cannot be the approved course itself.",
+            "maximum": 9007199254740991
           },
           "acknowledge_course_change": {
             "type": "boolean",
@@ -15229,7 +15772,7 @@
       "toolName": "moodle_copy_course",
       "provider": "moodle",
       "summary": "Copy a Moodle course into a new course",
-      "description": "Create a new Moodle course from the approved course, through the native course copy form. The copy is always created hidden, so it cannot reach a learner before someone shows it, and it always carries no learner data and keeps no enrolments, because Morrow copies no people. Morrow refuses before sending when the form already keeps a role's enrolments. The copy is created without an ID number unless you give one, because Moodle refuses a course whose ID number is already in use and the form is seeded with the source course's own. Every other control of the form, including the dates it offers, is sent back unchanged. Morrow reads the course copies already in progress first, refuses a copy whose new full name is already being made, sends one POST, then reads the copies again and requires exactly one new copy with that exact name. Moodle makes the copy as scheduled tasks, so the new course is not finished when this returns. A short name Moodle already uses is refused by the native form and is reported as sent but not applied; a lost response is reported as applied but unconfirmed. Neither is retried. It requires moodle/backup:backupcourse, moodle/restore:restorecourse and moodle/course:create at that exact course context. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_course_settings, and Morrow compares that snapshot again immediately before send.",
+      "description": "Create a new Moodle course from the approved course, through the native course copy form. The copy is always created hidden, so it cannot reach a learner before someone shows it, and it always carries no learner data and keeps no enrolments, because Morrow copies no people. Morrow refuses before sending when the form already keeps a role's enrolments. The copy is created without an ID number unless you give one, because Moodle refuses a course whose ID number is already in use and the form is seeded with the source course's own. Every other control of the form, including the dates it offers, is sent back unchanged. Morrow reads the course copies already in progress first, refuses a copy whose new short name is already being made, sends one POST, then reads the copies again and requires exactly one new copy with that exact short name. Moodle makes the copy as scheduled tasks, so the new course is not finished when this returns. A short name Moodle already uses is refused by the native form and is reported as sent but not applied; a lost response is reported as applied but unconfirmed. Neither is retried. It requires moodle/backup:backupcourse, moodle/restore:restorecourse and moodle/course:create at that exact course context. Browser-fixture proof only; no signed-in Moodle site has run it. The required expected_digest must match the canonical 64-character lowercase SHA-256 digest of the complete snapshot from moodle_get_course_settings, and Morrow compares that snapshot again immediately before send.",
       "readOnly": false,
       "reviewTool": "moodle_get_course_settings",
       "inputSchema": {
@@ -15237,7 +15780,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "new_full_name": {
             "type": "string",
@@ -15252,7 +15796,8 @@
           "category_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "A category the native control offers. Without it the copy keeps the source course's category."
+            "description": "A category the native control offers. Without it the copy keeps the source course's category.",
+            "maximum": 9007199254740991
           },
           "new_id_number": {
             "type": "string",
@@ -15288,7 +15833,7 @@
       "toolName": "moodle_get_site_inventory",
       "provider": "moodle",
       "summary": "Get the Moodle release and the installed plugin inventory",
-      "description": "Read this Moodle site's release and its installed plugin inventory: each plugin's type, name, component and version number, and the enabled or disabled state Moodle itself shows for it. The inventory is site-wide; course_id names the selected course whose signed-in site connection Morrow reads through, and the result carries no course content. The enabled authentication, enrolment, question-bank filter, availability condition, repository and filter plugins are reported as their own sets, read from those same rows. Morrow reads two native administration pages and sends nothing: /admin/environment.php for the release, which requires moodle/site:config at the system context, and /admin/plugins.php for the inventory, which Moodle serves only to a site administrator. When either page is not served, Morrow returns moodle_site_inventory_administration_required and reports no inventory; it never treats a page it could not read as an empty site. Morrow cannot tell a person who is not an administrator from a site that changed these pages, and refuses in both cases. No secret leaves the page: every value is rebuilt from a fixed vocabulary, and the plugin display name, settings link, uninstall link, update control and notes are never read, so no API key, token, password, session key or salted value can reach the result. A row carrying a class this read does not recognise is refused as moodle_site_inventory_page_control_unrecognised. This adds no administration write: Morrow cannot enable, disable, install, update or remove a plugin. It bounds the response to 2 MiB and the site to 2000 plugins and returns moodle_site_inventory_incomplete instead of a partial inventory. Browser-fixture proof only; no signed-in Moodle site has run it.",
+      "description": "Read this Moodle site's release and its installed plugin inventory: each plugin's type, name, component and version number, and the enabled or disabled state Moodle itself shows for it. The inventory is site-wide; course_id names the selected course whose signed-in site connection Morrow reads through, and the result carries no course content. The enabled authentication, enrolment, question-bank filter, availability condition, repository and filter plugins are reported as their own sets, read from those same rows. Morrow reads two native administration pages and sends nothing: /admin/environment.php for the release, which requires moodle/site:config at the system context, and /admin/plugins.php for the inventory, which Moodle serves only to a site administrator. When either page is not served, Morrow returns moodle_site_inventory_administration_required and reports no inventory; it never treats a page it could not read as an empty site. Morrow cannot tell a person who is not an administrator from a site that changed these pages, and refuses in both cases. No secret leaves the page: every value is rebuilt from a fixed vocabulary, and the plugin display name, settings link, uninstall link, update control and notes are never read, so no API key, token, password, session key or salted value can reach the result. Presentation, source and update metadata classes on a plugin row are ignored because they do not enter the result; the row is refused unless it carries exactly one valid type, component and status identity, at most one availability state, and a matching component cell. This adds no administration write: Morrow cannot enable, disable, install, update or remove a plugin. It bounds the response to 2 MiB and the site to 2000 plugins and returns moodle_site_inventory_incomplete instead of a partial inventory. Browser-fixture proof only; no signed-in Moodle site has run it.",
       "readOnly": true,
       "dataClass": "course",
       "inputSchema": {
@@ -15296,7 +15841,8 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           }
         },
         "required": [
@@ -15319,12 +15865,14 @@
         "properties": {
           "course_id": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 1,
+            "maximum": 9007199254740991
           },
           "role_id": {
             "type": "integer",
             "minimum": 1,
-            "description": "Optional. Without it the result lists every role and opens no role definition."
+            "description": "Optional. Without it the result lists every role and opens no role definition.",
+            "maximum": 9007199254740991
           }
         },
         "required": [

@@ -1,14 +1,15 @@
-import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
+import {
+  bridgeCatalogDigest,
+  loadCanvasBrowserCatalog,
+  loadMoodleBrowserCatalog,
+} from "../../../canvas-connector-mcp/src/browser-catalog.js";
 
 /**
- * The catalog digest a Bridge hello must carry: the Canvas API catalog digest,
- * the raw bytes of the Canvas browser catalog, then the raw bytes of the Moodle
- * browser catalog. This mirrors bridgeCatalogDigest in
- * packages/canvas-connector-mcp/src/browser-catalog.ts and the extension's own
- * computation in connector/extension/src/service-worker.js.
+ * The operational compatibility digest a Bridge hello must carry. The runtime
+ * keeps raw catalog digests for provenance, while this identity ignores source
+ * transport details and prose that cannot change execution.
  *
  * Every test computes it here because a hello carrying any other value is
  * refused with close code 4403, and `once(socket, "message")` does not reject
@@ -19,11 +20,8 @@ import { loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
  * @param root repository root, usually `resolve("../..")` from a package test.
  */
 export function bridgeCatalogDigestForTests(root: string): string {
-  const rawDigest = (relativePath: string): string => createHash("sha256")
-    .update(readFileSync(resolve(root, relativePath)))
-    .digest("hex");
   const canvas = loadCanvasApiCatalog(resolve(root, "artifacts/canvas-api/canvas-api-catalog.json"));
-  const canvasBrowser = rawDigest("connector/extension/generated/canvas-browser-catalog.json");
-  const moodle = rawDigest("connector/extension/generated/moodle-browser-catalog.json");
-  return createHash("sha256").update(`${canvas.catalogDigest}\n${canvasBrowser}\n${moodle}`).digest("hex");
+  const canvasBrowser = loadCanvasBrowserCatalog(resolve(root, "connector/extension/generated/canvas-browser-catalog.json"));
+  const moodle = loadMoodleBrowserCatalog(resolve(root, "connector/extension/generated/moodle-browser-catalog.json"));
+  return bridgeCatalogDigest(canvas, canvasBrowser, moodle);
 }

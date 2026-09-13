@@ -178,9 +178,11 @@ function containsAlias(value, alias) {
   return boundaryPattern(alias).test(value.normalize("NFKC"));
 }
 
-function replaceAliases(value, aliases, usedIds) {
+function replaceAliases(value, aliases, usedIds, allowedNumericAliases = new Set()) {
   let output = value.normalize("NFKC");
-  const ordered = [...aliases.entries()].sort((left, right) => right[0].length - left[0].length);
+  const ordered = [...aliases.entries()]
+    .filter(([alias]) => !/^[0-9]+$/u.test(alias) || allowedNumericAliases.has(alias))
+    .sort((left, right) => right[0].length - left[0].length);
   for (const [alias, matches] of ordered) {
     const matcher = boundaryPattern(alias);
     if (!matcher.test(output)) continue;
@@ -208,7 +210,7 @@ function replaceContextualIds(value, byId, usedIds) {
   return output;
 }
 
-function transformStructured(value, aliases, byId, usedIds, key = "", depth = 0) {
+function transformStructured(value, aliases, byId, usedIds, allowedNumericAliases, key = "", depth = 0) {
   if (depth > 20) fail("protected_request_too_deep");
   if (typeof value === "string") {
     if (IDENTITY_KEY.test(key)) {
@@ -216,7 +218,7 @@ function transformStructured(value, aliases, byId, usedIds, key = "", depth = 0)
       usedIds.add(entry.identity.id);
       return entry.label;
     }
-    return replaceContextualIds(replaceAliases(value, aliases, usedIds), byId, usedIds);
+    return replaceContextualIds(replaceAliases(value, aliases, usedIds, allowedNumericAliases), byId, usedIds);
   }
   if (typeof value === "number" && Number.isSafeInteger(value) && IDENTITY_KEY.test(key)) {
     const entry = byId.get(String(value));
@@ -224,19 +226,19 @@ function transformStructured(value, aliases, byId, usedIds, key = "", depth = 0)
     usedIds.add(entry.identity.id);
     return entry.label;
   }
-  if (Array.isArray(value)) return value.map((entry) => transformStructured(entry, aliases, byId, usedIds, key, depth + 1));
+  if (Array.isArray(value)) return value.map((entry) => transformStructured(entry, aliases, byId, usedIds, allowedNumericAliases, key, depth + 1));
   if (!value || typeof value !== "object") return value;
   const output = {};
   for (const [field, child] of Object.entries(value)) {
-    const protectedField = replaceAliases(field, aliases, usedIds);
+    const protectedField = replaceAliases(field, aliases, usedIds, allowedNumericAliases);
     if (Object.hasOwn(output, protectedField)) fail("protected_request_key_collision");
-    output[protectedField] = transformStructured(child, aliases, byId, usedIds, field, depth + 1);
+    output[protectedField] = transformStructured(child, aliases, byId, usedIds, allowedNumericAliases, field, depth + 1);
   }
   return output;
 }
 
 function remainingUnknownIdentifier(value) {
-  const withoutProtectedLabels = value.replace(/\bStudent A[1-9][0-9]*\b/gu, "");
+  const withoutProtectedLabels = value.replace(/\bStudent A[1-9][0-9]*\b/gu, "[learner]");
   return /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/iu.test(withoutProtectedLabels)
     || /(?:\b(?:learner|student|user|recipient|enrollment|submission)\b\s*(?:id\b\s*)?[#:=]\s*|["']?(?:learner|student|user|recipient|enrollment|submission)[_-]?id["']?\s*[:=]\s*["']?)[A-Za-z0-9][A-Za-z0-9_.:@-]*/iu.test(withoutProtectedLabels);
 }
@@ -270,6 +272,7 @@ export function protectLocalRequest(input) {
     return !number || !allowedLabels.has(`Student A${number}`);
   })) fail("protected_request_existing_label_refused");
   const asserted = input.assertedIdentifiers.map((identifier) => text(identifier, "protected_request_identifier_invalid"));
+  const assertedAliases = new Set(asserted.map(normalize));
   for (const identifier of asserted) {
     exactAlias(identifier, aliases);
     if (!containsAlias(input.text, normalize(identifier))) fail("protected_request_assertion_missing");
@@ -278,13 +281,14 @@ export function protectLocalRequest(input) {
   if (/^\s*[\[{]/u.test(input.text)) {
     let parsed;
     try { parsed = JSON.parse(input.text); } catch { fail("protected_request_structured_invalid"); }
-    protectedText = JSON.stringify(transformStructured(parsed, aliases, byId, usedIds));
+    protectedText = JSON.stringify(transformStructured(parsed, aliases, byId, usedIds, assertedAliases));
   } else {
-    protectedText = replaceContextualIds(replaceAliases(input.text, aliases, usedIds), byId, usedIds);
+    protectedText = replaceContextualIds(replaceAliases(input.text, aliases, usedIds, assertedAliases), byId, usedIds);
   }
   if (remainingUnknownIdentifier(protectedText)) fail("protected_request_identifier_unknown");
   for (const alias of aliases.keys()) {
     if (/^student a[1-9][0-9]*$/u.test(alias)) continue;
+    if (/^[0-9]+$/u.test(alias) && !assertedAliases.has(alias)) continue;
     if (boundaryPattern(alias).test(protectedText)) fail("protected_request_identity_leak_refused");
   }
   const retainedLabels = { ...(input.labelsById || {}) };

@@ -687,6 +687,30 @@ export async function validEditPermission({ permission, binding, catalogDigest, 
   }
 }
 
+/**
+ * Rebinds one permission created by the retired raw-catalog digest formula.
+ * The old permission must still validate against the exact current operation
+ * set. A new revision invalidates every command prepared before migration.
+ */
+export async function migrateLegacyEditPermission({ permission, binding, legacyCatalogDigest, catalogDigest, policyRevision, operations }) {
+  if (!/^[0-9a-f]{64}$/.test(legacyCatalogDigest || "") || legacyCatalogDigest === catalogDigest
+    || permission?.catalogDigest !== legacyCatalogDigest) return null;
+  const legacy = await validEditPermission({ permission, binding, catalogDigest: legacyCatalogDigest, operations });
+  if (!legacy) return null;
+  const revision = Math.max(
+    Number.isSafeInteger(policyRevision) ? policyRevision : 0,
+    legacy.revision,
+  ) + 1;
+  return await createEditPermission({
+    binding,
+    catalogDigest,
+    revision,
+    enabledCategories: legacy.enabledCategories,
+    operations,
+    expiresAt: legacy.expiresAt,
+  });
+}
+
 export function changedFields(args) {
   return Object.keys(args || {}).filter((key) => !STRUCTURAL_EDIT_FIELDS.has(key)).sort();
 }

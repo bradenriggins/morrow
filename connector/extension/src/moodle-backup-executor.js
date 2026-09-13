@@ -22,6 +22,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleBackupInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const MAX_FORM_ENTRIES = 600;
   const MAX_FORM_BYTES = 512 * 1024;
@@ -216,19 +218,60 @@ export async function executeMoodleBackupInPage(rawInput) {
     return status;
   };
   const live = () => Number.isFinite(input?.expiresAt) && Date.now() < input.expiresAt;
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const boundedResponseText = async (response) => {
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_PAGE_BYTES)) {
+      cancelBody(response.body);
+      return null;
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") return null;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const remaining = Number.isFinite(input?.expiresAt) ? input.expiresAt - Date.now() : Infinity;
+        if (remaining <= 0) throw new Error("moodle_execution_expired");
+        let timeout;
+        const next = Number.isFinite(remaining)
+          ? await Promise.race([
+              reader.read(),
+              new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+            ]).finally(() => clearTimeout(timeout))
+          : await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_PAGE_BYTES) {
+          cancelBody(reader);
+          return null;
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch {
+      cancelBody(reader);
+      return null;
+    }
+  };
 
   const readPage = async (context, endpoint, step, code) => {
     if (!live()) return { error: "moodle_execution_expired" };
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { record(step, "GET", endpoint.pathname); return { error: code }; }
     record(step, "GET", endpoint.pathname, response.status);
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())) {
       return { error: code, status: response.status };
     }
     let html;
-    try { html = await response.text(); } catch { return { error: code, status: response.status }; }
+    html = await boundedResponseText(response);
     if (typeof html !== "string" || html.length > MAX_PAGE_BYTES || typeof globalThis.DOMParser !== "function") {
       return { error: code, status: response.status };
     }
@@ -244,13 +287,13 @@ export async function executeMoodleBackupInPage(rawInput) {
     if (!live()) return { error: "moodle_execution_expired" };
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { record(step, "GET", endpoint.pathname); return { error: code }; }
     record(step, "GET", endpoint.pathname, response.status);
     const landed = samePath(response.url, context, landingPath);
     if (!response.ok || !landed || !sameContext(context, currentContext())) return { error: code, status: response.status };
     let html;
-    try { html = await response.text(); } catch { return { error: code, status: response.status }; }
+    html = await boundedResponseText(response);
     if (typeof html !== "string" || html.length > MAX_PAGE_BYTES || typeof globalThis.DOMParser !== "function") {
       return { error: code, status: response.status };
     }
@@ -369,6 +412,7 @@ export async function executeMoodleBackupInPage(rawInput) {
         redirect: expectRedirect ? "manual" : "error",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" },
         body,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { record(step, "POST", path); return { unconfirmed: code }; }
     record(step, "POST", path, response.status);
@@ -385,7 +429,7 @@ export async function executeMoodleBackupInPage(rawInput) {
     }
     if (!response.ok || !sameRoute(response.url, new URL(state.action))) return { unconfirmed: code, status: response.status };
     let html;
-    try { html = await response.text(); } catch { return { unconfirmed: code, status: response.status }; }
+    html = await boundedResponseText(response);
     if (typeof html !== "string" || html.length > MAX_PAGE_BYTES || typeof globalThis.DOMParser !== "function") {
       return { unconfirmed: code, status: response.status };
     }
@@ -532,11 +576,12 @@ export async function executeMoodleBackupInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify([{ index: 0, methodname: STATE_METHOD, args: { courseid: Number(courseId) } }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { record(step, "POST", endpoint.pathname); return { error: "moodle_course_state_unavailable" }; }
     record(step, "POST", endpoint.pathname, response.status);
     let payload;
-    try { payload = JSON.parse(await response.text()); } catch { return { error: "moodle_course_state_unavailable", status: response.status }; }
+    try { payload = JSON.parse(await boundedResponseText(response)); } catch { return { error: "moodle_course_state_unavailable", status: response.status }; }
     const entry = Array.isArray(payload) && payload.length === 1 && object(payload[0]) ? payload[0] : null;
     if (!response.ok || !entry || entry.error || entry.exception || typeof entry.data !== "string") {
       return { error: "moodle_course_state_unavailable", status: response.status };
@@ -583,11 +628,12 @@ export async function executeMoodleBackupInPage(rawInput) {
           method: "POST", credentials: "include", cache: "no-store",
           headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
           body: new URLSearchParams({ sesskey: context.sesskey, itemid: itemId, filepath: "/" }),
+          signal: requestSignal(input?.expiresAt),
         });
       } catch { return null; }
       if (!response.ok) return null;
       try {
-        const payload = JSON.parse(await response.text());
+        const payload = JSON.parse(await boundedResponseText(response));
         return object(payload) ? payload : null;
       } catch { return null; }
     };
@@ -643,11 +689,12 @@ export async function executeMoodleBackupInPage(rawInput) {
           methodname: PROGRESS_METHOD,
           args: { backupids: [operationId], contextid: Number(context.courseContextId) },
         }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { record("progress", "POST", endpoint.pathname); return failure("moodle_backup_progress_unavailable"); }
     record("progress", "POST", endpoint.pathname, response.status);
     let payload;
-    try { payload = JSON.parse(await response.text()); } catch { return failure("moodle_backup_progress_unavailable", response.status); }
+    try { payload = JSON.parse(await boundedResponseText(response)); } catch { return failure("moodle_backup_progress_unavailable", response.status); }
     const entry = Array.isArray(payload) && payload.length === 1 && object(payload[0]) ? payload[0] : null;
     if (!response.ok || !entry || entry.error || entry.exception || !Array.isArray(entry.data) || entry.data.length !== 1) {
       return failure("moodle_backup_progress_unavailable", response.status);
@@ -749,6 +796,56 @@ export async function executeMoodleBackupInPage(rawInput) {
     const known = new Set(before.map(fileKey));
     return after.filter((file) => !known.has(fileKey(file)));
   };
+  const importCompletionVerified = (documentValue, context) => {
+    if (!documentValue || typeof documentValue.querySelectorAll !== "function") return false;
+    if (postForms(documentValue, context, IMPORT_PATH).length !== 0) return false;
+    const notices = new Set([
+      ...documentValue.querySelectorAll(".notifysuccess"),
+      ...documentValue.querySelectorAll(".alert-success"),
+    ]);
+    return notices.size === 1 && collapsed([...notices][0]?.textContent, 1_000).length > 0;
+  };
+  const activityIds = (activities) => {
+    const values = new Set();
+    for (const activity of activities) {
+      const value = id(activity?.id);
+      if (!value || values.has(value)) return null;
+      values.add(value);
+    }
+    return values;
+  };
+  const importActivitySignature = (activity) => {
+    if (!object(activity) || !id(activity.id) || !validText(collapsed(activity.name), MAX_TEXT)
+      || !validText(String(activity.module || ""), 100)
+      || !Number.isSafeInteger(activity.sectionnumber) || activity.sectionnumber < 0) return null;
+    return stable({
+      module: String(activity.module),
+      name: collapsed(activity.name),
+      sectionNumber: activity.sectionnumber,
+    });
+  };
+  const importedActivities = (source, before, after) => {
+    const beforeIds = activityIds(before);
+    const afterIds = activityIds(after);
+    if (!beforeIds || !afterIds) return null;
+    const expected = new Map();
+    for (const activity of source) {
+      const signature = importActivitySignature(activity);
+      if (!signature) return null;
+      expected.set(signature, (expected.get(signature) || 0) + 1);
+    }
+    const added = after.filter((activity) => !beforeIds.has(id(activity?.id)));
+    const matched = [];
+    for (const activity of added) {
+      const signature = importActivitySignature(activity);
+      if (!signature) return null;
+      const remaining = expected.get(signature) || 0;
+      if (remaining < 1) continue;
+      expected.set(signature, remaining - 1);
+      matched.push(activity);
+    }
+    return [...expected.values()].some((remaining) => remaining !== 0) ? null : matched;
+  };
 
   const runCourseBackup = async (context, args) => {
     const before = await readBackupFiles(context, args.courseId, "read_backup_files_before");
@@ -806,6 +903,12 @@ export async function executeMoodleBackupInPage(rawInput) {
     const before = await courseState(context, args.courseId, "read_course_state_before");
     if (before.error) return failure(before.error, before.status);
     if (before.digest !== args.expectedDigest) return failure("moodle_expected_digest_mismatch", before.status);
+    const sourceBefore = await courseState(context, args.sourceCourseId, "read_import_source_before");
+    if (sourceBefore.error) return failure("moodle_import_source_state_unavailable", sourceBefore.status);
+    if (!activityIds(before.data.activities) || !activityIds(sourceBefore.data.activities)
+      || sourceBefore.data.activities.some((activity) => importActivitySignature(activity) === null)) {
+      return failure("moodle_import_source_state_unavailable", sourceBefore.status);
+    }
 
     const endpoint = urlFor(context, IMPORT_PATH, { id: args.courseId, importid: args.sourceCourseId });
     const page = await readPage(context, endpoint, "load_import_form", "moodle_import_form_unavailable");
@@ -817,6 +920,7 @@ export async function executeMoodleBackupInPage(rawInput) {
       stage: BACKUP_STAGE_INITIAL, backup: null, importid: args.sourceCourseId, target: TARGET_CURRENT_ADDING,
     }, urlFor(context, IMPORT_PATH, { id: args.courseId }));
     if (!state) return failure("moodle_import_form_invalid", page.status);
+    if (!one(valuesOf(state.entries, "setting_root_activities"), "1")) return failure("moodle_import_form_invalid", page.status);
     const jump = submitValue(state.form, ONE_CLICK_FIELD);
     if (!jump) return failure("moodle_import_form_invalid", page.status);
 
@@ -828,16 +932,27 @@ export async function executeMoodleBackupInPage(rawInput) {
       const cancelled = await cancelWorkflow(context, state, args.courseId, "cancel_import");
       return { ...failure("moodle_import_course_changed", fresh.status), workflow_cancelled: cancelled };
     }
+    const sourceFresh = await courseState(context, args.sourceCourseId, "read_import_source_fresh");
+    if (sourceFresh.error) {
+      const cancelled = await cancelWorkflow(context, state, args.courseId, "cancel_import");
+      return { ...failure("moodle_import_source_state_unavailable", sourceFresh.status), workflow_cancelled: cancelled };
+    }
+    if (sourceFresh.digest !== sourceBefore.digest) {
+      const cancelled = await cancelWorkflow(context, state, args.courseId, "cancel_import");
+      return { ...failure("moodle_import_source_changed", sourceFresh.status), workflow_cancelled: cancelled };
+    }
 
     const posted = await postForm(context, state, new Map([[ONE_CLICK_FIELD, [jump]]]), "run_import", "moodle_import_unconfirmed", false);
     if (posted.error) return failure(posted.error, posted.status);
     if (posted.unconfirmed) return unconfirmedWrite(posted.unconfirmed, posted.status);
+    if (!importCompletionVerified(posted.document, context)) {
+      return unconfirmedWrite("moodle_import_completion_unconfirmed", posted.status);
+    }
 
     const after = await courseState(context, args.courseId, "read_course_state_after");
     if (after.error) return unconfirmedWrite("moodle_import_readback_unconfirmed", posted.status);
-    const known = new Set(before.data.activities.map((activity) => String(activity?.id ?? "")));
-    const addedActivities = after.data.activities.filter((activity) => !known.has(String(activity?.id ?? "")));
-    if (addedActivities.length === 0) return unconfirmedWrite("moodle_import_not_verified", posted.status);
+    const addedActivities = importedActivities(sourceBefore.data.activities, before.data.activities, after.data.activities);
+    if (addedActivities === null) return unconfirmedWrite("moodle_import_source_snapshot_not_verified", posted.status);
     return {
       ok: true,
       sent: true,
@@ -845,6 +960,7 @@ export async function executeMoodleBackupInPage(rawInput) {
       data: {
         course_id: args.courseId,
         source_course_id: args.sourceCourseId,
+        source_snapshot_digest: sourceBefore.digest,
         restore_mode: "merge",
         activities_added: addedActivities.map((activity) => ({ id: String(activity?.id ?? ""), name: collapsed(activity?.name) })),
         course_state_before: before.data,
@@ -877,7 +993,7 @@ export async function executeMoodleBackupInPage(rawInput) {
       if (cells.length < 5) return { error: "moodle_course_copy_progress_unavailable", status: page.status };
       copies.push({
         source: collapsed(cells[0]?.textContent),
-        destination: collapsed(cells[1]?.textContent),
+        destination_short_name: collapsed(cells[1]?.textContent),
         started_at: collapsed(cells[2]?.textContent),
         operation: collapsed(cells[3]?.textContent, 40),
         ...(asyncHandle(cells.slice(4)) ? { operation_id: asyncHandle(cells.slice(4)) } : {}),
@@ -889,7 +1005,7 @@ export async function executeMoodleBackupInPage(rawInput) {
   const runCourseCopy = async (context, args) => {
     const before = await copyRows(context, args.courseId, "read_copies_before");
     if (before.error) return failure(before.error, before.status);
-    if (before.copies.some((copy) => copy.destination === args.fullName)) {
+    if (before.copies.some((copy) => copy.destination_short_name === args.shortName)) {
       return failure("moodle_course_copy_already_in_progress", before.status);
     }
 
@@ -936,7 +1052,7 @@ export async function executeMoodleBackupInPage(rawInput) {
 
     const after = await copyRows(context, args.courseId, "read_copies_after");
     if (after.error) return unconfirmedWrite("moodle_course_copy_readback_unconfirmed", posted.status);
-    const added = after.copies.filter((copy) => copy.destination === args.fullName);
+    const added = after.copies.filter((copy) => copy.destination_short_name === args.shortName);
     if (added.length !== 1) {
       // A copy is created only on the branch that redirects, so a form that
       // answered with a page instead of a redirect saved nothing. Morrow still

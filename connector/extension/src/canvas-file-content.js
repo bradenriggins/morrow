@@ -14,6 +14,10 @@ export function canvasFileTextContentTypeSupported(value) {
  * needs must remain inside this lexical scope.
  */
 export async function executeCanvasCourseFileTextInPage(input) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
+  const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+  const COUNT = /^(?:0|[1-9][0-9]*)$/;
   const isOwnToken = (value) => /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(value);
   const decimalId = (value) => {
     const id = String(value || "");
@@ -50,17 +54,52 @@ export async function executeCanvasCourseFileTextInPage(input) {
       || !url.searchParams.get("verifier")) throw new Error("canvas_file_download_url_refused");
     return url.href;
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const boundedText = async (response) => {
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!COUNT.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      cancelBody(response.body);
+      throw new Error("canvas_file_metadata_response_too_large");
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") throw new Error("canvas_file_metadata_response_unavailable");
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const next = await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_RESPONSE_BYTES) {
+          cancelBody(reader);
+          throw new Error("canvas_file_metadata_response_too_large");
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch (error) {
+      cancelBody(reader);
+      throw error;
+    }
+  };
   const canvasJson = async (pathname, canvasOrigin) => {
     const response = await fetch(new URL(pathname, canvasOrigin), {
       credentials: "include",
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
       redirect: "error",
+      signal: requestSignal(input?.expiresAt),
     });
     if (!response.ok) throw new Error(`canvas_file_metadata_http_${response.status}`);
     const received = new URL(response.url);
     if (received.origin !== canvasOrigin) throw new Error("canvas_file_metadata_origin_changed");
-    return await response.json();
+    const text = await boundedText(response);
+    try { return JSON.parse(text); } catch { throw new Error("canvas_file_metadata_response_invalid"); }
   };
   try {
     if (!plainObject(input) || !plainObject(input.binding)) throw new Error("canvas_file_binding_invalid");

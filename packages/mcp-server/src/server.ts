@@ -24,12 +24,13 @@ import { registerActivityTool, type ActivityGroups } from "./activity-tools.js";
 import { MORROW_SERVER_INSTRUCTIONS } from "./server-instructions.js";
 import { registerLessonReviewTool, type LessonReviewState } from "./lesson-review.js";
 import { registerEditAccessTool, type EditAccessRequestState } from "./edit-access.js";
-import { registerPrivateChatTool, type PrivateChatRequestState } from "./private-chat.js";
+import { PrivateChatContinuationLedger, registerPrivateChatTool, type PrivateChatRequestState } from "./private-chat.js";
 import { registerCourseAuditResource, registerCourseAuditTool } from "./course-audit.js";
 import { registerCourseInventoryTool } from "./course-inventory.js";
 import { registerProgramLedgerResource, registerProgramLedgerTool } from "./program-ledger.js";
 import { registerMoodleResourceFileTool } from "./moodle-resource-file.js";
 import { registerCanvasCourseFileUploadTool } from "./canvas-file-transfer.js";
+import { resultArtifactAudience } from "./result-artifacts.js";
 import {
   PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL,
   publicMoodleLearnerInputSchema,
@@ -154,6 +155,10 @@ export interface MorrowServerContext {
   readonly workspaceRoot?: string;
   /** The stdio process this connection arrived through. */
   readonly proxyPid?: number;
+  /** Session-scoped request-state signing key, shared by modern per-request servers. */
+  readonly requestStateKey?: Uint8Array;
+  /** Session-scoped one-shot Private Chat continuations. */
+  readonly privateChatContinuations?: PrivateChatContinuationLedger;
 }
 
 /**
@@ -188,18 +193,11 @@ function sessionIdOf(context: ServerContext): string {
   return typeof context.sessionId === "string" && context.sessionId ? context.sessionId : "stdio-single-client";
 }
 
-function artifactAudience(context: ServerContext): string {
-  const session = typeof context.sessionId === "string" && context.sessionId ? context.sessionId : "stdio-single-client";
-  const client = typeof context.http?.authInfo?.clientId === "string" && context.http.authInfo.clientId
-    ? context.http.authInfo.clientId
-    : "local";
-  return session + "\0" + client;
-}
-
 /** Install one last response boundary before any native or catalog tool registers. */
 function installMcpEgressBoundary(
   server: McpServer,
   runtime: GatewayRuntime,
+  serverContext: MorrowServerContext,
   requestedBy: (context: ServerContext) => RequestedByIdentity | undefined,
 ): void {
   const registrar = server as unknown as ToolRegistrar;
@@ -220,7 +218,7 @@ function installMcpEgressBoundary(
       toolName: name,
     });
     return (boundaryRuntime.bindResultArtifactAudience
-      ? boundaryRuntime.bindResultArtifactAudience(projected, artifactAudience(context))
+      ? boundaryRuntime.bindResultArtifactAudience(projected, resultArtifactAudience(context, serverContext))
       : projected) as unknown as CallToolResult;
   });
 }
@@ -246,7 +244,7 @@ export function createMorrowServer(
 ): McpServer {
   const workspaceRoot = serverContext.workspaceRoot;
   const reviewState = createRequestStateCodec<LessonReviewState | EditAccessRequestState | PrivateChatRequestState>({
-    key: randomBytes(32), ttlSeconds: 600,
+    key: serverContext.requestStateKey ?? randomBytes(32), ttlSeconds: 600,
     bind: (context) => `${context.mcpReq.method}\0${context.sessionId ?? ""}\0${context.http?.authInfo?.clientId ?? ""}`,
   });
   const server = new McpServer(
@@ -259,14 +257,14 @@ export function createMorrowServer(
       requestState: { verify: reviewState.verify },
     },
   );
-  installMcpEgressBoundary(server, runtime, (context) => requestedByIdentity(server, sessionIdOf(context), serverContext));
+  installMcpEgressBoundary(server, runtime, serverContext, (context) => requestedByIdentity(server, sessionIdOf(context), serverContext));
   registerActivityTool(server, runtime, healthProvider, {
     identityFor: (sessionId) => requestedByIdentity(server, sessionId, serverContext),
     ...(groups ? { groups } : {}),
   });
   registerLessonReviewTool(server, runtime, reviewState);
   registerEditAccessTool(server, runtime, reviewState);
-  registerPrivateChatTool(server, runtime, reviewState);
+  registerPrivateChatTool(server, runtime, reviewState, serverContext.privateChatContinuations);
   registerCourseAuditResource(server);
   registerCourseAuditTool(server, runtime);
   registerCourseInventoryTool(server, runtime);
@@ -323,7 +321,7 @@ export function createMorrowServer(
     },
     async ({ handle, offset, limit }, context) => {
       try {
-        const page = runtime.resultPage(handle, offset, limit, artifactAudience(context));
+        const page = runtime.resultPage(handle, offset, limit, resultArtifactAudience(context, serverContext));
         return textAndStructured(
           `Read ${page.returned} characters from saved local result ${handle}.`,
           page,

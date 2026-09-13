@@ -62,8 +62,8 @@ describe("Blackboard readable learner labels", () => {
       const cipher = createCipheriv("aes-256-gcm", key, iv);
       const records = [{ token, scope: { canvasOrigin: baseUrl, account: tenant.id, course: courses[0], principal: principalId, profile: "blackboard-learn-api" }, identity: { id: "_44_1", name: "Jane Doe" } }];
       const ciphertext = Buffer.concat([cipher.update(JSON.stringify(records)), cipher.final()]);
-      writeFileSync(`${path}.key`, key.toString("base64url"));
-      writeFileSync(path, JSON.stringify({ schema: "morrow.learner-vault.v1", iv: iv.toString("base64url"), tag: cipher.getAuthTag().toString("base64url"), ciphertext: ciphertext.toString("base64url") }));
+      writeFileSync(`${path}.key`, key.toString("base64url"), { mode: 0o600 });
+      writeFileSync(path, JSON.stringify({ schema: "morrow.learner-vault.v1", iv: iv.toString("base64url"), tag: cipher.getAuthTag().toString("base64url"), ciphertext: ciphertext.toString("base64url") }), { mode: 0o600 });
       const runtime = new BlackboardLearnRuntime([tenant], { learnerVault: new LearnerVault(path) });
       const request = (courseId: string) => ({ tenant_id: tenant.id, course_id: courseId, source_binding_id: deriveBlackboardSourceBindingId(baseUrl, principalId, courseId), learner_reference: token });
       await expect(runtime.resolvePublicInput(request(courses[0]!))).rejects.toThrow("Public learner references require readable labels");

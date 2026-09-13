@@ -20,6 +20,7 @@ async function writeMcpRuntimeFixture(root) {
     ["dist/local-owner-sidecar-access.js", "fixture"],
   ];
   const files = [];
+  const directFiles = [];
   for (const [relative, content] of gatewayFiles) {
     const direct = path.join(app, "packages", "mcp-server", relative);
     const installed = path.join(app, "node_modules", "@morrow-lms", "gateway", relative);
@@ -32,9 +33,23 @@ async function writeMcpRuntimeFixture(root) {
       bytes: Buffer.byteLength(content),
       sha256: sha256(content),
     });
+    directFiles.push({
+      path: `packages/mcp-server/${relative}`,
+      bytes: Buffer.byteLength(content),
+      sha256: sha256(content),
+    });
   }
+  for (const relative of [
+    "packages/client-config/dist/cli.js",
+    "packages/canvas-connector-mcp/dist/index.js",
+    "installer/runtime-monitor.mjs",
+  ]) {
+    const content = await fs.readFile(path.join(app, relative));
+    directFiles.push({ path: relative, bytes: content.byteLength, sha256: sha256(content) });
+  }
+  directFiles.sort((left, right) => left.path.localeCompare(right.path));
   const manifest = {
-    schema: "morrow.mcp-runtime-manifest.v1",
+    schema: "morrow.mcp-runtime-manifest.v2",
     package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
     entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: Buffer.byteLength("fixture"), sha256: sha256("fixture") },
     dependencies: [{
@@ -43,12 +58,13 @@ async function writeMcpRuntimeFixture(root) {
       packageJson: files[0],
       files,
     }],
+    directFiles,
   };
   const bytes = Buffer.from(`${JSON.stringify(manifest)}\n`);
   const manifestSha256 = sha256(bytes);
   await fs.writeFile(path.join(app, "mcp-runtime-manifest.json"), bytes);
   await fs.writeFile(path.join(app, "package-input-manifest.json"), `${JSON.stringify({
-    schema: "morrow.desktop-package-input.v1",
+    schema: "morrow.desktop-package-input.v2",
     mcpRuntime: { path: "app/mcp-runtime-manifest.json", sha256: manifestSha256 },
   })}\n`);
   return manifestSha256;
@@ -103,6 +119,44 @@ test("MCP startup verification rejects a tampered direct gateway sibling", async
   const manifestSha256 = await payload(payloadRoot);
   assert.ok(await verifyMcpRuntime(payloadRoot, manifestSha256));
   await fs.writeFile(path.join(payloadRoot, "app", "packages", "mcp-server", "dist", "runtime.js"), "tampered");
+  assert.equal(await verifyMcpRuntime(payloadRoot, manifestSha256), null);
+});
+
+test("MCP startup verification rejects every damaged direct executable tree", async (t) => {
+  const directRuntimeFiles = [
+    "app/packages/client-config/dist/cli.js",
+    "app/packages/canvas-connector-mcp/dist/index.js",
+    "app/installer/runtime-monitor.mjs",
+  ];
+  for (const [index, relative] of directRuntimeFiles.entries()) {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), `morrow-installer-direct-runtime-${index}-`));
+    t.after(() => fs.rm(root, { recursive: true, force: true }));
+    const payloadRoot = path.join(root, "MorrowPayload");
+    const manifestSha256 = await payload(payloadRoot);
+    assert.ok(await verifyMcpRuntime(payloadRoot, manifestSha256));
+    await fs.writeFile(path.join(payloadRoot, relative), "damaged direct runtime file");
+    assert.equal(await verifyMcpRuntime(payloadRoot, manifestSha256), null, relative);
+  }
+});
+
+test("MCP startup verification rejects unsealed code added to a direct package", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-direct-runtime-extra-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const payloadRoot = path.join(root, "MorrowPayload");
+  const manifestSha256 = await payload(payloadRoot);
+  await fs.writeFile(path.join(payloadRoot, "app", "packages", "client-config", "dist", "unsealed.js"), "unsealed");
+  assert.equal(await verifyMcpRuntime(payloadRoot, manifestSha256), null);
+});
+
+test("MCP startup rejects the legacy package input schema that could select mutable dependencies", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-runtime-legacy-input-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const payloadRoot = path.join(root, "MorrowPayload");
+  const manifestSha256 = await payload(payloadRoot);
+  const inputPath = path.join(payloadRoot, "app", "package-input-manifest.json");
+  const input = JSON.parse(await fs.readFile(inputPath, "utf8"));
+  input.schema = "morrow.desktop-package-input.v1";
+  await fs.writeFile(inputPath, `${JSON.stringify(input)}\n`);
   assert.equal(await verifyMcpRuntime(payloadRoot, manifestSha256), null);
 });
 
@@ -177,4 +231,23 @@ test("configuration rollback leaves a newer assistant edit untouched", async (t)
   await fs.writeFile(config, "newer assistant edit");
   assert.equal(await restoreConfiguration(snapshot, expected), false);
   assert.equal(await fs.readFile(config, "utf8"), "newer assistant edit");
+});
+
+test("configuration rollback preserves an existing user-owned project directory mode", async (t) => {
+  if (process.platform === "win32") return;
+  const { captureConfiguration, restoreConfiguration } = require("../shared/runtime.cjs");
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-project-mode-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const project = path.join(root, "course-project");
+  const config = path.join(project, ".mcp.json");
+  await fs.mkdir(project, { mode: 0o775 });
+  await fs.chmod(project, 0o775);
+  await fs.writeFile(config, "before\n");
+  const snapshot = await captureConfiguration(config, path.join(root, "backups"));
+  await fs.writeFile(config, "morrow installed\n");
+  const installedDigest = require("node:crypto").createHash("sha256").update("morrow installed\n").digest("hex");
+
+  assert.equal(await restoreConfiguration(snapshot, installedDigest), true);
+  assert.equal(await fs.readFile(config, "utf8"), "before\n");
+  assert.equal((await fs.stat(project)).mode & 0o777, 0o775);
 });

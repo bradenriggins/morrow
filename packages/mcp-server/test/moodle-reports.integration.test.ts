@@ -1,12 +1,10 @@
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
-import { loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
 import type { JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
 import { buildLocalCanvasConfig } from "../../client-config/src/index.js";
@@ -14,6 +12,7 @@ import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
+import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 
 const ORIGIN = "https://moodle.example.edu";
 const SITE_URL = `${ORIGIN}/campus/`;
@@ -38,12 +37,6 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-function browserCatalogDigest(root: string): string {
-  const canvas = loadCanvasApiCatalog(resolve(root, "artifacts/canvas-api/canvas-api-catalog.json"));
-  const canvasBrowser = createHash("sha256").update(readFileSync(resolve(root, "connector/extension/generated/canvas-browser-catalog.json"))).digest("hex");
-  const moodle = createHash("sha256").update(readFileSync(resolve(root, "connector/extension/generated/moodle-browser-catalog.json"))).digest("hex");
-  return createHash("sha256").update(`${canvas.catalogDigest}\n${canvasBrowser}\n${moodle}`).digest("hex");
-}
 
 function configuration(root: string, directory: string, port: number) {
   const generated = structuredClone(buildLocalCanvasConfig(root, process.execPath)) as { upstreams: Record<string, unknown>[]; operationJournal: Record<string, unknown>; privacy: Record<string, unknown> };
@@ -166,7 +159,7 @@ function result(command: BridgeCommand, digest: string): JsonObject {
 describe("Moodle course-report Full MCP exposure", () => {
   it("refuses retained learner reports before source reads and preserves the course dates report", async () => {
     const root = resolve("../.."); const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-reports-integration-")); const port = await availablePort();
-    const digest = browserCatalogDigest(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
+    const digest = bridgeCatalogDigestForTests(root); const runtime = await MorrowRuntime.connect(configuration(root, directory, port), { statePath: join(directory, "batch.sqlite3") }); const gateway = runtime.gateway;
     let bridge: BridgeTestClient | undefined; let server: ReturnType<typeof serveStdio> | undefined; let client: Client | undefined; const commands: BridgeCommand[] = [];
     try {
       bridge = await connectBridgeTestClient({ port, token: TOKEN, extensionId: EXTENSION_ID, catalogDigest: digest,

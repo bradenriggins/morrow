@@ -15,7 +15,10 @@ import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
 
 const ORIGIN = "https://canvas.example.edu";
-const SITE_URL = `${ORIGIN}/courses/2`;
+const COURSE_ID = "9007199254740993";
+const ASSIGNMENT_ID = "9007199254740995";
+const GRADEBOOK_IDS = ["9007199254740997", "9007199254740999"] as const;
+const SITE_URL = `${ORIGIN}/courses/${COURSE_ID}`;
 const SOURCE_BINDING_ID = "canvas:course-summaries";
 const PRINCIPAL_FINGERPRINT = "c".repeat(64);
 const TOKEN = "canvas-course-summary-token-".repeat(4);
@@ -28,7 +31,7 @@ const PRIVATE_ROWS = [{
 }];
 
 const ASSIGNMENT_SUMMARY = {
-  schema: "morrow.canvas-assignment-submission-summary.v1", provider: "canvas", course_id: 2, assignment_id: 8,
+  schema: "morrow.canvas-assignment-submission-summary.v1", provider: "canvas", course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID,
   submission_count: 5, workflow_state_counts: { unsubmitted: 1, submitted: 1, graded: 2, pending_review: 1 },
   late_count: 1, missing_count: 1, excused_count: 1, needs_grading_count: 3,
   proof: {
@@ -41,18 +44,18 @@ const ASSIGNMENT_SUMMARY = {
 
 const GRADEBOOK_ASSIGNMENTS = [
   {
-    assignment_id: 11, submitted_count: 2, graded_count: 10, ungraded_count: 3, scored_count: 10,
+    assignment_id: GRADEBOOK_IDS[0], submitted_count: 2, graded_count: 10, ungraded_count: 3, scored_count: 10,
     score_distribution_state: "reported",
     score_distribution: { below_60: 0, "60_to_69": 0, "70_to_79": 0, "80_to_89": 0, "90_and_above": 10 },
   },
   {
-    assignment_id: 12, submitted_count: 0, graded_count: 3, ungraded_count: 0, scored_count: 3,
+    assignment_id: GRADEBOOK_IDS[1], submitted_count: 0, graded_count: 3, ungraded_count: 0, scored_count: 3,
     score_distribution_state: "suppressed_cohort_below_minimum", score_distribution: null,
   },
 ];
 
 const GRADEBOOK_SUMMARY = {
-  schema: "morrow.canvas-course-gradebook-summary.v1", provider: "canvas", course_id: 2,
+  schema: "morrow.canvas-course-gradebook-summary.v1", provider: "canvas", course_id: COURSE_ID,
   assignment_count: 2, submission_count: 25, minimum_cohort: 5, assignments: GRADEBOOK_ASSIGNMENTS,
   proof: {
     method: "GET /api/v1/courses/:course_id/students/submissions",
@@ -64,7 +67,7 @@ const GRADEBOOK_SUMMARY = {
 };
 
 const ACTIVITY_SUMMARY = {
-  schema: "morrow.canvas-course-activity-summary.v1", provider: "canvas", course_id: 2,
+  schema: "morrow.canvas-course-activity-summary.v1", provider: "canvas", course_id: COURSE_ID,
   window_days: 7, window_start: "2026-09-01T00:00:00.000Z",
   kinds: {
     pages: { state: "counted", changed_count: 2, item_count: 3 },
@@ -119,7 +122,7 @@ function configuration(root: string, directory: string, port: number) {
 
 function result(command: BridgeCommand, override?: JsonObject): JsonObject {
   if (command.toolName === "canvas_list_users_in_course_users") {
-    expect(String(command.arguments.course_id)).toBe("2");
+    expect(String(command.arguments.course_id)).toBe(COURSE_ID);
     expect(command.arguments).toMatchObject({
       include: ["enrollments", "uuid"], enrollment_type: ["student"],
       enrollment_state: ["active", "invited", "rejected", "completed", "inactive"], morrow_max_pages: 50,
@@ -148,7 +151,7 @@ describe("Canvas course-summary Full MCP exposure", () => {
     let override: JsonObject | undefined;
     try {
       bridge = await connectBridgeTestClient({ port, token: TOKEN, extensionId: EXTENSION_ID, catalogDigest: digest,
-        bindings: [{ sourceBindingId: SOURCE_BINDING_ID, provider: "canvas", origin: ORIGIN, siteUrl: SITE_URL, courseId: "2", courseName: "Private Canvas course", principalFingerprint: PRINCIPAL_FINGERPRINT, sessionGeneration: 1, catalogDigest: digest, editPolicyRevision: 0, runtimeVerified: true }] });
+        bindings: [{ sourceBindingId: SOURCE_BINDING_ID, provider: "canvas", origin: ORIGIN, siteUrl: SITE_URL, courseId: COURSE_ID, courseName: "Private Canvas course", principalFingerprint: PRINCIPAL_FINGERPRINT, sessionGeneration: 1, catalogDigest: digest, editPolicyRevision: 0, runtimeVerified: true }] });
       bridge.onCommand((command) => {
         if (command.kind !== "invoke_read") return;
         commands.push(command);
@@ -164,7 +167,7 @@ describe("Canvas course-summary Full MCP exposure", () => {
       }
 
       const roster = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_list_users_in_course_users", arguments: {
-        course_id: "2", include: ["enrollments", "uuid"], enrollment_type: ["student"],
+        course_id: COURSE_ID, include: ["enrollments", "uuid"], enrollment_type: ["student"],
         enrollment_state: ["active", "invited", "rejected", "completed", "inactive"], morrow_max_pages: 50,
         _morrow: { source_binding_id: SOURCE_BINDING_ID },
       } } });
@@ -173,27 +176,27 @@ describe("Canvas course-summary Full MCP exposure", () => {
       expect(rosterText).toMatch(/Student A[1-9][0-9]*/);
       for (const privateValue of ["Jane Canvas", "jane@example.edu", '"id":91']) expect(rosterText).not.toContain(privateValue);
 
-      const assignment = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_assignment_submission_summary", arguments: { course_id: 2, assignment_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const assignment = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_assignment_submission_summary", arguments: { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const assignmentText = JSON.stringify(assignment);
       expect(assignment.isError, assignmentText).not.toBe(true);
       expect(assignment.structuredContent).toMatchObject({
         schema: "morrow.result.v1", tool: "canvas_get_assignment_submission_summary",
         data: {
-          schema: "morrow.canvas-assignment-submission-summary.v1", course_id: 2, assignment_id: 8, submission_count: 5,
+          schema: "morrow.canvas-assignment-submission-summary.v1", course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID, submission_count: 5,
           workflow_state_counts: { unsubmitted: 1, submitted: 1, graded: 2, pending_review: 1 },
           late_count: 1, missing_count: 1, excused_count: 1, needs_grading_count: 3,
           proof: { needs_grading_count_source: "assignment_record", pages_read: 2 },
         },
       });
 
-      const gradebook = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_course_gradebook_summary", arguments: { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const gradebook = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_course_gradebook_summary", arguments: { course_id: COURSE_ID, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const gradebookText = JSON.stringify(gradebook);
       expect(gradebook.isError, gradebookText).not.toBe(true);
       const gradebookData = (gradebook.structuredContent as { data: { assignments: JsonObject[] } }).data;
       expect(gradebookData.assignments).toEqual(GRADEBOOK_ASSIGNMENTS);
       expect(gradebookData.assignments[1]).toMatchObject({ score_distribution_state: "suppressed_cohort_below_minimum", score_distribution: null });
 
-      const activity = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_course_activity_summary", arguments: { course_id: 2, days: 7, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const activity = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_course_activity_summary", arguments: { course_id: COURSE_ID, days: 7, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const activityText = JSON.stringify(activity);
       expect(activity.isError, activityText).not.toBe(true);
       expect((activity.structuredContent as { data: JsonObject }).data).toMatchObject({
@@ -217,13 +220,13 @@ describe("Canvas course-summary Full MCP exposure", () => {
       override = {
         ...GRADEBOOK_SUMMARY,
         assignments: [{
-          assignment_id: 11, submitted_count: 2, graded_count: 10, ungraded_count: 3, scored_count: 10,
+          assignment_id: GRADEBOOK_IDS[0], submitted_count: 2, graded_count: 10, ungraded_count: 3, scored_count: 10,
           score_distribution_state: "reported",
           score_distribution: { below_60: 1, "60_to_69": 0, "70_to_79": 0, "80_to_89": 0, "90_and_above": 9 },
         }],
         assignment_count: 1,
       } as unknown as JsonObject;
-      const thin = await gateway.call("canvas_get_course_gradebook_summary", { course_id: 2, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
+      const thin = await gateway.call("canvas_get_course_gradebook_summary", { course_id: COURSE_ID, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
       const thinText = JSON.stringify(thin);
       expect(thin.isError).toBe(true);
       expect(thinText).toContain("privacy_output_refused");
@@ -233,13 +236,13 @@ describe("Canvas course-summary Full MCP exposure", () => {
 
       // A source result for a different assignment is refused rather than relabelled.
       override = undefined;
-      const mismatched = await gateway.call("canvas_get_assignment_submission_summary", { course_id: 2, assignment_id: 9, _morrow: { source_binding_id: SOURCE_BINDING_ID } });
+      const mismatched = await gateway.call("canvas_get_assignment_submission_summary", { course_id: COURSE_ID, assignment_id: "9", _morrow: { source_binding_id: SOURCE_BINDING_ID } });
       const mismatchedText = JSON.stringify(mismatched);
       expect(mismatched.isError).toBe(true);
       expect(mismatchedText).toContain("privacy_output_refused");
       expect(mismatchedText).not.toContain("submission_count");
 
-      const disallowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_course_gradebook_summary", arguments: { course_id: 2, _morrow: { source_binding_id: "canvas:wrong-course" } } } });
+      const disallowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_course_gradebook_summary", arguments: { course_id: COURSE_ID, _morrow: { source_binding_id: "canvas:wrong-course" } } } });
       expect(disallowed.isError).toBe(true);
       expect(commands.map((command) => command.toolName).filter((name) => name !== "canvas_list_users_in_course_users")).toHaveLength(5);
       expect(commands.filter((command) => command.toolName === "canvas_list_users_in_course_users")).toHaveLength(8);

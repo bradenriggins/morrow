@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parseGatewayConfig } from "../src/config.js";
 
@@ -10,6 +12,7 @@ function source(overrides: Record<string, unknown> = {}) {
     kind: "mcp-stdio",
     command: "python3",
     args: ["server.py"],
+    cwd: "/tmp/meridian",
     enabled: true,
     sourceDisposition: "clean_reimplementation",
     ...overrides,
@@ -17,6 +20,28 @@ function source(overrides: Record<string, unknown> = {}) {
 }
 
 describe("public-canvas configuration", () => {
+  it("loads the shipped environment-templated public configuration", () => {
+    const path = fileURLToPath(new URL("../../../morrow.upstreams.public-canvas.example.json", import.meta.url));
+    const parsed = parseGatewayConfig(JSON.parse(readFileSync(path, "utf8")), {
+      MORROW_PUBLICATION_POLICY_PATH: "/tmp/publication.json",
+      MORROW_NODE_COMMAND: process.execPath,
+      MORROW_REPOSITORY_ROOT: "/tmp/morrow-release",
+      MORROW_RELEASE_REVISION: revision,
+      MORROW_CANVAS_ENTRYPOINT_SHA256: "c".repeat(64),
+    });
+    expect(parsed.upstreams[0]).toMatchObject({
+      revision,
+      cwd: "/tmp/morrow-release",
+      attestation: {
+        root: "/tmp/morrow-release",
+        expectedRevision: revision,
+        launch: {
+          expectedEntrypointSha256: "c".repeat(64),
+        },
+      },
+    });
+  });
+
   it("requires a publication policy path", () => {
     expect(() => parseGatewayConfig({
       schema: "morrow.upstreams.v1",
@@ -28,6 +53,10 @@ describe("public-canvas configuration", () => {
           root: "/tmp/meridian",
           expectedRevision: revision,
           requireTrackedClean: true,
+          launch: {
+            entrypoint: "server.py",
+            runtime: { kind: "sha256", expectedExecutableSha256: "c".repeat(64) },
+          },
         },
       })],
     })).toThrow(/requires publicationPolicy.path/);
@@ -59,6 +88,10 @@ describe("public-canvas configuration", () => {
           root: "${SOURCE_ROOT}",
           expectedRevision: revision,
           requireTrackedClean: true,
+          launch: {
+            entrypoint: "server.py",
+            runtime: { kind: "sha256", expectedExecutableSha256: "c".repeat(64) },
+          },
         },
       })],
       operationJournal: { path: ":memory:" },
@@ -82,12 +115,17 @@ describe("public-canvas configuration", () => {
         publicationPolicy: { path: "/tmp/public-canvas.json" },
         upstreams: [source({
           sourceDisposition,
+          cwd: "/tmp/adapter",
           revision,
           attestation: {
             kind: "local-git",
             root: "/tmp/adapter",
             expectedRevision: revision,
             requireTrackedClean: true,
+            launch: {
+              entrypoint: "server.py",
+              runtime: { kind: "sha256", expectedExecutableSha256: "c".repeat(64) },
+            },
           },
         })],
       })).toThrow(/public-canvas profile refuses/);

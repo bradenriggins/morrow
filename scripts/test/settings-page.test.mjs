@@ -138,6 +138,23 @@ test("the connected-course summary counts only runtime-verified eligible courses
   assert.equal(page.text("#course-list"), "No connected courses are available. Choose a signed-in site above to find courses you can connect.");
 });
 
+test("a Bridge course-tab status event refreshes the rendered course state", async () => {
+  let bindings = [ANATOMY];
+  const page = await openSettings({ status: () => statusFixture(bindings) });
+  assert.equal(page.text("#connection-status"), "1 connected course is ready to use.");
+  bindings = [{ ...ANATOMY, runtimeVerified: false }];
+
+  page.listeners.message[0]({ type: "morrow_bridge_status_changed" });
+  await page.waitFor(
+    () => page.text("#connection-status") === "0 connected courses are ready to use. 1 saved course needs an open course tab or a reconnected site.",
+    "settings did not refresh after the Bridge invalidated the course tab",
+  );
+  assert.equal(page.query(`[data-binding-id="${ANATOMY.sourceBindingId}"] .course-select`).disabled, false);
+  await page.click(`[data-binding-id="${ANATOMY.sourceBindingId}"] .course-select`);
+  assert.equal(page.query("#mode-edit").disabled, true);
+  assert.equal(page.query("#return-plan").disabled, false);
+});
+
 test("an older settings response cannot replace a newer connected-course state", async () => {
   let call = 0;
   let resolveOlder;
@@ -169,12 +186,17 @@ test("a course search narrows the list, and the pages move through the courses t
   assert.equal(page.text("#announcement"), "8 connected courses, page 1 of 2.");
 
   await page.click("#next-page");
-  assert.deepEqual(listedCourses(page), ["Select Genetics", "Select Immunology"]);
+  assert.deepEqual(listedCourses(page), [
+    "Select Canvas course Genetics (course ID 7) at https://canvas.example.edu for teacher@example.edu",
+    "Select Canvas course Immunology (course ID 8) at https://canvas.example.edu for teacher@example.edu",
+  ]);
   assert.equal(page.text("#page-status"), "Showing 7–8 of 8 matching connected courses. Page 2 of 2.");
   assert.equal(page.query("#next-page").disabled, true);
 
   await page.type("#course-filter", "phys");
-  assert.deepEqual(listedCourses(page), ["Select Physiology"]);
+  assert.deepEqual(listedCourses(page), [
+    "Select Canvas course Physiology (course ID 2) at https://canvas.example.edu for teacher@example.edu",
+  ]);
   assert.equal(page.text("#page-status"), "Showing 1–1 of 1 matching connected course. Page 1 of 1.");
   assert.equal(page.hidden("#course-pages"), true);
   assert.equal(page.text("#announcement"), "Search matches 1 connected course.");
@@ -354,6 +376,7 @@ test("an action Morrow cannot check, or one that removes content, is confirmed b
   await page.click(`#category-list input[value="${DESTRUCTIVE_ACTION.id}"]`);
   await page.click("#save-edit");
   assert.equal(page.hidden("#save-confirmation"), false);
+  assert.equal(page.document.activeElement?.getAttribute("id"), "cancel-save");
   assert.equal(page.text("#save-confirmation-detail"),
     "1 selected action removes course content: Delete page."
     + " Morrow cannot check the saved result for 1 selected action: Add course to favorites. Morrow reports those results as unconfirmed."
@@ -362,6 +385,7 @@ test("an action Morrow cannot check, or one that removes content, is confirmed b
 
   await page.click("#cancel-save");
   assert.equal(page.hidden("#save-confirmation"), true);
+  assert.equal(page.document.activeElement?.getAttribute("id"), "save-edit");
   assert.deepEqual(page.messages("morrow_edit_policy_save"), []);
 
   await page.click("#save-edit");
@@ -462,6 +486,66 @@ test("a state the page cannot read is named as itself, with the next action", as
   const unreadable = await openSettings({ status: () => ({ bindings: [], editDurations: "hourly" }) });
   assert.equal(unreadable.text("#error"), problemText("edit_policy_status_unreadable"));
   assert.equal(unreadable.text("#connection-status"), "Connected courses were not checked.");
+});
+
+test("available Canvas course IDs remain exact decimal strings through selection and readback", async () => {
+  const site = {
+    siteAnchorId: "canvas-site-1", provider: "canvas", origin: "https://canvas.example.edu",
+    principalId: "teacher@example.edu", sessionGeneration: 4, runtimeVerified: true,
+  };
+  const discovery = {
+    ...site,
+    discoveryReceiptId: "discovery-1",
+    expiresAt: Date.now() + 60_000,
+    courses: [{ id: "42", name: "Small ID" }, { id: "9007199254740993", name: "64-bit ID" }],
+    pageNumber: 1, complete: true, courseCount: 2,
+  };
+  let savedCourseIds = null;
+  const page = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [site] }),
+    handlers: {
+      morrow_course_discovery_start: () => discovery,
+      morrow_course_selection_save: ({ siteAnchorId, courseIds }) => {
+        savedCourseIds = courseIds;
+        return {
+          siteAnchorId,
+          bindings: courseIds.map((courseId) => ({ provider: "canvas", courseId })),
+        };
+      },
+    },
+  });
+  await page.click("#discover-courses");
+  await page.waitFor(() => page.queryAll(".available-course-select").length === 2, "the available Canvas courses did not render");
+  assert.deepEqual(
+    page.queryAll(".available-course-select").map((input) => input.getAttribute("aria-label")),
+    [
+      "Select Canvas course Small ID (course ID 42) at https://canvas.example.edu for teacher@example.edu to connect",
+      "Select Canvas course 64-bit ID (course ID 9007199254740993) at https://canvas.example.edu for teacher@example.edu to connect",
+    ],
+  );
+  await page.click('[data-course-id="42"] .available-course-select');
+  await page.click('[data-course-id="9007199254740993"] .available-course-select');
+  await page.click("#connect-selected");
+  await page.waitFor(() => savedCourseIds !== null, "the selected Canvas courses were not sent");
+  assert.deepEqual(savedCourseIds, ["42", "9007199254740993"]);
+  assert.equal(savedCourseIds.every((courseId) => typeof courseId === "string"), true);
+  assert.equal(page.hidden("#error"), true);
+
+  const malformed = await openSettings({
+    status: () => statusFixture([], { siteAnchors: [site] }),
+    handlers: {
+      morrow_course_discovery_start: () => ({
+        ...discovery,
+        discoveryReceiptId: "discovery-invalid",
+        courses: [{ id: "01", name: "Noncanonical ID" }],
+        courseCount: 1,
+      }),
+    },
+  });
+  await malformed.click("#discover-courses");
+  await malformed.waitFor(() => !malformed.hidden("#error"), "the malformed Canvas course ID was not refused");
+  assert.equal(malformed.text("#error"), problemText("course_discovery_failed"));
+  assert.equal(malformed.queryAll(".available-course-select").length, 0);
 });
 
 test("course file access is off until Chrome grants it, and off again the moment Chrome takes it back", async () => {
@@ -596,6 +680,13 @@ test("after Disconnect Morrow course file access reads off, even when Chrome kee
   assert.equal(page.text("#enable-file-storage"), "Turn on course file access");
   assert.equal(page.hidden("#enable-file-storage"), false);
   // The page corrected nothing: the disconnect left the opt-in off on its own.
-  assert.deepEqual(page.storage, {});
-  assert.deepEqual(local, {});
+  for (const saved of [page.storage, local]) {
+    assert.equal(saved[COURSE_FILE_ACCESS_KEY], undefined);
+    assert.equal(saved.token, undefined);
+    assert.equal(saved.pairing, undefined);
+    assert.match(saved.pairingAuthority.generation, /^[0-9a-f-]{36}$/u);
+    assert.equal(saved.pairingAuthority.schema, "morrow.bridge-pairing-authority.v1");
+    assert.equal(saved.pairingAuthority.status, "disconnected");
+    assert.equal(Number.isSafeInteger(saved.pairingAuthority.changedAt), true);
+  }
 });

@@ -1,8 +1,8 @@
-import { lstat, readFile, stat } from "node:fs/promises";
+import { lstat, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { isJsonObject } from "@morrow/contracts";
-import { privateFileAccessAccepted } from "@morrow/gateway-core";
+import { decodeExactUtf8, privateFileAccessAccepted, readExactPrivateStateFile } from "@morrow/gateway-core";
 import { BLACKBOARD_ID, blackboardPrincipalVerification, type BlackboardCourseBinding, type BlackboardPrincipalVerification, type BlackboardPublicTenant, type BlackboardTenant } from "./types.js";
 import { deriveBlackboardSourceBindingId } from "./binding.js";
 
@@ -18,6 +18,14 @@ interface CredentialFile {
 }
 
 const CREDENTIAL_REVISION = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const MAX_CONFIG_BYTES = 1_048_576;
+const MAX_CREDENTIAL_BYTES = 16_384;
+
+function exactPrivateJson(path: string, label: string, maxBytes: number): unknown {
+  const bytes = readExactPrivateStateFile(path, { label, maxBytes, minBytes: 1 });
+  if (bytes === null) throw new TypeError(`${label} is unavailable`);
+  return JSON.parse(decodeExactUtf8(bytes, label)) as unknown;
+}
 
 function exactString(value: unknown, label: string, max = 500): string {
   if (typeof value !== "string" || !value.trim() || value.trim().length > max) throw new TypeError(`${label} is invalid`);
@@ -117,8 +125,8 @@ async function credentialFor(
   if (!metadata.isFile() || metadata.isSymbolicLink() || !privateFileAccessAccepted(path, metadata.mode, { trustedRoot: homedir() })) {
     throw new TypeError("Blackboard credential access is not private");
   }
-  if (metadata.size > 16_384) throw new TypeError("Blackboard credential file is invalid");
-  const document = JSON.parse(await readFile(path, "utf8")) as unknown;
+  if (metadata.size > MAX_CREDENTIAL_BYTES) throw new TypeError("Blackboard credential file is invalid");
+  const document = exactPrivateJson(path, "Blackboard credential file", MAX_CREDENTIAL_BYTES);
   return parseCredentialFile(document, expectedRevision).applicationSecret;
 }
 
@@ -173,8 +181,8 @@ export async function loadBlackboardLearnConfig(
     || (!insideHome && !await ancestorDirectoriesAccepted(path))) {
     throw new TypeError("Blackboard configuration access is not private");
   }
-  if (metadata.size > 1_048_576) throw new TypeError("Blackboard configuration is invalid");
-  const parsed = parseConfig(JSON.parse(await readFile(path, "utf8")) as unknown);
+  if (metadata.size > MAX_CONFIG_BYTES) throw new TypeError("Blackboard configuration is invalid");
+  const parsed = parseConfig(exactPrivateJson(path, "Blackboard configuration", MAX_CONFIG_BYTES));
   const tenantIds = new Set<string>();
   const tenants: BlackboardTenant[] = [];
   for (const entry of parsed.tenants) {

@@ -11,6 +11,9 @@ import { executeCanvasCourseSummaryInPage } from "../../connector/extension/src/
 const ASSIGNMENT_SUMMARY = "canvas.api.v1.course.assignment.submissions.aggregate.read.v1";
 const GRADEBOOK_SUMMARY = "canvas.api.v1.course.gradebook.aggregate.read.v1";
 const ACTIVITY_SUMMARY = "canvas.api.v1.course.activity.aggregate.read.v1";
+const COURSE_ID = "9007199254740993";
+const ASSIGNMENT_ID = "9007199254740995";
+const GRADEBOOK_IDS = ["9007199254740997", "9007199254740999", "9007199254741001", "9007199254741003"];
 const TOOLS = Object.freeze({
   [ASSIGNMENT_SUMMARY]: "canvas_get_assignment_submission_summary",
   [GRADEBOOK_SUMMARY]: "canvas_get_course_gradebook_summary",
@@ -56,53 +59,53 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
   let browser;
   const day = 24 * 60 * 60 * 1_000;
   const ago = (days) => new Date(Date.now() - (days * day)).toISOString();
-  const assignmentSubmissionsPath = "/api/v1/courses/2/assignments/8/submissions";
-  const courseSubmissionsPath = "/api/v1/courses/2/students/submissions";
+  const assignmentSubmissionsPath = `/api/v1/courses/${COURSE_ID}/assignments/${ASSIGNMENT_ID}/submissions`;
+  const courseSubmissionsPath = `/api/v1/courses/${COURSE_ID}/students/submissions`;
   const assignmentRows = () => [
-    { id: 11, name: "Private assignment title", points_possible: 100, updated_at: ago(1) },
-    { id: 12, name: "Private assignment title", points_possible: 100, updated_at: ago(2) },
-    { id: 13, name: "Private assignment title", points_possible: 50, updated_at: ago(40) },
-    { id: 14, name: "Private assignment title", points_possible: 0, updated_at: ago(40) },
+    { id: GRADEBOOK_IDS[0], name: "Private assignment title", points_possible: 100, updated_at: ago(1) },
+    { id: GRADEBOOK_IDS[1], name: "Private assignment title", points_possible: 100, updated_at: ago(2) },
+    { id: GRADEBOOK_IDS[2], name: "Private assignment title", points_possible: 50, updated_at: ago(40) },
+    { id: GRADEBOOK_IDS[3], name: "Private assignment title", points_possible: 0, updated_at: ago(40) },
   ];
   const courseSubmissionRows = (page) => {
     if (mode === "duplicate-gradebook-submission") {
-      return [learnerRow(11, "graded", { submission_id: 9_901, score: 95, excused: false })];
+      return [learnerRow(GRADEBOOK_IDS[0], "graded", { submission_id: 9_901, score: 95, excused: false })];
     }
     if (page === "2") {
       return [
-        ...scoredRows(13, 5, 48),
-        learnerRow(13, "graded", { score: 20, excused: false }),
-        ...scoredRows(14, 2, 0),
+        ...scoredRows(GRADEBOOK_IDS[2], 5, 48),
+        learnerRow(GRADEBOOK_IDS[2], "graded", { score: 20, excused: false }),
+        ...scoredRows(GRADEBOOK_IDS[3], 2, 0),
       ];
     }
     return [
-      ...scoredRows(11, 10, 95),
-      learnerRow(11, "submitted"),
-      learnerRow(11, "submitted"),
-      learnerRow(11, "pending_review"),
-      learnerRow(11, "unsubmitted"),
-      learnerRow(12, "graded", { score: 90, excused: false }),
-      learnerRow(12, "graded", { score: 80, excused: false }),
-      learnerRow(12, "graded", { score: 70, excused: false }),
+      ...scoredRows(GRADEBOOK_IDS[0], 10, 95),
+      learnerRow(GRADEBOOK_IDS[0], "submitted"),
+      learnerRow(GRADEBOOK_IDS[0], "submitted"),
+      learnerRow(GRADEBOOK_IDS[0], "pending_review"),
+      learnerRow(GRADEBOOK_IDS[0], "unsubmitted"),
+      learnerRow(GRADEBOOK_IDS[1], "graded", { score: 90, excused: false }),
+      learnerRow(GRADEBOOK_IDS[1], "graded", { score: 80, excused: false }),
+      learnerRow(GRADEBOOK_IDS[1], "graded", { score: 70, excused: false }),
     ];
   };
   const assignmentSubmissionRows = (page) => {
-    if (mode === "unknown-state") return [learnerRow(8, "returned")];
+    if (mode === "unknown-state") return [learnerRow(ASSIGNMENT_ID, "returned")];
     if (mode === "wrong-assignment") return [learnerRow(9, "graded")];
-    if (mode === "overflow") return [learnerRow(8, "graded")];
+    if (mode === "overflow") return [learnerRow(ASSIGNMENT_ID, "graded")];
     if (mode === "duplicate-assignment-submission") {
-      return [learnerRow(8, "graded", { submission_id: 9_902, late: false, missing: false, excused: false })];
+      return [learnerRow(ASSIGNMENT_ID, "graded", { submission_id: 9_902, late: false, missing: false, excused: false })];
     }
     if (page === "2") {
       return [
-        learnerRow(8, "unsubmitted", { late: false, missing: true, excused: false }),
-        learnerRow(8, "graded", { late: false, missing: false, excused: true }),
+        learnerRow(ASSIGNMENT_ID, "unsubmitted", { late: false, missing: true, excused: false }),
+        learnerRow(ASSIGNMENT_ID, "graded", { late: false, missing: false, excused: true }),
       ];
     }
     return [
-      learnerRow(8, "graded", { late: false, missing: false, excused: false }),
-      learnerRow(8, "submitted", { late: true, missing: false, excused: null }),
-      learnerRow(8, "pending_review", { late: false, missing: false }),
+      learnerRow(ASSIGNMENT_ID, "graded", { late: false, missing: false, excused: false }),
+      learnerRow(ASSIGNMENT_ID, "submitted", { late: true, missing: false, excused: null }),
+      learnerRow(ASSIGNMENT_ID, "pending_review", { late: false, missing: false }),
     ];
   };
   const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
@@ -114,17 +117,17 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
       response.end(JSON.stringify(body));
     };
     const nextLink = (path, query) => ({ link: `<${origin}${path}?${query}&page=2>; rel="next"` });
-    if (target.pathname === "/courses/2") {
+    if (target.pathname === `/courses/${COURSE_ID}`) {
       response.writeHead(200, { "content-type": "text/html" });
       response.end("<!doctype html><title>Canvas fixture</title>");
       return;
     }
     if (target.pathname === "/api/v1/users/self/profile") return json({ id: 3, name: "Instructor Private", primary_email: "instructor@example.edu", session: PRIVATE_SESSION });
-    if (target.pathname === "/api/v1/courses/2") return json({ id: 2, name: "Private course name" });
-    if (target.pathname === "/api/v1/courses/2/assignments/8") {
+    if (target.pathname === `/api/v1/courses/${COURSE_ID}`) return json({ id: COURSE_ID, name: "Private course name" });
+    if (target.pathname === `/api/v1/courses/${COURSE_ID}/assignments/${ASSIGNMENT_ID}`) {
       if (mode === "wrong-assignment-record") return json({ id: 9, name: "Private assignment title" });
       return json({
-        id: 8,
+        id: ASSIGNMENT_ID,
         name: "Private assignment title",
         ...(mode === "no-needs-grading" ? {} : { needs_grading_count: 3 }),
       });
@@ -141,8 +144,8 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
       const headers = page ? {} : nextLink(courseSubmissionsPath, "student_ids%5B%5D=all&per_page=100");
       return json(courseSubmissionRows(page), headers);
     }
-    if (target.pathname === "/api/v1/courses/2/assignments") return json(assignmentRows());
-    if (target.pathname === "/api/v1/courses/2/pages") {
+    if (target.pathname === `/api/v1/courses/${COURSE_ID}/assignments`) return json(assignmentRows());
+    if (target.pathname === `/api/v1/courses/${COURSE_ID}/pages`) {
       const rows = [
         { page_id: 21, title: "Private page title", updated_at: ago(1) },
         { page_id: 22, title: "Private page title", updated_at: ago(2) },
@@ -150,18 +153,18 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
       ];
       return json(mode === "duplicate-activity-item" ? [rows[0], rows[0]] : rows);
     }
-    if (target.pathname === "/api/v1/courses/2/discussion_topics") {
+    if (target.pathname === `/api/v1/courses/${COURSE_ID}/discussion_topics`) {
       return json([
         { id: 31, title: "Private discussion title", updated_at: ago(1) },
         { id: 32, title: "Private discussion title", updated_at: ago(60) },
       ]);
     }
-    if (target.pathname === "/api/v1/courses/2/quizzes") {
+    if (target.pathname === `/api/v1/courses/${COURSE_ID}/quizzes`) {
       return json(mode === "quiz-timestamps"
         ? [{ id: 41, title: "Private assignment title", updated_at: ago(3) }, { id: 42, title: "Private assignment title", updated_at: ago(90) }]
         : [{ id: 41, title: "Private assignment title" }, { id: 42, title: "Private assignment title" }]);
     }
-    if (target.pathname === "/api/v1/courses/2/modules") return json([{ id: 51, name: "Private page title", updated_at: ago(1) }]);
+    if (target.pathname === `/api/v1/courses/${COURSE_ID}/modules`) return json([{ id: 51, name: "Private page title", updated_at: ago(1) }]);
     response.writeHead(404).end();
   });
   try {
@@ -171,13 +174,13 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     origin = `https://127.0.0.1:${address.port}`;
     browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
-    await page.goto(`${origin}/courses/2`);
+    await page.goto(`${origin}/courses/${COURSE_ID}`);
     const invoke = (key, args, binding, expiresAt = Date.now() + 60_000) => page.evaluate(
       executeCanvasCourseSummaryInPage,
       JSON.stringify({
         operation: { key, toolName: TOOLS[key], provider: "canvas", readOnly: true },
         arguments: args,
-        binding: binding || { origin, siteUrl: `${origin}/courses/2`, principalId: "3", courseId: "2" },
+        binding: binding || { origin, siteUrl: `${origin}/courses/${COURSE_ID}`, principalId: "3", courseId: COURSE_ID },
         expiresAt,
       }),
     );
@@ -192,32 +195,32 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     // Arguments are checked before any provider request.
     const beforeInvalid = requestCount(assignmentSubmissionsPath);
     assert.deepEqual(
-      await invoke(ASSIGNMENT_SUMMARY, { course_id: 9, assignment_id: 8 }),
+      await invoke(ASSIGNMENT_SUMMARY, { course_id: "9", assignment_id: ASSIGNMENT_ID }),
       { ok: false, sent: false, error: "canvas_assignment_submission_summary_arguments_invalid" },
     );
     assert.deepEqual(
-      await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 }, undefined, Date.now() - 1),
+      await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID }, undefined, Date.now() - 1),
       { ok: false, sent: false, error: "canvas_assignment_submission_summary_arguments_invalid" },
     );
     assert.deepEqual(
-      await invoke(ACTIVITY_SUMMARY, { course_id: 2, days: 0 }),
+      await invoke(ACTIVITY_SUMMARY, { course_id: COURSE_ID, days: 0 }),
       { ok: false, sent: false, error: "canvas_course_activity_summary_arguments_invalid" },
     );
     assert.deepEqual(
-      await invoke(GRADEBOOK_SUMMARY, { course_id: 2, assignment_id: 8 }),
+      await invoke(GRADEBOOK_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID }),
       { ok: false, sent: false, error: "canvas_course_gradebook_summary_arguments_invalid" },
     );
     assert.equal(requestCount(assignmentSubmissionsPath), beforeInvalid);
 
     // 1. Assignment submission summary.
-    const assignmentSummary = await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 });
+    const assignmentSummary = await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID });
     assert.equal(assignmentSummary.ok, true, JSON.stringify(assignmentSummary));
     assert.match(assignmentSummary.snapshot_digest, /^[0-9a-f]{64}$/);
     assert.deepEqual(assignmentSummary.data, {
       schema: "morrow.canvas-assignment-submission-summary.v1",
       provider: "canvas",
-      course_id: 2,
-      assignment_id: 8,
+      course_id: COURSE_ID,
+      assignment_id: ASSIGNMENT_ID,
       submission_count: 5,
       workflow_state_counts: { unsubmitted: 1, submitted: 1, graded: 2, pending_review: 1 },
       late_count: 1,
@@ -236,24 +239,24 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     noLeak(assignmentSummary);
 
     mode = "no-needs-grading";
-    const withoutNeedsGrading = await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 });
+    const withoutNeedsGrading = await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID });
     assert.equal(withoutNeedsGrading.data.needs_grading_count, null);
     assert.equal(withoutNeedsGrading.data.proof.needs_grading_count_source, "unavailable");
 
     // 2. Gradebook summary: a small cohort is suppressed instead of bucketed.
     mode = "complete";
-    const gradebook = await invoke(GRADEBOOK_SUMMARY, { course_id: 2 });
+    const gradebook = await invoke(GRADEBOOK_SUMMARY, { course_id: COURSE_ID });
     assert.equal(gradebook.ok, true, JSON.stringify(gradebook));
     assert.deepEqual(gradebook.data, {
       schema: "morrow.canvas-course-gradebook-summary.v1",
       provider: "canvas",
-      course_id: 2,
+      course_id: COURSE_ID,
       assignment_count: 4,
       submission_count: 25,
       minimum_cohort: 5,
       assignments: [
         {
-          assignment_id: 11,
+          assignment_id: GRADEBOOK_IDS[0],
           submitted_count: 2,
           graded_count: 10,
           ungraded_count: 3,
@@ -262,7 +265,7 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
           score_distribution: { below_60: 0, "60_to_69": 0, "70_to_79": 0, "80_to_89": 0, "90_and_above": 10 },
         },
         {
-          assignment_id: 12,
+          assignment_id: GRADEBOOK_IDS[1],
           submitted_count: 0,
           graded_count: 3,
           ungraded_count: 0,
@@ -271,7 +274,7 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
           score_distribution: null,
         },
         {
-          assignment_id: 13,
+          assignment_id: GRADEBOOK_IDS[2],
           submitted_count: 0,
           graded_count: 6,
           ungraded_count: 0,
@@ -280,7 +283,7 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
           score_distribution: null,
         },
         {
-          assignment_id: 14,
+          assignment_id: GRADEBOOK_IDS[3],
           submitted_count: 0,
           graded_count: 2,
           ungraded_count: 0,
@@ -304,7 +307,7 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     noLeak(gradebook);
 
     // 3. Course activity summary: a kind without the timestamp is not counted as unchanged.
-    const activity = await invoke(ACTIVITY_SUMMARY, { course_id: 2, days: 7 });
+    const activity = await invoke(ACTIVITY_SUMMARY, { course_id: COURSE_ID, days: 7 });
     assert.equal(activity.ok, true, JSON.stringify(activity));
     assert.deepEqual(activity.data.kinds, {
       pages: { state: "counted", changed_count: 2, item_count: 3 },
@@ -326,53 +329,53 @@ test("Canvas course summaries aggregate in the page and publish counts only", as
     noLeak(activity);
 
     mode = "quiz-timestamps";
-    const countedQuizzes = await invoke(ACTIVITY_SUMMARY, { course_id: 2, days: 7 });
+    const countedQuizzes = await invoke(ACTIVITY_SUMMARY, { course_id: COURSE_ID, days: 7 });
     assert.deepEqual(countedQuizzes.data.kinds.quizzes, { state: "counted", changed_count: 1, item_count: 2 });
 
     // 4. Refusals: an unreadable row, a changed target, a foreign or extended
     //    pagination link, and a read that reaches the page cap.
     mode = "unknown-state";
     assert.deepEqual(
-      await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 }),
+      await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID }),
       { ok: false, sent: false, error: "canvas_assignment_submission_summary_response_invalid" },
     );
     mode = "wrong-assignment";
     assert.deepEqual(
-      await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 }),
+      await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID }),
       { ok: false, sent: false, error: "canvas_assignment_submission_summary_response_invalid" },
     );
     mode = "duplicate-assignment-submission";
     assert.deepEqual(
-      await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 }),
+      await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID }),
       { ok: false, sent: false, error: "canvas_assignment_submission_summary_response_invalid" },
     );
     mode = "duplicate-gradebook-submission";
     assert.deepEqual(
-      await invoke(GRADEBOOK_SUMMARY, { course_id: 2 }),
+      await invoke(GRADEBOOK_SUMMARY, { course_id: COURSE_ID }),
       { ok: false, sent: false, error: "canvas_course_gradebook_summary_response_invalid" },
     );
     mode = "duplicate-activity-item";
     assert.deepEqual(
-      await invoke(ACTIVITY_SUMMARY, { course_id: 2, days: 7 }),
+      await invoke(ACTIVITY_SUMMARY, { course_id: COURSE_ID, days: 7 }),
       { ok: false, sent: false, error: "canvas_course_activity_summary_response_invalid" },
     );
     mode = "wrong-assignment-record";
     assert.deepEqual(
-      await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 }),
+      await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID }),
       { ok: false, sent: false, error: "canvas_assignment_submission_summary_target_unavailable" },
     );
     for (const refusal of ["off-origin", "foreign-parameter"]) {
       mode = refusal;
       const before = requestCount(assignmentSubmissionsPath);
       assert.deepEqual(
-        await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 }),
+        await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID }),
         { ok: false, sent: false, error: "canvas_assignment_submission_summary_pagination_refused" },
       );
       assert.equal(requestCount(assignmentSubmissionsPath) - before, 1);
     }
     mode = "overflow";
     const beforeOverflow = requestCount(assignmentSubmissionsPath);
-    const truncated = await invoke(ASSIGNMENT_SUMMARY, { course_id: 2, assignment_id: 8 });
+    const truncated = await invoke(ASSIGNMENT_SUMMARY, { course_id: COURSE_ID, assignment_id: ASSIGNMENT_ID });
     assert.deepEqual(truncated, { ok: false, sent: false, complete: false, error: "canvas_assignment_submission_summary_incomplete" });
     assert.equal(requestCount(assignmentSubmissionsPath) - beforeOverflow, 25);
   } finally {

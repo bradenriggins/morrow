@@ -1,18 +1,75 @@
 import { randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
-import { chmodSync, lstatSync, linkSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
-import { localOwnerSidecarAccessAccepted } from "./local-owner-sidecar-access.js";
+import { lstatSync, realpathSync, statSync, unlinkSync } from "node:fs";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
+import {
+  canonicalPrivateStateFilePath,
+  createExactPrivateStateFile,
+  decodeExactUtf8,
+  processMatchesRecordedLifetime,
+  readExactPrivateStateFile,
+  replaceExactPrivateStateFile,
+  withExactPrivateStateFileTransaction,
+  type ProcessLifetimeMatcher,
+} from "@morrow/gateway-core";
+import { RuntimeStateLease } from "./state-lease.js";
+
+export { processMatchesRecordedLifetime } from "@morrow/gateway-core";
 
 export const LOCAL_OWNER_MAINTENANCE_SCHEMA = "morrow.local-owner-maintenance.v1";
 export const LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA = "morrow.local-owner-maintenance.request.v1";
 export const LOCAL_OWNER_MAINTENANCE_PATH = "/morrow-maintenance/v1";
 const LOCAL_OWNER_SCHEMA = "morrow.local-owner.v1";
 const LOOPBACK_HOST = "127.0.0.1";
+const LOCAL_OWNER_DESCRIPTOR_SUFFIX = ".local-owner.json";
+const LOCAL_OWNER_MAINTENANCE_SUFFIX = ".local-owner-maintenance.json";
+const LOCAL_OWNER_DESCRIPTOR_FILE_OPTIONS = {
+  label: "local owner descriptor",
+  minBytes: 1,
+  maxBytes: 4_096,
+} as const;
+const LOCAL_OWNER_MAINTENANCE_FILE_OPTIONS = {
+  label: "local owner maintenance lease",
+  minBytes: 1,
+  maxBytes: 4_096,
+} as const;
+const LOCAL_OWNER_MAINTENANCE_TRANSACTION_OPTIONS = {
+  label: "local owner maintenance lease",
+  timeoutMs: 1_000,
+} as const;
+const LOCAL_OWNER_MAINTENANCE_RESPONSE_MAX_BYTES = 8_192;
+const LOCAL_OWNER_MAINTENANCE_RESPONSE_TIMEOUT_MS = 60_000;
+const LOCAL_OWNER_ENDPOINT_KEYS = [
+  "configDigest",
+  "journalPath",
+  "nonce",
+  "pid",
+  "port",
+  "schema",
+  "startedAt",
+  "token",
+] as const;
+const LOCAL_OWNER_MAINTENANCE_KEYS = [
+  "acquiredAt",
+  "configDigest",
+  "holderPid",
+  "journalPath",
+  "leaseId",
+  "leaseToken",
+  "monitorProxyPid",
+  "ownerNonce",
+  "ownerPid",
+  "ownerPort",
+  "ownerTokenDigest",
+  "recovery",
+  "schema",
+  "workspaceRoot",
+] as const;
 
 export type LocalOwnerBridgeMaintenanceControl =
   | { readonly action: "status" }
   | { readonly action: "quiesce" }
   | { readonly action: "readback" }
+  | { readonly action: "commit"; readonly previousManifestVersion: string; readonly quiesceEpoch: string }
   | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true };
 
 export interface LocalOwnerIdentity {
@@ -22,6 +79,7 @@ export interface LocalOwnerIdentity {
   readonly token: string;
   readonly journalPath: string;
   readonly configDigest: string;
+  readonly startedAt: string;
 }
 
 export interface LocalOwnerMaintenanceLease {
@@ -53,6 +111,7 @@ export interface LocalOwnerMaintenanceOwnerRecoveryInput {
   readonly previousLeaseId: string;
   readonly previousLeaseToken: string;
   readonly processAlive?: (pid: number) => boolean;
+  readonly processMatches?: ProcessLifetimeMatcher;
 }
 
 export interface LocalOwnerMaintenanceClearInput {
@@ -60,6 +119,13 @@ export interface LocalOwnerMaintenanceClearInput {
   /** The new desktop holder after a private recovery, when applicable. */
   readonly holderPid?: number;
   readonly processAlive?: (pid: number) => boolean;
+  readonly processMatches?: ProcessLifetimeMatcher;
+}
+
+export interface LocalOwnerStoppedMaintenanceInput {
+  readonly holderPid: number;
+  readonly workspaceRoot: string;
+  readonly processMatches?: ProcessLifetimeMatcher;
 }
 
 interface LocalOwnerEndpoint {
@@ -163,8 +229,15 @@ function exactPid(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 2_147_483_647 ? Number(value) : null;
 }
 
+function lifetimeMatcher(input: { processAlive?: (pid: number) => boolean; processMatches?: ProcessLifetimeMatcher }): ProcessLifetimeMatcher {
+  if (input.processMatches) return input.processMatches;
+  if (input.processAlive) return (pid) => input.processAlive!(pid);
+  return processMatchesRecordedLifetime;
+}
+
 function uuid(value: unknown): value is string {
-  return typeof value === "string" && /^[0-9a-f-]{36}$/i.test(value);
+  return typeof value === "string"
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(value);
 }
 
 function token(value: unknown): value is string {
@@ -195,6 +268,13 @@ export function normalizeLocalOwnerBridgeMaintenanceControl(value: unknown): Loc
   const keys = Object.keys(source);
   if ((source.action === "status" || source.action === "quiesce" || source.action === "readback")
     && keys.length === 1 && keys[0] === "action") return { action: source.action };
+  if (source.action === "commit" && keys.length === 3
+    && ["action", "previousManifestVersion", "quiesceEpoch"].every((key) => keys.includes(key))
+    && typeof source.previousManifestVersion === "string"
+    && /^(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*)){0,3}$/.test(source.previousManifestVersion)
+    && typeof source.quiesceEpoch === "string" && /^[A-Za-z0-9._-]{16,256}$/.test(source.quiesceEpoch)) {
+    return { action: "commit", previousManifestVersion: source.previousManifestVersion, quiesceEpoch: source.quiesceEpoch };
+  }
   if (source.action !== "resume" || keys.length !== 3
     || !["action", "quiesceEpoch", "fileLayerRestored"].every((key) => keys.includes(key))
     || typeof source.quiesceEpoch !== "string" || !/^[A-Za-z0-9._-]{16,256}$/.test(source.quiesceEpoch)
@@ -213,37 +293,53 @@ function exactSecret(left: string, right: string): boolean {
 }
 
 export function localOwnerMaintenancePath(journalPath: string): string {
-  return `${resolve(journalPath)}.local-owner-maintenance.json`;
+  return `${canonicalLocalOwnerJournalPath(journalPath)}${LOCAL_OWNER_MAINTENANCE_SUFFIX}`;
 }
 
 function ownerDescriptorPath(journalPath: string): string {
-  return `${resolve(journalPath)}.local-owner.json`;
+  return `${canonicalLocalOwnerJournalPath(journalPath)}${LOCAL_OWNER_DESCRIPTOR_SUFFIX}`;
+}
+
+function canonicalLocalOwnerJournalPath(journalPath: string): string {
+  return canonicalPrivateStateFilePath(resolve(journalPath), "local owner state");
+}
+
+function canonicalRecordedJournalPath(journalPath: string): string | null {
+  if (!isAbsolute(journalPath) || /[\0\r\n]/.test(journalPath)) return null;
+  const requested = resolve(journalPath);
+  try {
+    return resolve(realpathSync(dirname(requested)), basename(requested));
+  } catch {
+    return null;
+  }
 }
 
 function parseLocalOwnerEndpoint(value: string, journalPath: string): LocalOwnerEndpoint | null {
   try {
-    const parsed = JSON.parse(value) as Partial<LocalOwnerEndpoint>;
+    const candidate = JSON.parse(value) as unknown;
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)
+      || Object.keys(candidate).sort().join("\0") !== LOCAL_OWNER_ENDPOINT_KEYS.join("\0")) return null;
+    const parsed = candidate as Partial<LocalOwnerEndpoint>;
     if (parsed.schema !== LOCAL_OWNER_SCHEMA
       || !uuid(parsed.nonce)
       || exactPid(parsed.pid) === null
       || !Number.isSafeInteger(parsed.port) || Number(parsed.port) < 1 || Number(parsed.port) > 65_535
       || !token(parsed.token)
-      || typeof parsed.journalPath !== "string" || resolve(parsed.journalPath) !== journalPath
+      || typeof parsed.journalPath !== "string" || canonicalRecordedJournalPath(parsed.journalPath) !== journalPath
       || !digest(parsed.configDigest)
-      || typeof parsed.startedAt !== "string") return null;
-    return parsed as LocalOwnerEndpoint;
+      || typeof parsed.startedAt !== "string" || !Number.isFinite(Date.parse(parsed.startedAt))
+      || new Date(parsed.startedAt).toISOString() !== parsed.startedAt) return null;
+    return { ...parsed, journalPath } as LocalOwnerEndpoint;
   } catch {
     return null;
   }
 }
 
 function readLocalOwnerEndpoint(journalPathValue: string): LocalOwnerEndpoint | null {
-  const journalPath = resolve(journalPathValue);
-  const path = ownerDescriptorPath(journalPath);
   try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || !localOwnerSidecarAccessAccepted(path, stat.mode)) return null;
-    return parseLocalOwnerEndpoint(readFileSync(path, "utf8"), journalPath);
+    const journalPath = canonicalLocalOwnerJournalPath(journalPathValue);
+    const content = readExactPrivateStateFile(ownerDescriptorPath(journalPath), LOCAL_OWNER_DESCRIPTOR_FILE_OPTIONS);
+    return content ? parseLocalOwnerEndpoint(decodeExactUtf8(content, "local owner descriptor"), journalPath) : null;
   } catch {
     return null;
   }
@@ -251,7 +347,10 @@ function readLocalOwnerEndpoint(journalPathValue: string): LocalOwnerEndpoint | 
 
 function parseLease(value: string, journalPath: string): LocalOwnerMaintenanceLease | null {
   try {
-    const parsed = JSON.parse(value) as Partial<LocalOwnerMaintenanceLease>;
+    const candidate = JSON.parse(value) as unknown;
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)
+      || Object.keys(candidate).sort().join("\0") !== LOCAL_OWNER_MAINTENANCE_KEYS.join("\0")) return null;
+    const parsed = candidate as Partial<LocalOwnerMaintenanceLease>;
     if (
       parsed.schema !== LOCAL_OWNER_MAINTENANCE_SCHEMA
       || !uuid(parsed.leaseId)
@@ -260,96 +359,94 @@ function parseLease(value: string, journalPath: string): LocalOwnerMaintenanceLe
       || (parsed.ownerPid !== null && exactPid(parsed.ownerPid) === null)
       || (parsed.ownerPort !== null && (!Number.isSafeInteger(parsed.ownerPort) || Number(parsed.ownerPort) < 1 || Number(parsed.ownerPort) > 65_535))
       || (parsed.ownerTokenDigest !== null && !digest(parsed.ownerTokenDigest))
-      || typeof parsed.journalPath !== "string" || resolve(parsed.journalPath) !== journalPath
+      || typeof parsed.journalPath !== "string" || canonicalRecordedJournalPath(parsed.journalPath) !== journalPath
       || !digest(parsed.configDigest)
       || exactPid(parsed.holderPid) === null
       || exactPid(parsed.monitorProxyPid) === null
       || !exactWorkspace(parsed.workspaceRoot)
-      || typeof parsed.acquiredAt !== "string"
+      || typeof parsed.acquiredAt !== "string" || !Number.isFinite(Date.parse(parsed.acquiredAt))
+      || new Date(parsed.acquiredAt).toISOString() !== parsed.acquiredAt
       || typeof parsed.recovery !== "boolean"
     ) return null;
     if ((parsed.ownerNonce === null) !== (parsed.ownerPid === null)
       || (parsed.ownerPid === null) !== (parsed.ownerPort === null)
       || (parsed.ownerPort === null) !== (parsed.ownerTokenDigest === null)) return null;
-    return parsed as LocalOwnerMaintenanceLease;
+    return { ...parsed, journalPath } as LocalOwnerMaintenanceLease;
   } catch {
     return null;
   }
 }
 
 export function readLocalOwnerMaintenanceLease(journalPathValue: string): LocalOwnerMaintenanceLease | null {
-  const journalPath = resolve(journalPathValue);
-  const path = localOwnerMaintenancePath(journalPath);
   try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || !localOwnerSidecarAccessAccepted(path, stat.mode)) return null;
-    return parseLease(readFileSync(path, "utf8"), journalPath);
+    const journalPath = canonicalLocalOwnerJournalPath(journalPathValue);
+    const content = readExactPrivateStateFile(localOwnerMaintenancePath(journalPath), LOCAL_OWNER_MAINTENANCE_FILE_OPTIONS);
+    return content ? parseLease(decodeExactUtf8(content, "local owner maintenance lease"), journalPath) : null;
   } catch {
     return null;
   }
 }
 
 export function localOwnerMaintenanceMarkerPresent(journalPathValue: string): boolean {
-  try { lstatSync(localOwnerMaintenancePath(resolve(journalPathValue))); return true; } catch { return false; }
+  try {
+    lstatSync(localOwnerMaintenancePath(journalPathValue));
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code !== "ENOENT";
+  }
 }
 
 export function maintenanceLeaseFingerprint(journalPathValue: string): string | null {
-  const path = localOwnerMaintenancePath(resolve(journalPathValue));
   try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || !localOwnerSidecarAccessAccepted(path, stat.mode)) return null;
-    return createHash("sha256").update(readFileSync(path)).digest("hex");
+    const journalPath = canonicalLocalOwnerJournalPath(journalPathValue);
+    const path = localOwnerMaintenancePath(journalPath);
+    const content = readExactPrivateStateFile(path, LOCAL_OWNER_MAINTENANCE_FILE_OPTIONS);
+    return content && parseLease(decodeExactUtf8(content, "local owner maintenance lease"), journalPath)
+      ? createHash("sha256").update(content).digest("hex")
+      : null;
   } catch {
     return null;
   }
 }
 
 function writeExclusive(path: string, lease: LocalOwnerMaintenanceLease): void {
-  const temporary = `${path}.${lease.leaseId}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(lease)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    safeChmod(temporary, 0o600);
-    linkSync(temporary, path);
-    safeChmod(path, 0o600);
-    safeChmod(dirname(path), 0o700);
-  } finally {
-    try { unlinkSync(temporary); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  const journalPath = canonicalLocalOwnerJournalPath(lease.journalPath);
+  const content = exactMaintenanceLeaseContent(lease, journalPath);
+  withExactPrivateStateFileTransaction(path, LOCAL_OWNER_MAINTENANCE_TRANSACTION_OPTIONS, () => {
+    if (!createExactPrivateStateFile(path, content, LOCAL_OWNER_MAINTENANCE_FILE_OPTIONS)) {
+      throw new Error("local owner maintenance lease already exists");
     }
-  }
+  });
 }
 
 function replaceUnbroken(path: string, previousFingerprint: string, lease: LocalOwnerMaintenanceLease): boolean {
-  const before = maintenanceLeaseFingerprint(path.slice(0, -".local-owner-maintenance.json".length));
-  if (!before || !exactSecret(before, previousFingerprint)) return false;
-  const temporary = `${path}.${lease.leaseId}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(lease)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    safeChmod(temporary, 0o600);
-    // rename replaces the marker without a visible delete/recreate gap.
-    const latest = maintenanceLeaseFingerprint(path.slice(0, -".local-owner-maintenance.json".length));
-    if (!latest || !exactSecret(latest, previousFingerprint)) return false;
-    renameSync(temporary, path);
-    safeChmod(path, 0o600);
+  const journalPath = canonicalLocalOwnerJournalPath(lease.journalPath);
+  const content = exactMaintenanceLeaseContent(lease, journalPath);
+  return withExactPrivateStateFileTransaction(path, LOCAL_OWNER_MAINTENANCE_TRANSACTION_OPTIONS, () => {
+    const current = readExactPrivateStateFile(path, LOCAL_OWNER_MAINTENANCE_FILE_OPTIONS);
+    if (!current || !exactSecret(createHash("sha256").update(current).digest("hex"), previousFingerprint)
+      || !parseLease(decodeExactUtf8(current, "local owner maintenance lease"), journalPath)) return false;
+    replaceExactPrivateStateFile(path, content, LOCAL_OWNER_MAINTENANCE_FILE_OPTIONS);
     return true;
-  } finally {
-    try { unlinkSync(temporary); } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-  }
+  });
 }
 
-function safeChmod(path: string, mode: number): void {
-  try { chmodSync(path, mode); } catch { /* best effort on non-POSIX filesystems */ }
+function exactMaintenanceLeaseContent(lease: LocalOwnerMaintenanceLease, journalPath: string): Buffer {
+  const content = Buffer.from(`${JSON.stringify(lease)}\n`, "utf8");
+  const parsed = parseLease(content.toString("utf8"), journalPath);
+  if (!parsed || parsed.journalPath !== lease.journalPath || parsed.leaseId !== lease.leaseId) {
+    throw new TypeError("local owner maintenance lease is invalid");
+  }
+  return content;
 }
 
 export function createLocalOwnerMaintenanceLease(
   owner: LocalOwnerIdentity,
   input: LocalOwnerMaintenanceAcquireInput,
 ): LocalOwnerMaintenanceLease {
-  const journalPath = resolve(owner.journalPath);
+  const journalPath = canonicalLocalOwnerJournalPath(owner.journalPath);
   if (!uuid(owner.nonce) || exactPid(owner.pid) === null || !Number.isSafeInteger(owner.port) || owner.port < 1 || owner.port > 65_535
-    || !token(owner.token) || !digest(owner.configDigest) || !exactWorkspace(input.workspaceRoot)
+    || !token(owner.token) || !digest(owner.configDigest) || !Number.isFinite(Date.parse(owner.startedAt)) || !exactWorkspace(input.workspaceRoot)
     || exactPid(input.holderPid) === null || exactPid(input.monitorProxyPid) === null) {
     throw new TypeError("local owner maintenance identity is invalid");
   }
@@ -372,7 +469,8 @@ export function createLocalOwnerMaintenanceLease(
 }
 
 export function writeLocalOwnerMaintenanceLease(lease: LocalOwnerMaintenanceLease): void {
-  writeExclusive(localOwnerMaintenancePath(lease.journalPath), lease);
+  const journalPath = canonicalLocalOwnerJournalPath(lease.journalPath);
+  writeExclusive(localOwnerMaintenancePath(journalPath), lease);
 }
 
 export function localOwnerMaintenanceMatches(
@@ -408,12 +506,12 @@ export function recoverExactLocalOwnerMaintenanceLease(
   owner: LocalOwnerIdentity,
   input: LocalOwnerMaintenanceOwnerRecoveryInput,
 ): LocalOwnerMaintenanceLease | null {
-  const journalPath = resolve(owner.journalPath);
+  const journalPath = canonicalLocalOwnerJournalPath(owner.journalPath);
   const current = readLocalOwnerMaintenanceLease(journalPath);
   const fingerprint = maintenanceLeaseFingerprint(journalPath);
-  const processAlive = input.processAlive ?? defaultProcessAlive;
+  const processMatches = lifetimeMatcher(input);
   if (!current || !fingerprint || current.recovery || exactPid(input.holderPid) === null || !exactWorkspace(input.workspaceRoot)
-    || processAlive(current.holderPid)
+    || processMatches(current.holderPid, current.acquiredAt) !== false
     || !localOwnerMaintenanceMatches(current, owner, current.holderPid, input.workspaceRoot, input.previousLeaseId, input.previousLeaseToken)) return null;
   const replacement: LocalOwnerMaintenanceLease = {
     ...current,
@@ -428,11 +526,15 @@ export function recoverExactLocalOwnerMaintenanceLease(
 }
 
 export function removeExactLocalOwnerMaintenanceLease(journalPath: string, leaseId: string, leaseToken: string): boolean {
-  const current = readLocalOwnerMaintenanceLease(journalPath);
-  if (!current || !exactSecret(current.leaseId, leaseId) || !exactSecret(current.leaseToken, leaseToken)) return false;
   try {
-    unlinkSync(localOwnerMaintenancePath(resolve(journalPath)));
-    return true;
+    const canonicalJournalPath = canonicalLocalOwnerJournalPath(journalPath);
+    const path = localOwnerMaintenancePath(canonicalJournalPath);
+    return withExactPrivateStateFileTransaction(path, LOCAL_OWNER_MAINTENANCE_TRANSACTION_OPTIONS, () => {
+      const current = readLocalOwnerMaintenanceLease(canonicalJournalPath);
+      if (!current || !exactSecret(current.leaseId, leaseId) || !exactSecret(current.leaseToken, leaseToken)) return false;
+      unlinkSync(path);
+      return true;
+    });
   } catch {
     return false;
   }
@@ -449,13 +551,101 @@ export function clearDeadLocalOwnerMaintenanceLease(
   input: LocalOwnerMaintenanceClearInput,
 ): boolean {
   const current = readLocalOwnerMaintenanceLease(journalPathValue);
-  const processAlive = input.processAlive ?? defaultProcessAlive;
+  const processMatches = lifetimeMatcher(input);
   const replacementHolder = input.holderPid !== undefined && exactPid(input.holderPid) !== null
-    && current?.holderPid === input.holderPid && processAlive(input.holderPid);
+    && current?.holderPid === input.holderPid && processMatches(input.holderPid, current.acquiredAt) === true;
   if (!current || !exactWorkspace(input.workspaceRoot) || current.workspaceRoot !== input.workspaceRoot
-    || (!replacementHolder && processAlive(current.holderPid))
-    || (current.ownerPid !== null && processAlive(current.ownerPid))) return false;
+    || (!replacementHolder && processMatches(current.holderPid, current.acquiredAt) !== false)
+    || (current.ownerPid !== null && processMatches(current.ownerPid, current.acquiredAt) !== false)) return false;
   return removeExactLocalOwnerMaintenanceLease(journalPathValue, current.leaseId, current.leaseToken);
+}
+
+function stoppedMaintenanceLease(
+  journalPath: string,
+  input: LocalOwnerStoppedMaintenanceInput,
+): LocalOwnerMaintenanceLease {
+  return {
+    schema: LOCAL_OWNER_MAINTENANCE_SCHEMA,
+    leaseId: randomUUID(),
+    leaseToken: randomBytes(32).toString("base64url"),
+    ownerNonce: null,
+    ownerPid: null,
+    ownerPort: null,
+    ownerTokenDigest: null,
+    journalPath,
+    configDigest: "0".repeat(64),
+    holderPid: input.holderPid,
+    monitorProxyPid: input.holderPid,
+    workspaceRoot: input.workspaceRoot,
+    acquiredAt: new Date().toISOString(),
+    recovery: true,
+  };
+}
+
+/**
+ * Establishes a durable maintenance guard when no runtime owner is running.
+ * The marker is written first so new runtimes stop at admission. Acquiring the
+ * runtime lock then closes the race with a process that passed admission just
+ * before the marker appeared. The marker remains after the probe lock is
+ * released and must be removed with its exact lease secret.
+ */
+export function acquireStoppedLocalOwnerMaintenanceLease(
+  journalPathValue: string,
+  input: LocalOwnerStoppedMaintenanceInput,
+): LocalOwnerMaintenanceLease | null {
+  const journalPath = canonicalLocalOwnerJournalPath(journalPathValue);
+  const workspaceRoot = canonicalWorkspace(input.workspaceRoot);
+  if (workspaceRoot === null || exactPid(input.holderPid) === null || input.holderPid !== process.pid) return null;
+  const lease = stoppedMaintenanceLease(journalPath, { ...input, workspaceRoot });
+  try {
+    writeExclusive(localOwnerMaintenancePath(journalPath), lease);
+  } catch {
+    return null;
+  }
+  let probe: RuntimeStateLease | null = null;
+  let accepted = false;
+  try {
+    probe = RuntimeStateLease.acquire(journalPath, { pid: input.holderPid, heartbeatMs: 60_000 });
+    const descriptorPath = ownerDescriptorPath(journalPath);
+    let descriptorPresent = false;
+    try {
+      lstatSync(descriptorPath);
+      descriptorPresent = true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return null;
+    }
+    if (descriptorPresent) {
+      const endpoint = readLocalOwnerEndpoint(journalPath);
+      if (!endpoint || lifetimeMatcher(input)(endpoint.pid, endpoint.startedAt) !== false) return null;
+    }
+    accepted = true;
+    return lease;
+  } catch {
+    return null;
+  } finally {
+    probe?.release();
+    if (!accepted) removeExactLocalOwnerMaintenanceLease(journalPath, lease.leaseId, lease.leaseToken);
+  }
+}
+
+/**
+ * Converts a committed live-owner lease into a stopped-runtime guard without a
+ * delete/recreate gap. Success proves that the exact recorded owner is dead.
+ */
+export function replaceDeadLocalOwnerMaintenanceLeaseWithStoppedGuard(
+  journalPathValue: string,
+  input: LocalOwnerStoppedMaintenanceInput,
+): LocalOwnerMaintenanceLease | null {
+  const journalPath = canonicalLocalOwnerJournalPath(journalPathValue);
+  const workspaceRoot = canonicalWorkspace(input.workspaceRoot);
+  const current = readLocalOwnerMaintenanceLease(journalPath);
+  const fingerprint = maintenanceLeaseFingerprint(journalPath);
+  if (workspaceRoot === null || exactPid(input.holderPid) === null || input.holderPid !== process.pid
+    || !current || !fingerprint || current.workspaceRoot !== workspaceRoot || current.holderPid !== input.holderPid
+    || lifetimeMatcher(input)(input.holderPid, current.acquiredAt) !== true
+    || (current.ownerPid !== null && lifetimeMatcher(input)(current.ownerPid, current.acquiredAt) !== false)) return null;
+  const replacement = stoppedMaintenanceLease(journalPath, { ...input, workspaceRoot });
+  return replaceUnbroken(localOwnerMaintenancePath(journalPath), fingerprint, replacement) ? replacement : null;
 }
 
 function exactClientInput(input: LocalOwnerMaintenanceClientInput): LocalOwnerMaintenanceClientInput | null {
@@ -463,7 +653,8 @@ function exactClientInput(input: LocalOwnerMaintenanceClientInput): LocalOwnerMa
     || !["acquire", "release", "commit", "recover", "bridge"].includes(input.action)
     || exactPid(input.holderPid) === null
     || canonicalWorkspace(input.workspaceRoot) === null
-    || typeof input.journalPath !== "string" || !isAbsolute(input.journalPath)) return null;
+    || typeof input.journalPath !== "string" || !isAbsolute(input.journalPath)
+    || (input.signal !== undefined && !(input.signal instanceof AbortSignal))) return null;
   if (input.action === "recover") return uuid(input.leaseId) && token(input.leaseToken) ? input : null;
   if (input.action === "acquire") return input;
   if (input.action === "bridge") {
@@ -475,23 +666,84 @@ function exactClientInput(input: LocalOwnerMaintenanceClientInput): LocalOwnerMa
   return uuid(input.leaseId) && token(input.leaseToken) ? input : null;
 }
 
-async function boundedResponseText(response: Response): Promise<string | null> {
+function cancelResponseStream(
+  stream: { cancel?: (reason?: unknown) => unknown } | null | undefined,
+  reason: string,
+): void {
+  try {
+    const cancellation = stream?.cancel?.(reason);
+    if (cancellation && typeof (cancellation as Promise<unknown>).catch === "function") {
+      void (cancellation as Promise<unknown>).catch(() => undefined);
+    }
+  } catch { /* The response is already refused. */ }
+}
+
+function settleWithAbort<T>(operation: PromiseLike<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason || new Error("local owner maintenance request aborted"));
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      action();
+    };
+    const onAbort = (): void => finish(() => reject(signal.reason || new Error("local owner maintenance request aborted")));
+    signal.addEventListener("abort", onAbort, { once: true });
+    Promise.resolve(operation).then(
+      (value) => finish(() => resolve(value)),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
+async function boundedResponseText(response: Response, signal: AbortSignal): Promise<string | null> {
+  const declared = response.headers?.get?.("content-length");
+  if (declared !== null && declared !== undefined
+    && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > LOCAL_OWNER_MAINTENANCE_RESPONSE_MAX_BYTES)) {
+    cancelResponseStream(response.body, "local_owner_maintenance_response_too_large");
+    return null;
+  }
   if (!response.body) return "";
-  const reader = response.body.getReader();
+  let reader: ReadableStreamDefaultReader<Uint8Array>;
+  try {
+    reader = response.body.getReader();
+  } catch {
+    cancelResponseStream(response.body, "local_owner_maintenance_response_invalid");
+    return null;
+  }
   const chunks: Uint8Array[] = [];
   let bytes = 0;
+  let complete = false;
   try {
     for (;;) {
-      const part = await reader.read();
-      if (part.done) break;
+      const part = await settleWithAbort(reader.read(), signal);
+      if (part.done) {
+        complete = true;
+        break;
+      }
+      if (!(part.value instanceof Uint8Array)) return null;
       bytes += part.value.byteLength;
-      if (bytes > 8_192) return null;
+      if (bytes > LOCAL_OWNER_MAINTENANCE_RESPONSE_MAX_BYTES) return null;
       chunks.push(part.value);
     }
+  } catch {
+    return null;
   } finally {
-    reader.releaseLock();
+    if (!complete) {
+      cancelResponseStream(reader, signal.aborted
+        ? "local_owner_maintenance_response_interrupted"
+        : bytes > LOCAL_OWNER_MAINTENANCE_RESPONSE_MAX_BYTES
+          ? "local_owner_maintenance_response_too_large"
+          : "local_owner_maintenance_response_invalid");
+    }
+    try { reader.releaseLock(); } catch { /* The refused stream no longer owns request progress. */ }
   }
-  return Buffer.concat(chunks).toString("utf8");
+  try {
+    return decodeExactUtf8(Buffer.concat(chunks), "local owner maintenance response");
+  } catch {
+    return null;
+  }
 }
 
 function problemCode(value: unknown): string | null {
@@ -558,9 +810,16 @@ export async function requestLocalOwnerMaintenance(
   if (!exact) throw new LocalOwnerMaintenanceClientError("local_owner_maintenance_request_invalid");
   const workspaceRoot = canonicalWorkspace(exact.workspaceRoot);
   if (!workspaceRoot) throw new LocalOwnerMaintenanceClientError("local_owner_workspace_required");
-  const journalPath = resolve(exact.journalPath);
+  let journalPath: string;
+  try {
+    journalPath = canonicalLocalOwnerJournalPath(exact.journalPath);
+  } catch {
+    throw new LocalOwnerMaintenanceClientError("local_owner_unavailable");
+  }
   const endpoint = readLocalOwnerEndpoint(journalPath);
-  if (!endpoint) throw new LocalOwnerMaintenanceClientError("local_owner_unavailable");
+  if (!endpoint || processMatchesRecordedLifetime(endpoint.pid, endpoint.startedAt) !== true) {
+    throw new LocalOwnerMaintenanceClientError("local_owner_unavailable");
+  }
   const body = exact.action === "acquire"
     ? {
       schema: LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA,
@@ -591,9 +850,11 @@ export async function requestLocalOwnerMaintenance(
       leaseId: exact.leaseId,
       leaseToken: exact.leaseToken,
     };
+  const deadline = AbortSignal.timeout(LOCAL_OWNER_MAINTENANCE_RESPONSE_TIMEOUT_MS);
+  const signal = exact.signal ? AbortSignal.any([exact.signal, deadline]) : deadline;
   let response: Response;
   try {
-    response = await fetcher(`http://${LOOPBACK_HOST}:${endpoint.port}${LOCAL_OWNER_MAINTENANCE_PATH}`, {
+    response = await settleWithAbort(Promise.resolve(fetcher(`http://${LOOPBACK_HOST}:${endpoint.port}${LOCAL_OWNER_MAINTENANCE_PATH}`, {
       method: "POST",
       headers: {
         authorization: `Bearer ${endpoint.token}`,
@@ -604,12 +865,12 @@ export async function requestLocalOwnerMaintenance(
       body: JSON.stringify(body),
       cache: "no-store",
       redirect: "error",
-      ...(exact.signal ? { signal: exact.signal } : {}),
-    });
+      signal,
+    })), signal);
   } catch {
     throw new LocalOwnerMaintenanceClientError("local_owner_unavailable");
   }
-  const text = await boundedResponseText(response);
+  const text = await boundedResponseText(response, signal);
   if (text === null) throw new LocalOwnerMaintenanceClientError("local_owner_maintenance_response_invalid");
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch { throw new LocalOwnerMaintenanceClientError("local_owner_maintenance_response_invalid"); }
@@ -617,9 +878,4 @@ export async function requestLocalOwnerMaintenance(
   const result = exactClientResult(parsed, exact.action, exact.holderPid, "monitorProxyPid" in exact ? exact.monitorProxyPid : undefined);
   if (!result) throw new LocalOwnerMaintenanceClientError("local_owner_maintenance_response_invalid");
   return result;
-}
-
-function defaultProcessAlive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; }
-  catch (error) { return (error as NodeJS.ErrnoException).code === "EPERM"; }
 }
