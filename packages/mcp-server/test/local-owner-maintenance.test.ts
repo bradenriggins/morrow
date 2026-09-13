@@ -58,8 +58,10 @@ describe("local owner maintenance lease", () => {
     const sidecar = `${fixture.journalPath}.local-owner.json`;
     try {
       await writeFile(sidecar, "sidecar\n", { mode: 0o600 });
-      expect(localOwnerSidecarAccessAccepted(sidecar, 0o100600, { platform: "darwin" })).toBe(true);
-      expect(localOwnerSidecarAccessAccepted(sidecar, 0o100666, { platform: "darwin" })).toBe(false);
+      const darwin = { platform: "darwin" as const, classifyMacAcl: () => "private" as const };
+      expect(localOwnerSidecarAccessAccepted(sidecar, 0o100600, darwin)).toBe(true);
+      expect(localOwnerSidecarAccessAccepted(sidecar, 0o100666, darwin)).toBe(false);
+      expect(localOwnerSidecarAccessAccepted(sidecar, 0o100600, { ...darwin, classifyMacAcl: () => "extended_acl" as const })).toBe(false);
       const classified: string[] = [];
       expect(localOwnerSidecarAccessAccepted(sidecar, 0o100666, {
         platform: "win32",

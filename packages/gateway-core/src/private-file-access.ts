@@ -35,6 +35,18 @@ const WINDOWS_ACL_RESULTS = new Set<WindowsPrivateFileAccessClassification>([
   "unavailable",
 ]);
 
+/**
+ * Classifies one macOS `ls -lde` listing. The mode column carries `+` when
+ * an extended ACL is present, and each ACL entry follows on its own numbered
+ * line. This is the complete darwin decision, so a test can prove it without
+ * a macOS host.
+ */
+export function classifyMacAclListing(output: string): MacPrivateFileAccessClassification {
+  const mode = String(output || "").match(/^(\S+)/)?.[1];
+  if (!mode) return "unavailable";
+  return mode.includes("+") || /\n\s*\d+:\s/u.test(output) ? "extended_acl" : "private";
+}
+
 function classifyMacPrivateAcl(path: string): MacPrivateFileAccessClassification {
   const result = spawnSync("/bin/ls", ["-lde", resolve(path)], {
     encoding: "utf8",
@@ -44,10 +56,7 @@ function classifyMacPrivateAcl(path: string): MacPrivateFileAccessClassification
     stdio: ["ignore", "pipe", "ignore"],
   });
   if (result.status !== 0) return "unavailable";
-  const output = String(result.stdout || "");
-  const mode = output.match(/^(\S+)/)?.[1];
-  if (!mode) return "unavailable";
-  return mode.includes("+") || /\n\s*\d+:\s/u.test(output) ? "extended_acl" : "private";
+  return classifyMacAclListing(String(result.stdout || ""));
 }
 
 function removeMacPrivateAcl(path: string): boolean {
