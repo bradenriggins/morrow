@@ -684,7 +684,7 @@ async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentType
       signal: controller.signal,
     });
     let finalUrl;
-    try { finalUrl = new URL(response.url); } catch { return { ok: false, sent: true, error: "canvas_file_final_url_invalid" }; }
+    try { finalUrl = new URL(response.url); } catch { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return { ok: false, sent: true, error: "canvas_file_final_url_invalid" }; }
     if (!response.ok || finalUrl.protocol !== "https:") return { ok: false, sent: true, status: response.status, error: "canvas_file_content_fetch_failed" };
     if (responseContentType(response.headers.get("content-type")) !== prepared.version.content_type) {
       return { ok: false, sent: true, status: response.status, error: "canvas_file_content_type_mismatch" };
@@ -911,7 +911,7 @@ function pairingStatus(value, pairing) {
 }
 
 async function boundedPairingJson(response, signal) {
-  if (responseContentType(response.headers.get("content-type")) !== "application/json") throw new Error("bridge_pairing_response_invalid");
+  if (responseContentType(response.headers.get("content-type")) !== "application/json") { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("bridge_pairing_response_invalid"); }
   const declaredLength = response.headers.get("content-length");
   if (declaredLength !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declaredLength) || Number(declaredLength) > PAIRING_RESPONSE_MAX_BYTES)) {
     try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}

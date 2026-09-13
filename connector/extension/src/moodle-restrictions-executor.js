@@ -354,7 +354,7 @@ export async function executeMoodleRestrictionsInPage(rawInput) {
         signal: requestSignal(input?.expiresAt),
       });
     } catch { return null; }
-    if (!response.ok) return null;
+    if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return null; }
     let payload;
     try { payload = JSON.parse(await boundedResponseText(response)); } catch { return null; }
     return object(payload) ? payload : null;

@@ -327,6 +327,30 @@ Every row stays open until its evidence columns are added and its status becomes
 | 310 | P1 | R8 | The Desktop maintenance client has no default deadline, waits directly on response reads, replacement-decodes UTF-8, and leaves oversized or interrupted bodies uncancelled. | `packages/mcp-server/src/local-owner-maintenance.ts`; exact maintenance response regressions | IMPLEMENTED |
 | 311 | P1 | R8 | Desktop runtime monitoring can wait forever for MCP initialization, status, course discovery, first read, diagnostics, or shutdown when a local peer stops settling requests. | `installer/shared/runtime-monitor.mjs:535-667`; deadline regression still required | OPEN |
 | 312 | P2 | R7 | The first-run evidence inventory cites stale source lines for 12 rendered controls after protocol and approval hardening moved their markup. | `docs/implementation/FIRST-RUN-STATE-INVENTORY.md`; `scripts/test/first-run-state-inventory.test.mjs` | VERIFIED |
+| 313 | P1 | R1 | Every non-Canvas write route accepts a caller-supplied `_morrow.readback` and marks the write verified from that caller-chosen read. | `packages/mcp-server/src/runtime.ts`; `packages/mcp-server/src/server.ts`; `packages/mcp-server/test/operations.integration.test.ts` | OPEN |
+| 314 | P1 | R2 | Runtime state hardening opens and closes raw descriptors on the live SQLite database and its WAL sidecars, silently dropping the POSIX locks SQLite still believes it holds. | `packages/gateway-core/src/private-sqlite-state.ts`; `packages/mcp-server/src/state-lease.ts` | OPEN |
+| 315 | P2 | R7 | Four darwin-forced tests shell to `/bin/ls -lde` and fail on Linux, so the required `check` merge gate cannot pass. | `packages/gateway-core/src/private-file-access.ts`; `packages/gateway-core/test/private-file-access.test.ts`; `packages/mcp-server/test/local-owner-maintenance.test.ts` | OPEN |
+| 316 | P2 | R6 | A process that dies between linking its transaction release claim and unlinking the lock leaves every later acquirer unable to enter until a person deletes both names. | `packages/gateway-core/src/private-state-file.ts` | OPEN |
+| 317 | P1 | R3 | Egress redaction returns strings under status, grade, score, rows, and similar keys unchanged, without learner redaction or the sensitive-text refusal. | `packages/gateway-core/src/privacy.ts` | OPEN |
+| 318 | P2 | R8 | Request-path liveness checks spawn a synchronous child process per modern-protocol request, per reaper tick, and per owner-start poll, stalling the owner event loop. | `packages/gateway-core/src/process-lifetime.ts`; `packages/mcp-server/src/local-owner.ts` | OPEN |
+| 319 | P2 | R8 | Transaction admission requires a parsable `ps -o lstart=` answer, so a minimal container or a localised locale cannot construct the learner vault or start the gateway. | `packages/gateway-core/src/process-lifetime.ts`; `packages/gateway-core/src/private-state-file.ts` | OPEN |
+| 320 | P3 | R8 | The client-config CLI awaits MCP initialization and its tool call with no deadline, signal, or settlement race, so a stalled peer freezes the command. | `packages/client-config/src/cli.ts` | OPEN |
+| 321 | P3 | R7 | Two closure entries for defect 274 carry contradictory statuses and nothing fails on a duplicated closure heading. | `docs/implementation/DEFECT-ERADICATION-LEDGER.md` | OPEN |
+| 322 | P3 | R7 | Fifty ledger identifiers have no row and no recorded disposition, so the numbering cannot be audited end to end. | `docs/implementation/DEFECT-ERADICATION-LEDGER.md` | OPEN |
+| 323 | P3 | R7 | The first-run inventory cites lines that only contain a control name as an identifier substring, and the guard accepts any substring match. | `docs/implementation/FIRST-RUN-STATE-INVENTORY.md`; `scripts/test/first-run-state-inventory.test.mjs` | OPEN |
+| 324 | P3 | R7 | Three provider response source guards test text windows, so a renamed helper, a moved reader, or a differently spelled refusal keeps the forbidden behaviour while the guards stay green. | `scripts/test/provider-response-body-guard.test.mjs` | OPEN |
+| 325 | P3 | R7 | The defect 264 regressions assert wall-clock bounds instead of the one-snapshot invariant, so they can pass while the defect recurs and flake under load. | `packages/gateway-core/test/privacy.test.ts` | OPEN |
+| 326 | P3 | R6 | The Canvas connector carries a second state-transaction lock implementation whose release path differs from the shared primitive. | `packages/canvas-connector-mcp/src/config.ts` | OPEN |
+| 327 | P2 | R8 | Egress and projection tokenize every learner record and resolve every learner token through its own durable vault transaction, although the prepared snapshot already holds each label. | `packages/gateway-core/src/privacy.ts`; `packages/gateway-core/test/privacy.test.ts` | OPEN |
+| 328 | P2 | R8 | Thirty provider refusal paths in 17 Bridge source files return or throw with a fetched body still live, because the response is handed to a reading helper rather than read where it is refused. | `connector/extension/src`; `scripts/test/provider-response-body-guard.test.mjs` | OPEN |
+
+## Identifier accounting
+
+Every identifier from 1 through the highest row is either a ledger row or listed here, so the numbering is auditable end to end. `scripts/test/defect-ledger.test.mjs` fails when an identifier has neither a row nor an entry here, has both, or when a row or closure heading is duplicated.
+
+| Identifiers | Disposition |
+| --- | --- |
+| 177–179, 193, 198–199, 201–204, 206–209, 211–214, 216–219, 221–224, 227–229, 233–234, 236–239, 242–244, 246–249, 251–254, 256–259 | Never assigned. From identifier 200 the discovery waves reserved candidate blocks of five (200, 205, 210, and so on) and only validated candidates received rows; identifiers 177–179, 193, and 198–199 were skipped the same way in the preceding wave. No row, closure entry, or merge note ever used these identifiers. Every row first appeared in commit `267e7ec`, so git history holds no further evidence. |
 
 ## Continuing work
 
@@ -350,7 +374,9 @@ Fresh discovery remains active after each repair wave. Every validated defect re
 - User effect: a local owner or upstream that accepts the connection and then stops settling one request can freeze Desktop startup, refresh, diagnostic capture, first-read completion, or shutdown indefinitely.
 - Required repair: one reusable Desktop MCP operation boundary must own explicit per-operation deadlines, pass its signal into every SDK request that supports cancellation, race settlement even when a peer ignores that signal, close the exact client and transport generation, and leave the monitor reconnectable. Shutdown must reclaim the spawned process tree within a fixed bound.
 - Required regression: use a fixture that completes initialization and then selectively stalls each MCP operation. Every public monitor method must settle within its contract, report the fixed unavailable state, close the stalled generation, reclaim the child process, and reconnect to a healthy replacement. Add a source guard so a direct unbounded SDK request cannot return.
-- Status: `OPEN`. This delivery freezes new discovery so the complete repair set can be committed and handed off as requested.
+- Repair: the monitor holds one connected generation (client, transport, child process) and runs every MCP operation through `operate`, which owns a per-operation deadline, passes its signal and timeout to the SDK, races settlement itself, and on any failure closes exactly that generation: client and transport close within a bound and the child is reclaimed with SIGTERM then SIGKILL. Initialization, health, binding discovery, first read, and both diagnostic reads use it; shutdown closes the current generation the same way.
+- Regression: a fixture that stalls initialize, health, binding discovery, the first read, the diagnostic resource read, and one that freezes and ignores SIGTERM: every public monitor method settles within its bound, reports the fixed unavailable state, reclaims that generation's child, and a healthy fixture reconnects afterwards. A syntax-tree guard requires every SDK request in the monitor to run inside `operate` with its options and every close to run inside `settleWithin`.
+- Status: `IMPLEMENTED`.
 
 ### 274: enforced GitHub merge protection
 
@@ -646,13 +672,6 @@ Fresh discovery remains active after each repair wave. Every validated defect re
 - Regression: Canvas tests prove transport and presentation edits preserve compatibility while route edits change it. Browser tests prove summary, description, documentation, raw-byte, and schema-help changes preserve compatibility while an operation-key change does not. A cross-runtime test requires the extension and TypeScript projections to produce byte-identical canonical JSON for all three shipped catalogs.
 - Focused verification: all 43 Canvas API catalog tests and all 60 Canvas Connector tests passed. Four targeted Gateway digest and integration tests passed. The 17 copied Gateway digest helpers were removed, and all 20 related script contracts passed.
 - Remaining gate: the complete Gateway suite, repository check, and real browser handshake must pass before this row becomes `VERIFIED`.
-
-### 274: unbound repository merge gate
-
-- Root cause: the repository workflow defines a strong `ci / check` job, but GitHub branch protection does not require that result. Repository policy and hosting policy can therefore diverge without any checked-in failure.
-- Current evidence: a fresh GitHub API read on 2026-09-13 returned `required_status_checks: null`, `enforce_admins.enabled: false`, and `required_conversation_resolution.enabled: false` for `bradenriggins/morrow:main`. It requires one approving review and dismisses stale reviews, but does not require code-owner review.
-- Required repair: after the final check names are stable, bind the exact required CI context to `main`, enforce the protection for administrators, require review-conversation resolution, then fresh-read the branch rule and prove a failing check blocks a test pull request.
-- Status: `OPEN`. This checkout does not alter GitHub provider configuration.
 
 ### 273: browser fixture proves pre-upload filename admission
 
@@ -2059,7 +2078,10 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - User effect: any caller can self-certify any write on the MCP, Blackboard, Moodle, and generic routes. Verification no longer proves the platform kept what was planned.
 - Required repair: verification must bind the readback to the route's own authoritative read of the written object, not to caller-chosen content. A caller-supplied readback must never satisfy verification on any route.
 - Required regression: an adversarial caller submitting an unrelated read as `_morrow.readback` must not reach `verified` on any route; the suite must cover Canvas connector, MCP, Blackboard, and Moodle routes.
-- Status: `OPEN`. This disputes ledger row 1, whose closure text scopes the fix to Canvas connector writes while its title covers every route.
+- Root cause: `outerOperationControls` accepted a caller-supplied `_morrow.readback` as the frozen comparator for every route that does not embed a connector readback, and verification then compared a digest of whatever read the caller chose, admitting it on `readOnlyHint` alone.
+- Repair: a caller-supplied readback is refused on every route before any operation is recorded (`caller_readback_refused`), and the public `_morrow` schema no longer advertises it. Each write route declares its own authoritative review read through `route.planBackend` with the `exact-requested-fields` comparator; Morrow freezes that declaration with the request digest, reads the written object back through that read-only source tool, and reports verified only when the fresh read carries every requested field with the requested value. A saved digest comparator now verifies only when it names the exact Blackboard verify tool Morrow pairs with that apply tool; any other saved readback is unsupported. Corrections derive their readback the same way.
+- Regression: an adversarial caller submitting an unrelated read as `_morrow.readback` is refused on the Canvas connector, MCP, sandbox, Blackboard, and Moodle routes with no operation recorded. On the MCP route a write the source kept verifies through the route's own read, and a write whose requested `note` the source's read never returns stays unconfirmed with `readback_did_not_match_frozen_comparator`.
+- Status: `IMPLEMENTED`. Ledger row 1 is now closed for every route, not only Canvas connector writes.
 
 ### 314: SQLite lock-dropping on live database files
 
@@ -2067,7 +2089,10 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - User effect: any other process that opens the same journal file (sqlite3 CLI, a maintenance script, or a second gateway whose lease check returned null) can obtain EXCLUSIVE on the DMS byte, reinitialise `-shm`, and on close checkpoint and delete `-wal` while the gateway keeps appending commits to the unlinked WAL inode. Effect records and approvals are lost or the file is corrupted. This is the documented SQLite "How To Corrupt" section 2.2 path, applied to the effect and batch authority stores.
 - Required repair: the file-hardening goal must be achieved without opening live database files. Apply permission hardening before SQLite opens the path, or harden a private copy and atomically install it, or prove descriptor-level safety; never `open`/`close`/`fchmod` the live `-wal`/`-shm` under a running connection.
 - Required regression: a test that opens the store, runs the hardening/heartbeat path, and then proves from a second connection that the journal lock discipline still holds (no EXCLUSIVE obtainable, WAL intact across interleaved commits).
-- Status: `OPEN`.
+- Root cause: admission and the lease heartbeat proved database identity by opening a descriptor on the live database, `-wal`, and `-shm` and closing it, and hardened access with `fchmod` on that descriptor. POSIX advisory locks belong to the process, so each close silently dropped the SHARED and shared-memory locks SQLite still believed it held.
+- Repair: identity is proven from path metadata only, before SQLite opens the path, and hardening uses a path permission change followed by a metadata reread that must name the same inode. No live database or sidecar is ever opened outside SQLite.
+- Regression: a second operating-system process asks to leave WAL mode, which SQLite grants only when no other connection holds its locks. After reopening a populated journal, and after each heartbeat hardening pass, that request is refused as locked and interleaved commits remain intact; after close it succeeds. Before repair the second process was granted `delete` while the gateway connection was open.
+- Status: `IMPLEMENTED`.
 
 ### 315: darwin-forced tests fail on Linux, CI merge gate cannot go green
 
@@ -2075,7 +2100,10 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - User effect: the merge gate the defect pass itself created cannot pass for this commit. Reproduced on the audit host: gateway-core 3 failed / 120 passed, mcp-server 1 failed / 41 passed.
 - Required repair: make the platform-specific tests hermetic. Stub the `ls -lde` invocation (or the platform layer) so the darwin branch is tested without a macOS host, and prove the full `check` suite passes on Linux.
 - Required regression: the four tests must pass on Linux; a CI-equivalent Linux run of the required `check` job must be green.
-- Status: `OPEN`.
+- Root cause: the darwin branch decided extended-ACL state inside `spawnSync("/bin/ls", ["-lde", ...])`, so a test forcing `platform: "darwin"` on Linux ran the real shell-out and failed.
+- Repair: the listing decision is the pure function `classifyMacAclListing`, and the platform layer accepts injected `classifyMacAcl` and `removeMacAcl` decisions, so the darwin branch runs without a macOS host.
+- Regression: real macOS listings with and without a `+` mode flag or numbered ACL entries classify as expected, an injected extended ACL refuses the sidecar, and the four formerly failing tests pass on Linux.
+- Status: `IMPLEMENTED`.
 
 ### 316: crash-window transaction lock wedge
 
@@ -2083,7 +2111,10 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - User effect: `LearnerVault` construction, every `prepareTextReferenceSets`/`resolve`, owner-descriptor writes, Blackboard durable state, and maintenance-lease writes all run inside this transaction. A single crash in that window makes the gateway unable to start until a person hand-deletes `<file>.transaction.lock` and `<file>.transaction.lock.release-*`.
 - Required repair: make the release path crash-atomic or teach the reclaim path to recognise and finish an interrupted release claim for the same private inode, the way stale-owner recovery already handles interrupted claims.
 - Required regression: a fixture that kills the process between claim publication and unlink must be recoverable by the next acquirer with no manual deletion; a decoy release claim on a different inode must still refuse.
-- Status: `OPEN`.
+- Root cause: release linked `<lock>.release-<nonce>` and then unlinked the lock; a crash between the two left a two-link owner that no later acquirer recognised, because reclaim only understood `.reclaim-<nonce>` claims.
+- Repair: admission recognises an interrupted claim of either kind for the same private inode. A release claim whose owner process no longer runs is finished by the next acquirer, exactly as an interrupted reclaim is; a live owner still finishes its own release. Admission also has an asynchronous form that yields between attempts instead of blocking the event loop.
+- Regression: a worker enters the transaction, publishes its release claim, and is killed before the unlink; the next acquirer enters within 200 ms and leaves the directory empty. A release name that is not the stale owner's exact inode still refuses and leaves both names untouched.
+- Status: `IMPLEMENTED`.
 
 ### 317: privacy redaction bypass on status/grade-type keys
 
@@ -2091,7 +2122,10 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - User effect: `{ "grading_status": "Submitted by jane.doe@school.edu" }` or `{ "rows": ["Jane Doe, 95"] }` reaches the assistant unchanged through the egress path, while the same content in a field named `note` is refused. Learner-identifying data leaks to the model.
 - Required repair: the egress redactor must apply the same sensitive-text refusal to `nonIdentityScalar` keys as `projectValue` does, or prove key-shape can never carry identity content.
 - Required regression: adversarial payloads under `grading_status`, `rows`, `score`, and similar keys carrying emails and names must be redacted or refused; the existing `note`-key behaviour must stay green.
-- Status: `OPEN`.
+- Root cause: `redactLearnerEgressPrepared` returned any string under a `nonIdentityScalar` key unchanged, without roster redaction or the sensitive-text refusal that the sibling projection branch applied.
+- Repair: text under a measure- or status-shaped key is still provider-controlled text. Both paths now run roster redaction on it, with only the bare-numeric-id-is-a-person rule disabled for that key shape, and refuse sensitive text; structural reference fields refuse sensitive text too.
+- Regression: `grading_status`, `rows`, and `score` values carrying a roster name are tokenized on the egress path and in projected output; the same keys carrying an unknown email or a bearer token are refused; a bare number under `score` stays a number while the same digits under `note` stay a person.
+- Status: `IMPLEMENTED`.
 
 ### 318: per-request synchronous process spawn blocks the owner event loop
 
@@ -2099,7 +2133,10 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - User effect: each call blocks the single owner event loop for a process spawn (tens of ms on POSIX; PowerShell start is typically 0.3-1.5 s on Windows), so every tool call through the local owner on Windows adds a synchronous PowerShell launch and stalls all other proxy sessions for that time.
 - Required repair: make liveness checks asynchronous and cached: resolve process start time once per owner lifecycle (or on a bounded background interval) and compare without spawning per request. Never `spawnSync` on a request path.
 - Required regression: a concurrency fixture proving N parallel modern-protocol requests do not serialise on process spawns; a source guard forbidding `spawnSync` on the request path.
-- Status: `OPEN`.
+- Root cause: every request-path liveness check called `processMatchesRecordedLifetime`, which ran a synchronous `ps` or PowerShell child per call.
+- Repair: request paths use `requestPathProcessMatches`, a process-wide matcher that answers Linux from procfs with no child process and answers other platforms from a start time cached for five seconds and refreshed by one background asynchronous query; `process.kill(pid, 0)` still runs on every call so a dead process is never reported alive. The session reaper, modern-proxy admission, maintenance recovery, and monitor checks all use it.
+- Regression: 32 concurrent request-path checks answer immediately from one background query while the fake `ps` is still held open, and Linux checks answer from a procfs fixture with an absent `ps`.
+- Status: `IMPLEMENTED`.
 
 ### 319: gateway cannot start where process-start introspection is unavailable
 
@@ -2107,7 +2144,10 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - User effect: in minimal containers or non-C locales that localise month names, every `withExactPrivateStateFileTransaction` caller fails, including `LearnerVault` construction, so the gateway cannot start at all.
 - Required repair: provide a fallback process-identity mechanism that does not depend on `ps` output parsing, or degrade the lifetime check with a documented bound instead of refusing startup.
 - Required regression: a fixture with `ps` absent (and one with localised month names) must still construct the vault and acquire transactions.
-- Status: `OPEN`.
+- Root cause: the only start-time source was `ps -o lstart=` parsed by `Date.parse`, so a missing `ps` or a localised month name made transaction admission throw and the vault unconstructible.
+- Repair: Linux reads `/proc/<pid>/stat` against `btime` and never starts a process; other platforms run the query under `LC_ALL=C`, retry a failed spawn, and answer null instead of throwing. Exact-start comparison is by whole second because `ps` records whole seconds.
+- Regression: with every child-process entry point mocked absent, the learner vault constructs and transactions acquire on Linux; a German `ps` output parses through the C locale; an absent query answers null.
+- Status: `IMPLEMENTED`.
 
 ### 320: unbounded MCP awaits in client-config CLI
 
@@ -2115,46 +2155,83 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - User effect: a stalled peer can freeze the client-config CLI indefinitely on its primary path.
 - Required repair: give every CLI MCP operation an owned deadline and cancellation path consistent with the operation-boundary pattern used elsewhere in this pass.
 - Required regression: a stalled-peer fixture proving each CLI operation settles within its bound.
-- Status: `OPEN`.
+- Root cause: `callMorrowTool` awaited `client.connect` and `client.callTool` with no deadline or settlement race.
+- Repair: each exchange runs under an owned deadline taken from `--startup-timeout` and `--tool-timeout` (the tool call defaults to 60 seconds), passes its signal and timeout to the SDK, races settlement itself, then closes the client and transport within a bound and reclaims the child process with SIGTERM then SIGKILL.
+- Regression: a raw stdio peer that stalls before or after `initialize` and ignores SIGTERM makes `backend status` exit 1 within the bound with the named operation, and the peer process is gone afterwards.
+- Status: `IMPLEMENTED`.
 
 ### 321: duplicate contradictory ledger entries for defect 274
 
 - Verified defect: two closure entries exist for defect 274 with contradictory status: `### 274: enforced GitHub merge protection` (`VERIFIED`) and `### 274: unbound repository merge gate` (`OPEN`, "This checkout does not alter GitHub provider configuration"). The stale OPEN entry was never removed; it is the only duplicated `### <id>:` heading in the ledger (192 headings, 1 duplicate).
 - Required repair: remove the stale entry and keep the single authoritative 274 row. Add a ledger lint that fails on duplicate `### <id>:` headings.
-- Status: `OPEN`.
+- Repair: the stale `### 274: unbound repository merge gate` entry is removed; the single `VERIFIED` closure remains. `scripts/test/defect-ledger.test.mjs` fails on a duplicated closure heading or table row, on a closure heading without a table row, and on an unknown status.
+- Regression: the lint failed on the ledger as committed (duplicate heading 274, fourteen closure headings without rows) and passes after this repair.
+- Status: `IMPLEMENTED`.
 
 ### 322: fifty ledger IDs missing with no explanation
 
 - Verified defect: 50 defect IDs in the ledger's numbering have no row and no recorded reason (skipped, merged, or reserved).
 - Required repair: account for every missing ID in a ledger appendix (merged into X, reserved, or never assigned) so the numbering is auditable end to end.
-- Status: `OPEN`.
+- Repair: the `Identifier accounting` appendix records every identifier without a row and its disposition, and the ledger lint requires every identifier up to the highest row to be exactly one of a row or an accounted gap.
+- Regression: the lint failed on the ledger as committed and passes after this repair.
+- Status: `IMPLEMENTED`.
 
 ### 323: wrong first-run inventory citation the guard cannot detect
 
 - Verified defect: `FIRST-RUN-STATE-INVENTORY.md:563` cites a wrong source line, and the inventory guard cannot detect it because it matches identifier substrings rather than exact rendered source lines.
 - Required repair: correct the citation and strengthen the guard to resolve every cited control against the exact rendered source line, failing on substring-only matches.
 - Required regression: a fixture with a substring-matching but line-wrong citation must fail the guard.
-- Status: `OPEN`.
+- Root cause: the control guard accepted any line whose text contained the control name, so `Remove` matched a comment at `installer/renderer/renderer.js:327` and `Cancel` matched the identifier `Cancelled` at `packages/mcp-server/src/approval-server.ts:778`.
+- Repair: `renderedOnLine` accepts a citation only when the name stands as a whole word inside a string or template literal, HTML text, or an attribute value; comments, identifiers, and longer words never qualify. The two citations now name lines 398 and 963, where the controls are rendered.
+- Regression: the former citations contain the names as substrings and fail the strengthened guard, and fixtures for identifier, longer-word, comment, and attribute cases pass or fail as required.
+- Status: `IMPLEMENTED`.
 
 ### 324: three source-guard tests defeatable by trivial rewrites
 
 - Verified defect: three source-guard tests in this pass can be defeated by trivial rewrites that preserve the forbidden behaviour under a different shape.
 - Required repair: rewrite the guards to test behaviour (via adversarial fixtures that exercise the forbidden path) rather than source shape, so a rename or restructure cannot silently reintroduuse the defect.
 - Required regression: the trivial-rewrite variants must fail the strengthened guards.
-- Status: `OPEN`.
+- Root cause: the three guards matched text windows: one regular expression per line for an awaited `.cancel(`, a nine-line window after `content-length`, and a five-line window after `if (!response` that also had to contain `getReader`.
+- Repair: `scripts/test/lib/provider-response-analysis.mjs` decides both invariants on the syntax tree with data flow: a cancellation promise may not be awaited wherever it flows (variable, renamed helper, promise combinator, chained catch, or an async helper that settles with it), and every exit that abandons a fetched or received response before its body reaches a reader, a whole-body decoder, or another function must cancel on that same path, with only a proven body absence exempt. The guards run over every provider file.
+- Regression: eight forbidden fixtures fail the analyser; the former text guards accepted six of them. Applied to the provider sources as committed, the analyser found the thirty abandonment paths recorded as defect 328.
+- Status: `IMPLEMENTED`.
 
 ### 325: defect 264 regression is a wall-clock bound only
 
 - Verified defect: the regression test recorded for defect 264 asserts a wall-clock bound rather than the underlying invariant, so it can pass while the defect recurs and can flake under load.
 - Required repair: replace the timing assertion with a deterministic invariant the defect would violate (ordering, single-settlement, or state proof).
-- Status: `OPEN`.
+- Root cause: the defect 264 regressions asserted elapsed time under 3 and 5 seconds.
+- Repair: both tests count durable vault transactions through a mocked transaction primitive and require exactly one for 2,000 protected references and for 2,500 learner records, with the second test moved from an in-memory vault to a file-backed vault so the count is real.
+- Regression: the 2,500-record count failed against the code as committed with 2,501 transactions (defect 327) and passes with one after that repair.
+- Status: `IMPLEMENTED`.
 
 ### 326: second lock implementation contradicts the "one primitive" claim
 
 - Verified defect: `packages/canvas-connector-mcp/src/config.ts` carries a second state-transaction lock implementation whose release path differs from the shared primitive, contradicting the ledger's "one primitive" claim for the lock work.
 - Required repair: either migrate the connector to the shared primitive or record the second implementation as an explicit, tested exception with its own crash-window analysis.
-- Status: `OPEN`.
+- Root cause: the connector kept its own lock schema, claim, reclaim, and release code beside the shared primitive.
+- Repair: the connector serialises state changes through `withExactPrivateStateFileTransactionAsync`, the shared primitive's non-blocking form, keeping only an in-process queue and a one-way reclaim of a dead owner's lock in the superseded connector schema so an upgrade under such a lock can enter.
+- Regression: a live legacy lock refuses admission and stays intact, a dead owner's legacy lock is removed and admission proceeds, and linked, broadly readable, and oversized lock names are refused through the shared primitive's own admission.
+- Status: `IMPLEMENTED`.
+
+### 327: per-record durable vault transactions in projection and egress
+
+- Verified defect: found while replacing the defect 264 wall-clock regression (row 325) with a transaction count: 2,500 learner records through a file-backed vault made 2,501 durable transactions.
+- User effect: a large roster response reopens, decrypts, and closes the encrypted vault once per learner record, which is the same starvation defect 264 closed for text references.
+- Root cause: `redactLearnerEgressPrepared`, `projectValue`, `redactLearnerNumber`, and `redactLearnerKey` tokenized each learner record through `learnerVault.tokenize`, and `learnerIdentity` resolved each existing token through `learnerVault.resolve`; with a file-backed vault each call is one durable transaction, although the prepared snapshot already publishes every roster label.
+- Repair: the prepared context carries the snapshot's label for every roster identity and a label-to-identity index; records and tokens resolve through it, and the vault is asked only for an identity outside the snapshot.
+- Regression: 2,500 learner records through a file-backed vault made 2,501 transactions before repair and one after; the privacy suite ran in 1.4 seconds instead of 166.
+- Status: `IMPLEMENTED`.
+
+### 328: provider refusal paths that abandon a live body
+
+- Verified defect: found by the syntax-tree guard that replaced the text-window guards (row 324): thirty refusal branches in 17 Bridge source files return or throw with a fetched body still live.
+- User effect: a refused or redirected provider response keeps its network stream alive after Morrow has produced its terminal result, the defect 308 and 309 closures claimed to have removed.
+- Root cause: thirty refusal branches returned or threw after `fetch` produced a response and before a reading helper received it, without cancelling the body: `!response.ok` and route checks in Canvas content, file, hot-spot, and Moodle executors, redirect and context checks in the BigBlueButton, LTI, and enrolment executors, invalid `Location` and `response.url` handling, and a content-type refusal in the pairing reader.
+- Repair: each branch now starts the same best-effort body cancellation used elsewhere before it returns or throws.
+- Regression: the analyser reports zero abandonment paths after repair and thirty on the sources as committed.
+- Status: `IMPLEMENTED`.
 
 ### 311 (reconfirmation, 2026-09-13)
 
-- The Fable 5.1 audit reconfirmed defect 311 remains open: `installer/shared/runtime-monitor.mjs:540-651` still awaits MCP operations with no caller signal, owned deadline, or outer settlement race. The SDK caps each await at 60 seconds, so "indefinitely" is overstated, but waits compound to minutes and cannot be cancelled. Status remains `OPEN`; it is not the only remaining defect.
+- The Fable 5.1 audit reconfirmed defect 311 remains open: `installer/shared/runtime-monitor.mjs:540-651` still awaits MCP operations with no caller signal, owned deadline, or outer settlement race. The SDK caps each await at 60 seconds, so "indefinitely" is overstated, but waits compound to minutes and cannot be cancelled. Repaired in the same delivery as rows 313-328; see the primary 311 entry.

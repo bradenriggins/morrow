@@ -97,7 +97,7 @@ export async function executeCanvasCourseFileTextInPage(input) {
     });
     if (!response.ok) throw new Error(`canvas_file_metadata_http_${response.status}`);
     const received = new URL(response.url);
-    if (received.origin !== canvasOrigin) throw new Error("canvas_file_metadata_origin_changed");
+    if (received.origin !== canvasOrigin) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("canvas_file_metadata_origin_changed"); }
     const text = await boundedText(response);
     try { return JSON.parse(text); } catch { throw new Error("canvas_file_metadata_response_invalid"); }
   };

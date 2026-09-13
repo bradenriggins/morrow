@@ -580,8 +580,8 @@ export async function executeMoodleEnrolmentInPage(rawInput) {
     } catch { return { lost: true }; }
     if (response.type === "opaqueredirect") return { sent: true, redirected: true };
     const status = response.status;
-    if ([301, 302, 303, 307, 308].includes(status)) return { sent: true, redirected: true, status };
-    if (!response.ok) return { sent: true, status };
+    if ([301, 302, 303, 307, 308].includes(status)) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return { sent: true, redirected: true, status }; }
+    if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return { sent: true, status }; }
     const html = await boundedText(response, expiresAt);
     const documentValue = parseHtml(html);
     // A submission Moodle refuses comes back as the same form again, and that

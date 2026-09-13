@@ -832,7 +832,7 @@ export async function executeMoodleH5pInPage(rawInput) {
   const bytesMatch = async (endpoint, manifest) => {
     let response;
     try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return false; }
-    if (!response.ok || response.url !== endpoint) return false;
+    if (!response.ok || response.url !== endpoint) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return false; }
     let bytes;
     try { bytes = await readLimitedBytes(response); } catch { return false; }
     if (bytes.byteLength !== manifest.size_bytes) return false;

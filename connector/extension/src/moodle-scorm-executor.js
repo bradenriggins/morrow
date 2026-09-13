@@ -662,7 +662,7 @@ export async function executeMoodleScormInPage(rawInput) {
   const draftBytesMatch = async (context, draftUrl, manifest) => {
     let response;
     try { response = await fetch(draftUrl, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return false; }
-    if (!response.ok || response.url !== draftUrl) return false;
+    if (!response.ok || response.url !== draftUrl) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return false; }
     let bytes;
     try { bytes = await readLimitedBytes(response); } catch { return false; }
     if (bytes.byteLength !== manifest.size_bytes) return false;
@@ -672,7 +672,7 @@ export async function executeMoodleScormInPage(rawInput) {
     const endpoint = urlFor(context, `/pluginfile.php/${contextId}/mod_scorm/package/${encodeURIComponent(manifest.filename)}`, { forcedownload: 1 });
     let response;
     try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return false; }
-    if (!response.ok || response.url !== endpoint) return false;
+    if (!response.ok || response.url !== endpoint) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return false; }
     let bytes;
     try { bytes = await readLimitedBytes(response); } catch { return false; }
     if (bytes.byteLength !== manifest.size_bytes) return false;
