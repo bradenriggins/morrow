@@ -2048,3 +2048,113 @@ Fresh discovery remains active after each repair wave. Every validated defect re
 - Regression: before repair, reinstalling an exact configuration with two hard links returned success and changed the unrelated peer from mode `0644` to `0600`. A deterministic temporary-name substitution also returned success, installed the substitute text, and wrote the intended configuration to the displaced inode. Both cases now refuse; the peer remains byte- and mode-exact, and the displaced inode remains empty because identity is checked before any configuration byte is written. The existing 4 MiB sparse-file refusal remains green.
 - Focused verification: the Client Config TypeScript build passed. Both focused identity regressions passed, and the complete package passed all 37 tests. The scoped diff check passed.
 - Remaining gate: the integrated repository checks and a native Windows ACL, crash-durability, and replacement-race run must pass before this row becomes `VERIFIED`. No provider write was used.
+
+## Fable 5.1 independent audit findings (2026-09-13)
+
+Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradication` at commit `267e7ec09fb9a815f34d353c0d6968e9599b0d39`. The audit verdict was: the branch is not correct and complete. Three P1 and four P2 defects below were unrecorded; eight named P3s follow. Defect 311 was reconfirmed open.
+
+### 313: caller-supplied readback verifies writes on non-Canvas routes
+
+- Verified defect: `packages/mcp-server/src/runtime.ts:634-664,7866-7893` accepts a caller-supplied `_morrow.readback` and marks the write `verified` on every non-Canvas-connector route. The only admission check is `readOnlyHint`. The existing integration test at `operations.integration.test.ts:190-230` shows a write reaching `verified` from an unrelated read the caller chose.
+- User effect: any caller can self-certify any write on the MCP, Blackboard, Moodle, and generic routes. Verification no longer proves the platform kept what was planned.
+- Required repair: verification must bind the readback to the route's own authoritative read of the written object, not to caller-chosen content. A caller-supplied readback must never satisfy verification on any route.
+- Required regression: an adversarial caller submitting an unrelated read as `_morrow.readback` must not reach `verified` on any route; the suite must cover Canvas connector, MCP, Blackboard, and Moodle routes.
+- Status: `OPEN`. This disputes ledger row 1, whose closure text scopes the fix to Canvas connector writes while its title covers every route.
+
+### 314: SQLite lock-dropping on live database files
+
+- Verified defect: `packages/gateway-core/src/private-sqlite-state.ts:40-48,89-94` and `packages/mcp-server/src/state-lease.ts:91-133,491` perform raw `openSync`/`closeSync` (and `fchmodSync`) on the live database file, `-wal`, and `-shm` at open time and on every 10-second lease heartbeat, after SQLite has the database open. POSIX advisory locks are released by `close()` of any descriptor for the inode, so each call silently drops the SHARED lock SQLite holds on the WAL-mode database and the DMS lock on `-shm` while SQLite still believes it holds them.
+- User effect: any other process that opens the same journal file (sqlite3 CLI, a maintenance script, or a second gateway whose lease check returned null) can obtain EXCLUSIVE on the DMS byte, reinitialise `-shm`, and on close checkpoint and delete `-wal` while the gateway keeps appending commits to the unlinked WAL inode. Effect records and approvals are lost or the file is corrupted. This is the documented SQLite "How To Corrupt" section 2.2 path, applied to the effect and batch authority stores.
+- Required repair: the file-hardening goal must be achieved without opening live database files. Apply permission hardening before SQLite opens the path, or harden a private copy and atomically install it, or prove descriptor-level safety; never `open`/`close`/`fchmod` the live `-wal`/`-shm` under a running connection.
+- Required regression: a test that opens the store, runs the hardening/heartbeat path, and then proves from a second connection that the journal lock discipline still holds (no EXCLUSIVE obtainable, WAL intact across interleaved commits).
+- Status: `OPEN`.
+
+### 315: darwin-forced tests fail on Linux, CI merge gate cannot go green
+
+- Verified defect: `packages/gateway-core/src/private-file-access.ts:177-179,207-209` shells to `/bin/ls -lde` on the darwin branch. Four tests force `platform: "darwin"` without stubbing the shell-out (`private-file-access.test.ts:22-45`, `local-owner-maintenance.test.ts:56-62`) and fail on Linux. The required `check` job from defect 274 runs on `ubuntu-latest`.
+- User effect: the merge gate the defect pass itself created cannot pass for this commit. Reproduced on the audit host: gateway-core 3 failed / 120 passed, mcp-server 1 failed / 41 passed.
+- Required repair: make the platform-specific tests hermetic. Stub the `ls -lde` invocation (or the platform layer) so the darwin branch is tested without a macOS host, and prove the full `check` suite passes on Linux.
+- Required regression: the four tests must pass on Linux; a CI-equivalent Linux run of the required `check` job must be green.
+- Status: `OPEN`.
+
+### 316: crash-window transaction lock wedge
+
+- Verified defect: `packages/gateway-core/src/private-state-file.ts:437-459` publishes a hard-link `${lock}.release-<nonce>` claim, then `unlinkSync(lock.path)`. If the process dies between `linkSync` (`:440`) and the unlink (`:455`), the lock file is left with `nlink === 2` and a `.release-*` sibling. Every later `acquireTransaction` then fails permanently: `publishTransactionOwner` returns false (EEXIST); `readTransactionOwner` throws because the reader requires `nlink === 1`; the fallback `readInterruptedReclaimOwner` only recognises `.reclaim-<nonce>` claims and returns null for `.release-*`; the loop spins until deadline and throws `admissionFailure`. Nothing ever unlinks the stale lock.
+- User effect: `LearnerVault` construction, every `prepareTextReferenceSets`/`resolve`, owner-descriptor writes, Blackboard durable state, and maintenance-lease writes all run inside this transaction. A single crash in that window makes the gateway unable to start until a person hand-deletes `<file>.transaction.lock` and `<file>.transaction.lock.release-*`.
+- Required repair: make the release path crash-atomic or teach the reclaim path to recognise and finish an interrupted release claim for the same private inode, the way stale-owner recovery already handles interrupted claims.
+- Required regression: a fixture that kills the process between claim publication and unlink must be recoverable by the next acquirer with no manual deletion; a decoy release claim on a different inode must still refuse.
+- Status: `OPEN`.
+
+### 317: privacy redaction bypass on status/grade-type keys
+
+- Verified defect: `packages/gateway-core/src/privacy.ts:882-884,1197`. In `redactLearnerEgressPrepared`, a string whose key matches `nonIdentityScalar` (`.*status`, `.*page`, `.*rows`, `.*index`, `.*attempt`, `.*size`, `.*limit`, `depth`, and similar) is returned as-is with no learner redaction and, unlike the sibling branch in `projectValue` (`:1113-1116`), no `containsSensitiveText` check. New in this pass from the projection rewrite.
+- User effect: `{ "grading_status": "Submitted by jane.doe@school.edu" }` or `{ "rows": ["Jane Doe, 95"] }` reaches the assistant unchanged through the egress path, while the same content in a field named `note` is refused. Learner-identifying data leaks to the model.
+- Required repair: the egress redactor must apply the same sensitive-text refusal to `nonIdentityScalar` keys as `projectValue` does, or prove key-shape can never carry identity content.
+- Required regression: adversarial payloads under `grading_status`, `rows`, `score`, and similar keys carrying emails and names must be redacted or refused; the existing `note`-key behaviour must stay green.
+- Status: `OPEN`.
+
+### 318: per-request synchronous process spawn blocks the owner event loop
+
+- Verified defect: `packages/gateway-core/src/process-lifetime.ts:19-47` and `packages/mcp-server/src/local-owner.ts:698`. Liveness checks moved from `process.kill(pid, 0)` to `processMatchesRecordedLifetime`, which calls synchronous `spawnSync("/bin/ps", ...)` (POSIX) or `spawnSync("powershell.exe", ...)` with a 3 s timeout (Windows). `recordModernProxy` runs it on every modern-protocol MCP request, the session reaper runs it once per client every 1 s, and `waitForOwner` runs it every 25 ms while the owner starts.
+- User effect: each call blocks the single owner event loop for a process spawn (tens of ms on POSIX; PowerShell start is typically 0.3-1.5 s on Windows), so every tool call through the local owner on Windows adds a synchronous PowerShell launch and stalls all other proxy sessions for that time.
+- Required repair: make liveness checks asynchronous and cached: resolve process start time once per owner lifecycle (or on a bounded background interval) and compare without spawning per request. Never `spawnSync` on a request path.
+- Required regression: a concurrency fixture proving N parallel modern-protocol requests do not serialise on process spawns; a source guard forbidding `spawnSync` on the request path.
+- Status: `OPEN`.
+
+### 319: gateway cannot start where process-start introspection is unavailable
+
+- Verified defect: `packages/gateway-core/src/private-state-file.ts:292-299,380` and `process-lifetime.ts:38-46`. `acquireTransaction` requires `exactCurrentProcessStart`, which returns null (and therefore throws "transaction process lifetime is unavailable") whenever `/bin/ps -o lstart= -p <pid>` is missing, exits non-zero, or prints a format `Date.parse` cannot read.
+- User effect: in minimal containers or non-C locales that localise month names, every `withExactPrivateStateFileTransaction` caller fails, including `LearnerVault` construction, so the gateway cannot start at all.
+- Required repair: provide a fallback process-identity mechanism that does not depend on `ps` output parsing, or degrade the lifetime check with a documented bound instead of refusing startup.
+- Required regression: a fixture with `ps` absent (and one with localised month names) must still construct the vault and acquire transactions.
+- Status: `OPEN`.
+
+### 320: unbounded MCP awaits in client-config CLI
+
+- Verified defect: `packages/client-config/src/cli.ts:466-470` awaits MCP operations with no deadline, caller signal, or settlement race.
+- User effect: a stalled peer can freeze the client-config CLI indefinitely on its primary path.
+- Required repair: give every CLI MCP operation an owned deadline and cancellation path consistent with the operation-boundary pattern used elsewhere in this pass.
+- Required regression: a stalled-peer fixture proving each CLI operation settles within its bound.
+- Status: `OPEN`.
+
+### 321: duplicate contradictory ledger entries for defect 274
+
+- Verified defect: two closure entries exist for defect 274 with contradictory status: `### 274: enforced GitHub merge protection` (`VERIFIED`) and `### 274: unbound repository merge gate` (`OPEN`, "This checkout does not alter GitHub provider configuration"). The stale OPEN entry was never removed; it is the only duplicated `### <id>:` heading in the ledger (192 headings, 1 duplicate).
+- Required repair: remove the stale entry and keep the single authoritative 274 row. Add a ledger lint that fails on duplicate `### <id>:` headings.
+- Status: `OPEN`.
+
+### 322: fifty ledger IDs missing with no explanation
+
+- Verified defect: 50 defect IDs in the ledger's numbering have no row and no recorded reason (skipped, merged, or reserved).
+- Required repair: account for every missing ID in a ledger appendix (merged into X, reserved, or never assigned) so the numbering is auditable end to end.
+- Status: `OPEN`.
+
+### 323: wrong first-run inventory citation the guard cannot detect
+
+- Verified defect: `FIRST-RUN-STATE-INVENTORY.md:563` cites a wrong source line, and the inventory guard cannot detect it because it matches identifier substrings rather than exact rendered source lines.
+- Required repair: correct the citation and strengthen the guard to resolve every cited control against the exact rendered source line, failing on substring-only matches.
+- Required regression: a fixture with a substring-matching but line-wrong citation must fail the guard.
+- Status: `OPEN`.
+
+### 324: three source-guard tests defeatable by trivial rewrites
+
+- Verified defect: three source-guard tests in this pass can be defeated by trivial rewrites that preserve the forbidden behaviour under a different shape.
+- Required repair: rewrite the guards to test behaviour (via adversarial fixtures that exercise the forbidden path) rather than source shape, so a rename or restructure cannot silently reintroduuse the defect.
+- Required regression: the trivial-rewrite variants must fail the strengthened guards.
+- Status: `OPEN`.
+
+### 325: defect 264 regression is a wall-clock bound only
+
+- Verified defect: the regression test recorded for defect 264 asserts a wall-clock bound rather than the underlying invariant, so it can pass while the defect recurs and can flake under load.
+- Required repair: replace the timing assertion with a deterministic invariant the defect would violate (ordering, single-settlement, or state proof).
+- Status: `OPEN`.
+
+### 326: second lock implementation contradicts the "one primitive" claim
+
+- Verified defect: `packages/canvas-connector-mcp/src/config.ts` carries a second state-transaction lock implementation whose release path differs from the shared primitive, contradicting the ledger's "one primitive" claim for the lock work.
+- Required repair: either migrate the connector to the shared primitive or record the second implementation as an explicit, tested exception with its own crash-window analysis.
+- Status: `OPEN`.
+
+### 311 (reconfirmation, 2026-09-13)
+
+- The Fable 5.1 audit reconfirmed defect 311 remains open: `installer/shared/runtime-monitor.mjs:540-651` still awaits MCP operations with no caller signal, owned deadline, or outer settlement race. The SDK caps each await at 60 seconds, so "indefinitely" is overstated, but waits compound to minutes and cannot be cancelled. Status remains `OPEN`; it is not the only remaining defect.
