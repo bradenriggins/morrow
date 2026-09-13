@@ -1134,7 +1134,7 @@
 
   async function pageJson(url) {
     const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
-    if (!response.ok) throw new Error("page_check_unavailable");
+    if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("page_check_unavailable"); }
     return JSON.parse(await readBounded(response));
   }
 
@@ -2508,7 +2508,7 @@
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
       const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
-      if (!response.ok) throw new Error("new_quiz_list_read_failed");
+      if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_list_read_failed"); }
       const rows = JSON.parse(await readBounded(response));
       if (!Array.isArray(rows) || rows.length > NEW_QUIZ_ITEM_PAGE_LIMIT || ids.length + rows.length > NEW_QUIZ_ITEM_LIMIT) {
         throw new Error("new_quiz_list_incomplete");
@@ -2716,7 +2716,7 @@
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
       const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
-      if (!response.ok) throw new Error("new_quiz_item_position_list_read_failed");
+      if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_item_position_list_read_failed"); }
       const page = JSON.parse(await readBounded(response));
       if (!Array.isArray(page) || page.length > NEW_QUIZ_ITEM_PAGE_LIMIT || rows.length + page.length > NEW_QUIZ_ITEM_LIMIT) {
         throw new Error("new_quiz_item_position_list_incomplete");
@@ -2756,7 +2756,7 @@
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
       const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
-      if (!response.ok) throw new Error("new_quiz_item_list_read_failed");
+      if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_item_list_read_failed"); }
       const page = JSON.parse(await readBounded(response));
       if (!Array.isArray(page) || page.length > NEW_QUIZ_ITEM_PAGE_LIMIT || rows.length + page.length > NEW_QUIZ_ITEM_LIMIT) {
         throw new Error("new_quiz_item_list_incomplete");

@@ -55,7 +55,7 @@ export async function executeMoodleCourseGroupsInPage(rawInput) {
   const approved = () => Date.now() <= input.expiresAt && sameContext();
   const boundedText = async (response, endpoint) => {
     let responseUrl;
-    try { responseUrl = new URL(response.url); } catch { return null; }
+    try { responseUrl = new URL(response.url); } catch { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return null; }
     if (!response.ok || responseUrl.origin !== endpoint.origin || responseUrl.pathname !== endpoint.pathname || responseUrl.search !== endpoint.search
       || !sameContext() || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
         try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}

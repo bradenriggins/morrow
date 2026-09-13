@@ -495,7 +495,7 @@ stale name here.
 | `Choose an assistant` | Morrow app | `installer/shared/setup-view.mjs:160` |
 | `Choose folder` | Morrow app | `installer/shared/setup-view.mjs:181`, `installer/shared/setup-view.mjs:181` |
 | `Change folder` | Morrow app | `installer/shared/setup-view.mjs:189` |
-| `Remove` | Morrow app | `installer/shared/setup-view.mjs:210`, `installer/renderer/renderer.js:327` |
+| `Remove` | Morrow app | `installer/shared/setup-view.mjs:210`, `installer/renderer/renderer.js:398` |
 | `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:311` |
 | `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:297` |
 | `Check connection` | Morrow app | `installer/shared/setup-view.mjs:348` |
@@ -547,7 +547,7 @@ stale name here.
 | `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
 | `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
 | `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:778` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:963` |
 | `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:946` |
 | `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:943` |
 | `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:945` |
@@ -560,9 +560,9 @@ Names a person reads as landmarks rather than presses:
 | `Setup you can change` | Morrow app | `installer/shared/setup-view.mjs:232` |
 | `Materials folder` | Morrow app | `installer/shared/setup-view.mjs:181` |
 | `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:468` |
-| `Assistant` | Morrow app progress rail | `installer/shared/setup-view.mjs:14` |
-| `Morrow Bridge` | Morrow app progress rail | `installer/shared/setup-view.mjs:89` |
-| `Course` | Morrow app progress rail | `installer/shared/setup-view.mjs:51` |
+| `Assistant` | Morrow app progress rail | `installer/shared/setup-view.mjs:137` |
+| `Morrow Bridge` | Morrow app progress rail | `installer/shared/setup-view.mjs:138` |
+| `Course` | Morrow app progress rail | `installer/shared/setup-view.mjs:139` |
 | `Connect a Blackboard Learn site (optional)` | Morrow app | `installer/renderer/index.html:50` |
 | `Morrow setup` | Setup guide | `connector/extension/onboarding/onboarding.html:6` |
 | `Plan and Edit settings` | Plan and Edit settings | `connector/extension/settings/settings.html:6` |

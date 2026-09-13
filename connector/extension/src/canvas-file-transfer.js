@@ -98,8 +98,8 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     });
     if (!response.ok) throw new Error("canvas_file_transfer_http_" + response.status);
     let received;
-    try { received = new URL(response.url); } catch { throw new Error("canvas_file_transfer_origin_changed"); }
-    if (received.origin !== canvasOrigin) throw new Error("canvas_file_transfer_origin_changed");
+    try { received = new URL(response.url); } catch { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("canvas_file_transfer_origin_changed"); }
+    if (received.origin !== canvasOrigin) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("canvas_file_transfer_origin_changed"); }
     const text = await boundedText(response);
     let value;
     try { value = JSON.parse(text); } catch { throw new Error("canvas_file_transfer_response_invalid"); }

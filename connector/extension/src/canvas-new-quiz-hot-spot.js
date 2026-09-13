@@ -270,7 +270,7 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
       let pages = 0;
       while (next && pages < Math.ceil(MAX_ITEMS / PAGE_LIMIT)) {
         const response = await canvasFetch(next);
-        if (!response.ok) throw new Error("canvas_hot_spot_item_list_read_failed");
+        if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("canvas_hot_spot_item_list_read_failed"); }
         const page = await boundedJson(response);
         if (!Array.isArray(page) || page.length > PAGE_LIMIT || rows.length + page.length > MAX_ITEMS) {
           throw new Error("canvas_hot_spot_item_list_incomplete");

@@ -2026,7 +2026,7 @@ export async function executeMoodleInPage(input) {
   const draftBytesMatch = async (context, draftUrl, manifest) => {
     let response;
     try { response = await fetch(draftUrl, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return false; }
-    if (!response.ok || response.url !== draftUrl) return false;
+    if (!response.ok || response.url !== draftUrl) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return false; }
     let bytes;
     try { bytes = await readLimitedBytes(response); } catch { return false; }
     if (bytes.byteLength !== manifest.size_bytes) return false;

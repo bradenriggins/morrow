@@ -661,12 +661,13 @@ export async function executeMoodleLtiInPage(rawInput) {
     } catch { return { error: "unconfirmed" }; }
     // Chromium reports an opaqueredirect with status 0, which is not a status.
     const status = Number.isInteger(response.status) && response.status > 0 ? response.status : undefined;
-    if (!sameContext(context, currentContext())) return { error: "unconfirmed", status };
+    if (!sameContext(context, currentContext())) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return { error: "unconfirmed", status }; }
     if (response.type === "opaqueredirect") return { sent: true };
     if ([301, 302, 303, 307, 308].includes(status)) {
       let redirect;
-      try { redirect = new URL(response.headers.get("location") || "", form.action); } catch { return { error: "unconfirmed", status }; }
+      try { redirect = new URL(response.headers.get("location") || "", form.action); } catch { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return { error: "unconfirmed", status }; }
       const courseView = urlFor(context, COURSE_VIEW_PATH, { id: form.courseId });
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return redirect.origin === courseView.origin && redirect.pathname === courseView.pathname
         ? { sent: true, status }
         : { error: "unconfirmed", status };

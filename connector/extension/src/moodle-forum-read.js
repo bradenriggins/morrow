@@ -96,7 +96,7 @@ export async function executeMoodleForumReadInPage(rawInput) {
     try {
       response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify([{ index: 0, methodname, args: argsValue }]), signal: requestSignal(input?.expiresAt) });
     } catch { return null; }
-    if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext()) return null;
+    if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext()) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return null; }
     let payload;
     try { payload = JSON.parse(await boundedText(response)); } catch { return null; }
     if (!Array.isArray(payload) || payload.length !== 1 || object(payload[0]?.error)) return null;
@@ -143,7 +143,7 @@ export async function executeMoodleForumReadInPage(rawInput) {
   if (submit.length !== 1 || !text(submit[0].value, 500)) return failed("moodle_forum_export_form_invalid", formResponse.status);
   values.append("submitbutton", submit[0].value);
   const readBounded = async (response) => {
-    if (!response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+    if (!response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return null; }
     const reader = response.body.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0; let output = "";
