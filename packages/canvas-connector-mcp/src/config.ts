@@ -1,16 +1,18 @@
-import { randomBytes } from "node:crypto";
-import { constants, type Stats } from "node:fs";
-import { chmod, link, lstat, mkdir, open, realpath, rename, unlink } from "node:fs/promises";
+import { randomBytes, randomUUID } from "node:crypto";
+import { closeSync, constants, fsyncSync, linkSync, lstatSync, openSync, unlinkSync, type Stats } from "node:fs";
+import { chmod, lstat, mkdir, open, realpath, rename, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { isJsonObject } from "@morrow/contracts";
 import {
+  canonicalPrivateStateFilePath,
   hardenPrivateDirectory,
   decodeExactUtf8,
   privateDirectoryAccessAccepted,
   privateFileAccessAccepted,
   processMatchesExactStart,
-  readProcessStartedAt,
+  readExactPrivateStateFile,
+  withExactPrivateStateFileTransactionAsync,
 } from "@morrow/gateway-core";
 
 export interface CanvasConnectorConfig {
@@ -30,16 +32,13 @@ interface ConnectorState {
   readonly allowedExtensionIds: readonly string[];
 }
 
-interface StateTransactionLock {
+/** The superseded connector-owned lock record, recognised only to remove a dead owner's lock. */
+interface LegacyStateTransactionLock {
   readonly schema: "morrow.canvas-connector.state-transaction.v1";
   readonly nonce: string;
   readonly pid: number;
   readonly processStartedAt: string;
   readonly acquiredAt: number;
-}
-
-interface HeldStateTransactionLock extends StateTransactionLock {
-  readonly path: string;
 }
 
 interface ExactPrivateBytes {
@@ -50,8 +49,6 @@ interface ExactPrivateBytes {
 const stateQueues = new Map<string, Promise<void>>();
 const MAX_STATE_BYTES = 64 * 1024;
 const MAX_LOCK_BYTES = 4 * 1024;
-const LOCK_WAIT_MS = 20;
-const LOCK_TIMEOUT_MS = 10_000;
 
 async function withStateQueue<T>(path: string, work: () => Promise<T>): Promise<T> {
   const previous = stateQueues.get(path) || Promise.resolve();
@@ -127,9 +124,9 @@ async function preparePrivateFile(path: string, content: string, maximum: number
   }
 }
 
-async function readPrivateBytes(path: string, maximum: number, label: string, maximumLinks = 1): Promise<ExactPrivateBytes> {
+async function readPrivateBytes(path: string, maximum: number, label: string): Promise<ExactPrivateBytes> {
   const named = await lstat(path);
-  if (!named.isFile() || named.isSymbolicLink() || named.nlink < 1 || named.nlink > maximumLinks
+  if (!named.isFile() || named.isSymbolicLink() || named.nlink !== 1
     || named.size > maximum || !exactOwner(named)) {
     throw new Error(`${label} is not a bounded private regular file`);
   }
@@ -142,7 +139,7 @@ async function readPrivateBytes(path: string, maximum: number, label: string, ma
   const handle = await open(path, constants.O_RDONLY | noFollow);
   try {
     const opened = await handle.stat();
-    if (!opened.isFile() || opened.nlink < 1 || opened.nlink > maximumLinks || opened.size > maximum
+    if (!opened.isFile() || opened.nlink !== 1 || opened.size > maximum
       || !exactOwner(opened) || !sameFile(named, opened)) {
       throw changedDuringAdmission(label);
     }
@@ -166,168 +163,72 @@ async function readPrivateBytes(path: string, maximum: number, label: string, ma
   }
 }
 
-function parseStateTransactionLock(value: unknown): StateTransactionLock {
+function legacyStateTransactionLock(value: unknown): LegacyStateTransactionLock | null {
   if (!isJsonObject(value)
     || Object.keys(value).sort().join("\0") !== ["acquiredAt", "nonce", "pid", "processStartedAt", "schema"].join("\0")
     || value.schema !== "morrow.canvas-connector.state-transaction.v1"
     || typeof value.nonce !== "string" || !/^[0-9a-f]{32}$/.test(value.nonce)
     || !Number.isSafeInteger(value.pid) || Number(value.pid) < 1 || Number(value.pid) > 2_147_483_647
     || typeof value.processStartedAt !== "string" || !Number.isFinite(Date.parse(value.processStartedAt))
-    || !Number.isSafeInteger(value.acquiredAt) || Number(value.acquiredAt) < 0) {
-    throw new Error("connector state transaction lock is invalid");
-  }
-  return value as unknown as StateTransactionLock;
+    || !Number.isSafeInteger(value.acquiredAt) || Number(value.acquiredAt) < 0) return null;
+  return value as unknown as LegacyStateTransactionLock;
 }
 
-async function readStateTransactionLock(path: string): Promise<StateTransactionLock> {
-  const admitted = await readPrivateBytes(path, MAX_LOCK_BYTES, "connector state transaction lock", 2);
-  let record: StateTransactionLock;
-  try { record = parseStateTransactionLock(JSON.parse(decodeExactUtf8(admitted.bytes, "connector state transaction lock")) as unknown); } catch (error) {
-    if (error instanceof Error && error.message === "connector state transaction lock is invalid") throw error;
-    throw new Error("connector state transaction lock is invalid");
-  }
-  const current = await lstat(path);
-  if (!sameFile(admitted.identity, current)) throw changedDuringAdmission("connector state transaction lock");
-  if (current.nlink === 1) return record;
-  const claimSuffix = `.reclaim-${record.nonce}`;
-  const peerPaths = path.endsWith(claimSuffix)
-    ? [path.slice(0, -claimSuffix.length)]
-    : [
-        `${path}${claimSuffix}`,
-        `${path.slice(0, -".transaction.lock".length)}.lock-${record.pid}-${record.nonce}`,
-      ];
-  const peers = await Promise.all(peerPaths.map(async (peerPath) => await lstat(peerPath).catch(() => null)));
-  if (peers.some((peer) => peer && sameFile(current, peer))) return record;
-  const refreshed = await lstat(path);
-  if (!sameFile(current, refreshed)) throw changedDuringAdmission("connector state transaction lock");
-  if (refreshed.nlink === 1) return record;
-  throw new Error("connector state transaction lock is not a bounded private regular file");
+function syncDirectorySync(path: string): void {
+  if (process.platform === "win32") return;
+  const descriptor = openSync(dirname(path), constants.O_RDONLY);
+  try { fsyncSync(descriptor); } finally { closeSync(descriptor); }
 }
 
-async function publishStateTransactionLock(
-  path: string,
-  record: StateTransactionLock,
-  preparedPath: string,
-  prepared: Stats,
-): Promise<boolean> {
-  if (!sameFile(prepared, await lstat(preparedPath))) throw new Error("connector state transaction lock preparation changed");
-  let published = false;
+/**
+ * Removes only a complete lock from the superseded connector-owned schema
+ * whose owner process no longer runs, so a connector upgraded under a dead
+ * owner's lock can enter the shared transaction.
+ */
+function reclaimLegacyStateTransaction(pathValue: string): void {
+  const path = `${canonicalPrivateStateFilePath(pathValue, "connector state")}.transaction.lock`;
+  let content: Buffer | null;
   try {
-    try {
-      await link(preparedPath, path);
-      published = true;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
-      throw error;
-    }
-    if (!sameFile(prepared, await lstat(path))) throw new Error("connector state transaction lock publication changed");
-    await unlink(preparedPath);
-    await syncDirectory(path);
-    const saved = await readStateTransactionLock(path);
-    if (JSON.stringify(saved) !== JSON.stringify(record)) throw new Error("connector state transaction lock readback mismatch");
-    return true;
+    content = readExactPrivateStateFile(path, { label: "connector legacy state transaction lock", maxBytes: MAX_LOCK_BYTES, minBytes: 1 });
+  } catch {
+    return;
+  }
+  if (content === null) return;
+  let parsed: unknown;
+  try { parsed = JSON.parse(decodeExactUtf8(content, "connector legacy state transaction lock")); } catch { return; }
+  const owner = legacyStateTransactionLock(parsed);
+  if (!owner || processMatchesExactStart(owner.pid, owner.processStartedAt) !== false) return;
+  const before = lstatSync(path);
+  const claim = `${path}.legacy-reclaim-${process.pid}-${randomUUID()}`;
+  let linked = false;
+  try {
+    linkSync(path, claim);
+    linked = true;
+    const current = lstatSync(path);
+    const claimed = lstatSync(claim);
+    if (!sameFile(before, current) || !sameFile(current, claimed)
+      || current.nlink !== 2 || claimed.nlink !== 2
+      || current.size !== before.size || current.mtimeMs !== before.mtimeMs) return;
+    unlinkSync(path);
+    syncDirectorySync(path);
   } catch (error) {
-    if (published) {
-      const current = await lstat(path).catch(() => null);
-      if (current && sameFile(prepared, current)) {
-        await unlink(path).catch(() => undefined);
-        await syncDirectory(path).catch(() => undefined);
-      }
-    }
-    throw error;
-  }
-}
-
-async function reclaimStateTransactionLock(path: string, record: StateTransactionLock): Promise<boolean> {
-  if (processMatchesExactStart(record.pid, record.processStartedAt) !== false) return false;
-  const claimPath = `${path}.reclaim-${record.nonce}`;
-  let claimed: Stats | null = null;
-  let cleanupClaim = false;
-  try {
-    await link(path, claimPath);
-    claimed = await lstat(claimPath);
-    cleanupClaim = true;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-    claimed = await lstat(claimPath).catch(() => null);
-    if (!claimed) return false;
-  }
-  try {
-    const [current, claimedRecord] = await Promise.all([
-      lstat(path).catch(() => null),
-      readStateTransactionLock(claimPath),
-    ]);
-    if (claimedRecord.nonce !== record.nonce
-      || processMatchesExactStart(claimedRecord.pid, claimedRecord.processStartedAt) !== false) return false;
-    cleanupClaim = true;
-    if (!current || !sameFile(claimed, current)) return false;
-    try {
-      await unlink(path);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
-      throw error;
-    }
-    await syncDirectory(path);
-    return true;
+    if (!["ENOENT", "EEXIST"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
   } finally {
-    if (cleanupClaim) await unlinkIfSame(claimPath, claimed);
-  }
-}
-
-async function acquireStateTransactionLock(path: string): Promise<HeldStateTransactionLock> {
-  const processStartedAt = readProcessStartedAt(process.pid);
-  if (processStartedAt === null) throw new Error("connector state transaction process lifetime is unavailable");
-  const record: StateTransactionLock = {
-    schema: "morrow.canvas-connector.state-transaction.v1",
-    nonce: randomBytes(16).toString("hex"),
-    pid: process.pid,
-    processStartedAt: new Date(processStartedAt).toISOString(),
-    acquiredAt: Date.now(),
-  };
-  const preparedPath = `${path}.lock-${record.pid}-${record.nonce}`;
-  let prepared: Stats | null = null;
-  try {
-    prepared = await preparePrivateFile(
-      preparedPath,
-      `${JSON.stringify(record)}\n`,
-      MAX_LOCK_BYTES,
-      "connector state transaction lock",
-    );
-    const deadline = performance.now() + LOCK_TIMEOUT_MS;
-    while (performance.now() <= deadline) {
-      if (await publishStateTransactionLock(`${path}.transaction.lock`, record, preparedPath, prepared)) {
-        return { ...record, path: `${path}.transaction.lock` };
-      }
-      let current: StateTransactionLock;
-      try {
-        current = await readStateTransactionLock(`${path}.transaction.lock`);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === "ENOENT" || (error as NodeJS.ErrnoException).code === "EAGAIN") continue;
-        throw error;
-      }
-      if (await reclaimStateTransactionLock(`${path}.transaction.lock`, current)) continue;
-      await new Promise((resolve) => setTimeout(resolve, LOCK_WAIT_MS));
+    if (linked) {
+      try { unlinkSync(claim); } catch { /* the claim is already gone */ }
     }
-    throw new Error("connector state is busy in another process");
-  } finally {
-    await unlinkIfSame(preparedPath, prepared);
   }
 }
 
-async function releaseStateTransactionLock(lock: HeldStateTransactionLock): Promise<void> {
-  const current = await readStateTransactionLock(lock.path);
-  if (current.nonce !== lock.nonce || current.pid !== lock.pid || current.processStartedAt !== lock.processStartedAt) {
-    throw new Error("connector state transaction ownership changed");
-  }
-  await unlink(lock.path);
-  await syncDirectory(lock.path);
-}
-
+/**
+ * Serialises connector state changes across processes through the one
+ * Gateway Core private-state transaction primitive; the in-process queue only
+ * keeps this process from competing with itself for that lock.
+ */
 async function withStateTransaction<T>(path: string, work: () => Promise<T>): Promise<T> {
   return await withStateQueue(path, async () => {
-    const lock = await acquireStateTransactionLock(path);
-    try { return await work(); } finally { await releaseStateTransactionLock(lock); }
+    reclaimLegacyStateTransaction(path);
+    return await withExactPrivateStateFileTransactionAsync(path, { label: "connector state" }, work);
   });
 }
 

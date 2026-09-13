@@ -59,7 +59,21 @@ function configRaceWorker(path: string, extensionId: string, barrierPath: string
   return { child, ready, outcome };
 }
 
+const LOCK_NONCE = "00000000-0000-4000-8000-000000000099";
+
+/** An owner record in the shared Gateway Core transaction schema the connector now uses. */
 function lockRecord(pid: number, processStartedAt: number): string {
+  return `${JSON.stringify({
+    schema: "morrow.exact-private-state-transaction.v1",
+    nonce: LOCK_NONCE,
+    pid,
+    processStartedAt: new Date(processStartedAt).toISOString(),
+    acquiredAt: Date.now(),
+  })}\n`;
+}
+
+/** A lock left by the superseded connector-owned lock implementation. */
+function legacyLockRecord(pid: number, processStartedAt: number): string {
   return `${JSON.stringify({
     schema: "morrow.canvas-connector.state-transaction.v1",
     nonce: "0".repeat(32),
@@ -166,7 +180,7 @@ describe("Canvas connector config", () => {
   it("reclaims a lock whose live PID has a different exact process lifetime", async () => {
     const path = await statePath();
     const lockPath = `${path}.transaction.lock`;
-    const claimPath = `${lockPath}.reclaim-${"0".repeat(32)}`;
+    const claimPath = `${lockPath}.reclaim-${LOCK_NONCE}`;
     const startedAt = readProcessStartedAt(process.pid);
     expect(startedAt).not.toBeNull();
     await writeFile(lockPath, lockRecord(process.pid, startedAt! - 60_000), { mode: 0o600, flag: "wx" });
@@ -179,33 +193,50 @@ describe("Canvas connector config", () => {
     await expect(readFile(claimPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
-  it("rejects linked, oversized, and broadly readable transaction locks", async () => {
-    const lock = `${await statePath()}.transaction.lock`;
-    const target = `${lock}.target`;
+  it("rejects linked, oversized, and broadly readable transaction locks through the shared primitive", async () => {
     const startedAt = readProcessStartedAt(process.pid);
     expect(startedAt).not.toBeNull();
-    await writeFile(target, lockRecord(process.pid, startedAt!), { mode: 0o600 });
-    await symlink(target, lock);
-    await expect(loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: lock.slice(0, -".transaction.lock".length) }, process.cwd()))
-      .rejects.toThrow("bounded private regular file");
-
+    const lock = `${await statePath()}.transaction.lock`;
+    const linkedTarget = lockRecord(process.pid, startedAt!);
+    await writeFile(`${lock}.target`, linkedTarget, { mode: 0o600 });
+    await symlink(`${lock}.target`, lock);
     const hardLinked = `${await statePath()}.transaction.lock`;
     await writeFile(hardLinked, lockRecord(process.pid, startedAt!), { mode: 0o600 });
     await link(hardLinked, `${hardLinked}.other-name`);
-    await expect(loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: hardLinked.slice(0, -".transaction.lock".length) }, process.cwd()))
-      .rejects.toThrow("bounded private regular file");
-
     const broad = `${await statePath()}.transaction.lock`;
     await writeFile(broad, lockRecord(process.pid, startedAt!), { mode: 0o600 });
     await chmod(broad, 0o644);
-    await expect(loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: broad.slice(0, -".transaction.lock".length) }, process.cwd()))
-      .rejects.toThrow("bounded private regular file");
-
     const oversized = `${await statePath()}.transaction.lock`;
     await writeFile(oversized, "x".repeat(4 * 1024 + 1), { mode: 0o600 });
-    await expect(loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: oversized.slice(0, -".transaction.lock".length) }, process.cwd()))
-      .rejects.toThrow("bounded private regular file");
-  });
+
+    // A damaged lock stays a fail-closed barrier until the shared admission bound passes.
+    const load = (lockPath: string) => loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: lockPath.slice(0, -".transaction.lock".length) }, process.cwd());
+    await Promise.all([
+      expect(load(lock)).rejects.toThrow("connector state transaction owner is not one exact private file"),
+      expect(load(hardLinked)).rejects.toThrow("connector state transaction owner is not one exact private file"),
+      expect(load(broad)).rejects.toThrow("connector state transaction owner"),
+      expect(load(oversized)).rejects.toThrow("connector state transaction owner"),
+    ]);
+    expect(await readFile(`${lock}.target`, "utf8")).toBe(linkedTarget);
+  }, 30_000);
+
+  it("reclaims only a dead owner's lock from the superseded connector lock schema", async () => {
+    const path = await statePath();
+    const lockPath = `${path}.transaction.lock`;
+    const startedAt = readProcessStartedAt(process.pid);
+    expect(startedAt).not.toBeNull();
+    const liveLegacy = legacyLockRecord(process.pid, startedAt!);
+    await writeFile(lockPath, liveLegacy, { mode: 0o600, flag: "wx" });
+    await expect(loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: path }, process.cwd()))
+      .rejects.toThrow("connector state transaction owner is invalid");
+    expect(await readFile(lockPath, "utf8")).toBe(liveLegacy);
+
+    await rm(lockPath);
+    await writeFile(lockPath, legacyLockRecord(process.pid, startedAt! - 60_000), { mode: 0o600, flag: "wx" });
+    const config = await loadCanvasConnectorConfig({ MORROW_CANVAS_CONNECTOR_STATE: path }, process.cwd());
+    expect(config.token.length).toBeGreaterThanOrEqual(32);
+    await expect(readFile(lockPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  }, 20_000);
 
   it("refuses malformed extension ids before changing state", async () => {
     const path = await statePath();
