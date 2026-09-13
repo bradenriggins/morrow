@@ -1457,6 +1457,81 @@ describe("project installation and hermetic parity", () => {
  * restriction is applied before any content exists, and that a computer which
  * cannot apply it is left with nothing Morrow wrote.
  */
+describe("CLI MCP operation bounds", () => {
+  // A raw stdio JSON-RPC peer that stops settling requests at one chosen
+  // point, ignores SIGTERM, and records its pid so the test can prove the
+  // command reclaimed it.
+  const STALLED_PEER = `
+const fs = require("node:fs");
+const mode = process.env.MORROW_STALLED_PEER_MODE;
+fs.writeFileSync(process.env.MORROW_STALLED_PEER_PID_FILE, String(process.pid));
+process.on("SIGTERM", () => {});
+let pending = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  pending += chunk;
+  let newline;
+  while ((newline = pending.indexOf("\\n")) >= 0) {
+    const line = pending.slice(0, newline);
+    pending = pending.slice(newline + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (message.method === "initialize" && mode === "stall-tool") {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {
+        protocolVersion: message.params.protocolVersion,
+        capabilities: { tools: {} },
+        serverInfo: { name: "stalled-peer", version: "1.0.0" },
+      } }) + "\\n");
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`;
+
+  async function stalledPeerCommand(mode: string): Promise<{ readonly status: number | null; readonly stderr: string; readonly elapsedMs: number; readonly peerPid: number }> {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-cli-stalled-peer-"));
+    try {
+      const peerPath = join(directory, "stalled-peer.cjs");
+      const pidFile = join(directory, "peer.pid");
+      const upstreamConfigPath = join(directory, "upstreams.json");
+      await writeFile(peerPath, STALLED_PEER, "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+      const startedAt = Date.now();
+      const result = spawnSync(process.execPath, [
+        cliPath, "backend", "status", "--json",
+        "--repository", directory, "--upstreams", upstreamConfigPath, "--server-entry", peerPath,
+        "--startup-timeout", "1", "--tool-timeout", "1",
+      ], {
+        encoding: "utf8",
+        timeout: 20_000,
+        env: { ...process.env, MORROW_STALLED_PEER_MODE: mode, MORROW_STALLED_PEER_PID_FILE: pidFile },
+      });
+      const elapsedMs = Date.now() - startedAt;
+      const peerPid = Number(await readFile(pidFile, "utf8").catch(() => "0"));
+      return { status: result.status, stderr: `${result.stderr}${result.error ? `\n${result.error.message}` : ""}`, elapsedMs, peerPid };
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  const alive = (pid: number): boolean => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  };
+
+  it.each([
+    ["stall-initialize", /MCP initialization did not settle within 1000 ms/],
+    ["stall-tool", /MCP tool morrow_health did not settle within 1000 ms/],
+  ])("settles a %s peer within the owned deadline and reclaims its process", async (mode, message) => {
+    const { status, stderr, elapsedMs, peerPid } = await stalledPeerCommand(mode);
+    expect(stderr).toMatch(message);
+    expect(status).toBe(1);
+    expect(elapsedMs).toBeLessThan(15_000);
+    expect(peerPid).toBeGreaterThan(0);
+    expect(alive(peerPid)).toBe(false);
+  }, 30_000);
+});
+
 describe("private file restriction", () => {
   const succeeds = () => ({ status: 0, stdout: "restricted\n" });
 
