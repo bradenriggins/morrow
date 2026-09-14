@@ -5,6 +5,9 @@ import * as z from 'zod/v4';
 const source = process.env.FAKE_SOURCE || 'fixture';
 const stagedTasks = new Map();
 const taskReads = new Map();
+// The title each course's page holds after a staged edit lands, so the
+// source's own read reports what it kept.
+const pageTitles = new Map();
 
 function taskProjection(taskId, sourceBindingId) {
   const readCount = (taskReads.get(taskId) || 0) + 1;
@@ -120,7 +123,7 @@ function createServer() {
     },
     async ({ course_id }) => ({
       content: [{ type: 'text', text: `${source}:${course_id}` }],
-      structuredContent: { source, course_id },
+      structuredContent: { source, course_id, ...(pageTitles.has(course_id) ? { title: pageTitles.get(course_id) } : {}) },
     }),
   );
   server.registerTool(
@@ -195,18 +198,22 @@ function createServer() {
         inputSchema: z.object({
           course_id: z.string(),
           title: z.string().optional(),
-          fixture_outcome: z.enum(['normal', 'failed-effect', 'failed-no-effect', 'unconfirmed']).optional(),
+          // `stale-read` completes the task but leaves the page unchanged, so
+          // the source's own read cannot confirm the requested title.
+          fixture_outcome: z.enum(['normal', 'failed-effect', 'failed-no-effect', 'unconfirmed', 'stale-read']).optional(),
           _morrow: z.object({
             operation_id: z.string(),
             source_binding_id: z.string().optional(),
           }).optional(),
         }),
         annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+        _meta: { 'io.morrow/capability': { route: { planBackend: 'canvas_page_get', comparator: 'exact-requested-fields' } } },
       },
-      async ({ course_id, fixture_outcome, _morrow }) => {
+      async ({ course_id, title, fixture_outcome, _morrow }) => {
         const suffix = fixture_outcome && fixture_outcome !== 'normal'
           ? `-${fixture_outcome}`
           : '';
+        if ((!fixture_outcome || fixture_outcome === 'normal') && title !== undefined) pageTitles.set(course_id, title);
         const taskId = `task-${course_id}${suffix}`;
         stagedTasks.set(taskId, {
           taskId,

@@ -52,6 +52,10 @@ if (process.env.FAKE_STDOUT_CONTAMINATION === "1") {
   process.stdout.write("this is not MCP JSON-RPC\n");
 }
 
+// The last value each course accepted through the source-only write, so the
+// source's own read can return what it holds.
+const pageValues = new Map();
+
 function createServer() {
   const server = new McpServer({
     name: `fake-${source}`,
@@ -87,6 +91,7 @@ function createServer() {
           source,
           course_id: course_id || null,
           ...(large ? { large } : {}),
+          ...(course_id && pageValues.has(course_id) ? pageValues.get(course_id) : {}),
         },
         _meta: {
           secret: "result-metadata-must-not-pass",
@@ -101,6 +106,9 @@ function createServer() {
       description: `A source-only fake ${sourceToolIsWrite ? "write" : "read"} tool from ${source}.`,
       inputSchema: z.object({
         value: z.string().optional(),
+        course_id: z.string().optional(),
+        page_id: z.string().optional(),
+        note: z.string().optional(),
         _morrow: z.object({
           operation_id: z.string().optional(),
           source_binding_id: z.string().optional(),
@@ -119,10 +127,18 @@ function createServer() {
         idempotentHint: !sourceToolIsWrite,
         openWorldHint: false,
       },
+      // A write names the read-only tool that reviews what it wrote. Morrow
+      // derives every readback from this declaration and accepts no other.
+      ...(sourceToolIsWrite ? {
+        _meta: { "io.morrow/capability": { route: { planBackend: "canvas_page_get", comparator: "exact-requested-fields" } } },
+      } : {}),
     },
-    async ({ value, _morrow }, context) => {
+    async ({ value, course_id, page_id, _morrow }, context) => {
       note(sourceToolName);
       await waitForDelay(context.mcpReq.signal);
+      if (sourceToolIsWrite && course_id && value !== undefined) {
+        pageValues.set(course_id, { value, ...(page_id !== undefined ? { page_id } : {}) });
+      }
       return {
         content: [{ type: "text", text: sourceToolName }],
         structuredContent: {

@@ -144,10 +144,15 @@ function readExactPrivateStateFileWithLinks(
     if (length < minBytes || length > maxBytes) throw new Error(`${options.label} violates its byte bound`);
     const afterRead = fstatSync(descriptor);
     const current = lstatSync(path);
+    // Every attribute the admission decided on is re-read on the open
+    // descriptor and by name. ctime is not compared: a multigrain-timestamp
+    // kernel refines the ctime of a freshly written inode after it is first
+    // queried, with no content or attribute change, so it cannot prove a
+    // concurrent change and it refuses this process's own readback.
     if (!sameFile(opened, afterRead) || !sameFile(opened, current)
       || afterRead.nlink !== linkCount || current.nlink !== linkCount
       || opened.size !== afterRead.size || opened.mtimeMs !== afterRead.mtimeMs
-      || opened.ctimeMs !== afterRead.ctimeMs) {
+      || opened.mode !== afterRead.mode || opened.uid !== afterRead.uid) {
       throw new Error(`${options.label} changed while it was read`);
     }
     return buffer.subarray(0, length);

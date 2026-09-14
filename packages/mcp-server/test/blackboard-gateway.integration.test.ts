@@ -30,7 +30,7 @@ function json(response: ServerResponse, value: unknown, status = 200): void {
 
 function operationId(value: unknown): string {
   if (!isJsonObject(value) || !isJsonObject(value.structuredContent) || typeof value.structuredContent.operationId !== "string") {
-    throw new Error("Blackboard plan did not produce an operation id");
+    throw new Error(`Blackboard plan did not produce an operation id: ${JSON.stringify(value)}`);
   }
   return value.structuredContent.operationId;
 }
@@ -346,6 +346,26 @@ describe("Blackboard API Gateway effect integration", () => {
     } finally {
       await client?.close();
       await server?.close();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 40_000);
+
+  it("refuses a caller-supplied readback on the Blackboard route", async () => {
+    const fixture = await createFixture();
+    let runtime: MorrowRuntime | undefined;
+    try {
+      runtime = await MorrowRuntime.connect(configuration(resolve("../.."), fixture), { statePath: join(fixture.directory, "caller-readback.sqlite3") });
+      const scope = { tenant_id: "fixture", source_binding_id: sourceBindingId(fixture.baseUrl), course_id: COURSE_ID };
+      const apply = BLACKBOARD_ACTIONS.find((action) => action.publicName === "morrow_plan_blackboard_course_announcement")!;
+      const refused = runtime.gateway.planOperation(apply.apply.name, {
+        ...scope, title: "Self-certified", body: "Caller chose the comparator.", duration_type: "Continuous", show_at_top_of_course: false,
+        _morrow: { readback: { tool: "blackboard_read_course", arguments: scope, expected_digest: "a".repeat(64) } },
+      });
+      expect(refused.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      expect(runtime.gateway.operationList(10)).toMatchObject({ returned: 0 });
+      expect(fixture.counts().requests.filter((entry) => entry === `POST /learn/api/public/v1/courses/${COURSE_ID}/announcements`)).toHaveLength(0);
+    } finally {
       await runtime?.close();
       await fixture.close();
     }

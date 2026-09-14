@@ -183,6 +183,8 @@ function createSandboxServer(): McpServer {
         fault: z.enum(["none", "reject_before_apply", "throw_after_apply"]).default("none"),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      // The sandbox read of the same page is the only readback Morrow uses.
+      _meta: { "io.morrow/capability": { route: { planBackend: "canvas_page_get", comparator: "exact-requested-fields" } } },
     },
     async ({ course_id, page_slug, title, body, expected_revision, fault }) => {
       const current = estate.pages[pageKey(course_id, page_slug)];

@@ -490,6 +490,25 @@ describe("Canvas connector gateway path", () => {
       runtime.cancelOperation(pagePlanOperationId);
     }, CASE_TIMEOUT_MS);
 
+    it("refuses a caller-supplied readback on the Canvas connector route", async () => {
+      activeEditPermission = detailedEditPermission("canvas_page_content");
+      bridge?.updateBindings([binding()]);
+      await bindingsApplied();
+      const before = writeCommands;
+      const refused = await runtime.call("canvas_update_create_page_courses", {
+        course_id: "42",
+        url_or_id: "lesson",
+        _morrow: {
+          source_binding_id: sourceBindingId,
+          canvas_content_guard: pageContentGuard,
+          readback: { tool: "canvas_list_favorite_courses", arguments: {}, expected_digest: "a".repeat(64) },
+        },
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      expect(writeCommands).toBe(before);
+    }, CASE_TIMEOUT_MS);
+
     it("saves one guarded Page edit under the Edit grant", async () => {
       activeEditPermission = detailedEditPermission("canvas_page_content");
       bridge?.updateBindings([binding()]);
@@ -1351,19 +1370,30 @@ describe("Canvas connector gateway path", () => {
         return operationId(planned as unknown as JsonObject);
       };
 
-      // A caller-supplied comparator can never replace the connector-owned
-      // policy. Existing saved operations from before this invariant also
-      // remain unresolved instead of running their unrelated comparator.
+      // A caller-supplied comparator is refused before any operation exists;
+      // the connector-owned policy is the only readback a plan carries.
+      // Existing saved operations from before this invariant also remain
+      // unresolved instead of running their unrelated comparator.
       const suppliedReadback = {
         tool: "canvas_show_page_courses",
         arguments: { course_id: "999", url_or_id: "unrelated" },
         expected_digest: "a".repeat(64),
       };
-      const guardedPlan = await runtime.planOperationWithCurrentEditPermission("canvas_update_create_page_courses", {
+      const beforeSupplied = writeCommands;
+      const refusedSupplied = await runtime.planOperationWithCurrentEditPermission("canvas_update_create_page_courses", {
         course_id: "42",
         url_or_id: "legacy-lesson",
         wiki_page_title: "Legacy cell structure",
         _morrow: { source_binding_id: sourceBindingId, readback: suppliedReadback },
+      });
+      expect(refusedSupplied.isError).toBe(true);
+      expect(refusedSupplied.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      expect(writeCommands).toBe(beforeSupplied);
+      const guardedPlan = await runtime.planOperationWithCurrentEditPermission("canvas_update_create_page_courses", {
+        course_id: "42",
+        url_or_id: "legacy-lesson",
+        wiki_page_title: "Legacy cell structure",
+        _morrow: { source_binding_id: sourceBindingId },
       });
       const guardedId = operationId(guardedPlan);
       const guarded = runtime.effects.get(guardedId);

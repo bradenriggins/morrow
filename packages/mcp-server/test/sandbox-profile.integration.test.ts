@@ -104,14 +104,6 @@ describe("sandbox runtime profile", () => {
         title: expected.title,
         body: expected.body,
         expected_revision: 1,
-        fault: "none",
-        _morrow: {
-          readback: {
-            tool: "canvas_page_get",
-            arguments: { course_id: "90001", page_slug: "welcome" },
-            expected_digest: sha256Json(expected),
-          },
-        },
       });
       const id = operationId(planned);
       expect(id).toMatch(/^op:/);
@@ -130,6 +122,24 @@ describe("sandbox runtime profile", () => {
     }
   }, 30_000);
 
+  it("refuses a caller-supplied readback on the sandbox route", async () => {
+    const runtime = await GatewayRuntime.connect(sandboxConfig(), { journalPath: ":memory:" });
+    try {
+      const refused = runtime.planOperation("canvas_page_update", {
+        course_id: "90003",
+        page_slug: "welcome",
+        title: "Self-certified",
+        body: "Caller chose the comparator.",
+        expected_revision: 1,
+        _morrow: { readback: { tool: "canvas_courses_list", arguments: { offset: 0, limit: 1 }, expected_digest: "a".repeat(64) } },
+      });
+      expect(refused.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      expect(runtime.operationList(10)).toMatchObject({ returned: 0 });
+    } finally {
+      await runtime.close();
+    }
+  }, 30_000);
+
   it("distinguishes a definite pre-apply rejection from an ambiguous post-apply failure", async () => {
     const runtime = await GatewayRuntime.connect(sandboxConfig(), { journalPath: ":memory:" });
     try {
@@ -142,13 +152,6 @@ describe("sandbox runtime profile", () => {
           body: "Synthetic fault.",
           expected_revision: revision,
           fault,
-          _morrow: {
-            readback: {
-              tool: "canvas_page_get",
-              arguments: { course_id: "90002", page_slug: "welcome" },
-              expected_digest: "f".repeat(64),
-            },
-          },
         },
       );
 
@@ -226,14 +229,6 @@ describe("sandbox runtime profile", () => {
         title: expected.title,
         body: expected.body,
         expected_revision: 1,
-        fault: "none",
-        _morrow: {
-          readback: {
-            tool: "canvas_page_get",
-            arguments: { course_id: expected.course_id, page_slug: expected.page_slug },
-            expected_digest: sha256Json(expected),
-          },
-        },
       });
       const id = operationId(planned);
       runtime.approveOperation(id);

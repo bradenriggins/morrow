@@ -202,6 +202,36 @@ describe("Moodle source-bound roster egress", () => {
       expect(approvalUrl).toEqual(expect.stringMatching(/^http:\/\/127\.0\.0\.1:4317\/operations\/op%3A/));
       expect(String(approvalUrl)).toContain("%3A");
 
+      const refused = await client.callTool({
+        name: "morrow_capability_change",
+        arguments: {
+          name: "moodle_update_page",
+          arguments: {
+            course_id: 2,
+            module_id: 8,
+            name: "Self-certified",
+            expected_digest: SNAPSHOT_DIGEST,
+            _morrow: {
+              source_binding_id: "moodle:complete",
+              readback: { tool: "moodle_get_page", arguments: { course_id: 2, module_id: 8 }, expected_digest: "a".repeat(64) },
+            },
+          },
+        },
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ code: "capability_input_invalid" });
+      const refusedPlan = runtime.planOperation("moodle_update_page", {
+        course_id: 2,
+        module_id: 8,
+        name: "Self-certified",
+        expected_digest: SNAPSHOT_DIGEST,
+        _morrow: {
+          source_binding_id: "moodle:complete",
+          readback: { tool: "moodle_get_page", arguments: { course_id: 2, module_id: 8 }, expected_digest: "a".repeat(64) },
+        },
+      });
+      expect(refusedPlan.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+
       const audit = async (courseId: number) => await client!.callTool({
         name: "morrow_audit_course",
         arguments: { provider: "moodle", source_binding_id: SOURCE_BINDINGS.get(String(courseId)), course_id: courseId, target: { kind: "quiz_question", module_id: 8, slot_id: 9 } },

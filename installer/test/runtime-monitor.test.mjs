@@ -899,6 +899,14 @@ test("settles every stalled MCP operation within its bound, reclaims that genera
   const originalMode = process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
   const originalLog = process.env.MORROW_RUNTIME_MONITOR_PID_LOG;
   process.env.MORROW_RUNTIME_MONITOR_PID_LOG = log;
+  const operationTimeouts = { connectMs: 1_500, operationMs: 400, closeMs: 300, reclaimMs: 1_500 };
+  // One public method may spawn a child, run one connect and one operation to
+  // their deadlines, close the client and transport, and reclaim the child
+  // through SIGTERM then SIGKILL. That contract sum is the bound; the envelope
+  // allows a loaded host several times that and still stays far under the
+  // unbounded SDK wait the repair removed.
+  const contractMs = operationTimeouts.connectMs + operationTimeouts.operationMs + 2 * operationTimeouts.closeMs + operationTimeouts.reclaimMs;
+  const envelopeMs = contractMs * 5;
   const monitor = createRuntimeMonitor({
     nodePath: process.execPath,
     serverEntryPath: entry,
@@ -906,7 +914,7 @@ test("settles every stalled MCP operation within its bound, reclaims that genera
     workspaceRoot,
     journalPath: path.join(workspaceRoot, "gateway.sqlite3"),
     diagnosticTracePath: tracePath,
-    operationTimeouts: { connectMs: 1_500, operationMs: 400, closeMs: 300, reclaimMs: 1_500 },
+    operationTimeouts,
   });
   t.after(async () => {
     if (originalMode === undefined) delete process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
@@ -921,8 +929,10 @@ test("settles every stalled MCP operation within its bound, reclaims that genera
     .filter((line) => line.startsWith("pid:")).map((line) => Number(line.slice(4)));
   const settled = async (operation, detail) => {
     const marker = Symbol("deadline");
-    const outcome = await Promise.race([operation, new Promise((resolve) => setTimeout(() => resolve(marker), 8_000))]);
-    assert.notEqual(outcome, marker, `${detail} did not settle within its bound`);
+    let timer = null;
+    const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve(marker), envelopeMs); });
+    const outcome = await Promise.race([operation, deadline]).finally(() => clearTimeout(timer));
+    assert.notEqual(outcome, marker, `${detail} did not settle within ${envelopeMs} ms`);
     return outcome;
   };
   const expectUnavailable = async (mode, run, detail) => {

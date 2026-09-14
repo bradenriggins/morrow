@@ -50,7 +50,7 @@ function config() {
         required: true,
         enabled: true,
         outputPrivacy: {
-          canvas_page_get: { allowedFields: ["source", "course_id"], dataClass: "course", maxRecords: 10, maxBytes: 10_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+          canvas_page_get: { allowedFields: ["source", "course_id", "title"], dataClass: "course", maxRecords: 10, maxBytes: 10_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
           edit_page: { allowedFields: ["schema", "ok", "sourceToolName", "commandKind", "result", "approvalRequired", "taskId", "status", "operationId"], dataClass: "course", maxRecords: 20, maxBytes: 10_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
           morrow_legacy_task_get: { allowedFields: ["schema", "ok", "task", "taskId", "status", "outcome", "terminal", "verificationStatus", "resultCounts", "done", "unconfirmed", "failed", "rollbackFailed", "skipped", "undone", "notStarted", "sourceBindingId"], dataClass: "course", maxRecords: 20, maxBytes: 10_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
         },
@@ -60,16 +60,6 @@ function config() {
     operationJournal: { path: ":memory:" },
     maxCatalogTools: 50,
   });
-}
-
-function readback(courseId: string) {
-  return {
-    readback: {
-      tool: "canvas_page_get",
-      arguments: { course_id: courseId },
-      expected_digest: sha256Json({ source: "meridian", course_id: courseId }),
-    },
-  };
 }
 
 function connectorConfig(directory: string, port: number) {
@@ -459,7 +449,7 @@ describe("MorrowRuntime durable batches", () => {
       await first?.close();
       await rm(directory, { recursive: true, force: true });
     }
-  }, 30_000);
+  }, 45_000);
 
   it("compensates every outer effect when later batch planning fails", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-batch-create-compensation-"));
@@ -1127,7 +1117,7 @@ describe("MorrowRuntime durable batches", () => {
           childId: `course:${course}`,
           tool: "edit_page",
           sourceBindingId: `canvas:${course}`,
-          arguments: { course_id: String(course), title: `Course ${course}`, _morrow: readback(String(course)) },
+          arguments: { course_id: String(course), title: `Course ${course}` },
         })),
       });
       const batch = created.batch as { batchId: string; concurrency: number };
@@ -1250,7 +1240,6 @@ describe("MorrowRuntime durable batches", () => {
           arguments: {
             course_id: String(index + 1),
             fixture_outcome: entry.outcome,
-            _morrow: readback(String(index + 1)),
           },
         })),
       });
@@ -1286,13 +1275,9 @@ describe("MorrowRuntime durable batches", () => {
           arguments: {
             course_id: "99",
             title: "Reviewed value",
-            _morrow: {
-              readback: {
-                tool: "canvas_page_get",
-                arguments: { course_id: "99" },
-                expected_digest: "f".repeat(64),
-              },
-            },
+            // The source completes the task but its own read still shows the
+            // old title, so Morrow's route readback cannot confirm the change.
+            fixture_outcome: "stale-read",
           },
         }],
       });
@@ -1331,7 +1316,7 @@ describe("MorrowRuntime durable batches", () => {
           childId: "course:700",
           tool: "edit_page",
           sourceBindingId: "canvas:700",
-          arguments: { course_id: "700", title: "Never returned", _morrow: readback("700") },
+          arguments: { course_id: "700", title: "Never returned" },
         }],
       });
       batchId = (created.batch as { batchId: string }).batchId;

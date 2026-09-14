@@ -352,15 +352,9 @@ describe("morrow_activity", () => {
             value: "activity-write",
             course_id: "77",
             page_id: "page-77",
-            _morrow: {
-              readback: {
-                tool: "canvas_page_get",
-                arguments: { course_id: "77" },
-                // A comparator the fresh read cannot match, so the record stays
-                // unresolved and a person has to check the item.
-                expected_digest: "a".repeat(64),
-              },
-            },
+            // The source's own read never returns a note, so the route
+            // readback cannot match and a person has to check the item.
+            note: "needs a person",
           },
         },
       }));

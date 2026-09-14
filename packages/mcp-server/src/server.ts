@@ -71,17 +71,6 @@ function publicToolInputSchema(toolName: string, schema: JsonObject): JsonObject
         type: "object",
         properties: {
           ...controls,
-          readback: {
-            type: "object",
-            description: "Optional frozen fresh-readback comparator for a mutating operation.",
-            properties: {
-              tool: { type: "string", minLength: 1, maxLength: 160 },
-              arguments: { type: "object" },
-              expected_digest: { type: "string", pattern: "^[0-9a-f]{64}$" },
-            },
-            required: ["tool", "arguments", "expected_digest"],
-            additionalProperties: false,
-          },
           approval_ttl_ms: {
             type: "integer",
             minimum: 60000,

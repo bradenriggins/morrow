@@ -631,37 +631,32 @@ interface OuterOperationControls {
   readonly approvalTtlMs?: number;
 }
 
+/** The caller named a readback comparator. Morrow never accepts one: every readback is derived from the route. */
+export class CallerReadbackRefusedError extends TypeError {
+  override readonly name = "CallerReadbackRefusedError";
+  constructor() {
+    super("_morrow.readback is not accepted: Morrow derives every readback from the write's own route.");
+  }
+}
+
 function outerOperationControls(args: Readonly<Record<string, unknown>>): OuterOperationControls {
   assertNoPrivateAttachmentInput(args);
   const request = structuredClone(args) as JsonObject;
   if (!isJsonObject(request._morrow)) return { request };
   const routing = { ...request._morrow };
-  const rawReadback = routing.readback;
+  if (routing.readback !== undefined) throw new CallerReadbackRefusedError();
   const rawTtl = routing.approval_ttl_ms;
-  delete routing.readback;
   delete routing.approval_ttl_ms;
   delete routing.outer_grant;
   if (Object.keys(routing).length > 0) request._morrow = routing;
   else delete request._morrow;
 
-  let readback: FrozenReadbackPlan | undefined;
-  if (rawReadback !== undefined) {
-    if (!isJsonObject(rawReadback) || typeof rawReadback.tool !== "string" || !isJsonObject(rawReadback.arguments)
-      || typeof rawReadback.expected_digest !== "string" || !/^[0-9a-f]{64}$/.test(rawReadback.expected_digest)) {
-      throw new TypeError("_morrow.readback requires tool, arguments, and expected_digest");
-    }
-    readback = {
-      tool: rawReadback.tool,
-      arguments: structuredClone(rawReadback.arguments),
-      expectedDigest: rawReadback.expected_digest,
-    };
-  }
   const approvalTtlMs = rawTtl === undefined
     ? undefined
     : typeof rawTtl === "number" && Number.isInteger(rawTtl) && rawTtl >= 60_000 && rawTtl <= 24 * 60 * 60_000
       ? rawTtl
       : (() => { throw new TypeError("_morrow.approval_ttl_ms must be 60000 through 86400000"); })();
-  return { request, ...(readback ? { readback } : {}), ...(approvalTtlMs ? { approvalTtlMs } : {}) };
+  return { request, ...(approvalTtlMs ? { approvalTtlMs } : {}) };
 }
 
 function resultComparable(value: JsonObject): JsonObject {
@@ -694,6 +689,14 @@ function isBlackboardApply(mapping: CatalogTool): boolean {
     && mapping.capability?.provider === "blackboard"
     && mapping.capability.route.backend === "lms-api"
     && BLACKBOARD_ACTIONS.some((action) => action.apply.name === mapping.upstreamName));
+}
+
+/** Whether a saved readback names the exact verify tool Morrow pairs with this Blackboard apply tool. */
+function isBlackboardDerivedReadback(effectMapping: CatalogTool, readbackMapping: CatalogTool): boolean {
+  if (!isBlackboardApply(effectMapping) || readbackMapping.upstreamId !== effectMapping.upstreamId) return false;
+  if (isBlackboardContentPatchApply(effectMapping)) return readbackMapping.upstreamName === BLACKBOARD_CONTENT_PATCH_VERIFY_TOOL;
+  return BLACKBOARD_ACTIONS.some((action) => action.apply.name === effectMapping.upstreamName
+    && action.verify.name === readbackMapping.upstreamName);
 }
 
 function isBlackboardAttachment(mapping: CatalogTool): boolean {
@@ -1095,6 +1098,41 @@ function connectorReadback(mapping: CatalogTool, request: JsonObject): FrozenRea
 
 function isConnectorReadbackPolicy(readback: FrozenReadbackPlan | null | undefined): boolean {
   return readback?.tool === "morrow_connector_embedded_readback";
+}
+
+const ROUTE_READBACK_TOOL = "morrow_route_embedded_readback";
+const ROUTE_READBACK_SCHEMA = "morrow.route-readback-policy.v1";
+/** The one comparator a non-connector route may declare: the review read must return every requested field. */
+const EXACT_REQUESTED_FIELDS_COMPARATOR = "exact-requested-fields";
+
+/**
+ * A route declares its own authoritative read through `route.planBackend`
+ * (the read-only source tool that reviews the written object) and
+ * `route.comparator`. Morrow freezes that declaration with the request digest
+ * so verification can only read what the route names, never what a caller
+ * chose.
+ */
+function routeReadback(mapping: CatalogTool, reviewTool: CatalogTool, request: JsonObject): FrozenReadbackPlan {
+  const policy = {
+    schema: ROUTE_READBACK_SCHEMA,
+    source: mapping.upstreamId,
+    tool: mapping.publicName,
+    sourceTool: mapping.upstreamName,
+    reviewTool: reviewTool.publicName,
+    reviewSourceTool: reviewTool.upstreamName,
+    comparator: EXACT_REQUESTED_FIELDS_COMPARATOR,
+    requestDigest: sha256Json(request),
+  };
+  return { tool: ROUTE_READBACK_TOOL, arguments: policy, expectedDigest: sha256Json(policy) };
+}
+
+function isRouteReadbackPolicy(readback: FrozenReadbackPlan | null | undefined): boolean {
+  return readback?.tool === ROUTE_READBACK_TOOL;
+}
+
+/** Requested fields are every request field except identity, routing, and `expected_*` preconditions. */
+function requestedReadbackFields(request: JsonObject, identityKeys: ReadonlySet<string>): readonly (readonly [string, unknown])[] {
+  return Object.entries(request).filter(([key]) => key !== "_morrow" && !key.startsWith("expected_") && !identityKeys.has(key));
 }
 
 /** A saved connector operation may use only the policy Morrow derives from its frozen request. */
@@ -1632,12 +1670,19 @@ export class GatewayRuntime {
             throw new Error(`Source ${upstream.id} eligible catalog does not match generated truth.`);
           }
         }
+        // A Meridian server publishes no capability metadata of its own; the
+        // attested catalog truth is the authority that declares each tool's
+        // route, including the review read a write verifies through.
+        const truthCapabilities = new Map((truth?.tools ?? []).map((tool) => [tool.name, tool.capability]));
         sources.push({
           id: upstream.id,
           label: upstream.label,
           priority: upstream.priority,
           ...(upstreamConfig.revision ? { revision: upstreamConfig.revision } : {}),
-          tools,
+          tools: tools.map((tool) => {
+            const declared = truthCapabilities.get(tool.name);
+            return tool.capability || !declared ? tool : { ...tool, capability: declared };
+          }),
         });
       } catch (error) {
         if (upstream.required) {
@@ -7311,37 +7356,37 @@ export class GatewayRuntime {
       if (mapping.capability?.provider === "moodle" && !/^[0-9a-f]{64}$/.test(String(supplied.request.expected_digest || ""))) {
         throw new TypeError("Moodle browser writes require expected_digest from the exact preceding read");
       }
-      const controls: OuterOperationControls = usesEmbeddedReadback(mapping)
-        ? { ...supplied, readback: connectorReadback(mapping, supplied.request) }
-        : supplied;
-      if (!controls.readback) {
+      const readback = this.derivedReadback(mapping, supplied.request);
+      if (!readback) {
         return canonicalMorrowResult({
           tool: publicName,
           phase: "rejected",
           verificationStatus: "not_requested",
           result: {
-            content: [{ type: "text", text: "Morrow refused a write without a frozen fresh-readback comparator." }],
+            content: [{ type: "text", text: "Morrow refused a write whose route declares no read-only review tool for fresh readback." }],
             isError: true,
             structuredContent: { schema: "morrow.problem.v1", code: "write_readback_required" },
           },
         });
       }
+      const controls: OuterOperationControls = { ...supplied, readback };
       const operation = this.planEffect(mapping, controls, authorization, undefined, bindingScope);
       return this.effectResult(operation, "planned");
   }
 
   private planOperationRejected(publicName: string, error: unknown): JsonObject {
     const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+    const callerReadback = error instanceof CallerReadbackRefusedError;
     return canonicalMorrowResult({
       tool: publicName,
       phase: "rejected",
       verificationStatus: "not_requested",
       result: {
-        content: [{ type: "text", text: "Morrow could not freeze this operation plan." }],
+        content: [{ type: "text", text: callerReadback ? error.message : "Morrow could not freeze this operation plan." }],
         isError: true,
         structuredContent: {
           schema: "morrow.problem.v1",
-          code: "operation_plan_invalid",
+          code: callerReadback ? "caller_readback_refused" : "operation_plan_invalid",
           detailDigest: sha256Text(detail),
         },
       },
@@ -7863,8 +7908,15 @@ export class GatewayRuntime {
     if (operation.state === "awaiting_inner_approval") {
       return this.effectResult(operation, "verification_requires_inner_approval");
     }
+    if (isRouteReadbackPolicy(operation.readback)) {
+      return await this.routeReadbackVerification(operation);
+    }
     const mapping = this.toolByPublicName.get(operation.readback.tool);
-    if (!mapping || mapping.annotations?.readOnlyHint !== true) {
+    // The digest comparator remains only for plans Morrow itself froze from a
+    // Blackboard review contract. A saved readback naming any other read is
+    // caller content from before route-owned readback and never verifies.
+    if (!mapping || mapping.annotations?.readOnlyHint !== true
+      || !effectMapping || !isBlackboardDerivedReadback(effectMapping, mapping)) {
       return this.effectResult(operation, "verification_unsupported");
     }
     const createReadback = blackboardCreateReadbackContract(mapping);
@@ -8011,6 +8063,55 @@ export class GatewayRuntime {
         resentWrite: false,
       },
     });
+  }
+
+  /** The read-only source tool a non-connector route declares as its review read, or null. */
+  private routeReviewTool(mapping: CatalogTool): CatalogTool | null {
+    const route = mapping.capability?.route;
+    if (!route?.planBackend || route.comparator !== EXACT_REQUESTED_FIELDS_COMPARATOR || isCanvasConnector(mapping)) return null;
+    const matches = this.catalog.tools.filter((candidate) => candidate.upstreamId === mapping.upstreamId
+      && candidate.upstreamName === route.planBackend
+      && candidate.annotations?.readOnlyHint === true
+      && !isCanvasConnector(candidate));
+    return matches.length === 1 ? matches[0]! : null;
+  }
+
+  /** Morrow's own readback plan for a write, or null when the route owns none. */
+  private derivedReadback(mapping: CatalogTool, request: JsonObject): FrozenReadbackPlan | null {
+    if (usesEmbeddedReadback(mapping)) return connectorReadback(mapping, request);
+    const reviewTool = this.routeReviewTool(mapping);
+    return reviewTool ? routeReadback(mapping, reviewTool, request) : null;
+  }
+
+  /**
+   * Reads the written object back through the route's declared review tool
+   * and reports verified only when that fresh read carries every requested
+   * field with the requested value. The saved policy must recompute from the
+   * frozen request, so a historical record with another policy never verifies.
+   */
+  private async routeReadbackVerification(operation: EffectOperationRecord): Promise<JsonObject> {
+    const effectMapping = this.toolByPublicName.get(operation.publicToolName);
+    const request = isJsonObject(operation.plan.arguments) ? operation.plan.arguments : null;
+    const reviewTool = effectMapping ? this.routeReviewTool(effectMapping) : null;
+    if (!effectMapping || !request || !reviewTool || !operation.readback
+      || sha256Json(routeReadback(effectMapping, reviewTool, request)) !== sha256Json(operation.readback)) {
+      return this.effectResult(operation, "verification_unsupported");
+    }
+    const properties = isJsonObject(reviewTool.inputSchema.properties) ? reviewTool.inputSchema.properties : {};
+    const identityKeys = new Set(Object.keys(request).filter((key) => key !== "_morrow" && key in properties));
+    const sourceBindingId = legacyRouting(request).sourceBindingId;
+    const readArguments: JsonObject = {
+      ...Object.fromEntries([...identityKeys].map((key) => [key, structuredClone(request[key])])),
+      ...(sourceBindingId ? { _morrow: { source_binding_id: sourceBindingId } } : {}),
+    };
+    const fresh = this.resolveResultArtifact(await this.callSourceOwned(reviewTool.publicName, readArguments));
+    if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
+    const observed = isJsonObject(fresh.structuredContent) ? fresh.structuredContent : null;
+    const requested = requestedReadbackFields(request, identityKeys);
+    const verified = observed !== null && requested.length > 0
+      && requested.every(([key, value]) => Object.hasOwn(observed, key) && sha256Json(observed[key]) === sha256Json(value));
+    const settled = this.effects.recordReadback(operation.operationId, sha256Json(resultComparable(fresh)), verified);
+    return this.effectResult(settled, "verified_readback", fresh);
   }
 
   private async connectorReadbackReconciliationResult(operation: EffectOperationRecord): Promise<JsonObject> {
@@ -8314,9 +8415,10 @@ export class GatewayRuntime {
     if (!mapping || mapping.annotations?.readOnlyHint === true) {
       throw new Error("A correction must use one current mutating Morrow tool");
     }
-    const controls = outerOperationControls(correctionArguments);
-    if (!controls.readback) throw new Error("A correction requires its own frozen readback comparator");
-    const correction = this.planEffect(mapping, controls, REVIEW_AUTHORIZATION, original.operationId);
+    const supplied = outerOperationControls(correctionArguments);
+    const readback = this.derivedReadback(mapping, supplied.request);
+    if (!readback) throw new Error("A correction requires a route-owned readback comparator");
+    const correction = this.planEffect(mapping, { ...supplied, readback }, REVIEW_AUTHORIZATION, original.operationId);
     return this.effectResult(correction, "correction_planned");
   }
 

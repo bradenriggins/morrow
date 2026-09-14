@@ -161,13 +161,7 @@ describe("Morrow stdio entry", () => {
         name: "morrow_legacy_only",
         arguments: {
           value: "surface-test",
-          _morrow: {
-            readback: {
-              tool: "canvas_page_get",
-              arguments: { course_id: "1" },
-              expected_digest: "a".repeat(64),
-            },
-          },
+          course_id: "1",
         },
       });
       const operationId = (planned.structuredContent as { operationId?: string }).operationId;
