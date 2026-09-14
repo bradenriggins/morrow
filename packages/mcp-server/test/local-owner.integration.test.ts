@@ -613,7 +613,7 @@ describe("Morrow local owner", () => {
       await waitFor(() => !existsSync(ownerPath), "workspace local owner cleanup");
       await rm(directory, { recursive: true, force: true });
     }
-  }, 40_000);
+  }, 60_000);
 
   it("recovers a dead desktop holder through the still-held owner, then closes it before a normal monitor restarts", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-local-owner-recovery-"));

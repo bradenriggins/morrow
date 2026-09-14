@@ -42,7 +42,10 @@ async function sourceTruth(directory: string): Promise<{ path: string; fileSha25
     capability: {
       family: "canvas-operation",
       provider: "canvas",
-      route: { backend: "meridian" },
+      // The attested truth names the read-only tool a write verifies through.
+      route: tool.annotations?.readOnlyHint === false
+        ? { backend: "meridian", planBackend: "canvas_page_get", comparator: "exact-requested-fields" }
+        : { backend: "meridian" },
     },
   })));
   const bytes = Buffer.from(`${JSON.stringify(artifact, null, 2)}\n`, "utf8");
@@ -314,13 +317,6 @@ describe("ExamplePlatform SSH runtime adapter", () => {
         const planned = await runtime.call("canvas_page_update", {
           course_id: "101",
           body: "one dispatch",
-          _morrow: {
-            readback: {
-              tool: "canvas_page_get",
-              arguments: { course_id: "101" },
-              expected_digest: "a".repeat(64),
-            },
-          },
         });
         const operationId = (planned.structuredContent as { operationId: string }).operationId;
         runtime.approveOperation(operationId);

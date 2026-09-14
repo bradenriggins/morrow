@@ -74,6 +74,12 @@ async function writePayloadFile(payload, relative, content) {
   return { path: relative, bytes: Buffer.byteLength(content), sha256: sha256(content) };
 }
 
+// The payload every case prepares targets the desktop the config packages for:
+// Windows on a Windows host, otherwise macOS. A host the config cannot package
+// on (Linux CI) loads it as a cross-build for that same target.
+const PAYLOAD_TARGET = process.platform === "win32" ? "win32-x64" : "darwin-arm64";
+const TARGET_PLATFORM = PAYLOAD_TARGET === "win32-x64" ? "win32" : "darwin";
+
 /**
  * Writes a complete, small payload graph. Invalid-manifest options and a custom
  * package input let refusal cases change only the contract under test.
@@ -81,7 +87,7 @@ async function writePayloadFile(payload, relative, content) {
 async function preparedPayload(t, { invalidBridge = false, invalidMcp = false, invalidDependency = false, packageInput } = {}) {
   const payload = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-config-"));
   t.after(() => fs.rm(payload, { recursive: true, force: true }));
-  const target = process.platform === "win32" ? "win32-x64" : "darwin-arm64";
+  const target = PAYLOAD_TARGET;
   const nodePath = target === "win32-x64" ? "runtime/node/node.exe" : "runtime/node/bin/node";
   const node = await writePayloadFile(payload, nodePath, "morrow-node-runtime-fixture");
   const definitions = [
@@ -192,6 +198,8 @@ function loadConfig({ payload, signedRelease = false, version = null, chromeStor
   const previousStore = process.env.MORROW_CHROME_STORE_LIVE;
   const previousAdmission = process.env[PACKAGER_ADMISSION_ENV];
   const previousReviewedGraph = process.env[REVIEWED_GRAPH_SHA256_ENV];
+  const previousTargetPlatform = process.env.MORROW_TARGET_PLATFORM;
+  process.env.MORROW_TARGET_PLATFORM = TARGET_PLATFORM;
   const manifest = require(manifestPath);
   const manifestModule = require.cache[manifestPath];
   const previousManifest = manifestModule.exports;
@@ -222,6 +230,8 @@ function loadConfig({ payload, signedRelease = false, version = null, chromeStor
     else process.env[PACKAGER_ADMISSION_ENV] = previousAdmission;
     if (previousReviewedGraph === undefined) delete process.env[REVIEWED_GRAPH_SHA256_ENV];
     else process.env[REVIEWED_GRAPH_SHA256_ENV] = previousReviewedGraph;
+    if (previousTargetPlatform === undefined) delete process.env.MORROW_TARGET_PLATFORM;
+    else process.env.MORROW_TARGET_PLATFORM = previousTargetPlatform;
   }
 }
 

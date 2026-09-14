@@ -252,7 +252,6 @@ describe("Morrow public stdio protocol", () => {
             properties: {
               _morrow: {
                 properties: {
-                  readback: { required: ["tool", "arguments", "expected_digest"] },
                   approval_ttl_ms: { minimum: 60_000 },
                 },
               },
@@ -260,6 +259,9 @@ describe("Morrow public stdio protocol", () => {
           },
         },
       });
+      const advertisedControls = (capability.structuredContent as { descriptor: { inputSchema: { properties: { _morrow: { properties: Record<string, unknown> } } } } })
+        .descriptor.inputSchema.properties._morrow.properties;
+      expect(advertisedControls).not.toHaveProperty("readback");
       const read = await client.callTool({
         name: "morrow_capability_read",
         arguments: { name: "canvas_page_get", arguments: { course_id: "101" } },
@@ -279,13 +281,7 @@ describe("Morrow public stdio protocol", () => {
           name: "morrow_legacy_only",
           arguments: {
             value: "compact-plan",
-            _morrow: {
-              readback: {
-                tool: "canvas_page_get",
-                arguments: { course_id: "101" },
-                expected_digest: "a".repeat(64),
-              },
-            },
+            course_id: "101",
           },
         },
       });

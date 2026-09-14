@@ -96,14 +96,8 @@ function runtimeConfig() {
 function plan(runtime: MorrowRuntime, suffix: string): { readonly id: string; readonly url: string } {
   const result = runtime.gateway.planOperation("morrow_legacy_only", {
     value: suffix,
-    _morrow: {
-      operation_id: `operation:approval-shutdown-${suffix}`,
-      readback: {
-        tool: "canvas_page_get",
-        arguments: { course_id: "101" },
-        expected_digest: sha256Json({ source: "morrow-legacy", course_id: "101" }),
-      },
-    },
+    course_id: "101",
+    _morrow: { operation_id: `operation:approval-shutdown-${suffix}` },
   });
   const structured = result.structuredContent as {
     operationId?: unknown;

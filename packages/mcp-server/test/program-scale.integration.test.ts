@@ -17,9 +17,11 @@ import { assertPortListening, reserveLoopbackPort } from "./fixtures/loopback-po
  * The deadline for one case, and for the fixture the cases share. Every case
  * below drives a real connector process over a real loopback bridge, and the
  * two restart cases start a second one; the slowest measured about four
- * seconds on this machine. Change the deadline here, not per case.
+ * seconds on this machine, and the shared fixture passed thirty seconds on a
+ * two-CPU host running a second vitest worker. Change the deadline here, not
+ * per case.
  */
-const CASE_TIMEOUT_MS = 30_000;
+const CASE_TIMEOUT_MS = 60_000;
 
 const EXTENSION_ID = "a".repeat(32);
 const TOKEN = "program-scale-connector-token-".repeat(3);
