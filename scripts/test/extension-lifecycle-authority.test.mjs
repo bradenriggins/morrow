@@ -513,7 +513,9 @@ async function pairingStalledCancellationScenario() {
   const result = await sendRuntime(value, { type: "morrow_pair" });
   assert.deepEqual(result, { ok: false, code: "bridge_pairing_response_timeout", error: "bridge_pairing_response_timeout" });
   assert.equal(bodyCancelled, true);
-  assert.ok(Date.now() - startedAt < 500);
+  // The bound guards against hanging on the never-settling cancel(), not
+  // against scheduling jitter: the settle itself never awaits the cancel.
+  assert.ok(Date.now() - startedAt < 2000);
   assert.equal(value.local.values.pairing, undefined);
 }
 

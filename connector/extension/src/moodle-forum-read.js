@@ -95,7 +95,7 @@ export async function executeMoodleForumReadInPage(rawInput) {
     const signal = requestSignal(input?.expiresAt);
     let response;
     try {
-      response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify([{ index: 0, methodname, args: argsValue }]), signal });
+      response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { "Content-Type": "application/json", Accept: "application/json" }, body: JSON.stringify([{ index: 0, methodname, args: argsValue }]), signal: signal });
     } catch { return signal.aborted ? { expired: true } : null; }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext()) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return null; }
     let payload;

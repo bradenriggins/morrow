@@ -94,7 +94,11 @@ test("desktop payload seals the actual gateway package, records its source prove
   const receipt = JSON.parse(execFileSync(process.execPath, [builder, "--target", "darwin-arm64", "--prepare-desktop-payload", payload], {
     cwd: root,
     encoding: "utf8",
-    maxBuffer: 8 * 1024 * 1024
+    maxBuffer: 8 * 1024 * 1024,
+    // The suite runs test files concurrently and other files import
+    // packages/*/dist, so this builder run must not delete and rebuild those
+    // shared outputs. `pnpm build` already compiled them before the suite.
+    env: { ...process.env, MORROW_PACKAGER_SKIP_REBUILD: "1" },
   }));
   const sealed = sealedInput(payload);
   const releaseGraph = createPackagerAdmission({ payload, target: "darwin-arm64" });
