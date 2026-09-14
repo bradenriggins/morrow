@@ -174,7 +174,11 @@ function loadBuildConfig(t) {
   const configPath = require.resolve(join(rootPath, BUILD_CONFIG));
   const previousPayload = process.env.MORROW_INSTALLER_PAYLOAD;
   const previousSigned = process.env.MORROW_SIGNED_RELEASE;
+  const previousTargetPlatform = process.env.MORROW_TARGET_PLATFORM;
   process.env.MORROW_INSTALLER_PAYLOAD = payload;
+  // The build config only packages darwin/win32. The target platform is a
+  // test-harness declaration here, so this file also runs on Linux CI.
+  process.env.MORROW_TARGET_PLATFORM = "darwin";
   delete process.env.MORROW_SIGNED_RELEASE;
   delete require.cache[configPath];
   try {
@@ -185,6 +189,8 @@ function loadBuildConfig(t) {
     else process.env.MORROW_INSTALLER_PAYLOAD = previousPayload;
     if (previousSigned === undefined) delete process.env.MORROW_SIGNED_RELEASE;
     else process.env.MORROW_SIGNED_RELEASE = previousSigned;
+    if (previousTargetPlatform === undefined) delete process.env.MORROW_TARGET_PLATFORM;
+    else process.env.MORROW_TARGET_PLATFORM = previousTargetPlatform;
   }
 }
 
