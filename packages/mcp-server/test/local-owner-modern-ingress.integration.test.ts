@@ -47,7 +47,7 @@ async function readLog(path: string): Promise<readonly string[]> {
 async function removeDirectory(directory: string): Promise<void> {
   for (let attempt = 0; ; attempt += 1) {
     try {
-      await removeDirectory(directory);
+      await rm(directory, { recursive: true, force: true });
       return;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOTEMPTY" || attempt >= 4) throw error;
