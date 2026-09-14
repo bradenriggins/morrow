@@ -17,7 +17,11 @@ interface ConfigRaceWorker {
 }
 
 function configRaceWorker(path: string, extensionId: string, barrierPath: string): ConfigRaceWorker {
-  const child = spawn(process.execPath, [raceFixturePath, path, extensionId, barrierPath], {
+  // Node 22 prints an ExperimentalWarning for node:sqlite on stderr; the product
+  // cannot suppress Node's own startup warning from inside the worker, so the
+  // harness disables warnings. The assertion below still catches any real
+  // worker stderr output.
+  const child = spawn(process.execPath, ["--no-warnings", raceFixturePath, path, extensionId, barrierPath], {
     cwd: process.cwd(),
     stdio: ["pipe", "pipe", "pipe"],
   });
