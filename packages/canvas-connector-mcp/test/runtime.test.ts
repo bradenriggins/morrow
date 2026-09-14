@@ -5,6 +5,7 @@ import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
 import { fromJsonSchema } from "@modelcontextprotocol/server";
 import { augmentBridgeInputSchema, BRIDGE_PROTOCOL_VERSION, BRIDGE_SCHEMAS, bridgeAuthenticationProofPayload, parseBridgeJson, serializeBridgeMessage, type BridgeBinding, type BridgeCommand } from "@morrow/bridge-protocol";
+import { BridgeRequestCancelledError } from "@morrow/bridge-loopback";
 import type { CanvasConnectorConfig } from "../src/config.js";
 import {
   CanvasConnectorRuntime,
@@ -505,6 +506,7 @@ describe("CanvasConnectorRuntime", () => {
     expect(commands).toBe(1);
   });
 
+
   it("refuses direct Canvas file calls and forwards one exact reserved private Canvas file transfer", async () => {
     const runtime = await start();
     const socket = sockets.at(-1)!;
@@ -711,6 +713,49 @@ describe("CanvasConnectorRuntime", () => {
       problem: { code: "request_cancelled_before_dispatch" },
     });
     expect(commands).toBe(1);
+  });
+
+  it("classifies a cancellation during bridge preflight as not_sent before dispatch", async () => {
+    const runtime = await start();
+    const stub = runtime.bridge as unknown as { invoke: (invocation: unknown) => Promise<never> };
+    // The bridge's pre-dispatch checkpoints throw the signal's own AbortError
+    // when the abort lands mid-preflight (for example while the edit-permission
+    // detail round trip is in flight). Nothing was sent.
+    stub.invoke = async () => { throw new DOMException("The operation was aborted.", "AbortError"); };
+    expect(await runtime.call("canvas_get_single_course_courses", {
+      id: "42",
+      _morrow: { source_binding_id: "canvas:test-account" },
+    })).toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "request_cancelled_before_dispatch" },
+    });
+    // A queued write whose bridge command never left rejects with
+    // BridgeRequestCancelledError. For a write that is still "not sent".
+    stub.invoke = async () => {
+      throw new BridgeRequestCancelledError({ requestId: "bridge:test", operationId: "operation:test" } as never);
+    };
+    const grant = {
+      plan_digest: "a".repeat(64),
+      approval_grant_digest: "b".repeat(64),
+      effect_receipt_id: "effect:abort-preflight-test",
+      dispatch_attempt: 1,
+      gateway_process_id: "gateway:connector-test",
+    };
+    expect(await runtime.call("canvas_edit_assignment", {
+      course_id: "42",
+      id: "9",
+      assignment: { due_at: "2026-10-01T00:00:00Z" },
+      _morrow: {
+        source_binding_id: "canvas:test-account",
+        operation_id: "operation:abort-preflight-test",
+        outer_grant: grant,
+      },
+    })).toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "request_cancelled_before_dispatch" },
+    });
   });
 
   it("preserves extension before-send and unknown write outcomes", async () => {

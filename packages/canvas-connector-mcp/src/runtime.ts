@@ -1175,6 +1175,23 @@ export class CanvasConnectorRuntime {
         result: resultObject(response.result),
       };
     } catch (error) {
+      // A cancellation that lands before the provider operation is dispatched
+      // must read as "not sent", never as an unclassified bridge failure.
+      // The bridge's pre-dispatch checkpoints throw the signal's own
+      // AbortError (for example when the edit-permission detail round trip
+      // resolves after the abort), and a queued bridge command rejects with
+      // BridgeRequestCancelledError. For a write, both mean the provider
+      // never saw the change.
+      const cancelledBeforeDispatch = error instanceof DOMException && error.name === "AbortError"
+        || (error instanceof BridgeRequestCancelledError && kind !== "invoke_read");
+      if (cancelledBeforeDispatch) {
+        return failedBeforeSend({
+          schema: "morrow.bridge.problem.v1",
+          code: "request_cancelled_before_dispatch",
+          message: "Morrow cancelled this request before the provider operation started.",
+          recoverable: true,
+        }, provider);
+      }
       return {
         schema: "morrow.canvas-connector.result.v1",
         ok: false,
