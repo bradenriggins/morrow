@@ -30,7 +30,7 @@ function json(response: ServerResponse, value: unknown, status = 200): void {
 
 function operationId(value: unknown): string {
   if (!isJsonObject(value) || !isJsonObject(value.structuredContent) || typeof value.structuredContent.operationId !== "string") {
-    throw new Error("Blackboard plan did not produce an operation id");
+    throw new Error(`Blackboard plan did not produce an operation id: ${JSON.stringify(value)}`);
   }
   return value.structuredContent.operationId;
 }
@@ -70,7 +70,10 @@ function returnedPlanDigest(value: JsonObject): string {
   return structured.planDigest;
 }
 
-async function createFixture(): Promise<{
+async function createFixture(options: {
+  readonly announcementCreateFails?: boolean;
+  readonly preexistingMatchingAnnouncement?: boolean;
+} = {}): Promise<{
   readonly directory: string;
   readonly baseUrl: string;
   readonly configPath: string;
@@ -85,7 +88,14 @@ async function createFixture(): Promise<{
   const key = await readFile(TEST_KEY);
   const requests: string[] = [];
   let patch = 0;
-  const announcements = new Map<string, JsonObject>();
+  const announcements = new Map<string, JsonObject>(options.preexistingMatchingAnnouncement ? [["_90_1", {
+    id: "_90_1",
+    title: "Course update",
+    body: "The lab opens on Monday.",
+    availability: { duration: { type: "Permanent" } },
+    showAtTopOfCourse: false,
+    created: "2026-09-01T12:00:00.000Z",
+  }]] : []);
   const attachments = new Map<string, JsonObject>();
   let uploadedBytes = 0;
   let copyTaskReads = 0;
@@ -116,6 +126,7 @@ async function createFixture(): Promise<{
       if (request.method === "POST") {
         let body = "";
         for await (const chunk of request) body += String(chunk);
+        if (options.announcementCreateFails) { json(response, { message: "create failed" }, 500); return; }
         const record = { ...JSON.parse(body), id: "_91_1", created: "2026-09-07T12:00:00.000Z" };
         announcements.set(record.id, record);
         json(response, record, 201);
@@ -307,6 +318,59 @@ function configuration(
 }
 
 describe("Blackboard API Gateway effect integration", () => {
+  it("keeps a failed create unconfirmed when an old announcement has all reviewed values", async () => {
+    const fixture = await createFixture({ announcementCreateFails: true, preexistingMatchingAnnouncement: true });
+    let runtime: MorrowRuntime | undefined;
+    let client: Client | undefined;
+    let server: ReturnType<typeof serveStdio> | undefined;
+    try {
+      runtime = await MorrowRuntime.connect(configuration(resolve("../.."), fixture), { statePath: join(fixture.directory, "create-identity.sqlite3") });
+      const [left, right] = InMemoryTransport.createLinkedPair();
+      server = serveStdio(() => createFullMorrowServer(runtime!), { transport: right });
+      client = new Client({ name: "morrow-blackboard-create-identity", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+      await client.connect(left);
+      const scope = { tenant_id: "fixture", source_binding_id: sourceBindingId(fixture.baseUrl), course_id: COURSE_ID };
+      const planned = await client.callTool({
+        name: "morrow_plan_blackboard_course_announcement",
+        arguments: { ...scope, title: "Course update", body: "The lab opens on Monday.", duration_type: "Continuous", show_at_top_of_course: false },
+      });
+      const id = operationId(planned);
+      runtime.gateway.approveOperation(id);
+      await runtime.gateway.dispatchOperation(id);
+      expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "applied_or_unknown", verificationStatus: "unconfirmed" });
+      await runtime.gateway.reconcileOperation(id);
+      expect(runtime.gateway.operationGet(id)).toMatchObject({ state: "applied_or_unknown", verificationStatus: "unconfirmed" });
+      expect(fixture.counts().requests.filter((entry) => entry === `POST /learn/api/public/v1/courses/${COURSE_ID}/announcements`)).toHaveLength(1);
+      const unresolved = await runtime.gateway.callSourceOwned("blackboard_unresolved_effects", {});
+      expect(unresolved.structuredContent).toMatchObject({ count: 1 });
+    } finally {
+      await client?.close();
+      await server?.close();
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 40_000);
+
+  it("refuses a caller-supplied readback on the Blackboard route", async () => {
+    const fixture = await createFixture();
+    let runtime: MorrowRuntime | undefined;
+    try {
+      runtime = await MorrowRuntime.connect(configuration(resolve("../.."), fixture), { statePath: join(fixture.directory, "caller-readback.sqlite3") });
+      const scope = { tenant_id: "fixture", source_binding_id: sourceBindingId(fixture.baseUrl), course_id: COURSE_ID };
+      const apply = BLACKBOARD_ACTIONS.find((action) => action.publicName === "morrow_plan_blackboard_course_announcement")!;
+      const refused = runtime.gateway.planOperation(apply.apply.name, {
+        ...scope, title: "Self-certified", body: "Caller chose the comparator.", duration_type: "Continuous", show_at_top_of_course: false,
+        _morrow: { readback: { tool: "blackboard_read_course", arguments: scope, expected_digest: "a".repeat(64) } },
+      });
+      expect(refused.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      expect(runtime.gateway.operationList(10)).toMatchObject({ returned: 0 });
+      expect(fixture.counts().requests.filter((entry) => entry === `POST /learn/api/public/v1/courses/${COURSE_ID}/announcements`)).toHaveLength(0);
+    } finally {
+      await runtime?.close();
+      await fixture.close();
+    }
+  }, 40_000);
+
   it("exposes the existing action plans and dispatches approved announcements and workspace files once", async () => {
     const fixture = await createFixture();
     let runtime: MorrowRuntime | undefined;
@@ -481,7 +545,7 @@ describe("Blackboard API Gateway effect integration", () => {
         expected_connection: reviewedConnection(returnedEffectScope(currentSourcePlan)),
         _morrow: {
           outer_grant: {
-            schema: "morrow.blackboard.effect-grant.v1",
+            schema: "morrow.blackboard.effect-grant.v2",
             operation_id: "op:forged-blackboard-grant",
             plan_digest: sourcePlanDigest,
             outer_plan_digest: "1".repeat(64),
@@ -489,6 +553,8 @@ describe("Blackboard API Gateway effect integration", () => {
             effect_receipt_id: "effect:00000000-0000-4000-8000-000000000001",
             dispatch_attempt: 1,
             gateway_process_id: "gateway:forged",
+            issued_at: Date.now(),
+            not_after: Date.now() + 60_000,
             dispatch_token: "3".repeat(64),
           },
         },
@@ -520,7 +586,7 @@ describe("Blackboard API Gateway effect integration", () => {
       const recordPath = join(fixture.directory, "home", ".morrow", "blackboard-sessions.json");
       const record = JSON.parse(await readFile(recordPath, "utf8")) as JsonObject;
       expect(record).toMatchObject({
-        schema: "morrow.blackboard-learn.sessions.v1",
+        schema: "morrow.blackboard-learn.sessions.v2",
         sessions: [{ generation: 1 }],
       });
       const recordText = JSON.stringify(record);

@@ -198,9 +198,11 @@ test("installing Morrow keeps every unrelated setting, and repair replaces only 
     projectNotes: "kept by the person who wrote this file",
   }, null, 4)}\n`;
   const file = path.join(project, ".mcp.json");
+  if (process.platform !== "win32") chmodSync(project, 0o775);
   writeFileSync(file, existing, "utf8");
 
   const installed = withHome(home, () => installMorrowClient(installerOptions(installation, "claude-code", "project")));
+  if (process.platform !== "win32") assert.equal((await stat(project)).mode & 0o777, 0o775, "setup preserves the existing project directory mode");
   const merged = readJson(file);
   assert.deepEqual(merged.mcpServers["another-server"], { command: "/usr/local/bin/other", args: ["--serve"], env: { OTHER: "1" } });
   assert.equal(merged.projectNotes, "kept by the person who wrote this file");

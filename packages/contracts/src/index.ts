@@ -207,6 +207,9 @@ export interface SourceAttestationHealth {
   readonly trackedPatchDigest?: string;
   readonly expectedTrackedPatchDigest?: string;
   readonly rootDigest: string;
+  readonly launchDigest?: string;
+  readonly executableDigest?: string;
+  readonly entrypointDigest?: string;
   readonly verifiedAt: string;
   readonly expectedToolCount?: number;
   readonly expectedCatalogDigest?: string;

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
+import { launchManagedChromiumPersistentContext } from "../lib/playwright-managed-browser.mjs";
 
 const ROOT = resolve(import.meta.dirname, "../..");
 const EXTENSION = join(ROOT, "connector/extension");
@@ -39,11 +40,8 @@ writeFileSync(join(extensionLayer, "morrow-bridge-active-folder.json"), marker, 
 
 let context;
 try {
-  const executablePath = chromium.executablePath();
-  assert.equal(executablePath.includes("Google Chrome for Testing"), true, "chrome_for_testing_executable_required");
-  context = await chromium.launchPersistentContext(profile, {
+  context = await launchManagedChromiumPersistentContext(chromium, profile, {
     headless: false,
-    executablePath,
     args: [
       `--disable-extensions-except=${extensionLayer}`,
       `--load-extension=${extensionLayer}`,

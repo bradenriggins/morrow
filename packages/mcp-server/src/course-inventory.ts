@@ -254,10 +254,11 @@ function sourceRead(
 function requireInput(value: unknown): CanvasProgramInventoryInput {
   const parsed = courseInventoryInputSchema.safeParse(value);
   if (!parsed.success) throw new TypeError("Canvas program inventory input is invalid.");
-  const courseIds = new Set<string>();
+  const courseIdentities = new Set<string>();
   for (const course of parsed.data.courses) {
-    if (courseIds.has(course.course_id)) throw new TypeError("Canvas program inventory requires each selected course id once.");
-    courseIds.add(course.course_id);
+    const identity = canonicalJson({ provider: parsed.data.provider, sourceBindingId: course.source_binding_id, courseId: course.course_id });
+    if (courseIdentities.has(identity)) throw new TypeError("Canvas program inventory requires each selected course connection once.");
+    courseIdentities.add(identity);
   }
   return parsed.data;
 }
@@ -269,11 +270,11 @@ export function parseCanvasProgramInventoryInput(value: unknown): CanvasProgramI
 export function parseProgramInventoryInput(value: unknown): ProgramInventoryInput {
   const parsed = programInventoryInputSchema.safeParse(value);
   if (!parsed.success) throw new TypeError("Selected-program inventory input is invalid.");
-  const courseIds = new Set<string>();
+  const courseIdentities = new Set<string>();
   for (const course of parsed.data.courses) {
-    const courseId = String(course.course_id);
-    if (courseIds.has(courseId)) throw new TypeError("Selected-program inventory requires each selected course id once.");
-    courseIds.add(courseId);
+    const identity = canonicalJson({ provider: parsed.data.provider, sourceBindingId: course.source_binding_id, courseId: String(course.course_id) });
+    if (courseIdentities.has(identity)) throw new TypeError("Selected-program inventory requires each selected course connection once.");
+    courseIdentities.add(identity);
   }
   return parsed.data;
 }

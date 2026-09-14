@@ -60,6 +60,7 @@ export interface CatalogToolEvidence {
   readonly inputSchemaSha256: string;
   readonly outputSchemaSha256?: string;
   readonly annotationsSha256: string;
+  readonly authorityAnnotationsSha256: string;
   readonly contractSha256: string;
   readonly sourcePath?: string;
   readonly sourceExport?: string;
@@ -269,6 +270,11 @@ function toolEvidence(catalog: SourceCatalogSnapshot, tool: UpstreamTool): Catal
   const inputSchemaSha256 = sha256Json(tool.inputSchema);
   const outputSchemaSha256 = tool.outputSchema ? sha256Json(tool.outputSchema) : undefined;
   const annotationsSha256 = sha256Json(tool.annotations ?? null);
+  const authorityAnnotationsSha256 = sha256Json({
+    readOnlyHint: tool.annotations?.readOnlyHint ?? null,
+    destructiveHint: tool.annotations?.destructiveHint ?? null,
+    idempotentHint: tool.annotations?.idempotentHint ?? null,
+  });
   const contractSha256 = sha256Json({
     inputSchema: tool.inputSchema,
     outputSchema: tool.outputSchema ?? null,
@@ -282,6 +288,7 @@ function toolEvidence(catalog: SourceCatalogSnapshot, tool: UpstreamTool): Catal
     inputSchemaSha256,
     ...(outputSchemaSha256 ? { outputSchemaSha256 } : {}),
     annotationsSha256,
+    authorityAnnotationsSha256,
     contractSha256,
     ...(tool.capability?.sourcePath ? { sourcePath: tool.capability.sourcePath } : {}),
     ...(tool.capability?.sourceExport ? { sourceExport: tool.capability.sourceExport } : {}),
@@ -417,18 +424,21 @@ export function reconcileCatalogs(
       consumed.add(key);
       return toolEvidence(catalog, tool);
     }));
-    const compatible = new Set(members.map((member) => member.contractSha256)).size === 1;
+    const contractCompatible = new Set(members.map((member) => member.contractSha256)).size === 1;
+    const authorityCompatible = new Set(members.map((member) => member.authorityAnnotationsSha256)).size === 1;
+    const compatible = contractCompatible && authorityCompatible;
+    const reviewedContractDrift = alias.allowContractDrift === true && authorityCompatible;
     const preferred = members.find((member) => member.sourceId === alias.preferredSourceId);
     if (!preferred) throw new Error(`Alias ${alias.id} preferred source could not be resolved`);
     rows.push({
       id: `alias:${alias.id}`,
       kind: "alias",
-      status: compatible ? "compatible" : alias.allowContractDrift ? "compatible_by_rule" : "contract_drift",
+      status: compatible ? "compatible" : reviewedContractDrift ? "compatible_by_rule" : "contract_drift",
       publicName: alias.publicName,
-      selected: compatible || alias.allowContractDrift
+      selected: compatible || reviewedContractDrift
         ? { sourceId: preferred.sourceId, toolName: preferred.toolName }
         : null,
-      reviewRequired: !compatible && alias.allowContractDrift !== true,
+      reviewRequired: !compatible && !reviewedContractDrift,
       annotationsAligned: alignment(members, "annotationsSha256"),
       descriptionsAligned: alignment(members, "descriptionSha256"),
       reason: alias.reason,
@@ -468,7 +478,9 @@ export function reconcileCatalogs(
       continue;
     }
 
-    const compatible = new Set(members.map((member) => member.contractSha256)).size === 1;
+    const contractCompatible = new Set(members.map((member) => member.contractSha256)).size === 1;
+    const authorityCompatible = new Set(members.map((member) => member.authorityAnnotationsSha256)).size === 1;
+    const compatible = contractCompatible && authorityCompatible;
     const selectedMember = compatible ? members[0] : undefined;
     rows.push({
       id: `exact:${name}`,

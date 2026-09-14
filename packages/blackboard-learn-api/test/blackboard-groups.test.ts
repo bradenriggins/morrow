@@ -97,6 +97,10 @@ interface FixtureOptions {
   readonly ignoreMembership?: boolean;
   /** Return the same person twice in the group, as two membership records. */
   readonly duplicateGroupMembership?: boolean;
+  /** Fail the group create before saving a group. */
+  readonly createFails?: boolean;
+  /** Start with one old group whose compared values equal the reviewed group. */
+  readonly preexistingMatchingGroup?: boolean;
 }
 
 async function harness(options: FixtureOptions = {}) {
@@ -104,8 +108,10 @@ async function harness(options: FixtureOptions = {}) {
   const patches: JsonObject[] = [];
   const creates: JsonObject[] = [];
   let group: JsonObject = {
-    id: groupId, name: "Lab team 1", description: "The first lab team.",
-    availability: { available: "Yes" }, groupSetId,
+    id: groupId,
+    name: options.preexistingMatchingGroup ? newGroup.name : "Lab team 1",
+    description: options.preexistingMatchingGroup ? newGroup.description : "The first lab team.",
+    availability: { available: options.preexistingMatchingGroup ? newGroup.available : "Yes" }, groupSetId,
   };
   let members: readonly string[] = [studentId];
   let created: JsonObject | undefined;
@@ -117,8 +123,8 @@ async function harness(options: FixtureOptions = {}) {
   };
 
   const memberRecords = (): readonly JsonObject[] => [
-    ...members.map((userId, index) => ({ id: `_gm${index + 1}_1`, groupId, userId })),
-    ...(options.duplicateGroupMembership ? [{ id: "_gm90_1", groupId, userId: studentId }] : []),
+    ...members.map((userId) => ({ userId })),
+    ...(options.duplicateGroupMembership ? [{ userId: studentId }] : []),
   ];
 
   const groupList = (): readonly JsonObject[] => (created ? [group, created] : [group]);
@@ -169,6 +175,7 @@ async function harness(options: FixtureOptions = {}) {
       void body(request).then((raw) => {
         const requested = JSON.parse(raw) as JsonObject;
         creates.push(requested);
+        if (options.createFails) { json(response, { message: "create failed" }, 500); return; }
         created = { id: createdGroupId, ...requested };
         json(response, created, 201);
       });
@@ -297,14 +304,16 @@ let receipts = 0;
 function effectGrant(planDigest: string): BlackboardEffectGrant {
   receipts += 1;
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-groups-test",
     planDigest,
     outerPlanDigest: "b".repeat(64),
     approvalGrantDigest: "c".repeat(64),
     effectReceiptId: `effect:00000000-0000-4000-8000-${String(receipts).padStart(12, "0")}`,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:test",
+   gatewayProcessId: "gateway:test",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return { ...unsigned, dispatchToken: signBlackboardEffectGrant(effectSecret, unsigned) };
 }
@@ -319,7 +328,17 @@ function grantArguments(grant: BlackboardEffectGrant): JsonObject {
     effect_receipt_id: grant.effectReceiptId,
     dispatch_attempt: grant.dispatchAttempt,
     gateway_process_id: grant.gatewayProcessId,
+    issued_at: grant.issuedAt,
+    not_after: grant.notAfter,
     dispatch_token: grant.dispatchToken,
+  };
+}
+
+function receiptArguments(grant: BlackboardEffectGrant): JsonObject {
+  return {
+    gateway_process_id: grant.gatewayProcessId,
+    effect_receipt_id: grant.effectReceiptId,
+    operation_id: grant.operationId,
   };
 }
 
@@ -441,8 +460,8 @@ describe("Blackboard groups, group sets and group membership", () => {
     const refused = structured(await fixture.call("blackboard_plan_group_membership_removal", {
       group_id: groupId, learner_reference: reference,
     }));
-    expect(refused).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_membership_mismatch" } });
-    expect(String(problem(refused).message)).toContain("more than one membership of this group");
+    expect(refused).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_response_incomplete" } });
+    expect(String(problem(refused).message)).toContain("duplicate or invalid group membership identities");
     expect(fixture.writeRequests()).toEqual([]);
   });
 
@@ -476,9 +495,10 @@ describe("Blackboard groups, group sets and group membership", () => {
     expect(plan.effect_scope).toMatchObject({ provider: "blackboard" });
     expect(fixture.writeRequests()).toEqual([]);
 
+    const grant = effectGrant(String(plan.planDigest));
     const result = await fixture.call(
       "blackboard_apply_reviewed_course_group",
-      applyArguments(newGroup, String(plan.planDigest)),
+      applyArguments(newGroup, String(plan.planDigest), grantArguments(grant)),
     );
     expect(structured(result)).toMatchObject({
       schema: "morrow.blackboard.course-group.readback.v1",
@@ -495,9 +515,30 @@ describe("Blackboard groups, group sets and group membership", () => {
     // The created group was re-read by the id Blackboard returned.
     expect(fixture.requests()).toContain(`GET ${groupsV2Path}/${createdGroupId}`);
 
-    const verified = structured(await fixture.call("blackboard_verify_course_group", newGroup));
-    expect(verified).toMatchObject({ schema: "morrow.blackboard.course-group.comparator.v1", ok: true, verified: true });
+    const verified = structured(await fixture.call("blackboard_verify_course_group", {
+      ...newGroup,
+      _morrow_receipt: receiptArguments(grant),
+    }));
+    expect(verified).toMatchObject({ schema: "morrow.blackboard.course-group.comparator.v2", ok: true, verified: true });
     expect(verified).not.toHaveProperty("diagnostics");
+  });
+
+  it("keeps a failed create unresolved when an old group has all reviewed values", async () => {
+    const fixture = await harness({ createFails: true, preexistingMatchingGroup: true });
+    const digest = await planDigestOf(fixture, "blackboard_plan_course_group", newGroup);
+    const grant = effectGrant(digest);
+    expect(structured(await fixture.call(
+      "blackboard_apply_reviewed_course_group",
+      applyArguments(newGroup, digest, grantArguments(grant)),
+    ))).toMatchObject({ ok: false, resultState: "applied_or_unknown" });
+    expect(structured(await fixture.call("blackboard_verify_course_group", {
+      ...newGroup,
+      _morrow_receipt: receiptArguments(grant),
+    }))).toMatchObject({ schema: "morrow.blackboard.course-group.comparator.v2", verified: false });
+    expect(structured(await fixture.call("blackboard_unresolved_effects"))).toMatchObject({ count: 1 });
+    expect(structured(await fixture.call("blackboard_plan_course_group", newGroup)))
+      .toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "blackboard_effect_unresolved" } });
+    expect(fixture.writeRequests()).toEqual([`POST ${groupsV2Path}`]);
   });
 
   it("refuses a group named after a person on the course roster, before any request is planned", async () => {

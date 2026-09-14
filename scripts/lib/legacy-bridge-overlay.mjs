@@ -32,9 +32,36 @@ export function patchBackground(source) {
 
 export function unpatchBackground(source) {
   if (typeof source !== 'string') throw new TypeError('background source must be a string');
-  const importPattern = new RegExp(`${escapeRegExp(IMPORT_BEGIN)}\\n[\\s\\S]*?${escapeRegExp(IMPORT_END)}\\n`, 'g');
-  const callPattern = new RegExp(`${escapeRegExp(CALL_BEGIN)}\\n[\\s\\S]*?${escapeRegExp(CALL_END)}\\n`, 'g');
-  return source.replace(importPattern, '').replace(callPattern, '');
+  const markers = [IMPORT_BEGIN, IMPORT_END, CALL_BEGIN, CALL_END];
+  if (markers.every((marker) => !source.includes(marker))) return source;
+  if (markers.some((marker) => source.split(marker).length !== 2)
+    || !source.includes(IMPORT_BLOCK) || !source.includes(CALL_BLOCK)) {
+    throw new Error('Morrow legacy background overlay markers do not contain the exact installed blocks');
+  }
+  return source.replace(IMPORT_BLOCK, '').replace(CALL_BLOCK, '');
+}
+
+export function parseLocalConfig(source) {
+  if (typeof source !== 'string') throw new TypeError('bridge configuration source must be a string');
+  const prefix = 'export const MORROW_GATEWAY_BRIDGE_CONFIG = Object.freeze(';
+  const suffix = ');\n';
+  if (!source.startsWith(prefix) || !source.endsWith(suffix)) {
+    throw new Error('bridge configuration does not have the exact generated shape');
+  }
+  let value;
+  try {
+    value = JSON.parse(source.slice(prefix.length, -suffix.length));
+  } catch {
+    throw new Error('bridge configuration does not have the exact generated shape');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).sort().join(',') !== 'catalogDigest,donorRevision,enabled,token,url'
+    || value.enabled !== true) {
+    throw new Error('bridge configuration does not have the exact generated shape');
+  }
+  const rendered = renderLocalConfig(value);
+  if (rendered !== source) throw new Error('bridge configuration does not have the exact generated shape');
+  return Object.freeze({ ...value });
 }
 
 export function renderLocalConfig({ url, token, donorRevision, catalogDigest }) {
@@ -61,8 +88,4 @@ export function renderLocalConfig({ url, token, donorRevision, catalogDigest }) 
     throw new Error('catalog digest must be a SHA-256 digest');
   }
   return `export const MORROW_GATEWAY_BRIDGE_CONFIG = Object.freeze(${JSON.stringify(normalized, null, 2)});\n`;
-}
-
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }

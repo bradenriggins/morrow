@@ -14,6 +14,7 @@ import {
 import { isJsonObject, type JsonObject, type UpstreamTool } from "@morrow/contracts";
 import { canvasPrivacyRoster, type SourcePrivacyBinding, type LearnerIdentity, type SourceCatalogSnapshot } from "@morrow/gateway-core";
 import type { LegacyBridgeConfig } from "./config.js";
+import { legacyBridgeRuntimeRevision } from "./identity.js";
 
 export interface LegacyBridgeRuntimeHealth {
   readonly schema: "morrow.legacy-bridge.health.v1";
@@ -66,7 +67,7 @@ export class LegacyBridgeRuntime {
   static async start(config: LegacyBridgeConfig): Promise<LegacyBridgeRuntime> {
     const bridge = new LoopbackBridgeServer({
       token: config.token,
-      expectedRuntimeRevision: config.expectedRevision,
+      expectedRuntimeRevision: legacyBridgeRuntimeRevision(config.expectedRevision),
       expectedCatalogDigest: config.sourceCatalog.digest,
       allowedExtensionIds: config.allowedExtensionIds,
       port: config.port,
@@ -106,7 +107,16 @@ export class LegacyBridgeRuntime {
         operationId: operationId(split.options.operationId),
         ...(split.options.outerGrant ? { outerGrant: split.options.outerGrant } : {}),
       });
-      if (!response.ok) return failedProblem(response.problem);
+      if (!response.ok) {
+        const failed = failedProblem(response.problem);
+        if (kind === "stage_write" && response.problem?.code === "write_outcome_unknown") {
+          return { ...failed, sourceToolName: tool.name, commandKind: kind, operationId: response.operationId, resultState: "unknown" };
+        }
+        if (kind === "stage_write" && response.problem?.code === "request_cancelled_before_dispatch") {
+          return { ...failed, sourceToolName: tool.name, commandKind: kind, operationId: response.operationId, resultState: "not_sent" };
+        }
+        return failed;
+      }
       return {
         schema: "morrow.legacy-bridge.result.v1",
         ok: true,

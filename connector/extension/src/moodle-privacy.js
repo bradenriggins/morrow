@@ -3,6 +3,8 @@
  * Browser-session material and raw Moodle HTML remain in this page-world function.
  */
 export async function collectMoodleCourseParticipantRoster(input) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const SCHEMA = "morrow.moodle-course-roster.v1";
   const PAGE_SIZE = 100;
   const MAX_PAGES = 100;
@@ -299,6 +301,47 @@ export async function collectMoodleCourseParticipantRoster(input) {
     url.hash = "";
     return url.toString();
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
+  const readBoundedResponse = async (response) => {
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_CHARS)) {
+      cancelBody(response.body);
+      return { error: "moodle_roster_response_too_large" };
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") return { error: "moodle_roster_response_unavailable" };
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let bytes = 0;
+    let raw = "";
+    try {
+      for (;;) {
+        const remaining = expiresAt - Date.now();
+        if (remaining <= 0) throw new Error("moodle_roster_execution_expired");
+        let timeout;
+        const next = await Promise.race([
+          reader.read(),
+          new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_roster_execution_expired")), remaining); }),
+        ]).finally(() => clearTimeout(timeout));
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_CHARS) {
+          cancelBody(reader);
+          return { error: "moodle_roster_response_too_large" };
+        }
+        raw += decoder.decode(next.value, { stream: true });
+      }
+      return { raw: raw + decoder.decode() };
+    } catch (error) {
+      cancelBody(reader);
+      return { error: String(error?.message || error) === "moodle_roster_execution_expired"
+        ? "moodle_roster_execution_expired"
+        : "moodle_roster_response_unavailable" };
+    }
+  };
   const requestAjax = async (method, args) => {
     let response;
     try {
@@ -308,15 +351,16 @@ export async function collectMoodleCourseParticipantRoster(input) {
         cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify([{ index: 0, methodname: method, args }]),
+        signal: requestSignal(expiresAt),
       });
     } catch {
       return { error: "moodle_roster_request_failed" };
     }
     if (!responseIsSameOrigin(response, context)) return { error: "moodle_roster_response_origin_invalid" };
     if (!sameContext(context, currentContext())) return { error: "moodle_roster_session_changed" };
-    let raw;
-    try { raw = await response.text(); } catch { return { error: "moodle_roster_response_unavailable" }; }
-    if (raw.length > MAX_RESPONSE_CHARS) return { error: "moodle_roster_response_too_large" };
+    const bounded = await readBoundedResponse(response);
+    if (!Object.hasOwn(bounded, "raw")) return { error: bounded.error };
+    const raw = bounded.raw;
     let payload;
     try { payload = JSON.parse(raw); } catch { return { error: "moodle_roster_response_invalid" }; }
     if (!response.ok || !Array.isArray(payload) || payload.length !== 1 || !isObject(payload[0])
@@ -340,6 +384,7 @@ export async function collectMoodleCourseParticipantRoster(input) {
         redirect: "follow",
         headers: method === "POST" ? { "Content-Type": "application/x-www-form-urlencoded" } : undefined,
         ...(method === "POST" ? { body: new URLSearchParams(params).toString() } : {}),
+        signal: requestSignal(expiresAt),
       });
     } catch {
       return { error: "moodle_roster_request_failed" };
@@ -347,10 +392,7 @@ export async function collectMoodleCourseParticipantRoster(input) {
     if (!responseIsSameOrigin(response, context)) return { error: "moodle_roster_response_origin_invalid" };
     if (!sameContext(context, currentContext())) return { error: "moodle_roster_session_changed" };
     if (!response.ok) return { error: "moodle_roster_native_request_failed" };
-    let raw;
-    try { raw = await response.text(); } catch { return { error: "moodle_roster_response_unavailable" }; }
-    if (raw.length > MAX_RESPONSE_CHARS) return { error: "moodle_roster_response_too_large" };
-    return { raw };
+    return await readBoundedResponse(response);
   };
   const readScope = async () => {
     const coursePage = await requestNative(COURSE_PAGE_PATH, {

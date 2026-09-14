@@ -7,7 +7,8 @@ import { itemBankMediaFindings, itemBankNewMediaReason } from "../../connector/e
 const catalog = JSON.parse(readFileSync(new URL("../../artifacts/canvas-api/canvas-api-catalog.json", import.meta.url), "utf8"));
 const operations = new Map(catalog.operations.filter((operation) => operation.service === "item_bank").map((operation) => [operation.nickname, operation]));
 const TOKEN = `Signature ${"secret-credential-".repeat(8)}`;
-const LAUNCH_URL = "https://school.instructure.com/courses/42/external_tools/54065";
+const EXTERNAL_TOOL_ID = "54065";
+const LAUNCH_URL = `https://school.instructure.com/courses/42/external_tools/${EXTERNAL_TOOL_ID}`;
 const CONTEXT_UUID = "course-context-uuid";
 const stable = (value) => Array.isArray(value) ? `[${value.map(stable).join(",")}]` : value && typeof value === "object" ? `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stable(value[key])}`).join(",")}}` : JSON.stringify(value === undefined ? null : value);
 const digest = async (value) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(stable(value)))), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -39,7 +40,7 @@ function input(nickname, argumentsValue) {
   const capturedAt = Date.now();
   return { principalId: "7", canvasOrigin: "https://school.instructure.com", courseId: "42", operation, arguments: argumentsValue, credential: {
     apiOrigin: "https://school.quiz-api.instructure.com", token: TOKEN, authType: "Signature", contextUuid: CONTEXT_UUID,
-    canvasLocalContextId: "42", launchUrl: LAUNCH_URL, launchNonce: "b28f3aae-8888-4c5b-9a17-458f2e1fe309",
+    canvasLocalContextId: "42", externalToolId: EXTERNAL_TOOL_ID, launchUrl: LAUNCH_URL, launchNonce: "b28f3aae-8888-4c5b-9a17-458f2e1fe309",
     launchedAt: capturedAt - 1_000, capturedAt,
   } };
 }
@@ -865,6 +866,7 @@ test("tenant, principal, course, credential and descriptor mismatches stop befor
     ["another course", (value) => ({ ...value, courseId: "43" })],
     ["no credential", (value) => ({ ...value, credential: undefined })],
     ["a credential from another launch", (value) => ({ ...value, credential: { ...value.credential, launchUrl: "https://school.instructure.com/courses/43/external_tools/54065" } })],
+    ["a credential for another deployment", (value) => ({ ...value, credential: { ...value.credential, externalToolId: "71234" } })],
     ["a credential older than ten minutes", (value) => ({ ...value, credential: { ...value.credential, launchedAt: capturedAt - 11 * 60 * 1_000 - 1_000, capturedAt: capturedAt - 11 * 60 * 1_000 } })],
     ["a credential for another tenant", (value) => ({ ...value, credential: { ...value.credential, apiOrigin: "https://other.quiz-api.instructure.com" } })],
     ["a route that is not this operation", (value) => ({ ...value, operation: { ...value.operation, path: "/api/other" } })],
@@ -880,7 +882,6 @@ test("tenant, principal, course, credential and descriptor mismatches stop befor
   for (const [label, overrides] of [
     ["a frame on another host", { location: { hostname: "school.instructure.com" } }],
     ["a launch opened from another origin", { document: { referrer: "https://evil.example/courses/42/external_tools/54065" } }],
-    ["a launch that is not the Item Banks tool", { document: { referrer: "https://school.instructure.com/courses/42/external_tools/9" } }],
   ]) {
     await withPageContext(async () => {
       let calls = 0; globalThis.fetch = async () => { calls += 1; return new Response("{}"); };
@@ -888,4 +889,11 @@ test("tenant, principal, course, credential and descriptor mismatches stop befor
       assert.equal(result.matched, false, label); assert.equal(calls, 0, label);
     }, overrides);
   }
+  await withPageContext(async () => {
+    let calls = 0; globalThis.fetch = async () => { calls += 1; return new Response("{}"); };
+    const result = await executeItemBankInPage(input("list_banks", { course_id: "42" }));
+    assert.equal(result.matched, true);
+    assert.equal(result.error, "item_bank_credential_unavailable");
+    assert.equal(calls, 0);
+  }, { document: { referrer: "https://school.instructure.com/courses/42/external_tools/9" } });
 });

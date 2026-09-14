@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { desktopTargetEnvironment } from "../package-mcp-bundle.mjs";
 
 const root = new URL("../../", import.meta.url);
 const rootPath = fileURLToPath(root);
@@ -21,6 +22,12 @@ test("desktop payload declares the two supported consumer installer targets", ()
     assert.match(target.nodeSha256, /^[0-9a-f]{64}$/);
   }
   assert.equal(listed.publicRelease, "unsigned_release_requires_native_verification");
+});
+
+test("each installer build receives the selected payload platform", () => {
+  assert.deepEqual(desktopTargetEnvironment("darwin-arm64"), { MORROW_TARGET_PLATFORM: "darwin" });
+  assert.deepEqual(desktopTargetEnvironment("win32-x64"), { MORROW_TARGET_PLATFORM: "win32" });
+  assert.throws(() => desktopTargetEnvironment("linux-x64"), /No desktop target is configured/);
 });
 
 test("desktop payload builder requires an explicit absolute destination before it can write", () => {

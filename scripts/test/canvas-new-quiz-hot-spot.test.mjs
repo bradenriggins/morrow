@@ -4,9 +4,11 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInThisContext } from "node:vm";
 import {
+  canvasNewQuizHotSpotVerification,
   executeCanvasNewQuizHotSpotInPage,
   unsignedHotSpotImageUrl,
 } from "../../connector/extension/src/canvas-new-quiz-hot-spot.js";
+import { stableJson } from "../../connector/extension/src/catalog-compatibility.js";
 import { canvasWriteOutcomeUncertain } from "../../connector/extension/src/canvas-write-outcome.js";
 
 const ORIGIN = "https://school.instructure.com";
@@ -25,13 +27,17 @@ const SAVED = [
 const TEMPLATE = {
   entry_type: "Item",
   points_possible: 3,
+  position: 3,
   entry: {
     title: "Label the mitochondrion",
     item_body: "<p>Select the mitochondrion.</p>",
+    calculator_type: "none",
     interaction_type_slug: "hot-spot",
     interaction_data: {},
     scoring_algorithm: "HotSpot",
     scoring_data: { value: { type: "oval", coordinates: [{ x: 0.2, y: 0.2 }, { x: 0.4, y: 0.4 }] } },
+    properties: {},
+    feedback: { correct: "Correct.", incorrect: "Try again.", neutral: "Select one region." },
   },
 };
 
@@ -47,13 +53,18 @@ function digest(value) {
 }
 
 function response(url, body, { status = 200, headers = {} } = {}) {
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
   return {
     ok: status >= 200 && status < 300,
     status,
     url,
     headers: new Headers(headers),
-    json: async () => body,
-    text: async () => JSON.stringify(body),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
   };
 }
 
@@ -89,14 +100,14 @@ async function runInPage(input, routes) {
   }
 }
 
-function routes({ items = SAVED, created = { id: "13" }, saved: savedItem, createStatus = 200, uploadUrlBody = { url: SIGNED_UPLOAD_URL } } = {}) {
+function routes({ items = SAVED, created = { id: "13" }, saved: savedItem, createdPosition = items.length + 1, createStatus = 200, uploadUrlBody = { url: SIGNED_UPLOAD_URL } } = {}) {
   const readback = savedItem === undefined
     ? {
-        id: "13", entry_type: "Item",
-        entry: { interaction_type_slug: "hot-spot", interaction_data: { image_url: UNSIGNED_UPLOAD_URL } },
+        id: "13", ...TEMPLATE,
+        entry: { ...TEMPLATE.entry, interaction_data: { ...TEMPLATE.entry.interaction_data, image_url: UNSIGNED_UPLOAD_URL } },
       }
     : savedItem;
-  const after = [...items, { id: "13", position: items.length + 1, entry_type: "Item" }];
+  const after = [...items, { id: "13", position: createdPosition, entry_type: "Item" }];
   let listReads = 0;
   return (url, method) => {
     const href = url.pathname;
@@ -282,6 +293,37 @@ test("a create Canvas did not save the way it was asked for is a mismatch, never
   assert.equal(result.error, "canvas_hot_spot_item_readback_mismatch");
 });
 
+test("complete compares every supplied author field, answer shape, coordinates, and position", async (t) => {
+  const matching = {
+    id: "13", ...TEMPLATE,
+    entry: { ...TEMPLATE.entry, interaction_data: { image_url: UNSIGNED_UPLOAD_URL } },
+  };
+  const cases = [
+    ["points", { ...matching, points_possible: 4 }],
+    ["position", { ...matching, position: 4 }],
+    ["title", { ...matching, entry: { ...matching.entry, title: "A different title" } }],
+    ["omitted title", { ...matching, entry: Object.fromEntries(Object.entries(matching.entry).filter(([key]) => key !== "title")) }],
+    ["body", { ...matching, entry: { ...matching.entry, item_body: "<p>Different.</p>" } }],
+    ["calculator", { ...matching, entry: { ...matching.entry, calculator_type: "basic" } }],
+    ["algorithm", { ...matching, entry: { ...matching.entry, scoring_algorithm: "None" } }],
+    ["shape", { ...matching, entry: { ...matching.entry, scoring_data: { value: { ...matching.entry.scoring_data.value, type: "square" } } } }],
+    ["coordinates", { ...matching, entry: { ...matching.entry, scoring_data: { value: { ...matching.entry.scoring_data.value, coordinates: [{ x: 0.1, y: 0.2 }, { x: 0.4, y: 0.4 }] } } } }],
+    ["feedback", { ...matching, entry: { ...matching.entry, feedback: { ...matching.entry.feedback, correct: "Almost." } } }],
+  ];
+  for (const [name, saved] of cases) {
+    await t.test(name, async () => {
+      const { result } = await runInPage(completeInput(), routes({ saved }));
+      assert.equal(result.ok, false, JSON.stringify(result));
+      assert.equal(result.verification.status, "mismatch");
+      assert.equal(result.error, "canvas_hot_spot_item_readback_mismatch");
+    });
+  }
+
+  const wrongMembershipPosition = await runInPage(completeInput(), routes({ saved: matching, createdPosition: 4 }));
+  assert.equal(wrongMembershipPosition.result.ok, false);
+  assert.equal(wrongMembershipPosition.result.error, "canvas_hot_spot_membership_mismatch");
+});
+
 test("a wrong course, quiz or signed-in person is refused before anything is sent", async () => {
   const cases = [
     [{ binding: { origin: ORIGIN, courseId: "999", principalId: PRINCIPAL_ID } }, /canvas_hot_spot_http_|canvas_hot_spot_course_changed/],
@@ -349,6 +391,7 @@ const hotSpotWorkerRegion = (() => {
     "function executeCanvasNewQuizHotSpotInPage() {}",
     workerFunction("async function sha256Bytes(bytes) {"),
     workerFunction("function decimalId(value) {"),
+    stableJson.toString(),
     WORKER_SOURCE.slice(
       WORKER_SOURCE.indexOf("function privateCanvasConfirmationUrl(value, canvasOrigin) {"),
       WORKER_SOURCE.indexOf("async function executeCanvasCourseFileTransfer("),
@@ -368,11 +411,23 @@ const HOT_SPOT_PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 
 
 function createdFixture() {
   return {
+    schema: "morrow.canvas-new-quiz-hot-spot.v1",
     ok: true, sent: true, outcomeUnknown: false, status: 200,
-    verification: { status: "verified" },
+    verification: {
+      schema: "morrow.browser-verification.v1",
+      status: "verified",
+      strategy: "new-quiz-item-lifecycle",
+      evidence: "complete_created_item_shape_and_item_list_reread",
+      targets: [
+        { type: "canvas_course", id: COURSE_ID },
+        { type: "canvas_new_quiz", id: QUIZ_ID },
+        { type: "canvas_new_quiz_item", id: "13" },
+      ],
+    },
     data: {
       course_id: COURSE_ID, assignment_id: QUIZ_ID, item_id: "13",
       item_count: SAVED.length + 1, image_url: UNSIGNED_UPLOAD_URL,
+      interaction_type_slug: "hot-spot", payload_sha256: digest(TEMPLATE),
     },
   };
 }
@@ -383,7 +438,7 @@ function createdFixture() {
  * the watch is registered and the create has not been reached.
  */
 async function runHotSpotWorker({ expiresAt, duringFetch }) {
-  const keys = ["chrome", "fetch", "canvasWriteOutcomeUncertain"];
+  const keys = ["chrome", "fetch", "canvasWriteOutcomeUncertain", "unsignedHotSpotImageUrl"];
   const saved = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const scriptModes = [];
   const putRequests = [];
@@ -397,6 +452,14 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
     },
   });
   const triggers = {
+    confirmUpload() {
+      const beforeRequest = beforeRequestListeners[0];
+      const headers = headersListeners[0];
+      assert.ok(beforeRequest && headers, "the observer did not register both listeners");
+      const details = { url: SIGNED_UPLOAD_URL, method: "PUT", requestId: "100" };
+      beforeRequest(details);
+      headers({ ...details, statusCode: 200, responseHeaders: [] });
+    },
     ambiguousUploadRequest() {
       const beforeRequest = beforeRequestListeners[0];
       assert.ok(beforeRequest, "the observer registered no onBeforeRequest listener");
@@ -416,7 +479,7 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
           const input = injection.args[0];
           scriptModes.push(input.mode);
           const result = input.mode === "initialize"
-            ? { ok: true, sent: false, data: { course_id: COURSE_ID, assignment_id: QUIZ_ID, upload_url: SIGNED_UPLOAD_URL } }
+            ? { ok: true, sent: false, data: { course_id: COURSE_ID, assignment_id: QUIZ_ID, item_count: SAVED.length, upload_url: SIGNED_UPLOAD_URL } }
             : createdFixture();
           return [{ result }];
         },
@@ -433,6 +496,7 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
       return { status: 200 };
     },
     canvasWriteOutcomeUncertain,
+    unsignedHotSpotImageUrl,
   };
   hotSpotWorkerRegion.canvasUploadObservers.clear();
   try {
@@ -462,6 +526,19 @@ async function runHotSpotWorker({ expiresAt, duringFetch }) {
     }
   }
 }
+
+test("the worker preserves a complete verified Hot Spot result after one confirmed upload", async () => {
+  const { result, scriptModes, putRequests } = await runHotSpotWorker({
+    expiresAt: Date.now() + 60_000,
+    duringFetch: (triggers) => triggers.confirmUpload(),
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.verification.status, "verified");
+  assert.equal(result.verification.evidence, "complete_created_item_shape_and_item_list_reread");
+  assert.equal(result.data.payload_sha256, digest(TEMPLATE));
+  assert.deepEqual(scriptModes, ["initialize", "complete"]);
+  assert.equal(putRequests.length, 1);
+});
 
 /** The refusal every unconfirmed watch owes, whatever the worker's own fetch read. */
 function assertUnconfirmedUploadRefusal(result, scriptModes, putRequests, error) {
@@ -498,4 +575,27 @@ test("an upload watch that timed out refuses the create even when the worker's o
   // with canvas_file_transfer_timeout while the PUT has already read a 2xx.
   const { result, scriptModes, putRequests } = await runHotSpotWorker({ expiresAt: Date.now() + 250 });
   assertUnconfirmedUploadRefusal(result, scriptModes, putRequests, "canvas_file_transfer_timeout");
+});
+
+test("the outer Hot Spot verifier accepts only the exact private result contract", () => {
+  const operation = {
+    provider: "canvas", toolName: "canvas_create_new_quiz_hot_spot",
+    key: "canvas.private.new_quiz.hot_spot.create.v1", service: "canvas_new_quiz_hot_spot",
+  };
+  const args = { course_id: COURSE_ID, assignment_id: QUIZ_ID, payload_sha256: digest(TEMPLATE) };
+  const result = createdFixture();
+  assert.equal(canvasNewQuizHotSpotVerification(operation, args, result), result.verification);
+  assert.equal(canvasNewQuizHotSpotVerification({ ...operation, service: "canvas" }, args, result), null);
+  assert.equal(canvasNewQuizHotSpotVerification(operation, args, {
+    ...result,
+    verification: { ...result.verification, evidence: "claimed_by_page" },
+  }), null);
+  assert.equal(canvasNewQuizHotSpotVerification(operation, args, {
+    ...result,
+    data: { ...result.data, payload_sha256: "0".repeat(64) },
+  }), null);
+
+  const worker = WORKER_SOURCE;
+  assert.match(worker, /else if \(privateHotSpot\) \{\s*verification = canvasNewQuizHotSpotVerification\(operation, command\.arguments \|\| \{\}, result\)/);
+  assert.match(worker, /privateCanvasCourseFileOperation\(operation\) \|\| privateHotSpot \|\| operation\.provider/);
 });

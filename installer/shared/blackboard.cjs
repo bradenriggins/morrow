@@ -1,6 +1,7 @@
 const crypto = require("node:crypto");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { decodeStrictUtf8 } = require("./strict-utf8.cjs");
 
 const CONFIG_SCHEMA = "morrow.blackboard-learn.config.v1";
 const CREDENTIAL_SCHEMA = "morrow.blackboard-learn.credential.v1";
@@ -131,7 +132,7 @@ async function privateText(file, privateFileAccessAccepted, label, maximumBytes,
   if (typeof privateFileAccessAccepted !== "function") throw new TypeError(`${label} access is not private`);
   const metadata = await fs.lstat(file);
   if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size > maximumBytes || privateFileAccessAccepted(file, metadata.mode, { trustedRoot }) !== true) throw new TypeError(`${label} access is not private`);
-  return fs.readFile(file, "utf8");
+  return decodeStrictUtf8(await fs.readFile(file), label);
 }
 async function readConfig(home, privateFileAccessAccepted) {
   const paths = blackboardPaths(home, "default");
@@ -147,6 +148,16 @@ async function readConfig(home, privateFileAccessAccepted) {
 async function readCredential(paths, tenant, privateFileAccessAccepted) {
   const serialized = await privateText(paths.credential, privateFileAccessAccepted, "Blackboard credential", 16 * 1024, path.dirname(paths.configDirectory));
   return { serialized, sha256: hash(serialized), applicationSecret: parseCredential(JSON.parse(serialized), tenant.credentialRevision) };
+}
+async function readPriorCredential(paths, tenant, privateFileAccessAccepted) {
+  try { return await readCredential(paths, tenant, privateFileAccessAccepted); }
+  catch (error) {
+    // A prior data-removal defect could leave a valid route whose secret is
+    // absent. Fresh discovery and a newly supplied secret may replace that
+    // unusable pair. Every other access or binding failure remains a refusal.
+    if (error?.code === "ENOENT") return null;
+    throw error;
+  }
 }
 async function writeConfig(file, value) {
   const directory = path.dirname(file);
@@ -170,12 +181,47 @@ function publicTenant(value) {
   };
 }
 function configuredHealth(tenants) { return { schema: "morrow.blackboard.health.v1", status: "api_configured_live_untested", tenants: tenants.map(publicTenant) }; }
-async function readBlackboardHealth(home, { privateFileAccessAccepted } = {}) {
+function repairHealth(status, tenants = []) { return { schema: "morrow.blackboard.health.v1", status, tenants: tenants.map(publicTenant) }; }
+function accessRefused(error) { return error?.code === "EACCES" || error?.code === "EPERM"; }
+async function inspectHealthText(file, privateFileAccessAccepted, maximumBytes, trustedRoot) {
+  let metadata;
+  try { metadata = await fs.lstat(file); }
+  catch (error) {
+    if (error?.code === "ENOENT") return { status: "absent" };
+    return { status: accessRefused(error) ? "private_access_refused" : "damaged" };
+  }
+  if (!metadata.isFile() || metadata.isSymbolicLink()) return { status: "private_access_refused" };
+  if (metadata.size > maximumBytes) return { status: "damaged" };
   try {
-    const { config } = await readConfig(home, privateFileAccessAccepted);
-    for (const tenant of config.tenants) if (tenant.credentialRef === "file") await readCredential(blackboardPaths(home, tenant.id), tenant, privateFileAccessAccepted);
-    return config.tenants.length === 0 ? { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] } : configuredHealth(config.tenants);
-  } catch { return { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] }; }
+    if (typeof privateFileAccessAccepted !== "function" || privateFileAccessAccepted(file, metadata.mode, { trustedRoot }) !== true) {
+      return { status: "private_access_refused" };
+    }
+  } catch { return { status: "private_access_refused" }; }
+  try { return { status: "readable", serialized: decodeStrictUtf8(await fs.readFile(file), "Blackboard private state") }; }
+  catch (error) { return { status: accessRefused(error) ? "private_access_refused" : "damaged" }; }
+}
+async function readBlackboardHealth(home, { privateFileAccessAccepted } = {}) {
+  const paths = blackboardPaths(home, "default");
+  const configFile = await inspectHealthText(paths.config, privateFileAccessAccepted, 1024 * 1024, path.dirname(paths.configDirectory));
+  if (configFile.status === "absent") return repairHealth("not_configured");
+  if (configFile.status === "private_access_refused") return repairHealth("private_access_refused");
+  if (configFile.status !== "readable") return repairHealth("configuration_repair_required");
+  let config;
+  try { config = parseConfig(JSON.parse(configFile.serialized)); }
+  catch { return repairHealth("configuration_repair_required"); }
+  if (config.tenants.length === 0) return repairHealth("not_configured");
+  const tenants = config.tenants;
+  for (const tenant of tenants) {
+    if (tenant.credentialRef !== "file") continue;
+    const credentialPaths = blackboardPaths(home, tenant.id);
+    const credentialFile = await inspectHealthText(credentialPaths.credential, privateFileAccessAccepted, 16 * 1024, path.dirname(credentialPaths.configDirectory));
+    if (credentialFile.status === "absent") return repairHealth("credential_missing", tenants);
+    if (credentialFile.status === "private_access_refused") return repairHealth("private_access_refused", tenants);
+    if (credentialFile.status !== "readable") return repairHealth("credential_mismatched", tenants);
+    try { parseCredential(JSON.parse(credentialFile.serialized), tenant.credentialRevision); }
+    catch { return repairHealth("credential_mismatched", tenants); }
+  }
+  return configuredHealth(tenants);
 }
 async function restoreCredential({ previous, next, paths, writeCredential, privateFileAccessAccepted }) {
   try {
@@ -221,7 +267,7 @@ async function configureBlackboard({ home, input, discoverConnection, writeCrede
     const discovered = parseDiscoveredConnection(await discoverConnection({ ...setup }));
     const paths = blackboardPaths(home, setup.id); const before = await readConfig(home, privateFileAccessAccepted);
     const existing = before.config.tenants.find((tenant) => tenant.id === setup.id);
-    const prior = existing?.credentialRef === "file" ? await readCredential(paths, existing, privateFileAccessAccepted) : null;
+    const prior = existing?.credentialRef === "file" ? await readPriorCredential(paths, existing, privateFileAccessAccepted) : null;
     const credentialRevision = crypto.randomUUID();
     // A course binding proves one exact site and account, so a saved change of either releases it.
     const sameIdentity = existing?.baseUrl === setup.baseUrl && existing?.principalId === discovered.principalId;
@@ -302,6 +348,27 @@ async function credentialPresence(file) {
   catch (error) { return error?.code === "ENOENT" ? "absent" : "unknown"; }
 }
 /**
+ * Removes all local Blackboard connection data in dependency order. The route
+ * goes first and its absence is read back before any credential is removed. If
+ * the route remains or cannot be inspected, every secret remains available to
+ * that route. If a secret cannot be removed after the route is gone, it is
+ * unreferenced and the caller reports it as remaining.
+ */
+async function removeBlackboardData({ home, removePath = fs.rm }) {
+  if (typeof removePath !== "function") throw new TypeError("Blackboard data removal is unavailable");
+  const paths = blackboardPaths(home, "default");
+  await removePath(paths.config, { force: true }).catch(() => {});
+  const configuration = await credentialPresence(paths.config);
+  if (configuration !== "absent") {
+    return { configuration, credentials: await credentialPresence(paths.credentialDirectory) };
+  }
+  await removePath(paths.credentialDirectory, { recursive: true, force: true }).catch(() => {});
+  return {
+    configuration,
+    credentials: await credentialPresence(paths.credentialDirectory)
+  };
+}
+/**
  * Removes one saved Blackboard connection from this computer: its entry in the
  * stored configuration and the secret file that entry named. Nothing here
  * reaches Blackboard, and nothing in the Blackboard site changes.
@@ -343,4 +410,4 @@ async function removeBlackboardTenant({ home, tenantId, privateFileAccessAccepte
     health: await readBlackboardHealth(home, { privateFileAccessAccepted })
   };
 }
-module.exports = { CONFIG_SCHEMA, CREDENTIAL_SCHEMA, blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, deriveBlackboardSourceBindingId, readBlackboardHealth, removeBlackboardTenant, selectBlackboardCourses };
+module.exports = { CONFIG_SCHEMA, CREDENTIAL_SCHEMA, blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, deriveBlackboardSourceBindingId, readBlackboardHealth, removeBlackboardData, removeBlackboardTenant, selectBlackboardCourses };

@@ -30,7 +30,7 @@
       <section class="action-panel" aria-labelledby="action-title">
         <div id="loading" class="loading" role="status">Checking Morrow setup…</div>
         <div id="action-content" hidden>
-          <h2 id="action-title"></h2>
+          <h2 id="action-title" tabindex="-1"></h2>
           <p id="action-copy" class="action-copy"></p>
           <div id="action-body" class="action-body"></div>
         </div>
@@ -39,14 +39,14 @@
 
       <section id="updates-panel" class="updates-panel" aria-labelledby="updates-title" hidden>
         <div>
-          <h2 id="updates-title">Updates</h2>
-          <p id="updates-copy"></p>
+          <h2 id="updates-title" tabindex="-1">Updates</h2>
+          <p id="updates-copy" role="status" aria-live="polite" aria-atomic="true"></p>
         </div>
         <div id="updates-actions" class="inline-actions"></div>
       </section>
 
       <details id="blackboard-panel" class="blackboard-panel" hidden>
-        <summary class="blackboard-summary">
+        <summary id="blackboard-summary" class="blackboard-summary">
           <h2>Connect a Blackboard Learn site (optional)</h2>
           <span class="blackboard-summary-detail">Most people do not need this. Canvas and Moodle connect through the steps above. Open this only if a Blackboard administrator gave you an application key for Morrow.</span>
         </summary>
@@ -87,7 +87,7 @@
       </details>
 
       <details id="retention-panel" class="retention-panel" hidden>
-        <summary class="retention-summary">
+        <summary id="retention-summary" class="retention-summary">
           <h2 id="retention-title">What stays on this computer</h2>
           <span id="retention-copy" class="retention-summary-detail"></span>
         </summary>

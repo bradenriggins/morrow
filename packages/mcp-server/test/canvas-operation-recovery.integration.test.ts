@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -10,6 +9,7 @@ import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
+import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 
 const ROOT = resolve("../..");
 const CATALOG_PATH = resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json");
@@ -27,15 +27,6 @@ async function availablePort(): Promise<number> {
   return port;
 }
 
-function rawDigest(relativePath: string): string {
-  return createHash("sha256").update(readFileSync(resolve(ROOT, relativePath))).digest("hex");
-}
-
-function connectorCatalogDigest(canvasCatalogDigest: string): string {
-  const canvasBrowser = rawDigest("connector/extension/generated/canvas-browser-catalog.json");
-  const moodle = rawDigest("connector/extension/generated/moodle-browser-catalog.json");
-  return createHash("sha256").update(`${canvasCatalogDigest}\n${canvasBrowser}\n${moodle}`).digest("hex");
-}
 
 function connectorConfig(directory: string, port: number) {
   return parseGatewayConfig({
@@ -104,7 +95,7 @@ describe("Canvas unresolved-operation recovery", () => {
     const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-recovery-"));
     const port = await availablePort();
     const catalog = loadCanvasApiCatalog(CATALOG_PATH);
-    const browserCatalogDigest = connectorCatalogDigest(catalog.catalogDigest);
+    const browserCatalogDigest = bridgeCatalogDigestForTests(ROOT);
     const morrow = await MorrowRuntime.connect(connectorConfig(directory, port), {
       statePath: join(directory, "gateway.sqlite3"),
     });

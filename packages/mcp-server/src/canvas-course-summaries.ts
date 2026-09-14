@@ -32,10 +32,19 @@ type ScoreBucket = typeof SCORE_BUCKETS[number];
 type ActivityKind = typeof ACTIVITY_KINDS[number];
 type DistributionState = typeof DISTRIBUTION_STATES[number];
 
-export type CanvasCourseSummaryExpectation = Readonly<{ courseId: number; assignmentId?: number; days?: number }>;
+export type CanvasCourseSummaryExpectation = Readonly<{ courseId: string; assignmentId?: string; days?: number }>;
 
-function positiveId(value: unknown): number | null {
-  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
+function positiveId(value: unknown): string | null {
+  const text = typeof value === "string"
+    ? value
+    : Number.isSafeInteger(value) && Number(value) > 0
+      ? String(value)
+      : "";
+  return /^[1-9][0-9]{0,18}$/u.test(text) ? text : null;
+}
+
+function compareIds(left: string, right: string): number {
+  return left.length - right.length || left.localeCompare(right, "en-US");
 }
 
 function count(value: unknown, maximum: number): number | null {
@@ -131,7 +140,7 @@ export function projectCanvasCourseGradebookSummary(
   const proof = isJsonObject(source.proof) ? source.proof : null;
   if (submissions === null || assignmentCount === null || !rows || !proof
     || rows.length !== assignmentCount || source.minimum_cohort !== MINIMUM_COHORT) refuse(tool);
-  let previousId = 0;
+  let previousId: string | null = null;
   const assignments = rows.map((entry) => {
     if (!isJsonObject(entry)) refuse(tool);
     const assignmentId = positiveId(entry.assignment_id);
@@ -140,7 +149,7 @@ export function projectCanvasCourseGradebookSummary(
     const ungraded = count(entry.ungraded_count, submissions);
     const scored = graded === null ? null : count(entry.scored_count, graded);
     const state = DISTRIBUTION_STATES.find((candidate) => candidate === entry.score_distribution_state);
-    if (assignmentId === null || assignmentId <= previousId || submitted === null || graded === null
+    if (assignmentId === null || (previousId !== null && compareIds(assignmentId, previousId) <= 0) || submitted === null || graded === null
       || ungraded === null || ungraded < submitted || scored === null || !state) refuse(tool);
     previousId = assignmentId;
     if (state !== "reported") {
@@ -268,7 +277,7 @@ export type CanvasCourseSummaryRoute = Readonly<{
   operation: string;
   schema: string;
   text: string;
-  expectation: (courseId: number, request: Readonly<Record<string, unknown>>) => CanvasCourseSummaryExpectation | null;
+  expectation: (courseId: string, request: Readonly<Record<string, unknown>>) => CanvasCourseSummaryExpectation | null;
   project: (value: unknown, expected: CanvasCourseSummaryExpectation) => JsonObject;
 }>;
 
@@ -283,7 +292,7 @@ const ROUTES: readonly CanvasCourseSummaryRoute[] = Object.freeze([
     schema: CANVAS_ASSIGNMENT_SUBMISSION_SUMMARY_SCHEMA,
     text: "Morrow read the current aggregate Canvas Assignment submission summary.",
     expectation: (courseId, request) => {
-      const assignmentId = requestedInteger(request.assignment_id, Number.MAX_SAFE_INTEGER);
+      const assignmentId = positiveId(request.assignment_id);
       return assignmentId === null ? null : { courseId, assignmentId };
     },
     project: projectCanvasAssignmentSubmissionSummary,

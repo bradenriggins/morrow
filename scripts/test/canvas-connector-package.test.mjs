@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { BRIDGE_SOURCE_FILES } from "../package-mcp-bundle.mjs";
 
@@ -19,6 +21,25 @@ test("the Bridge release includes the Item Bank credential module", () => {
   assert.match(worker, /from "\.\/quiz-bank-draw-executor\.js"/);
   assert.ok(BRIDGE_SOURCE_FILES.includes("src/item-bank-credential.js"));
   assert.ok(BRIDGE_SOURCE_FILES.includes("src/quiz-bank-draw-executor.js"));
+  assert.ok(BRIDGE_SOURCE_FILES.includes("src/catalog-compatibility.js"));
+});
+
+test("the connector package check derives proof from source without requiring an untracked archive", () => {
+  const archive = new URL(`artifacts/connector/morrow-canvas-connector-v${manifest.version}.zip`, root);
+  const receipt = new URL("artifacts/connector/receipt.json", root);
+  const before = [archive, receipt].map((path) => existsSync(path) ? readFileSync(path) : null);
+  const result = spawnSync(process.execPath, [fileURLToPath(new URL("scripts/package-canvas-connector.mjs", root)), "--check"], {
+    cwd: fileURLToPath(root),
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const checked = JSON.parse(result.stdout);
+  assert.equal(checked.check, true);
+  assert.match(checked.archiveSha256, /^[0-9a-f]{64}$/);
+  for (const [index, path] of [archive, receipt].entries()) {
+    assert.equal(existsSync(path), before[index] !== null, `${path.pathname} existence changed during --check`);
+    if (before[index]) assert.deepEqual(readFileSync(path), before[index], `${path.pathname} changed during --check`);
+  }
 });
 
 /** The exact top-level function of that name, taken from the shipped service worker and run here. */

@@ -5,6 +5,7 @@ import {
   type BatchExecutionResult,
   type BatchExecutor,
   type BatchRecord,
+  type BatchRateState,
   type BatchState,
   type BatchWindowResult,
   type CreateBatchInput,
@@ -13,6 +14,11 @@ import {
   type RunBatchWindowOptions,
 } from "./index.js";
 import { sha256Text, type JsonObject } from "@morrow/contracts";
+import {
+  recoverBatchState,
+  type BatchRecoveryMode,
+  type BatchRecoveryResult,
+} from "./recovery.js";
 
 const TERMINAL_BATCH_STATES = new Set<BatchState>([
   "completed",
@@ -42,11 +48,13 @@ export interface BatchChildrenPage {
 export class DurableBatchStore {
   readonly path: string;
   private readonly inner: InternalDurableBatchStore;
+  private readonly recoveryEncryptionKey: Uint8Array;
   private closed = false;
 
   constructor(options: DurableBatchStoreOptions) {
     this.inner = new InternalDurableBatchStore(options);
     this.path = this.inner.path;
+    this.recoveryEncryptionKey = Uint8Array.from(options.encryptionKey);
   }
 
   create(input: CreateBatchInput): BatchDetail {
@@ -109,12 +117,25 @@ export class DurableBatchStore {
     return this.inner.pause(batchId);
   }
 
-  cancel(batchId: string): BatchRecord {
-    return this.inner.cancel(batchId);
+  cancel(batchId: string, irreversibleOperationIds: readonly string[] = []): BatchRecord {
+    return this.inner.cancel(batchId, irreversibleOperationIds);
   }
 
   quarantine(batchId: string): BatchRecord {
     return this.inner.quarantine(batchId);
+  }
+
+  recover(input: {
+    readonly batchId: string;
+    readonly mode: BatchRecoveryMode;
+    readonly afterOrdinal?: number;
+    readonly maxChildren?: number;
+  }): BatchRecoveryResult {
+    return recoverBatchState({
+      path: this.path,
+      encryptionKey: this.recoveryEncryptionKey,
+      ...input,
+    });
   }
 
   beginRun(
@@ -159,6 +180,18 @@ export class DurableBatchStore {
     result: BatchExecutionResult,
   ): BatchChildRecord {
     return this.inner.settleChild(batchId, childId, result);
+  }
+
+  readRateStates(batchId: string): readonly BatchRateState[] {
+    return this.inner.readRateStates(batchId);
+  }
+
+  recordRateState(batchId: string, sourceId: string, policy: RatePolicy, delayMs: number): BatchRateState {
+    return this.inner.recordRateState(batchId, sourceId, policy, delayMs);
+  }
+
+  clearRateDelays(batchId: string): void {
+    this.inner.clearRateDelays(batchId);
   }
 
   finishWindow(batchId: string): BatchRecord {
@@ -264,6 +297,18 @@ function mergeRateObservations(
   };
 }
 
+function mergeDurableRatePolicy(current: RatePolicy, states: readonly BatchRateState[]): RatePolicy {
+  const requestCosts = [current.requestCost, ...states.map((state) => state.policy.requestCost)]
+    .filter((value): value is number => value !== undefined);
+  const remainingValues = [current.rateLimitRemaining, ...states.map((state) => state.policy.rateLimitRemaining)]
+    .filter((value): value is number => value !== undefined);
+  return {
+    ...current,
+    ...(requestCosts.length > 0 ? { requestCost: Math.max(...requestCosts) } : {}),
+    ...(remainingValues.length > 0 ? { rateLimitRemaining: Math.min(...remainingValues) } : {}),
+  };
+}
+
 export async function runBatchWindow(
   store: DurableBatchStore,
   batchId: string,
@@ -277,8 +322,14 @@ export async function runBatchWindow(
   const manifest = store.getManifest(batchId);
   const random = options.random || Math.random;
   const sleep = options.sleep || ((milliseconds: number) => new Promise<void>((resolveValue) => setTimeout(resolveValue, milliseconds)));
-  let policy: RatePolicy = { ...manifest.ratePolicy, ...options.ratePolicy };
+  const durableRateStates = store.readRateStates(batchId);
+  let policy: RatePolicy = mergeDurableRatePolicy(
+    { ...manifest.ratePolicy, ...options.ratePolicy },
+    durableRateStates,
+  );
   let rate = windowRate(started, manifest, policy, random);
+  const durableDelayMs = durableRateStates.reduce((maximum, state) => Math.max(maximum, state.remainingDelayMs), 0);
+  if (durableDelayMs > rate.backoffMs) rate = { ...rate, backoffMs: durableDelayMs };
   if (TERMINAL_BATCH_STATES.has(started.state)) {
     return {
       schema: "morrow.batch-window.v1",
@@ -304,6 +355,7 @@ export async function runBatchWindow(
       await abortableSleep(sleep, rate.backoffMs, options.signal, options.sleep === undefined);
       totalBackoffMs += rate.backoffMs;
       policy = { ...policy, retryAfterMs: undefined };
+      if (!options.signal?.aborted) store.clearRateDelays(batchId);
       if (options.signal?.aborted) continue;
     }
     const wave = store.claimPending(batchId, Math.min(available, rate.concurrency));
@@ -328,11 +380,33 @@ export async function runBatchWindow(
         };
       }
     }));
+    const observedBySource = new Map<string, BatchExecutionResult["ratePolicy"][]>();
+    for (const execution of executions) {
+      if (!execution.result.ratePolicy) continue;
+      const observations = observedBySource.get(execution.child.sourceId) || [];
+      observations.push(execution.result.ratePolicy);
+      observedBySource.set(execution.child.sourceId, observations);
+    }
+    const priorBySource = new Map(store.readRateStates(batchId).map((state) => [state.sourceId, state]));
+    let observedDelayMs = 0;
+    for (const [sourceId, observations] of observedBySource) {
+      const sourcePolicy = mergeRateObservations(priorBySource.get(sourceId)?.policy || {}, observations);
+      const sourceRate = windowRate(started, manifest, {
+        ...sourcePolicy,
+        ...(policy.jitterRatio === undefined ? {} : { jitterRatio: policy.jitterRatio }),
+      }, random);
+      observedDelayMs = Math.max(observedDelayMs, sourceRate.backoffMs);
+      // Persist before child settlement. A crash may retain a conservative
+      // delay, but it cannot lose accepted rate-limit evidence while retaining
+      // the completed child.
+      store.recordRateState(batchId, sourceId, sourcePolicy, sourceRate.backoffMs);
+    }
     for (const execution of executions) {
       settled.push(store.settleChild(execution.child.batchId, execution.child.childId, execution.result));
     }
     policy = mergeRateObservations(policy, executions.map((execution) => execution.result.ratePolicy));
-    rate = windowRate(started, manifest, policy, random);
+    rate = windowRate(started, manifest, { ...policy, retryAfterMs: undefined }, random);
+    if (observedDelayMs > 0) rate = { ...rate, backoffMs: observedDelayMs };
     minimumConcurrency = Math.min(minimumConcurrency, rate.concurrency);
     if (options.stopOnUnverified && executions.some(({ result }) => (
       result.state !== "succeeded" || result.gatewayOperationState !== "verified"

@@ -138,6 +138,7 @@ describe("lesson specialist review", () => {
       const requestData = JSON.parse(round.inputRequests.lesson_alignment!.params.messages[0]!.content.text);
       const validResponses = Object.fromEntries(["lesson_alignment", "quiz_alignment"].map((key) => [key, { model: "reported-test", role: "assistant", stopReason: "endTurn", content: { type: "text", text: JSON.stringify({ request_id: requestData.request_id, request_key: key, findings: [{ target_key: key === "lesson_alignment" ? "lesson" : "question:1", source_quote: "Cells have membranes.", target_quote: key === "lesson_alignment" ? "Cells lack membranes." : '"value":false', concern: "The saved statement conflicts with the source.", proposed_correction: "Correct the saved content." }], limits: [] }) } }]));
       const responses = Object.fromEntries(["lesson_alignment", "quiz_alignment"].map((key) => [key, { model: "reported-test", role: "assistant", stopReason: "endTurn", content: { type: "text", text: JSON.stringify({ request_id: requestData.request_id, request_key: key, findings: [{ target_key: key === "lesson_alignment" ? "lesson" : "question:1", source_quote: "A fabricated source quote", target_quote: "Cells lack membranes.", concern: "Unsupported", proposed_correction: "Unsupported" }], limits: [] }) } }]));
+      const whitespaceResponses = Object.fromEntries(["lesson_alignment", "quiz_alignment"].map((key) => [key, { model: "reported-test", role: "assistant", stopReason: "endTurn", content: { type: "text", text: JSON.stringify({ request_id: requestData.request_id, request_key: key, findings: [{ target_key: key === "lesson_alignment" ? "lesson" : "question:1", source_quote: " ", target_quote: " ", concern: "Unsupported", proposed_correction: "Unsupported" }], limits: [] }) } }]));
       const retry = (requestState: string, arguments_ = args) => client.callTool({ name: "morrow_review_lesson", arguments: arguments_, requestState, inputResponses: responses } as Parameters<Client["callTool"]>[0]);
       const expiredRetry = () => client.callTool({ name: "morrow_review_lesson", arguments: args, requestState: round.requestState, inputResponses: validResponses } as Parameters<Client["callTool"]>[0]);
       const dateNow = vi.spyOn(Date, "now").mockReturnValue(Date.now() + 601_000);
@@ -160,6 +161,15 @@ describe("lesson specialist review", () => {
       const invalid = await retry(round.requestState);
       expect(invalid.isError).toBe(true);
       expect(JSON.stringify(invalid.content)).toContain("not in the captured evidence");
+      expect(calls).toHaveLength(4);
+      const whitespace = await client.callTool({
+        name: "morrow_review_lesson",
+        arguments: args,
+        requestState: round.requestState,
+        inputResponses: whitespaceResponses,
+      } as Parameters<Client["callTool"]>[0], { allowInputRequired: true });
+      expect(whitespace.isError).toBe(true);
+      expect(whitespace).not.toHaveProperty("inputRequests.checker");
       expect(calls).toHaveLength(4);
       const item = (snapshots.canvas_list_quiz_items as JsonObject[])[0]!;
       snapshots.canvas_list_quiz_items = [{ ...item, entry: { ...(item.entry as JsonObject), scoring_data: null } }];

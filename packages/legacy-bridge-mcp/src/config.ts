@@ -1,6 +1,9 @@
-import { readFile } from "node:fs/promises";
+import { constants } from "node:fs";
+import { lstat, open } from "node:fs/promises";
 import { resolve } from "node:path";
 import { parseSourceCatalog, type SourceCatalogSnapshot } from "@morrow/gateway-core";
+
+export const LEGACY_BRIDGE_MAX_CATALOG_BYTES = 16 * 1024 * 1024;
 
 export interface LegacyBridgeConfig {
   readonly catalogPath: string;
@@ -26,11 +29,60 @@ function exactPort(value: string | undefined): number {
   return parsed;
 }
 
+function sameFile(
+  left: Awaited<ReturnType<typeof lstat>>,
+  right: Awaited<ReturnType<typeof lstat>>,
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+async function readCatalog(path: string): Promise<string> {
+  const invalid = (): Error => new Error(
+    "MORROW_LEGACY_CATALOG_PATH must name one stable regular file no larger than 16 MiB",
+  );
+  let handle;
+  try {
+    const namedBefore = await lstat(path);
+    if (!namedBefore.isFile() || namedBefore.size < 1 || namedBefore.size > LEGACY_BRIDGE_MAX_CATALOG_BYTES) {
+      throw invalid();
+    }
+    handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+    const openedBefore = await handle.stat();
+    if (!openedBefore.isFile() || !sameFile(namedBefore, openedBefore)
+      || openedBefore.size < 1 || openedBefore.size > LEGACY_BRIDGE_MAX_CATALOG_BYTES) {
+      throw invalid();
+    }
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    while (true) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, LEGACY_BRIDGE_MAX_CATALOG_BYTES + 1 - bytes));
+      const read = await handle.read(chunk, 0, chunk.length, null);
+      if (read.bytesRead === 0) break;
+      bytes += read.bytesRead;
+      if (bytes > LEGACY_BRIDGE_MAX_CATALOG_BYTES) throw invalid();
+      chunks.push(Buffer.from(chunk.subarray(0, read.bytesRead)));
+    }
+    const openedAfter = await handle.stat();
+    const namedAfter = await lstat(path);
+    if (!sameFile(openedBefore, openedAfter) || !sameFile(openedAfter, namedAfter)
+      || openedAfter.size !== openedBefore.size || openedAfter.mtimeMs !== openedBefore.mtimeMs
+      || openedAfter.ctimeMs !== openedBefore.ctimeMs || bytes !== openedAfter.size) {
+      throw invalid();
+    }
+    return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, bytes));
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("MORROW_LEGACY_CATALOG_PATH must name")) throw error;
+    throw invalid();
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
 export async function loadLegacyBridgeConfig(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<LegacyBridgeConfig> {
   const catalogPath = resolve(requiredEnvironment("MORROW_LEGACY_CATALOG_PATH", environment));
-  const text = await readFile(catalogPath, "utf8");
+  const text = await readCatalog(catalogPath);
   const sourceCatalog = parseSourceCatalog(JSON.parse(text) as unknown);
   if (sourceCatalog.source.id !== "morrow-legacy") {
     throw new Error("MORROW_LEGACY_CATALOG_PATH must contain the morrow-legacy source catalog");

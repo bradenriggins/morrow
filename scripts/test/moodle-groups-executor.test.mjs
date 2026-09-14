@@ -435,7 +435,7 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
       groups: model.groups
         .map((group) => ({
           id: group.id, name: group.name, visibility: group.visibility, participation: group.participation,
-          membership: group.members.map((userId) => ({ user_id: userId, name: model.people[userId] }))
+          membership: group.members.map((userId) => ({ user_id: userId }))
             .sort((left, right) => Number(left.user_id) - Number(right.user_id)),
         }))
         .sort((left, right) => Number(left.id) - Number(right.id)),
@@ -601,7 +601,7 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
     const added = await run(operations.addMember, { course_id: 2, group_id: "8", expected_group_name: "Team Alpha", user_id: 11 });
     assert.equal(added.ok, true, JSON.stringify(added));
     assert.equal(countWrites(), before + 1);
-    assert.deepEqual(added.data.member, { user_id: "11", name: "Sam Partner" });
+    assert.deepEqual(added.data.member, { user_id: "11" });
     assert.equal(added.data.member_count, 2);
     assert.equal(added.proof.group_visibility, 0);
     assert.equal(added.proof.group_visibility_meaning, "Visible to everyone in the course");
@@ -616,7 +616,7 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
     const removed = await run(operations.removeMember, { course_id: 2, group_id: "8", expected_group_name: "Team Alpha", user_id: 11 });
     assert.equal(removed.ok, true, JSON.stringify(removed));
     assert.equal(countWrites(), before + 1);
-    assert.deepEqual(removed.data.member, { user_id: "11", name: "Sam Partner" });
+    assert.deepEqual(removed.data.member, { user_id: "11" });
     assert.deepEqual(lastBody().getAll("removeselect[]"), ["11"]);
     assert.equal(lastBody().get("remove"), "1");
     assert.deepEqual(groupById("8").members, ["7"]);
@@ -655,7 +655,7 @@ test("one group, membership, grouping, or activity group mode changes exactly, a
     const deleted = await run(operations.deleteGroup, { course_id: 2, group_id: "8", expected_group_name: "Team Alpha", expected_member_count: 1 });
     assert.equal(deleted.ok, true, JSON.stringify(deleted));
     assert.equal(countWrites(), before + 1);
-    assert.deepEqual(deleted.data.removed_members, [{ user_id: "7", name: "Jane Moodle" }]);
+    assert.deepEqual(deleted.data.removed_members, [{ user_id: "7" }]);
     assert.equal(deleted.data.deleted_group.name, "Team Alpha");
     assert.equal(deleted.proof.members_removed, 1);
     assert.equal(deleted.proof.learner_records_removed, true);

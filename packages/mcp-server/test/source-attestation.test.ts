@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { realpathSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   SourceAttestationError,
   verifyLocalGitSourceAttestation,
+  verifyLocalGitStdioLaunch,
 } from "../src/source-attestation.js";
 
 function git(root: string, ...args: string[]): string {
@@ -102,6 +105,119 @@ describe("verifyLocalGitSourceAttestation", () => {
           allowedTrackedPaths: ["source.txt"],
         },
       )).toMatchObject({ verified: true, trackedClean: false });
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  it("binds the exact runtime, worktree, entrypoint argument, and launch bytes", async () => {
+    const fixture = await committedRepository();
+    try {
+      const verified = verifyLocalGitStdioLaunch(
+        "meridian",
+        undefined,
+        {
+          kind: "local-git",
+          root: fixture.root,
+          expectedRevision: fixture.revision,
+          requireTrackedClean: true,
+          launch: {
+            entrypoint: "source.txt",
+            entrypointArgumentIndex: 0,
+            runtime: { kind: "current-node" },
+          },
+        },
+        {
+          command: process.execPath,
+          args: [join(fixture.root, "source.txt"), "--exact-argument"],
+          cwd: fixture.root,
+          env: { MORROW_TEST: "exact-value" },
+        },
+      );
+      expect(verified.launch).toMatchObject({
+        command: realpathSync(process.execPath),
+        args: [realpathSync(join(fixture.root, "source.txt")), "--exact-argument"],
+        cwd: realpathSync(fixture.root),
+      });
+      expect(verified.attestation).toMatchObject({ verified: true });
+      expect(verified.attestation.launchDigest).toMatch(/^[0-9a-f]{64}$/);
+      expect(verified.attestation.executableDigest).toMatch(/^[0-9a-f]{64}$/);
+      expect(verified.attestation.entrypointDigest).toBe(
+        createHash("sha256").update("first\n").digest("hex"),
+      );
+
+      expect(() => verifyLocalGitStdioLaunch(
+        "meridian",
+        undefined,
+        {
+          kind: "local-git",
+          root: fixture.root,
+          expectedRevision: fixture.revision,
+          requireTrackedClean: true,
+          launch: {
+            entrypoint: "source.txt",
+            entrypointArgumentIndex: 0,
+            runtime: { kind: "current-node" },
+          },
+        },
+        {
+          command: process.execPath,
+          args: [process.execPath],
+          cwd: fixture.root,
+          env: {},
+        },
+      )).toThrow(/does not execute the entrypoint inside its attested Git worktree/);
+    } finally {
+      await fixture.dispose();
+    }
+  });
+
+  it("requires an exact byte digest for an ignored or untracked build entrypoint", async () => {
+    const fixture = await committedRepository();
+    const buildPath = join(fixture.root, "build.mjs");
+    try {
+      await writeFile(buildPath, "process.exit(0);\n", "utf8");
+      const base = {
+        kind: "local-git" as const,
+        root: fixture.root,
+        expectedRevision: fixture.revision,
+        requireTrackedClean: true,
+      };
+      const launch = {
+        command: process.execPath,
+        args: [buildPath],
+        cwd: fixture.root,
+        env: {},
+      };
+      expect(() => verifyLocalGitStdioLaunch(
+        "meridian",
+        undefined,
+        {
+          ...base,
+          launch: {
+            entrypoint: "build.mjs",
+            entrypointArgumentIndex: 0,
+            runtime: { kind: "current-node" },
+          },
+        },
+        launch,
+      )).toThrow(/not tracked.*no expected byte digest/);
+
+      const digest = createHash("sha256").update("process.exit(0);\n").digest("hex");
+      expect(verifyLocalGitStdioLaunch(
+        "meridian",
+        undefined,
+        {
+          ...base,
+          launch: {
+            entrypoint: "build.mjs",
+            entrypointArgumentIndex: 0,
+            expectedEntrypointSha256: digest,
+            runtime: { kind: "current-node" },
+          },
+        },
+        launch,
+      ).attestation.entrypointDigest).toBe(digest);
     } finally {
       await fixture.dispose();
     }

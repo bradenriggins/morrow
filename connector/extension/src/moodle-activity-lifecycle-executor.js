@@ -50,6 +50,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleActivityLifecycleInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const AJAX_PATH = "/lib/ajax/service.php";
   const COURSE_FORM_PATH = "/course/edit.php";
@@ -204,11 +206,17 @@ export async function executeMoodleActivityLifecycleInPage(rawInput) {
   const live = () => Number.isSafeInteger(input.expiresAt) && Date.now() < input.expiresAt;
   const boundedText = async (response, endpoint, context) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return null;
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return null;
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())
-      || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -216,14 +224,14 @@ export async function executeMoodleActivityLifecycleInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return null;
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -238,7 +246,7 @@ export async function executeMoodleActivityLifecycleInPage(rawInput) {
     const endpoint = urlFor(context, COURSE_FORM_PATH, { id: courseId });
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error: "moodle_activity_lifecycle_course_format_unverified" }; }
     const html = await boundedText(response, endpoint, context);
     if (typeof html !== "string" || typeof globalThis.DOMParser !== "function") return { error: "moodle_activity_lifecycle_course_format_unverified", status: response.status };
@@ -282,6 +290,7 @@ export async function executeMoodleActivityLifecycleInPage(rawInput) {
         redirect: "error",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify([{ index: 0, methodname: methodName, args }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return write ? { unconfirmed: "moodle_activity_lifecycle_write_unconfirmed" } : { error: "moodle_activity_lifecycle_state_unavailable" }; }
     const raw = await boundedText(response, endpoint, context);

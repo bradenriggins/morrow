@@ -15,7 +15,7 @@
         <h1>Plan and Edit settings</h1>
         <p class="lede">Plan is the default. Choose specific courses and individual Edit actions only when Morrow should apply changes for you.</p>
       </div>
-      <button id="private-chat-open" class="private-chat-open secondary" type="button" aria-haspopup="dialog" aria-controls="private-chat-drawer">Private Chat</button>
+      <button id="private-chat-open" class="private-chat-open secondary" type="button" aria-haspopup="dialog" aria-controls="private-chat-drawer" aria-expanded="false">Private Chat</button>
     </header>
 
     <p id="notice" class="notice" hidden></p>
@@ -167,7 +167,7 @@
       </ul>
     </section>
   </main>
-  <div id="private-chat-scrim" class="private-chat-scrim" hidden></div>
+  <div id="private-chat-scrim" class="private-chat-scrim" aria-hidden="true" hidden></div>
   <aside id="private-chat-drawer" class="private-chat-drawer" role="dialog" aria-modal="true" aria-labelledby="private-chat-title" hidden>
     <header class="private-chat-header">
       <div>

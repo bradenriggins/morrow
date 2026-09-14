@@ -2,20 +2,15 @@ import { spawn } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   closeSync,
-  chmodSync,
   constants,
-  lstatSync,
   openSync,
   realpathSync,
-  readFileSync,
-  renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, resolve } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
@@ -23,7 +18,10 @@ import {
   type JSONRPCMessage,
 } from "@modelcontextprotocol/client";
 import {
+  createMcpHandler,
+  isLegacyRequest,
   WebStandardStreamableHTTPServerTransport,
+  type McpHttpHandler,
   type McpServer,
 } from "@modelcontextprotocol/server";
 import {
@@ -31,8 +29,16 @@ import {
   type StdioServerHandle,
 } from "@modelcontextprotocol/server/stdio";
 import { sha256Json } from "@morrow/contracts";
+import {
+  canonicalPrivateStateFilePath,
+  decodeExactUtf8,
+  readExactPrivateStateFile,
+  replaceExactPrivateStateFile,
+  withExactPrivateStateFileTransaction,
+} from "@morrow/gateway-core";
 import type { GatewayConfig } from "./config.js";
 import { createFullMorrowServer } from "./full-server.js";
+import { BoundedHttpServerLifecycle } from "./approval-server.js";
 import { MorrowRuntime } from "./morrow-runtime.js";
 import {
   LOCAL_OWNER_MAINTENANCE_PATH,
@@ -41,14 +47,16 @@ import {
   localOwnerMaintenanceMarkerPresent,
   localOwnerMaintenanceMatches,
   normalizeLocalOwnerBridgeMaintenanceControl,
+  processMatchesRecordedLifetime,
+  requestPathProcessMatches,
   readLocalOwnerMaintenanceLease,
   recoverExactLocalOwnerMaintenanceLease,
   removeExactLocalOwnerMaintenanceLease,
   writeLocalOwnerMaintenanceLease,
 } from "./local-owner-maintenance.js";
-import { localOwnerSidecarAccessAccepted } from "./local-owner-sidecar-access.js";
 import { RuntimeStateLease, hardenMorrowStateFiles } from "./state-lease.js";
 import { StrictStdioServerTransport } from "./strict-stdio.js";
+import { PrivateChatContinuationLedger } from "./private-chat.js";
 
 const OWNER_SCHEMA = "morrow.local-owner.v1";
 const LOOPBACK_HOST = "127.0.0.1";
@@ -60,9 +68,32 @@ const OWNER_START_GRACE_MS = 30_000;
 const OWNER_IDLE_MS = 1_000;
 const OWNER_PENDING_IDLE_CHECK_MS = 1_000;
 const OWNER_SESSION_REAP_MS = 1_000;
+const MODERN_PROTOCOL_VERSION = "2026-07-28";
 const MAX_HTTP_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_ACTIVE_MODERN_PROXY_REQUESTS = 64;
 const MAX_WORKSPACE_HEADER_CHARS = 4_096;
 const MAX_WORKSPACE_ROOT_BYTES = 3_072;
+const OWNER_DESCRIPTOR_MAX_BYTES = 4_096;
+const OWNER_DESCRIPTOR_SUFFIX = ".local-owner.json";
+const OWNER_DESCRIPTOR_FILE_OPTIONS = {
+  label: "local owner descriptor",
+  minBytes: 1,
+  maxBytes: OWNER_DESCRIPTOR_MAX_BYTES,
+} as const;
+const OWNER_DESCRIPTOR_TRANSACTION_OPTIONS = {
+  label: "local owner descriptor",
+  timeoutMs: 1_000,
+} as const;
+const OWNER_DESCRIPTOR_KEYS = [
+  "configDigest",
+  "journalPath",
+  "nonce",
+  "pid",
+  "port",
+  "schema",
+  "startedAt",
+  "token",
+] as const;
 
 interface WorkspaceAdmission {
   readonly root: string;
@@ -80,12 +111,21 @@ interface OwnerDescriptor {
   readonly startedAt: string;
 }
 
-interface Session {
-  id: string | null;
+interface ClientPresence {
   readonly proxyPid: number;
+  readonly observedAt: string;
   readonly workspace: WorkspaceAdmission;
+}
+
+interface Session extends ClientPresence {
+  id: string | null;
   readonly server: McpServer;
   readonly transport: WebStandardStreamableHTTPServerTransport;
+}
+
+interface ProxyPresence extends ClientPresence {
+  readonly requestStateKey: Uint8Array;
+  readonly privateChatContinuations: PrivateChatContinuationLedger;
 }
 
 interface MaintenanceRequest {
@@ -103,7 +143,21 @@ function durableJournalPath(config: GatewayConfig): string | null {
 }
 
 function ownerDescriptorPath(journalPath: string): string {
-  return `${journalPath}.local-owner.json`;
+  return `${journalPath}${OWNER_DESCRIPTOR_SUFFIX}`;
+}
+
+function canonicalLocalOwnerJournalPath(journalPath: string): string {
+  return canonicalPrivateStateFilePath(resolve(journalPath), "local owner state");
+}
+
+function canonicalRecordedJournalPath(journalPath: string): string | null {
+  if (!isAbsolute(journalPath) || /[\0\r\n]/.test(journalPath)) return null;
+  const requested = resolve(journalPath);
+  try {
+    return resolve(realpathSync(dirname(requested)), basename(requested));
+  } catch {
+    return null;
+  }
 }
 
 function ownerConfigDigest(config: GatewayConfig): string {
@@ -125,10 +179,6 @@ function testOwnerStderrDescriptor(): number | null {
   }
 }
 
-function safeChmod(path: string, mode: number): void {
-  try { chmodSync(path, mode); } catch { /* best effort on non-POSIX filesystems */ }
-}
-
 function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
@@ -141,64 +191,69 @@ function processAlive(pid: number): boolean {
 
 function parseOwnerDescriptor(value: string, journalPath: string): OwnerDescriptor | null {
   try {
-    const parsed = JSON.parse(value) as Partial<OwnerDescriptor>;
+    const candidate = JSON.parse(value) as unknown;
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)
+      || Object.keys(candidate).sort().join("\0") !== OWNER_DESCRIPTOR_KEYS.join("\0")) return null;
+    const parsed = candidate as Partial<OwnerDescriptor>;
+    const recordedJournalPath = typeof parsed.journalPath === "string" ? canonicalRecordedJournalPath(parsed.journalPath) : null;
     if (
       parsed.schema !== OWNER_SCHEMA
       || typeof parsed.nonce !== "string"
-      || !/^[0-9a-f-]{36}$/i.test(parsed.nonce)
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(parsed.nonce)
       || !Number.isSafeInteger(parsed.pid)
       || Number(parsed.pid) < 1
+      || Number(parsed.pid) > 2_147_483_647
       || !Number.isSafeInteger(parsed.port)
       || Number(parsed.port) < 1
       || Number(parsed.port) > 65_535
       || typeof parsed.token !== "string"
       || !/^[A-Za-z0-9_-]{40,160}$/.test(parsed.token)
-      || typeof parsed.journalPath !== "string"
-      || resolve(parsed.journalPath) !== journalPath
+      || recordedJournalPath !== journalPath
       || typeof parsed.configDigest !== "string"
       || !/^[a-f0-9]{64}$/.test(parsed.configDigest)
       || typeof parsed.startedAt !== "string"
+      || !Number.isFinite(Date.parse(parsed.startedAt))
+      || new Date(parsed.startedAt).toISOString() !== parsed.startedAt
     ) return null;
-    return parsed as OwnerDescriptor;
+    return { ...parsed, journalPath } as OwnerDescriptor;
   } catch {
     return null;
   }
 }
 
-function readOwnerDescriptor(journalPath: string): OwnerDescriptor | null {
-  const path = ownerDescriptorPath(journalPath);
+function readOwnerDescriptor(journalPathValue: string): OwnerDescriptor | null {
   try {
-    const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || !localOwnerSidecarAccessAccepted(path, stat.mode)) return null;
-    return parseOwnerDescriptor(readFileSync(path, "utf8"), journalPath);
+    const journalPath = canonicalLocalOwnerJournalPath(journalPathValue);
+    const content = readExactPrivateStateFile(ownerDescriptorPath(journalPath), OWNER_DESCRIPTOR_FILE_OPTIONS);
+    return content ? parseOwnerDescriptor(decodeExactUtf8(content, "local owner descriptor"), journalPath) : null;
   } catch {
     return null;
   }
 }
 
-function removeOwnerDescriptor(journalPath: string, nonce: string): void {
+function removeOwnerDescriptor(journalPathValue: string, nonce: string): void {
+  const journalPath = canonicalLocalOwnerJournalPath(journalPathValue);
   const path = ownerDescriptorPath(journalPath);
-  const current = readOwnerDescriptor(journalPath);
-  if (current?.nonce !== nonce) return;
-  try { unlinkSync(path); } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
-}
-
-function writeOwnerDescriptor(journalPath: string, descriptor: OwnerDescriptor): void {
-  const path = ownerDescriptorPath(journalPath);
-  const temporary = `${path}.${descriptor.nonce}.tmp`;
-  try {
-    writeFileSync(temporary, `${JSON.stringify(descriptor)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-    safeChmod(temporary, 0o600);
-    renameSync(temporary, path);
-    safeChmod(path, 0o600);
-    safeChmod(dirname(path), 0o700);
-  } finally {
-    try { unlinkSync(temporary); } catch (error) {
+  withExactPrivateStateFileTransaction(path, OWNER_DESCRIPTOR_TRANSACTION_OPTIONS, () => {
+    const current = readOwnerDescriptor(journalPath);
+    if (current?.nonce !== nonce) return;
+    try { unlinkSync(path); } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
     }
+  });
+}
+
+function writeOwnerDescriptor(journalPathValue: string, descriptor: OwnerDescriptor): void {
+  const journalPath = canonicalLocalOwnerJournalPath(journalPathValue);
+  const path = ownerDescriptorPath(journalPath);
+  const content = Buffer.from(`${JSON.stringify(descriptor)}\n`, "utf8");
+  const parsed = parseOwnerDescriptor(content.toString("utf8"), journalPath);
+  if (!parsed || parsed.journalPath !== descriptor.journalPath || parsed.nonce !== descriptor.nonce) {
+    throw new TypeError("local owner descriptor is invalid");
   }
+  withExactPrivateStateFileTransaction(path, OWNER_DESCRIPTOR_TRANSACTION_OPTIONS, () => {
+    replaceExactPrivateStateFile(path, content, OWNER_DESCRIPTOR_FILE_OPTIONS);
+  });
 }
 
 function ownerUrl(descriptor: OwnerDescriptor): URL {
@@ -261,6 +316,10 @@ function oneHeaderValue(request: IncomingMessage, name: string): string | null {
 
 function admittedWorkspaceFromRequest(request: IncomingMessage): WorkspaceAdmission | null {
   const encoded = oneHeaderValue(request, PROXY_WORKSPACE_HEADER);
+  return admittedWorkspaceFromEncoded(encoded);
+}
+
+function admittedWorkspaceFromEncoded(encoded: string | null): WorkspaceAdmission | null {
   if (!encoded || encoded.length > MAX_WORKSPACE_HEADER_CHARS || !/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
   const bytes = Buffer.from(encoded, "base64url");
   if (bytes.length === 0 || bytes.length > MAX_WORKSPACE_ROOT_BYTES || bytes.toString("base64url") !== encoded) return null;
@@ -270,6 +329,7 @@ function admittedWorkspaceFromRequest(request: IncomingMessage): WorkspaceAdmiss
 }
 
 function sendProblem(response: ServerResponse, status: number, code: string): void {
+  if (response.destroyed || response.writableEnded) return;
   if (response.headersSent) {
     response.destroy();
     return;
@@ -296,6 +356,54 @@ function requestLengthIsAllowed(request: IncomingMessage): boolean {
   if (typeof value !== "string" || !value) return true;
   const bytes = Number(value);
   return Number.isSafeInteger(bytes) && bytes >= 0 && bytes <= MAX_HTTP_BODY_BYTES;
+}
+
+class HttpBodyTooLargeError extends Error {}
+class HttpBodyInvalidUtf8Error extends Error {}
+
+async function readBoundedHttpBody(
+  request: IncomingMessage,
+  signal: AbortSignal,
+): Promise<Buffer | undefined> {
+  const method = request.method || "GET";
+  if (method === "GET" || method === "HEAD") return undefined;
+  const chunks: Buffer[] = [];
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  let bytes = 0;
+  for await (const part of request) {
+    signal.throwIfAborted();
+    const chunk = Buffer.isBuffer(part) ? part : Buffer.from(part);
+    if (chunk.byteLength > MAX_HTTP_BODY_BYTES - bytes) {
+      request.pause();
+      throw new HttpBodyTooLargeError("Morrow local owner request body exceeds the byte limit.");
+    }
+    bytes += chunk.byteLength;
+    chunks.push(chunk);
+    try {
+      decoder.decode(chunk, { stream: true });
+    } catch {
+      request.pause();
+      throw new HttpBodyInvalidUtf8Error("Morrow local owner request body is not valid UTF-8.");
+    }
+  }
+  signal.throwIfAborted();
+  try {
+    decoder.decode();
+  } catch {
+    throw new HttpBodyInvalidUtf8Error("Morrow local owner request body is not valid UTF-8.");
+  }
+  return Buffer.concat(chunks, bytes);
+}
+
+function rejectOversizedRequest(request: IncomingMessage, response: ServerResponse): void {
+  request.pause();
+  if (response.destroyed || response.writableEnded) {
+    request.destroy();
+    return;
+  }
+  response.setHeader("connection", "close");
+  response.once("finish", () => request.socket.destroySoon());
+  sendProblem(response, 413, "local_owner_message_too_large");
 }
 
 function exactMaintenanceRequest(value: unknown): MaintenanceRequest | null {
@@ -337,27 +445,59 @@ function exactPid(value: unknown): number | null {
   return Number.isSafeInteger(value) && Number(value) > 0 && Number(value) <= 2_147_483_647 ? Number(value) : null;
 }
 
+type ModernRequestId = string | number;
+
+function modernRequestId(message: JSONRPCMessage): ModernRequestId | null {
+  if (!("method" in message) || !("id" in message)) return null;
+  return typeof message.id === "string" || typeof message.id === "number" ? message.id : null;
+}
+
+function cancelledModernRequestId(message: JSONRPCMessage): ModernRequestId | null {
+  if (!("method" in message) || message.method !== "notifications/cancelled"
+    || !message.params || typeof message.params !== "object") return null;
+  const requestId = (message.params as { requestId?: unknown }).requestId;
+  return typeof requestId === "string" || typeof requestId === "number" ? requestId : null;
+}
+
+function modernMessageProtocol(message: JSONRPCMessage): string | null {
+  if (!("method" in message) || !message.params || typeof message.params !== "object") return null;
+  const metadata = (message.params as { _meta?: unknown })._meta;
+  if (!metadata || typeof metadata !== "object") return null;
+  const version = (metadata as Record<string, unknown>)["io.modelcontextprotocol/protocolVersion"];
+  return typeof version === "string" ? version : null;
+}
+
+function modernRequestKey(id: ModernRequestId): string {
+  return `${typeof id}:${String(id)}`;
+}
+
 async function readMaintenanceRequest(request: IncomingMessage): Promise<MaintenanceRequest | null> {
   const chunks: Buffer[] = [];
   let bytes = 0;
   for await (const part of request) {
     const chunk = Buffer.isBuffer(part) ? part : Buffer.from(part);
     bytes += chunk.byteLength;
-    if (bytes > 8_192) return null;
+    if (bytes > 8_192) {
+      request.pause();
+      return null;
+    }
     chunks.push(chunk);
   }
-  try { return exactMaintenanceRequest(JSON.parse(Buffer.concat(chunks).toString("utf8"))); } catch { return null; }
+  try {
+    const text = new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks));
+    return exactMaintenanceRequest(JSON.parse(text));
+  } catch {
+    return null;
+  }
 }
 
-function asWebRequest(request: IncomingMessage, port: number, signal: AbortSignal): Request {
+async function asWebRequest(request: IncomingMessage, port: number, signal: AbortSignal): Promise<Request> {
   const method = request.method || "GET";
-  const body = method === "GET" || method === "HEAD"
-    ? undefined
-    : Readable.toWeb(request) as unknown as ReadableStream<Uint8Array>;
+  const body = await readBoundedHttpBody(request, signal);
   return new Request(`http://${LOOPBACK_HOST}:${port}${request.url || "/"}`, {
     method,
     headers: requestHeaders(request),
-    ...(body ? { body, duplex: "half" } : {}),
+    ...(body ? { body: body as unknown as BodyInit, duplex: "half" } : {}),
     signal,
   });
 }
@@ -380,36 +520,39 @@ function terminalWorkAbsent(runtime: MorrowRuntime): boolean {
   return !runtime.hasActiveWork();
 }
 
-async function closeHttpServer(server: Server): Promise<void> {
-  await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
-}
-
 async function runDedicatedStdio(config: GatewayConfig): Promise<void> {
   const workspace = currentWorkspaceAdmission();
-  const lease = RuntimeStateLease.acquire(config.operationJournal.path);
+  let lease: RuntimeStateLease | null = null;
   let runtime: MorrowRuntime | null = null;
   let serverHandle: StdioServerHandle | null = null;
-  let closing = false;
-  const close = async (): Promise<void> => {
-    if (closing) return;
-    closing = true;
-    try {
-      if (serverHandle) await serverHandle.close();
-      if (runtime) await runtime.close();
-    } finally {
-      lease.release();
-    }
+  let closePromise: Promise<void> | null = null;
+  const close = (): Promise<void> => {
+    closePromise ??= (async () => {
+      try {
+        if (serverHandle) await serverHandle.close();
+        if (runtime) await runtime.close();
+      } finally {
+        lease?.release();
+      }
+    })();
+    return closePromise;
   };
+  lease = RuntimeStateLease.acquire(config.operationJournal.path, {
+    onOwnershipLost: (error) => {
+      console.error(`[morrow] runtime state lease lost: ${error.message}`);
+      return close().finally(() => process.exit(1));
+    },
+  });
   process.once("SIGINT", () => void close().finally(() => process.exit(0)));
   process.once("SIGTERM", () => void close().finally(() => process.exit(0)));
-  process.once("exit", () => lease.release());
+  process.once("exit", () => lease?.release());
   process.stdin.once("end", () => void close());
   try {
-    runtime = await MorrowRuntime.connect(config);
-    hardenMorrowStateFiles(config.operationJournal.path);
+    runtime = await MorrowRuntime.connect(config, { statePath: lease.statePath });
+    hardenMorrowStateFiles(lease.statePath);
     console.error(
       `[morrow] connected ${runtime.gateway.catalog.tools.length} upstream tools; `
-      + `catalog=${runtime.gateway.catalog.digest}; state=${config.operationJournal.path}; lease=active`,
+      + `catalog=${runtime.gateway.catalog.digest}; state=${lease.statePath}; lease=active`,
     );
     serverHandle = serveStdio(() => createFullMorrowServer(runtime!, {
       workspaceRoot: workspace.root,
@@ -425,16 +568,26 @@ async function runDedicatedStdio(config: GatewayConfig): Promise<void> {
 }
 
 export async function runLocalOwner(config: GatewayConfig): Promise<void> {
-  const journalPath = durableJournalPath(config);
-  if (!journalPath) throw new Error("Morrow local owner requires a durable operation journal path.");
+  const requestedJournalPath = durableJournalPath(config);
+  if (!requestedJournalPath) throw new Error("Morrow local owner requires a durable operation journal path.");
+  let leaseLossHandler: (error: Error) => void | Promise<void> = (error) => {
+    console.error(`[morrow] runtime state lease lost before owner startup: ${error.message}`);
+    process.exit(1);
+  };
+  const lease = RuntimeStateLease.acquire(requestedJournalPath, {
+    onOwnershipLost: (error) => leaseLossHandler(error),
+  });
+  const journalPath = lease.statePath;
   if (localOwnerMaintenanceMarkerPresent(journalPath)) {
+    lease.release();
     throw new Error("Morrow local owner is held for authenticated desktop maintenance.");
   }
   const configDigest = ownerConfigDigest(config);
-  const lease = RuntimeStateLease.acquire(journalPath);
   const nonce = randomUUID();
   let runtime: MorrowRuntime | null = null;
   let httpServer: Server | null = null;
+  let httpLifecycle: BoundedHttpServerLifecycle | null = null;
+  let modernHandler: McpHttpHandler | null = null;
   let descriptor: OwnerDescriptor | null = null;
   let closing = false;
   let activeMcpRequests = 0;
@@ -443,6 +596,21 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
   let sessionReapTimer: NodeJS.Timeout | null = null;
   let startupGraceDeadline = 0;
   const sessions = new Map<string, Session>();
+  const modernProxies = new Map<number, ProxyPresence>();
+
+  const clientPresences = (): readonly ClientPresence[] => [
+    ...sessions.values(),
+    ...modernProxies.values(),
+  ];
+
+  const removeModernProxy = (presence: ProxyPresence): void => {
+    if (modernProxies.get(presence.proxyPid) !== presence) return;
+    modernProxies.delete(presence.proxyPid);
+    presence.privateChatContinuations.clear();
+    presence.requestStateKey.fill(0);
+  };
+
+  const hasClientPresence = (): boolean => sessions.size !== 0 || modernProxies.size !== 0;
 
   const clearIdle = (): void => {
     if (idleTimer) clearTimeout(idleTimer);
@@ -465,25 +633,32 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     clearIdle();
     clearSessionReap();
     try {
-      if (httpServer) await closeHttpServer(httpServer);
+      const httpClosing = httpLifecycle?.close();
+      if (modernHandler) await modernHandler.close();
+      if (httpClosing) await httpClosing;
       await Promise.all([...sessions.values()].map((session) => closeSession(session).catch(() => undefined)));
       sessions.clear();
+      for (const presence of [...modernProxies.values()]) removeModernProxy(presence);
       if (runtime) await runtime.close();
     } finally {
       if (descriptor) removeOwnerDescriptor(journalPath, descriptor.nonce);
       lease.release();
     }
   };
+  leaseLossHandler = (error) => {
+    console.error(`[morrow] runtime state lease lost: ${error.message}`);
+    return close().finally(() => process.exit(1));
+  };
 
   const scheduleIdle = (): void => {
-    if (closing || sessions.size !== 0 || activeMcpRequests !== 0 || !runtime || maintenanceState !== "open") return;
+    if (closing || hasClientPresence() || activeMcpRequests !== 0 || !runtime || maintenanceState !== "open") return;
     if (idleTimer) return;
     const delay = startupGraceDeadline > Date.now()
       ? startupGraceDeadline - Date.now()
       : terminalWorkAbsent(runtime) ? OWNER_IDLE_MS : OWNER_PENDING_IDLE_CHECK_MS;
     idleTimer = setTimeout(() => {
       idleTimer = null;
-      if (sessions.size !== 0 || activeMcpRequests !== 0 || !runtime || maintenanceState !== "open") return;
+      if (hasClientPresence() || activeMcpRequests !== 0 || !runtime || maintenanceState !== "open") return;
       if (startupGraceDeadline > Date.now() || !terminalWorkAbsent(runtime)) {
         scheduleIdle();
         return;
@@ -494,12 +669,17 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
   };
 
   const scheduleSessionReap = (): void => {
-    if (closing || sessions.size === 0 || sessionReapTimer) return;
+    if (closing || !hasClientPresence() || sessionReapTimer) return;
     sessionReapTimer = setTimeout(() => {
       sessionReapTimer = null;
-      const dead = [...sessions.values()].filter((session) => !processAlive(session.proxyPid));
+      const dead = [...sessions.values()].filter((session) => requestPathProcessMatches(session.proxyPid, session.observedAt) === false);
       for (const session of dead) removeSession(session);
-      if (sessions.size === 0) scheduleIdle();
+      for (const presence of [...modernProxies.values()]) {
+        if (requestPathProcessMatches(presence.proxyPid, presence.observedAt) === false) {
+          removeModernProxy(presence);
+        }
+      }
+      if (!hasClientPresence()) scheduleIdle();
       else scheduleSessionReap();
     }, OWNER_SESSION_REAP_MS);
     sessionReapTimer.unref();
@@ -508,9 +688,30 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
   const removeSession = (session: Session): void => {
     if (session.id) sessions.delete(session.id);
     void session.server.close().catch(() => undefined);
-    if (sessions.size === 0) clearSessionReap();
+    if (!hasClientPresence()) clearSessionReap();
     else scheduleSessionReap();
     scheduleIdle();
+  };
+
+  const recordModernProxy = (proxyPid: number, workspace: WorkspaceAdmission): ProxyPresence | null => {
+    const existing = modernProxies.get(proxyPid);
+    if (existing) {
+      const sameProcess = requestPathProcessMatches(existing.proxyPid, existing.observedAt);
+      if (sameProcess !== false) return existing.workspace.encoded === workspace.encoded ? existing : null;
+      removeModernProxy(existing);
+    }
+    const presence: ProxyPresence = {
+      proxyPid,
+      observedAt: new Date().toISOString(),
+      workspace,
+      requestStateKey: randomBytes(32),
+      privateChatContinuations: new PrivateChatContinuationLedger(),
+    };
+    modernProxies.set(proxyPid, presence);
+    startupGraceDeadline = 0;
+    clearIdle();
+    scheduleSessionReap();
+    return presence;
   };
 
   const createSession = async (proxyPid: number, workspace: WorkspaceAdmission): Promise<Session> => {
@@ -536,7 +737,7 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     // process that connected, the project it was admitted for, and the name the
     // assistant reports at initialize.
     const server = createFullMorrowServer(runtime, { workspaceRoot: workspace.root, proxyPid });
-    session = { id: null, proxyPid, workspace, server, transport };
+    session = { id: null, proxyPid, observedAt: new Date().toISOString(), workspace, server, transport };
     await server.connect(transport);
     return session;
   };
@@ -567,12 +768,14 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     response: ServerResponse,
     proxyPid: number,
     workspace: WorkspaceAdmission,
+    signal: AbortSignal,
   ): Promise<void> => {
     if (request.method !== "POST" || !requestLengthIsAllowed(request)) {
       sendProblem(response, 405, "local_owner_maintenance_method_required");
       return;
     }
     const input = await readMaintenanceRequest(request);
+    signal.throwIfAborted();
     if (!input || input.holderPid !== proxyPid || !processAlive(input.holderPid)) {
       maintenanceError(response, "local_owner_maintenance_request_invalid");
       return;
@@ -581,13 +784,18 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
       maintenanceError(response, "local_owner_maintenance_owner_changed");
       return;
     }
-    if (input.action === "recover") {
-      const marker = readLocalOwnerMaintenanceLease(journalPath);
-      for (const session of [...sessions.values()]) {
-        if (!processAlive(session.proxyPid)) removeSession(session);
-      }
-      if (maintenanceState !== "held" || !marker || !input.leaseId || !input.leaseToken
-        || activeMcpRequests !== 0 || sessions.size !== 0 || !runtime.maintenanceQuiescent()) {
+      if (input.action === "recover") {
+        const marker = readLocalOwnerMaintenanceLease(journalPath);
+        for (const session of [...sessions.values()]) {
+          if (requestPathProcessMatches(session.proxyPid, session.observedAt) === false) removeSession(session);
+        }
+        for (const presence of [...modernProxies.values()]) {
+          if (requestPathProcessMatches(presence.proxyPid, presence.observedAt) === false) {
+            removeModernProxy(presence);
+          }
+        }
+        if (maintenanceState !== "held" || !marker || !input.leaseId || !input.leaseToken
+          || activeMcpRequests !== 0 || hasClientPresence() || !runtime.maintenanceQuiescent()) {
         maintenanceError(response, "local_owner_maintenance_work_active");
         return;
       }
@@ -648,10 +856,20 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
       }
       maintenanceState = "acquiring";
       runtime.approval.setMaintenanceAdmission(false);
-      const monitorSessions = [...sessions.values()];
+      for (const session of [...sessions.values()]) {
+        if (requestPathProcessMatches(session.proxyPid, session.observedAt) === false) removeSession(session);
+      }
+      for (const presence of [...modernProxies.values()]) {
+        if (requestPathProcessMatches(presence.proxyPid, presence.observedAt) === false) {
+          removeModernProxy(presence);
+        }
+      }
+      const monitorSessions = clientPresences();
       const monitorOnly = monitorSessions.every((session) => session.proxyPid === monitorProxyPid);
       const monitorPresent = monitorSessions.some((session) => session.proxyPid === monitorProxyPid);
-      const monitorAlive = processAlive(monitorProxyPid);
+      const monitorAlive = monitorSessions
+        .filter((session) => session.proxyPid === monitorProxyPid)
+        .every((session) => requestPathProcessMatches(session.proxyPid, session.observedAt) === true);
       if (activeMcpRequests !== 0 || !monitorPresent || !monitorOnly || !monitorAlive || !runtime.maintenanceQuiescent()) {
         reopenAfterFailedMaintenance();
         maintenanceError(response, "local_owner_maintenance_work_active");
@@ -707,22 +925,21 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     response.end(JSON.stringify({ schema: "morrow.local-owner-maintenance.v1", status: "closing", leaseId: input.leaseId }));
   };
 
-  const handleHttp = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+  const handleHttp = async (request: IncomingMessage, response: ServerResponse, signal: AbortSignal): Promise<void> => {
     clearIdle();
-    const abort = new AbortController();
-    const abortRequest = () => abort.abort();
-    request.once("aborted", abortRequest);
-    response.once("close", () => {
-      if (!response.writableEnded) abort.abort();
-    });
     let resolveDisconnect: (() => void) | null = null;
     const disconnected = new Promise<void>((resolveDisconnectPromise) => {
       resolveDisconnect = resolveDisconnectPromise;
     });
     const abortDisconnect = () => resolveDisconnect?.();
-    if (abort.signal.aborted) abortDisconnect();
-    else abort.signal.addEventListener("abort", abortDisconnect, { once: true });
+    if (signal.aborted) abortDisconnect();
+    else signal.addEventListener("abort", abortDisconnect, { once: true });
     let countedMcpRequest = false;
+    const finishMcpRequest = (): void => {
+      if (!countedMcpRequest) return;
+      countedMcpRequest = false;
+      activeMcpRequests -= 1;
+    };
     try {
       const proxyPid = proxyProcessId(request.headers[PROXY_PID_HEADER]);
       if (
@@ -742,7 +959,7 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
       }
       const url = new URL(request.url || "/", `http://${LOOPBACK_HOST}:${descriptor?.port || 0}`);
       if (url.pathname === LOCAL_OWNER_MAINTENANCE_PATH && !url.search) {
-        await handleMaintenance(request, response, proxyPid, workspace);
+        await handleMaintenance(request, response, proxyPid, workspace, signal);
         return;
       }
       if (url.pathname !== OWNER_PATH || url.search || !["POST", "DELETE", "GET"].includes(request.method || "")) {
@@ -750,7 +967,7 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
         return;
       }
       if (!requestLengthIsAllowed(request)) {
-        sendProblem(response, 413, "local_owner_message_too_large");
+        rejectOversizedRequest(request, response);
         return;
       }
       if (request.method === "GET") {
@@ -758,11 +975,6 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
         response.end();
         return;
       }
-      const sessionId = typeof request.headers["mcp-session-id"] === "string"
-        ? request.headers["mcp-session-id"]
-        : "";
-      let session: Session | undefined;
-      let created = false;
       if (request.method === "POST") {
         if (maintenanceState !== "open") {
           maintenanceError(response, "local_owner_maintenance_held");
@@ -771,6 +983,25 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
         activeMcpRequests += 1;
         countedMcpRequest = true;
       }
+      const webRequest = await asWebRequest(request, descriptor!.port, signal);
+      if (modernHandler && !await isLegacyRequest(webRequest)) {
+        if (!recordModernProxy(proxyPid, workspace)) {
+          sendProblem(response, 403, "local_owner_session_workspace_required");
+          return;
+        }
+        const webResponse = await Promise.race<Response | null>([
+          modernHandler.fetch(webRequest),
+          disconnected.then(() => null),
+        ]);
+        finishMcpRequest();
+        if (webResponse) await sendWebResponse(webResponse, response);
+        return;
+      }
+      const sessionId = typeof request.headers["mcp-session-id"] === "string"
+        ? request.headers["mcp-session-id"]
+        : "";
+      let session: Session | undefined;
+      let created = false;
       if (sessionId) {
         session = sessions.get(sessionId);
         if (!session) {
@@ -793,18 +1024,31 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
         return;
       }
       const webResponse = await Promise.race<Response | null>([
-        session.transport.handleRequest(asWebRequest(request, descriptor!.port, abort.signal)),
+        session.transport.handleRequest(webRequest),
         disconnected.then(() => null),
       ]);
+      if (webResponse && session.server.server.getNegotiatedProtocolVersion() === MODERN_PROTOCOL_VERSION
+        && !recordModernProxy(proxyPid, workspace)) {
+        sendProblem(response, 403, "local_owner_session_workspace_required");
+        return;
+      }
+      finishMcpRequest();
       if (webResponse) await sendWebResponse(webResponse, response);
       if (created && !session.id) await closeSession(session);
     } catch (error) {
+      if (error instanceof HttpBodyTooLargeError) {
+        rejectOversizedRequest(request, response);
+        return;
+      }
+      if (error instanceof HttpBodyInvalidUtf8Error) {
+        sendProblem(response, 400, "local_owner_message_invalid_utf8");
+        return;
+      }
       if (!response.writableEnded) sendProblem(response, 500, "local_owner_request_failed");
-      console.error(`[morrow] local owner request failed: ${error instanceof Error ? error.message : String(error)}`);
+      if (!signal.aborted) console.error(`[morrow] local owner request failed: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
-      request.off("aborted", abortRequest);
-      abort.signal.removeEventListener("abort", abortDisconnect);
-      if (countedMcpRequest) activeMcpRequests -= 1;
+      signal.removeEventListener("abort", abortDisconnect);
+      finishMcpRequest();
       scheduleIdle();
     }
   };
@@ -819,7 +1063,34 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
   try {
     runtime = await MorrowRuntime.connect(config, { statePath: journalPath });
     hardenMorrowStateFiles(journalPath);
-    httpServer = createServer((request, response) => void handleHttp(request, response));
+    modernHandler = createMcpHandler((context) => {
+      if (!runtime || !context.requestInfo) throw new Error("Morrow local owner modern request context is unavailable.");
+      const proxyPid = proxyProcessId(context.requestInfo.headers.get(PROXY_PID_HEADER) || undefined);
+      const workspace = admittedWorkspaceFromEncoded(context.requestInfo.headers.get(PROXY_WORKSPACE_HEADER));
+      if (proxyPid === null || !workspace) throw new Error("Morrow local owner modern request identity is invalid.");
+      const presence = modernProxies.get(proxyPid);
+      if (!presence || presence.workspace.encoded !== workspace.encoded) {
+        throw new Error("Morrow local owner modern request presence is unavailable.");
+      }
+      return createFullMorrowServer(runtime, {
+        workspaceRoot: workspace.root,
+        proxyPid,
+        requestStateKey: presence.requestStateKey,
+        privateChatContinuations: presence.privateChatContinuations,
+      });
+    }, {
+      legacy: "reject",
+      onerror: (error) => console.error(`[morrow] local owner modern protocol error: ${error.message}`),
+    });
+    httpServer = createServer((request, response) => {
+      const accepted = httpLifecycle?.accept(request, response);
+      if (!accepted) {
+        sendProblem(response, 503, "local_owner_closing");
+        return;
+      }
+      void handleHttp(request, response, accepted.signal).finally(accepted.release);
+    });
+    httpLifecycle = new BoundedHttpServerLifecycle(httpServer);
     await new Promise<void>((resolveListen, rejectListen) => {
       httpServer!.once("error", rejectListen);
       httpServer!.listen(0, LOOPBACK_HOST, () => {
@@ -862,7 +1133,10 @@ async function waitForOwner(journalPath: string, configDigest: string): Promise<
   const deadline = Date.now() + OWNER_START_TIMEOUT_MS;
   for (;;) {
     const descriptor = readOwnerDescriptor(journalPath);
-    if (descriptor && processAlive(descriptor.pid)) {
+    const descriptorLifetime = descriptor
+      ? processMatchesRecordedLifetime(descriptor.pid, descriptor.startedAt)
+      : false;
+    if (descriptor && descriptorLifetime === true) {
       if (descriptor.configDigest !== configDigest) {
         throw new Error(
           "Morrow local owner configuration does not match this client. "
@@ -871,7 +1145,7 @@ async function waitForOwner(journalPath: string, configDigest: string): Promise<
       }
       return descriptor;
     }
-    if (descriptor && !processAlive(descriptor.pid)) removeOwnerDescriptor(journalPath, descriptor.nonce);
+    if (descriptor && descriptorLifetime === false) removeOwnerDescriptor(journalPath, descriptor.nonce);
     if (!launched) {
       const stderr = testOwnerStderrDescriptor();
       let child;
@@ -912,11 +1186,12 @@ async function closeProxy(
 }
 
 export async function runLocalOwnerProxy(config: GatewayConfig): Promise<void> {
-  const journalPath = durableJournalPath(config);
-  if (!journalPath) {
+  const requestedJournalPath = durableJournalPath(config);
+  if (!requestedJournalPath) {
     await runDedicatedStdio(config);
     return;
   }
+  const journalPath = canonicalLocalOwnerJournalPath(requestedJournalPath);
   const workspace = currentWorkspaceAdmission();
   const descriptor = await waitForOwner(journalPath, ownerConfigDigest(config));
   const http = new StreamableHTTPClientTransport(ownerUrl(descriptor), {
@@ -938,24 +1213,105 @@ export async function runLocalOwnerProxy(config: GatewayConfig): Promise<void> {
   const state = { closed: false };
   let initialization: Promise<void> | null = null;
   let initialized = false;
-  const close = async (): Promise<void> => closeProxy(stdio, http, state);
+  let initializationId: string | number | null = null;
+  let modernProtocol = false;
+  const activeModernRequests = new Map<string, AbortController>();
+  const settleModernRequest = (id: ModernRequestId, controller?: AbortController): void => {
+    const key = modernRequestKey(id);
+    if (controller && activeModernRequests.get(key) !== controller) return;
+    activeModernRequests.delete(key);
+  };
+  const close = async (): Promise<void> => {
+    for (const controller of activeModernRequests.values()) {
+      controller.abort(new Error("Morrow local owner proxy closed."));
+    }
+    activeModernRequests.clear();
+    await closeProxy(stdio, http, state);
+  };
   const fail = (error: unknown): void => {
     if (state.closed) return;
     const detail = error instanceof Error ? error.message : String(error);
     console.error(`[morrow] local owner connection failed: ${detail}`);
-    void close();
+    void close().finally(() => process.exit(1));
   };
 
   http.onmessage = (message: JSONRPCMessage) => {
+    if ("id" in message && ("result" in message || "error" in message)
+      && (typeof message.id === "string" || typeof message.id === "number")) {
+      settleModernRequest(message.id);
+    }
+    if (
+      initializationId !== null
+      && "id" in message
+      && message.id === initializationId
+      && "result" in message
+      && message.result
+      && typeof message.result === "object"
+      && typeof (message.result as { protocolVersion?: unknown }).protocolVersion === "string"
+    ) {
+      http.setProtocolVersion((message.result as { protocolVersion: string }).protocolVersion);
+    }
     void stdio.send(message).catch(fail);
   };
   http.onerror = fail;
   stdio.onerror = (error) => console.error(`[morrow] protocol error ${error.message}`);
   stdio.onmessage = (message: JSONRPCMessage) => {
     const send = async (): Promise<void> => {
-      if (!state.closed) await http.send(message);
+      if (state.closed) return;
+      const envelopeVersion = modernMessageProtocol(message);
+      if (envelopeVersion === MODERN_PROTOCOL_VERSION) {
+        modernProtocol = true;
+        http.setProtocolVersion(envelopeVersion);
+      }
+      const cancelledId = modernProtocol ? cancelledModernRequestId(message) : null;
+      if (cancelledId !== null) {
+        const key = modernRequestKey(cancelledId);
+        const controller = activeModernRequests.get(key);
+        if (controller) {
+          activeModernRequests.delete(key);
+          controller.abort(new Error("The MCP client cancelled this request."));
+          return;
+        }
+      }
+      const requestId = modernProtocol ? modernRequestId(message) : null;
+      if (requestId === null) {
+        await http.send(message);
+        return;
+      }
+      const key = modernRequestKey(requestId);
+      if (activeModernRequests.has(key) || activeModernRequests.size >= MAX_ACTIVE_MODERN_PROXY_REQUESTS) {
+        await stdio.send({
+          jsonrpc: "2.0",
+          id: requestId,
+          error: { code: -32600, message: "Morrow refused an invalid or excessive concurrent request." },
+        });
+        return;
+      }
+      const controller = new AbortController();
+      activeModernRequests.set(key, controller);
+      try {
+        await http.send(message, {
+          requestSignal: controller.signal,
+          onRequestStreamEnd: () => settleModernRequest(requestId, controller),
+        });
+      } catch (error) {
+        settleModernRequest(requestId, controller);
+        if (!controller.signal.aborted) throw error;
+      }
     };
     if (!initialized && !initialization && "method" in message && message.method === "initialize") {
+      const protocolVersion = message.params
+        && typeof message.params === "object"
+        && typeof (message.params as { protocolVersion?: unknown }).protocolVersion === "string"
+        ? (message.params as { protocolVersion: string }).protocolVersion
+        : null;
+      if (protocolVersion) {
+        modernProtocol = protocolVersion === MODERN_PROTOCOL_VERSION;
+        http.setProtocolVersion(protocolVersion);
+      }
+      initializationId = "id" in message && (typeof message.id === "string" || typeof message.id === "number")
+        ? message.id
+        : null;
       initialization = send().then(() => {
         initialized = true;
       });

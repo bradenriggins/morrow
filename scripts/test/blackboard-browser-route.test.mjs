@@ -38,7 +38,7 @@ globalThis.fetch = async (input) => {
   const name = url.startsWith(CATALOG_PREFIX) ? url.slice(CATALOG_PREFIX.length) : null;
   if (!name || !name.startsWith("generated/")) throw new Error(`no request to ${url} is expected here`);
   const body = readFileSync(new URL(`connector/extension/${name}`, root), "utf8");
-  return { ok: true, text: async () => body, json: async () => JSON.parse(body) };
+  return new Response(body, { headers: { "content-type": "application/json" } });
 };
 
 class RecordedSocket {

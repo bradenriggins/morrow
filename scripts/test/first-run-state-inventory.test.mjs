@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import { installerState } from "../../installer/shared/contract.cjs";
+import { renderedOnLine } from "./lib/rendered-source-line.mjs";
 import { actionView, progress, setupUnavailableView } from "../../installer/shared/setup-view.mjs";
 import { setupGuideState } from "../../connector/extension/onboarding/onboarding-state.js";
 import { courseValue, detailText, primaryLabel, statusValue } from "../../connector/extension/popup/popup-view.js";
@@ -172,6 +173,7 @@ const POPUP_STATES = new Map([
   ["connecting", { status: { ...connection, paired: true, connecting: true } }],
   ["paired-not-connected", { status: { ...connection, paired: true } }],
   ["runtime-mismatch", { status: { ...connection, paired: true, connected: true, runtimeHealthy: false } }],
+  ["authentication-failed", { status: { ...connection, ...healthyPopup, authenticationFailed: true } }],
   ["connected-no-site", { status: { ...connection, ...healthyPopup } }],
   ["detected-platform", { status: { ...connection, ...healthyPopup }, detectedProvider: "moodle", sourceNeedle: "Morrow Bridge detected" }],
   ["site-ready-no-course", { status: { ...connection, ...healthyPopup, siteAnchors: [anchor()] } }],
@@ -289,15 +291,39 @@ test("every control name in the inventory is on the line cited beside it", () =>
   const wrong = [];
   for (const [, name, , sources] of rows) {
     for (const [, path, line] of sources.matchAll(CITATION)) {
+      const html = path.endsWith(".html");
       const text = lines(path);
-      if (text[Number(line) - 1]?.includes(name)) continue;
-      const found = text.findIndex((value) => value.includes(name)) + 1;
+      if (renderedOnLine(text[Number(line) - 1], name, { html })) continue;
+      const found = text.findIndex((value) => renderedOnLine(value, name, { html })) + 1;
       wrong.push(found
-        ? `"${name}" is at ${path}:${found}, not ${path}:${line}`
-        : `"${name}" is not in ${path}; the control was renamed or removed`);
+        ? `"${name}" is rendered at ${path}:${found}, not ${path}:${line}`
+        : `"${name}" is rendered nowhere in ${path}; the control was renamed or removed`);
     }
   }
   assert.deepEqual(wrong, [], `${INVENTORY} names a control at a line that does not carry it`);
+});
+
+test("a citation that only matches an identifier, a longer word, or a comment fails the control check", () => {
+  // Each pair is a line that carried a substring match before this guard, and the line that renders the control.
+  const wrong = [
+    ["Assistant", "    || assistants.find((assistant) => assistant?.id === current?.selectedAssistantId)"],
+    ["Course", "function verifiedCourse(current) {"],
+    ["Cancel", '    cancelled: "Cancelled", failed: "Did not finish",'],
+    ["Remove", "// site, the account, and the name Morrow saved it under. Remove is offered here"],
+    ["Remove", "const remove = () => Remove;"],
+  ];
+  for (const [name, line] of wrong) assert.equal(renderedOnLine(line, name), false, `${JSON.stringify(line)} must not carry ${name}`);
+  const rendered = [
+    ["Assistant", '    { label: "Assistant", detail: repairRequired ? "Waiting for repair" : "Choose an installed assistant" },'],
+    ["Cancel", '<button class="cancel" type="submit">Cancel</button></form>'],
+    ["Remove", '      <button class="secondary-button" type="button">${connected ? "Remove" : "Allow Morrow"}</button>'],
+    ["Remove connection", '      <button class="secondary-button" type="button">Remove connection</button>'],
+    ["Where to get help", "  return { title: `Where to get help`, body };"],
+  ];
+  for (const [name, line] of rendered) assert.equal(renderedOnLine(line, name), true, `${JSON.stringify(line)} renders ${name}`);
+  assert.equal(renderedOnLine('<h1 id="setup-title">Set up Morrow on this computer</h1>', "Set up Morrow on this computer", { html: true }), true);
+  assert.equal(renderedOnLine('<button aria-label="Remove connection">Remove</button>', "Remove connection", { html: true }), true);
+  assert.equal(renderedOnLine('<button data-action="remove-connection">Forget</button>', "Remove connection", { html: true }), false);
 });
 
 test("every file and line the inventory cites exists", () => {

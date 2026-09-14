@@ -101,11 +101,18 @@ function nativeAjaxResponse(data, extra = {}) {
 }
 
 function nativePageResponse(url, html, status = 200) {
+  const bytes = new TextEncoder().encode(html);
   return {
     ok: status >= 200 && status < 300,
     status,
     url,
-    text: async () => html,
+    headers: new Headers(),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
   };
 }
 

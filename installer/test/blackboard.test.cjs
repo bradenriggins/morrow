@@ -5,7 +5,7 @@ const fsSync = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, deriveBlackboardSourceBindingId, readBlackboardHealth, removeBlackboardTenant, selectBlackboardCourses } = require("../shared/blackboard.cjs");
+const { blackboardPaths, blackboardTenantIdFromBaseUrl, configureBlackboard, deriveBlackboardSourceBindingId, readBlackboardHealth, removeBlackboardData, removeBlackboardTenant, selectBlackboardCourses } = require("../shared/blackboard.cjs");
 
 const TENANT = "learn-example-edu";
 // The binding packages/blackboard-learn-api/src/binding.ts derives for this
@@ -123,10 +123,72 @@ test("a credential-write failure leaves the existing configuration unchanged", a
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
+test("fresh verified setup repairs a stored route whose prior secret is absent", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
+  try {
+    const configured = await setup(root, { secret: "old-credential" });
+    const paths = blackboardPaths(root, TENANT);
+    await fs.rm(paths.credential);
+    assert.deepEqual(
+      await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }),
+      { ...configured, status: "credential_missing" },
+    );
+
+    const repaired = await setup(root, { secret: "replacement-credential" });
+    const config = await storedConfig(root);
+    const credential = JSON.parse(await fs.readFile(paths.credential, "utf8"));
+    assert.equal(repaired.status, "api_configured_live_untested");
+    assert.equal(credential.applicationSecret, "replacement-credential");
+    assert.equal(credential.credentialRevision, config.tenants[0].credentialRevision);
+    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), repaired);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test("complete Blackboard data removal never deletes a secret while its route remains", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
+  try {
+    const before = await setup(root);
+    const paths = blackboardPaths(root, TENANT);
+    const refusedCalls = [];
+    const refused = await removeBlackboardData({
+      home: root,
+      removePath: async (target, options) => {
+        refusedCalls.push(target);
+        if (target === paths.config) throw new Error("configuration is busy");
+        await fs.rm(target, options);
+      }
+    });
+    assert.deepEqual(refusedCalls, [paths.config]);
+    assert.deepEqual(refused, { configuration: "present", credentials: "present" });
+    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), before);
+
+    const partialCalls = [];
+    const partial = await removeBlackboardData({
+      home: root,
+      removePath: async (target, options) => {
+        partialCalls.push(target);
+        if (target === paths.credentialDirectory) throw new Error("credentials are busy");
+        await fs.rm(target, options);
+      }
+    });
+    assert.deepEqual(partialCalls, [paths.config, paths.credentialDirectory]);
+    assert.deepEqual(partial, { configuration: "absent", credentials: "present" });
+    assert.equal(fsSync.existsSync(paths.config), false);
+    assert.equal(fsSync.existsSync(paths.credential), true);
+    assert.deepEqual(
+      await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }),
+      { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] },
+    );
+
+    assert.deepEqual(await removeBlackboardData({ home: root }), { configuration: "absent", credentials: "absent" });
+    assert.equal(fsSync.existsSync(paths.credentialDirectory), false);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
 test("a failed Windows ACL confirmation leaves an old route and new credential unusable", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
   try {
-    await setup(root, { secret: "old-credential" });
+    const configured = await setup(root, { secret: "old-credential" });
     let accepted = 0;
     await assert.rejects(() => setup(root, {
       secret: "new-credential",
@@ -134,7 +196,7 @@ test("a failed Windows ACL confirmation leaves an old route and new credential u
     }), /Blackboard credential access is not private/);
     assert.deepEqual(
       await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }),
-      { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] },
+      { ...configured, status: "credential_mismatched" },
     );
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
@@ -166,39 +228,38 @@ test("a linked credentials ancestor or DACL preparation failure writes no creden
 test("Blackboard health fails closed for insecure, linked, and Windows-refused routing files", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
   try {
-    await setup(root);
+    const configured = await setup(root);
     const paths = blackboardPaths(root, TENANT);
-    const absent = { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] };
+    const refused = { schema: "morrow.blackboard.health.v1", status: "private_access_refused", tenants: [] };
     if (process.platform !== "win32") {
       await fs.chmod(paths.config, 0o644);
-      assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), absent);
+      assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), refused);
       await fs.chmod(paths.config, 0o600);
     }
     await fs.chmod(paths.credentialDirectory, 0o700);
     const linked = `${paths.credential}.linked`;
     await fs.rename(paths.credential, linked);
     await fs.symlink(linked, paths.credential);
-    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), absent);
+    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), { ...configured, status: "private_access_refused" });
     await fs.unlink(paths.credential); await fs.rename(linked, paths.credential);
-    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: () => false }), absent);
+    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: () => false }), refused);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
 test("Blackboard health refuses oversized private routing files before parsing them", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
   try {
-    const absent = { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] };
-    await setup(root);
+    const configured = await setup(root);
     const paths = blackboardPaths(root, TENANT);
     await fs.writeFile(paths.config, " ".repeat(1024 * 1024 + 1), { mode: 0o600 });
-    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), absent);
+    assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), { schema: "morrow.blackboard.health.v1", status: "configuration_repair_required", tenants: [] });
     await fs.rm(root, { recursive: true, force: true });
     const nextRoot = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
     try {
-      await setup(nextRoot);
+      const nextConfigured = await setup(nextRoot);
       const nextPaths = blackboardPaths(nextRoot, TENANT);
       await fs.writeFile(nextPaths.credential, " ".repeat(16 * 1024 + 1), { mode: 0o600 });
-      assert.deepEqual(await readBlackboardHealth(nextRoot, { privateFileAccessAccepted: privateAccess }), absent);
+      assert.deepEqual(await readBlackboardHealth(nextRoot, { privateFileAccessAccepted: privateAccess }), { ...nextConfigured, status: "credential_mismatched" });
     } finally { await fs.rm(nextRoot, { recursive: true, force: true }); }
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
@@ -333,7 +394,7 @@ test("a course-selection write failure leaves the stored courses exactly as they
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 
-test("a saved course reports no connection when the secret its configuration names cannot be opened", async () => {
+test("a saved course reports its repair state when the secret its configuration names cannot be opened", async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
   try {
     await setup(root);
@@ -343,9 +404,40 @@ test("a saved course reports no connection when the secret its configuration nam
     // the app shows, not a connection inferred from that write.
     await fs.rm(blackboardPaths(root, TENANT).credential);
     const health = await selectCourses(root, [{ courseId: "_45_1" }]);
-    assert.deepEqual(health, { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] });
+    assert.equal(health.status, "credential_missing");
+    assert.equal(health.tenants[0].baseUrl, "https://learn.example.edu");
+    assert.deepEqual(health.tenants[0].courseBindings, [{ courseId: "_45_1", sourceBindingId: DERIVED_BINDING }]);
     assert.deepEqual(await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }), health);
     assert.deepEqual((await storedConfig(root)).tenants[0].courseBindings, [{ courseId: "_45_1", sourceBindingId: DERIVED_BINDING }]);
+  } finally { await fs.rm(root, { recursive: true, force: true }); }
+});
+
+test("Blackboard health reserves not configured for confirmed absence and classifies malformed saved data", async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-installer-blackboard-"));
+  try {
+    assert.deepEqual(
+      await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }),
+      { schema: "morrow.blackboard.health.v1", status: "not_configured", tenants: [] },
+    );
+    const configured = await setup(root);
+    const paths = blackboardPaths(root, TENANT);
+    await fs.writeFile(paths.config, "{bad json\n", { mode: 0o600 });
+    assert.deepEqual(
+      await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess }),
+      { schema: "morrow.blackboard.health.v1", status: "configuration_repair_required", tenants: [] },
+    );
+    // Restore a valid route, then damage only its bound credential.
+    await fs.rm(paths.config, { force: true });
+    await fs.rm(paths.credential, { force: true });
+    const restored = await setup(root);
+    await fs.writeFile(paths.credential, `${JSON.stringify({ schema: "morrow.blackboard-learn.credential.v1", credentialRevision: crypto.randomUUID(), applicationSecret: "different" })}\n`, { mode: 0o600 });
+    const mismatched = await readBlackboardHealth(root, { privateFileAccessAccepted: privateAccess });
+    assert.deepEqual(mismatched, { ...restored, status: "credential_mismatched" });
+    const serialized = JSON.stringify(mismatched);
+    for (const forbidden of ["application-key-for-example", "different", "credentialRef", "credentialRevision", paths.credential]) {
+      assert.equal(serialized.includes(forbidden), false, `${forbidden} entered repair state`);
+    }
+    assert.equal(configured.tenants[0].baseUrl, restored.tenants[0].baseUrl);
   } finally { await fs.rm(root, { recursive: true, force: true }); }
 });
 

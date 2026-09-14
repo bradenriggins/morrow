@@ -160,8 +160,8 @@ test("every repo-relative link in the claim documents resolves", () => {
 
 test("the course audit guidance names exactly the signals the audit returns", () => {
   const source = read(COURSE_AUDIT);
-  const declared = source.match(/const SOURCE_SIGNAL_NAMES = \[([\s\S]*?)\] as const;/);
-  assert.ok(declared, `${COURSE_AUDIT} must declare SOURCE_SIGNAL_NAMES; the claim gate reads it as the authority`);
+  const declared = source.match(/export const COURSE_AUDIT_SOURCE_SIGNAL_NAMES = \[([\s\S]*?)\] as const;/);
+  assert.ok(declared, `${COURSE_AUDIT} must export COURSE_AUDIT_SOURCE_SIGNAL_NAMES; the claim gate reads it as the authority`);
   const signals = [...declared[1].matchAll(/"([a-z0-9_]+)"/g)].map(([, name]) => name);
   assert.ok(signals.length > 0, `${COURSE_AUDIT} declares no source signals`);
 
@@ -177,7 +177,7 @@ test("the course audit guidance names exactly the signals the audit returns", ()
 
 test("no claim document widens what the course audit detects", () => {
   const source = read(COURSE_AUDIT);
-  const signals = [...source.match(/const SOURCE_SIGNAL_NAMES = \[([\s\S]*?)\] as const;/)[1].matchAll(/"([a-z0-9_]+)"/g)].map(([, name]) => name);
+  const signals = [...source.match(/export const COURSE_AUDIT_SOURCE_SIGNAL_NAMES = \[([\s\S]*?)\] as const;/)[1].matchAll(/"([a-z0-9_]+)"/g)].map(([, name]) => name);
   const signalSet = new Set(signals);
 
   const detection = /\b(detect|detects|detected|find|finds|report|reports|return|returns|list|lists|scan|scans|show|shows)\b/i;

@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
+import { launchManagedChromiumPersistentContext } from "../lib/playwright-managed-browser.mjs";
 import { canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
 import { CanvasConnectorRuntime } from "../../packages/canvas-connector-mcp/dist/runtime.js";
 import { LoopbackApprovalServer } from "../../packages/mcp-server/dist/approval-server.js";
@@ -133,6 +134,7 @@ function startCanvas(directory) {
   let pageWrites = 0;
   let pageRevision = 1;
   let principalId = "7";
+  const courseDiscoveryUrls = [];
   let heldPageWrites = 0;
   const pendingPageWrites = [];
   let externalFileDownloadUrl = "";
@@ -157,14 +159,17 @@ function startCanvas(directory) {
   // read back and resend. 302 sits in a question group and 303 is a question
   // type the repair does not support.
   let classicQuizQuestion = {
-    id: "301", quiz_id: "77", quiz_group_id: null, assessment_question_id: "9001", position: 1,
+    id: "301", quiz_id: "77", quiz_group_id: null, assessment_question_id: "9001", assessment_question_bank_id: null,
+    created_at: "2026-09-01T12:00:00Z", updated_at: "2026-09-02T12:00:00Z", regrade_option: null, position: 1,
     question_name: "Cell structure", question_type: "multiple_choice_question",
     question_text: '<p>Which part controls the cell?</p><img src="/courses/42/files/17">',
     points_possible: 2, correct_comments: "Correct.", incorrect_comments: "Review the diagram.", neutral_comments: "",
     correct_comments_html: "<p>Correct.</p>", incorrect_comments_html: "<p>Review the diagram.</p>", neutral_comments_html: "",
+    variables: null, formulas: null, answer_tolerance: null, formula_decimal_places: null,
+    matches: null, matching_answer_incorrect_matches: null,
     answers: [
-      { id: "6656", answer_text: '<p>Nucleus</p><img src="/courses/42/files/18">', answer_weight: 100, answer_comments: "Correct." },
-      { id: "6657", answer_text: "<p>Cell wall</p>", answer_weight: 0, answer_comments: "Review the diagram." },
+      { id: "6656", text: "Nucleus", html: '<p>Nucleus</p><img src="/courses/42/files/18">', weight: 100, comments: "Correct.", comments_html: "<p>Correct.</p>" },
+      { id: "6657", text: "Cell wall", html: "<p>Cell wall</p>", weight: 0, comments: "Review the diagram.", comments_html: "<p>Review the diagram.</p>" },
     ],
   };
   const groupedQuizQuestion = { ...structuredClone(classicQuizQuestion), id: "302", quiz_group_id: "5501" };
@@ -270,6 +275,15 @@ function startCanvas(directory) {
     if (url.pathname === "/api/v1/users/self/profile") return json(200, { id: principalId, name: "Synthetic Instructor" });
     if (url.pathname === "/api/v1/courses/42/folders/81" && request.method === "GET") return json(200, { id: "81" });
     if (url.pathname === "/api/v1/courses/43/folders/82" && request.method === "GET") return json(200, { id: "82" });
+    if (["/api/v1/folders/81/files", "/api/v1/folders/82/files"].includes(url.pathname) && request.method === "GET") {
+      if (!String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
+        return json(403, { error: "missing browser session" });
+      }
+      assert.equal(url.searchParams.get("search_term"), "reviewed-material.txt");
+      assert.equal(url.searchParams.get("per_page"), "100");
+      assert.deepEqual(url.searchParams.getAll("only[]"), ["names"]);
+      return json(200, []);
+    }
     if (["/api/v1/folders/81/files", "/api/v1/folders/82/files"].includes(url.pathname) && request.method === "POST") {
       if (!String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
         return json(403, { error: "missing browser session" });
@@ -582,12 +596,27 @@ function startCanvas(directory) {
       }
     }
     if (url.pathname === "/api/v1/courses") {
-      const page = Number(url.searchParams.get("page"));
+      courseDiscoveryUrls.push(url.href);
+      const numericPage = url.searchParams.get("page");
+      const bookmark = url.searchParams.get("bookmark");
+      const bookmarkMatch = /^course-page-([1-9][0-9]*)$/.exec(bookmark || "");
+      const page = numericPage === null ? Number(bookmarkMatch?.[1]) : Number(numericPage);
       assert.equal(Number.isSafeInteger(page) && page >= 1, true);
+      if (numericPage === null) {
+        assert.equal(url.searchParams.get("signature"), `synthetic-signature-${page}`);
+        assert.deepEqual([...url.searchParams.keys()], ["bookmark", "signature"]);
+      } else {
+        assert.equal(url.searchParams.get("enrollment_state"), "active");
+        assert.equal(url.searchParams.get("per_page"), "100");
+        assert.deepEqual([...url.searchParams.keys()], ["enrollment_state", "per_page", "page"]);
+      }
       const start = (page - 1) * 100;
       const nextPage = start + 100 < courses.length ? page + 1 : null;
+      const nextUrl = nextPage === 3
+        ? `https://${request.headers.host}/api/v1/courses?enrollment_state=active&per_page=100&page=3`
+        : `https://${request.headers.host}/api/v1/courses?bookmark=course-page-${nextPage}&signature=synthetic-signature-${nextPage}`;
       return json(200, courses.slice(start, start + 100), nextPage === null ? {} : {
-        Link: `<https://${request.headers.host}/api/v1/courses?enrollment_state=active&per_page=100&page=${nextPage}>; rel="next"`,
+        Link: `<${nextUrl}>; rel="next"`,
       });
     }
     const courseMatch = url.pathname.match(/^\/api\/v1\/courses\/([1-9][0-9]*)$/);
@@ -737,15 +766,21 @@ function startCanvas(directory) {
           const field = (name) => body.has(`question[${name}]`) ? body.get(`question[${name}]`) : "";
           const answers = [];
           for (let index = 0; body.has(`question[answers][${index}][id]`); index += 1) {
-            const answer = { id: body.get(`question[answers][${index}][id]`), answer_text: body.get(`question[answers][${index}][answer_text]`) ?? "", answer_weight: Number(body.get(`question[answers][${index}][answer_weight]`)) };
-            for (const name of ["answer_comments", "answer_html", "text_after_answers"]) {
-              if (body.has(`question[answers][${index}][${name}]`)) answer[name] = body.get(`question[answers][${index}][${name}]`);
-            }
+            const answer = {
+              id: body.get(`question[answers][${index}][id]`),
+              text: body.get(`question[answers][${index}][answer_text]`) ?? "",
+              weight: Number(body.get(`question[answers][${index}][answer_weight]`)),
+            };
+            if (body.has(`question[answers][${index}][answer_comments]`)) answer.comments = body.get(`question[answers][${index}][answer_comments]`);
+            if (body.has(`question[answers][${index}][answer_comment_html]`)) answer.comments_html = body.get(`question[answers][${index}][answer_comment_html]`);
+            if (body.has(`question[answers][${index}][answer_html]`)) answer.html = body.get(`question[answers][${index}][answer_html]`);
+            if (body.has(`question[answers][${index}][text_after_answers]`)) answer.text_after_answers = body.get(`question[answers][${index}][text_after_answers]`);
             answers.push(answer);
           }
           const comments = { correct: field("correct_comments"), incorrect: field("incorrect_comments"), neutral: field("neutral_comments") };
           classicQuizQuestion = {
-            id: "301", quiz_id: "77", quiz_group_id: null, assessment_question_id: "9001",
+            id: "301", quiz_id: "77", quiz_group_id: null, assessment_question_id: "9001", assessment_question_bank_id: null,
+            created_at: "2026-09-01T12:00:00Z", updated_at: new Date().toISOString(), regrade_option: null,
             position: Number(field("position")),
             question_name: field("question_name"),
             question_type: field("question_type"),
@@ -755,6 +790,8 @@ function startCanvas(directory) {
             correct_comments_html: comments.correct ? `<p>${comments.correct}</p>` : "",
             incorrect_comments_html: comments.incorrect ? `<p>${comments.incorrect}</p>` : "",
             neutral_comments_html: comments.neutral ? `<p>${comments.neutral}</p>` : "",
+            variables: null, formulas: null, answer_tolerance: null, formula_decimal_places: null,
+            matches: null, matching_answer_incorrect_matches: null,
             answers,
           };
           classicQuizQuestionWrites += 1;
@@ -879,6 +916,7 @@ function startCanvas(directory) {
     changeAssignment: () => { assignment.description += "<p>Another edit.</p>"; },
     changeDiscussion: () => { discussion.message += "<p>Another edit.</p>"; },
     setPrincipalId: (value) => { principalId = String(value); },
+    courseDiscoveryUrls: () => [...courseDiscoveryUrls],
     setExternalFileDownloadUrl: (value) => { externalFileDownloadUrl = String(value); },
     addDocumentFile: (value) => { documentFiles.set(value.id, value); },
     setExternalFileUploadUrl: (value) => { externalFileUploadUrl = String(value); },
@@ -1136,9 +1174,8 @@ const operationApproval = new LoopbackApprovalServer({
 const operationApprovalBaseUrl = await operationApproval.start();
 
 const profile = join(temporary, "chrome-profile");
-const launchBrowser = () => chromium.launchPersistentContext(profile, {
+const launchBrowser = () => launchManagedChromiumPersistentContext(chromium, profile, {
   headless: false,
-  executablePath: chromium.executablePath(),
   ignoreHTTPSErrors: true,
   args: [
     `--disable-extensions-except=${extensionCopy}`,
@@ -1488,16 +1525,88 @@ try {
   await captureThemes(settings, "bridge-settings-empty", 900);
   await captureThemes(settings, "bridge-settings-empty-narrow", 320);
   await settings.setViewportSize({ width: 900, height: 760 });
+  const privateChatOpen = settings.getByRole("button", { name: "Private Chat", exact: true });
+  const privateChatClose = settings.getByRole("button", { name: "Close Private Chat and clear this conversation" });
+  await privateChatOpen.focus();
+  await privateChatOpen.click();
+  await privateChatClose.waitFor();
+  assert.equal(await settings.locator("main").getAttribute("inert"), "");
+  assert.equal(await privateChatOpen.getAttribute("aria-expanded"), "true");
+  assert.equal(await privateChatClose.evaluate((button) => button === document.activeElement), true);
+  await settings.keyboard.press("Shift+Tab");
+  assert.equal(await privateChatClose.evaluate((button) => button === document.activeElement), true);
+  await settings.keyboard.press("Tab");
+  assert.equal(await privateChatClose.evaluate((button) => button === document.activeElement), true);
+  await captureThemes(settings, "bridge-settings-private-chat", 900);
+  await settings.keyboard.press("Escape");
+  await waitFor(async () => await settings.locator("#private-chat-drawer").isHidden(), "Escape did not close Private Chat");
+  assert.equal(await settings.locator("main").getAttribute("inert"), null);
+  assert.equal(await privateChatOpen.getAttribute("aria-expanded"), "false");
+  assert.equal(await privateChatOpen.evaluate((button) => button === document.activeElement), true);
+  process.stderr.write("[browser-test] Private Chat makes the covered page inert, contains keyboard focus, and restores its opener\n");
   await settings.getByRole("button", { name: "Find available courses" }).click();
   await waitFor(async () => {
     const text = await settings.locator("body").innerText();
     if (/Morrow could not read available courses|course_discovery_failed/.test(text)) throw new Error(text);
     return text.includes("Page 1 shows 100 available courses");
   }, "initial Canvas discovery did not list its first 100 courses");
+  const cursorBoundary = await settings.evaluate(async () => {
+    const saved = await chrome.storage.session.get("courseDiscoveries");
+    const [[discoveryReceiptId, receipt]] = Object.entries(saved.courseDiscoveries || {});
+    const restore = async () => await chrome.storage.session.set({
+      courseDiscoveries: { [discoveryReceiptId]: structuredClone(receipt) },
+    });
+    const requestMore = async () => await chrome.runtime.sendMessage({
+      type: "morrow_course_discovery_more",
+      siteAnchorId: receipt.siteAnchorId,
+      discoveryReceiptId,
+    });
+    const codes = [];
+    const invalidNextValues = [
+      "https://foreign.example/api/v1/courses?cursor=2",
+      `${receipt.origin}/api/v1/other?cursor=2`,
+      receipt.origin.replace("https://", "https://user@") + "/api/v1/courses?cursor=2",
+      `${receipt.origin}/api/v1/courses?cursor=2#`,
+      `${receipt.origin}/api/v1/courses?cursor=${"x".repeat(4096)}`,
+      "not a URL",
+    ];
+    for (const value of invalidNextValues) {
+      await chrome.storage.session.set({
+        courseDiscoveries: { [discoveryReceiptId]: { ...structuredClone(receipt), next: { kind: "canvas_url", value } } },
+      });
+      codes.push((await requestMore()).code);
+      await restore();
+    }
+    await chrome.storage.session.set({
+      courseDiscoveries: { [discoveryReceiptId]: { ...structuredClone(receipt), next: { kind: "canvas_url", value: receipt.visited[0] } } },
+    });
+    const repeated = (await requestMore()).code;
+    await restore();
+    const visited = Array.from({ length: 100 }, (_, index) => `${receipt.origin}/api/v1/courses?cursor=bounded-${index + 1}`);
+    await chrome.storage.session.set({
+      courseDiscoveries: { [discoveryReceiptId]: {
+        ...structuredClone(receipt), pageNumber: 100, visited,
+        next: { kind: "canvas_url", value: `${receipt.origin}/api/v1/courses?cursor=bounded-101` },
+      } },
+    });
+    const pageLimit = (await requestMore()).code;
+    await restore();
+    return { codes, repeated, pageLimit };
+  });
+  assert.deepEqual(cursorBoundary, {
+    codes: Array(6).fill("course_discovery_failed"),
+    repeated: "course_discovery_failed",
+    pageLimit: "course_discovery_failed",
+  });
+  assert.equal(canvas.courseDiscoveryUrls().length, 1, "invalid stored cursors must be refused before another provider request");
+  process.stderr.write("[browser-test] Canvas discovery refuses foreign, malformed, credentialed, fragmented, oversized, repeated, and over-limit cursors before provider access\n");
+  const canvasSite = new URL(canvasUrl).origin;
+  const courseSelectionName = (name, courseId, connect = true) =>
+    `Select Canvas course ${name} (course ID ${courseId}) at ${canvasSite} for 7${connect ? " to connect" : ""}`;
   await settings.locator("#course-filter").fill("Introduction to Human Biology");
-  await settings.getByRole("checkbox", { name: "Select Introduction to Human Biology to connect" }).check();
+  await settings.getByRole("checkbox", { name: courseSelectionName("Introduction to Human Biology", "42") }).check();
   await settings.locator("#course-filter").fill("Synthetic Human Anatomy");
-  await settings.getByRole("checkbox", { name: "Select Synthetic Human Anatomy to connect" }).check();
+  await settings.getByRole("checkbox", { name: courseSelectionName("Synthetic Human Anatomy", "43") }).check();
   await settings.locator("#course-filter").fill("");
   await settings.getByRole("button", { name: "Connect 2 selected courses in Plan" }).click();
   await settings.getByText(/2 courses connected in Plan/).first().waitFor();
@@ -1505,6 +1614,9 @@ try {
     await settings.getByRole("button", { name: "Load more available courses" }).click();
     await settings.locator("#discovery-progress-text").getByText(new RegExp(`Page ${pageNumber} shows`)).waitFor();
   }
+  assert.match(canvas.courseDiscoveryUrls()[1], /\/api\/v1\/courses\?bookmark=course-page-2&signature=synthetic-signature-2$/);
+  assert.match(canvas.courseDiscoveryUrls()[2], /\/api\/v1\/courses\?enrollment_state=active&per_page=100&page=3$/);
+  process.stderr.write("[browser-test] Canvas discovery preserves opaque and numeric provider next URLs unchanged\n");
   const retainedDiscovery = await settings.evaluate(async () => {
     const saved = await chrome.storage.session.get("courseDiscoveries");
     const receipts = Object.values(saved.courseDiscoveries || {});
@@ -1516,7 +1628,7 @@ try {
   });
   assert.deepEqual(retainedDiscovery, { receiptCount: 1, pageNumber: 6, courseCount: 1 });
   await settings.locator("#course-filter").fill("Evidence-Based Practice");
-  await settings.getByRole("checkbox", { name: `Select ${LONG_COURSE_NAME} to connect` }).check();
+  await settings.getByRole("checkbox", { name: courseSelectionName(LONG_COURSE_NAME, "501") }).check();
   await settings.locator("#course-filter").fill("");
   await settings.getByRole("button", { name: "Connect 1 selected course in Plan" }).click();
   await settings.getByText(/1 course connected in Plan/).first().waitFor();
@@ -1754,7 +1866,11 @@ try {
       },
     },
   });
-  assert.equal(transferred.ok, true, JSON.stringify(transferred));
+  assert.equal(transferred.ok, true, JSON.stringify({
+    transferred,
+    canvasRequests: canvas.requests().slice(-24),
+    storageRequests: externalFileStore.requests().slice(externalRequestsBeforeTransfer),
+  }));
   assert.equal(transferred.result?.ok, true, JSON.stringify(transferred));
   assert.equal(transferred.result?.verification?.status, "verified", JSON.stringify(transferred));
   assert.equal(JSON.stringify(transferred).includes(transferAttachment.bytes_base64), false);
@@ -1895,7 +2011,7 @@ try {
   await captureThemes(settings, "bridge-settings-plan-narrow", 320);
   await settings.setViewportSize({ width: 900, height: 760 });
 
-  const selectedCourseControl = settings.getByRole("checkbox", { name: "Select Introduction to Human Biology" });
+  const selectedCourseControl = settings.getByRole("checkbox", { name: courseSelectionName("Introduction to Human Biology", "42", false) });
   await selectedCourseControl.focus();
   await settings.keyboard.press("Space");
   await waitFor(async () => await selectedCourseControl.isChecked(), "Space did not select the focused course");
@@ -2066,6 +2182,12 @@ try {
   assert.equal(resumedList.result.truncated, false);
   assert.equal(resumedList.result.morrow_pages_read, 3);
   assert.deepEqual(resumedList.result.data.map((entry) => entry.url), ["listed-page-2", "listed-page-3"]);
+  const replayedResume = await runtime.call("canvas_list_pages_courses", {
+    course_id: "42",
+    _morrow: { source_binding_id: binding.sourceBindingId, list_resume: { next_page: cappedList.result.morrow_next_page } },
+  });
+  assert.equal(replayedResume.ok, false, JSON.stringify(replayedResume));
+  assert.match(JSON.stringify(replayedResume), /canvas_pagination_resume_refused/);
   const foreignResume = await runtime.call("canvas_list_pages_courses", {
     course_id: "42",
     _morrow: {
@@ -2077,7 +2199,7 @@ try {
   });
   assert.equal(foreignResume.ok, false, JSON.stringify(foreignResume));
   assert.match(JSON.stringify(foreignResume), /canvas_pagination_resume_refused/);
-  console.log("[browser-test] a capped Canvas list resumes to its last page through one opaque token and refuses a foreign-origin token");
+  console.log("[browser-test] a capped Canvas list resumes through one session-owned token and refuses its replay or a caller-forged token");
   const semanticCourseMismatch = await runtime.call("canvas_get_course_nickname", {
     course_id: "43",
     _morrow: { source_binding_id: binding.sourceBindingId },
@@ -2599,8 +2721,24 @@ try {
   const editAuthorization = { kind: "edit_scope", policy_digest: editPermission.scopeDigest, policy_revision: editPermission.revision };
   const pageArgs = { course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: binding.sourceBindingId, canvas_content_guard: pageGuard, outer_grant: { ...grant, effect_receipt_id: "effect:page-edit-test", authorization: editAuthorization } } };
   canvas.holdOnePageWrite();
-  const pageWritePromise = runtime.call("canvas_update_create_page_courses", pageArgs);
+  const startedWriteAbort = new AbortController();
+  const pageWritePromise = runtime.call("canvas_update_create_page_courses", pageArgs, startedWriteAbort.signal);
   await waitFor(() => canvas.pendingPageWrites() === 1, "first Page correction was not held at the provider");
+  const queuedWriteAbort = new AbortController();
+  const cancelledQueuedWrite = runtime.call("canvas_update_create_page_courses", {
+    ...pageArgs,
+    _morrow: {
+      ...pageArgs._morrow,
+      outer_grant: { ...grant, effect_receipt_id: "effect:page-edit-cancelled-before-send", authorization: editAuthorization },
+    },
+  }, queuedWriteAbort.signal);
+  await delay(100);
+  queuedWriteAbort.abort();
+  const cancelledQueuedResult = await cancelledQueuedWrite;
+  assert.equal(cancelledQueuedResult.ok, false, JSON.stringify(cancelledQueuedResult));
+  assert.equal(cancelledQueuedResult.resultState, "not_sent", JSON.stringify(cancelledQueuedResult));
+  assert.equal(cancelledQueuedResult.problem.code, "request_cancelled_before_dispatch", JSON.stringify(cancelledQueuedResult));
+  assert.equal(canvas.pendingPageWrites(), 1);
   const revokedQueuedWrite = runtime.call("canvas_update_create_page_courses", {
     ...pageArgs,
     _morrow: {
@@ -2614,17 +2752,20 @@ try {
   await captureThemes(settings, "bridge-settings-returned-plan", 900);
   await captureThemes(settings, "bridge-settings-returned-plan-narrow", 320);
   await settings.setViewportSize({ width: 900, height: 760 });
-  canvas.releaseOnePageWrite();
+  startedWriteAbort.abort();
   const pageWrite = await pageWritePromise;
-  assert.equal(pageWrite.ok, true, JSON.stringify(pageWrite));
-  assert.equal(pageWrite.result.verification.status, "verified", JSON.stringify(pageWrite));
-  assert.equal(pageWrite.result.verification.createdRevisionId, "2");
+  assert.equal(pageWrite.ok, false, JSON.stringify(pageWrite));
+  assert.equal(pageWrite.resultState, "unknown", JSON.stringify(pageWrite));
+  assert.equal(pageWrite.problem.code, "write_outcome_unknown", JSON.stringify(pageWrite));
+  canvas.releaseOnePageWrite();
+  await waitFor(() => canvas.pageWrites() === 1, "the cancelled in-flight Page correction did not finish at the provider");
   assert.deepEqual(canvas.lesson(), { ...pageBefore, body: pageBefore.body.replace(pageGuard.find_text, pageGuard.replace_text) });
   assert.equal(canvas.pageWrites(), 1);
   const queuedResult = await revokedQueuedWrite;
   assert.equal(queuedResult.ok, false);
   assert.match(JSON.stringify(queuedResult), /edit_policy_stale/);
   assert.equal(canvas.pageWrites(), 1);
+  process.stderr.write("[browser-test] cancellation before provider dispatch sends nothing, while cancellation after Canvas receives a change reports an unknown outcome and suppresses the late result\n");
 
   await settings.getByRole("radio", { name: /^Edit/ }).check();
   const textCategory = settings.getByRole("checkbox", { name: "Correct Canvas Page text" });
@@ -2924,24 +3065,32 @@ try {
   assert.match(questionTextWrite.result.verification.evidence, /selected_image_alt_reaudited/);
   // The whole saved question, not a digest of it: every other field, every
   // answer, its weights and its comments are unchanged by the rebuild.
-  assert.deepEqual(canvas.classicQuizQuestion(), {
+  const questionTextAfter = canvas.classicQuizQuestion();
+  const { updated_at: questionTextAfterUpdatedAt, ...questionTextAfterStable } = questionTextAfter;
+  const { updated_at: _questionTextBeforeUpdatedAt, ...questionTextExpectedStable } = {
     ...classicQuestionBefore,
     question_text: classicQuestionBefore.question_text.replace('<img src="/courses/42/files/17">', '<img src="/courses/42/files/17" alt="Labelled plant cell diagram">'),
-  });
+  };
+  assert.deepEqual(questionTextAfterStable, questionTextExpectedStable);
+  assert.ok(Number.isFinite(Date.parse(questionTextAfterUpdatedAt)));
   assert.equal(canvas.classicQuizQuestionWrites(), 1);
 
   const answerBefore = canvas.classicQuizQuestion();
-  const answerGuard = classicQuestionGuard(answerBefore, "/courses/42/files/18", "Cell nucleus diagram", { answer: { id: "6656", field: "answer_text" } });
+  const answerGuard = classicQuestionGuard(answerBefore, "/courses/42/files/18", "Cell nucleus diagram", { answer: { id: "6656", field: "html" } });
   const answerWrite = await runtime.call("canvas_update_existing_quiz_question", classicQuestionArgs(answerGuard, "effect:classic-quiz-answer-image-alt"));
   assert.equal(answerWrite.ok, true, JSON.stringify(answerWrite));
   assert.equal(answerWrite.result.verification.status, "verified", JSON.stringify(answerWrite));
   assert.match(answerWrite.result.verification.evidence, /selected_image_alt_reaudited/);
-  assert.deepEqual(canvas.classicQuizQuestion(), {
+  const answerAfter = canvas.classicQuizQuestion();
+  const { updated_at: answerAfterUpdatedAt, ...answerAfterStable } = answerAfter;
+  const { updated_at: _answerBeforeUpdatedAt, ...answerExpectedStable } = {
     ...answerBefore,
     answers: answerBefore.answers.map((answer) => answer.id === "6656"
-      ? { ...answer, answer_text: answer.answer_text.replace('<img src="/courses/42/files/18">', '<img src="/courses/42/files/18" alt="Cell nucleus diagram">') }
+      ? { ...answer, html: answer.html.replace('<img src="/courses/42/files/18">', '<img src="/courses/42/files/18" alt="Cell nucleus diagram">') }
       : answer),
-  });
+  };
+  assert.deepEqual(answerAfterStable, answerExpectedStable);
+  assert.ok(Number.isFinite(Date.parse(answerAfterUpdatedAt)));
   assert.equal(canvas.classicQuizQuestionWrites(), 2);
 
   const groupedQuestionWrite = await runtime.call("canvas_update_existing_quiz_question", classicQuestionArgs(classicQuestionGuard(classicQuestionBefore, "/courses/42/files/17", "Labelled plant cell diagram", { questionId: "302" }), "effect:classic-quiz-question-group-linked"));
@@ -3297,15 +3446,18 @@ try {
 
   await runtime.close();
   runtime = await CanvasConnectorRuntime.start({ ...connectorConfig, token: "replacement-bridge-secret-".repeat(3) });
-  await waitFor(async () => {
-    const stored = await replacementWorker.evaluate(() => chrome.storage.local.get(["token", "bindings"]));
-    return !stored.token && !(stored.bindings || []).length;
-  }, "rejected pairing did not clear stale authority", 10_000);
   await popup.bringToFront();
-  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).waitFor();
+  await popup.locator("#status-value").filter({ hasText: /^Reconnect needed$/ }).waitFor({ timeout: 10_000 });
+  const retained = await replacementWorker.evaluate(async () => {
+    const stored = await chrome.storage.local.get(["token", "bindings"]);
+    return { tokenPresent: typeof stored.token === "string", bindingCount: Array.isArray(stored.bindings) ? stored.bindings.length : 0 };
+  });
+  assert.deepEqual(retained, { tokenPresent: true, bindingCount: 3 });
+  assert.equal(await popup.locator("#detail").innerText(), "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved.");
+  await popup.getByRole("button", { name: "Reconnect Morrow", exact: true }).waitFor();
   await captureThemes(popup, "popup-reconnect", 360);
   const replacementApprovalPromise = context.waitForEvent("page");
-  await popup.getByRole("button", { name: "Connect Morrow", exact: true }).click();
+  await popup.getByRole("button", { name: "Reconnect Morrow", exact: true }).click();
   const replacementApproval = await replacementApprovalPromise;
   await replacementApproval.getByRole("button", { name: "Allow connection", exact: true }).click();
   await popup.bringToFront();

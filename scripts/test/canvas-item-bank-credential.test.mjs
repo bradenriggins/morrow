@@ -4,6 +4,7 @@ import {
   ITEM_BANK_CREDENTIAL_MAX_AGE_MS,
   itemBankApiOriginForFrameUrl,
   itemBankCredentialFromRequest,
+  itemBankLaunchFromCourseTabs,
   itemBankLaunchUrl,
   itemBankPermissionOrigins,
   usableItemBankCredential,
@@ -12,13 +13,15 @@ import {
 const NOW = Date.parse("2026-09-08T20:00:00.000Z");
 const NONCE = "b28f3aae-8888-4c5b-9a17-458f2e1fe309";
 const TOKEN = `Signature ${"launch-bound-secret-".repeat(8)}`;
-const LAUNCH_URL = "https://school.instructure.com/courses/42/external_tools/54065";
+const EXTERNAL_TOOL_ID = "71234";
+const LAUNCH_URL = `https://school.instructure.com/courses/42/external_tools/${EXTERNAL_TOOL_ID}`;
 const LTI_URL = "https://school.quiz-lti-iad-prod.instructure.com/lti/launch";
 const API_ORIGIN = "https://school.quiz-api-iad-prod.instructure.com";
 
 const launch = (overrides = {}) => ({
   tabId: 19,
   canvasLocalContextId: "42",
+  externalToolId: EXTERNAL_TOOL_ID,
   launchUrl: LAUNCH_URL,
   launchNonce: NONCE,
   launchedAt: NOW - 1_000,
@@ -39,18 +42,37 @@ const request = (overrides = {}) => ({
   ...overrides,
 });
 
-test("a normal bound course path derives only the exact Item Banks launch", () => {
+test("a normal bound course path derives only the supplied external-tool deployment", () => {
   for (const path of ["/courses/42", "/courses/42/quizzes", "/courses/42/pages/week-1", "/courses/42/external_tools/99"]) {
-    assert.equal(itemBankLaunchUrl(`https://school.instructure.com${path}`, "https://school.instructure.com", "42"), LAUNCH_URL, path);
+    assert.equal(itemBankLaunchUrl(`https://school.instructure.com${path}`, "https://school.instructure.com", "42", EXTERNAL_TOOL_ID), LAUNCH_URL, path);
   }
-  assert.equal(itemBankLaunchUrl("https://school.instructure.com/courses/42", "https://school.instructure.com"), LAUNCH_URL);
+  assert.equal(itemBankLaunchUrl(LAUNCH_URL, "https://school.instructure.com"), LAUNCH_URL);
   for (const [tabUrl, origin, course] of [
     ["https://other.instructure.com/courses/42", "https://school.instructure.com", "42"],
     ["http://school.instructure.com/courses/42", "http://school.instructure.com", "42"],
     ["https://school.instructure.com/courses/43", "https://school.instructure.com", "42"],
     ["https://school.instructure.com/courses/42", "https://school.instructure.com/path", "42"],
     ["https://school.instructure.com/accounts/42", "https://school.instructure.com", "42"],
-  ]) assert.equal(itemBankLaunchUrl(tabUrl, origin, course), "");
+  ]) assert.equal(itemBankLaunchUrl(tabUrl, origin, course, EXTERNAL_TOOL_ID), "");
+  assert.equal(itemBankLaunchUrl("https://school.instructure.com/courses/42", "https://school.instructure.com", "42"), "");
+});
+
+test("Canvas course Tabs resolves one exact Item Banks deployment without a global id", () => {
+  assert.deepEqual(itemBankLaunchFromCourseTabs([
+    { id: "home", type: "internal", label: "Home", html_url: "https://school.instructure.com/courses/42" },
+    { id: `context_external_tool_${EXTERNAL_TOOL_ID}`, type: "external", label: "Item Banks", html_url: LAUNCH_URL },
+  ], "https://school.instructure.com", "42"), { externalToolId: EXTERNAL_TOOL_ID, launchUrl: LAUNCH_URL });
+
+  for (const tabs of [
+    [],
+    [{ id: "context_external_tool_54065", type: "external", label: "Publisher tool", html_url: "https://school.instructure.com/courses/42/external_tools/54065" }],
+    [{ id: `context_external_tool_${EXTERNAL_TOOL_ID}`, type: "external", label: "Item Banks", html_url: `https://other.instructure.com/courses/42/external_tools/${EXTERNAL_TOOL_ID}` }],
+    [{ id: `context_external_tool_${EXTERNAL_TOOL_ID}`, type: "external", label: "Item Banks", html_url: `https://school.instructure.com/courses/43/external_tools/${EXTERNAL_TOOL_ID}` }],
+    [
+      { id: `context_external_tool_${EXTERNAL_TOOL_ID}`, type: "external", label: "Item Banks", html_url: LAUNCH_URL },
+      { id: "context_external_tool_71235", type: "external", label: "Item Banks", html_url: "https://school.instructure.com/courses/42/external_tools/71235" },
+    ],
+  ]) assert.equal(itemBankLaunchFromCourseTabs(tabs, "https://school.instructure.com", "42"), null);
 });
 
 test("origin discovery accepts one exact same-tenant quiz-lti frame", () => {
@@ -87,6 +109,7 @@ test("the first exact authenticated bank list request yields one launch-bound cr
     authType: "Signature",
     contextUuid: "course-context-uuid",
     canvasLocalContextId: "42",
+    externalToolId: EXTERNAL_TOOL_ID,
     launchUrl: LAUNCH_URL,
     launchNonce: NONCE,
     launchedAt: NOW - 1_000,
@@ -112,6 +135,7 @@ test("credential capture rejects every request outside the pending launch", () =
     ["stale launch", request(), launch({ launchedAt: NOW - 45_001 })],
     ["future launch", request(), launch({ launchedAt: NOW + 1 })],
     ["wrong tool", request(), launch({ launchUrl: "https://school.instructure.com/courses/42/external_tools/9" })],
+    ["missing deployment", request(), launch({ externalToolId: undefined })],
     ["wrong numeric context", request(), launch({ canvasLocalContextId: "43" })],
     ["invalid nonce", request(), launch({ launchNonce: "nonce" })],
   ];
@@ -127,6 +151,7 @@ test("credential use requires an exact fresh tab, frame, host, course, launch, a
     frameId: 7,
     apiOrigin: API_ORIGIN,
     canvasLocalContextId: "42",
+    externalToolId: EXTERNAL_TOOL_ID,
     launchUrl: LAUNCH_URL,
     launchNonce: NONCE,
     launchedAt: NOW - 1_000,
@@ -137,6 +162,7 @@ test("credential use requires an exact fresh tab, frame, host, course, launch, a
     ["frame", { frameId: 8 }],
     ["host", { apiOrigin: "https://other.quiz-api-iad-prod.instructure.com" }],
     ["course", { canvasLocalContextId: "43" }],
+    ["deployment", { externalToolId: "71235" }],
     ["launch", { launchUrl: "https://school.instructure.com/courses/42/external_tools/9" }],
     ["nonce", { launchNonce: "a28f3aae-8888-4c5b-9a17-458f2e1fe309" }],
     ["time", { launchedAt: NOW - 2_000 }],

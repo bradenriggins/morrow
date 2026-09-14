@@ -12,6 +12,7 @@ import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
 
 const COURSE_ID = "_22_1";
+const OTHER_COURSE_ID = "_23_1";
 const CONTENT_ID = "_33_1";
 const MISSING_CONTENT_ID = "_44_1";
 const PRINCIPAL_ID = "_11_1";
@@ -74,6 +75,27 @@ async function createBlackboardFixture(): Promise<{
           availability: { available: "Yes" },
           user: { id: "_55_1", name: { given: "Jane", family: "Doe" }, contact: { email: "jane@example.edu" } },
         }],
+        paging: {},
+      });
+      return;
+    }
+    if (pathname === `/learn/api/public/v1/users/${PRINCIPAL_ID}/courses`) {
+      json(response, {
+        results: [
+          {
+            id: "_membership_3", userId: PRINCIPAL_ID, courseId: COURSE_ID, courseRoleId: "Instructor",
+            course: { id: COURSE_ID, courseId: "BIO-101", name: "Biology with Jane Doe", description: "Jane Doe enrolled." },
+          },
+          {
+            id: "_membership_4", userId: PRINCIPAL_ID, courseId: OTHER_COURSE_ID, courseRoleId: "Instructor",
+            course: {
+              id: OTHER_COURSE_ID,
+              courseId: "Morgan Lee Seminar",
+              name: "Chemistry with Morgan Lee",
+              description: "Morgan Lee enrolled in this other course.",
+            },
+          },
+        ],
         paging: {},
       });
       return;
@@ -280,6 +302,28 @@ describe("Blackboard egress exemption scope", () => {
       expect(projectedRead.isError, JSON.stringify(projectedRead)).not.toBe(true);
       expect(JSON.stringify(projectedRead)).toContain("Biology");
       expect(JSON.stringify(projectedRead)).not.toContain("Jane Doe");
+
+      // Account-wide discovery may use the selected course's roster only for
+      // that exact course. Another course keeps its opaque identity and
+      // connection state, while all of its free text remains at the source.
+      const courseList = await gateway.callSourceOwned("blackboard_list_my_courses", readInput);
+      expect(courseList.isError, JSON.stringify(courseList)).not.toBe(true);
+      const sourceCourseText = JSON.stringify(courseList);
+      expect(sourceCourseText).not.toContain("Morgan Lee");
+      const sourceContent = isJsonObject(courseList.structuredContent) ? courseList.structuredContent : {};
+      const sourceCourses = Array.isArray(sourceContent.courses) ? sourceContent.courses : [];
+      expect(sourceCourses[1]).toEqual({
+        id: OTHER_COURSE_ID,
+        textWithheld: true,
+        textWithheldReason: "course_roster_unavailable",
+        connected: false,
+      });
+      const projectedCourseList = await gateway.redactMcpEgress(courseList, readInput, {
+        bound: false,
+        toolName: "blackboard_list_my_courses",
+      });
+      expect(projectedCourseList.isError, JSON.stringify(projectedCourseList)).not.toBe(true);
+      expect(JSON.stringify(projectedCourseList)).not.toContain("Morgan Lee");
       const readAsCanvasTool = await gateway.redactMcpEgress(read, readInput, {
         bound: false,
         toolName: canvasTool.publicName,

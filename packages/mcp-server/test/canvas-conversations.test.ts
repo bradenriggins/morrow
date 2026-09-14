@@ -6,8 +6,16 @@ const request = { action: "create", source_binding_id: "canvas:course:41", cours
 describe("Canvas conversation learner labels", () => {
   it("preserves readable recipients and message labels in the reviewed plan", () => {
     const input = canvasConversationInputSchema.parse(request);
+    expect(input.course_id).toBe("41");
     expect(canvasConversationPlan(input)).toMatchObject({ recipient_tokens: ["Student A1", "Student A2"], body: "Hello Student A1." });
     expect(canvasConversationInputSchema.safeParse({ ...request, action: "reply", conversation_id: "12" }).success).toBe(true);
+  });
+
+  it("keeps large Canvas course IDs exact and rejects unsafe numeric forms", () => {
+    expect(canvasConversationInputSchema.parse({ ...request, course_id: "9007199254740993" }).course_id)
+      .toBe("9007199254740993");
+    expect(canvasConversationInputSchema.safeParse({ ...request, course_id: 9_007_199_254_740_993 }).success)
+      .toBe(false);
   });
 
   it("refuses duplicate, ambiguous, raw, and internal-only recipient references", () => {

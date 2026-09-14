@@ -9,6 +9,7 @@ import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { deriveBlackboardSourceBindingId } from "../src/binding.js";
 import { signBlackboardEffectGrant } from "../src/effect-grant.js";
+import { BlackboardSessionGenerations } from "../src/operations/effect-scope.js";
 import { BlackboardLearnRuntime } from "../src/runtime.js";
 import { createBlackboardLearnMcpServer } from "../src/server.js";
 import type { BlackboardPrincipalVerification, BlackboardTenant } from "../src/types.js";
@@ -48,14 +49,16 @@ function scopeOf(value: JsonObject): JsonObject {
 
 function grantArguments(planDigest: string, receipt: string): JsonObject {
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-effect-scope",
     planDigest,
     outerPlanDigest: "a".repeat(64),
     approvalGrantDigest: "b".repeat(64),
     effectReceiptId: receipt,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:effect-scope",
+   gatewayProcessId: "gateway:effect-scope",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return {
     schema: unsigned.schema,
@@ -66,6 +69,8 @@ function grantArguments(planDigest: string, receipt: string): JsonObject {
     effect_receipt_id: unsigned.effectReceiptId,
     dispatch_attempt: unsigned.dispatchAttempt,
     gateway_process_id: unsigned.gatewayProcessId,
+    issued_at: unsigned.issuedAt,
+    not_after: unsigned.notAfter,
     dispatch_token: signBlackboardEffectGrant(effectSecret, unsigned),
   };
 }
@@ -243,6 +248,29 @@ async function fixture(options: { readonly principalAnswers?: boolean } = {}) {
 }
 
 describe("Blackboard effect binding scope", () => {
+  it("serializes session generations and refuses a stale in-process binding", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-blackboard-session-transaction-"));
+    try {
+      const path = join(directory, "blackboard-sessions.json");
+      const first = new BlackboardSessionGenerations(path);
+      const second = new BlackboardSessionGenerations(path);
+      const tenant: BlackboardTenant = {
+        id: "fixture", baseUrl: "https://learn.example.edu", applicationKey, clientSecret: firstSecret, principalId,
+        courseBindings: [],
+      };
+      const rotated = { ...tenant, clientSecret: rotatedSecret };
+      const resolution = { state: "verified" as const, principalId };
+      await first.observe(tenant, resolution);
+      await second.observe(rotated, resolution);
+      const saved = JSON.parse(await readFile(path, "utf8")) as { revision: number; sessions: { generation: number }[] };
+      expect(saved).toMatchObject({ revision: 2, sessions: [{ generation: 2 }] });
+      expect(() => first.binding(tenant)).toThrow(/durable Blackboard connection changed/);
+      expect(second.binding(rotated).sessionGeneration).toBe(2);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("binds a change to the account, the credential, and a session generation of one or more", async () => {
     const site = await fixture();
     const first = await site.start();

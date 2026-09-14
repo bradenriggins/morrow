@@ -56,8 +56,8 @@ function usage(): string {
     "  --workspace-root <path>   Existing canonical directory used as the MCP working directory.",
     "  --state-directory <path>  Existing canonical directory for durable local Morrow state.",
     "  --name <name>             MCP server name. Defaults to morrow.",
-    "  --startup-timeout <sec>   Codex startup timeout. Defaults to 60.",
-    "  --tool-timeout <sec>      Codex tool timeout. Defaults to 900.",
+    "  --startup-timeout <sec>   Codex startup timeout. Defaults to 60. Also bounds this command's own MCP initialization.",
+    "  --tool-timeout <sec>      Codex tool timeout. Defaults to 900. Also bounds this command's own MCP tool call, which defaults to 60.",
     "  --gemini-timeout <ms>     Gemini request timeout. Defaults to tool timeout in milliseconds.",
     "  --force                   Replace existing generated bundle files only.",
     "  --replace-generated       Replace an unchanged Morrow-generated local settings file.",
@@ -447,6 +447,79 @@ function catalogStats(repositoryRoot: string): Record<string, unknown> {
   };
 }
 
+// Every MCP exchange this command makes runs under one owned deadline, and the
+// command races settlement itself so a peer that ignores cancellation cannot
+// hold the process open. A stalled exchange closes the client within a bound
+// and reclaims the child process it started.
+const DEFAULT_MCP_STARTUP_SECONDS = 60;
+const DEFAULT_MCP_TOOL_SECONDS = 60;
+const MCP_CLOSE_TIMEOUT_MS = 5_000;
+const CHILD_RECLAIM_TIMEOUT_MS = 2_000;
+const CHILD_RECLAIM_POLL_MS = 25;
+
+const pause = (milliseconds: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+/** Settles with the operation, or rejects as soon as the signal aborts, whichever comes first. */
+function settleWithAbort<T>(operation: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(signal.reason instanceof Error ? signal.reason : new Error("MCP operation aborted"));
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener("abort", onAbort);
+      action();
+    };
+    const onAbort = (): void => finish(() => reject(signal.reason instanceof Error ? signal.reason : new Error("MCP operation aborted")));
+    signal.addEventListener("abort", onAbort, { once: true });
+    operation.then((value) => finish(() => resolve(value)), (error: unknown) => finish(() => reject(error)));
+  });
+}
+
+/** Waits for a promise for at most the given time; a late settlement is ignored. */
+function settleWithin(operation: Promise<unknown>, milliseconds: number): Promise<void> {
+  let timer: NodeJS.Timeout | null = null;
+  const deadline = new Promise<void>((resolve) => { timer = setTimeout(resolve, milliseconds); });
+  return Promise.race([operation.then(() => undefined, () => undefined), deadline]).finally(() => { if (timer) clearTimeout(timer); });
+}
+
+function processAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+/** Ends the one stdio child within a fixed bound: SIGTERM first, then SIGKILL. */
+async function reclaimChildProcess(pid: number | null): Promise<void> {
+  if (!Number.isSafeInteger(pid) || Number(pid) <= 0 || !processAlive(pid as number)) return;
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    try { process.kill(pid as number, signal); } catch { return; }
+    const deadline = Date.now() + Math.floor(CHILD_RECLAIM_TIMEOUT_MS / 2);
+    while (Date.now() < deadline) {
+      if (!processAlive(pid as number)) return;
+      await pause(CHILD_RECLAIM_POLL_MS);
+    }
+  }
+}
+
+/** Runs one MCP operation under an owned deadline the SDK receives and the command enforces itself. */
+async function boundedMcpOperation<T>(
+  label: string,
+  timeoutMs: number,
+  action: (options: { readonly signal: AbortSignal; readonly timeout: number }) => Promise<T>,
+): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(new Error(`${label} did not settle within ${timeoutMs} ms`)), timeoutMs);
+  try {
+    return await settleWithAbort(action({ signal: controller.signal, timeout: timeoutMs }), controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function callMorrowTool(
   options: SharedOptions,
   name: string,
@@ -454,6 +527,8 @@ async function callMorrowTool(
 ): Promise<unknown> {
   const bundle = requireUpstreams(options);
   const serverEntryPath = bundle.serverEntryPath || resolve(bundle.repositoryRoot, "packages/mcp-server/dist/index.js");
+  const startupMs = (options.startupTimeoutSeconds ?? DEFAULT_MCP_STARTUP_SECONDS) * 1_000;
+  const toolMs = (options.toolTimeoutSeconds ?? DEFAULT_MCP_TOOL_SECONDS) * 1_000;
   const client = new Client({ name: "morrow-cli", version: "1.0.0" });
   const transport = new StdioClientTransport({
     command: bundle.nodeCommand || process.execPath,
@@ -463,11 +538,15 @@ async function callMorrowTool(
     stderr: "inherit",
   });
   try {
-    await client.connect(transport);
-    const result = await client.callTool({ name, arguments: args });
+    await boundedMcpOperation("MCP initialization", startupMs, (requestOptions) => client.connect(transport, requestOptions));
+    const result = await boundedMcpOperation(`MCP tool ${name}`, toolMs, (requestOptions) => client.callTool({ name, arguments: args }, requestOptions));
     return result.structuredContent || result;
   } finally {
-    await client.close();
+    // The transport forgets its child once closed, so the pid is fixed first.
+    const pid = transport.pid;
+    await settleWithin(client.close(), MCP_CLOSE_TIMEOUT_MS);
+    await settleWithin(transport.close(), MCP_CLOSE_TIMEOUT_MS);
+    await reclaimChildProcess(pid);
   }
 }
 

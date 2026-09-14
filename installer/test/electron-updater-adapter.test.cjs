@@ -9,6 +9,13 @@ const { createElectronUpdaterAdapter } = require("../shared/electron-updater-ada
 
 const CACHE_DIRECTORY = os.tmpdir();
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((nextResolve, nextReject) => { resolve = nextResolve; reject = nextReject; });
+  return { promise, resolve, reject };
+}
+
 function updater() {
   const listeners = new Map();
   return {
@@ -27,6 +34,9 @@ function updater() {
       listeners.set(event, values);
     },
     removeListener(event, listener) { listeners.get(event)?.delete(listener); },
+    emit(event, value) {
+      for (const listener of listeners.get(event) || []) listener(value);
+    },
     async checkForUpdates() { this.checks += 1; return { isUpdateAvailable: false, cancellationToken: { value: "current-check" } }; },
     async downloadUpdate(token) { this.downloads += 1; this.downloadTokens.push(token); return []; },
     quitAndInstall(...argumentsValue) { this.installs.push(argumentsValue); }
@@ -91,4 +101,98 @@ test("the adapter reports the free space on the updater cache volume and reports
     cacheDirectory: missing
   });
   assert.equal(await unmeasured.freeCacheBytes(), null);
+});
+
+test("the adapter publishes a downloaded event only after the matching updater promise succeeds", async () => {
+  const source = updater();
+  const completed = deferred();
+  source.checkForUpdates = async () => ({
+    isUpdateAvailable: true,
+    updateInfo: { version: "1.0.1", platform: "darwin", arch: "arm64" },
+    cancellationToken: { cancel() {} }
+  });
+  source.downloadUpdate = async () => {
+    source.emit("update-downloaded", { version: "1.0.1", platform: "darwin", arch: "arm64" });
+    await completed.promise;
+    return ["private-updater-cache"];
+  };
+  const adapter = createElectronUpdaterAdapter({
+    updater: source,
+    currentVersion: "1.0.0",
+    platform: "darwin",
+    arch: "arm64",
+    feedId: "morrow-github-stable",
+    cacheDirectory: CACHE_DIRECTORY
+  });
+  const events = [];
+  adapter.on("update-downloaded", (event) => events.push(event));
+  await adapter.checkForUpdates();
+  const pending = adapter.downloadUpdate();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(events, []);
+  completed.resolve();
+  await pending;
+  assert.deepEqual(events, [{ version: "1.0.1", platform: "darwin", arch: "arm64" }]);
+});
+
+test("the adapter discards premature download evidence when staging fails or is cancelled", async (t) => {
+  await t.test("failure", async () => {
+    const source = updater();
+    source.checkForUpdates = async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.0.1" },
+      cancellationToken: { cancel() {} }
+    });
+    source.downloadUpdate = async () => {
+      source.emit("update-downloaded", { version: "1.0.1" });
+      throw new Error("cache finalization failed");
+    };
+    const adapter = createElectronUpdaterAdapter({
+      updater: source,
+      currentVersion: "1.0.0",
+      platform: "darwin",
+      arch: "arm64",
+      feedId: "morrow-github-stable",
+      cacheDirectory: CACHE_DIRECTORY
+    });
+    const events = [];
+    adapter.on("update-downloaded", (event) => events.push(event));
+    await adapter.checkForUpdates();
+    await assert.rejects(() => adapter.downloadUpdate(), /cache finalization failed/);
+    assert.deepEqual(events, []);
+  });
+
+  await t.test("cancellation", async () => {
+    const source = updater();
+    const completed = deferred();
+    let cancellations = 0;
+    source.checkForUpdates = async () => ({
+      isUpdateAvailable: true,
+      updateInfo: { version: "1.0.1" },
+      cancellationToken: { cancel() { cancellations += 1; } }
+    });
+    source.downloadUpdate = async () => {
+      source.emit("update-downloaded", { version: "1.0.1" });
+      await completed.promise;
+      return ["private-updater-cache"];
+    };
+    const adapter = createElectronUpdaterAdapter({
+      updater: source,
+      currentVersion: "1.0.0",
+      platform: "darwin",
+      arch: "arm64",
+      feedId: "morrow-github-stable",
+      cacheDirectory: CACHE_DIRECTORY
+    });
+    const events = [];
+    adapter.on("update-downloaded", (event) => events.push(event));
+    await adapter.checkForUpdates();
+    const pending = adapter.downloadUpdate();
+    await new Promise((resolve) => setImmediate(resolve));
+    adapter.cancelUpdate();
+    assert.equal(cancellations, 1);
+    completed.resolve();
+    await pending;
+    assert.deepEqual(events, []);
+  });
 });

@@ -684,6 +684,12 @@
       "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.4 publication; reviewer=Claude technical source review; source=HEAD"
     },
     {
+      "path": "installer/shared/bridge-updates.cjs",
+      "sha256": "6bd4061ee3d7df5c07bcde57beffa6128723b99d41d8b61b48fa78a09740854f",
+      "disposition": "direct_owned",
+      "review": "User requested the Morrow implementation, original Morrow branding, and public v1.0.4 publication; reviewer=Claude technical source review; source=HEAD"
+    },
+    {
       "path": "morrow.upstreams.connector.example.json",
       "sha256": "d60ff028d165937eeb3eaed9cdcf0bfc69f3d1089d85e6304fd66a2a74ded088",
       "disposition": "direct_owned",

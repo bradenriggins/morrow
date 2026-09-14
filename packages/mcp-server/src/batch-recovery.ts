@@ -1,5 +1,4 @@
 import {
-  recoverBatchState,
   type BatchRecoveryMode,
   type BatchSourceSettlementSummary,
 } from "@morrow/batch-engine";
@@ -83,8 +82,7 @@ export function recoverGatewayBatch(
   runtime: MorrowRuntime,
   input: RecoverGatewayBatchInput,
 ): JsonObject {
-  const recovery = recoverBatchState({
-    path: runtime.batches.path,
+  const recovery = runtime.batches.recover({
     batchId: input.batchId,
     mode: input.mode,
     ...(input.afterOrdinal !== undefined ? { afterOrdinal: input.afterOrdinal } : {}),

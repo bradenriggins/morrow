@@ -1,4 +1,6 @@
 export async function executeItemBankInPage(input) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const MAX_BYTES = 2 * 1024 * 1024;
   const hostPattern = /^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i;
   const apiHostPattern = /^[^.]+\.quiz-api(?:-[^.]+)*\.instructure\.com$/i;
@@ -24,8 +26,10 @@ export async function executeItemBankInPage(input) {
   const canvasHost = canvasUrl.hostname.toLowerCase();
   const standardTenant = canvasHost.match(/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/i)?.[1]?.toLowerCase();
   if (standardTenant && apiHost.split(".")[0] !== standardTenant) return { matched: false };
-  const referrerCourse = referrerUrl.pathname.match(/^\/courses\/([1-9][0-9]*)\/external_tools\/54065\/?$/)?.[1];
-  if (!input.courseId || referrerCourse !== input.courseId) return { matched: false };
+  const referrer = referrerUrl.pathname.match(/^\/courses\/([1-9][0-9]*)\/external_tools\/([1-9][0-9]*)\/?$/);
+  const referrerCourse = referrer?.[1];
+  const externalToolId = id(referrer?.[2]);
+  if (!input.courseId || referrerCourse !== input.courseId || !externalToolId) return { matched: false };
   const operation = input.operation;
   if (!operation || operation.service !== "item_bank" || !["GET", "POST", "PATCH", "DELETE"].includes(operation.method)) return { matched: false };
   const operationContracts = {
@@ -63,7 +67,8 @@ export async function executeItemBankInPage(input) {
   const launchedAt = Number(credential?.launchedAt);
   const capturedAt = Number(credential?.capturedAt);
   if (!credential || credential.apiOrigin !== `https://${apiHost}` || credential.authType !== "Signature"
-    || credential.canvasLocalContextId !== input.courseId || credential.launchUrl !== referrerUrl.href
+    || credential.canvasLocalContextId !== input.courseId || credential.externalToolId !== externalToolId
+    || credential.launchUrl !== referrerUrl.href
     || typeof credential.launchNonce !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(credential.launchNonce)
     || token.length < 51 || token.length > 8192 || !contextUuid
     || !Number.isFinite(launchedAt) || !Number.isFinite(capturedAt) || capturedAt < launchedAt
@@ -473,10 +478,13 @@ export async function executeItemBankInPage(input) {
     && !(Number.isInteger(httpStatus) && httpStatus >= 400 && httpStatus < 500 && httpStatus !== 408 && httpStatus !== 429);
   const boundedResponseText = async (response) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) return { oversize: true };
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return { oversize: true };
+    }
     if (!response?.body || typeof response.body.getReader !== "function") return { text: "" };
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let size = 0;
     let text = "";
     try {
@@ -484,14 +492,14 @@ export async function executeItemBankInPage(input) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return { oversize: true };
         }
         text += decoder.decode(next.value, { stream: true });
       }
       return { text: text + decoder.decode() };
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return { unreadable: true };
     }
   };
@@ -601,6 +609,7 @@ export async function executeItemBankInPage(input) {
         const associationQuery = new URLSearchParams({ course_id: contextUuid, page: String(page), per_page: "100" });
         response = await fetch(`https://${apiHost}/api/banks?${associationQuery}`, {
           method: "GET", headers, credentials: "omit", redirect: "error",
+          signal: requestSignal(input?.expiresAt),
         });
       } catch {
         return { matched: true, ok: false, sent: false, outcomeUnknown: false, error: "item_bank_course_association_unreadable" };
@@ -647,6 +656,7 @@ export async function executeItemBankInPage(input) {
           credentials: "omit",
           redirect: "error",
           ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }),
+          signal: requestSignal(input?.expiresAt),
         });
       } catch {
         return { transport: true };
@@ -1149,6 +1159,7 @@ export async function executeItemBankInPage(input) {
           credentials: "omit",
           redirect: "error",
           ...(requestBody === undefined ? {} : { body: JSON.stringify(requestBody) }),
+          signal: requestSignal(input?.expiresAt),
         });
       } catch {
         return { transport: true };
@@ -1289,6 +1300,7 @@ export async function executeItemBankInPage(input) {
         credentials: "omit",
         redirect: "error",
         ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch {
       return { matched: true, ok: false, sent: operation.method !== "GET", outcomeUnknown: operation.method !== "GET", error: "item_bank_request_failed" };

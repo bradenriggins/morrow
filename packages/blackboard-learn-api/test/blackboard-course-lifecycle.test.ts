@@ -125,7 +125,6 @@ async function harness(options: FixtureOptions = {}) {
   let content: JsonObject = {
     id: contentId,
     parentId: "_54_1",
-    courseId,
     title: "Week 3 reading",
     description: "The reading for week 3.",
     position: 2,
@@ -141,7 +140,6 @@ async function harness(options: FixtureOptions = {}) {
   const folder: JsonObject = {
     id: folderId,
     parentId: null,
-    courseId,
     title: "Week 3",
     position: 1,
     contentHandler: { id: "resource/x-bb-folder", isBbPage: false },
@@ -334,14 +332,16 @@ let receipts = 0;
 function effectGrant(planDigest: string): BlackboardEffectGrant {
   receipts += 1;
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-course-lifecycle-test",
     planDigest,
     outerPlanDigest: "b".repeat(64),
     approvalGrantDigest: "c".repeat(64),
     effectReceiptId: `effect:00000000-0000-4000-8000-${String(receipts).padStart(12, "0")}`,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:test",
+   gatewayProcessId: "gateway:test",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return { ...unsigned, dispatchToken: signBlackboardEffectGrant(effectSecret, unsigned) };
 }
@@ -356,6 +356,8 @@ function grantArguments(grant: BlackboardEffectGrant): JsonObject {
     effect_receipt_id: grant.effectReceiptId,
     dispatch_attempt: grant.dispatchAttempt,
     gateway_process_id: grant.gatewayProcessId,
+    issued_at: grant.issuedAt,
+    not_after: grant.notAfter,
     dispatch_token: grant.dispatchToken,
   };
 }
@@ -743,8 +745,13 @@ describe("Blackboard course availability, dates and course copy", () => {
       ok: true,
       resultState: "applied",
       destinationCourseId,
-      copiedCourse: { id: copiedCourseId, courseId: destinationCourseId, name: "Biology" },
+      copiedCourse: {
+        id: copiedCourseId,
+        textWithheld: true,
+        textWithheldReason: "course_roster_unavailable",
+      },
     });
+    expect(JSON.stringify(applied)).not.toContain('"name":"Biology"');
     expect(fixture.courseCopyBodies()).toEqual([{ targetCourse: { courseId: destinationCourseId } }]);
     expect(fixture.writeRequests()).toEqual([`POST ${courseCopyPath}`]);
     expect(structured(await fixture.call("blackboard_verify_course_copy", args))).toMatchObject({

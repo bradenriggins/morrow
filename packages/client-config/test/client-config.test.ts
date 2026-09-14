@@ -1,6 +1,7 @@
-import { lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { chmod, link, lstat, mkdtemp, mkdir, readdir, readFile, realpath, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
+import { renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -15,6 +16,8 @@ import {
   morrowClientConfigPath,
   restrictToCurrentAccount,
   windowsPrivateFileCommand,
+  withoutMorrowClientJson,
+  withoutMorrowCodexTable,
   writeClientConfigBundle,
   writeLocalCanvasConfig,
   writePrivateLocalFile,
@@ -39,6 +42,75 @@ function refusalOf(attempt: () => unknown): MorrowClientConfigRefusal {
   }
   throw new Error("expected a Morrow client configuration refusal");
 }
+
+describe("withoutMorrowCodexTable", () => {
+  it("uses TOML key identity for bare, quoted, and escaped Morrow table names", () => {
+    const prefix = "model = \"gpt-6\"\n\n";
+    for (const header of [
+      "[mcp_servers.morrow]",
+      "[mcp_servers.\"morrow\"]",
+      "[mcp_servers.'morrow']",
+      "[mcp_servers.\"mo\\u0072row\"]",
+      "[ mcp_servers . morrow ] # same table",
+    ]) {
+      expect(withoutMorrowCodexTable(`${prefix}${header}\ncommand = \"node\"\n`)).toBe("model = \"gpt-6\"\n");
+    }
+  });
+
+  it("refuses a later table because the append-only installer did not create that shape", () => {
+    const content = "[mcp_servers.\"morrow\"]\ncommand = \"node\"\n\n[projects.\"/tmp/course\"]\ntrust_level = \"trusted\"\n";
+    expect(() => withoutMorrowCodexTable(content)).toThrow(/without rewriting existing TOML/);
+  });
+});
+
+describe("withoutMorrowClientJson", () => {
+  it("removes an escaped Morrow member from JSONC without changing any unrelated byte", () => {
+    const content = "{\r\n"
+      + "\t// Keep the document comment.\r\n"
+      + "\t\"limit\" : 9007199254740993123456789,\r\n"
+      + "\t\"mcpServers\" : {\r\n"
+      + "\t\t\"other\" : { \"command\" : \"other\", \"id\" : 9007199254740993123456788 }, // keep this comment\r\n"
+      + "\t\t\"mo\\u0072row\" : { \"command\" : \"node\" }, /* removal boundary */\r\n"
+      + "\t},\r\n"
+      + "\t\"tail\" : \"a literal, } stays inside this string\",\r\n"
+      + "}\r\n";
+    const expected = "{\r\n"
+      + "\t// Keep the document comment.\r\n"
+      + "\t\"limit\" : 9007199254740993123456789,\r\n"
+      + "\t\"mcpServers\" : {\r\n"
+      + "\t\t\"other\" : { \"command\" : \"other\", \"id\" : 9007199254740993123456788 }, // keep this comment\r\n"
+      + "\t\t /* removal boundary */\r\n"
+      + "\t},\r\n"
+      + "\t\"tail\" : \"a literal, } stays inside this string\",\r\n"
+      + "}\r\n";
+
+    expect(withoutMorrowClientJson(content)).toBe(expected);
+  });
+
+  it("accepts every member position, trailing comma form, and supported container", () => {
+    expect(withoutMorrowClientJson('{"mcpServers":{"morrow":{},"other":1}}'))
+      .toBe('{"mcpServers":{"other":1}}');
+    expect(withoutMorrowClientJson('{"mcpServers":{"first":1,"morrow":{},"last":2}}'))
+      .toBe('{"mcpServers":{"first":1,"last":2}}');
+    expect(withoutMorrowClientJson('{"mcpServers":{"other":1,"morrow":{}}}'))
+      .toBe('{"mcpServers":{"other":1}}');
+    expect(withoutMorrowClientJson('{"mcpServers":{"morrow":{},}}'))
+      .toBe('{"mcpServers":{}}');
+    expect(withoutMorrowClientJson('{"servers":{"other":1,"morrow":{},}}', "servers"))
+      .toBe('{"servers":{"other":1,}}');
+  });
+
+  it("returns null only when the exact semantic member is absent and refuses duplicates", () => {
+    expect(withoutMorrowClientJson('{"mcpServers":{"tomorrow":{}}}')).toBeNull();
+    expect(withoutMorrowClientJson('{"other":true}')).toBeNull();
+    expect(() => withoutMorrowClientJson('{"mcpServers":{"morrow":{},"mo\\u0072row":{}}}'))
+      .toThrow(/appears more than once/);
+    expect(() => withoutMorrowClientJson('{"mcpServers":{},"mcpServers":{"morrow":{}}}'))
+      .toThrow(/appears more than once/);
+    expect(() => withoutMorrowClientJson('{"mcpServers":{"morrow":{}},"mcpServers":{}}'))
+      .toThrow(/appears more than once/);
+  });
+});
 
 describe("buildClientConfigBundle", () => {
   it("builds one local browser-connector configuration without credentials", () => {
@@ -281,6 +353,8 @@ describe("project installation and hermetic parity", () => {
       await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
       await writeFile(upstreamConfigPath, "{}\n", "utf8");
       const options = { repositoryRoot, upstreamConfigPath, serverEntryPath, nodeCommand: process.execPath };
+      const canonicalServerEntryPath = await realpath(serverEntryPath);
+      const canonicalUpstreamConfigPath = await realpath(upstreamConfigPath);
 
       const codex = installMorrowClient({ ...options, client: "codex" });
       const claude = installMorrowClient({ ...options, client: "claude-code" });
@@ -291,7 +365,7 @@ describe("project installation and hermetic parity", () => {
       expect(await readFile(join(repositoryRoot, ".codex", "config.toml"), "utf8"))
         .toContain("[mcp_servers.morrow]");
       expect(JSON.parse(await readFile(join(repositoryRoot, ".mcp.json"), "utf8")))
-        .toMatchObject({ mcpServers: { morrow: { env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath } } } });
+        .toMatchObject({ mcpServers: { morrow: { env: { MORROW_UPSTREAMS_FILE: canonicalUpstreamConfigPath } } } });
       expect(JSON.parse(await readFile(join(repositoryRoot, ".gemini", "settings.json"), "utf8")))
         .toMatchObject({ mcpServers: { morrow: { trust: false } } });
 
@@ -321,9 +395,9 @@ describe("project installation and hermetic parity", () => {
       expect(separateCodex.path).toBe(join(canonicalProjectRoot, ".codex", "config.toml"));
       expect(await readFile(separateCodex.path, "utf8")).toContain(`cwd = ${JSON.stringify(canonicalProjectRoot)}`);
       expect(JSON.parse(await readFile(separateClaude.path, "utf8")))
-        .toMatchObject({ mcpServers: { morrow: { cwd: canonicalProjectRoot, args: [serverEntryPath], env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath } } } });
+        .toMatchObject({ mcpServers: { morrow: { cwd: canonicalProjectRoot, args: [canonicalServerEntryPath], env: { MORROW_UPSTREAMS_FILE: canonicalUpstreamConfigPath } } } });
       expect(JSON.parse(await readFile(separateGemini.path, "utf8")))
-        .toMatchObject({ mcpServers: { morrow: { cwd: canonicalProjectRoot, args: [serverEntryPath], env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath } } } });
+        .toMatchObject({ mcpServers: { morrow: { cwd: canonicalProjectRoot, args: [canonicalServerEntryPath], env: { MORROW_UPSTREAMS_FILE: canonicalUpstreamConfigPath } } } });
       expect(() => installMorrowClient({
         ...options,
         client: "codex",
@@ -407,7 +481,15 @@ describe("project installation and hermetic parity", () => {
       await writeFile(upstreamConfigPath, "{}\n", "utf8");
 
       const canonicalRepositoryRoot = await realpath(repositoryRoot);
-      const generated = fileContent(buildClientConfigBundle({ ...options, workspaceRoot: canonicalRepositoryRoot }), "codex.config.toml")
+      const canonicalOptions = {
+        ...options,
+        repositoryRoot: canonicalRepositoryRoot,
+        workspaceRoot: canonicalRepositoryRoot,
+        serverEntryPath: await realpath(serverEntryPath),
+        upstreamConfigPath: await realpath(upstreamConfigPath),
+        nodeCommand: await realpath(process.execPath),
+      };
+      const generated = fileContent(buildClientConfigBundle(canonicalOptions), "codex.config.toml")
         .replace("[mcp_servers.morrow]", "[mcp_servers.\"morrow\"]");
       const equivalentQuoted = `model = "gpt-6"\n\n${generated}`;
       await writeFile(codexPath, equivalentQuoted, "utf8");
@@ -417,13 +499,13 @@ describe("project installation and hermetic parity", () => {
       const unrelated = "model = \"gpt-6\"\n";
       await writeFile(codexPath, unrelated, "utf8");
       expect(installMorrowClient(options)).toMatchObject({ changed: true });
-      expect(await readFile(codexPath, "utf8")).toBe(`${unrelated.trimEnd()}\n\n${fileContent(buildClientConfigBundle({ ...options, workspaceRoot: canonicalRepositoryRoot }), "codex.config.toml")}`);
+      expect(await readFile(codexPath, "utf8")).toBe(`${unrelated.trimEnd()}\n\n${fileContent(buildClientConfigBundle(canonicalOptions), "codex.config.toml")}`);
 
       const trailingWhitespace = "model = \"gpt-6\"  \n# keep this exact spacing\n\n\n";
       await writeFile(codexPath, trailingWhitespace, "utf8");
       expect(installMorrowClient(options)).toMatchObject({ changed: true });
       expect(await readFile(codexPath, "utf8"))
-        .toBe(`${trailingWhitespace}${fileContent(buildClientConfigBundle({ ...options, workspaceRoot: canonicalRepositoryRoot }), "codex.config.toml")}`);
+        .toBe(`${trailingWhitespace}${fileContent(buildClientConfigBundle(canonicalOptions), "codex.config.toml")}`);
 
       const conflictingInline = "mcp_servers = { morrow = { command = \"other\" } }\n";
       await writeFile(codexPath, conflictingInline, "utf8");
@@ -460,6 +542,9 @@ describe("project installation and hermetic parity", () => {
       await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
       await writeFile(upstreamConfigPath, "{}\n", "utf8");
       const canonicalRepositoryRoot = await realpath(repositoryRoot);
+      const canonicalServerEntryPath = await realpath(serverEntryPath);
+      const canonicalUpstreamConfigPath = await realpath(upstreamConfigPath);
+      const canonicalNodeCommand = await realpath(process.execPath);
       const cursorPath = join(canonicalRepositoryRoot, ".cursor", "mcp.json");
       const vscodePath = join(canonicalRepositoryRoot, ".vscode", "mcp.json");
 
@@ -474,9 +559,9 @@ describe("project installation and hermetic parity", () => {
         mcpServers: {
           morrow: {
             type: "stdio",
-            command: process.execPath,
-            args: [serverEntryPath],
-            env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+            command: canonicalNodeCommand,
+            args: [canonicalServerEntryPath],
+            env: { MORROW_UPSTREAMS_FILE: canonicalUpstreamConfigPath },
           },
         },
       });
@@ -484,10 +569,10 @@ describe("project installation and hermetic parity", () => {
         servers: {
           morrow: {
             type: "stdio",
-            command: process.execPath,
-            args: [serverEntryPath],
+            command: canonicalNodeCommand,
+            args: [canonicalServerEntryPath],
             cwd: canonicalRepositoryRoot,
-            env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+            env: { MORROW_UPSTREAMS_FILE: canonicalUpstreamConfigPath },
           },
         },
       });
@@ -496,6 +581,8 @@ describe("project installation and hermetic parity", () => {
       expect(installMorrowClient({ ...options, client: "vscode" })).toMatchObject({ changed: false });
 
       if (process.platform !== "win32") {
+        await chmod(cursorPath, 0o666);
+        expect(installMorrowClient({ ...options, client: "cursor" })).toMatchObject({ changed: false });
         expect((await stat(cursorPath)).mode & 0o777).toBe(0o600);
         expect((await stat(vscodePath)).mode & 0o777).toBe(0o600);
       }
@@ -622,6 +709,64 @@ describe("project installation and hermetic parity", () => {
     }
   });
 
+  it("preserves JSON comments and trailing commas in VS Code and Gemini configuration", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-json-comments-"));
+    const repositoryRoot = join(directory, "repo");
+    const serverEntryPath = join(repositoryRoot, "packages", "mcp-server", "dist", "index.js");
+    const upstreamConfigPath = join(repositoryRoot, "morrow.upstreams.json");
+    const vscodePath = join(repositoryRoot, ".vscode", "mcp.json");
+    const geminiPath = join(repositoryRoot, ".gemini", "settings.json");
+    const vscode = `{
+  // Keep the shared development server.
+  "servers": {
+    "other": { "command": "other" }, // This comma is intentional.
+  },
+  /* Keep prompt inputs beside the servers. */
+  "inputs": [],
+}
+`;
+    const gemini = `{
+  /* Personal display setting. */
+  "theme": "night 🌙", // Keep this value. 🌌
+}
+`;
+    const options = { repositoryRoot, upstreamConfigPath, serverEntryPath, nodeCommand: process.execPath };
+    try {
+      await mkdir(dirname(serverEntryPath), { recursive: true });
+      await mkdir(dirname(vscodePath), { recursive: true });
+      await mkdir(dirname(geminiPath), { recursive: true });
+      await writeFile(serverEntryPath, "console.error('fixture');\n", "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      await writeFile(vscodePath, vscode, "utf8");
+      await writeFile(geminiPath, gemini, "utf8");
+
+      expect(installMorrowClient({ ...options, client: "vscode" })).toMatchObject({ changed: true });
+      expect(installMorrowClient({ ...options, client: "gemini-cli" })).toMatchObject({ changed: true });
+
+      const updatedVscode = await readFile(vscodePath, "utf8");
+      const updatedGemini = await readFile(geminiPath, "utf8");
+      expect(updatedVscode).toContain("// Keep the shared development server.");
+      expect(updatedVscode).toContain('"other": { "command": "other" }, // This comma is intentional.');
+      expect(updatedVscode).toContain("/* Keep prompt inputs beside the servers. */");
+      expect(updatedVscode).toContain('"morrow": {');
+      expect(updatedGemini).toContain("/* Personal display setting. */");
+      expect(updatedGemini).toContain('"theme": "night 🌙", // Keep this value. 🌌');
+      expect(updatedGemini).toContain('"mcpServers": {');
+      expect(installMorrowClient({ ...options, client: "vscode" })).toMatchObject({ changed: false });
+      expect(installMorrowClient({ ...options, client: "gemini-cli" })).toMatchObject({ changed: false });
+      expect(await readFile(vscodePath, "utf8")).toBe(updatedVscode);
+      expect(await readFile(geminiPath, "utf8")).toBe(updatedGemini);
+
+      const malformed = "{ /* never closed\n";
+      await writeFile(geminiPath, malformed, "utf8");
+      expect(() => installMorrowClient({ ...options, client: "gemini-cli" }))
+        .toThrow(/not valid JSON: unterminated block comment/);
+      expect(await readFile(geminiPath, "utf8")).toBe(malformed);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("binds an exact executable and refuses a server entry whose link escapes the repository", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-client-runtime-binding-"));
     const repositoryRoot = join(directory, "repo");
@@ -651,7 +796,7 @@ describe("project installation and hermetic parity", () => {
       const settings = JSON.parse(await readFile(join(repositoryRoot, ".gemini", "settings.json"), "utf8")) as {
         mcpServers: { morrow: { command: string } };
       };
-      expect(settings.mcpServers.morrow.command).toBe(nodeLink);
+      expect(settings.mcpServers.morrow.command).toBe(await realpath(nodeLink));
 
       if (process.platform !== "win32") {
         const nonExecutable = join(repositoryRoot, "not-executable");
@@ -659,6 +804,58 @@ describe("project installation and hermetic parity", () => {
         expect(() => installMorrowClient({ ...options, nodeCommand: nonExecutable }))
           .toThrow(/nodeCommand is not executable/);
       }
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("stores the canonical files and workspace that setup validated", async () => {
+    if (process.platform === "win32") return;
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-canonical-launch-"));
+    const repositoryRoot = join(directory, "repo");
+    const repositoryLink = join(directory, "repo-link");
+    const server = join(repositoryRoot, "runtime", "server.js");
+    const serverLink = join(repositoryRoot, "runtime", "server-link.js");
+    const upstream = join(repositoryRoot, "config", "upstreams.json");
+    const upstreamLink = join(repositoryRoot, "config", "upstreams-link.json");
+    const workspace = join(directory, "course");
+    const workspaceLink = join(directory, "course-link");
+    const nodeLink = join(directory, "node-link");
+    try {
+      await mkdir(dirname(server), { recursive: true });
+      await mkdir(dirname(upstream), { recursive: true });
+      await mkdir(workspace);
+      await writeFile(server, "console.error('sealed server');\n", "utf8");
+      await writeFile(upstream, "{}\n", "utf8");
+      await symlink(repositoryRoot, repositoryLink, "dir");
+      await symlink(server, serverLink);
+      await symlink(upstream, upstreamLink);
+      await symlink(workspace, workspaceLink, "dir");
+      await symlink(process.execPath, nodeLink);
+
+      installMorrowClient({
+        repositoryRoot: repositoryLink,
+        upstreamConfigPath: upstreamLink,
+        serverEntryPath: serverLink,
+        nodeCommand: nodeLink,
+        workspaceRoot: workspaceLink,
+        client: "gemini-cli",
+      });
+      const configurationPath = join(await realpath(repositoryRoot), ".gemini", "settings.json");
+      const entry = (JSON.parse(await readFile(configurationPath, "utf8")) as {
+        mcpServers: { morrow: { command: string; args: string[]; cwd: string; env: { MORROW_UPSTREAMS_FILE: string } } };
+      }).mcpServers.morrow;
+      expect(entry).toMatchObject({
+        command: await realpath(process.execPath),
+        args: [await realpath(server)],
+        cwd: await realpath(workspace),
+        env: { MORROW_UPSTREAMS_FILE: await realpath(upstream) },
+      });
+
+      await rm(nodeLink);
+      await symlink("/bin/echo", nodeLink);
+      expect((JSON.parse(await readFile(configurationPath, "utf8")) as { mcpServers: { morrow: { command: string } } })
+        .mcpServers.morrow.command).toBe(await realpath(process.execPath));
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -897,16 +1094,20 @@ describe("project installation and hermetic parity", () => {
       }
 
       const configurationPath = join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json");
+      const canonicalRepositoryRoot = await realpath(repositoryRoot);
+      const canonicalServerEntryPath = await realpath(serverEntryPath);
+      const canonicalUpstreamConfigPath = await realpath(upstreamConfigPath);
+      const canonicalNodeCommand = await realpath(process.execPath);
       const installed = installMorrowClient(options);
       expect(installed).toMatchObject({ scope: "user", path: configurationPath, changed: true });
       expect(JSON.parse(await readFile(configurationPath, "utf8"))).toEqual({
         mcpServers: {
           morrow: {
             type: "stdio",
-            command: process.execPath,
-            args: [serverEntryPath],
-            cwd: repositoryRoot,
-            env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+            command: canonicalNodeCommand,
+            args: [canonicalServerEntryPath],
+            cwd: canonicalRepositoryRoot,
+            env: { MORROW_UPSTREAMS_FILE: canonicalUpstreamConfigPath },
           },
         },
       });
@@ -988,7 +1189,7 @@ describe("project installation and hermetic parity", () => {
       const cursor = installMorrowClient({ ...options, client: "cursor" });
       expect(cursor).toMatchObject({ scope: "user", path: join(home, ".cursor", "mcp.json"), changed: true });
       expect(JSON.parse(await readFile(cursor.path, "utf8")))
-        .toMatchObject({ mcpServers: { morrow: { args: [serverEntryPath] } } });
+        .toMatchObject({ mcpServers: { morrow: { args: [await realpath(serverEntryPath)] } } });
 
       expect(() => installMorrowClient({ ...options, client: "vscode" }))
         .toThrow(/MCP: Open User Configuration/);
@@ -1093,13 +1294,15 @@ describe("project installation and hermetic parity", () => {
         "--client-project", clientProject,
       ], { encoding: "utf8" });
       expect(projectInstall.status).toBe(0);
+      const canonicalServerEntryPath = await realpath(serverEntryPath);
+      const canonicalUpstreamConfigPath = await realpath(upstreamConfigPath);
       expect(JSON.parse(await readFile(join(clientProject, ".mcp.json"), "utf8")))
         .toMatchObject({
           mcpServers: {
             morrow: {
               cwd: await realpath(clientProject),
-              args: [serverEntryPath],
-              env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath },
+              args: [canonicalServerEntryPath],
+              env: { MORROW_UPSTREAMS_FILE: canonicalUpstreamConfigPath },
             },
           },
         });
@@ -1115,7 +1318,7 @@ describe("project installation and hermetic parity", () => {
       expect(JSON.parse(await readFile(join(editorProject, ".cursor", "mcp.json"), "utf8")))
         .toMatchObject({
           mcpServers: {
-            morrow: { type: "stdio", args: [serverEntryPath], env: { MORROW_UPSTREAMS_FILE: upstreamConfigPath } },
+            morrow: { type: "stdio", args: [canonicalServerEntryPath], env: { MORROW_UPSTREAMS_FILE: canonicalUpstreamConfigPath } },
           },
         });
 
@@ -1128,7 +1331,7 @@ describe("project installation and hermetic parity", () => {
       expect(JSON.parse(await readFile(join(editorProject, ".vscode", "mcp.json"), "utf8")))
         .toMatchObject({
           servers: {
-            morrow: { type: "stdio", cwd: await realpath(editorProject), args: [serverEntryPath] },
+            morrow: { type: "stdio", cwd: await realpath(editorProject), args: [canonicalServerEntryPath] },
           },
         });
 
@@ -1254,19 +1457,115 @@ describe("project installation and hermetic parity", () => {
  * restriction is applied before any content exists, and that a computer which
  * cannot apply it is left with nothing Morrow wrote.
  */
+describe("CLI MCP operation bounds", () => {
+  // A raw stdio JSON-RPC peer that stops settling requests at one chosen
+  // point, ignores SIGTERM, and records its pid so the test can prove the
+  // command reclaimed it.
+  const STALLED_PEER = `
+const fs = require("node:fs");
+const mode = process.env.MORROW_STALLED_PEER_MODE;
+fs.writeFileSync(process.env.MORROW_STALLED_PEER_PID_FILE, String(process.pid));
+process.on("SIGTERM", () => {});
+let pending = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  pending += chunk;
+  let newline;
+  while ((newline = pending.indexOf("\\n")) >= 0) {
+    const line = pending.slice(0, newline);
+    pending = pending.slice(newline + 1);
+    if (!line.trim()) continue;
+    const message = JSON.parse(line);
+    if (message.method === "initialize" && mode === "stall-tool") {
+      process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: message.id, result: {
+        protocolVersion: message.params.protocolVersion,
+        capabilities: { tools: {} },
+        serverInfo: { name: "stalled-peer", version: "1.0.0" },
+      } }) + "\\n");
+    }
+  }
+});
+setInterval(() => {}, 1000);
+`;
+
+  async function stalledPeerCommand(mode: string): Promise<{ readonly status: number | null; readonly stderr: string; readonly elapsedMs: number; readonly peerPid: number }> {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-cli-stalled-peer-"));
+    try {
+      const peerPath = join(directory, "stalled-peer.cjs");
+      const pidFile = join(directory, "peer.pid");
+      const upstreamConfigPath = join(directory, "upstreams.json");
+      await writeFile(peerPath, STALLED_PEER, "utf8");
+      await writeFile(upstreamConfigPath, "{}\n", "utf8");
+      const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+      const startedAt = Date.now();
+      const result = spawnSync(process.execPath, [
+        cliPath, "backend", "status", "--json",
+        "--repository", directory, "--upstreams", upstreamConfigPath, "--server-entry", peerPath,
+        "--startup-timeout", "1", "--tool-timeout", "1",
+      ], {
+        encoding: "utf8",
+        timeout: 20_000,
+        env: { ...process.env, MORROW_STALLED_PEER_MODE: mode, MORROW_STALLED_PEER_PID_FILE: pidFile },
+      });
+      const elapsedMs = Date.now() - startedAt;
+      const peerPid = Number(await readFile(pidFile, "utf8").catch(() => "0"));
+      return { status: result.status, stderr: `${result.stderr}${result.error ? `\n${result.error.message}` : ""}`, elapsedMs, peerPid };
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  const alive = (pid: number): boolean => {
+    try { process.kill(pid, 0); return true; } catch { return false; }
+  };
+
+  it.each([
+    ["stall-initialize", /MCP initialization did not settle within 1000 ms/],
+    ["stall-tool", /MCP tool morrow_health did not settle within 1000 ms/],
+  ])("settles a %s peer within the owned deadline and reclaims its process", async (mode, message) => {
+    const { status, stderr, elapsedMs, peerPid } = await stalledPeerCommand(mode);
+    expect(stderr).toMatch(message);
+    expect(status).toBe(1);
+    expect(elapsedMs).toBeLessThan(15_000);
+    expect(peerPid).toBeGreaterThan(0);
+    expect(alive(peerPid)).toBe(false);
+  }, 30_000);
+});
+
 describe("private file restriction", () => {
   const succeeds = () => ({ status: 0, stdout: "restricted\n" });
 
-  it("leaves POSIX permissions alone and never runs a command there", () => {
-    const calls: string[] = [];
-    const run = (command: string) => {
-      calls.push(command);
-      return succeeds();
-    };
-    for (const platform of ["darwin", "linux", "freebsd"]) {
-      restrictToCurrentAccount("/tmp/morrow-private-file", { platform, run });
+  it("enforces POSIX mode and verifies macOS ACL removal", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-posix-private-"));
+    const path = join(directory, "config.json");
+    try {
+      await writeFile(path, "{}\n", { mode: 0o666 });
+      for (const platform of ["linux", "freebsd"]) {
+        const calls: string[] = [];
+        restrictToCurrentAccount(path, { platform, run: (command) => {
+          calls.push(command);
+          return succeeds();
+        } });
+        expect(calls).toEqual([]);
+        expect((await stat(path)).mode & 0o777).toBe(0o600);
+      }
+      const calls: string[] = [];
+      restrictToCurrentAccount(path, { platform: "darwin", run: (command) => {
+        calls.push(command);
+        return command === "/bin/ls"
+          ? { status: 0, stdout: "-rw------- 1 user staff 3 Sep 13 00:00 config.json\n" }
+          : { status: 0, stdout: "" };
+      } });
+      expect(calls).toEqual(["/bin/chmod", "/bin/ls"]);
+      expect(() => restrictToCurrentAccount(path, {
+        platform: "darwin",
+        run: (command) => command === "/bin/ls"
+          ? { status: 0, stdout: "-rw-------+ 1 user staff 3 Sep 13 00:00 config.json\n 0: group:everyone allow read\n" }
+          : { status: 0, stdout: "" },
+      })).toThrow(/access-control list/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
     }
-    expect(calls).toEqual([]);
   });
 
   it("restricts a Windows file to this account, SYSTEM and Administrators, with inheritance off", () => {
@@ -1344,6 +1643,40 @@ describe("private file restriction", () => {
       expect(restricted).toHaveLength(1);
       expect(restricted[0]!.startsWith(`${target}.tmp-`)).toBe(true);
       expect((await readdir(directory)).sort()).toEqual(["mcp.json", "new"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses a temporary-file substitution before writing configuration bytes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-private-file-race-"));
+    const target = join(directory, "mcp.json");
+    const displaced = join(directory, "displaced.tmp");
+    let calls = 0;
+    let refused = false;
+    try {
+      try {
+        writePrivateLocalFile(target, "intended configuration\n", {
+          platform: "win32",
+          run: (_command, args) => {
+            const encoded = /FromBase64String\('([A-Za-z0-9+/=]+)'\)/.exec(args[5] || "")?.[1] || "";
+            const restrictedPath = Buffer.from(encoded, "base64").toString("utf16le");
+            if (calls++ === 0) {
+              renameSync(restrictedPath, displaced);
+              writeFileSync(restrictedPath, "substituted configuration\n", { mode: 0o600 });
+            }
+            return { status: 0, stdout: "restricted\n" };
+          },
+        });
+      } catch (error) {
+        if (!/changed during private-file preparation/u.test(String((error as Error).message))) throw error;
+        refused = true;
+      }
+      expect({
+        refused,
+        target: await readFile(target, "utf8").catch(() => null),
+        displaced: await readFile(displaced, "utf8"),
+      }).toEqual({ refused: true, target: null, displaced: "" });
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1434,13 +1767,44 @@ describe("writeClientConfigBundle", () => {
         outputDirectory,
         serverEntryPath,
       })).toThrow(/Refusing to overwrite/);
+      const oldGeneration = Object.fromEntries(await Promise.all(names.map(async (name) => [
+        name,
+        await readFile(join(outputDirectory, name), "utf8"),
+      ])));
+      const otherWorkspace = join(repositoryRoot, "other-workspace");
+      await mkdir(otherWorkspace);
+      let restrictions = 0;
       expect(() => writeClientConfigBundle({
         repositoryRoot,
         upstreamConfigPath,
         outputDirectory,
+        workspaceRoot: otherWorkspace,
         serverEntryPath,
         force: true,
-      })).not.toThrow();
+        restriction: {
+          platform: "win32",
+          run: () => (++restrictions === 4
+            ? { status: 1, stdout: "" }
+            : { status: 0, stdout: "morrow-private-file-restricted" }),
+        },
+      })).toThrow(/could not restrict/);
+      for (const name of names) {
+        expect(await readFile(join(outputDirectory, name), "utf8")).toBe(oldGeneration[name]);
+      }
+      expect((await readdir(repositoryRoot)).some((name) => name.includes("clients.staging-"))).toBe(false);
+
+      const replaced = writeClientConfigBundle({
+        repositoryRoot,
+        upstreamConfigPath,
+        outputDirectory,
+        workspaceRoot: otherWorkspace,
+        serverEntryPath,
+        force: true,
+      });
+      for (const name of names) {
+        expect(await readFile(join(outputDirectory, name), "utf8")).toBe(fileContent(replaced, name));
+      }
+      expect(await readFile(join(outputDirectory, "manifest.json"), "utf8")).not.toBe(oldGeneration["manifest.json"]);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -1448,6 +1812,48 @@ describe("writeClientConfigBundle", () => {
 });
 
 describe("existing configuration read bound", () => {
+  it.skipIf(process.platform === "win32")("refuses a multiply linked configuration without changing its peer", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-client-config-link-"));
+    try {
+      const upstreamConfigPath = join(directory, "morrow.upstreams.json");
+      const serverEntryPath = join(directory, "packages", "mcp-server", "dist", "index.js");
+      await mkdir(dirname(serverEntryPath), { recursive: true });
+      await writeFile(upstreamConfigPath, "{}\n");
+      await writeFile(serverEntryPath, "// fixture entry\n");
+      const options = {
+        client: "claude-code" as const,
+        scope: "project" as const,
+        repositoryRoot: directory,
+        upstreamConfigPath,
+        serverEntryPath,
+        nodeCommand: process.execPath,
+      };
+      const installed = installMorrowClient(options);
+      const peer = join(directory, "shared-client-config.json");
+      await link(installed.path, peer);
+      await chmod(peer, 0o644);
+      const before = await readFile(peer, "utf8");
+      expect((await lstat(installed.path)).nlink).toBe(2);
+
+      let refused = false;
+      try {
+        installMorrowClient(options);
+      } catch (error) {
+        if (!/single-link/u.test(String((error as Error).message))) throw error;
+        refused = true;
+      }
+      expect({
+        refused,
+        targetMode: (await stat(installed.path)).mode & 0o777,
+        peerMode: (await stat(peer)).mode & 0o777,
+        targetContent: await readFile(installed.path, "utf8"),
+        peerContent: await readFile(peer, "utf8"),
+      }).toEqual({ refused: true, targetMode: 0o644, peerMode: 0o644, targetContent: before, peerContent: before });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("refuses to edit an existing configuration larger than 4 MiB instead of reading it whole", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-client-config-"));
     try {

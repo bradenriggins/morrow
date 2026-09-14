@@ -36,6 +36,7 @@ If a bridge response is lost after a command was sent, the server records the re
 ## Build the source catalog first
 
 The overlay binds itself to one exact donor revision and one exact source-catalog digest.
+It also binds the four overlay modules to one content digest. The MCP listener rejects an installed overlay from an older source revision, and the extension refuses a mixed partial copy before it opens a socket.
 
 ```bash
 pnpm build
@@ -58,7 +59,7 @@ Generate a local token and keep it out of Git:
 export MORROW_LEGACY_BRIDGE_TOKEN="$(node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))")"
 ```
 
-The token is carried only in the first WebSocket message. It is not placed in the URL, catalog, MCP metadata, logs, or generated evidence.
+The token never crosses the WebSocket. The extension first sends one random nonce with its public build identity. The Bridge returns an HMAC proof bound to that nonce and a second random nonce. Only after the extension verifies that proof does it send its own HMAC proof and current bindings. The token is not placed in the URL, catalog, MCP metadata, logs, or generated evidence.
 
 ## Install the donor overlay
 
@@ -73,6 +74,8 @@ The installer:
 
 - verifies the donor checkout is at `7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4`;
 - refuses unrelated tracked changes;
+- resolves the repository-common exclude file through Git, including when the donor is a linked worktree;
+- admits every destination and exclusion path before it changes donor files, then patches the background entrypoint last;
 - verifies the source catalog belongs to the same revision;
 - adds a marked import and installer call to `extension/background.js`;
 - copies the four bridge modules into the extension directory;
@@ -84,6 +87,8 @@ The tracked `background.js` patch is intentional and reversible. Remove it with:
 ```bash
 MORROW_LEGACY_ROOT=/absolute/path/to/morrow-legacy node scripts/remove-morrow-legacy-bridge.mjs
 ```
+
+Removal requires the exact pinned donor revision, exact current overlay modules, exact generated local configuration, and unchanged generated marker blocks. It preserves donor edits outside those blocks. It refuses linked, changed, partial, or unknown overlay state without deleting it, and restores the original installed state if a later removal step fails.
 
 ## Start the internal bridge MCP
 
@@ -101,6 +106,7 @@ ws://127.0.0.1:32145/morrow-bridge/v1
 ```
 
 The port may be changed with `MORROW_LEGACY_BRIDGE_PORT`. The server never binds a non-loopback interface.
+Startup accepts the source catalog only as one stable regular UTF-8 file no larger than 16 MiB. It refuses links, nonregular files, concurrent replacement, and larger input before MCP stdio opens.
 
 For a packed or stable extension id, set:
 
@@ -116,10 +122,15 @@ Copy `morrow.upstreams.with-legacy-bridge.example.json` to `morrow.upstreams.jso
 
 ```bash
 export MORROW_MERIDIAN_CATALOG_PATH=/absolute/path/to/meridian.live.json
+export MORROW_NEW_REPO_ROOT=$PWD
+export MORROW_RELEASE_REVISION=$(git rev-parse HEAD)
+export MORROW_LEGACY_ENTRYPOINT_SHA256=$(shasum -a 256 packages/legacy-bridge-mcp/dist/index.js | awk '{print $1}')
 export MORROW_LEGACY_CATALOG_PATH=$PWD/artifacts/catalogs/morrow-legacy.canvas.json
 export MORROW_LEGACY_BRIDGE_TOKEN
 pnpm start
 ```
+
+The local Git attestation binds the bridge adapter to this exact Morrow worktree, Node.js runtime, built entrypoint bytes, arguments, working directory, and environment policy. The legacy catalog and `MORROW_LEGACY_EXPECTED_REVISION` separately bind the external donor source.
 
 ExamplePlatform remains the preferred source for exact-name collisions in the example. Morrow legacy retains its unique tool names and receives deterministic aliases when both donors advertise the same public name.
 
@@ -133,6 +144,8 @@ The donor adapter sends only a bounded binding projection:
 - course label when known;
 - canonical Canvas origin when known;
 - runtime-verification state and last-seen time.
+
+The authenticated projection also carries a one-way principal fingerprint, the Canvas session authority generation, and the exact catalog digest. The source privacy boundary requires all three before it returns public course data.
 
 For an incoming tool call, the adapter requires either:
 
@@ -161,6 +174,8 @@ It deliberately does not add a task-action tool.
 | Extension not connected | `bridge_unavailable` | No |
 | Command rejected before execution | typed bridge problem | No |
 | Deadline or disconnect after send | `bridge_outcome_unknown` | No |
+| Cancellation before legacy task staging | `request_cancelled_before_dispatch` | No |
+| Cancellation after legacy task staging may have started | `write_outcome_unknown` | No |
 | Write accepted by extension | staged task with `approval_required` | Not applicable |
 | Provider mutation | Still owned by donor task executor after separate approval | Not applicable |
 

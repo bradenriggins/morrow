@@ -14,12 +14,12 @@ const { installerState } = require("../shared/contract.cjs");
 const SELECTORS = [
   "#setup", "#refresh", "#header-status", ".intro", "#windows-note", "#macos-note", "#progress-list", "#loading",
   "#action-content", "#action-title", "#action-copy", "#action-body", "#problem",
-  "#updates-panel", "#updates-copy", "#updates-actions", "#blackboard-panel", "#blackboard-copy",
+  "#updates-panel", "#updates-title", "#updates-copy", "#updates-actions", "#blackboard-panel", "#blackboard-summary", "#blackboard-copy",
   "#blackboard-admin-note", "#blackboard-tenant", "#blackboard-saved-note", "#blackboard-replace-note",
   "#blackboard-form", "#blackboard-base-url", "#blackboard-application-key", "#blackboard-application-secret", "#blackboard-submit",
   "#blackboard-base-url-error", "#blackboard-application-key-error", "#blackboard-application-secret-error",
   "#blackboard-courses", "#blackboard-courses-copy", "#blackboard-course-list",
-  "#retention-panel", "#retention-title", "#retention-copy", "#retention-body",
+  "#retention-panel", "#retention-summary", "#retention-title", "#retention-copy", "#retention-body",
   "#removal-status", "#support"
 ];
 
@@ -65,9 +65,10 @@ class ShimElement {
     this.id = attributes.id || "";
     this.className = attributes.class || "";
     this.dataset = {};
-    this.attributes = {};
+    this.attributes = { ...attributes };
     this.listeners = new Map();
     this.children = [];
+    this.parentElement = null;
     this.hidden = false;
     this.open = false;
     this.value = "";
@@ -97,6 +98,7 @@ class ShimElement {
   }
 
   set innerHTML(value) {
+    if (this.contains(this.document.activeElement)) this.document.activeElement = null;
     this.html = String(value);
     this.htmlWrites += 1;
     this.children = parseChildren(this.document, this.html);
@@ -114,6 +116,14 @@ class ShimElement {
     if (!this.disabledValue) this.document.activeElement = this;
   }
 
+  get classList() {
+    return { contains: (value) => this.className.split(/\s+/).includes(value) };
+  }
+
+  contains(candidate) {
+    return candidate === this || this.children.some((child) => child.contains(candidate));
+  }
+
   addEventListener(type, handler) {
     this.listeners.set(type, handler);
   }
@@ -125,11 +135,22 @@ class ShimElement {
   }
 
   closest(selector) {
-    return matches(this, selector) ? this : null;
+    for (let current = this; current; current = current.parentElement) {
+      if (matches(current, selector)) return current;
+    }
+    return null;
   }
 
   querySelectorAll(selector) {
-    return this.children.filter((child) => matches(child, selector));
+    const found = [];
+    const visit = (element) => {
+      for (const child of element.children) {
+        if (matches(child, selector)) found.push(child);
+        visit(child);
+      }
+    };
+    visit(this);
+    return found;
   }
 
   querySelector(selector) {
@@ -140,6 +161,8 @@ class ShimElement {
 function matches(element, selector) {
   if (selector === "[data-action]") return typeof element.dataset.action === "string";
   if (selector === "button") return element.tagName === "BUTTON";
+  if (selector === "details") return element.tagName === "DETAILS";
+  if (selector === "summary") return element.tagName === "SUMMARY";
   if (selector.startsWith(".")) return element.className.split(/\s+/).includes(selector.slice(1));
   if (selector.startsWith("#")) return element.id === selector.slice(1);
   throw new Error(`the stand-in document does not support ${selector}`);
@@ -147,12 +170,21 @@ function matches(element, selector) {
 
 function parseChildren(document, html) {
   const children = [];
-  for (const [, tag, rest] of html.matchAll(/<(button|details)\b([^>]*)>/g)) {
+  const stack = [];
+  for (const [, closing, tag, rest] of html.matchAll(/<(\/)?(button|details|summary)\b([^>]*)>/g)) {
+    if (closing) {
+      if (tag === "details") stack.pop();
+      continue;
+    }
     const attributes = {};
     for (const [, name, value] of rest.matchAll(/([a-z-]+)(?:="([^"]*)")?/g)) attributes[name] = value ?? "";
     const element = new ShimElement(document, tag, attributes);
     element.open = Object.hasOwn(attributes, "open");
-    children.push(element);
+    const parent = stack.at(-1) || null;
+    element.parentElement = parent;
+    if (parent) parent.children.push(element);
+    else children.push(element);
+    if (tag === "details") stack.push(element);
   }
   return children;
 }
@@ -176,10 +208,18 @@ function setupDocument() {
   const elements = new Map();
   for (const selector of SELECTORS) {
     const inputs = Object.values(BLACKBOARD_FIELD_SELECTORS);
-    const tag = selector.endsWith("-form") ? "form" : inputs.includes(selector) ? "input" : "div";
+    const summaries = new Set(["#blackboard-summary", "#retention-summary"]);
+    const headings = new Set(["#action-title", "#updates-title"]);
+    const tag = selector.endsWith("-form") ? "form" : inputs.includes(selector) ? "input" : summaries.has(selector) ? "summary" : headings.has(selector) ? "h2" : "div";
     const attributes = selector.startsWith("#") ? { id: selector.slice(1) } : { class: selector.slice(1) };
     if (Object.hasOwn(PLATFORM_NOTES, selector)) attributes["data-platform"] = PLATFORM_NOTES[selector];
     elements.set(selector, new ShimElement(document, tag, attributes));
+  }
+  for (const [summarySelector, panelSelector] of [["#blackboard-summary", "#blackboard-panel"], ["#retention-summary", "#retention-panel"]]) {
+    const summary = elements.get(summarySelector);
+    const panel = elements.get(panelSelector);
+    summary.parentElement = panel;
+    panel.children.push(summary);
   }
   document.querySelector = (selector) => {
     const element = elements.get(selector);
@@ -246,20 +286,36 @@ async function checkStatus(dom) {
 
 async function load(name, invoke, platform) {
   const dom = setupDocument();
+  let updateListener = null;
+  let rendererReadyCalls = 0;
   globalThis.document = dom.document;
   globalThis.window = dom.window;
   globalThis.Element = ShimElement;
   globalThis.HTMLElement = ShimElement;
   globalThis.FormData = ShimFormData;
-  globalThis.morrowInstaller = platform ? { invoke, platform } : { invoke };
+  const api = {
+    invoke,
+    async rendererReady() { rendererReadyCalls += 1; },
+    subscribeUpdates(listener) {
+      updateListener = listener;
+      return () => { if (updateListener === listener) updateListener = null; };
+    }
+  };
+  globalThis.morrowInstaller = platform ? { ...api, platform } : api;
   await import(`../renderer/renderer.js?case=${name}`);
   await settle();
+  dom.rendererReadyCalls = () => rendererReadyCalls;
+  dom.publishUpdate = async (snapshot) => {
+    updateListener?.(snapshot);
+    await settle();
+  };
   return dom;
 }
 
 test("a first load that returns no state stops claiming progress and offers a retry", async () => {
   let answer = () => ({ nothing: true });
   const dom = await load("unreadable", async (method) => answer(method));
+  assert.equal(dom.rendererReadyCalls(), 1, "the renderer did not acknowledge its completed first state render");
 
   assert.equal(dom.element("#loading").hidden, true);
   assert.equal(dom.element("#action-content").hidden, false);
@@ -417,6 +473,52 @@ test("focus survives the busy re-render an action causes", async () => {
   assert.notEqual(after, before);
   assert.equal(dom.document.activeElement, after);
   assert.equal(after.disabled, false);
+});
+
+test("a refresh restores a repeated course action by course identity", async (t) => {
+  let clock = 100_000;
+  t.mock.method(Date, "now", () => clock);
+  const dom = await load("course-focus", async () => ok(state({
+    blackboard: { status: "api_configured_live_untested", tenants: [BLACKBOARD_TENANT] }
+  })));
+  const coursesBefore = dom.element("#blackboard-course-list").querySelectorAll("[data-action]");
+  assert.equal(coursesBefore.length, 2);
+  assert.equal(coursesBefore[0].dataset.action, "select-blackboard-course");
+  assert.equal(coursesBefore[1].dataset.action, "select-blackboard-course");
+  const chemistryBefore = coursesBefore.find((button) => button.dataset.courseId === "_46_2");
+  chemistryBefore.focus();
+
+  clock += 5_000;
+  await dom.window.dispatch("focus");
+  await settle();
+
+  const coursesAfter = dom.element("#blackboard-course-list").querySelectorAll("[data-action]");
+  const chemistryAfter = coursesAfter.find((button) => button.dataset.courseId === "_46_2");
+  assert.notEqual(chemistryAfter, chemistryBefore);
+  assert.equal(dom.document.activeElement, chemistryAfter);
+  assert.equal(dom.document.activeElement.dataset.courseId, "_46_2");
+  assert.equal(dom.document.activeElement.disabled, false);
+});
+
+test("a passive refresh restores each replaced disclosure summary by stable identity", async (t) => {
+  let clock = 100_000;
+  t.mock.method(Date, "now", () => clock);
+  const assistants = [
+    { id: "codex", title: "ChatGPT", tier: "primary", supported: true, detected: true },
+    { id: "claude-code", title: "Claude Code", tier: "advanced", supported: true, detected: true, needsWorkspace: true }
+  ];
+  const dom = await load("disclosure-focus", async () => ok(state({ lifecycle: "ready_for_assistant", assistants, selectedAssistantId: null, materialsFolder: null })));
+
+  for (const className of ["advanced-assistants", "optional-setup"]) {
+    const before = dom.element("#action-body").querySelector(`.${className}`).querySelector("summary");
+    before.focus();
+    clock += 5_000;
+    await dom.window.dispatch("focus");
+    await settle();
+    const after = dom.element("#action-body").querySelector(`.${className}`).querySelector("summary");
+    assert.notEqual(after, before);
+    assert.equal(dom.document.activeElement, after, className);
+  }
 });
 
 test("choosing an assistant keeps focus on the chosen card and leaves the advanced group open", async () => {
@@ -590,6 +692,7 @@ test("a Blackboard course selected from discovery is added and removed from the 
   assert.match(dom.element("#blackboard-course-list").innerHTML, /Biology/);
   const selectBiology = dom.element("#blackboard-course-list").querySelectorAll("[data-action]").find((entry) => entry.dataset.courseId === "_45_1");
   assert.equal(selectBiology.dataset.action, "select-blackboard-course");
+  assert.equal(selectBiology.getAttribute("aria-label"), "Allow Morrow to use Biology (_45_1)");
   await dom.element("#blackboard-panel").dispatch("click", { target: selectBiology });
   await settle();
   assert.deepEqual(requests, [{ tenantId: "learn-example-edu", courseBindings: [{ courseId: "_45_1" }] }]);
@@ -602,6 +705,7 @@ test("a Blackboard course selected from discovery is added and removed from the 
 
   const remove = dom.element("#blackboard-course-list").querySelectorAll("[data-action]").find((entry) => entry.dataset.courseId === "_45_1");
   assert.equal(remove.dataset.action, "remove-blackboard-course");
+  assert.equal(remove.getAttribute("aria-label"), "Remove Biology (_45_1) from Morrow");
   await dom.element("#blackboard-panel").dispatch("click", { target: remove });
   await settle();
   assert.deepEqual(requests[2], { tenantId: "learn-example-edu", courseBindings: [{ courseId: "_46_2" }] });
@@ -644,6 +748,46 @@ test("a saved Blackboard connection names its site, account and stored name, and
   const form = dom.element("#blackboard-form");
   assert.equal(form.resets, 1);
   for (const [name, input] of Object.entries(form.fields)) assert.equal(input.value, "", name);
+});
+
+test("damaged Blackboard state shows bounded repair and local removal instead of fresh setup", async () => {
+  let current = state({ blackboard: { status: "credential_missing", tenants: [BLACKBOARD_TENANT] } });
+  const calls = [];
+  const dom = await load("blackboard-recovery", async (method) => {
+    calls.push(method);
+    if (method === "installer:remove-blackboard-data") current = state({ blackboard: { status: "not_configured", tenants: [] } });
+    return ok(current);
+  });
+
+  assert.match(dom.element("#blackboard-copy").textContent, /saved Blackboard connection, but its secret is missing/);
+  assert.doesNotMatch(dom.element("#blackboard-copy").textContent, /before it saves this connection/);
+  assert.equal(dom.element("#blackboard-submit").textContent, "Repair Blackboard connection");
+  assert.equal(dom.element("#blackboard-form").hidden, false);
+  assert.equal(dom.element("#blackboard-courses").hidden, true, "damaged credentials expose no course action");
+  const row = dom.element("#blackboard-tenant");
+  assert.match(row.innerHTML, /https:\/\/learn\.example\.edu/);
+  assert.doesNotMatch(row.innerHTML, /application-key|credential-for-example/i);
+  const remove = row.querySelector("[data-action]");
+  assert.equal(remove.dataset.action, "remove-blackboard-data");
+
+  await dom.element("#blackboard-panel").dispatch("click", { target: remove });
+  await settle();
+  assert.deepEqual(calls, ["installer:get-state", "installer:remove-blackboard-data"]);
+  assert.equal(dom.element("#blackboard-tenant").hidden, true);
+  assert.equal(dom.element("#blackboard-form").resets, 1);
+  assert.equal(dom.element("#blackboard-copy").textContent, "Morrow verifies the Blackboard account and its accessible courses before it saves this connection on this computer.");
+});
+
+test("an unreadable Blackboard config offers only bounded local recovery", async () => {
+  const dom = await load("blackboard-config-recovery", async () => ok(state({
+    blackboard: { status: "configuration_repair_required", tenants: [] }
+  })));
+
+  assert.match(dom.element("#blackboard-copy").textContent, /saved Blackboard data that it cannot safely read/);
+  assert.doesNotMatch(dom.element("#blackboard-copy").textContent, /before it saves this connection/);
+  assert.equal(dom.element("#blackboard-form").hidden, true, "an unreadable route cannot be overwritten through fresh setup");
+  assert.equal(dom.element("#blackboard-courses").hidden, true);
+  assert.equal(dom.element("#blackboard-tenant").querySelector("[data-action]").dataset.action, "remove-blackboard-data");
 });
 
 test("a refused Blackboard removal keeps the connection and says so", async () => {
@@ -726,6 +870,7 @@ test("the repair panel starts the in-app repair and then shows the state repair 
   assert.equal(dom.element("#action-title").textContent, "Repair Morrow before you connect a course.");
   const repair = dom.element("#action-body").querySelector("[data-action]");
   assert.equal(repair.dataset.action, "repair");
+  repair.focus();
 
   await dom.element("#action-body").dispatch("click", { target: repair });
   await settle();
@@ -733,6 +878,24 @@ test("the repair panel starts the in-app repair and then shows the state repair 
   assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
   assert.equal(dom.element("#header-status").textContent, "Assistant is ready");
   assert.equal(dom.element("#problem").innerHTML, "", "a repair that finished reports no problem");
+  assert.equal(dom.document.activeElement, dom.element("#action-title"), "a completed step with no primary action focuses its new heading");
+});
+
+test("a completed step whose old action is gone focuses the new primary action", async () => {
+  let current = state({ lifecycle: "repair_required", runtimeStatus: "repair_required", assistants: [], selectedAssistantId: null });
+  const dom = await load("transition-primary-focus", async (method) => {
+    if (method === "installer:repair") current = state({ bridgeDelivery: "available", bridgeLoadedInChrome: false });
+    return ok(current);
+  });
+
+  const repair = dom.element("#action-body").querySelector("[data-action]");
+  repair.focus();
+  await dom.element("#action-body").dispatch("click", { target: repair });
+  await settle();
+
+  const primary = dom.element("#action-body").querySelector(".primary-button");
+  assert.equal(primary.dataset.action, "check-bridge");
+  assert.equal(dom.document.activeElement, primary);
 });
 
 test("a repair Morrow cannot finish reports the exact reason and leaves the repair panel in place", async () => {
@@ -779,6 +942,45 @@ test("an update that did not start names the running version and offers the retr
     "Morrow could not download the update: this computer does not have enough free space for it."
   );
   assert.equal(dom.element("#updates-actions").querySelector("[data-action]").dataset.action, "check-for-updates");
+});
+
+test("a background update event redraws the open update status without another state request", async () => {
+  const methods = [];
+  const idle = {
+    schema: "morrow.desktop-update.v1",
+    status: "idle",
+    currentVersion: "1.0.0",
+    availableVersion: null,
+    automatic: true,
+    reason: "up_to_date"
+  };
+  const dom = await load("update-event", async (method) => {
+    methods.push(method);
+    return ok(state({ updates: idle }));
+  });
+  const requestsBeforeEvent = methods.length;
+  dom.element("#updates-actions").querySelector("[data-action]").focus();
+
+  const ready = {
+    schema: "morrow.desktop-update.v1",
+    status: "ready",
+    currentVersion: "1.0.0",
+    availableVersion: "1.0.1",
+    automatic: true,
+    reason: null
+  };
+  await dom.publishUpdate(ready);
+  assert.equal(methods.length, requestsBeforeEvent);
+  assert.equal(dom.element("#updates-copy").textContent, "Version 1.0.1 is ready. Restart Morrow when course work is idle to finish the update.");
+  const install = dom.element("#updates-actions").querySelector("[data-action]");
+  assert.equal(install.dataset.action, "install-update");
+  assert.equal(dom.document.activeElement, dom.element("#updates-title"), "a removed update action moves focus to the stable Updates heading");
+
+  await dom.publishUpdate(ready);
+  assert.equal(dom.element("#updates-actions").querySelector("[data-action]"), install, "an unchanged update action is not replaced");
+
+  await dom.publishUpdate({ schema: "morrow.desktop-update.v1", status: "ready", currentVersion: 1 });
+  assert.equal(dom.element("#updates-copy").textContent, "Version 1.0.1 is ready. Restart Morrow when course work is idle to finish the update.");
 });
 
 test("the data-retention panel names every path and shows the removal Morrow reports", async () => {

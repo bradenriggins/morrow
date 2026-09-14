@@ -32,6 +32,30 @@ function createElectronUpdaterAdapter({ updater, currentVersion, platform, arch,
   updater.disableWebInstaller = true;
 
   let cancellationToken = null;
+  let checkedUpdateInfo = null;
+  let operationGeneration = 0;
+  let downloadGeneration = null;
+  let pendingDownloadedEvent = null;
+  let downloadedEventInvalid = false;
+  const downloadedListeners = new Set();
+
+  function sameDownloadedCandidate(event, info) {
+    if (!event || typeof event !== "object" || !info || typeof info !== "object") return false;
+    if (event.version !== info.version) return false;
+    if (typeof event.platform === "string" && typeof info.platform === "string" && event.platform !== info.platform) return false;
+    if (typeof event.arch === "string" && typeof info.arch === "string" && event.arch !== info.arch) return false;
+    return true;
+  }
+
+  // electron-updater emits this event before its download promise finishes all
+  // staging work. Capture it here and publish it only after that promise has
+  // succeeded for the same controller-owned download generation.
+  const captureDownloaded = (event) => {
+    if (downloadGeneration === null) return;
+    if (pendingDownloadedEvent !== null) downloadedEventInvalid = true;
+    else pendingDownloadedEvent = event;
+  };
+  updater.on("update-downloaded", captureDownloaded);
 
   return Object.freeze({
     identity: Object.freeze({ currentVersion, platform, arch, feedId }),
@@ -53,18 +77,60 @@ function createElectronUpdaterAdapter({ updater, currentVersion, platform, arch,
       }
     },
     async checkForUpdates() {
+      const generation = ++operationGeneration;
       cancellationToken = null;
+      checkedUpdateInfo = null;
       const result = await updater.checkForUpdates();
-      cancellationToken = result?.cancellationToken || null;
+      const token = result?.cancellationToken || null;
+      if (generation !== operationGeneration) {
+        if (typeof token?.cancel === "function") token.cancel();
+        return result;
+      }
+      cancellationToken = token;
+      checkedUpdateInfo = result?.updateInfo && typeof result.updateInfo === "object" ? result.updateInfo : null;
       return result;
     },
     async downloadUpdate() {
       const token = cancellationToken;
+      const info = checkedUpdateInfo;
+      const generation = operationGeneration;
+      downloadGeneration = generation;
+      pendingDownloadedEvent = null;
+      downloadedEventInvalid = false;
+      try {
+        const downloaded = await updater.downloadUpdate(token || undefined);
+        if (generation !== operationGeneration) return downloaded;
+        if (downloadedEventInvalid || (pendingDownloadedEvent !== null && !sameDownloadedCandidate(pendingDownloadedEvent, info))) {
+          const error = new Error("electron updater download generation changed");
+          error.code = "ERR_UPDATER_GENERATION_MISMATCH";
+          throw error;
+        }
+        if (pendingDownloadedEvent !== null) {
+          for (const listener of downloadedListeners) listener(pendingDownloadedEvent);
+        }
+        return downloaded;
+      } finally {
+        if (downloadGeneration === generation) downloadGeneration = null;
+        if (cancellationToken === token) cancellationToken = null;
+        pendingDownloadedEvent = null;
+        downloadedEventInvalid = false;
+      }
+    },
+    cancelUpdate() {
+      operationGeneration += 1;
+      const token = cancellationToken;
       cancellationToken = null;
-      return updater.downloadUpdate(token || undefined);
+      checkedUpdateInfo = null;
+      pendingDownloadedEvent = null;
+      downloadedEventInvalid = false;
+      if (typeof token?.cancel === "function") token.cancel();
     },
     quitAndInstall: () => updater.quitAndInstall(false, true),
     on(event, listener) {
+      if (event === "update-downloaded") {
+        downloadedListeners.add(listener);
+        return () => downloadedListeners.delete(listener);
+      }
       updater.on(event, listener);
       return () => updater.removeListener(event, listener);
     }

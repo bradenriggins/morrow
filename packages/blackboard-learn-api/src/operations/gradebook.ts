@@ -1,6 +1,7 @@
 import { canonicalJson, isJsonObject, sha256Text, type JsonObject, type SourceCapabilityMetadata } from "@morrow/contracts";
 import * as z from "zod/v4";
 import type { BlackboardEffectGrant } from "../effect-grant.js";
+import { displayGrade } from "../provider-contract.js";
 import { redactInto, type BlackboardCourseRead, type BlackboardLearnRuntime } from "../runtime.js";
 import { BLACKBOARD_ID, BlackboardApiError, withBlackboardDispatchState, type BlackboardDispatchState } from "../types.js";
 import { blackboardTool, effectGrantInput, patchInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
@@ -32,7 +33,7 @@ const GRADE_ROUTE = `${COLUMN_ROUTE}/users/{user_id}`;
  */
 export const COLUMN_FIELDS = ["id", "name", "description", "externalGrade", "contentId", "score", "availability", "grading"];
 const ATTEMPT_FIELDS = ["id", "userId", "status", "score", "created", "attemptDate", "modified", "exempt"];
-const GRADE_FIELDS = ["userId", "columnId", "status", "score", "text", "exempt"];
+const GRADE_FIELDS = ["userId", "columnId", "status", "displayGrade", "score", "text", "exempt"];
 
 const SHA256 = /^[0-9a-f]{64}$/;
 
@@ -356,6 +357,17 @@ function safeAttempt(record: JsonObject, reference: string): JsonObject {
  */
 function safeGrade(record: JsonObject, reference: string, read: BlackboardCourseRead): JsonObject {
   const output: JsonObject = { learnerToken: reference };
+  const displayed = displayGrade(record);
+  if (displayed) {
+    const safeDisplay: JsonObject = {};
+    if (displayed.score !== undefined) safeDisplay.score = displayed.score;
+    if (displayed.possible !== undefined) safeDisplay.possible = displayed.possible;
+    if (displayed.scaleType !== undefined) safeDisplay.scaleType = displayed.scaleType;
+    redactInto(safeDisplay, { ...(displayed.text === undefined ? {} : { text: displayed.text }) }, ["text"], read.roster, "displayed grade");
+    if (Object.keys(safeDisplay).length > 0) output.displayGrade = safeDisplay;
+  }
+  // Blackboard uses these top-level fields only for an instructor override.
+  // They stay separate from the normal displayed grade above.
   const score = exactScore(record.score);
   if (score !== null) output.score = score;
   redactInto(output, record, ["text"], read.roster, "grade");
@@ -596,6 +608,8 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
     effectReceiptId: value.effect_receipt_id,
     dispatchAttempt: value.dispatch_attempt,
     gatewayProcessId: value.gateway_process_id,
+    issuedAt: value.issued_at,
+    notAfter: value.not_after,
     dispatchToken: value.dispatch_token,
   };
 }

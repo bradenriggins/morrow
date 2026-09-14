@@ -1,7 +1,7 @@
 {
   "schema": "morrow.source-origin-ledger.v1",
   "status": "reviewed",
-  "candidateCommit": "3fae0be9dfa505ae483d259ab1605ccbf4e5ddaf",
+  "candidateCommit": "d262ac47571dbba8a617f47b80ec7223c4ab46bd",
   "entries": [
     {
       "path": ".better-web-ui.md",

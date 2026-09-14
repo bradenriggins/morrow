@@ -10,6 +10,7 @@ import {
   nextError,
   primaryLabel,
   runtimeNeedsReload,
+  statusAnnouncement,
   statusValue,
 } from "../../connector/extension/popup/popup-view.js";
 
@@ -21,6 +22,7 @@ const statuses = [
   { paired: false, pairing: true, connecting: false, connected: false, bindings: [], siteAnchors: [] },
   { paired: true, pairing: false, connecting: true, connected: false, bindings: [], siteAnchors: [] },
   { paired: true, pairing: false, connecting: false, connected: false, bindings: [], siteAnchors: [] },
+  { paired: true, pairing: false, connecting: false, connected: false, authenticationFailed: true, bindings: [binding()], siteAnchors: [anchor()], bindingCount: 1 },
   { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [] },
   { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [anchor()] },
   { paired: true, pairing: false, connecting: false, connected: true, runtimeHealthy: true, bindings: [], siteAnchors: [anchor({ runtimeVerified: false })] },
@@ -29,7 +31,7 @@ const statuses = [
 ];
 
 test("a connected socket with an unhealthy runtime asks for a Bridge reload", () => {
-  const status = { ...statuses[8], runtimeHealthy: false };
+  const status = { ...statuses[9], runtimeHealthy: false };
   assert.equal(runtimeNeedsReload(status), true);
   assert.equal(statusValue(status), "Reload needed");
   assert.equal(courseValue(status), "Not available");
@@ -38,6 +40,15 @@ test("a connected socket with an unhealthy runtime asks for a Bridge reload", ()
   assert.equal(controlState(status).primaryDisabled, false);
   assert.match(detailText(status), /versions do not match/i);
   assert.match(detailText(status), /reload Morrow Bridge/i);
+});
+
+test("a refused server identity offers re-pairing without discarding selected courses", () => {
+  const status = statuses[5];
+  assert.equal(statusValue(status), "Reconnect needed");
+  assert.equal(courseValue(status), "Saved");
+  assert.equal(primaryLabel(status), "Reconnect Morrow");
+  assert.equal(controlState(status).primaryDisabled, false);
+  assert.match(detailText(status), /selected courses stay saved/i);
 });
 
 test("a failed status read renders a definite state with a usable retry", () => {
@@ -117,23 +128,31 @@ test("known connection states keep their own value, label, and detail", () => {
   assert.equal(statusValue(statuses[4]), "Not available");
   assert.equal(primaryLabel(statuses[4]), "Waiting for your assistant");
   assert.equal(controlState(statuses[4]).primaryDisabled, true);
-  assert.equal(courseValue(statuses[5]), "Not connected");
-  assert.equal(primaryLabel(statuses[5]), "Open Canvas or Moodle");
-  assert.equal(controlState(statuses[5]).primaryDisabled, true);
-  assert.equal(primaryLabel(statuses[5], "canvas"), "Connect Canvas");
-  assert.equal(controlState(statuses[5], { detectedProvider: "canvas" }).primaryDisabled, false);
-  assert.equal(primaryLabel(statuses[5], "moodle"), "Connect Moodle");
-  assert.match(detailText(statuses[5], "moodle"), /detected Moodle.*Connect Moodle/);
-  assert.equal(canChooseCourses(statuses[6]), true);
-  assert.equal(courseValue(statuses[6]), "Ready");
-  assert.equal(primaryLabel(statuses[6]), "Choose courses");
-  assert.equal(controlState(statuses[6]).primaryDisabled, false);
-  assert.equal(courseValue(statuses[7]), "Canvas tab needed");
-  assert.equal(courseValue(statuses[8]), "Connected");
-  assert.match(detailText(statuses[8]), /Keep one signed-in Canvas course tab open/);
-  assert.equal(courseValue(statuses[9]), "Canvas tab needed");
-  assert.match(detailText(statuses[9]), /its Canvas tab is no longer open/);
-  assert.match(detailText(statuses[9], "moodle"), /selected Canvas course is not open.*detected Moodle.*Connect Moodle/);
+  assert.equal(courseValue(statuses[6]), "Not connected");
+  assert.equal(primaryLabel(statuses[6]), "Open Canvas or Moodle");
+  assert.equal(controlState(statuses[6]).primaryDisabled, true);
+  assert.equal(primaryLabel(statuses[6], "canvas"), "Connect Canvas");
+  assert.equal(controlState(statuses[6], { detectedProvider: "canvas" }).primaryDisabled, false);
+  assert.equal(primaryLabel(statuses[6], "moodle"), "Connect Moodle");
+  assert.match(detailText(statuses[6], "moodle"), /detected Moodle.*Connect Moodle/);
+  assert.equal(canChooseCourses(statuses[7]), true);
+  assert.equal(courseValue(statuses[7]), "Ready");
+  assert.equal(primaryLabel(statuses[7]), "Choose courses");
+  assert.equal(controlState(statuses[7]).primaryDisabled, false);
+  assert.equal(courseValue(statuses[8]), "Canvas tab needed");
+  assert.equal(courseValue(statuses[9]), "Connected");
+  assert.match(detailText(statuses[9]), /Keep one signed-in Canvas course tab open/);
+  assert.equal(courseValue(statuses[10]), "Canvas tab needed");
+  assert.match(detailText(statuses[10]), /its Canvas tab is no longer open/);
+  assert.match(detailText(statuses[10], "moodle"), /selected Canvas course is not open.*detected Moodle.*Connect Moodle/);
+});
+
+test("the background status announcement names Morrow and course readiness together", () => {
+  assert.equal(statusAnnouncement(statuses[3]), "Morrow: Connecting…. Course: Not connected.");
+  assert.equal(statusAnnouncement(statuses[9]), "Morrow: Connected. Course: Connected.");
+  const markup = readFileSync(new URL("../../connector/extension/popup/popup.html", import.meta.url), "utf8");
+  assert.match(markup, /id="status-announcement"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
+  assert.match(markup, /id="error"[^>]*role="alert"/);
 });
 
 // The popup message types answer with a code, and the popup reads its words from that code, so the
@@ -152,8 +171,8 @@ test("every service-worker failure the popup explains still exists in the servic
 // controls that popup.html ships disabled.
 function stubElement(text = "", hidden = false) {
   const classes = new Set();
-  return {
-    textContent: text,
+  const element = {
+    textWrites: [],
     hidden,
     disabled: false,
     attributes: {},
@@ -164,6 +183,12 @@ function stubElement(text = "", hidden = false) {
     removeAttribute(name) { delete this.attributes[name]; },
     addEventListener(type, handler) { (this.listeners[type] ||= []).push(handler); },
   };
+  let currentText = text;
+  Object.defineProperty(element, "textContent", {
+    get() { return currentText; },
+    set(next) { currentText = next; element.textWrites.push(next); },
+  });
+  return element;
 }
 
 test("the popup answers a failed first status read with a retry, then clears it when the retry works", async () => {
@@ -181,6 +206,7 @@ test("the popup answers a failed first status read with a retry, then clears it 
     "#pulse": stubElement(),
     "#detail": stubElement("Checking the connection…"),
     "#error": stubElement("", true),
+    "#status-announcement": stubElement(),
     "#account": stubElement("", true),
     "#account-label": stubElement(),
     "#account-origin": stubElement(),
@@ -194,8 +220,9 @@ test("the popup answers a failed first status read with a retry, then clears it 
   let respond = async () => { throw new Error("Could not establish connection. Receiving end does not exist."); };
   globalThis.document = { hidden: false, querySelector: (selector) => nodes[selector] || null, addEventListener() {} };
   globalThis.window = { addEventListener() {} };
+  let statusListener;
   globalThis.chrome = {
-    runtime: { sendMessage: (request) => respond(request), onMessage: { addListener() {} }, openOptionsPage() {} },
+    runtime: { sendMessage: (request) => respond(request), onMessage: { addListener(listener) { statusListener = listener; } }, openOptionsPage() {} },
     storage: { onChanged: { addListener() {} } },
     tabs: { query: async () => [] },
     permissions: { request: async () => false },
@@ -220,6 +247,24 @@ test("the popup answers a failed first status read with a retry, then clears it 
     assert.equal(nodes["#canvas-value"].textContent, "Ready");
     assert.equal(nodes["#primary"].textContent, "Choose courses");
     assert.equal(nodes["#primary"].disabled, false);
+
+    respond = async (request) => request.type === "morrow_status"
+      ? { ok: true, result: statuses[3] }
+      : { ok: false, error: "unexpected request" };
+    statusListener({ type: "morrow_bridge_status_changed" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(nodes["#status-announcement"].textContent, "Morrow: Connecting…. Course: Not connected.");
+
+    respond = async (request) => request.type === "morrow_status"
+      ? { ok: true, result: statuses[9] }
+      : { ok: false, error: "unexpected request" };
+    statusListener({ type: "morrow_bridge_status_changed" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(nodes["#status-announcement"].textContent, "Morrow: Connected. Course: Connected.");
+    const writesAfterChange = nodes["#status-announcement"].textWrites.length;
+    statusListener({ type: "morrow_bridge_status_changed" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(nodes["#status-announcement"].textWrites.length, writesAfterChange, "an unchanged background status must not be announced twice");
   } finally {
     delete globalThis.document;
     delete globalThis.window;

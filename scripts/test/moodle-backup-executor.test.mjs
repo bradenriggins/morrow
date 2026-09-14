@@ -125,11 +125,17 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     copies: [],
     shortNamesInUse: new Set(["NURS-101", "NURS-201"]),
     activities: [{ id: 21, name: "Orientation page" }, { id: 22, name: "Skills lab" }],
+    sourceActivities: [{ id: 71, name: "Imported pharmacology page", module: "page", sectionnumber: 0 }],
+    nextActivityId: 41,
+    importResponse: "success",
+    importAddsUnrelatedActivity: false,
+    importedActivityOverride: null,
     restoreWorkflow: null,
     restoreStageOverride: "",
     copyRoleChecked: false,
     backupCreatesFile: true,
     changeCourseOnNextRead: false,
+    changeSourceOnNextRead: false,
     progress: { b1: { status: 800, progress: 0.42, operation: "backup" }, r1: { status: 700, progress: 0, operation: "restore" } },
   };
   const requests = [];
@@ -322,8 +328,21 @@ test("Moodle backup executor runs each native course-reuse step once and never r
         response.writeHead(400).end();
         return;
       }
-      state.activities.push({ id: 41, name: "Imported pharmacology page" });
-      html(page("<div class='import-complete'>Import complete</div>"));
+      if (state.importResponse === "success") {
+        const source = state.importedActivityOverride || state.sourceActivities[0];
+        state.activities.push({
+          id: state.nextActivityId++,
+          name: source.name,
+          module: source.module,
+          sectionnumber: source.sectionnumber,
+        });
+        html(page("<div class='alert alert-success notifysuccess' role='alert'>Import complete</div>"));
+      } else {
+        if (state.importAddsUnrelatedActivity) {
+          state.activities.push({ id: state.nextActivityId++, name: "Unrelated instructor edit", module: "forum", sectionnumber: 0 });
+        }
+        html(page("<div class='alert alert-danger' role='alert'>Import precheck failed</div>"));
+      }
       return;
     }
 
@@ -359,7 +378,7 @@ test("Moodle backup executor runs each native course-reuse step once and never r
       state.shortNamesInUse.add(shortName);
       state.copies.push({
         source: "Nursing Fundamentals",
-        destination: values.get("fullname") || "",
+        destinationShortName: shortName,
         started: "7 September 2026, 12:10 PM",
         operation: "backup",
         operationId: "c1",
@@ -369,7 +388,7 @@ test("Moodle backup executor runs each native course-reuse step once and never r
       return;
     }
     if (request.method === "GET" && url.pathname === "/backup/copyprogress.php") {
-      const rows = state.copies.map((copy) => `<tr><td><a href="/course/view.php?id=2">${copy.source}</a></td><td>${copy.destination}</td>`
+      const rows = state.copies.map((copy) => `<tr><td><a href="/course/view.php?id=2">${copy.source}</a></td><td>${copy.destinationShortName}</td>`
         + `<td>${copy.started}</td><td>${copy.operation}</td>${progressCell(copy.operationId, ` data-operation="${copy.operation}"`)}</tr>`).join("");
       html(page(`<table class="backup-files-table table generaltable">`
         + `<thead><tr><th>Source</th><th>Destination</th><th>Time</th><th>Operation</th><th>Status</th></tr></thead>`
@@ -407,18 +426,32 @@ test("Moodle backup executor runs each native course-reuse step once and never r
       const call = JSON.parse(await readBody(request))[0];
       assert.equal(url.searchParams.get("info"), call.methodname);
       if (call.methodname === "core_courseformat_get_state") {
+        const courseId = String(call.args.courseid);
+        const sourceCourse = courseId === "7";
+        const activities = sourceCourse ? state.sourceActivities : state.activities;
         response.writeHead(200, { "content-type": "application/json" });
         response.end(JSON.stringify([{
           data: JSON.stringify({
-            course: { id: 2, fullname: "Nursing Fundamentals", sesskey: ANCHOR_SESSION },
-            section: [{ id: 10, number: 0, title: "General" }],
-            cm: state.activities.map((activity) => ({ id: activity.id, sectionid: 10, name: activity.name, visible: 1 })),
+            course: { id: Number(courseId), fullname: sourceCourse ? "Pharmacology source" : "Nursing Fundamentals", sesskey: ANCHOR_SESSION },
+            section: [{ id: sourceCourse ? 70 : 10, number: 0, title: "General" }],
+            cm: activities.map((activity) => ({
+              id: activity.id,
+              sectionid: sourceCourse ? 70 : 10,
+              sectionnumber: activity.sectionnumber ?? 0,
+              name: activity.name,
+              visible: 1,
+              module: activity.module || "page",
+            })),
           }),
         }]));
-        if (state.changeCourseOnNextRead) {
+        if (!sourceCourse && state.changeCourseOnNextRead) {
           // Someone else changes the course between the two reads of it.
           state.changeCourseOnNextRead = false;
           state.activities.push({ id: 55, name: "Added by someone else" });
+        }
+        if (sourceCourse && state.changeSourceOnNextRead) {
+          state.changeSourceOnNextRead = false;
+          state.sourceActivities.push({ id: 72, name: "New source activity", module: "quiz", sectionnumber: 0 });
         }
         return;
       }
@@ -766,6 +799,7 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     assert.equal(posts.at(-1).values.get("target"), "1");
     assert.equal(posts.at(-1).values.get("oneclickbackup"), "Jump to final step");
     assert.deepEqual(imported.data.activities_added, [{ id: "41", name: "Imported pharmacology page" }]);
+    assert.match(imported.data.source_snapshot_digest, /^[a-f0-9]{64}$/);
     assert.deepEqual(imported.data.course_state_before.activities.map((activity) => activity.name), ["Orientation page", "Skills lab"]);
     assert.deepEqual(imported.data.course_state_after.activities.map((activity) => activity.name), [
       "Orientation page", "Skills lab", "Imported pharmacology page",
@@ -773,8 +807,61 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     assert.equal(imported.data.restore_mode, "merge");
     assert.equal(JSON.stringify(imported).includes(ANCHOR_SESSION), false);
     assert.deepEqual(imported.data.steps.map((step) => step.step), [
-      "read_course_state_before", "load_import_form", "read_course_state_fresh", "run_import", "read_course_state_after",
+      "read_course_state_before", "read_import_source_before", "load_import_form", "read_course_state_fresh",
+      "read_import_source_fresh", "run_import", "read_course_state_after",
     ]);
+
+    // A normal HTTP 200 precheck-error page is not import completion. An
+    // unrelated activity added during that request cannot verify the import.
+    const beforeRejectedImport = await executeContentsRead({ course_id: 2 });
+    state.importResponse = "precheck_error";
+    state.importAddsUnrelatedActivity = true;
+    const rejected = await execute(operations.import, {
+      ...importArguments,
+      expected_digest: beforeRejectedImport.snapshot_digest,
+    });
+    assert.deepEqual(rejected, {
+      ok: false,
+      sent: true,
+      status: 200,
+      outcomeUnknown: true,
+      verification: {
+        schema: "morrow.browser-verification.v1",
+        status: "unconfirmed",
+        reason: "moodle_import_completion_unconfirmed",
+      },
+      error: "moodle_import_completion_unconfirmed",
+    });
+    state.importResponse = "success";
+    state.importAddsUnrelatedActivity = false;
+
+    // Even a success response must produce the activity signature frozen from
+    // the selected source. Another new target activity is not that evidence.
+    const beforeMismatchedImport = await executeContentsRead({ course_id: 2 });
+    state.importedActivityOverride = { name: "Another instructor edit", module: "forum", sectionnumber: 0 };
+    const mismatched = await execute(operations.import, {
+      ...importArguments,
+      expected_digest: beforeMismatchedImport.snapshot_digest,
+    });
+    assert.equal(mismatched.ok, false);
+    assert.equal(mismatched.sent, true);
+    assert.equal(mismatched.outcomeUnknown, true);
+    assert.equal(mismatched.error, "moodle_import_source_snapshot_not_verified");
+    assert.equal(mismatched.verification.status, "unconfirmed");
+    state.importedActivityOverride = null;
+
+    // The selected source is part of the frozen effect. If it changes after
+    // the import form opens, Morrow cancels that workflow before dispatch.
+    const beforeChangedSource = await executeContentsRead({ course_id: 2 });
+    state.changeSourceOnNextRead = true;
+    const sourceChanged = await execute(operations.import, {
+      ...importArguments,
+      expected_digest: beforeChangedSource.snapshot_digest,
+    });
+    assert.equal(sourceChanged.ok, false);
+    assert.equal(sourceChanged.sent, false);
+    assert.equal(sourceChanged.error, "moodle_import_source_changed");
+    assert.equal(sourceChanged.workflow_cancelled, true);
 
     // A course someone else changed between the two reads is not imported into, and the
     // native workflow Morrow opened is ended with its own Cancel.
@@ -853,12 +940,13 @@ test("Moodle backup executor runs each native course-reuse step once and never r
     assert.equal(copied.data.enrolments_kept, false);
     assert.equal(copied.data.new_id_number, "");
     assert.deepEqual(copied.data.copy, {
-      source: "Nursing Fundamentals", destination: "Nursing Fundamentals 2027",
+      source: "Nursing Fundamentals", destination_short_name: "NURS-101-2027",
       started_at: "7 September 2026, 12:10 PM", operation: "backup", operation_id: "c1",
     });
-    // A copy Moodle is already making under that name is not started again.
+    // Moodle's progress row identifies the destination by short name. A
+    // different full name cannot bypass duplicate detection for that target.
     assert.deepEqual(await execute(operations.copy, {
-      ...copyArguments, new_short_name: "NURS-101-2028",
+      ...copyArguments, new_full_name: "A different full name",
     }), { ok: false, sent: false, status: 200, error: "moodle_course_copy_already_in_progress" });
     // A named category and a named ID number are both sent to the native controls.
     state.copies = [];

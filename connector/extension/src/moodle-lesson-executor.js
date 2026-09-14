@@ -82,6 +82,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleLessonPageWriteInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const SCHEMA = "morrow.moodle-lesson-page-list.v1";
   const LIST_PATH = "/mod/lesson/edit.php";
@@ -205,11 +207,17 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
   };
   const boundedText = async (response, endpoint, context, exactRoute = true) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || (exactRoute && !sameRoute(response.url, endpoint)) || !sameContext(context, currentContext())
-      || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || !response.body || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -217,14 +225,14 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -233,7 +241,7 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
     const endpoint = urlFor(context, path, query);
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error: "moodle_lesson_page_write_source_unavailable" }; }
     const html = await boundedText(response, endpoint, context);
     if (html === "limit") return { error: "moodle_lesson_page_write_source_too_large", status: response.status };
@@ -412,10 +420,15 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
     const page = await nativeDocument(context, LIST_PATH, { id: moduleId });
     if (page.error) return { error: page.error, status: page.status };
     const actions = { edit: new Set(), move: new Set(), delete: new Set() };
+    let firstPage = false;
     for (const anchor of page.document.querySelectorAll("a[href]")) {
       let href;
       try { href = new URL(anchor.getAttribute("href"), page.endpoint); } catch { continue; }
       if (href.origin !== context.origin || href.searchParams.get("id") !== moduleId) continue;
+      if (href.pathname === `${context.basePath}${PAGE_PATH}` && href.searchParams.get("id") === moduleId
+        && href.searchParams.get("pageid") === "0" && href.searchParams.get("firstpage") === "1") {
+        firstPage = true;
+      }
       const target = id(href.searchParams.get("pageid"));
       if (!target) continue;
       if (href.pathname === `${context.basePath}${PAGE_PATH}` && href.searchParams.get("edit") === "1") actions.edit.add(target);
@@ -423,7 +436,6 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
       if (href.searchParams.get("action") === "move") actions.move.add(target);
       if (href.searchParams.get("action") === "confirmdelete") actions.delete.add(target);
     }
-    if (!actions.edit.size) return { error: "moodle_lesson_page_write_list_unavailable", status: page.status };
     const ordered = [];
     for (const element of page.document.querySelectorAll('a[id^="lesson-"]')) {
       const pageId = id(String(element.getAttribute("id") || "").slice("lesson-".length));
@@ -431,8 +443,13 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
       ordered.push(pageId);
       if (ordered.length > MAX_PAGES) return { error: "moodle_lesson_page_write_lesson_too_large", status: page.status };
     }
-    if (!ordered.length) return { error: "moodle_lesson_page_write_list_invalid", status: page.status };
-    return { ordered, actions, status: page.status };
+    if (!ordered.length) {
+      return firstPage
+        ? { ordered, actions, firstPage: true, status: page.status }
+        : { error: "moodle_lesson_page_write_list_unavailable", status: page.status };
+    }
+    if (firstPage || !actions.edit.size) return { error: "moodle_lesson_page_write_list_unavailable", status: page.status };
+    return { ordered, actions, firstPage: false, status: page.status };
   };
 
   /**
@@ -478,7 +495,7 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
         page_request_count: pages.length,
       },
     };
-    return { ordered: order.ordered, actions: order.actions, data, details, status: order.status, snapshotDigest: await digest(data) };
+    return { ordered: order.ordered, actions: order.actions, firstPage: order.firstPage, data, details, status: order.status, snapshotDigest: await digest(data) };
   };
 
   /**
@@ -780,6 +797,7 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
         redirect: "follow",
         headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: params,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { unconfirmed: "moodle_lesson_page_write_unconfirmed" }; }
     const body = await boundedText(response, endpoint, context, false);
@@ -846,7 +864,12 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
       }
       if (!Object.values(AUTHORED_TYPES).includes(typeId)) return failure("moodle_lesson_page_write_page_type_not_authored", before.status);
       if (definition.kind === "create") {
-        const form = await nativeDocument(context, PAGE_PATH, { id: args.moduleId, pageid: args.afterPageId, qtype: String(typeId) });
+        const form = await nativeDocument(context, PAGE_PATH, {
+          id: args.moduleId,
+          pageid: args.afterPageId,
+          qtype: String(typeId),
+          ...(before.firstPage ? { firstpage: "1" } : {}),
+        });
         if (form.error) return failure(form.error, form.status);
         const forms = [...form.document.querySelectorAll("form")].filter((entry) => {
           if (String(entry.getAttribute("method") || "").toLowerCase() !== "post") return false;
@@ -897,6 +920,7 @@ export async function executeMoodleLessonPageWriteInPage(rawInput) {
     const fresh = await pageOrder(rechecked, args.moduleId);
     if (fresh.error) return failure(fresh.error, fresh.status);
     if (stable(fresh.ordered) !== stable(before.ordered)) return failure("moodle_expected_digest_mismatch", fresh.status);
+    if (fresh.firstPage !== before.firstPage) return failure("moodle_expected_digest_mismatch", fresh.status);
 
     let write;
     if (definition.kind === "create") {

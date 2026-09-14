@@ -18,7 +18,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@morrow/contracts": "workspace:*"
+    "@morrow/contracts": "workspace:*",
+    "@morrow/gateway-core": "workspace:*"
   },
   "devDependencies": {
     "@morrow/operation-journal": "workspace:*"

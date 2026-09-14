@@ -6,4 +6,7 @@ export * from "./result.js";
 export * from "./privacy.js";
 export * from "./source-rights.js";
 export * from "./private-file-access.js";
+export * from "./private-state-file.js";
+export * from "./private-sqlite-state.js";
 export * from "./source-mcp-privacy.js";
+export * from "./process-lifetime.js";

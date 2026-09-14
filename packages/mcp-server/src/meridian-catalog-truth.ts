@@ -5,7 +5,7 @@ import {
   type CatalogTruthHealth,
   type UpstreamTool,
 } from "@morrow/contracts";
-import { parseSourceCatalog } from "@morrow/gateway-core";
+import { decodeExactUtf8, parseSourceCatalog } from "@morrow/gateway-core";
 import type { ExamplePlatformSshUpstreamConfig } from "./config.js";
 
 export interface ExamplePlatformCatalogTruth {
@@ -37,7 +37,7 @@ export function loadExamplePlatformCatalogTruth(
 
   let catalog;
   try {
-    catalog = parseSourceCatalog(JSON.parse(bytes.toString("utf8")) as unknown);
+    catalog = parseSourceCatalog(JSON.parse(decodeExactUtf8(bytes, "ExamplePlatform catalog truth")) as unknown);
   } catch {
     throw new Error("The configured ExamplePlatform catalog truth is invalid.");
   }

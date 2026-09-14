@@ -1,17 +1,30 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as z from "zod/v4";
-import type { GatewayRuntimeLimitation } from "@morrow/contracts";
+import { normalizeSourceId, type GatewayRuntimeLimitation } from "@morrow/contracts";
 import { SOURCE_DISPOSITIONS } from "@morrow/gateway-core";
+import { readExactTrustJson } from "./exact-trust-file.js";
+
+export const MAX_GATEWAY_CONFIG_BYTES = 4 * 1024 * 1024;
 
 const EnvironmentName = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
-const FullGitRevision = z.string().regex(/^[0-9a-fA-F]{40,64}$/);
-const Sha256Digest = z.string().regex(/^[0-9a-fA-F]{64}$/);
+const EnvironmentTemplateValue = /\$\{[A-Z_][A-Z0-9_]*(?::-[^}]*)?\}/;
+const FullGitRevision = z.string().min(1).max(500).refine((value) => (
+  /^[0-9a-fA-F]{40,64}$/.test(value) || EnvironmentTemplateValue.test(value)
+), "expected a full Git revision or environment template");
+const Sha256Digest = z.string().min(1).max(500).refine((value) => (
+  /^[0-9a-fA-F]{64}$/.test(value) || EnvironmentTemplateValue.test(value)
+), "expected a SHA-256 digest or environment template");
 const RepositoryRelativePath = z.string().min(1).max(500);
+const SafeRepositoryRelativePath = RepositoryRelativePath.refine((value) => (
+  !value.startsWith("/")
+  && !/^[A-Za-z]:[\\/]/.test(value)
+  && !/[\0\r\n]/.test(value)
+  && !value.replaceAll("\\", "/").split("/").some((segment) => !segment || segment === "." || segment === "..")
+), "expected a safe repository-relative path");
 const RuntimeIdentifier = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/);
 const CanvasId = z.string().regex(/^[1-9][0-9]{0,18}$/);
 const SshHost = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9.-]{0,127}$/);
@@ -45,6 +58,18 @@ const LocalGitAttestationSchema = z.object({
   expectedTrackedPatchDigest: Sha256Digest.optional(),
   expectedToolCount: z.number().int().min(1).max(5000).optional(),
   expectedCatalogDigest: Sha256Digest.optional(),
+  launch: z.object({
+    entrypoint: SafeRepositoryRelativePath,
+    entrypointArgumentIndex: z.number().int().min(0).max(100).default(0),
+    expectedEntrypointSha256: Sha256Digest.optional(),
+    runtime: z.discriminatedUnion("kind", [
+      z.object({ kind: z.literal("current-node") }),
+      z.object({
+        kind: z.literal("sha256"),
+        expectedExecutableSha256: Sha256Digest,
+      }),
+    ]).default({ kind: "current-node" }),
+  }),
 });
 
 const RemoteGitSshAttestationSchema = z.object({
@@ -113,7 +138,7 @@ const PrivateRuntimeProfileSchema = z.object({
 });
 
 const StdioUpstreamSchema = z.object({
-  id: z.string().min(1),
+  id: z.string().min(1).transform((value) => normalizeSourceId(value)),
   label: z.string().min(1),
   kind: z.literal("mcp-stdio"),
   command: z.string().min(1),
@@ -212,6 +237,17 @@ export type StdioUpstreamConfig = Extract<UpstreamConfig, { kind: "mcp-stdio" }>
 export type ExamplePlatformSshUpstreamConfig = Extract<UpstreamConfig, { kind: "meridian-ssh" }>;
 export type LocalGitAttestationConfig = z.infer<typeof LocalGitAttestationSchema>;
 export type RemoteGitSshAttestationConfig = z.infer<typeof RemoteGitSshAttestationSchema>;
+
+export function assertUniqueCanonicalUpstreamIds(
+  upstreams: readonly Pick<UpstreamConfig, "id">[],
+): void {
+  const seen = new Set<string>();
+  for (const upstream of upstreams) {
+    const id = normalizeSourceId(upstream.id);
+    if (seen.has(id)) throw new Error(`Duplicate canonical upstream id ${id}`);
+    seen.add(id);
+  }
+}
 
 const TEMPLATE = /\$\{([A-Z_][A-Z0-9_]*)(?::-([^}]*))?\}/g;
 
@@ -374,7 +410,7 @@ function expandUpstream(
       },
       catalogTruth: {
         path: resolveLocalPath(upstream.catalogTruth.path, environment),
-        fileSha256: upstream.catalogTruth.fileSha256.toLowerCase(),
+        fileSha256: expandEnvironmentTemplate(upstream.catalogTruth.fileSha256, environment).toLowerCase(),
       },
       runtimeProfile,
     };
@@ -383,6 +419,9 @@ function expandUpstream(
     ...upstream,
     command: expandEnvironmentTemplate(upstream.command, environment),
     args: upstream.args.map((value) => expandEnvironmentTemplate(value, environment)),
+    ...(upstream.revision
+      ? { revision: expandEnvironmentTemplate(upstream.revision, environment).toLowerCase() }
+      : {}),
     ...(upstream.cwd
       ? { cwd: resolveLocalPath(upstream.cwd, environment) }
       : {}),
@@ -397,18 +436,52 @@ function expandUpstream(
           attestation: {
             ...upstream.attestation,
             root: resolveLocalPath(upstream.attestation.root, environment),
-            expectedRevision: upstream.attestation.expectedRevision.toLowerCase(),
+            expectedRevision: expandEnvironmentTemplate(
+              upstream.attestation.expectedRevision,
+              environment,
+            ).toLowerCase(),
             allowedTrackedPaths: upstream.attestation.allowedTrackedPaths.map((path) => (
               expandEnvironmentTemplate(path, environment)
             )),
             ...(upstream.attestation.expectedTrackedPatchDigest
               ? {
-                  expectedTrackedPatchDigest: upstream.attestation.expectedTrackedPatchDigest.toLowerCase(),
+                  expectedTrackedPatchDigest: expandEnvironmentTemplate(
+                    upstream.attestation.expectedTrackedPatchDigest,
+                    environment,
+                  ).toLowerCase(),
                 }
               : {}),
             ...(upstream.attestation.expectedCatalogDigest
-              ? { expectedCatalogDigest: upstream.attestation.expectedCatalogDigest.toLowerCase() }
+              ? {
+                  expectedCatalogDigest: expandEnvironmentTemplate(
+                    upstream.attestation.expectedCatalogDigest,
+                    environment,
+                  ).toLowerCase(),
+                }
               : {}),
+            launch: {
+              ...upstream.attestation.launch,
+              entrypoint: expandEnvironmentTemplate(upstream.attestation.launch.entrypoint, environment),
+              ...(upstream.attestation.launch.expectedEntrypointSha256
+                ? {
+                    expectedEntrypointSha256: expandEnvironmentTemplate(
+                      upstream.attestation.launch.expectedEntrypointSha256,
+                      environment,
+                    ).toLowerCase(),
+                  }
+                : {}),
+              ...(upstream.attestation.launch.runtime.kind === "sha256"
+                ? {
+                    runtime: {
+                      kind: "sha256" as const,
+                      expectedExecutableSha256: expandEnvironmentTemplate(
+                        upstream.attestation.launch.runtime.expectedExecutableSha256,
+                        environment,
+                      ).toLowerCase(),
+                    },
+                  }
+                : {}),
+            },
           },
         }
       : {}),
@@ -417,7 +490,13 @@ function expandUpstream(
 
 function validateSourceProvenance(upstream: UpstreamConfig): void {
   if (!upstream.attestation) return;
+  if (!/^[0-9a-f]{40,64}$/.test(upstream.attestation.expectedRevision)) {
+    throw new Error(`Upstream ${upstream.id} attestation expectedRevision must expand to a full Git object id.`);
+  }
   const declaredRevision = String(upstream.revision || "").trim().toLowerCase();
+  if (declaredRevision && !/^[0-9a-f]{40,64}$/.test(declaredRevision)) {
+    throw new Error(`Upstream ${upstream.id} revision must expand to a full Git object id.`);
+  }
   if (
     declaredRevision
     && declaredRevision !== upstream.attestation.expectedRevision.toLowerCase()
@@ -435,7 +514,13 @@ function validateSourceProvenance(upstream: UpstreamConfig): void {
         `Upstream ${upstream.id} launch and attestation must use the same SSH host and remote root.`,
       );
     }
+    if (!/^[0-9a-f]{64}$/.test(upstream.catalogTruth.fileSha256)) {
+      throw new Error(`Upstream ${upstream.id} catalog truth digest must expand to SHA-256.`);
+    }
     return;
+  }
+  if (upstream.kind !== "mcp-stdio") {
+    throw new Error(`Upstream ${upstream.id} cannot use local Git attestation.`);
   }
   if (
     upstream.attestation.requireTrackedClean
@@ -453,6 +538,27 @@ function validateSourceProvenance(upstream: UpstreamConfig): void {
       `Upstream ${upstream.id} must name every allowed tracked overlay path.`,
     );
   }
+  if (!upstream.cwd) {
+    throw new Error(`Upstream ${upstream.id} attestation requires an explicit launch working directory.`);
+  }
+  if (resolve(upstream.cwd) !== resolve(upstream.attestation.root)) {
+    throw new Error(`Upstream ${upstream.id} launch and attestation must use the same local worktree root.`);
+  }
+  if (upstream.attestation.launch.entrypointArgumentIndex >= upstream.args.length) {
+    throw new Error(`Upstream ${upstream.id} attestation entrypoint argument does not exist.`);
+  }
+  for (const [label, digest] of [
+    ["tracked patch", upstream.attestation.expectedTrackedPatchDigest],
+    ["catalog", upstream.attestation.expectedCatalogDigest],
+    ["entrypoint", upstream.attestation.launch.expectedEntrypointSha256],
+    ["executable", upstream.attestation.launch.runtime.kind === "sha256"
+      ? upstream.attestation.launch.runtime.expectedExecutableSha256
+      : undefined],
+  ] as const) {
+    if (digest && !/^[0-9a-f]{64}$/.test(digest)) {
+      throw new Error(`Upstream ${upstream.id} ${label} digest must expand to SHA-256.`);
+    }
+  }
 }
 
 export function parseGatewayConfig(
@@ -466,6 +572,7 @@ export function parseGatewayConfig(
   if (upstreams.length === 0) {
     throw new Error("At least one enabled upstream is required");
   }
+  assertUniqueCanonicalUpstreamIds(upstreams);
   const requireSourceAttestation = parsed.sourcePolicy.requireAttestation
     || parsed.profile === "public-canvas";
   for (const upstream of upstreams) {
@@ -526,7 +633,10 @@ export async function loadGatewayConfig(
   const path = resolve(workingDirectory, configuredPath || "morrow.upstreams.json");
 
   if (existsSync(path)) {
-    const raw = JSON.parse((await readFile(path, "utf8")).replace(/^\uFEFF/, "")) as unknown;
+    const raw = readExactTrustJson(path, {
+      label: "Gateway configuration",
+      maxBytes: MAX_GATEWAY_CONFIG_BYTES,
+    });
     const parsed = parseGatewayConfig(raw, environment);
     const config: GatewayConfig = {
       ...parsed,

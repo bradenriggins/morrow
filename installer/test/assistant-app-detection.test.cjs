@@ -1,7 +1,12 @@
 const assert = require("node:assert/strict");
 const path = require("node:path");
 const test = require("node:test");
-const { CODEX_BUNDLE_IDENTIFIER, detectAssistantApplication } = require("../shared/assistant-app-detection.cjs");
+const {
+  CODEX_BUNDLE_IDENTIFIER,
+  commandDirectories,
+  detectAssistantApplication,
+  detectAssistantCommand,
+} = require("../shared/assistant-app-detection.cjs");
 
 function readerFixture(directory, entries, identifiers) {
   const readCalls = [];
@@ -42,12 +47,15 @@ test("recognizes ChatGPT.app only when metadata identifies the Codex desktop bun
   assert.deepEqual(unreadable.readCalls, [chatGpt]);
 });
 
-test("retains known Codex application detection without reading ChatGPT metadata", async () => {
+test("requires exact Codex product identity for every application filename", async () => {
   const applications = path.join("fixture", "Applications");
   const codex = path.join(applications, "Codex.app");
-  const input = readerFixture(applications, new Set([codex]), new Map());
+  const input = readerFixture(applications, new Set([codex]), new Map([[codex, CODEX_BUNDLE_IDENTIFIER]]));
   assert.equal(await detectAssistantApplication(input.input), true);
-  assert.deepEqual(input.readCalls, []);
+  assert.deepEqual(input.readCalls, [codex]);
+
+  const wrongIdentity = readerFixture(applications, new Set([codex]), new Map([[codex, "com.example.lookalike"]]));
+  assert.equal(await detectAssistantApplication(wrongIdentity.input), false);
 });
 
 test("does not apply the ChatGPT bundle exception to another assistant", async () => {
@@ -57,4 +65,83 @@ test("does not apply the ChatGPT bundle exception to another assistant", async (
   fixture.input.assistantId = "claude-code";
   assert.equal(await detectAssistantApplication(fixture.input), false);
   assert.deepEqual(fixture.readCalls, []);
+});
+
+test("never treats Claude Desktop or a filename-only Claude Code app as Claude Code", async () => {
+  const applications = path.join("fixture", "Applications");
+  for (const name of ["Claude.app", "Claude Code.app"]) {
+    const candidate = path.join(applications, name);
+    const fixture = readerFixture(applications, new Set([candidate]), new Map([[candidate, "com.anthropic.claudefordesktop"]]));
+    fixture.input.assistantId = "claude-code";
+    assert.equal(await detectAssistantApplication(fixture.input), false);
+    assert.deepEqual(fixture.readCalls, []);
+  }
+});
+
+test("searches the local command directory and only absolute PATH entries", () => {
+  assert.deepEqual(commandDirectories({
+    platform: "darwin",
+    home: "/Users/example",
+    pathValue: "relative:/custom/bin::/usr/bin",
+  }), ["/Users/example/.local/bin", "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/custom/bin"]);
+});
+
+test("probes the documented native Windows Claude executable outside PATH", async () => {
+  const home = String.raw`C:\Users\example`;
+  const nativeClaude = path.win32.join(home, ".local", "bin", "claude.exe");
+  assert.deepEqual(commandDirectories({
+    platform: "win32",
+    home,
+    pathValue: String.raw`C:\Windows\System32`,
+  }), [path.win32.join(home, ".local", "bin"), String.raw`C:\Windows\System32`]);
+
+  const probes = [];
+  const detected = await detectAssistantCommand({
+    command: "claude",
+    platform: "win32",
+    home,
+    pathValue: String.raw`C:\Windows\System32`,
+    realpath: async (candidate) => {
+      if (candidate !== nativeClaude) throw new Error("missing");
+      return candidate;
+    },
+    stat: async (candidate) => ({ isFile: () => candidate === nativeClaude }),
+    probe: async (candidate) => { probes.push(candidate); return candidate === nativeClaude; },
+  });
+
+  assert.equal(detected, true);
+  assert.deepEqual(probes, [nativeClaude]);
+});
+
+test("requires a real executable with a successful bounded version probe", async () => {
+  const calls = [];
+  const files = new Map([
+    ["/Users/example/.local/bin/claude", { isFile: () => true }],
+    ["/custom/bin/claude", { isFile: () => true }],
+  ]);
+  const detected = await detectAssistantCommand({
+    command: "claude",
+    platform: "darwin",
+    home: "/Users/example",
+    pathValue: "relative:/custom/bin",
+    realpath: async (candidate) => {
+      if (!files.has(candidate)) throw new Error("missing");
+      return candidate;
+    },
+    stat: async (candidate) => files.get(candidate),
+    access: async (candidate) => {
+      calls.push(["access", candidate]);
+      if (candidate.includes(".local")) throw new Error("not executable");
+    },
+    probe: async (candidate) => {
+      calls.push(["probe", candidate]);
+      return candidate === "/custom/bin/claude";
+    },
+  });
+  assert.equal(detected, true);
+  assert.deepEqual(calls, [
+    ["access", "/Users/example/.local/bin/claude"],
+    ["access", "/custom/bin/claude"],
+    ["probe", "/custom/bin/claude"],
+  ]);
 });

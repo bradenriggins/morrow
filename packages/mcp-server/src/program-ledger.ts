@@ -3,8 +3,9 @@ import { BATCH_CHILD_STATES, MAX_BATCH_CHILDREN } from "@morrow/batch-engine";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 import { EFFECT_OPERATION_STATES } from "@morrow/operation-journal";
 import * as z from "zod/v4";
+import { COURSE_AUDIT_SOURCE_SIGNAL_NAMES } from "./course-audit.js";
 import { auditChildTargetKey } from "./course-inventory.js";
-import { resolveResultArtifact, type ResultArtifactPage } from "./result-artifacts.js";
+import { resolveResultArtifact, resultArtifactAudience, type ResultArtifactPage } from "./result-artifacts.js";
 import type { GatewayRuntime } from "./runtime.js";
 
 /** Exactly one of these is assigned to every discovered inventory target. */
@@ -20,7 +21,6 @@ export const PROGRAM_LEDGER_FINAL_STATES = Object.freeze([
 
 export type ProgramLedgerFinalState = typeof PROGRAM_LEDGER_FINAL_STATES[number];
 
-const SIGNAL_FIELDS = ["image_tags_without_alt", "heading_level_jumps", "tables_without_th", "embedded_media_tags"] as const;
 const MAX_SIGNAL_WALK_DEPTH = 12;
 const MAX_SIGNAL_WALK_NODES = 20_000;
 const REASON_CODE = /^[a-z][a-z0-9_]{2,80}$/;
@@ -136,6 +136,7 @@ interface SignalCounts {
   readonly counts: JsonObject;
   readonly observed: boolean;
   readonly notApplicable: boolean;
+  readonly complete: boolean;
 }
 
 interface DerivedState {
@@ -147,7 +148,10 @@ interface DerivedState {
 
 interface InventoryAuditChild {
   readonly key: string;
+  readonly provider: string;
   readonly courseId: string;
+  readonly sourceBindingId: string;
+  readonly target: JsonObject;
   readonly kind: unknown;
 }
 
@@ -163,18 +167,19 @@ function sentence(value: unknown, fallback: string): string {
   return typeof value === "string" && value.length > 0 && value.length <= 1_000 ? value : fallback;
 }
 
-/**
- * Count the four saved-source signals anywhere in one audit record. Nested
- * assessment fields carry their own signal block, so a top-level-only count
- * could call a target signal-free while a nested answer still has one.
- */
+/** Count every producer-defined signal, including nested assessment fields. */
 function collectSignals(report: JsonObject): SignalCounts {
-  const counts: Record<string, number> = { image_tags_without_alt: 0, heading_level_jumps: 0, tables_without_th: 0, embedded_media_tags: 0 };
+  const counts: Record<string, number> = Object.fromEntries(COURSE_AUDIT_SOURCE_SIGNAL_NAMES.map((field) => [field, 0]));
+  const knownFields = new Set<string>(COURSE_AUDIT_SOURCE_SIGNAL_NAMES);
   let observed = false;
   let notApplicable = false;
+  let complete = true;
   let visited = 0;
   const visit = (value: unknown, depth: number): void => {
-    if (depth > MAX_SIGNAL_WALK_DEPTH || visited > MAX_SIGNAL_WALK_NODES) return;
+    if (depth > MAX_SIGNAL_WALK_DEPTH || visited >= MAX_SIGNAL_WALK_NODES) {
+      complete = false;
+      return;
+    }
     visited += 1;
     if (Array.isArray(value)) {
       for (const item of value) visit(item, depth + 1);
@@ -184,22 +189,30 @@ function collectSignals(report: JsonObject): SignalCounts {
     const signals = value.observed_source_signals;
     if (isJsonObject(signals)) {
       if (signals.status === "not_applicable") notApplicable = true;
-      for (const field of SIGNAL_FIELDS) {
+      else {
+        const limits = isJsonObject(value.source_signal_limits) ? value.source_signal_limits : undefined;
+        if (limits?.status !== "observed") complete = false;
+      }
+      for (const field of COURSE_AUDIT_SOURCE_SIGNAL_NAMES) {
         const list = signals[field];
         if (Array.isArray(list)) {
           counts[field] = (counts[field] ?? 0) + list.length;
           observed = true;
-        }
+        } else if (signals.status !== "not_applicable") complete = false;
+      }
+      for (const [field, list] of Object.entries(signals)) {
+        if (Array.isArray(list) && !knownFields.has(field)) complete = false;
       }
     }
     for (const nested of Object.values(value)) visit(nested, depth + 1);
   };
   visit(report, 0);
   return {
-    total: SIGNAL_FIELDS.reduce((total, field) => total + (counts[field] ?? 0), 0),
+    total: COURSE_AUDIT_SOURCE_SIGNAL_NAMES.reduce((total, field) => total + (counts[field] ?? 0), 0),
     counts: { ...counts },
     observed,
     notApplicable,
+    complete,
   };
 }
 
@@ -278,20 +291,49 @@ function inventoryAuditChildren(report: JsonObject): Map<string, InventoryAuditC
   if (!Array.isArray(report.audit_children)) {
     throw new ProgramLedgerError("The selected-program inventory has no audit child collection.", "inventory_report_unavailable");
   }
+  if (typeof report.provider !== "string") {
+    throw new ProgramLedgerError("The selected-program inventory has no provider identity.", "inventory_report_unavailable");
+  }
   const children = new Map<string, InventoryAuditChild>();
+  const targetKeys = new Set<string>();
   for (const candidate of report.audit_children) {
     if (!isJsonObject(candidate) || typeof candidate.childId !== "string" || candidate.tool !== "morrow_audit_course") {
       throw new ProgramLedgerError("A selected-program inventory audit child is invalid.", "inventory_report_unavailable");
     }
     const argumentsValue = isJsonObject(candidate.arguments) ? candidate.arguments : {};
     const target = isJsonObject(argumentsValue.target) ? argumentsValue.target : {};
+    const courseId = String(candidate.courseId);
+    const sourceBindingId = String(candidate.sourceBindingId);
+    if (argumentsValue.provider !== report.provider || String(argumentsValue.course_id) !== courseId
+      || argumentsValue.source_binding_id !== sourceBindingId) {
+      throw new ProgramLedgerError("A selected-program inventory audit child carries a conflicting target identity.", "target_identity_disagreement");
+    }
+    const key = auditChildTargetKey(candidate);
+    if (children.has(candidate.childId) || targetKeys.has(key)) {
+      throw new ProgramLedgerError("A selected-program inventory audit child is duplicated.", "target_identity_disagreement");
+    }
+    targetKeys.add(key);
     children.set(candidate.childId, {
-      key: auditChildTargetKey(candidate),
-      courseId: String(candidate.courseId),
+      key,
+      provider: report.provider,
+      courseId,
+      sourceBindingId,
+      target,
       kind: target.kind,
     });
   }
   return children;
+}
+
+function assertAuditIdentity(audit: JsonObject, declared: InventoryAuditChild, label: string): void {
+  const course = isJsonObject(audit.course) ? audit.course : {};
+  const auditTarget = isJsonObject(audit.target) ? audit.target : {};
+  const selectedTarget = isJsonObject(audit.selected_target) ? audit.selected_target : undefined;
+  if (audit.provider !== declared.provider || audit.source_binding_id !== declared.sourceBindingId
+    || String(course.id) !== declared.courseId || auditTarget.kind !== declared.kind || !selectedTarget
+    || targetKey(declared.courseId, declared.sourceBindingId, selectedTarget) !== declared.key) {
+    throw new ProgramLedgerError(`A supplied ${label} is bound to a different provider, connection, course, or exact target.`, "target_identity_disagreement");
+  }
 }
 
 /**
@@ -326,13 +368,9 @@ function bindAuditChildren(
       throw new ProgramLedgerError("Two supplied audit results name the same inventory target.", "target_identity_disagreement");
     }
     const audit = auditRecord(child.report);
-    if (audit) {
-      const course = isJsonObject(audit.course) ? audit.course : {};
-      const auditTarget = isJsonObject(audit.target) ? audit.target : {};
-      if (String(course.id) !== declared.courseId || auditTarget.kind !== declared.kind) {
-        throw new ProgramLedgerError("A supplied audit report is bound to a different course or target kind.", "target_identity_disagreement");
-      }
-    }
+    if (audit) assertAuditIdentity(audit, declared, "audit report");
+    const reAudit = auditRecord(child.repair?.re_audit);
+    if (reAudit) assertAuditIdentity(reAudit, declared, "repair re-audit");
     bound.set(declared.key, child);
   }
   return bound;
@@ -369,6 +407,7 @@ function derive(target: InventoryTarget, child: ProgramLedgerAuditChildResult | 
     audit_status: auditStatus,
     ...(digest ? { content_sha256: digest } : {}),
     ...(signals?.observed ? { signals: signals.counts } : {}),
+    ...(signals ? { signal_coverage_complete: signals.complete } : {}),
     ...(repair ? { operation_id: repair.operation_id, verification_status: repair.verification_status ?? "not_recorded" } : {}),
   });
 
@@ -384,7 +423,7 @@ function derive(target: InventoryTarget, child: ProgramLedgerAuditChildResult | 
       };
     }
     if (repair.operation_state === "verified" && repair.verification_status === "verified") {
-      if (reAudit && currentStatus === "evidence_ready" && signals && signals.total === 0) {
+      if (reAudit && currentStatus === "evidence_ready" && signals?.observed && signals.complete && signals.total === 0) {
         return {
           finalState: "repaired_and_verified",
           reason: "repair_verified_and_signal_absent",
@@ -529,7 +568,7 @@ function derive(target: InventoryTarget, child: ProgramLedgerAuditChildResult | 
       evidence: evidence(currentStatus ?? "evidence_ready"),
     };
   }
-  if (currentStatus === "evidence_ready") {
+  if (currentStatus === "evidence_ready" && signals?.observed && signals.complete) {
     return {
       finalState: "evidence_ready_pending_review",
       reason: "no_source_signal_observed",
@@ -635,10 +674,10 @@ export function buildProgramAuditLedger(
   };
 }
 
-function resolveInventoryReport(runtime: GatewayRuntime, value: JsonObject): JsonObject {
+function resolveInventoryReport(runtime: GatewayRuntime, value: JsonObject, audience?: string): JsonObject {
   if (value.schema === "morrow.course-inventory.v1") return value;
   const resolved = resolveResultArtifact({ structuredContent: value }, (handle, offset) => (
-    runtime.resultPage(handle, offset) as unknown as ResultArtifactPage
+    runtime.resultPage(handle, offset, undefined, audience) as unknown as ResultArtifactPage
   ));
   const content = isJsonObject(resolved.structuredContent) ? resolved.structuredContent : undefined;
   if (!content || content.schema !== "morrow.course-inventory.v1") {
@@ -677,10 +716,10 @@ function ledgerSummary(ledger: JsonObject): string {
   ].join(" ");
 }
 
-export function collectProgramLedger(runtime: GatewayRuntime, value: unknown): CallToolResult {
+export function collectProgramLedger(runtime: GatewayRuntime, value: unknown, audience?: string): CallToolResult {
   try {
     const input = programLedgerInputSchema.parse(value);
-    const report = resolveInventoryReport(runtime, input.inventory);
+    const report = resolveInventoryReport(runtime, input.inventory, audience);
     const ledger = buildProgramAuditLedger(report, input.audit_children, input.manual_checks);
     return {
       content: [{ type: "text", text: ledgerSummary(ledger) }],
@@ -704,5 +743,5 @@ export function registerProgramLedgerTool(server: McpServer, runtime: GatewayRun
     description: "Combine a saved selected-program inventory with the audit results for its audit children and state exactly one final state for every discovered target: repaired and verified, manually checked, not applicable with evidence, unread, blocked, held, or evidence ready pending review. Refuses when a selected course was refused, and when the inventory and the supplied results disagree on target identity. Read the `morrow://guidance/program-audit-ledger-v1` resource before reporting these states. This tool reads no course, makes no edit, and makes no accessibility conformance claim.",
     inputSchema: programLedgerInputSchema,
     annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-  }, async (value, _context: ServerContext) => collectProgramLedger(runtime, value));
+  }, async (value, context: ServerContext) => collectProgramLedger(runtime, value, resultArtifactAudience(context)));
 }

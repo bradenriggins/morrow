@@ -66,10 +66,10 @@
  * No secret leaves the page. Every value in a result is rebuilt from a fixed
  * vocabulary that this file validates: a plugin type, a plugin name, a decimal
  * version, a dotted release, a role short name, a capability name and one of
- * four permission words. No free text, attribute, link, form value or hidden
- * control is copied, so no API key, token, password, session key or salted
- * value can reach a result. A row or control carrying a class or a value this
- * file does not recognise is refused rather than reported.
+ * four permission words. No free text, link, form value or hidden control is
+ * copied, so no API key, token, password, session key or salted value can reach
+ * a result. Plugin-row presentation and update metadata classes are ignored;
+ * the semantic identity classes are required and validated exactly.
  */
 
 /**
@@ -78,6 +78,8 @@
  * serializes this function for MAIN-world injection.
  */
 export async function executeMoodleSiteInventoryReadInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
   const MAX_PLUGINS = 2_000;
@@ -88,10 +90,6 @@ export async function executeMoodleSiteInventoryReadInPage(rawInput) {
   // one changes what a course can do. They are the same rows as the inventory,
   // selected by type.
   const REPORTED_TYPES = Object.freeze(["auth", "enrol", "qbank", "availability", "repository", "filter"]);
-  // Every plugin row class Moodle's own plugins control panel writes. A row
-  // carrying anything else is a control this read does not understand, and it
-  // is refused rather than reported.
-  const PLUGIN_ROW_CLASSES = new Set(["r0", "r1", "lastrow", "plugintypeheader", "deprecatedtype", "enabled", "disabled"]);
   // Moodle's four capability permissions. The value is the one this read emits.
   const PERMISSIONS = new Map([["0", "inherit"], ["1", "allow"], ["-1", "prevent"], ["-1000", "prohibit"]]);
   // Everything on these administration pages this read never parses. None of it
@@ -182,11 +180,17 @@ export async function executeMoodleSiteInventoryReadInPage(rawInput) {
   };
   const boundedText = async (response, endpoint) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!COUNT.test(String(declared)) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!COUNT.test(String(declared)) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext() || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -194,14 +198,14 @@ export async function executeMoodleSiteInventoryReadInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -219,6 +223,7 @@ export async function executeMoodleSiteInventoryReadInPage(rawInput) {
     try {
       response = await fetch(endpoint, {
         method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" },
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return "failed"; }
     if (!response.ok) return response.status === 403 ? "forbidden" : "failed";
@@ -281,19 +286,18 @@ export async function executeMoodleSiteInventoryReadInPage(rawInput) {
       let deprecatedType = false;
       let heading = false;
       for (const token of String(row.getAttribute("class") || "").split(/\s+/).filter(Boolean)) {
-        if (PLUGIN_ROW_CLASSES.has(token)) {
-          if (token === "enabled" || token === "disabled") {
-            if (availability !== "not_reported") return "invalid";
-            availability = token;
-          } else if (token === "deprecatedtype") deprecatedType = true;
-          else if (token === "plugintypeheader") heading = true;
+        if (token === "enabled" || token === "disabled") {
+          if (availability !== "not_reported") return "invalid";
+          availability = token;
           continue;
         }
+        if (token === "deprecatedtype") { deprecatedType = true; continue; }
+        if (token === "plugintypeheader") { heading = true; continue; }
         if (token.startsWith("type-")) { if (type) return "invalid"; type = token.slice(5); continue; }
         if (token.startsWith("name-")) { if (component) return "invalid"; component = token.slice(5); continue; }
         if (token.startsWith("status-")) { if (status) return "invalid"; status = token.slice(7); continue; }
-        // A control on an administration page Morrow's allowlist does not hold.
-        return "control";
+        // Moodle and installed plugins add presentation, source and update
+        // metadata classes here. They cannot affect the fixed result schema.
       }
       // One heading row introduces each plugin type and names no plugin.
       if (heading) {

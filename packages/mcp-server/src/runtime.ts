@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -30,17 +29,23 @@ import {
   type ToolAnnotations,
 } from "@morrow/contracts";
 import {
+  canvasResultBindingArtifactFromVerifiedConnector,
+  encryptCanvasResultBindingArtifact,
+} from "@morrow/batch-engine";
+import {
   applyPublicationPolicy,
   ArtifactGenerationRegistry,
   LearnerRoster,
   LearnerVault,
   canonicalMorrowResult,
   canvasPrivacyRoster,
+  decodeExactUtf8,
   moodleSourceHistoryAvailable,
   mergeCatalog,
   normalizeLearnerIdentity,
   normalizeUpstreamResult,
   redactLearnerEgress,
+  redactLearnerEgressBatch,
   resolveLearnerTokens,
   safeUpstreamFailure,
   type LearnerIdentity,
@@ -68,6 +73,7 @@ import {
   effectOperationProjection,
   operationRecordProjection,
   type EffectOperationRecord,
+  type EffectBatchRevocation,
   type EffectAuthoritySnapshot,
   type EffectAuthorization,
   type FrozenReadbackPlan,
@@ -78,6 +84,10 @@ import { StdioMcpUpstream } from "@morrow/upstream-mcp";
 import { FileStageStore, MAX_STAGED_FILE_BYTES, type FileStageBinding, type FileStageScope } from "./file-staging.js";
 import { validItemBankFanOutReceipt } from "./item-bank-fan-out.js";
 import { itemBankFanOutPlanRefusal } from "./item-bank-repair.js";
+import { readExactTrustFile, readExactTrustJson } from "./exact-trust-file.js";
+
+export const MAX_PUBLICATION_POLICY_BYTES = 8 * 1024 * 1024;
+export const MAX_MCP_RUNTIME_MANIFEST_BYTES = 1024 * 1024;
 
 const NEW_QUIZ_ACCOMMODATION_TOOLS = new Set([
   "canvas_set_course_level_accommodations",
@@ -255,8 +265,8 @@ import {
   isCanvasConversationTransfer,
   type CanvasConversationInput,
 } from "./canvas-conversations.js";
-import type { GatewayConfig } from "./config.js";
-import { signBlackboardEffectGrant } from "@morrow/blackboard-learn-api";
+import { assertUniqueCanonicalUpstreamIds, type GatewayConfig } from "./config.js";
+import { BLACKBOARD_EFFECT_GRANT_MAX_LIFETIME_MS, signBlackboardEffectGrant } from "@morrow/blackboard-learn-api";
 import {
   BLACKBOARD_CONTENT_PATCH_APPLY_TOOL,
   BLACKBOARD_CONTENT_PATCH_PLAN_NATIVE_TOOL,
@@ -270,6 +280,7 @@ import { resolveResultArtifact, ResultArtifactStore } from "./result-artifacts.j
 import { loadExamplePlatformCatalogTruth } from "./meridian-catalog-truth.js";
 import {
   verifyLocalGitSourceAttestation,
+  verifyLocalGitStdioLaunch,
   verifyRemoteGitSshSourceAttestation,
 } from "./source-attestation.js";
 import {
@@ -277,40 +288,8 @@ import {
   type ApprovalReviewReadCache,
   type ApprovalReviewContext,
 } from "./approval-context.js";
-
-export const MORROW_NATIVE_TOOL_NAMES = Object.freeze([
-  "morrow_health",
-  "morrow_activity",
-  "morrow_check_new_quiz",
-  "morrow_review_lesson",
-  "morrow_private_chat",
-  "morrow_audit_course",
-  "morrow_catalog",
-  "morrow_catalog_search",
-  "morrow_capability_get",
-  "morrow_capability_read",
-  "morrow_capability_change",
-  PUBLIC_MOODLE_ENROLMENT_CANDIDATE_TOOL,
-  "morrow_request_edit_access",
-  ...Object.values(MOODLE_STAGED_FILE_CAPABILITIES).map((capability) => capability.publicPlanToolName),
-  "morrow_plan_canvas_file_upload",
-  "morrow_plan_canvas_conversation",
-  "morrow_plan_classic_quiz_description_image_alt_repair",
-  "morrow_plan_blackboard_content_patch",
-  ...BLACKBOARD_ACTIONS.map((action) => action.publicName),
-  "morrow_profile_status",
-  "morrow_operation_get",
-  "morrow_operations_recent",
-  "morrow_operation_list",
-  "morrow_operation_dispatch",
-  "morrow_operation_cancel",
-  "morrow_operation_reconcile",
-  "morrow_operation_verify",
-  "morrow_operation_close_unresolved",
-  "morrow_operation_undo",
-  "morrow_operation_approve",
-  "morrow_result_page",
-] as const);
+import { MORROW_NATIVE_TOOL_NAMES } from "./native-tool-manifest.js";
+export { MORROW_NATIVE_TOOL_NAMES } from "./native-tool-manifest.js";
 
 const INTERNAL_SOURCE_TOOL_NAMES = Object.freeze([
   "morrow_browser_edit_policy_set",
@@ -380,6 +359,25 @@ export const PRIVATE_SOURCE_TOOL_NAMES: ReadonlySet<string> = new Set([
   "blackboard_verify_course_copy",
 ]);
 
+const BLACKBOARD_CREATE_READBACK_CONTRACTS: Readonly<Record<string, Readonly<{ schema: string; readback: string }>>> = Object.freeze({
+  blackboard_verify_ultra_assignment: Object.freeze({
+    schema: "morrow.blackboard.ultra-assignment.comparator.v2",
+    readback: "content_and_gradebook_column",
+  }),
+  blackboard_verify_course_announcement: Object.freeze({
+    schema: "morrow.blackboard.course-announcement.comparator.v2",
+    readback: "reviewed_fields",
+  }),
+  blackboard_verify_course_group: Object.freeze({
+    schema: "morrow.blackboard.course-group.comparator.v2",
+    readback: "reviewed_fields",
+  }),
+});
+
+function blackboardCreateReadbackContract(mapping: CatalogTool): Readonly<{ schema: string; readback: string }> | null {
+  return BLACKBOARD_CREATE_READBACK_CONTRACTS[mapping.upstreamName] || null;
+}
+
 export function isPrivateSourceTool(tool: Pick<CatalogTool, "upstreamName">): boolean {
   return PRIVATE_SOURCE_TOOL_NAMES.has(tool.upstreamName);
 }
@@ -388,7 +386,7 @@ const PRIVATE_EGRESS_FIELD_KEYS = new Set(["privateattachment", "bytesbase64"]);
 const MAX_INVENTORY_EGRESS_CONTEXTS = 4;
 const MAX_BROWSER_BINDING_EGRESS_CONTEXTS = 4;
 const MCP_RUNTIME_HEALTH_SCHEMA = "morrow.mcp-runtime.health.v1";
-const MCP_RUNTIME_MANIFEST_SCHEMA = "morrow.mcp-runtime-manifest.v1";
+const MCP_RUNTIME_MANIFEST_SCHEMA = "morrow.mcp-runtime-manifest.v2";
 const MCP_RUNTIME_PACKAGE_NAME = "@morrow-lms/gateway";
 const SHA256 = /^[0-9a-f]{64}$/;
 const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
@@ -421,8 +419,11 @@ export function mcpRuntimeHealthFromPayload(
   let bytes: Buffer;
   let manifest: unknown;
   try {
-    bytes = readFileSync(resolve(entrypointDirectory, "../../../mcp-runtime-manifest.json"));
-    manifest = JSON.parse(bytes.toString("utf8"));
+    bytes = readExactTrustFile(resolve(entrypointDirectory, "../../../mcp-runtime-manifest.json"), {
+      label: "MCP runtime manifest",
+      maxBytes: MAX_MCP_RUNTIME_MANIFEST_BYTES,
+    });
+    manifest = JSON.parse(decodeExactUtf8(bytes, "MCP runtime manifest"));
   } catch {
     return undefined;
   }
@@ -630,37 +631,32 @@ interface OuterOperationControls {
   readonly approvalTtlMs?: number;
 }
 
+/** The caller named a readback comparator. Morrow never accepts one: every readback is derived from the route. */
+export class CallerReadbackRefusedError extends TypeError {
+  override readonly name = "CallerReadbackRefusedError";
+  constructor() {
+    super("_morrow.readback is not accepted: Morrow derives every readback from the write's own route.");
+  }
+}
+
 function outerOperationControls(args: Readonly<Record<string, unknown>>): OuterOperationControls {
   assertNoPrivateAttachmentInput(args);
   const request = structuredClone(args) as JsonObject;
   if (!isJsonObject(request._morrow)) return { request };
   const routing = { ...request._morrow };
-  const rawReadback = routing.readback;
+  if (routing.readback !== undefined) throw new CallerReadbackRefusedError();
   const rawTtl = routing.approval_ttl_ms;
-  delete routing.readback;
   delete routing.approval_ttl_ms;
   delete routing.outer_grant;
   if (Object.keys(routing).length > 0) request._morrow = routing;
   else delete request._morrow;
 
-  let readback: FrozenReadbackPlan | undefined;
-  if (rawReadback !== undefined) {
-    if (!isJsonObject(rawReadback) || typeof rawReadback.tool !== "string" || !isJsonObject(rawReadback.arguments)
-      || typeof rawReadback.expected_digest !== "string" || !/^[0-9a-f]{64}$/.test(rawReadback.expected_digest)) {
-      throw new TypeError("_morrow.readback requires tool, arguments, and expected_digest");
-    }
-    readback = {
-      tool: rawReadback.tool,
-      arguments: structuredClone(rawReadback.arguments),
-      expectedDigest: rawReadback.expected_digest,
-    };
-  }
   const approvalTtlMs = rawTtl === undefined
     ? undefined
     : typeof rawTtl === "number" && Number.isInteger(rawTtl) && rawTtl >= 60_000 && rawTtl <= 24 * 60 * 60_000
       ? rawTtl
       : (() => { throw new TypeError("_morrow.approval_ttl_ms must be 60000 through 86400000"); })();
-  return { request, ...(readback ? { readback } : {}), ...(approvalTtlMs ? { approvalTtlMs } : {}) };
+  return { request, ...(approvalTtlMs ? { approvalTtlMs } : {}) };
 }
 
 function resultComparable(value: JsonObject): JsonObject {
@@ -693,6 +689,14 @@ function isBlackboardApply(mapping: CatalogTool): boolean {
     && mapping.capability?.provider === "blackboard"
     && mapping.capability.route.backend === "lms-api"
     && BLACKBOARD_ACTIONS.some((action) => action.apply.name === mapping.upstreamName));
+}
+
+/** Whether a saved readback names the exact verify tool Morrow pairs with this Blackboard apply tool. */
+function isBlackboardDerivedReadback(effectMapping: CatalogTool, readbackMapping: CatalogTool): boolean {
+  if (!isBlackboardApply(effectMapping) || readbackMapping.upstreamId !== effectMapping.upstreamId) return false;
+  if (isBlackboardContentPatchApply(effectMapping)) return readbackMapping.upstreamName === BLACKBOARD_CONTENT_PATCH_VERIFY_TOOL;
+  return BLACKBOARD_ACTIONS.some((action) => action.apply.name === effectMapping.upstreamName
+    && action.verify.name === readbackMapping.upstreamName);
 }
 
 function isBlackboardAttachment(mapping: CatalogTool): boolean {
@@ -753,14 +757,21 @@ function browserEditFields(mapping: CatalogTool, request: JsonObject): readonly 
     .sort();
 }
 
+function exactDecimalId(value: unknown): string | null {
+  if (typeof value === "string" && /^[1-9][0-9]{0,18}$/.test(value)) return value;
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
+  return null;
+}
+
 function requestCourseId(request: JsonObject): string | null {
   // Every current Item Bank route carries the selected course directly. The
   // legacy guarded repair also carries it inside the guard, so both forms lock,
   // bind, and approve the same course.
   const guard = request.morrow_item_bank_guard;
   const value = isJsonObject(guard) && guard.course_id !== undefined ? guard.course_id : request.course_id;
-  if (typeof value === "string" && (/^[1-9][0-9]{0,18}$/.test(value) || /^_[1-9][0-9]{0,18}_[1-9][0-9]{0,18}$/.test(value))) return value;
-  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) return String(value);
+  const decimal = exactDecimalId(value);
+  if (decimal) return decimal;
+  if (typeof value === "string" && /^_[1-9][0-9]{0,18}_[1-9][0-9]{0,18}$/.test(value)) return value;
   return null;
 }
 
@@ -903,6 +914,15 @@ export interface EffectBindingScope extends EffectTargetProviderScope {
   readonly sourceBindingId: string;
   readonly principalFingerprint: string;
   readonly sessionGeneration: number;
+}
+
+interface ReadAuthorityScope {
+  readonly bindingScope: EffectBindingScope;
+  readonly courseId: string;
+}
+
+interface BoundLearnerTextRedactionContext extends LearnerTextRedactionContext {
+  readonly readAuthorityScope: ReadAuthorityScope;
 }
 
 export interface PreparedEffectAuthority {
@@ -1078,6 +1098,48 @@ function connectorReadback(mapping: CatalogTool, request: JsonObject): FrozenRea
 
 function isConnectorReadbackPolicy(readback: FrozenReadbackPlan | null | undefined): boolean {
   return readback?.tool === "morrow_connector_embedded_readback";
+}
+
+const ROUTE_READBACK_TOOL = "morrow_route_embedded_readback";
+const ROUTE_READBACK_SCHEMA = "morrow.route-readback-policy.v1";
+/** The one comparator a non-connector route may declare: the review read must return every requested field. */
+const EXACT_REQUESTED_FIELDS_COMPARATOR = "exact-requested-fields";
+
+/**
+ * A route declares its own authoritative read through `route.planBackend`
+ * (the read-only source tool that reviews the written object) and
+ * `route.comparator`. Morrow freezes that declaration with the request digest
+ * so verification can only read what the route names, never what a caller
+ * chose.
+ */
+function routeReadback(mapping: CatalogTool, reviewTool: CatalogTool, request: JsonObject): FrozenReadbackPlan {
+  const policy = {
+    schema: ROUTE_READBACK_SCHEMA,
+    source: mapping.upstreamId,
+    tool: mapping.publicName,
+    sourceTool: mapping.upstreamName,
+    reviewTool: reviewTool.publicName,
+    reviewSourceTool: reviewTool.upstreamName,
+    comparator: EXACT_REQUESTED_FIELDS_COMPARATOR,
+    requestDigest: sha256Json(request),
+  };
+  return { tool: ROUTE_READBACK_TOOL, arguments: policy, expectedDigest: sha256Json(policy) };
+}
+
+function isRouteReadbackPolicy(readback: FrozenReadbackPlan | null | undefined): boolean {
+  return readback?.tool === ROUTE_READBACK_TOOL;
+}
+
+/** Requested fields are every request field except identity, routing, and `expected_*` preconditions. */
+function requestedReadbackFields(request: JsonObject, identityKeys: ReadonlySet<string>): readonly (readonly [string, unknown])[] {
+  return Object.entries(request).filter(([key]) => key !== "_morrow" && !key.startsWith("expected_") && !identityKeys.has(key));
+}
+
+/** A saved connector operation may use only the policy Morrow derives from its frozen request. */
+function hasExactConnectorReadbackPolicy(operation: EffectOperationRecord, mapping: CatalogTool): boolean {
+  if (!isCanvasConnector(mapping) || !isJsonObject(operation.plan.arguments)) return false;
+  const expected = connectorReadback(mapping, operation.plan.arguments);
+  return operation.readback !== null && sha256Json(operation.readback) === sha256Json(expected);
 }
 
 const CONNECTOR_READBACK_RECOVERY_LIMITATION = "Morrow did not keep a read-only check for this change, so it cannot check the result for you. Open the item in Canvas and see whether the change is there. If it is missing, ask Morrow for a new review; Morrow will not send this change again.";
@@ -1365,9 +1427,13 @@ function verifyConfiguredSources(
 
 function readPublicationManifest(path: string): unknown {
   try {
-    return JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return readExactTrustJson(path, {
+      label: "Publication policy",
+      maxBytes: MAX_PUBLICATION_POLICY_BYTES,
+    });
   } catch (error) {
-    throw new Error(`Morrow could not read publication policy ${path}`, { cause: error });
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    throw new Error(`Morrow could not read publication policy ${path}${detail}`, { cause: error });
   }
 }
 
@@ -1416,7 +1482,7 @@ export class GatewayRuntime {
   readonly catalog: CatalogSnapshot;
 
   private readonly upstreams: ReadonlyMap<string, StdioMcpUpstream>;
-  private readonly responseLearnerContexts = new AsyncLocalStorage<Map<string, LearnerTextRedactionContext>>();
+  private readonly responseLearnerContexts = new AsyncLocalStorage<Map<string, BoundLearnerTextRedactionContext>>();
   private readonly toolByPublicName: ReadonlyMap<string, CatalogTool>;
   private readonly journal: GatewayOperationJournal;
   private readonly effects: ProviderEffectBroker;
@@ -1440,6 +1506,7 @@ export class GatewayRuntime {
   private readonly requester = new AsyncLocalStorage<RequestedByIdentity>();
   private readonly gatewayProcessId = `gateway:${randomUUID()}`;
   private readonly blackboardEffectDispatchSecret: string;
+  private readonly resultBindingEncryptionKey: Uint8Array | null;
 
   private constructor(
     config: GatewayConfig,
@@ -1452,6 +1519,7 @@ export class GatewayRuntime {
     artifacts = new ArtifactGenerationRegistry(),
     mcpRuntime?: McpRuntimeHealth,
     blackboardEffectDispatchSecret = randomBytes(32).toString("base64url"),
+    resultBindingEncryptionKey?: Uint8Array,
   ) {
     this.config = config;
     this.upstreams = upstreams;
@@ -1463,13 +1531,23 @@ export class GatewayRuntime {
     this.artifacts = artifacts;
     this.mcpRuntime = mcpRuntime;
     this.blackboardEffectDispatchSecret = blackboardEffectDispatchSecret;
+    if (resultBindingEncryptionKey && resultBindingEncryptionKey.byteLength !== 32) {
+      throw new TypeError("result binding encryption key must contain exactly 32 bytes");
+    }
+    this.resultBindingEncryptionKey = resultBindingEncryptionKey
+      ? Uint8Array.from(resultBindingEncryptionKey) : null;
     this.toolByPublicName = new Map(catalog.tools.map((tool) => [tool.publicName, tool]));
   }
 
   static async connect(
     config: GatewayConfig,
-    options: { readonly journalPath?: string; readonly mcpRuntime?: McpRuntimeHealth } = {},
+    options: {
+      readonly journalPath?: string;
+      readonly mcpRuntime?: McpRuntimeHealth;
+      readonly resultBindingEncryptionKey?: Uint8Array;
+    } = {},
   ): Promise<GatewayRuntime> {
+    assertUniqueCanonicalUpstreamIds(config.upstreams);
     const sourceAttestations = verifyConfiguredSources(config);
     const catalogTruth = new Map<string, ReturnType<typeof loadExamplePlatformCatalogTruth>>(config.upstreams
       .filter((source) => source.kind === "meridian-ssh")
@@ -1565,6 +1643,16 @@ export class GatewayRuntime {
               },
             }
           : {}),
+        ...(upstreamConfig.kind === "mcp-stdio" && upstreamConfig.attestation?.kind === "local-git"
+          ? {
+              prepareLaunch: (stdioLaunch) => verifyLocalGitStdioLaunch(
+                upstreamConfig.id,
+                upstreamConfig.repository,
+                upstreamConfig.attestation!,
+                stdioLaunch,
+              ),
+            }
+          : {}),
       });
       upstreams.set(upstream.id, upstream);
 
@@ -1582,12 +1670,19 @@ export class GatewayRuntime {
             throw new Error(`Source ${upstream.id} eligible catalog does not match generated truth.`);
           }
         }
+        // A Meridian server publishes no capability metadata of its own; the
+        // attested catalog truth is the authority that declares each tool's
+        // route, including the review read a write verifies through.
+        const truthCapabilities = new Map((truth?.tools ?? []).map((tool) => [tool.name, tool.capability]));
         sources.push({
           id: upstream.id,
           label: upstream.label,
           priority: upstream.priority,
           ...(upstreamConfig.revision ? { revision: upstreamConfig.revision } : {}),
-          tools,
+          tools: tools.map((tool) => {
+            const declared = truthCapabilities.get(tool.name);
+            return tool.capability || !declared ? tool : { ...tool, capability: declared };
+          }),
         });
       } catch (error) {
         if (upstream.required) {
@@ -1663,6 +1758,7 @@ export class GatewayRuntime {
         undefined,
         mcpRuntime,
         blackboardEffectDispatchSecret,
+        options.resultBindingEncryptionKey,
       );
     } catch (error) {
       await closeStartupResources(upstreams, journal, effects);
@@ -1696,18 +1792,16 @@ export class GatewayRuntime {
   }
 
   effectHealth(): JsonObject {
-    const recent = this.effects.list(200);
-    const unresolved = recent.filter((operation) => (
-      !["verified", "failed", "cancelled", "closed_by_person"].includes(operation.state)
-    ));
+    const counts = this.effects.stats();
     return {
       schema: "morrow.effect-broker.health.v1",
       open: true,
-      recentOperationCount: recent.length,
-      recentCoverageComplete: recent.length < 200,
-      unresolvedOperationCount: unresolved.length,
-      appliedOrUnknownCount: recent.filter((operation) => operation.state === "applied_or_unknown").length,
-      dispatchingCount: recent.filter((operation) => operation.state === "dispatching").length,
+      totalOperationCount: counts.totalOperationCount,
+      recentOperationCount: Math.min(counts.totalOperationCount, 200),
+      recentCoverageComplete: counts.totalOperationCount <= 200,
+      unresolvedOperationCount: counts.unresolvedOperationCount,
+      appliedOrUnknownCount: counts.appliedOrUnknownCount,
+      dispatchingCount: counts.dispatchingCount,
     };
   }
 
@@ -1836,11 +1930,17 @@ export class GatewayRuntime {
     return this.requester.getStore();
   }
 
-  operationList(limit = 50): JsonObject {
-    const operations = this.effects.list(limit).map(effectOperationProjection);
+  operationList(limit = 50, cursor?: string): JsonObject {
+    const page = this.effects.listPage({ limit, ...(cursor !== undefined ? { cursor } : {}) });
+    const counts = this.effects.stats();
+    const operations = page.operations.map(effectOperationProjection);
     return {
       schema: "morrow.operations.list.v1",
       returned: operations.length,
+      total: counts.totalOperationCount,
+      unresolved: counts.unresolvedOperationCount,
+      hasMore: page.hasMore,
+      nextCursor: page.nextCursor,
       operations,
     };
   }
@@ -1863,10 +1963,31 @@ export class GatewayRuntime {
 
   cancelOperation(operationId: string): JsonObject {
     const cancelled = this.effects.cancel(operationId);
+    this.discardOperationFileStages(operationId);
+    return effectOperationProjection(cancelled);
+  }
+
+  private discardOperationFileStages(operationId: string): void {
     const stages = this.operationFileStages.get(operationId);
     for (const stage of stages || []) this.fileStages.discard(stage.handle);
     this.operationFileStages.delete(operationId);
-    return effectOperationProjection(cancelled);
+  }
+
+  private settleCancelledDispatch(operationId: string): JsonObject {
+    this.discardOperationFileStages(operationId);
+    return this.effectResult(this.effects.settleCancelledBeforeSend(operationId), "cancelled_before_dispatch");
+  }
+
+  registerEffectBatch(batchId: string): "active" | "revoked" {
+    return this.effects.registerBatch(batchId);
+  }
+
+  bindEffectBatchOperation(batchId: string, childId: string, operationId: string): EffectOperationRecord {
+    return this.effects.bindBatchOperation(batchId, childId, operationId).operation;
+  }
+
+  revokeEffectBatch(batchId: string, reason: string): EffectBatchRevocation {
+    return this.effects.revokeBatch(batchId, reason);
   }
 
   private async currentMoodleStagedFileScope(
@@ -1888,7 +2009,7 @@ export class GatewayRuntime {
   private async currentCanvasFileScope(
     mapping: CatalogTool,
     sourceBindingId: string,
-    courseId: number,
+    courseId: string,
     contentType: string,
     signal?: AbortSignal,
   ): Promise<FileStageScope> {
@@ -1990,12 +2111,15 @@ export class GatewayRuntime {
           throw new Error("An H5P package file name must end in .h5p.");
         }
         options.signal?.throwIfAborted();
-        stages = locals.map((local) => this.fileStages.stage({
-          ...local,
-          scope,
-          expiresAt: Date.now() + RESOURCE_FILE_APPROVAL_TTL_MS + 1_000,
-        }));
-        stageHandles.push(...stages.map((stage) => stage.handle));
+        for (const local of locals) {
+          const stage = this.fileStages.stage({
+            ...local,
+            scope,
+            expiresAt: Date.now() + RESOURCE_FILE_APPROVAL_TTL_MS + 1_000,
+          });
+          stages.push(stage);
+          stageHandles.push(stage.handle);
+        }
       } finally {
         for (const local of locals) local.bytes.fill(0);
       }
@@ -2027,7 +2151,10 @@ export class GatewayRuntime {
       return this.effectResult(operation, "planned");
     } catch (error) {
       for (const handle of stageHandles) this.fileStages.discard(handle);
-      if (operation) this.effects.cancel(operation.operationId);
+      if (operation) {
+        this.operationFileStages.delete(operation.operationId);
+        this.effects.cancel(operation.operationId);
+      }
       return this.planOperationRejected(capability.publicPlanToolName, error);
     }
   }
@@ -2378,11 +2505,27 @@ export class GatewayRuntime {
         throw new Error("Blackboard did not return the selected action's reviewed plan.");
       }
       const bindingScope = this.blackboardEffectScope(sourcePlan.effect_scope, { source_binding_id: String(input.source_binding_id) });
-      const comparison = this.resolveResultArtifact(await this.callSourceOwned(verifyMapping.publicName, input, options));
-      const comparator = isJsonObject(comparison.structuredContent) ? comparison.structuredContent : null;
-      if (comparison.isError === true || !exactScope(comparator)
-        || typeof comparator.schema !== "string" || !comparator.schema.endsWith(".comparator.v1")
-        || typeof comparator.verified !== "boolean") throw new Error("Blackboard did not return the selected action's readback contract.");
+      const createReadback = blackboardCreateReadbackContract(verifyMapping);
+      let comparator: JsonObject;
+      if (createReadback) {
+        comparator = {
+          schema: createReadback.schema,
+          ok: true,
+          tenantId: input.tenant_id!,
+          sourceBindingId: input.source_binding_id!,
+          courseId: input.course_id!,
+          verified: false,
+          readback: createReadback.readback,
+          status: "api_configured_live_untested",
+        };
+      } else {
+        const comparison = this.resolveResultArtifact(await this.callSourceOwned(verifyMapping.publicName, input, options));
+        const sourceComparator = isJsonObject(comparison.structuredContent) ? comparison.structuredContent : null;
+        if (comparison.isError === true || !exactScope(sourceComparator)
+          || typeof sourceComparator.schema !== "string" || !sourceComparator.schema.endsWith(".comparator.v1")
+          || typeof sourceComparator.verified !== "boolean") throw new Error("Blackboard did not return the selected action's readback contract.");
+        comparator = sourceComparator;
+      }
       const request: JsonObject = {
         ...input,
         expected_plan_digest: sourcePlan.planDigest,
@@ -2620,6 +2763,7 @@ export class GatewayRuntime {
   private async currentBrowserEffectAuthority(
     mapping: CatalogTool,
     request: JsonObject,
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<PreparedEffectAuthority> {
     const bindingsTool = this.browserBindingsTool(mapping);
     if (!bindingsTool) {
@@ -2629,7 +2773,7 @@ export class GatewayRuntime {
     if (!sourceBindingId) {
       throw new Error("Browser connector writes require one exact source_binding_id from morrow_browser_bindings");
     }
-    const result = await this.callSourceOwned(bindingsTool.publicName, {});
+    const result = await this.callSourceOwned(bindingsTool.publicName, {}, options);
     if (result.isError === true) {
       throw new Error("The current browser connection could not be read.");
     }
@@ -2640,7 +2784,7 @@ export class GatewayRuntime {
     const binding = matches[0]!;
     const permission = isJsonObject(binding.editPermission) ? binding.editPermission : null;
     const current = permission && !Array.isArray(permission.rules)
-      ? await this.browserEditOptions(bindingsTool, binding)
+      ? await this.browserEditOptions(bindingsTool, binding, options)
       : binding;
     return {
       authorization: currentEditAuthorization(mapping, request, current),
@@ -2651,21 +2795,24 @@ export class GatewayRuntime {
   private async currentEffectAuthority(
     mapping: CatalogTool,
     request: JsonObject,
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<PreparedEffectAuthority> {
     return isCanvasConnector(mapping)
-      ? this.currentBrowserEffectAuthority(mapping, request)
+      ? this.currentBrowserEffectAuthority(mapping, request, options)
       : { authorization: REVIEW_AUTHORIZATION };
   }
 
   async prepareEffectAuthority(
     publicName: string,
     args: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<PreparedEffectAuthority> {
     const mapping = this.toolByPublicName.get(publicName);
     if (!mapping || mapping.annotations?.readOnlyHint === true) {
       throw new Error("Morrow can only prepare one current mutating capability.");
     }
-    return this.currentEffectAuthority(mapping, outerOperationControls(args).request);
+    options.signal?.throwIfAborted();
+    return this.currentEffectAuthority(mapping, outerOperationControls(args).request, options);
   }
 
   private editAccessBindingsTool(): CatalogTool | null {
@@ -2676,12 +2823,16 @@ export class GatewayRuntime {
     return matches.length === 1 ? matches[0]! : null;
   }
 
-  private async browserEditOptions(source: CatalogTool, binding: JsonObject): Promise<JsonObject> {
+  private async browserEditOptions(
+    source: CatalogTool,
+    binding: JsonObject,
+    callOptions: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
     const candidates = this.catalog.tools.filter((candidate) => candidate.upstreamId === source.upstreamId
       && candidate.upstreamName === "morrow_browser_edit_options" && candidate.annotations?.readOnlyHint === true);
     if (candidates.length === 0 && binding.editOptionsAvailable !== true) return binding;
     if (candidates.length !== 1) throw new Error("The selected course Edit options are unavailable or ambiguous.");
-    const result = await this.callSourceOwned(candidates[0]!.publicName, { source_binding_id: binding.sourceBindingId! });
+    const result = await this.callSourceOwned(candidates[0]!.publicName, { source_binding_id: binding.sourceBindingId! }, callOptions);
     const options = isJsonObject(result.structuredContent) ? result.structuredContent : null;
     if (result.isError === true || !options || options.schema !== "morrow.bridge.edit-options.v1"
       || options.sourceBindingId !== binding.sourceBindingId || options.provider !== binding.provider
@@ -2873,10 +3024,12 @@ export class GatewayRuntime {
   private async resolveCurrentEditAuthorization(
     mapping: CatalogTool,
     request: JsonObject,
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<EffectAuthorization> {
     try {
-      return (await this.currentEffectAuthority(mapping, request)).authorization;
+      return (await this.currentEffectAuthority(mapping, request, options)).authorization;
     } catch {
+      options.signal?.throwIfAborted();
       return REVIEW_AUTHORIZATION;
     }
   }
@@ -3180,8 +3333,8 @@ export class GatewayRuntime {
     request: Readonly<Record<string, unknown>>,
   ): Readonly<{ courseId: string; expected: ReturnType<CanvasCourseSummaryRoute["expectation"]> }> | null {
     const courseId = this.requestCourseId(request);
-    if (!courseId || !Number.isSafeInteger(Number(courseId))) return null;
-    const expected = route.expectation(Number(courseId), request);
+    if (!courseId || !/^[1-9][0-9]{0,18}$/u.test(courseId)) return null;
+    const expected = route.expectation(courseId, request);
     return expected ? { courseId, expected } : null;
   }
 
@@ -5268,6 +5421,19 @@ export class GatewayRuntime {
     };
   }
 
+  private browserProviderMapping(
+    mapping: CatalogTool,
+    binding: Readonly<{ provider?: unknown }>,
+  ): CatalogTool {
+    const provider = this.exactString(binding.provider, 30);
+    if (provider !== "canvas" && provider !== "moodle") throw new Error("learner_roster_source_unavailable");
+    if (mapping.upstreamId && mapping.capability?.provider === provider && isCanvasConnector(mapping)) return mapping;
+    const candidate = this.catalog.tools.find((entry) => entry.upstreamId === mapping.upstreamId
+      && entry.capability?.provider === provider && isCanvasConnector(entry));
+    if (!candidate) throw new Error("learner_roster_source_unavailable");
+    return candidate;
+  }
+
   private async publicBrowserBindingMetadata(
     mapping: CatalogTool,
     binding: BridgeBinding,
@@ -5278,10 +5444,11 @@ export class GatewayRuntime {
     const sourceBindingId = binding.sourceBindingId;
     const bindingObject = binding as unknown as JsonObject;
     try {
+      const providerMapping = this.browserProviderMapping(mapping, binding);
       const context = binding.provider === "canvas"
-        ? await this.canvasLearnerContextForBinding(mapping, sourceBindingId, binding.courseId, bindingObject, options)
+        ? await this.canvasLearnerContextForBinding(providerMapping, sourceBindingId, binding.courseId, bindingObject, options)
         : binding.provider === "moodle"
-          ? await this.moodleLearnerContextForBinding(mapping, sourceBindingId, binding.courseId, bindingObject, options)
+          ? await this.moodleLearnerContextForBinding(providerMapping, sourceBindingId, binding.courseId, bindingObject, options)
           : undefined;
       if (!context) return output;
       const courseName = redactLearnerEgress(binding.courseName, context);
@@ -5583,7 +5750,7 @@ export class GatewayRuntime {
     mapping: CatalogTool,
     request: Readonly<Record<string, unknown>>,
     options: { readonly signal?: AbortSignal } = {},
-  ): Promise<LearnerTextRedactionContext | undefined> {
+  ): Promise<BoundLearnerTextRedactionContext | undefined> {
     if (!isCanvasConnector(mapping) || mapping.capability?.provider !== "canvas") return undefined;
     const sourceBindingId = this.requestSourceBindingId(request);
     // Canvas's single-course API names the course path parameter `id`. Keep
@@ -5613,7 +5780,7 @@ export class GatewayRuntime {
     requestedCourseId: string,
     binding: JsonObject,
     options: { readonly signal?: AbortSignal } = {},
-  ): Promise<LearnerTextRedactionContext> {
+  ): Promise<BoundLearnerTextRedactionContext> {
     const rosterTool = this.canvasRosterTool(mapping);
     if (!rosterTool) throw new Error("learner_roster_source_unavailable");
     const scope = this.canvasBindingScope(binding, sourceBindingId, requestedCourseId);
@@ -5649,7 +5816,18 @@ export class GatewayRuntime {
     }
     const learnerRoster = new LearnerRoster();
     learnerRoster.register(scope, canvasPrivacyRoster(this.completeCanvasCollection(roster), this.completeCanvasCollection(history), scope.course));
-    const context = { learnerRoster, learnerVault: this.learnerVault, learnerScope: scope };
+    const context = {
+      learnerRoster,
+      learnerVault: this.learnerVault,
+      learnerScope: scope,
+      readAuthorityScope: {
+        bindingScope: this.effectBindingScope(mapping, {
+          course_id: requestedCourseId,
+          _morrow: { source_binding_id: sourceBindingId },
+        }, binding),
+        courseId: requestedCourseId,
+      },
+    };
     contexts?.set(scopeKey, context);
     return context;
   }
@@ -5658,7 +5836,7 @@ export class GatewayRuntime {
     mapping: CatalogTool,
     request: Readonly<Record<string, unknown>>,
     options: { readonly signal?: AbortSignal } = {},
-  ): Promise<LearnerTextRedactionContext | undefined> {
+  ): Promise<BoundLearnerTextRedactionContext | undefined> {
     if (!isCanvasConnector(mapping)) return undefined;
     const sourceBindingId = this.requestSourceBindingId(request);
     const requestedCourseId = this.requestCourseId(request);
@@ -5673,7 +5851,7 @@ export class GatewayRuntime {
     requestedCourseId: string,
     binding: JsonObject,
     options: { readonly signal?: AbortSignal } = {},
-  ): Promise<LearnerTextRedactionContext> {
+  ): Promise<BoundLearnerTextRedactionContext> {
     const rosterTool = this.moodleRosterTool(mapping);
     if (!rosterTool) throw new Error("learner_roster_source_unavailable");
     const scope = this.moodleBindingScope(binding, sourceBindingId, requestedCourseId);
@@ -5692,7 +5870,18 @@ export class GatewayRuntime {
     if (roster.isError === true) throw new Error("learner_roster_result_incomplete");
     const learnerRoster = new LearnerRoster();
     learnerRoster.register(scope, this.completeMoodleRoster(roster, binding));
-    const context = { learnerRoster, learnerVault: this.learnerVault, learnerScope: scope };
+    const context = {
+      learnerRoster,
+      learnerVault: this.learnerVault,
+      learnerScope: scope,
+      readAuthorityScope: {
+        bindingScope: this.effectBindingScope(mapping, {
+          course_id: requestedCourseId,
+          _morrow: { source_binding_id: sourceBindingId },
+        }, binding),
+        courseId: requestedCourseId,
+      },
+    };
     contexts?.set(scopeKey, context);
     return context;
   }
@@ -6275,15 +6464,16 @@ export class GatewayRuntime {
       ? { ...request, course_id: request.id }
       : request;
     const binding = await this.verifiedBrowserBinding(mapping, bindingRequest, options);
+    const scopedMapping = this.browserProviderMapping(mapping, binding);
     if (binding.provider === "moodle") {
       if (this.isMoodleStagedFileMetadata(value, request, options.toolName)) {
         return this.strictNativeEgress(value) as JsonObject;
       }
-      const context = await this.moodleLearnerContext(mapping, request, options);
+      const context = await this.moodleLearnerContext(scopedMapping, request, options);
       if (!context) throw new Error("learner_roster_binding_unavailable");
       return redactLearnerEgress(value, context) as JsonObject;
     }
-    const context = await this.canvasLearnerContext(mapping, request, options);
+    const context = await this.canvasLearnerContext(scopedMapping, request, options);
     if (!context) throw new Error("learner_roster_binding_unavailable");
     return redactLearnerEgress(value, context) as JsonObject;
   }
@@ -6330,16 +6520,6 @@ export class GatewayRuntime {
     });
   }
 
-  /**
-   * Canvas Inbox message text and recipient references remain private after
-   * planning. Public operation controls expose only their durable state; the
-   * local approval loopback continues to read the raw operation record.
-   */
-  private isPrivateCanvasConversationOperation(record: EffectOperationRecord): boolean {
-    const mapping = this.toolByPublicName.get(record.publicToolName);
-    return mapping !== undefined && isCanvasConversationTransfer(mapping);
-  }
-
   private historicalConnectorRecord(record: EffectOperationRecord): {
     readonly mapping: CatalogTool;
     readonly request: JsonObject;
@@ -6362,36 +6542,22 @@ export class GatewayRuntime {
     return { mapping, request, frozenActorDigest };
   }
 
-  private async historicalEffectEgress(
+  /**
+   * Operation status is a local journal read. Browser-backed records expose
+   * only durable control state because reconstructing their learner scope
+   * would require a new Bridge and provider read. Non-browser records retain
+   * their existing bounded local projection.
+   */
+  private localEffectOperationEgress(
     value: JsonObject,
     record: EffectOperationRecord,
-    options: { readonly signal?: AbortSignal; readonly toolName?: string },
-  ): Promise<{ readonly value?: JsonObject; readonly unavailable: boolean; readonly ordinary?: true }> {
+    toolName?: "morrow_operation_get" | "morrow_operation_cancel",
+  ): JsonObject {
     const historical = this.historicalConnectorRecord(record);
-    // Non-browser operations have no learner binding to reconstruct. Their
-    // normal bounded projection remains available without a control fallback.
-    if (historical === null) return { unavailable: false, ordinary: true };
-    if (historical === "unavailable") return { unavailable: true };
-    try {
-      const current = await this.currentBrowserEffectAuthority(historical.mapping, historical.request);
-      const authority = this.effectAuthority(
-        historical.mapping,
-        historical.request,
-        current.authorization,
-        record.readback || undefined,
-        current.bindingScope,
-      );
-      if (authority.actorDigest !== historical.frozenActorDigest) return { unavailable: true };
-      return {
-        unavailable: false,
-        value: await this.scopedNativeEgress(value, historical.request, options),
-      };
-    } catch {
-      // The operation already exists, and callers handle operation errors before
-      // reaching this path. Any error here means the frozen current authority or
-      // learner scope could not be established, so historical content is unsafe.
-      return { unavailable: true };
-    }
+    if (historical === null) return this.strictNativeEgress(value) as JsonObject;
+    return toolName
+      ? this.historicalOperationControlResult(record, toolName)
+      : this.historicalOperationControl(record);
   }
 
   private historicalOperationPrivacyFailure(): JsonObject {
@@ -6419,7 +6585,7 @@ export class GatewayRuntime {
   private async redactHistoricalOperationGetEgress(
     value: JsonObject,
     request: Readonly<Record<string, unknown>>,
-    options: { readonly signal?: AbortSignal; readonly toolName?: string },
+    _options: { readonly signal?: AbortSignal; readonly toolName?: string },
   ): Promise<JsonObject> {
     if (value.isError === true) return this.boundedOperationUnavailable(value, "morrow_operation_get")
       || this.historicalOperationPrivacyFailure();
@@ -6427,12 +6593,7 @@ export class GatewayRuntime {
     if (!operationId?.startsWith("op:")) return this.strictNativeEgress(value) as JsonObject;
     try {
       const record = this.effects.get(operationId);
-      if (this.isPrivateCanvasConversationOperation(record)) {
-        return this.historicalOperationControlResult(record, "morrow_operation_get");
-      }
-      const egress = await this.historicalEffectEgress(value, record, options);
-      if (egress.unavailable || (!egress.value && !egress.ordinary)) return this.historicalOperationControlResult(record, "morrow_operation_get");
-      return egress.ordinary ? this.strictNativeEgress(value) as JsonObject : egress.value!;
+      return this.localEffectOperationEgress(value, record, "morrow_operation_get");
     } catch {
       return this.historicalOperationPrivacyFailure();
     }
@@ -6441,7 +6602,7 @@ export class GatewayRuntime {
   private async redactHistoricalOperationCancelEgress(
     value: JsonObject,
     request: Readonly<Record<string, unknown>>,
-    options: { readonly signal?: AbortSignal; readonly toolName?: string },
+    _options: { readonly signal?: AbortSignal; readonly toolName?: string },
   ): Promise<JsonObject> {
     if (value.isError === true) return this.boundedOperationUnavailable(value, "morrow_operation_cancel")
       || this.historicalOperationPrivacyFailure();
@@ -6450,12 +6611,7 @@ export class GatewayRuntime {
     try {
       const record = this.effects.get(operationId);
       if (record.state !== "cancelled") return this.historicalOperationPrivacyFailure();
-      if (this.isPrivateCanvasConversationOperation(record)) {
-        return this.historicalOperationControlResult(record, "morrow_operation_cancel");
-      }
-      const egress = await this.historicalEffectEgress(value, record, options);
-      if (egress.unavailable || (!egress.value && !egress.ordinary)) return this.historicalOperationControlResult(record, "morrow_operation_cancel");
-      return egress.ordinary ? this.strictNativeEgress(value) as JsonObject : egress.value!;
+      return this.localEffectOperationEgress(value, record, "morrow_operation_cancel");
     } catch {
       return this.historicalOperationPrivacyFailure();
     }
@@ -6593,15 +6749,45 @@ export class GatewayRuntime {
     for (const item of resolved) {
       for (const selectionKey of item.selectionKeys) contextsByScope.set(selectionKey, item.context);
     }
-    const redactEntries = (entries: readonly { readonly entry: JsonObject; readonly selectionKey: string }[]): JsonObject[] => (
-      entries.map((matched) => {
-        const context = contextsByScope.get(matched.selectionKey);
-        if (!context) throw new Error("learner_roster_binding_unavailable");
-        return redactLearnerEgress(matched.entry, context) as JsonObject;
-      })
-    );
-    const redactedCourses = redactEntries(courseEntries);
-    const redactedAudits = redactEntries(auditEntries);
+    // One inventory can carry thousands of targets for one learner scope. A
+    // single projection must share one exact vault snapshot for that complete
+    // scope instead of reopening and flushing the durable transaction once per
+    // target record.
+    const entrySets = [courseEntries, auditEntries] as const;
+    const redactedEntrySets: JsonObject[][] = entrySets.map(() => []);
+    const entriesByScope = new Map<string, Array<{
+      readonly entry: JsonObject;
+      readonly entryIndex: number;
+      readonly setIndex: number;
+    }>>();
+    for (const [setIndex, entries] of entrySets.entries()) {
+      for (const [entryIndex, matched] of entries.entries()) {
+        const grouped = entriesByScope.get(matched.selectionKey) ?? [];
+        grouped.push({ entry: matched.entry, entryIndex, setIndex });
+        entriesByScope.set(matched.selectionKey, grouped);
+      }
+    }
+    const projectionGroups = [...entriesByScope].map(([selectionKey, entries]) => {
+      const context = contextsByScope.get(selectionKey);
+      if (!context) throw new Error("learner_roster_binding_unavailable");
+      return { entries, context };
+    });
+    const redactedGroups = redactLearnerEgressBatch(projectionGroups.map(({ entries, context }) => ({
+      value: entries.map(({ entry }) => entry),
+      context,
+    })));
+    for (const [groupIndex, group] of projectionGroups.entries()) {
+      const { entries } = group;
+      const redacted = redactedGroups[groupIndex];
+      if (!Array.isArray(redacted) || redacted.length !== entries.length || !redacted.every(isJsonObject)) {
+        throw new Error("privacy_inventory_shape_unavailable");
+      }
+      for (const [index, entry] of entries.entries()) {
+        redactedEntrySets[entry.setIndex]![entry.entryIndex] = redacted[index]!;
+      }
+    }
+    const redactedCourses = redactedEntrySets[0]!;
+    const redactedAudits = redactedEntrySets[1]!;
     const targetKey = (courseId: string, sourceBindingId: string, target: JsonObject): string => (
       sha256Json({ schema: "morrow.inventory-target.v1", provider, courseId, sourceBindingId, target })
     );
@@ -6691,29 +6877,23 @@ export class GatewayRuntime {
 
   private async redactOperationCollectionEgress(
     value: JsonObject,
-    options: { readonly signal?: AbortSignal },
+    _options: { readonly signal?: AbortSignal },
   ): Promise<JsonObject> {
     const strict = this.strictNativeEgress(value) as JsonObject;
     const rawStructured = isJsonObject(value.structuredContent) ? value.structuredContent : null;
     const structured = isJsonObject(strict.structuredContent) ? strict.structuredContent : null;
     if (!rawStructured || !structured || !Array.isArray(rawStructured.operations)) return strict;
-    structured.operations = await Promise.all(rawStructured.operations.map(async (entry) => {
+    structured.operations = rawStructured.operations.map((entry) => {
       if (!isJsonObject(entry)) return this.strictNativeEgress(entry) as JsonObject;
       const operationId = this.exactString(entry.operationId, 160);
       if (!operationId?.startsWith("op:")) return this.strictNativeEgress(entry) as JsonObject;
       try {
         const operation = this.effects.get(operationId);
-        if (this.isPrivateCanvasConversationOperation(operation)) {
-          return this.historicalOperationControl(operation);
-        }
-        const egress = await this.historicalEffectEgress(entry, operation, options);
-        return egress.unavailable || (!egress.value && !egress.ordinary)
-          ? this.historicalOperationControl(operation)
-          : egress.ordinary ? this.strictNativeEgress(entry) as JsonObject : egress.value!;
+        return this.localEffectOperationEgress(entry, operation);
       } catch {
         return this.historicalOperationPrivacyFailure();
       }
-    }));
+    });
     return strict;
   }
 
@@ -6726,6 +6906,34 @@ export class GatewayRuntime {
       ? structuredClone(result)
       : this.resultArtifacts.bound(result);
     try {
+      const problem = value.isError === true && isJsonObject(value.structuredContent)
+        && value.structuredContent.schema === "morrow.problem.v1"
+        ? value.structuredContent
+        : null;
+      const problemCode = problem && typeof problem.code === "string"
+        && /^[a-z0-9_]{1,160}$/u.test(problem.code)
+        && /^(?:privacy_|capability_)/u.test(problem.code)
+        ? problem.code
+        : null;
+      if (problemCode) {
+        const resultState = problem && ["not_sent", "sent", "unknown"].includes(String(problem.resultState))
+          ? String(problem.resultState)
+          : null;
+        return finish({
+          content: [{
+            type: "text",
+            text: problemCode.startsWith("privacy_")
+              ? "Morrow did not return this result because its learner privacy boundary could not be established."
+              : "Morrow rejected this request because its input is invalid.",
+          }],
+          isError: true,
+          structuredContent: {
+            schema: "morrow.problem.v1",
+            code: problemCode,
+            ...(resultState ? { resultState } : {}),
+          },
+        });
+      }
       const assertHistoryDictionary = (entry: unknown): void => {
         if (Array.isArray(entry)) { entry.forEach(assertHistoryDictionary); return; }
         if (!isJsonObject(entry)) return;
@@ -6866,6 +7074,7 @@ export class GatewayRuntime {
         return finish(await this.redactBrowserEditOptionsEgress(value, this.egressRequest(request), options));
       }
       if (options.toolName === "morrow_inventory_courses") {
+        if (value.isError === true) return finish(this.strictNativeEgress(value) as JsonObject);
         return finish(await this.redactInventoryEgress(value, request, options));
       }
       if (options.toolName === "morrow_operation_get") {
@@ -6931,17 +7140,35 @@ export class GatewayRuntime {
       });
     }
     if (mapping.annotations?.readOnlyHint === true) {
+      let readAuthorityScope: ReadAuthorityScope | undefined;
       if (mapping.capability?.provider === "moodle" && !moodleSourceHistoryAvailable(mapping.upstreamName, mapping.capability.authority.dataClass)) {
         return this.privacyFailure(new Error("privacy_moodle_history_dictionary_unavailable"));
       }
-      if (isCanvasConnector(mapping) && this.requestCourseId(args)) {
+      const scopedCourseId = this.requestCourseId(args)
+        ?? (mapping.upstreamName === "canvas_get_single_course_courses"
+          ? this.requestCourseId({ course_id: args.id })
+          : null);
+      if (isCanvasConnector(mapping) && scopedCourseId) {
         try {
-          if (mapping.capability?.provider === "moodle") await this.moodleLearnerContext(mapping, args, options);
-          else await this.canvasLearnerContext(mapping, args, options);
+          const context = mapping.capability?.provider === "moodle"
+            ? await this.moodleLearnerContext(mapping, args, options)
+            : await this.canvasLearnerContext(mapping, args, options);
+          readAuthorityScope = context?.readAuthorityScope;
         } catch (error) { return this.privacyFailure(error); }
       }
-      const raw = await this.callSourceOwned(publicName, args, options);
+      const raw = await this.callSourceOwned(publicName, args, {
+        ...options,
+        ...(readAuthorityScope ? { readAuthorityScope } : {}),
+      });
       const result = await this.publicSourceResult(mapping, args, raw, options);
+      if (readAuthorityScope && result.isError !== true) {
+        const gateway = isJsonObject(raw._meta) && isJsonObject(raw._meta["io.morrow/gateway"])
+          ? raw._meta["io.morrow/gateway"] : null;
+        const gatewayOperationId = gateway && typeof gateway.gatewayOperationId === "string"
+          ? gateway.gatewayOperationId : null;
+        if (!gatewayOperationId) throw new Error("gateway read delivery evidence is unavailable");
+        this.journal.recordPublicReadDelivered(gatewayOperationId);
+      }
       return canonicalMorrowResult({
         result,
         tool: publicName,
@@ -6950,12 +7177,12 @@ export class GatewayRuntime {
         verificationStatus: "not_applicable",
       });
     }
-    const planned = await this.planOperationWithCurrentEditPermission(publicName, args);
+    const planned = await this.planOperationWithCurrentEditPermission(publicName, args, options);
     const content = isJsonObject(planned.structuredContent) ? planned.structuredContent : {};
     if (planned.isError === true || content.effectState !== "approved" || typeof content.operationId !== "string") {
       return planned;
     }
-    const dispatched = await this.dispatchOperation(content.operationId);
+    const dispatched = await this.dispatchOperation(content.operationId, options);
     return this.redactMcpEgress(dispatched, args, options);
   }
 
@@ -6969,6 +7196,7 @@ export class GatewayRuntime {
   async planOperationWithCurrentEditPermission(
     publicName: string,
     args: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal } = {},
   ): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
     if (!mapping || mapping.annotations?.readOnlyHint === true) {
@@ -6983,11 +7211,36 @@ export class GatewayRuntime {
         },
       });
     }
+    if (options.signal?.aborted) {
+      return canonicalMorrowResult({
+        tool: publicName,
+        phase: "rejected",
+        verificationStatus: "not_requested",
+        result: {
+          content: [{ type: "text", text: `Morrow cancelled ${publicName} before it created a change request.` }],
+          isError: true,
+          structuredContent: { schema: "morrow.problem.v1", code: "request_cancelled_before_dispatch", recoverable: true },
+        },
+      });
+    }
     try {
       const supplied = outerOperationControls(args);
-      const prepared = await this.prepareEffectAuthority(publicName, supplied.request);
+      const prepared = await this.prepareEffectAuthority(publicName, supplied.request, options);
+      options.signal?.throwIfAborted();
       return this.planOperationWithControls(publicName, mapping, supplied, prepared.authorization, prepared.bindingScope);
     } catch (error) {
+      if (options.signal?.aborted) {
+        return canonicalMorrowResult({
+          tool: publicName,
+          phase: "rejected",
+          verificationStatus: "not_requested",
+          result: {
+            content: [{ type: "text", text: `Morrow cancelled ${publicName} before it created a change request.` }],
+            isError: true,
+            structuredContent: { schema: "morrow.problem.v1", code: "request_cancelled_before_dispatch", recoverable: true },
+          },
+        });
+      }
       return this.planOperationRejected(publicName, error);
     }
   }
@@ -7103,44 +7356,52 @@ export class GatewayRuntime {
       if (mapping.capability?.provider === "moodle" && !/^[0-9a-f]{64}$/.test(String(supplied.request.expected_digest || ""))) {
         throw new TypeError("Moodle browser writes require expected_digest from the exact preceding read");
       }
-      const controls: OuterOperationControls = supplied.readback || !usesEmbeddedReadback(mapping)
-        ? supplied
-        : { ...supplied, readback: connectorReadback(mapping, supplied.request) };
-      if (!controls.readback) {
+      const readback = this.derivedReadback(mapping, supplied.request);
+      if (!readback) {
         return canonicalMorrowResult({
           tool: publicName,
           phase: "rejected",
           verificationStatus: "not_requested",
           result: {
-            content: [{ type: "text", text: "Morrow refused a write without a frozen fresh-readback comparator." }],
+            content: [{ type: "text", text: "Morrow refused a write whose route declares no read-only review tool for fresh readback." }],
             isError: true,
             structuredContent: { schema: "morrow.problem.v1", code: "write_readback_required" },
           },
         });
       }
+      const controls: OuterOperationControls = { ...supplied, readback };
       const operation = this.planEffect(mapping, controls, authorization, undefined, bindingScope);
       return this.effectResult(operation, "planned");
   }
 
   private planOperationRejected(publicName: string, error: unknown): JsonObject {
     const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
+    const callerReadback = error instanceof CallerReadbackRefusedError;
     return canonicalMorrowResult({
       tool: publicName,
       phase: "rejected",
       verificationStatus: "not_requested",
       result: {
-        content: [{ type: "text", text: "Morrow could not freeze this operation plan." }],
+        content: [{ type: "text", text: callerReadback ? error.message : "Morrow could not freeze this operation plan." }],
         isError: true,
         structuredContent: {
           schema: "morrow.problem.v1",
-          code: "operation_plan_invalid",
+          code: callerReadback ? "caller_readback_refused" : "operation_plan_invalid",
           detailDigest: sha256Text(detail),
         },
       },
     });
   }
 
-  async dispatchOperation(operationId: string): Promise<JsonObject> {
+  async dispatchOperation(
+    operationId: string,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<JsonObject> {
+    if (options.signal?.aborted) {
+      const current = this.effects.get(operationId);
+      if (["awaiting_approval", "approved"].includes(current.state)) this.cancelOperation(operationId);
+      return this.effectResult(this.effects.get(operationId), "cancelled_before_dispatch");
+    }
     let reserved: EffectOperationRecord;
     let fileStages: readonly FileStageBinding[] | undefined;
     let checkingFileStage = false;
@@ -7185,7 +7446,7 @@ export class GatewayRuntime {
           throw new Error("The reviewed Hot Spot image is unavailable. Prepare and approve a new Hot Spot plan.");
         }
         const scope = await this.currentCanvasNewQuizHotSpotScope(
-          pendingMapping, stage.scope.sourceBindingId, request.course_id, request.content_type,
+          pendingMapping, stage.scope.sourceBindingId, request.course_id, request.content_type, options.signal,
         );
         fileStages = [{ ...stage, scope }];
         for (const entry of fileStages) this.fileStages.verify(entry);
@@ -7195,40 +7456,47 @@ export class GatewayRuntime {
         const capability = moodleStagedFileCapabilityForMapping(pendingMapping);
         const multiple = capability?.planMode === "folder_add";
         const sourceBindingId = staged?.[0]?.scope.sourceBindingId;
+        const canvasFile = isCanvasCourseFileTransfer(pendingMapping);
+        const canvasCourseId = canvasFile ? exactDecimalId(request.course_id) : null;
+        const canvasFolderId = canvasFile ? exactDecimalId(request.folder_id) : null;
+        const moodleCourseId = !canvasFile && typeof request.course_id === "number"
+          && Number.isSafeInteger(request.course_id) && request.course_id > 0
+          ? request.course_id
+          : null;
         const exactSingle = staged?.length === 1 && request.filename === staged[0]!.manifest.filename
           && request.size_bytes === staged[0]!.manifest.sizeBytes && request.sha256 === staged[0]!.manifest.sha256;
         const exactMultiple = staged !== undefined && Array.isArray(request.files) && request.files.length === staged.length
           && request.files.every((file, index) => isJsonObject(file)
             && file.filename === staged[index]?.manifest.filename && file.size_bytes === staged[index]?.manifest.sizeBytes
             && file.sha256 === staged[index]?.manifest.sha256);
-        if (!staged || !sourceBindingId || authorization.kind !== "review" || typeof request.course_id !== "number"
+        if (!staged || !sourceBindingId || authorization.kind !== "review" || (canvasFile ? !canvasCourseId : !moodleCourseId)
           || !(multiple ? exactMultiple && typeof request.folder_path === "string" : exactSingle)
           || legacyRouting(request).sourceBindingId !== sourceBindingId) {
           throw new Error("The reviewed local file is unavailable. Prepare and approve a new file plan.");
         }
-        const scope = isCanvasCourseFileTransfer(pendingMapping)
+        const scope = canvasFile
           ? await this.currentCanvasFileScope(
             pendingMapping,
             sourceBindingId,
-            request.course_id,
+            canvasCourseId!,
             typeof request.content_type === "string" ? request.content_type : "",
+            options.signal,
           )
-          : await this.currentMoodleStagedFileScope(pendingMapping, sourceBindingId, request.course_id);
-        if (isCanvasCourseFileTransfer(pendingMapping)
-          && (typeof request.folder_id !== "number" || !Number.isSafeInteger(request.folder_id) || request.folder_id < 1
-            || request.content_type !== staged[0]!.scope.contentType)) {
+          : await this.currentMoodleStagedFileScope(pendingMapping, sourceBindingId, moodleCourseId!, options.signal);
+        if (canvasFile && (!canvasFolderId || request.content_type !== staged[0]!.scope.contentType)) {
           throw new Error("The reviewed Canvas file target is unavailable. Prepare and approve a new file plan.");
         }
         fileStages = staged.map((entry) => ({ ...entry, scope }));
         for (const stage of fileStages) this.fileStages.verify(stage);
         bindingScope = this.resourceFileEffectScope(scope);
       } else if (isCanvasConnector(pendingMapping)) {
-        const current = await this.currentEffectAuthority(pendingMapping, request);
+        const current = await this.currentEffectAuthority(pendingMapping, request, options);
         bindingScope = current.bindingScope;
         if (authorization.kind === "edit_scope") currentAuthorization = current.authorization;
       } else if (authorization.kind === "edit_scope") {
-        currentAuthorization = await this.resolveCurrentEditAuthorization(pendingMapping, request);
+        currentAuthorization = await this.resolveCurrentEditAuthorization(pendingMapping, request, options);
       }
+      options.signal?.throwIfAborted();
       checkingFileStage = false;
       reserved = this.effects.reserveDispatch(
         operationId,
@@ -7243,6 +7511,11 @@ export class GatewayRuntime {
         { enforceHistoricalTargetScopeBarrier: isCanvasConnector(pendingMapping) },
       );
     } catch (error) {
+      if (options.signal?.aborted) {
+        const current = this.effects.get(operationId);
+        if (["awaiting_approval", "approved"].includes(current.state)) this.cancelOperation(operationId);
+        return this.effectResult(this.effects.get(operationId), "cancelled_before_dispatch");
+      }
       let filePlanCancelled = false;
       if (checkingFileStage) {
         const current = this.effects.get(operationId);
@@ -7299,6 +7572,7 @@ export class GatewayRuntime {
       });
     }
     if (reserved.state !== "dispatching") return this.effectResult(reserved, "dispatch_refused");
+    if (options.signal?.aborted) return this.settleCancelledDispatch(reserved.operationId);
     const mapping = this.toolByPublicName.get(reserved.publicToolName);
     if (!mapping) {
       const settled = this.effects.settleFailure(reserved.operationId, "frozen_tool_mapping_missing", false);
@@ -7314,8 +7588,9 @@ export class GatewayRuntime {
         const settled = this.effects.settleFailure(reserved.operationId, "blackboard_effect_grant_unavailable", false);
         return this.effectResult(settled, "dispatch_failed");
       }
+      const issuedAt = Date.now();
       const unsignedGrant = {
-        schema: "morrow.blackboard.effect-grant.v1" as const,
+        schema: "morrow.blackboard.effect-grant.v2" as const,
         operationId: reserved.operationId,
         // The source checks this exact source-plan digest before its fresh precondition read or PATCH.
         planDigest: sourcePlanDigest,
@@ -7325,6 +7600,8 @@ export class GatewayRuntime {
         effectReceiptId: reserved.effectReceiptId,
         dispatchAttempt: reserved.dispatchAttempt,
         gatewayProcessId: this.gatewayProcessId,
+        issuedAt,
+        notAfter: issuedAt + BLACKBOARD_EFFECT_GRANT_MAX_LIFETIME_MS,
       };
       forwarded._morrow = {
         outer_grant: {
@@ -7336,6 +7613,8 @@ export class GatewayRuntime {
           effect_receipt_id: unsignedGrant.effectReceiptId,
           dispatch_attempt: unsignedGrant.dispatchAttempt,
           gateway_process_id: unsignedGrant.gatewayProcessId,
+          issued_at: unsignedGrant.issuedAt,
+          not_after: unsignedGrant.notAfter,
           dispatch_token: signBlackboardEffectGrant(this.blackboardEffectDispatchSecret, unsignedGrant),
         },
       };
@@ -7367,6 +7646,10 @@ export class GatewayRuntime {
     } catch (error) {
       const settled = this.effects.settleFailure(reserved.operationId, error, false);
       return this.effectResult(settled, "dispatch_failed");
+    }
+    if (options.signal?.aborted) {
+      await operationUpstream?.close();
+      return this.settleCancelledDispatch(reserved.operationId);
     }
     let result: JsonObject;
     let privateAttachment: BridgePrivateAttachment | undefined;
@@ -7403,7 +7686,7 @@ export class GatewayRuntime {
     try {
       if (isCanvasConversationTransfer(mapping)) {
         const input = canvasConversationInputFromFrozenRequest(mapping, reserved.plan.arguments as JsonObject);
-        const context = await this.canvasLearnerContext(mapping, reserved.plan.arguments as JsonObject);
+        const context = await this.canvasLearnerContext(mapping, reserved.plan.arguments as JsonObject, options);
         if (!context) throw new Error("learner_roster_source_unavailable");
         const resolved = resolveLearnerTokens({
           recipients: (input.recipient_tokens || []).map((learner_token) => ({ learner_token })),
@@ -7434,6 +7717,7 @@ export class GatewayRuntime {
       privateAttachment = undefined;
       privateAttachments = undefined;
       await operationUpstream?.close();
+      if (options.signal?.aborted) return this.settleCancelledDispatch(reserved.operationId);
       const settled = this.effects.settleFailure(reserved.operationId, error, false);
       return this.effectResult(settled, "dispatch_failed");
     }
@@ -7441,8 +7725,16 @@ export class GatewayRuntime {
       ? plannedNewQuizLifecycleDescriptor(mapping, forwarded as JsonObject, this.toolByPublicName.values())
       : null;
     if (plannedConnectorDescriptor) this.effects.recordConnectorReadDescriptor(reserved.operationId, plannedConnectorDescriptor);
+    if (options.signal?.aborted) {
+      privateAttachment = undefined;
+      privateAttachments = undefined;
+      privateConversation = undefined;
+      await operationUpstream?.close();
+      return this.settleCancelledDispatch(reserved.operationId);
+    }
     try {
       result = await this.callSourceOwned(mapping.publicName, forwarded, {
+        signal: options.signal,
         authorizedEffectOperationId: reserved.operationId,
         ...(privateAttachment ? { privateAttachment } : {}),
         ...(privateAttachments ? { privateAttachments } : {}),
@@ -7468,7 +7760,9 @@ export class GatewayRuntime {
       const definitelyNotSent = meta.gatewayOperationState === "failed_before_send"
         || source.state === "not_sent"
         || innerOperation?.sourceResultState === "not_sent";
-      const settled = this.effects.settleFailure(reserved.operationId, result, !definitelyNotSent);
+      const settled = options.signal?.aborted && definitelyNotSent
+        ? this.effects.settleCancelledBeforeSend(reserved.operationId)
+        : this.effects.settleFailure(reserved.operationId, result, !definitelyNotSent);
       const unresolved = settled.state === "applied_or_unknown" && usesEmbeddedReadback(mapping)
         ? connectorReadDescriptor(mapping, this.resolveResultArtifact(result))
         : null;
@@ -7499,10 +7793,33 @@ export class GatewayRuntime {
         // unresolved change can be checked later without being sent again.
         const descriptor = connectorReadDescriptor(mapping, artifact);
         if (descriptor) this.effects.recordConnectorReadDescriptor(settled.operationId, descriptor);
+        const readbackDigest = sha256Json(verification);
+        const resultBindingArtifact = verified
+          ? canvasResultBindingArtifactFromVerifiedConnector(mapping.publicName, artifact)
+          : null;
+        const resultBindingEnvelope = resultBindingArtifact && this.resultBindingEncryptionKey
+          && settled.upstreamResultDigest
+          ? encryptCanvasResultBindingArtifact(
+              this.resultBindingEncryptionKey,
+              {
+                operationId: settled.operationId,
+                publicToolName: settled.publicToolName,
+                sourceId: settled.sourceId,
+                sourceToolName: settled.sourceToolName,
+                sourceOperationId: settled.sourceOperationId,
+                sourceBindingId: settled.sourceBindingId,
+                targetIdentityDigest: settled.targetIdentityDigest,
+                upstreamResultDigest: settled.upstreamResultDigest,
+                readbackDigest,
+              },
+              resultBindingArtifact,
+            )
+          : undefined;
         const readbackSettled = this.effects.recordReadback(
           settled.operationId,
-          sha256Json(verification),
+          readbackDigest,
           verified,
+          resultBindingEnvelope ? { ...resultBindingEnvelope } : undefined,
         );
         return this.effectResult(
           readbackSettled,
@@ -7581,19 +7898,43 @@ export class GatewayRuntime {
     if (!operation.readback) {
       return this.effectResult(operation, "verification_unsupported");
     }
+    const effectMapping = this.toolByPublicName.get(operation.publicToolName);
+    if (effectMapping && isCanvasConnector(effectMapping) && !hasExactConnectorReadbackPolicy(operation, effectMapping)) {
+      return this.effectResult(operation, "verification_unsupported");
+    }
     if (isConnectorReadbackPolicy(operation.readback)) {
       return await this.connectorReadbackReconciliationResult(operation);
     }
     if (operation.state === "awaiting_inner_approval") {
       return this.effectResult(operation, "verification_requires_inner_approval");
     }
+    if (isRouteReadbackPolicy(operation.readback)) {
+      return await this.routeReadbackVerification(operation);
+    }
     const mapping = this.toolByPublicName.get(operation.readback.tool);
-    if (!mapping || mapping.annotations?.readOnlyHint !== true) {
+    // The digest comparator remains only for plans Morrow itself froze from a
+    // Blackboard review contract. A saved readback naming any other read is
+    // caller content from before route-owned readback and never verifies.
+    if (!mapping || mapping.annotations?.readOnlyHint !== true
+      || !effectMapping || !isBlackboardDerivedReadback(effectMapping, mapping)) {
       return this.effectResult(operation, "verification_unsupported");
     }
-    const readbackArguments = isBlackboardCourseCopyVerify(mapping) && operation.sourceTaskId?.startsWith("bbcopy:")
-      ? { ...operation.readback.arguments, task_reference: operation.sourceTaskId }
-      : operation.readback.arguments;
+    const createReadback = blackboardCreateReadbackContract(mapping);
+    const readbackArguments = createReadback
+      ? operation.effectReceiptId
+        ? {
+          ...operation.readback.arguments,
+          _morrow_receipt: {
+            gateway_process_id: this.gatewayProcessId,
+            effect_receipt_id: operation.effectReceiptId,
+            operation_id: operation.operationId,
+          },
+        }
+        : null
+      : isBlackboardCourseCopyVerify(mapping) && operation.sourceTaskId?.startsWith("bbcopy:")
+        ? { ...operation.readback.arguments, task_reference: operation.sourceTaskId }
+        : operation.readback.arguments;
+    if (readbackArguments === null) return this.effectResult(operation, "verification_failed");
     const fresh = this.resolveResultArtifact(await this.callSourceOwned(mapping.publicName, readbackArguments));
     if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
     const readbackDigest = sha256Json(resultComparable(fresh));
@@ -7617,6 +7958,10 @@ export class GatewayRuntime {
 
   async reconcileOperation(operationId: string): Promise<JsonObject> {
     const operation = this.effects.get(operationId);
+    const effectMapping = this.toolByPublicName.get(operation.publicToolName);
+    if (effectMapping && isCanvasConnector(effectMapping) && !hasExactConnectorReadbackPolicy(operation, effectMapping)) {
+      return this.effectResult(operation, "reconciliation_requires_provider_evidence");
+    }
     if (isConnectorReadbackPolicy(operation.readback)) {
       return await this.connectorReadbackReconciliationResult(operation);
     }
@@ -7629,20 +7974,27 @@ export class GatewayRuntime {
   /**
    * Finds the Morrow read the person actually looked at: a read-only call to the
    * same connection that answered after this change was sent, whose exact result
-   * digest is the one supplied. A read from before the change, from another
-   * connection, or one Morrow never made, is not evidence. Morrow searches its
-   * 200 most recent answered reads for that connection.
+   * digest is the one supplied. A failed read, a read from before the change,
+   * from another item, course, connection, sign-in, or one Morrow never made is
+   * not evidence. The journal performs one exact indexed lookup.
    */
   private freshReadEvidence(
     operation: EffectOperationRecord,
     observedState: string,
   ): GatewayOperationRecord | null {
     const sentAt = Date.parse(operation.approvalConsumedAt || operation.createdAt);
-    if (!Number.isFinite(sentAt)) return null;
-    return this.journal.list({ sourceId: operation.sourceId, state: "response_received", limit: 200 })
-      .find((record) => record.readOnly
-        && record.upstreamResultDigest === observedState
-        && Date.parse(record.createdAt) >= sentAt) || null;
+    const authority = isJsonObject(operation.plan.authority) ? operation.plan.authority : null;
+    const actorDigest = authority && typeof authority.actorDigest === "string" && /^[0-9a-f]{64}$/u.test(authority.actorDigest)
+      ? authority.actorDigest : null;
+    if (!Number.isFinite(sentAt) || !operation.sourceBindingId || !operation.targetIdentityDigest || !actorDigest) return null;
+    return this.journal.findSuccessfulReadEvidence({
+      sourceId: operation.sourceId,
+      sourceBindingId: operation.sourceBindingId,
+      targetIdentityDigest: operation.targetIdentityDigest,
+      actorDigest,
+      upstreamResultDigest: observedState,
+      notBefore: new Date(sentAt).toISOString(),
+    });
   }
 
   /**
@@ -7692,7 +8044,7 @@ export class GatewayRuntime {
     if (!evidence) {
       return refused(
         "observed_state_not_from_fresh_read",
-        "That digest does not match any Morrow read of this connection made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
+        "That digest does not match a successful Morrow read of this exact item, course, browser connection and sign-in made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
         {},
         [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
       );
@@ -7711,6 +8063,55 @@ export class GatewayRuntime {
         resentWrite: false,
       },
     });
+  }
+
+  /** The read-only source tool a non-connector route declares as its review read, or null. */
+  private routeReviewTool(mapping: CatalogTool): CatalogTool | null {
+    const route = mapping.capability?.route;
+    if (!route?.planBackend || route.comparator !== EXACT_REQUESTED_FIELDS_COMPARATOR || isCanvasConnector(mapping)) return null;
+    const matches = this.catalog.tools.filter((candidate) => candidate.upstreamId === mapping.upstreamId
+      && candidate.upstreamName === route.planBackend
+      && candidate.annotations?.readOnlyHint === true
+      && !isCanvasConnector(candidate));
+    return matches.length === 1 ? matches[0]! : null;
+  }
+
+  /** Morrow's own readback plan for a write, or null when the route owns none. */
+  private derivedReadback(mapping: CatalogTool, request: JsonObject): FrozenReadbackPlan | null {
+    if (usesEmbeddedReadback(mapping)) return connectorReadback(mapping, request);
+    const reviewTool = this.routeReviewTool(mapping);
+    return reviewTool ? routeReadback(mapping, reviewTool, request) : null;
+  }
+
+  /**
+   * Reads the written object back through the route's declared review tool
+   * and reports verified only when that fresh read carries every requested
+   * field with the requested value. The saved policy must recompute from the
+   * frozen request, so a historical record with another policy never verifies.
+   */
+  private async routeReadbackVerification(operation: EffectOperationRecord): Promise<JsonObject> {
+    const effectMapping = this.toolByPublicName.get(operation.publicToolName);
+    const request = isJsonObject(operation.plan.arguments) ? operation.plan.arguments : null;
+    const reviewTool = effectMapping ? this.routeReviewTool(effectMapping) : null;
+    if (!effectMapping || !request || !reviewTool || !operation.readback
+      || sha256Json(routeReadback(effectMapping, reviewTool, request)) !== sha256Json(operation.readback)) {
+      return this.effectResult(operation, "verification_unsupported");
+    }
+    const properties = isJsonObject(reviewTool.inputSchema.properties) ? reviewTool.inputSchema.properties : {};
+    const identityKeys = new Set(Object.keys(request).filter((key) => key !== "_morrow" && key in properties));
+    const sourceBindingId = legacyRouting(request).sourceBindingId;
+    const readArguments: JsonObject = {
+      ...Object.fromEntries([...identityKeys].map((key) => [key, structuredClone(request[key])])),
+      ...(sourceBindingId ? { _morrow: { source_binding_id: sourceBindingId } } : {}),
+    };
+    const fresh = this.resolveResultArtifact(await this.callSourceOwned(reviewTool.publicName, readArguments));
+    if (fresh.isError === true) return this.effectResult(operation, "verification_failed", fresh);
+    const observed = isJsonObject(fresh.structuredContent) ? fresh.structuredContent : null;
+    const requested = requestedReadbackFields(request, identityKeys);
+    const verified = observed !== null && requested.length > 0
+      && requested.every(([key, value]) => Object.hasOwn(observed, key) && sha256Json(observed[key]) === sha256Json(value));
+    const settled = this.effects.recordReadback(operation.operationId, sha256Json(resultComparable(fresh)), verified);
+    return this.effectResult(settled, "verified_readback", fresh);
   }
 
   private async connectorReadbackReconciliationResult(operation: EffectOperationRecord): Promise<JsonObject> {
@@ -8014,9 +8415,10 @@ export class GatewayRuntime {
     if (!mapping || mapping.annotations?.readOnlyHint === true) {
       throw new Error("A correction must use one current mutating Morrow tool");
     }
-    const controls = outerOperationControls(correctionArguments);
-    if (!controls.readback) throw new Error("A correction requires its own frozen readback comparator");
-    const correction = this.planEffect(mapping, controls, REVIEW_AUTHORIZATION, original.operationId);
+    const supplied = outerOperationControls(correctionArguments);
+    const readback = this.derivedReadback(mapping, supplied.request);
+    if (!readback) throw new Error("A correction requires a route-owned readback comparator");
+    const correction = this.planEffect(mapping, { ...supplied, readback }, REVIEW_AUTHORIZATION, original.operationId);
     return this.effectResult(correction, "correction_planned");
   }
 
@@ -8030,6 +8432,7 @@ export class GatewayRuntime {
       readonly privateAttachment?: BridgePrivateAttachment;
       readonly privateAttachments?: readonly BridgePrivateAttachment[];
       readonly privateConversation?: BridgePrivateConversation;
+      readonly readAuthorityScope?: ReadAuthorityScope;
     } = {},
   ): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
@@ -8087,6 +8490,30 @@ export class GatewayRuntime {
     const routed = withSourceOperationId(mapping, args);
     const requestDigest = sha256Json(args);
     const forwardedRequestDigest = sha256Json(routed.forwarded);
+    let readAuthorityEvidence: {
+      readonly sourceBindingId: string;
+      readonly targetIdentityDigest: string;
+      readonly actorDigest: string;
+    } | undefined;
+    if (options.readAuthorityScope) {
+      const { bindingScope, courseId } = options.readAuthorityScope;
+      const routedBindingId = legacyRouting(args).sourceBindingId;
+      const routedCourseId = requestCourseId(args) || courseIdFromCourseTarget(mapping, args as JsonObject);
+      if (mapping.annotations?.readOnlyHint !== true || !isCanvasConnector(mapping)
+        || mapping.capability?.provider !== bindingScope.provider
+        || routedBindingId !== bindingScope.sourceBindingId || routedCourseId !== courseId) {
+        throw new Error("gateway read authority evidence does not match the exact request");
+      }
+      readAuthorityEvidence = {
+        sourceBindingId: bindingScope.sourceBindingId,
+        targetIdentityDigest: stableEffectTargetIdentity(mapping, args as JsonObject, undefined, bindingScope),
+        actorDigest: sha256Json({
+          account: this.config.privacy.account,
+          principal: this.config.privacy.principal,
+          bindingScope,
+        }),
+      };
+    }
     let prepared;
     try {
       prepared = this.journal.prepare({
@@ -8099,6 +8526,7 @@ export class GatewayRuntime {
         ...(routed.sourceOperationId ? { sourceOperationId: routed.sourceOperationId } : {}),
         ...(routed.idempotencyKey ? { idempotencyKey: routed.idempotencyKey } : {}),
         readOnly: mapping.annotations?.readOnlyHint === true,
+        ...(readAuthorityEvidence || {}),
       });
     } catch (error) {
       if (error instanceof GatewayOperationConflictError) {
@@ -8162,15 +8590,15 @@ export class GatewayRuntime {
         dispatchedArguments = structuredClone(routed.forwarded) as Record<string, unknown>;
       } else if (mapping.capability?.provider === "moodle"
         && mapping.publicName === MOODLE_ENROL_CANDIDATE_INPUT_TOOL) {
-        const userId = await this.moodleEnrolmentCandidateUserId(mapping, routed.forwarded, options);
+        const userId = await this.moodleEnrolmentCandidateUserId(mapping, routed.forwarded, { signal: options.signal });
         dispatchedArguments = structuredClone(routed.forwarded) as Record<string, unknown>;
         delete dispatchedArguments.candidate_token;
         delete dispatchedArguments.candidateToken;
         dispatchedArguments.user_id = userId;
       } else {
         const learner = mapping.capability?.provider === "moodle"
-          ? await this.moodleLearnerContext(mapping, routed.forwarded, options)
-          : await this.canvasLearnerContext(mapping, routed.forwarded, options);
+          ? await this.moodleLearnerContext(mapping, routed.forwarded, { signal: options.signal })
+          : await this.canvasLearnerContext(mapping, routed.forwarded, { signal: options.signal });
         const resolved = learner
           ? resolveLearnerTokens(routed.forwarded, this.learnerVault, learner.learnerScope, learner.learnerRoster)
           : resolveLearnerTokens(routed.forwarded, this.learnerVault, {
@@ -8224,6 +8652,14 @@ export class GatewayRuntime {
       const complete = this.journal.recordResponse(dispatched.operationId, {
         upstreamResultDigest: sha256Json(result),
         normalizedResultDigest: sha256Json(result),
+        responseSucceeded: result.isError !== true && (mapping.annotations?.readOnlyHint !== true || !isCanvasConnector(mapping) || (() => {
+          const connector = isJsonObject(result.structuredContent) ? result.structuredContent : null;
+          const browser = connector && isJsonObject(connector.result) ? connector.result : null;
+          return connector?.schema === "morrow.canvas-connector.result.v1"
+            && connector.ok === true
+            && connector.commandKind === "invoke_read"
+            && browser?.ok === true;
+        })()),
         ...(source.state ? { sourceResultState: source.state } : {}),
         ...(source.taskId ? { sourceTaskId: source.taskId } : {}),
       });

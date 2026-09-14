@@ -1,10 +1,11 @@
 import { once } from "node:events";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { WebSocket } from "ws";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_SCHEMAS,
+  bridgeAuthenticationProofPayload,
   parseBridgeJson,
   serializeBridgeMessage,
   type BridgeCommand,
@@ -13,6 +14,7 @@ import {
 import {
   BridgeOutcomeUnknownError,
   BridgePortInUseError,
+  BridgeRequestCancelledError,
   BridgeUnavailableError,
   BridgeWriteRecordFullError,
   LoopbackBridgeServer,
@@ -50,10 +52,31 @@ async function connect(
   });
   sockets.push(socket);
   await once(socket, "open");
+  const authentication = {
+    schema: BRIDGE_SCHEMAS.authenticate,
+    protocolVersion: BRIDGE_PROTOCOL_VERSION,
+    clientNonce: randomBytes(32).toString("hex"),
+    extensionId,
+    runtimeRevision: revision,
+    catalogDigest: digest,
+    sentAt: Date.now(),
+  } as const;
+  socket.send(serializeBridgeMessage(authentication));
+  const [challengeRaw] = await once(socket, "message");
+  const challenge = parseBridgeJson(challengeRaw.toString()) as { clientNonce: string; serverNonce: string; serverProof: string };
+  expect(challenge.clientNonce).toBe(authentication.clientNonce);
+  expect(challenge.serverProof).toBe(createHmac("sha256", token)
+    .update(bridgeAuthenticationProofPayload("server", authentication, challenge.serverNonce), "utf8")
+    .digest("hex"));
+  const clientProof = createHmac("sha256", token)
+    .update(bridgeAuthenticationProofPayload("client", authentication, challenge.serverNonce), "utf8")
+    .digest("hex");
   socket.send(serializeBridgeMessage({
     schema: BRIDGE_SCHEMAS.hello,
     protocolVersion: BRIDGE_PROTOCOL_VERSION,
-    token,
+    clientNonce: authentication.clientNonce,
+    serverNonce: challenge.serverNonce,
+    clientProof,
     extensionId,
     runtimeRevision: revision,
     catalogDigest: digest,
@@ -210,6 +233,171 @@ function commandHandler(socket: WebSocket, handler: (command: BridgeCommand) => 
 }
 
 describe("LoopbackBridgeServer", () => {
+  it("closes mixed authenticated and unauthenticated peers within the shutdown bound", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+      authTimeoutMs: 10_000,
+      callTimeoutMs: 10_000,
+      shutdownGraceMs: 100,
+    });
+    servers.push(server);
+    const authenticated = await connect(server);
+    const address = await server.start();
+    const unauthenticated = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+      origin: `chrome-extension://${extensionId}`,
+    });
+    sockets.push(unauthenticated);
+    await once(unauthenticated, "open");
+    const authenticatedTransport = (authenticated as unknown as { _socket: { pause(): void; resume(): void } })._socket;
+    const unauthenticatedTransport = (unauthenticated as unknown as { _socket: { pause(): void; resume(): void } })._socket;
+    authenticatedTransport.pause();
+    unauthenticatedTransport.pause();
+    const pending = server.invoke({
+      kind: "invoke_read",
+      toolName: "list_pages",
+      operationKey: "GET /v1/courses/{course_id}/pages#list_pages",
+      arguments: { course_id: "42" },
+      sourceBindingId: "canvas-course-42",
+    }).then(() => null, (error: unknown) => error);
+    expect(server.health().pendingCount).toBe(1);
+    const state = server as unknown as {
+      acceptedSockets: Set<WebSocket>;
+      authenticationTimers: Map<WebSocket, NodeJS.Timeout>;
+    };
+    expect(state.acceptedSockets.size).toBe(2);
+    expect(state.authenticationTimers.size).toBe(1);
+    const terminationSpies = [...state.acceptedSockets].map((socket) => vi.spyOn(socket, "terminate"));
+
+    const startedAt = performance.now();
+    const closing = server.close();
+    const late = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+      origin: `chrome-extension://${extensionId}`,
+    });
+    sockets.push(late);
+    const lateOutcome = new Promise<"open" | "refused">((resolve) => {
+      late.once("open", () => resolve("open"));
+      late.once("error", () => resolve("refused"));
+      late.once("close", () => resolve("refused"));
+    });
+    await closing;
+    const elapsedMs = performance.now() - startedAt;
+    authenticatedTransport.resume();
+    unauthenticatedTransport.resume();
+
+    expect(elapsedMs).toBeLessThan(1_000);
+    expect(await lateOutcome).toBe("refused");
+    expect(terminationSpies.every((spy) => spy.mock.calls.length === 1)).toBe(true);
+    expect(await pending).toBeInstanceOf(BridgeOutcomeUnknownError);
+    expect(server.health()).toMatchObject({ listening: false, connected: false, pendingCount: 0 });
+    expect(state.acceptedSockets.size).toBe(0);
+    expect(state.authenticationTimers.size).toBe(0);
+    await expect(server.start()).rejects.toThrow("bridge server is closed");
+  });
+
+  it("closes a server without clients before the shutdown grace expires", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      port: 0,
+      shutdownGraceMs: 100,
+    });
+    servers.push(server);
+    await server.start();
+    const startedAt = performance.now();
+
+    await server.close();
+
+    expect(performance.now() - startedAt).toBeLessThan(500);
+    expect(server.health()).toMatchObject({ listening: false, connected: false, pendingCount: 0 });
+  });
+
+  it("reveals no client secret before server proof and refuses a forged client proof", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+      origin: `chrome-extension://${extensionId}`,
+    });
+    sockets.push(socket);
+    await once(socket, "open");
+    const authentication = {
+      schema: BRIDGE_SCHEMAS.authenticate,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      clientNonce: randomBytes(32).toString("hex"),
+      extensionId,
+      runtimeRevision: revision,
+      catalogDigest: digest,
+      sentAt: Date.now(),
+    } as const;
+    expect(authentication).not.toHaveProperty("token");
+    expect(authentication).not.toHaveProperty("bindings");
+    socket.send(serializeBridgeMessage(authentication));
+    const [raw] = await once(socket, "message");
+    const challenge = parseBridgeJson(raw.toString()) as Record<string, unknown>;
+    expect(Object.keys(challenge).sort()).toEqual([
+      "clientNonce", "issuedAt", "protocolVersion", "schema", "serverNonce", "serverProof",
+    ]);
+    const closed = once(socket, "close");
+    socket.send(serializeBridgeMessage({
+      schema: BRIDGE_SCHEMAS.hello,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      clientNonce: authentication.clientNonce,
+      serverNonce: String(challenge.serverNonce),
+      clientProof: "0".repeat(64),
+      extensionId,
+      runtimeRevision: revision,
+      catalogDigest: digest,
+      bindings: [],
+      sentAt: Date.now(),
+    }));
+    const [code, reason] = await closed;
+    expect(code).toBe(4403);
+    expect(reason.toString()).toBe("bridge_identity_refused");
+    expect(server.health()).toMatchObject({ connected: false, extensionId: null, bindingCount: 0 });
+  });
+
+  it("refuses a binary WebSocket frame even when its bytes contain valid Bridge JSON", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const socket = new WebSocket(`ws://${address.host}:${address.port}${address.path}`, {
+      origin: `chrome-extension://${extensionId}`,
+    });
+    sockets.push(socket);
+    await once(socket, "open");
+    const closed = once(socket, "close");
+    socket.send(Buffer.from(serializeBridgeMessage({
+      schema: BRIDGE_SCHEMAS.authenticate,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      clientNonce: randomBytes(32).toString("hex"),
+      extensionId,
+      runtimeRevision: revision,
+      catalogDigest: digest,
+      sentAt: Date.now(),
+    })));
+    const [code, reason] = await closed;
+    expect(code).toBe(4400);
+    expect(reason.toString()).toBe("invalid_message");
+    expect(server.health()).toMatchObject({ connected: false, extensionId: null, bindingCount: 0 });
+  });
+
   it("sends a private Bridge maintenance control without a catalog tool or course binding", async () => {
     const server = new LoopbackBridgeServer({
       token,
@@ -507,6 +695,37 @@ describe("LoopbackBridgeServer", () => {
     expect(await expired.text()).toContain("Start a new connection");
   });
 
+  it("refuses malformed UTF-8 before pairing status identity classification", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      port: 0,
+      pairingEnabled: true,
+    });
+    servers.push(server);
+    const address = await server.start();
+    const origin = `chrome-extension://${extensionId}`;
+    const created = await fetch(`http://${address.host}:${address.port}${address.path}/pair`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: JSON.stringify({ extensionId, catalogDigest: digest, runtimeRevision: revision }),
+    });
+    const pairing = await created.json() as { statusUrl: string };
+    const malformed = Buffer.concat([
+      Buffer.from(`{"extensionId":"${extensionId}`),
+      Buffer.from([0xff]),
+      Buffer.from('"}'),
+    ]);
+    const status = await fetch(pairing.statusUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin },
+      body: malformed,
+    });
+    expect(status.status).toBe(400);
+    expect(await status.json()).toEqual({ error: "invalid_request" });
+  });
+
   it("reuses a pending pairing request for the same extension", async () => {
     const server = new LoopbackBridgeServer({
       token,
@@ -722,6 +941,108 @@ describe("LoopbackBridgeServer", () => {
       timeoutMs: 120,
     })).rejects.toBeInstanceOf(BridgeOutcomeUnknownError);
     expect(calls).toBe(1);
+  });
+
+  it("removes and cancels the exact pending Private Chat request on abort", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const socket = await connect(server, []);
+    const controller = new AbortController();
+    let command: BridgeCommand | undefined;
+    let resolveCancellation!: (value: Record<string, unknown>) => void;
+    const cancellation = new Promise<Record<string, unknown>>((resolve) => {
+      resolveCancellation = resolve;
+    });
+    socket.on("message", (raw) => {
+      const message = parseBridgeJson(raw.toString()) as Record<string, unknown>;
+      if (message.schema === BRIDGE_SCHEMAS.command) command = message as unknown as BridgeCommand;
+      if (message.schema === BRIDGE_SCHEMAS.cancel) resolveCancellation(message);
+    });
+
+    const pending = server.invoke({
+      kind: "private_chat_exchange",
+      arguments: { action: "listen" },
+      operationId: "private-chat:cancel-1234",
+      signal: controller.signal,
+    });
+    while (!command) await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+
+    await expect(pending).rejects.toBeInstanceOf(BridgeRequestCancelledError);
+    await expect(cancellation).resolves.toMatchObject({
+      schema: BRIDGE_SCHEMAS.cancel,
+      protocolVersion: BRIDGE_PROTOCOL_VERSION,
+      requestId: command.requestId,
+      operationId: command.operationId,
+      generation: command.generation,
+    });
+    expect(server.health().pendingCount).toBe(0);
+  });
+
+  it("waits for an exact extension acknowledgement when a provider write is cancelled", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const socket = await connect(server, [editableAssignmentBinding()]);
+    const controller = new AbortController();
+    let command: BridgeCommand | undefined;
+    socket.on("message", (raw) => {
+      const message = parseBridgeJson(raw.toString()) as Record<string, unknown>;
+      if (message.schema === BRIDGE_SCHEMAS.command) command = message as unknown as BridgeCommand;
+      if (message.schema !== BRIDGE_SCHEMAS.cancel || !command) return;
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.result,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: command.requestId,
+        operationId: command.operationId,
+        generation: command.generation,
+        ok: false,
+        problem: {
+          schema: "morrow.bridge.problem.v1",
+          code: "request_cancelled_before_dispatch",
+          message: "Morrow cancelled this request before the provider change started.",
+          recoverable: true,
+        },
+        completedAt: Date.now(),
+      }));
+    });
+
+    const pending = server.invoke({
+      kind: "invoke_write",
+      toolName: "canvas_edit_assignment",
+      operationKey: "PUT /v1/courses/{course_id}/assignments/{id}#edit_assignment",
+      arguments: { course_id: "42", id: "7", assignment_due_at: "2026-10-01T12:00:00Z" },
+      sourceBindingId: "canvas-course-42",
+      operationId: "operation:cancel-write-1234",
+      outerGrant: {
+        planDigest: digest,
+        approvalGrantDigest: "b".repeat(64),
+        effectReceiptId: "effect:cancel-write-1234",
+        dispatchAttempt: 1,
+        gatewayProcessId: "gateway:12345678",
+        authorization: { kind: "review" },
+      },
+      signal: controller.signal,
+    });
+    while (!command) await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+
+    await expect(pending).resolves.toMatchObject({
+      ok: false,
+      problem: { code: "request_cancelled_before_dispatch" },
+    });
+    expect(server.health().pendingCount).toBe(0);
   });
 
   it("accepts a gateway outer effect receipt once", async () => {

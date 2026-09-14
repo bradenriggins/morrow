@@ -35,7 +35,8 @@ type ItemBankGuard = {
 type ItemBankCredentialContract = {
   ITEM_BANK_CREDENTIAL_MAX_AGE_MS: number;
   itemBankApiOriginForFrameUrl(value: string): string;
-  itemBankLaunchUrl(tabUrl: string, canvasOrigin: string, courseId: string): string;
+  itemBankLaunchUrl(tabUrl: string, canvasOrigin: string, courseId: string, externalToolId: string): string;
+  itemBankLaunchFromCourseTabs(tabs: readonly JsonObject[], canvasOrigin: string, courseId: string): JsonObject | null;
   itemBankPermissionOrigins(frames: readonly JsonObject[], canvasOrigin: string): string[];
   itemBankCredentialFromRequest(details: JsonObject, launch: JsonObject, now: number): JsonObject | null;
   usableItemBankCredential(credential: JsonObject | null, expected: JsonObject, now: number): JsonObject | null;
@@ -57,6 +58,7 @@ type ItemBankFrameContract = {
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url));
 const SOURCE_BINDING_ID = "canvas:quiz-bank-e2e";
 const COURSE_ID = "42";
+const ITEM_BANK_EXTERNAL_TOOL_ID = "81723";
 const TOKEN = "quiz-bank-e2e-token-".repeat(4);
 const EXTENSION_ID = "a".repeat(32);
 const CATALOG_PATH = resolve(ROOT, "artifacts/canvas-api/canvas-api-catalog.json");
@@ -184,8 +186,8 @@ function itemBankWorkerLifecycle(dependencies: {
   const source = worker.slice(begin, end);
   return Function(
     "chrome", "crypto", "itemBankCredentials", "pendingItemBankLaunches", "itemBankCredentialKey",
-    "itemBankLaunchUrl", "itemBankPermissionOrigins", "usableItemBankCredential", "itemBankFrameIds",
-    "itemBankApiOriginForFrame", "executeItemBankInPage", "ITEM_BANK_CREDENTIAL_WAIT_MS", "setTimeout",
+    "itemBankLaunchUrl", "itemBankLaunchFromCourseTabs", "itemBankPermissionOrigins", "usableItemBankCredential", "itemBankFrameIds",
+    "itemBankApiOriginForFrame", "executeItemBankInPage", "stableJson", "ITEM_BANK_CREDENTIAL_WAIT_MS", "setTimeout",
     `"use strict"; ${source}; return { executeItemBank, freshItemBankContext, clearItemBankCredentialsForTab };`,
   )(
     dependencies.chrome,
@@ -194,11 +196,13 @@ function itemBankWorkerLifecycle(dependencies: {
     dependencies.launches,
     (tabId: number, frameId: number) => `${tabId}:${frameId}`,
     dependencies.credential.itemBankLaunchUrl,
+    dependencies.credential.itemBankLaunchFromCourseTabs,
     dependencies.credential.itemBankPermissionOrigins,
     dependencies.credential.usableItemBankCredential,
     dependencies.frames.itemBankFrameIds,
     dependencies.frames.itemBankApiOriginForFrame,
     dependencies.executor.executeItemBankInPage,
+    stableJson,
     45_000,
     (resolveDelay: () => void) => resolveDelay(),
   ) as {
@@ -211,8 +215,9 @@ function itemBankRecoveryPlanner() {
   const begin = worker.indexOf("async function itemBankRecoveryDescriptor");
   const end = worker.indexOf("async function canvasRecoveryDescriptor", begin);
   if (begin < 0 || end < 0) throw new Error("Item Bank recovery descriptor is missing");
-  return Function("sha256", `"use strict"; ${worker.slice(begin, end)}; return itemBankRecoveryDescriptor;`)(
+  return Function("sha256", "stableJson", `"use strict"; ${worker.slice(begin, end)}; return itemBankRecoveryDescriptor;`)(
     async (value: string) => sha256Text(value),
+    stableJson,
   ) as (operation: JsonObject, args: JsonObject, result: JsonObject) => Promise<JsonObject | null>;
 }
 
@@ -330,11 +335,17 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       new URL("../../../connector/extension/src/quiz-bank-draw-executor.js", import.meta.url).href
     ) as QuizBankDrawExecutor;
     const canvasOrigin = "https://school.instructure.com";
-    const launchUrl = `${canvasOrigin}/courses/${COURSE_ID}/external_tools/54065`;
-    expect(credentialContract.itemBankLaunchUrl(`${canvasOrigin}/courses/${COURSE_ID}`, canvasOrigin, COURSE_ID)).toBe(launchUrl);
-    expect(credentialContract.itemBankLaunchUrl(`${canvasOrigin}/courses/${COURSE_ID}/quizzes`, canvasOrigin, COURSE_ID)).toBe(launchUrl);
-    expect(credentialContract.itemBankLaunchUrl(`${canvasOrigin}/courses/43`, canvasOrigin, COURSE_ID)).toBe("");
-    expect(credentialContract.itemBankLaunchUrl("https://evil.example/courses/42", canvasOrigin, COURSE_ID)).toBe("");
+    const launchUrl = `${canvasOrigin}/courses/${COURSE_ID}/external_tools/${ITEM_BANK_EXTERNAL_TOOL_ID}`;
+    expect(credentialContract.itemBankLaunchUrl(`${canvasOrigin}/courses/${COURSE_ID}`, canvasOrigin, COURSE_ID, ITEM_BANK_EXTERNAL_TOOL_ID)).toBe(launchUrl);
+    expect(credentialContract.itemBankLaunchUrl(`${canvasOrigin}/courses/${COURSE_ID}/quizzes`, canvasOrigin, COURSE_ID, ITEM_BANK_EXTERNAL_TOOL_ID)).toBe(launchUrl);
+    expect(credentialContract.itemBankLaunchUrl(`${canvasOrigin}/courses/43`, canvasOrigin, COURSE_ID, ITEM_BANK_EXTERNAL_TOOL_ID)).toBe("");
+    expect(credentialContract.itemBankLaunchUrl("https://evil.example/courses/42", canvasOrigin, COURSE_ID, ITEM_BANK_EXTERNAL_TOOL_ID)).toBe("");
+    expect(credentialContract.itemBankLaunchFromCourseTabs([{
+      id: `context_external_tool_${ITEM_BANK_EXTERNAL_TOOL_ID}`,
+      type: "external",
+      label: "Item Banks",
+      html_url: launchUrl,
+    }], canvasOrigin, COURSE_ID)).toEqual({ externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID, launchUrl });
     expect(credentialContract.itemBankApiOriginForFrameUrl("https://school.quiz-lti.instructure.com/lti/launch"))
       .toBe("https://school.quiz-api.instructure.com");
     expect(credentialContract.itemBankPermissionOrigins([
@@ -350,7 +361,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
 
     const launchedAt = 1_000_000;
     const launch = {
-      tabId: 5, canvasLocalContextId: COURSE_ID, launchUrl,
+      tabId: 5, canvasLocalContextId: COURSE_ID, externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID, launchUrl,
       launchNonce: "11111111-1111-4111-8111-111111111111", launchedAt,
     };
     const token = `Signature ${"credential-".repeat(8)}`;
@@ -361,12 +372,12 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       requestHeaders: [{ name: "Authorization", value: token }, { name: "AuthType", value: "Signature" }],
     }, launch, launchedAt + 1);
     expect(captured).toMatchObject({
-      tabId: 5, frameId: 7, canvasLocalContextId: COURSE_ID, launchUrl,
+      tabId: 5, frameId: 7, canvasLocalContextId: COURSE_ID, externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID, launchUrl,
       launchNonce: launch.launchNonce, launchedAt, capturedAt: launchedAt + 1,
       apiOrigin: "https://school.quiz-api.instructure.com", contextUuid: "course-context-uuid",
     });
     const expectedCredential = {
-      tabId: 5, frameId: 7, canvasLocalContextId: COURSE_ID, launchUrl,
+      tabId: 5, frameId: 7, canvasLocalContextId: COURSE_ID, externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID, launchUrl,
       launchNonce: launch.launchNonce, launchedAt, apiOrigin: "https://school.quiz-api.instructure.com",
     };
     expect(credentialContract.usableItemBankCredential(captured, expectedCredential, launchedAt + 2)).toBe(captured);
@@ -407,7 +418,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       principalId: "7", canvasOrigin, courseId: COURSE_ID,
       credential: {
         apiOrigin: "https://school.quiz-api.instructure.com", token, authType: "Signature",
-        canvasLocalContextId: COURSE_ID, contextUuid: "course-context-uuid", launchUrl,
+        canvasLocalContextId: COURSE_ID, externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID, contextUuid: "course-context-uuid", launchUrl,
         launchNonce: launch.launchNonce, launchedAt: now - 1, capturedAt: now,
       },
     }));
@@ -449,7 +460,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
           principalId: "7", canvasOrigin, courseId: COURSE_ID,
           credential: {
             apiOrigin: "https://school.quiz-api.instructure.com", token, authType: "Signature",
-            canvasLocalContextId: COURSE_ID, contextUuid: "course-context-uuid", launchUrl,
+            canvasLocalContextId: COURSE_ID, externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID,
+            contextUuid: "course-context-uuid", launchUrl,
             launchNonce: launch.launchNonce, launchedAt: now - 1, capturedAt: now,
           },
         });
@@ -485,7 +497,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       const capturedAt = Date.now();
       return {
         apiOrigin: "https://school.quiz-api.instructure.com", token, authType: "Signature",
-        contextUuid: "course-context-uuid", canvasLocalContextId: COURSE_ID, launchUrl,
+        contextUuid: "course-context-uuid", canvasLocalContextId: COURSE_ID,
+        externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID, launchUrl,
         launchNonce: launch.launchNonce, launchedAt: capturedAt - 1_000, capturedAt,
       };
     };
@@ -740,7 +753,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       principalId: "7", canvasOrigin, courseId: COURSE_ID,
       credential: {
         apiOrigin: "https://school.quiz-api.instructure.com", token, authType: "Signature",
-        canvasLocalContextId: "43", contextUuid: "course-context-uuid", launchUrl,
+        canvasLocalContextId: "43", externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID,
+        contextUuid: "course-context-uuid", launchUrl,
         launchNonce: launch.launchNonce, launchedAt: now - 1, capturedAt: now,
       },
     }));
@@ -757,7 +771,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       principalId: "7", canvasOrigin, courseId: COURSE_ID,
       credential: {
         apiOrigin: "https://school.quiz-api.instructure.com", token, authType: "Signature",
-        canvasLocalContextId: COURSE_ID, contextUuid: "course-context-uuid", launchUrl,
+        canvasLocalContextId: COURSE_ID, externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID,
+        contextUuid: "course-context-uuid", launchUrl,
         launchNonce: launch.launchNonce,
         launchedAt: now - credentialContract.ITEM_BANK_CREDENTIAL_MAX_AGE_MS - 2,
         capturedAt: now - credentialContract.ITEM_BANK_CREDENTIAL_MAX_AGE_MS - 1,
@@ -788,11 +803,23 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
             credentials.set(`${tabId}:7`, {
               tabId, frameId: 7, apiOrigin: "https://school.quiz-api.instructure.com",
               token, authType: "Signature", canvasLocalContextId: COURSE_ID,
+              externalToolId: pending.externalToolId,
               contextUuid: "course-context-uuid", launchUrl: pending.launchUrl,
               launchNonce: pending.launchNonce, launchedAt: pending.launchedAt, capturedAt: Date.now(),
             });
             return { id: tabId, url: options.url };
           },
+          sendMessage: async () => ({
+            ok: true,
+            profile: { origin: canvasOrigin, id: "7" },
+            course: { id: COURSE_ID },
+            tabs: [{
+              id: `context_external_tool_${ITEM_BANK_EXTERNAL_TOOL_ID}`,
+              type: "external",
+              label: "Item Banks",
+              html_url: launchUrl,
+            }],
+          }),
           remove: async (tabId: number) => { records.removes.push(tabId); },
         },
         webNavigation: {
@@ -805,6 +832,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         scripting: {
           executeScript: async (injection: JsonObject) => {
             records.scripts.push(injection);
+            if (!injection.args) return [{ result: undefined }];
             const input = (injection.args as JsonObject[])[0]!;
             return [{ result: input.contextOnly === true
               ? { matched: true, ok: true, sent: false }
@@ -825,7 +853,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
     expect(workerSuccess.records.creates).toEqual([{ active: false, windowId: 3 }]);
     expect(workerSuccess.records.updates).toEqual([{ tabId: 99, url: launchUrl }]);
     expect(workerSuccess.records.removes).toEqual([99]);
-    expect(workerSuccess.records.scripts).toHaveLength(2);
+    expect(workerSuccess.records.scripts).toHaveLength(3);
     expect(workerSuccess.credentials.size).toBe(0);
     expect(workerSuccess.launches.size).toBe(0);
 
@@ -835,7 +863,10 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
     expect(workerFailure.records.creates).toEqual([{ active: false, windowId: 3 }]);
     expect(workerFailure.records.updates).toEqual([{ tabId: 100, url: launchUrl }]);
     expect(workerFailure.records.removes).toEqual([100]);
-    expect(workerFailure.records.scripts).toEqual([]);
+    expect(workerFailure.records.scripts).toEqual([{
+      target: { tabId: 5, frameIds: [0] },
+      files: ["src/canvas-content.js"],
+    }]);
     expect(workerFailure.credentials.size).toBe(0);
     expect(workerFailure.launches.size).toBe(0);
   });
@@ -1006,7 +1037,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
     const canvasContentSource = readFileSync(resolve(ROOT, "connector/extension/src/canvas-content.js"), "utf8");
 
     const itemBankToken = `Signature ${"integrated-item-bank-credential-".repeat(4)}`;
-    const itemBankLaunchUrl = `${binding.origin}/courses/${COURSE_ID}/external_tools/54065`;
+    const itemBankLaunchUrl = `${binding.origin}/courses/${COURSE_ID}/external_tools/${ITEM_BANK_EXTERNAL_TOOL_ID}`;
     const quizBuilderReferrer = `${binding.origin}/courses/${COURSE_ID}/assignments/77`;
     const itemBankRequests: { tool: string; method: string; path: string }[] = [];
     let loseNextItemBankResponseTool = "";
@@ -1158,7 +1189,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
           operation, arguments: args, principalId: "7", canvasOrigin: binding.origin, courseId: COURSE_ID,
           credential: {
             apiOrigin: "https://school.quiz-api.instructure.com", token: itemBankToken, authType: "Signature",
-            canvasLocalContextId: COURSE_ID, contextUuid: "course-context-uuid", launchUrl: itemBankLaunchUrl,
+            canvasLocalContextId: COURSE_ID, externalToolId: ITEM_BANK_EXTERNAL_TOOL_ID,
+            contextUuid: "course-context-uuid", launchUrl: itemBankLaunchUrl,
             launchNonce: "11111111-1111-4111-8111-111111111111", launchedAt: capturedAt - 1_000, capturedAt,
           },
         };
@@ -2182,7 +2214,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       // Approving the exact repair sends one bank item update and rereads the exact item.
       const repairOperationId = operationId(repair);
       morrow!.gateway.approveOperation(repairOperationId);
-      expect(structured(await client!.callTool({ name: "morrow_operation_dispatch", arguments: { operation_id: repairOperationId } })))
+      const repairDispatch = structured(await client!.callTool({ name: "morrow_operation_dispatch", arguments: { operation_id: repairOperationId } }));
+      expect(repairDispatch, JSON.stringify(repairDispatch))
         .toMatchObject({ effectState: "verified", verification: { status: "verified" } });
       // The executor replaces the saved record, so the bank's own copy is the one to read.
       expect(String(((bankItems.get("501")!).entry as JsonObject).item_body)).toContain('alt="Cell membrane diagram"');

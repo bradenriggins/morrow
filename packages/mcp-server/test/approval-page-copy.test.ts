@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { runInNewContext } from "node:vm";
 import type { JsonObject } from "@morrow/contracts";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
 
@@ -55,7 +56,115 @@ async function reviewPage(baseUrl: string): Promise<{ body: string; nonce: strin
   };
 }
 
+async function submitApproval(baseUrl: string, nonce: string, cookie: string): Promise<Response> {
+  return fetch(`${baseUrl}/operations/${encodedId}/approve`, {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      accept: "text/html",
+      cookie,
+      origin: baseUrl,
+      referer: `${baseUrl}/operations/${encodedId}`,
+    },
+    body: new URLSearchParams({ nonce }),
+    redirect: "manual",
+  });
+}
+
+function trackedApprovalServer(approvals: { count: number }): LoopbackApprovalServer {
+  const snapshot = moodleSnapshot("awaiting_approval");
+  return new LoopbackApprovalServer({
+    operationGet: () => snapshot,
+    operationList: () => ({ schema: "morrow.operations.list.v1", returned: 1, operations: [snapshot] }),
+    operationReviewContext: async () => ({ targets: [
+      { field: "course_id", label: "Course", name: "Biology 101" },
+      { field: "module_id", label: "Page", name: "Week 2 overview" },
+    ] }),
+    approveOperation: () => {
+      approvals.count += 1;
+      return moodleSnapshot("approved");
+    },
+    runApprovedOperation: async () => undefined,
+    cancelOperation: () => moodleSnapshot("cancelled"),
+    setApprovalBaseUrl: () => undefined,
+  });
+}
+
 describe("approval page copy", () => {
+  it("bounds a stalled status request and schedules an automatic recovery read", async () => {
+    const server = approvalServer(moodleSnapshot("applied_or_unknown"));
+    try {
+      const baseUrl = await server.start();
+      const script = await (await fetch(`${baseUrl}/review-status.js`)).text();
+      const status = { innerHTML: "Waiting", textContent: "Waiting" };
+      const timers: Array<{ callback: () => void; delay: number; cleared: boolean }> = [];
+      const context = {
+        AbortController,
+        location: { pathname: `/operations/${encodedId}` },
+        document: {
+          body: { dataset: { polling: "true" } },
+          querySelector: () => null,
+          querySelectorAll: () => [],
+          getElementById: (id: string) => id === "work-status" ? status : null,
+        },
+        fetch: (_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+          options.signal?.addEventListener("abort", () => reject(new Error("stalled response aborted")), { once: true });
+        }),
+        setTimeout: (callback: () => void, delay: number) => {
+          const timer = { callback, delay, cleared: false };
+          timers.push(timer);
+          return timer;
+        },
+        clearTimeout: (timer: { cleared: boolean } | undefined) => { if (timer) timer.cleared = true; },
+      };
+
+      runInNewContext(script, context);
+      expect(timers).toHaveLength(1);
+      expect(timers[0]?.delay).toBe(5000);
+      timers[0]?.callback();
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(status.textContent).toContain("cannot refresh this result");
+      expect(timers).toHaveLength(2);
+      expect(timers[1]?.delay).toBe(5000);
+      expect(timers[0]?.cleared).toBe(true);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("keeps an earlier review page valid after the same review opens again", async () => {
+    const approvals = { count: 0 };
+    const server = trackedApprovalServer(approvals);
+    try {
+      const baseUrl = await server.start();
+      const first = await reviewPage(baseUrl);
+      const second = await reviewPage(baseUrl);
+      expect(first.nonce).not.toBe(second.nonce);
+      expect(first.cookie.split("=", 1)[0]).not.toBe(second.cookie.split("=", 1)[0]);
+      await expect(submitApproval(baseUrl, first.nonce, first.cookie)).resolves.toMatchObject({ status: 303 });
+      expect(approvals.count).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("an invalid page grant cannot erase another valid grant", async () => {
+    const approvals = { count: 0 };
+    const server = trackedApprovalServer(approvals);
+    try {
+      const baseUrl = await server.start();
+      const first = await reviewPage(baseUrl);
+      const second = await reviewPage(baseUrl);
+      await expect(submitApproval(baseUrl, first.nonce, second.cookie)).resolves.toMatchObject({ status: 409 });
+      expect(approvals.count).toBe(0);
+      await expect(submitApproval(baseUrl, second.nonce, second.cookie)).resolves.toMatchObject({ status: 303 });
+      expect(approvals.count).toBe(1);
+    } finally {
+      await server.close();
+    }
+  });
+
   it("names the platform the change is for, and no other", async () => {
     const server = approvalServer(moodleSnapshot("applied_or_unknown"));
     try {

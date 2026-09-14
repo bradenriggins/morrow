@@ -1,7 +1,7 @@
 import { shouldOpenSetupOnInstall } from "../onboarding/onboarding-install.js";
 import { COURSE_DATA_CONSENT_KEY, COURSE_DATA_CONSENT_VALUE, hasCourseDataConsent } from "./course-data-consent.js";
 import { executeItemBankInPage } from "./item-bank-executor.js";
-import { itemBankCredentialFromRequest, itemBankLaunchUrl, itemBankPermissionOrigins, usableItemBankCredential } from "./item-bank-credential.js";
+import { itemBankCredentialFromRequest, itemBankLaunchFromCourseTabs, itemBankPermissionOrigins, usableItemBankCredential } from "./item-bank-credential.js";
 import { itemBankApiOriginForFrame, itemBankFrameIds } from "./item-bank-frames.js";
 import { executeQuizBankDrawInPage } from "./quiz-bank-draw-executor.js";
 import { completeQuizItemPayloadReason } from "./quiz-item-payload.js";
@@ -10,8 +10,8 @@ import { canClaimCourseConnectionIntent, canCompleteCourseConnectionIntent, norm
 import { MAX_FILE_TEXT_BYTES, canvasFileTextContentTypeSupported, executeCanvasCourseFileTextInPage } from "./canvas-file-content.js";
 import { CANVAS_FILE_SIGNALS_OPERATION_KEY, CANVAS_FILE_SIGNALS_SCHEMA, CANVAS_FILE_SIGNALS_TOOL_NAME, canvasCourseFileSignals, canvasFileSignalsContentTypeSupported } from "./canvas-file-signals.js";
 import { executeCanvasCourseFileTransferInPage } from "./canvas-file-transfer.js";
-import { executeCanvasNewQuizHotSpotInPage } from "./canvas-new-quiz-hot-spot.js";
-import { PRIVATE_CANVAS_CONVERSATION_OPERATION, PRIVATE_CANVAS_CONVERSATION_TOOL, canvasConversationOperationMatches, executeCanvasConversationInPage, normalizeCanvasConversationPrivatePayload } from "./canvas-conversations.js";
+import { canvasNewQuizHotSpotVerification, executeCanvasNewQuizHotSpotInPage, unsignedHotSpotImageUrl } from "./canvas-new-quiz-hot-spot.js";
+import { CANVAS_CONVERSATION_PRIVATE_SCHEMA, PRIVATE_CANVAS_CONVERSATION_OPERATION, PRIVATE_CANVAS_CONVERSATION_TOOL, canvasConversationOperationMatches, executeCanvasConversationInPage, normalizeCanvasConversationPrivatePayload } from "./canvas-conversations.js";
 import { problemCopy, problemText } from "./bridge-problem-copy.js";
 import { bridgeWriteFailureCode, canvasWriteOutcomeUncertain } from "./canvas-write-outcome.js";
 import { canvasOperationAdmission } from "../generated/canvas-operation-admission.js";
@@ -60,24 +60,35 @@ import { executeMoodleBigBlueButtonInPage } from "./moodle-bbb-executor.js";
 import { executeMoodleSubsectionInPage } from "./moodle-subsection-executor.js";
 import { executeMoodleBackupInPage } from "./moodle-backup-executor.js";
 import { collectMoodleCourseParticipantRoster } from "./moodle-privacy.js";
-import { CONVERSATIONAL_EDIT_DURATION_MS, EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, SETTINGS_EDIT_DURATIONS, categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, validEditDuration, validEditPermission } from "./edit-policy.js";
+import { CONVERSATIONAL_EDIT_DURATION_MS, EDIT_PERMISSION_SCHEMA, EDIT_POLICY_SELECTION_LIMIT, SETTINGS_EDIT_DURATIONS, categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditDuration, validEditPermission } from "./edit-policy.js";
 import { BridgeMaintenanceError, createBridgeMaintenance } from "./bridge-maintenance.js";
 import { serializeBridgeResult } from "./bridge-transport.js";
 import { canvasProtectedRoster, protectLocalRequest, sourceProtectedRoster } from "./protected-request.js";
 import { MAX_RENDER_CHECK_SOURCE_CHARS, RENDER_CHECK_MESSAGE_TYPE, RENDER_CHECK_SCHEMA, renderCheckField } from "../render-check/render-check.js";
+import { PRIVATE_BRIDGE_OPERATION_CONTRACTS, bridgeCatalogCompatibilityContract, browserCatalogCompatibilityContract, canvasApiCompatibilityContract, fetchBoundedCatalogText, parseBrowserCatalogText, parseCanvasApiCatalogText, privateBridgeCompatibilityContract, stableJson } from "./catalog-compatibility.js";
 
 const PORT = 32147;
 const BRIDGE_PATH = "/morrow-bridge/v1";
 const PROTOCOL_VERSION = 1;
 const RUNTIME_REVISION = "1.0.0-rc.2";
 const ITEM_BANK_CREDENTIAL_WAIT_MS = 45_000;
-const ITEM_BANK_ORIGIN_DISCOVERY_WAIT_MS = 20_000;
 const DISCOVERY_PAGE_LIMIT = 100;
 const BRIDGE_BINDING_LIMIT = 500;
 const USED_EFFECT_RECEIPT_LIMIT = 2_000;
 const DISCOVERY_TTL_MS = 5 * 60 * 1_000;
+const DISCOVERY_MAX_PAGES = 100;
+const DISCOVERY_NEXT_MAX_BYTES = 4 * 1024;
 const MAX_PRIVATE_FILE_BYTES = 1024 * 1024;
 const MAX_PRIVATE_FILE_BASE64_BYTES = 4 * Math.ceil(MAX_PRIVATE_FILE_BYTES / 3);
+const PAIRING_AUTHORITY_KEY = "pairingAuthority";
+const PAIRING_AUTHORITY_SCHEMA = "morrow.bridge-pairing-authority.v1";
+const PAIRING_RESPONSE_MAX_BYTES = 4 * 1024;
+const PAIRING_RESPONSE_TIMEOUT_MS = 10_000;
+const CANVAS_LIST_CONTINUATIONS_KEY = "canvasListContinuations";
+const CANVAS_LIST_CONTINUATION_SCHEMA = "morrow.canvas-list-continuation.v1";
+const CANVAS_LIST_CONTINUATION_STATE_SCHEMA = "morrow.canvas-list-resume-state.v1";
+const CANVAS_LIST_CONTINUATION_LIMIT = 128;
+const CANVAS_LIST_CONTINUATION_TTL_MS = 5 * 60 * 1_000;
 
 // The private banks.build token is held only in this service worker. Canvas's
 // own Item Banks client sends it to quiz-api after each LTI launch. Capturing
@@ -178,6 +189,44 @@ const PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD = Object.freeze({
     additionalProperties: false,
   }),
 });
+
+function privateBridgeOperationContracts() {
+  return [
+    ...PRIVATE_MOODLE_STAGED_FILE_OPERATIONS.map((operation) => ({ kind: "moodle_staged_file", ...operation })),
+    {
+      kind: "canvas_private_operation", ...PRIVATE_CANVAS_COURSE_FILE_OPERATION,
+      argumentNames: PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS, attachmentMode: "single",
+    },
+    {
+      kind: "canvas_private_operation", ...PRIVATE_CANVAS_HOT_SPOT_OPERATION,
+      argumentNames: PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS, attachmentMode: "single", contentTypes: PRIVATE_CANVAS_HOT_SPOT_CONTENT_TYPES,
+    },
+    {
+      kind: "canvas_private_operation",
+      key: PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD.key,
+      toolName: PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD.toolName,
+      provider: PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD.provider,
+      readOnly: PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD.readOnly,
+      method: PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD.method,
+      service: PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD.service,
+      path: PRIVATE_CANVAS_CONVERSATION_OPERATION_RECORD.path,
+      argumentNames: ["course_id"],
+      privatePayloadSchema: CANVAS_CONVERSATION_PRIVATE_SCHEMA,
+    },
+    {
+      kind: "moodle_private_operation",
+      key: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION.key,
+      toolName: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION.toolName,
+      provider: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION.provider,
+      readOnly: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION.readOnly,
+      method: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION.method,
+      service: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION.service,
+      path: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION.path,
+      argumentNames: ["course_id", "query"],
+      resultSchema: "morrow.moodle-enrolment-candidate.private.v1",
+    },
+  ];
+}
 // The native course settings form. The format change is on the same form and
 // in the same executor, because it reads and verifies the same protected
 // course settings before it moves every section and activity.
@@ -454,6 +503,8 @@ const COURSE_FILE_STORAGE_ACCESS_KEY = "courseFileStorageAccessEnabled";
 const COURSE_FILE_STORAGE_ORIGINS = Object.freeze(["https://*/*"]);
 const COURSE_FILE_READ_TIMEOUT_MS = 30_000;
 const COURSE_CONNECTION_INTENT_KEY = "pendingCourseConnection";
+const COURSE_CONNECTION_AUTHORITY_KEY = "courseConnectionAuthority";
+const COURSE_CONNECTION_AUTHORITY_SCHEMA = "morrow.course-connection-authority.v1";
 const COURSE_CONNECTION_INTENT_TTL_MS = 60_000;
 // How long one confirmed course-site match is kept for reads and status. Short enough that a person
 // who signs out or moves that tab waits about a second for Morrow to notice, and long enough that a
@@ -472,7 +523,7 @@ const CANVAS_CONTENT_GUARD_OPERATIONS = Object.freeze([
   Object.freeze({ kind: "new_quiz_answer_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
   Object.freeze({ kind: "new_quiz_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
 ]);
-const state = { socket: null, generation: 0, accepted: null, catalog: null, operations: new Map(), reconnectTimer: null, writeQueues: new Map(), storageQueue: Promise.resolve(), privateChat: null, privateChatClosed: null };
+const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, catalog: null, operations: new Map(), reconnectTimer: null, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null };
 const canvasUploadObservers = new Map();
 // siteAnchorId -> the last course-site match, or the probe that is finding one now.
 const anchorVerifications = new Map();
@@ -484,6 +535,47 @@ async function sha256(value) {
 
 async function sha256Bytes(bytes) {
   return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function bridgeNonce() {
+  return Array.from(crypto.getRandomValues(new Uint8Array(32)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function bridgeAuthenticationProofPayload(direction, authentication, serverNonce) {
+  return JSON.stringify([
+    `morrow.bridge.${direction}-proof.v1`,
+    PROTOCOL_VERSION,
+    BRIDGE_PATH,
+    authentication.clientNonce,
+    serverNonce,
+    authentication.extensionId,
+    authentication.runtimeRevision,
+    authentication.catalogDigest,
+  ]);
+}
+
+async function bridgeAuthenticationProof(token, direction, authentication, serverNonce) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(token),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const proof = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(bridgeAuthenticationProofPayload(direction, authentication, serverNonce)),
+  );
+  return Array.from(new Uint8Array(proof), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function sameBridgeProof(expected, actual) {
+  if (!/^[0-9a-f]{64}$/.test(expected) || !/^[0-9a-f]{64}$/.test(actual)) return false;
+  let different = 0;
+  for (let index = 0; index < expected.length; index += 1) different |= expected.charCodeAt(index) ^ actual.charCodeAt(index);
+  return different === 0;
 }
 
 function responseContentType(value) {
@@ -516,6 +608,7 @@ async function courseFileStorageAccessEnabled() {
 async function boundedResponseBytes(response, limit, signal) {
   const declaredLength = response.headers.get("content-length");
   if (declaredLength !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declaredLength) || Number(declaredLength) > limit)) {
+    try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
     throw new Error("canvas_file_content_too_large");
   }
   if (!response.body) return new Uint8Array();
@@ -530,7 +623,7 @@ async function boundedResponseBytes(response, limit, signal) {
       if (!(value instanceof Uint8Array)) throw new Error("canvas_file_content_stream_invalid");
       length += value.byteLength;
       if (length > limit) {
-        await reader.cancel("canvas_file_content_too_large");
+        try { const cancellation = reader.cancel("canvas_file_content_too_large"); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
         throw new Error("canvas_file_content_too_large");
       }
       chunks.push(value);
@@ -591,7 +684,7 @@ async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentType
       signal: controller.signal,
     });
     let finalUrl;
-    try { finalUrl = new URL(response.url); } catch { return { ok: false, sent: true, error: "canvas_file_final_url_invalid" }; }
+    try { finalUrl = new URL(response.url); } catch { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return { ok: false, sent: true, error: "canvas_file_final_url_invalid" }; }
     if (!response.ok || finalUrl.protocol !== "https:") return { ok: false, sent: true, status: response.status, error: "canvas_file_content_fetch_failed" };
     if (responseContentType(response.headers.get("content-type")) !== prepared.version.content_type) {
       return { ok: false, sent: true, status: response.status, error: "canvas_file_content_type_mismatch" };
@@ -656,20 +749,24 @@ async function executeCanvasCourseFileSignals(binding, operation, args, expiresA
 
 async function catalog() {
   if (state.catalog) return state.catalog;
-  const response = await fetch(chrome.runtime.getURL("generated/canvas-api-catalog.json"));
-  const value = await response.json();
-  if (value?.schema !== "morrow.canvas-api-catalog.v1" || !Array.isArray(value.operations)) throw new Error("connector_catalog_invalid");
-  const canvasBrowserResponse = await fetch(chrome.runtime.getURL("generated/canvas-browser-catalog.json"));
-  const canvasBrowserText = await canvasBrowserResponse.text();
-  const canvasBrowser = JSON.parse(canvasBrowserText);
-  if (canvasBrowser.schema !== "morrow.browser-catalog.v1" || canvasBrowser.provider !== "canvas" || !Array.isArray(canvasBrowser.operations)
-    || canvasBrowser.operations.some((operation) => operation.provider !== "canvas" || !operation.toolName.startsWith("canvas_"))) throw new Error("connector_catalog_invalid");
-  const moodleResponse = await fetch(chrome.runtime.getURL("generated/moodle-browser-catalog.json"));
-  const moodleText = await moodleResponse.text();
-  const moodle = JSON.parse(moodleText);
-  if (moodle.schema !== "morrow.browser-catalog.v1" || moodle.provider !== "moodle" || !Array.isArray(moodle.operations)
-    || moodle.operations.some((operation) => operation.provider !== "moodle" || !operation.toolName.startsWith("moodle_"))) throw new Error("connector_catalog_invalid");
-  state.catalog = { ...value, catalogDigest: await sha256(`${value.catalogDigest}\n${await sha256(canvasBrowserText)}\n${await sha256(moodleText)}`) };
+  const canvasApiText = await fetchBoundedCatalogText(chrome.runtime.getURL("generated/canvas-api-catalog.json"), "Canvas API catalog");
+  const value = await parseCanvasApiCatalogText(canvasApiText);
+  const canvasBrowserText = await fetchBoundedCatalogText(chrome.runtime.getURL("generated/canvas-browser-catalog.json"), "Canvas browser catalog");
+  const canvasBrowser = parseBrowserCatalogText(canvasBrowserText, "canvas");
+  const moodleText = await fetchBoundedCatalogText(chrome.runtime.getURL("generated/moodle-browser-catalog.json"), "Moodle browser catalog");
+  const moodle = parseBrowserCatalogText(moodleText, "moodle");
+  const canvasApiDigest = await sha256(stableJson(canvasApiCompatibilityContract(value)));
+  const canvasBrowserDigest = await sha256(stableJson(browserCatalogCompatibilityContract(canvasBrowser)));
+  const moodleBrowserDigest = await sha256(stableJson(browserCatalogCompatibilityContract(moodle)));
+  const privateOperations = privateBridgeOperationContracts();
+  if (stableJson(privateOperations) !== stableJson(PRIVATE_BRIDGE_OPERATION_CONTRACTS)) throw new Error("connector_private_contract_invalid");
+  const privateCommandsDigest = await sha256(stableJson(privateBridgeCompatibilityContract(privateOperations)));
+  const legacyCatalogDigest = await sha256(`${value.catalogDigest}\n${await sha256(canvasBrowserText)}\n${await sha256(moodleText)}`);
+  state.catalog = {
+    ...value,
+    catalogDigest: await sha256(stableJson(bridgeCatalogCompatibilityContract(canvasApiDigest, canvasBrowserDigest, moodleBrowserDigest, privateCommandsDigest))),
+    legacyCatalogDigest,
+  };
   const operations = [
     ...value.operations.map((operation) => ({ ...operation, provider: "canvas" })),
     ...canvasBrowser.operations,
@@ -678,6 +775,7 @@ async function catalog() {
   ];
   state.operations = new Map(operations.map((operation) => [operation.toolName, operation]));
   if (state.operations.size !== operations.length) throw new Error("connector_catalog_invalid");
+  await migrateLegacyEditPolicies(state.catalog);
   return state.catalog;
 }
 
@@ -690,7 +788,7 @@ function httpUrl(path = "") {
 }
 
 async function storage() {
-  return await chrome.storage.local.get(["token", "bindings", "pairing", "siteAnchors", "editPolicies", "editPolicyRevisions"]);
+  return await chrome.storage.local.get(["token", "bindings", "pairing", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions"]);
 }
 
 async function courseDataConsentAccepted() {
@@ -700,6 +798,31 @@ async function courseDataConsentAccepted() {
 
 async function requireCourseDataConsent() {
   if (!await courseDataConsentAccepted()) throw new Error("course_data_consent_required");
+}
+
+function invalidateCourseDataAuthority(socket = null) {
+  state.courseDataAuthorityGeneration += 1;
+  for (const active of state.bridgeCommands.values()) {
+    if (!socket || active.socket === socket) active.cancelled = true;
+  }
+}
+
+async function courseDataAuthorityCurrent(generation) {
+  if (generation !== state.courseDataAuthorityGeneration) return false;
+  const accepted = await courseDataConsentAccepted();
+  return accepted && generation === state.courseDataAuthorityGeneration;
+}
+
+function bridgeConnectionCurrent(socket, authorityGeneration) {
+  return state.socket === socket
+    && socket?.readyState === WebSocket.OPEN
+    && authorityGeneration === state.courseDataAuthorityGeneration;
+}
+
+async function bridgeConnectionAuthorityCurrent(socket, authorityGeneration) {
+  if (!bridgeConnectionCurrent(socket, authorityGeneration)) return false;
+  return await courseDataAuthorityCurrent(authorityGeneration)
+    && bridgeConnectionCurrent(socket, authorityGeneration);
 }
 
 function discoveryArea() {
@@ -716,6 +839,160 @@ function queueStorageMutation(work) {
   return queued;
 }
 
+function courseConnectionAuthority(status, revokedOrigins = [], expiresAt = 0) {
+  return {
+    schema: COURSE_CONNECTION_AUTHORITY_SCHEMA,
+    generation: crypto.randomUUID(),
+    status,
+    changedAt: Date.now(),
+    ...(status === "disconnected" ? { revokedOrigins: [...new Set(revokedOrigins)].sort(), expiresAt } : {}),
+  };
+}
+
+function validCourseConnectionAuthority(value, status) {
+  if (!value || value.schema !== COURSE_CONNECTION_AUTHORITY_SCHEMA || value.status !== status
+    || typeof value.generation !== "string" || !/^[a-f0-9-]{36}$/.test(value.generation)
+    || !Number.isSafeInteger(value.changedAt)) return false;
+  if (status === "active") return true;
+  return Array.isArray(value.revokedOrigins)
+    && value.revokedOrigins.every((origin) => typeof origin === "string" && /^https:\/\/[^/*]+\/\*$/.test(origin))
+    && Number.isFinite(value.expiresAt);
+}
+
+function courseConnectionAuthorityMatches(value, intent) {
+  return validCourseConnectionAuthority(value, "active")
+    && typeof intent?.authorityGeneration === "string"
+    && intent.authorityGeneration === value.generation;
+}
+
+function pairingAuthority(generation, status) {
+  return { schema: PAIRING_AUTHORITY_SCHEMA, generation, status, changedAt: Date.now() };
+}
+
+function pairingIdentityMatches(stored, expected) {
+  return stored?.statusUrl === expected?.statusUrl
+    && stored?.pairingGeneration === expected?.pairingGeneration;
+}
+
+function pairingAuthorityMatches(authority, generation, status) {
+  return authority?.schema === PAIRING_AUTHORITY_SCHEMA
+    && authority.generation === generation
+    && authority.status === status;
+}
+
+function hasExactKeys(value, keys) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).length === keys.length
+    && keys.every((key) => Object.hasOwn(value, key));
+}
+
+function pairingOffer(value, pairingGeneration = null) {
+  const keys = ["schema", "pairingId", "status", "approvalUrl", "statusUrl", "expiresAt", ...(pairingGeneration ? ["pairingGeneration"] : [])];
+  if (!hasExactKeys(value, keys)
+    || value.schema !== "morrow.bridge.pairing.v1"
+    || typeof value.pairingId !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.pairingId)
+    || value.status !== "pending"
+    || value.approvalUrl !== httpUrl(`/pair/${value.pairingId}`)
+    || value.statusUrl !== httpUrl(`/pair/${value.pairingId}/status`)
+    || !Number.isSafeInteger(value.expiresAt)
+    || (pairingGeneration && value.pairingGeneration !== pairingGeneration)) return null;
+  return value;
+}
+
+function pairingStatus(value, pairing) {
+  const approved = value?.status === "approved";
+  const keys = ["schema", "status", "expiresAt", ...(approved ? ["token"] : [])];
+  if (!hasExactKeys(value, keys)
+    || value.schema !== "morrow.bridge.pairing-status.v1"
+    || !["pending", "approved", "denied"].includes(value.status)
+    || value.expiresAt !== pairing.expiresAt
+    || (approved && (typeof value.token !== "string" || value.token.length < 32 || value.token.length > 512))) return null;
+  return value;
+}
+
+async function boundedPairingJson(response, signal) {
+  if (responseContentType(response.headers.get("content-type")) !== "application/json") { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("bridge_pairing_response_invalid"); }
+  const declaredLength = response.headers.get("content-length");
+  if (declaredLength !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declaredLength) || Number(declaredLength) > PAIRING_RESPONSE_MAX_BYTES)) {
+    try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+    throw new Error("bridge_pairing_response_too_large");
+  }
+  if (!response.body) throw new Error("bridge_pairing_response_invalid");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let length = 0;
+  let rejectAbort;
+  const aborted = new Promise((_, reject) => { rejectAbort = reject; });
+  const onAbort = () => rejectAbort(new Error("bridge_pairing_response_interrupted"));
+  signal.addEventListener("abort", onAbort, { once: true });
+  try {
+    while (true) {
+      if (signal.aborted) throw new Error("bridge_pairing_response_interrupted");
+      const { done, value } = await Promise.race([reader.read(), aborted]);
+      if (done) break;
+      if (!(value instanceof Uint8Array)) throw new Error("bridge_pairing_response_invalid");
+      length += value.byteLength;
+      if (length > PAIRING_RESPONSE_MAX_BYTES) {
+        try { void reader.cancel("bridge_pairing_response_too_large").catch(() => {}); } catch {}
+        throw new Error("bridge_pairing_response_too_large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    signal.removeEventListener("abort", onAbort);
+    if (signal.aborted) {
+      try { void reader.cancel("bridge_pairing_response_interrupted").catch(() => {}); } catch {}
+    }
+    try { reader.releaseLock(); } catch {}
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  let text;
+  try { text = new TextDecoder("utf-8", { fatal: true }).decode(bytes); } catch { throw new Error("bridge_pairing_response_invalid"); }
+  try { return JSON.parse(text); } catch { throw new Error("bridge_pairing_response_invalid"); }
+}
+
+async function fetchPairing(input, init, readBody) {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, PAIRING_RESPONSE_TIMEOUT_MS);
+  state.pairingFetchControllers.add(controller);
+  try {
+    const response = await fetch(input, { ...init, signal: controller.signal });
+    return { response, body: await readBody(response, controller.signal) };
+  } catch (error) {
+    if (timedOut) throw new Error("bridge_pairing_response_timeout");
+    if (controller.signal.aborted) throw new Error("bridge_pairing_response_interrupted");
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+    state.pairingFetchControllers.delete(controller);
+  }
+}
+
+function abortPairingFetches() {
+  for (const controller of state.pairingFetchControllers) controller.abort();
+  state.pairingFetchControllers.clear();
+}
+
+async function settlePairing(expected, status, values) {
+  return await queueStorageMutation(async () => {
+    const latest = await chrome.storage.local.get(["pairing", PAIRING_AUTHORITY_KEY]);
+    if (!pairingIdentityMatches(latest.pairing, expected)
+      || !pairingAuthorityMatches(latest[PAIRING_AUTHORITY_KEY], expected?.pairingGeneration, "pending")) return false;
+    await chrome.storage.local.set({ ...values, [PAIRING_AUTHORITY_KEY]: pairingAuthority(expected.pairingGeneration, status) });
+    await chrome.alarms.clear("morrow-pairing");
+    return true;
+  });
+}
+
 function queueBindingWrite(sourceBindingId, work) {
   const queued = (state.writeQueues.get(sourceBindingId) || Promise.resolve()).catch(() => undefined).then(work);
   const settled = queued.finally(() => {
@@ -723,6 +1000,114 @@ function queueBindingWrite(sourceBindingId, work) {
   });
   state.writeQueues.set(sourceBindingId, settled);
   return settled;
+}
+
+function canvasListContinuationArguments(args) {
+  const normalized = structuredClone(args || {});
+  delete normalized.morrow_max_pages;
+  if (normalized.morrow_list_resume && typeof normalized.morrow_list_resume === "object" && !Array.isArray(normalized.morrow_list_resume)) {
+    normalized.morrow_list_resume = {};
+  }
+  return normalized;
+}
+
+function canvasListContinuationToken(args) {
+  const value = args?.morrow_list_resume?.next_page;
+  return typeof value === "string" && /^[A-Za-z0-9_-]{8,128}$/.test(value) ? value : null;
+}
+
+function canvasListContinuationBinding(binding, operation, argumentsSha256) {
+  return {
+    sourceBindingId: binding.sourceBindingId,
+    origin: binding.origin,
+    courseId: binding.courseId,
+    principalId: binding.principalId,
+    principalFingerprint: binding.principalFingerprint,
+    sessionGeneration: binding.sessionGeneration,
+    bridgeGeneration: state.generation,
+    operationKey: operation.key,
+    toolName: operation.toolName,
+    argumentsSha256,
+  };
+}
+
+function sameCanvasListContinuationBinding(record, expected) {
+  return Object.entries(expected).every(([key, value]) => record?.[key] === value);
+}
+
+async function claimCanvasListContinuation(binding, operation, args) {
+  if (operation.provider !== "canvas" || operation.readOnly !== true || args?.morrow_list_resume?.next_page === undefined) return null;
+  const token = canvasListContinuationToken(args);
+  if (!token) throw new Error("canvas_pagination_resume_refused");
+  const argumentsSha256 = await sha256(stableJson(canvasListContinuationArguments(args)));
+  const expected = canvasListContinuationBinding(binding, operation, argumentsSha256);
+  return await queueStorageMutation(async () => {
+    const area = chrome.storage.session;
+    const stored = await area.get(CANVAS_LIST_CONTINUATIONS_KEY);
+    const records = stored[CANVAS_LIST_CONTINUATIONS_KEY] && typeof stored[CANVAS_LIST_CONTINUATIONS_KEY] === "object"
+      && !Array.isArray(stored[CANVAS_LIST_CONTINUATIONS_KEY]) ? { ...stored[CANVAS_LIST_CONTINUATIONS_KEY] } : {};
+    const record = records[token];
+    delete records[token];
+    for (const [id, candidate] of Object.entries(records)) {
+      if (!Number.isSafeInteger(candidate?.expiresAt) || candidate.expiresAt <= Date.now()) delete records[id];
+    }
+    await area.set({ [CANVAS_LIST_CONTINUATIONS_KEY]: records });
+    if (!record || record.schema !== CANVAS_LIST_CONTINUATION_SCHEMA
+      || !Number.isSafeInteger(record.expiresAt) || record.expiresAt <= Date.now()
+      || !Number.isSafeInteger(record.pagesRead) || record.pagesRead < 1 || record.pagesRead >= 500
+      || typeof record.nextUrl !== "string" || record.nextUrl.length < 1 || record.nextUrl.length > 4_096
+      || !sameCanvasListContinuationBinding(record, expected)) throw new Error("canvas_pagination_resume_refused");
+    return { schema: CANVAS_LIST_CONTINUATION_STATE_SCHEMA, nextUrl: record.nextUrl, pagesRead: record.pagesRead };
+  });
+}
+
+async function issueCanvasListContinuation(binding, operation, args, result) {
+  const internal = result?._morrowListResumeState;
+  if (internal === undefined) {
+    if (result && Object.hasOwn(result, "morrow_next_page")) throw new Error("canvas_pagination_resume_refused");
+    return result;
+  }
+  if (operation.provider !== "canvas" || operation.readOnly !== true || result?.ok !== true || result.truncated !== true
+    || !args?.morrow_list_resume || typeof args.morrow_list_resume !== "object" || Array.isArray(args.morrow_list_resume)
+    || !internal || typeof internal !== "object" || Array.isArray(internal)
+    || Object.keys(internal).some((key) => !["schema", "nextUrl", "pagesRead"].includes(key))
+    || internal.schema !== CANVAS_LIST_CONTINUATION_STATE_SCHEMA
+    || !Number.isSafeInteger(internal.pagesRead) || internal.pagesRead < 1 || internal.pagesRead >= 500
+    || internal.pagesRead !== result.morrow_pages_read || typeof internal.nextUrl !== "string" || internal.nextUrl.length > 4_096) {
+    throw new Error("canvas_pagination_resume_refused");
+  }
+  let nextUrl;
+  try { nextUrl = new URL(internal.nextUrl); } catch { throw new Error("canvas_pagination_resume_refused"); }
+  if (nextUrl.protocol !== "https:" || nextUrl.origin !== binding.origin || nextUrl.username || nextUrl.password || nextUrl.hash) {
+    throw new Error("canvas_pagination_resume_refused");
+  }
+  const argumentsSha256 = await sha256(stableJson(canvasListContinuationArguments(args)));
+  const now = Date.now();
+  const record = {
+    schema: CANVAS_LIST_CONTINUATION_SCHEMA,
+    ...canvasListContinuationBinding(binding, operation, argumentsSha256),
+    nextUrl: nextUrl.href,
+    pagesRead: internal.pagesRead,
+    createdAt: now,
+    expiresAt: now + CANVAS_LIST_CONTINUATION_TTL_MS,
+  };
+  const token = crypto.randomUUID().replaceAll("-", "");
+  await queueStorageMutation(async () => {
+    const area = chrome.storage.session;
+    const stored = await area.get(CANVAS_LIST_CONTINUATIONS_KEY);
+    const records = stored[CANVAS_LIST_CONTINUATIONS_KEY] && typeof stored[CANVAS_LIST_CONTINUATIONS_KEY] === "object"
+      && !Array.isArray(stored[CANVAS_LIST_CONTINUATIONS_KEY]) ? { ...stored[CANVAS_LIST_CONTINUATIONS_KEY] } : {};
+    for (const [id, candidate] of Object.entries(records)) {
+      if (!Number.isSafeInteger(candidate?.expiresAt) || candidate.expiresAt <= now) delete records[id];
+    }
+    records[token] = record;
+    const ordered = Object.entries(records).sort((left, right) => Number(left[1]?.createdAt || 0) - Number(right[1]?.createdAt || 0));
+    for (const [id] of ordered.slice(0, Math.max(0, ordered.length - CANVAS_LIST_CONTINUATION_LIMIT))) delete records[id];
+    await area.set({ [CANVAS_LIST_CONTINUATIONS_KEY]: records });
+  });
+  const publicResult = { ...result, morrow_next_page: token };
+  delete publicResult._morrowListResumeState;
+  return publicResult;
 }
 
 function storedPolicies(value) {
@@ -739,6 +1124,33 @@ function storedAnchors(value) {
 
 function storedDiscoveries(value) {
   return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+
+async function migrateLegacyEditPolicies(api) {
+  await queueStorageMutation(async () => {
+    const stored = await storage();
+    const bindings = new Map((stored.bindings || []).map((binding) => [binding.sourceBindingId, binding]));
+    const policies = { ...storedPolicies(stored.editPolicies) };
+    const revisions = { ...storedPolicyRevisions(stored.editPolicyRevisions) };
+    let changed = false;
+    for (const [sourceBindingId, permission] of Object.entries(policies)) {
+      const binding = bindings.get(sourceBindingId);
+      if (!binding) continue;
+      const migrated = await migrateLegacyEditPermission({
+        permission,
+        binding,
+        legacyCatalogDigest: api.legacyCatalogDigest,
+        catalogDigest: api.catalogDigest,
+        policyRevision: revisions[sourceBindingId],
+        operations: [...state.operations.values()],
+      });
+      if (!migrated) continue;
+      policies[sourceBindingId] = migrated;
+      revisions[sourceBindingId] = migrated.revision;
+      changed = true;
+    }
+    if (changed) await chrome.storage.local.set({ editPolicies: policies, editPolicyRevisions: revisions });
+  });
 }
 
 function decimalId(value) {
@@ -1064,9 +1476,14 @@ function forgetTabSiteAnchorVerifications(tabId) {
 }
 
 async function publishBindings() {
+  const authorityGeneration = state.courseDataAuthorityGeneration;
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
+  const socket = state.socket;
+  const bridgeGeneration = state.generation;
   const bindings = await publicBindings();
-  if (state.socket?.readyState === WebSocket.OPEN && state.generation) {
-    state.socket.send(JSON.stringify({ schema: "morrow.bridge.bindings.v1", protocolVersion: PROTOCOL_VERSION, generation: state.generation, bindings, sentAt: Date.now() }));
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
+  if (state.socket === socket && socket?.readyState === WebSocket.OPEN && bridgeGeneration > 0 && state.generation === bridgeGeneration) {
+    socket.send(JSON.stringify({ schema: "morrow.bridge.bindings.v1", protocolVersion: PROTOCOL_VERSION, generation: bridgeGeneration, bindings, sentAt: Date.now() }));
   }
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
 }
@@ -1258,12 +1675,38 @@ async function handlePrivateChatExchange(command) {
   notifyPrivateChatChanged();
 }
 
-async function privateChatRoster(binding, expiresAt) {
+function handleBridgeCancellation(message) {
+  if (!message || message.schema !== "morrow.bridge.cancel.v1" || message.protocolVersion !== PROTOCOL_VERSION
+    || Object.keys(message).some((key) => !["schema", "protocolVersion", "requestId", "operationId", "generation", "cancelledAt"].includes(key))
+    || typeof message.requestId !== "string" || !/^[A-Za-z0-9_.:@-]{8,160}$/.test(message.requestId)
+    || typeof message.operationId !== "string" || !/^[A-Za-z0-9_.:@-]{8,160}$/.test(message.operationId)
+    || !Number.isSafeInteger(message.generation) || message.generation !== state.generation
+    || !Number.isSafeInteger(message.cancelledAt)) return;
+  const chatCommand = state.privateChat?.pending;
+  if (chatCommand && chatCommand.requestId === message.requestId && chatCommand.operationId === message.operationId
+    && chatCommand.generation === message.generation) {
+    clearPrivateChat();
+    sendResult(chatCommand, false, null, problem("bridge_request_cancelled", "The local Bridge request was cancelled.", true));
+    return;
+  }
+  const active = state.bridgeCommands.get(message.requestId);
+  const command = active?.command;
+  if (!active || !command || command.operationId !== message.operationId || command.generation !== message.generation) return;
+  active.cancelled = true;
+  sendResult(command, false, null, command.kind === "invoke_write" && active.effectPossible
+    ? problem("write_outcome_unknown", "The course change may have started before cancellation. Check the existing target before another change.", false)
+    : problem("request_cancelled_before_dispatch", "Morrow cancelled this request before the provider change started.", true));
+}
+
+async function privateChatRoster(binding, expiresAt, authorityGeneration) {
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
   await catalog();
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
   if (binding.provider === "moodle") {
     const operation = state.operations.get("moodle_get_course_participant_roster");
     if (!operation) throw new Error("private_chat_roster_unavailable");
     const result = await executeOperation(binding, operation, { course_id: binding.courseId }, expiresAt);
+    if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
     const roster = result?.data;
     if (!result?.ok || result.truncated !== false || roster?.schema !== "morrow.moodle-course-roster.v1"
       || roster.complete !== true || roster.status !== "complete" || roster.sourceBindingId !== binding.sourceBindingId
@@ -1280,16 +1723,20 @@ async function privateChatRoster(binding, expiresAt) {
     enrollment_state: ["active", "invited", "rejected", "completed", "inactive"],
     morrow_max_pages: 50,
   }, expiresAt);
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
   const history = await executeOperation(binding, historyOperation, {
     course_id: binding.courseId,
     type: ["StudentEnrollment"], state: ["deleted"], include: ["uuid"], morrow_max_pages: 50,
   }, expiresAt);
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
   if (!current?.ok || current.truncated !== false || !Array.isArray(current.data)
     || !history?.ok || history.truncated !== false || !Array.isArray(history.data)) throw new Error("private_chat_roster_incomplete");
   return canvasProtectedRoster(current.data, history.data, binding.courseId);
 }
 
 async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifiers) {
+  const authorityGeneration = state.courseDataAuthorityGeneration;
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
   const chat = state.privateChat;
   const command = chat?.pending;
   if (!chat || !command) throw new Error("private_chat_start_required");
@@ -1300,11 +1747,12 @@ async function submitPrivateChatMessage(sourceBindingId, text, assertedIdentifie
     throw new Error("private_chat_message_invalid");
   }
   const binding = await bindingFor(sourceBindingId, { fresh: true });
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) throw new Error("course_data_consent_required");
   if (!binding?.runtimeVerified || !/^[1-9][0-9]{0,18}$/.test(String(binding.courseId))) throw new Error("private_chat_course_unavailable");
   if (chat.sourceBindingId && (chat.sourceBindingId !== binding.sourceBindingId || chat.courseId !== binding.courseId)) {
     throw new Error("private_chat_scope_change_refused");
   }
-  const roster = await privateChatRoster(binding, Math.min(command.expiresAt, Date.now() + 60_000));
+  const roster = await privateChatRoster(binding, Math.min(command.expiresAt, Date.now() + 60_000), authorityGeneration);
   const protectedRequest = protectLocalRequest({
     sourceBindingId: binding.sourceBindingId,
     courseId: binding.courseId,
@@ -1346,8 +1794,8 @@ function editPermissionSummary(permission) {
 async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs) {
   if (typeof sourceBindingId !== "string" || !sourceBindingId || !Array.isArray(enabledCategories) || !enabledCategories.length) throw new Error("edit_policy_categories_invalid");
   if (!validEditDuration(expiresInMs)) throw new Error("edit_policy_expiration_invalid");
+  const api = await catalog();
   const result = await queueStorageMutation(async () => {
-    const api = await catalog();
     const stored = await storage();
     const binding = (stored.bindings || []).find((candidate) => candidate.sourceBindingId === sourceBindingId);
     if (!binding) throw new Error("edit_policy_binding_missing");
@@ -1460,8 +1908,8 @@ async function editPolicyOptions(sourceBindingId) {
 }
 
 async function applyBridgePolicySet(policySet) {
+  const api = await catalog();
   const result = await queueStorageMutation(async () => {
-    const api = await catalog();
     const stored = await storage();
     const policies = storedPolicies(stored.editPolicies);
     const revisions = storedPolicyRevisions(stored.editPolicyRevisions);
@@ -1531,7 +1979,7 @@ function discoveryCourses(value, maximum = DISCOVERY_PAGE_LIMIT) {
     seen.add(id);
     return { id, name };
   });
-  return courses.sort((left, right) => Number(left.id) - Number(right.id));
+  return courses.sort((left, right) => left.id.length - right.id.length || left.id.localeCompare(right.id, "en-US"));
 }
 
 function sameAnchorReceipt(receipt, anchor) {
@@ -1542,12 +1990,28 @@ function sameAnchorReceipt(receipt, anchor) {
     && (receipt.siteUrl || "") === (anchor.siteUrl || "")
     && receipt.principalFingerprint === anchor.principalFingerprint
     && receipt.sessionGeneration === anchor.sessionGeneration
-    && Number.isSafeInteger(receipt.pageNumber) && receipt.pageNumber >= 1
+    && Number.isSafeInteger(receipt.pageNumber) && receipt.pageNumber >= 1 && receipt.pageNumber <= DISCOVERY_MAX_PAGES
+    && (receipt.provider !== "canvas" || (Array.isArray(receipt.visited)
+      && receipt.visited.length === receipt.pageNumber
+      && receipt.visited.every((value) => canvasDiscoveryUrl(value, anchor) === value)
+      && new Set(receipt.visited).size === receipt.visited.length))
     && Number.isFinite(receipt.expiresAt) && Date.now() < receipt.expiresAt;
 }
 
-function continuation(value) {
-  if (value?.kind === "canvas_page" && Number.isSafeInteger(value.value) && value.value > 1) return value;
+function canvasDiscoveryUrl(value, anchor) {
+  if (typeof value !== "string" || new TextEncoder().encode(value).byteLength > DISCOVERY_NEXT_MAX_BYTES) return null;
+  let url;
+  try { url = new URL(value); } catch { return null; }
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(value)?.[1] || "";
+  return url.protocol === "https:" && url.origin === anchor.origin && url.pathname === "/api/v1/courses"
+    && !authority.includes("@") && !url.username && !url.password && !value.includes("#") ? url.href : null;
+}
+
+function continuation(value, anchor) {
+  if (value?.kind === "canvas_url") {
+    const exact = canvasDiscoveryUrl(value.value, anchor);
+    return exact ? { kind: "canvas_url", value: exact } : null;
+  }
   if (value?.kind === "moodle_offset" && Number.isSafeInteger(value.value) && value.value > 0 && value.value <= 10_000) return value;
   return null;
 }
@@ -1555,14 +2019,15 @@ function continuation(value) {
 async function listAnchorCourses(anchor, next = null) {
   if (anchor.provider === "canvas") {
     try {
-      if (next && next.kind !== "canvas_page") throw new Error("course_discovery_failed");
+      if (next && next.kind !== "canvas_url") throw new Error("course_discovery_failed");
       await chrome.scripting.executeScript({ target: { tabId: anchor.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
-      const result = await chrome.tabs.sendMessage(anchor.tabId, { type: "morrow_canvas_list_courses", ...(next ? { page: next.value } : {}) }, { frameId: 0 });
+      const result = await chrome.tabs.sendMessage(anchor.tabId, { type: "morrow_canvas_list_courses", ...(next ? { next: next.value } : {}) }, { frameId: 0 });
       if (result?.ok !== true || result.profile?.origin !== anchor.origin || result.profile?.id !== anchor.principalId) throw new Error("course_discovery_failed");
       const complete = result.complete === true;
-      const nextPage = Number.isSafeInteger(result.nextPage) && result.nextPage > (next?.value || 1) ? result.nextPage : null;
-      if (complete !== (nextPage === null)) throw new Error("course_discovery_failed");
-      return { courses: discoveryCourses(result.courses, DISCOVERY_PAGE_LIMIT), complete, next: nextPage === null ? null : { kind: "canvas_page", value: nextPage } };
+      const pageUrl = canvasDiscoveryUrl(result.pageUrl, anchor);
+      const nextUrl = result.nextUrl === null ? null : canvasDiscoveryUrl(result.nextUrl, anchor);
+      if (!pageUrl || (next && pageUrl !== next.value) || complete !== (nextUrl === null) || nextUrl === pageUrl) throw new Error("course_discovery_failed");
+      return { courses: discoveryCourses(result.courses, DISCOVERY_PAGE_LIMIT), complete, pageUrl, next: nextUrl === null ? null : { kind: "canvas_url", value: nextUrl } };
     } catch {
       throw new Error("course_discovery_failed");
     }
@@ -1616,7 +2081,7 @@ async function startCourseDiscovery(siteAnchorId) {
     const anchor = storedAnchors(stored.siteAnchors).find((candidate) => candidate.siteAnchorId === siteAnchorId);
     if (!anchor) throw new Error("course_discovery_anchor_missing");
     if (!await siteAnchorMatches(anchor, { fresh: true })) throw new Error("course_discovery_anchor_stale");
-    const listed = await listAnchorCourses(anchor, anchor.provider === "canvas" ? { kind: "canvas_page", value: 1 } : null);
+    const listed = await listAnchorCourses(anchor);
     if (!await siteAnchorMatches(anchor, { fresh: true })) throw new Error("course_discovery_anchor_stale");
     const createdAt = Date.now();
     const receipt = {
@@ -1633,6 +2098,7 @@ async function startCourseDiscovery(siteAnchorId) {
       snapshotDigest: await sha256(JSON.stringify(listed.courses)),
       courses: listed.courses,
       pageNumber: 1,
+      ...(anchor.provider === "canvas" ? { visited: [listed.pageUrl] } : {}),
       complete: listed.complete,
       next: listed.next,
     };
@@ -1672,16 +2138,23 @@ async function continueCourseDiscovery(siteAnchorId, discoveryReceiptId) {
     if (!receipt) throw new Error("course_discovery_receipt_missing");
     if (!sameAnchorReceipt(receipt, anchor)) throw new Error("course_discovery_receipt_stale");
     if (receipt.complete === true) throw new Error("course_discovery_complete");
-    const next = continuation(receipt.next);
+    const next = continuation(receipt.next, anchor);
     if (!next) throw new Error("course_discovery_failed");
+    if (receipt.pageNumber >= DISCOVERY_MAX_PAGES || (next.kind === "canvas_url" && receipt.visited.includes(next.value))) {
+      throw new Error("course_discovery_failed");
+    }
     if (!await siteAnchorMatches(anchor, { fresh: true })) throw new Error("course_discovery_anchor_stale");
     const listed = await listAnchorCourses(anchor, next);
     if (!await siteAnchorMatches(anchor, { fresh: true })) throw new Error("course_discovery_anchor_stale");
+    if (anchor.provider === "canvas" && listed.next && receipt.visited.includes(listed.next.value)) {
+      throw new Error("course_discovery_failed");
+    }
     const updated = {
       ...receipt,
       courses: listed.courses,
       snapshotDigest: await sha256(JSON.stringify(listed.courses)),
       pageNumber: receipt.pageNumber + 1,
+      ...(anchor.provider === "canvas" ? { visited: [...receipt.visited, listed.pageUrl] } : {}),
       complete: listed.complete,
       next: listed.next,
     };
@@ -1748,66 +2221,131 @@ async function saveCourseSelection(siteAnchorId, discoveryReceiptId, courseIds) 
 }
 
 async function connectBridge() {
-  if (!await courseDataConsentAccepted()) return;
+  const authorityGeneration = state.courseDataAuthorityGeneration;
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
   const stored = await storage();
   if (!stored.token || state.socket?.readyState === WebSocket.OPEN || state.socket?.readyState === WebSocket.CONNECTING) return;
   const api = await catalog();
+  if (!await courseDataAuthorityCurrent(authorityGeneration)
+    || state.socket?.readyState === WebSocket.OPEN || state.socket?.readyState === WebSocket.CONNECTING) return;
   const socket = new WebSocket(bridgeUrl());
+  const authentication = {
+    schema: "morrow.bridge.authenticate.v1",
+    protocolVersion: PROTOCOL_VERSION,
+    clientNonce: bridgeNonce(),
+    extensionId: chrome.runtime.id,
+    runtimeRevision: RUNTIME_REVISION,
+    catalogDigest: api.catalogDigest,
+    sentAt: Date.now(),
+  };
+  let phase = "opening";
+  let serverAuthenticated = false;
+  let messageQueue = Promise.resolve();
   state.socket = socket;
   socket.onopen = () => {
-    void (async () => {
-      const bindings = await publicBindings();
-      if (state.socket !== socket || socket.readyState !== WebSocket.OPEN) return;
-      socket.send(JSON.stringify({
-        schema: "morrow.bridge.hello.v1",
-        protocolVersion: PROTOCOL_VERSION,
-        token: stored.token,
-        extensionId: chrome.runtime.id,
-        runtimeRevision: RUNTIME_REVISION,
-        catalogDigest: api.catalogDigest,
-        bindings,
-        sentAt: Date.now(),
-      }));
-    })().catch(() => {
-      if (state.socket === socket) socket.close(1011, "hello_failed");
+    void bridgeConnectionAuthorityCurrent(socket, authorityGeneration).then((current) => {
+      if (!current) {
+        if (state.socket === socket) socket.close(1000, "course_data_authority_expired");
+        return;
+      }
+      phase = "awaiting_challenge";
+      socket.send(JSON.stringify(authentication));
     });
   };
   socket.onmessage = (event) => {
-    if (state.socket !== socket) return;
-    let message;
-    try {
-      message = JSON.parse(event.data);
-    } catch {
-      socket.close(4400, "invalid_message");
-      return;
-    }
-    void handleBridgeMessage(message).then(() => {
-      if (message?.schema === "morrow.bridge.ready.v1" && state.socket === socket) {
-        void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+    messageQueue = messageQueue.then(async () => {
+      if (!await bridgeConnectionAuthorityCurrent(socket, authorityGeneration)) return;
+      let message;
+      try {
+        message = JSON.parse(event.data);
+      } catch {
+        socket.close(4400, "invalid_message");
+        return;
       }
+      if (phase === "awaiting_challenge") {
+        const validShape = message?.schema === "morrow.bridge.challenge.v1"
+          && message.protocolVersion === PROTOCOL_VERSION
+          && Object.keys(message).every((key) => ["schema", "protocolVersion", "clientNonce", "serverNonce", "serverProof", "issuedAt"].includes(key))
+          && message.clientNonce === authentication.clientNonce
+          && /^[0-9a-f]{64}$/.test(message.serverNonce)
+          && /^[0-9a-f]{64}$/.test(message.serverProof)
+          && Number.isSafeInteger(message.issuedAt)
+          && Math.abs(Date.now() - message.issuedAt) <= 30_000;
+        if (!validShape) {
+          state.authenticationProblem = "bridge_server_identity_refused";
+          socket.close(4403, "bridge_server_identity_refused");
+          return;
+        }
+        const expectedProof = await bridgeAuthenticationProof(stored.token, "server", authentication, message.serverNonce);
+        if (!await bridgeConnectionAuthorityCurrent(socket, authorityGeneration)) return;
+        if (!sameBridgeProof(expectedProof, message.serverProof)) {
+          state.authenticationProblem = "bridge_server_identity_refused";
+          socket.close(4403, "bridge_server_identity_refused");
+          return;
+        }
+        serverAuthenticated = true;
+        phase = "awaiting_ready";
+        const bindings = await publicBindings();
+        const clientProof = await bridgeAuthenticationProof(stored.token, "client", authentication, message.serverNonce);
+        if (!await bridgeConnectionAuthorityCurrent(socket, authorityGeneration)) return;
+        socket.send(JSON.stringify({
+          schema: "morrow.bridge.hello.v1",
+          protocolVersion: PROTOCOL_VERSION,
+          clientNonce: authentication.clientNonce,
+          serverNonce: message.serverNonce,
+          clientProof,
+          extensionId: authentication.extensionId,
+          runtimeRevision: authentication.runtimeRevision,
+          catalogDigest: authentication.catalogDigest,
+          bindings,
+          sentAt: Date.now(),
+        }));
+        return;
+      }
+      if (phase === "awaiting_ready") {
+        const validReady = message?.schema === "morrow.bridge.ready.v1"
+          && message.protocolVersion === PROTOCOL_VERSION
+          && Object.keys(message).every((key) => ["schema", "protocolVersion", "generation", "acceptedExtensionId", "catalogDigest", "connectedAt"].includes(key))
+          && Number.isSafeInteger(message.generation) && message.generation > 0
+          && message.acceptedExtensionId === authentication.extensionId
+          && message.catalogDigest === authentication.catalogDigest
+          && Number.isSafeInteger(message.connectedAt);
+        if (!validReady) {
+          state.authenticationProblem = "bridge_server_identity_refused";
+          socket.close(4403, "bridge_server_identity_refused");
+          return;
+        }
+        await handleBridgeMessage(message, { socket, authorityGeneration });
+        if (!await bridgeConnectionAuthorityCurrent(socket, authorityGeneration)) return;
+        state.authenticationProblem = null;
+        phase = "active";
+        if (state.socket === socket) void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+        return;
+      }
+      if (phase !== "active" || !serverAuthenticated) {
+        socket.close(4403, "bridge_server_identity_refused");
+        return;
+      }
+      void handleBridgeMessage(message, { socket, authorityGeneration }).catch(() => {
+        if (state.socket === socket) socket.close(1011, "message_failed");
+      });
     }).catch(() => {
       if (state.socket === socket) socket.close(1011, "message_failed");
     });
   };
   socket.onclose = (event) => {
     if (state.socket !== socket) return;
+    invalidateCourseDataAuthority(socket);
     state.socket = null;
     state.generation = 0;
     state.accepted = null;
     clearPrivateChat();
     void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
-    if (event.code === 4403) {
+    if (event.code === 4403 && ["bridge_identity_refused", "bridge_server_identity_refused", "bridge_ready_mismatch"].includes(event.reason)) {
       if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
       state.reconnectTimer = null;
-      void (async () => {
-        const latest = await storage();
-        if (latest.token !== stored.token) return;
-        await chrome.alarms.clear("morrow-pairing");
-        await queueStorageMutation(async () => {
-          await chrome.storage.local.remove(["token", "bindings", "pairing", "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead"]);
-          await discoveryArea().remove("courseDiscoveries");
-        });
-      })();
+      state.authenticationProblem = event.reason;
+      void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
       return;
     }
     scheduleReconnect();
@@ -1845,8 +2383,42 @@ function withoutPrivateAttachment(value) {
 }
 
 function sendResult(command, ok, result, failure) {
-  if (!state.socket || state.socket.readyState !== WebSocket.OPEN) return;
+  const active = state.bridgeCommands.get(command.requestId);
+  if (active?.command === command) {
+    if (!bridgeCommandOwned(active, command)) return;
+    if (active.resultSent) return;
+    active.resultSent = true;
+  }
+  if (!state.socket || state.socket.readyState !== WebSocket.OPEN || command.generation !== state.generation) return;
   state.socket.send(serializeBridgeResult(command, ok, result, failure));
+}
+
+function bridgeCommandOwned(active, command) {
+  return active?.command === command
+    && active.socket === state.socket
+    && active.socket?.readyState === WebSocket.OPEN
+    && active.bridgeGeneration === state.generation
+    && command.generation === active.bridgeGeneration
+    && active.authorityGeneration === state.courseDataAuthorityGeneration;
+}
+
+async function bridgeCommandCancelled(command) {
+  const active = state.bridgeCommands.get(command.requestId);
+  if (!bridgeCommandOwned(active, command) || active.cancelled === true) return true;
+  if (!await courseDataAuthorityCurrent(active.authorityGeneration)) return true;
+  return !bridgeCommandOwned(active, command) || active.cancelled === true;
+}
+
+function markBridgeEffectPossible(command) {
+  const active = state.bridgeCommands.get(command.requestId);
+  if (!bridgeCommandOwned(active, command) || active.cancelled === true) return false;
+  active.effectPossible = true;
+  return true;
+}
+
+function bridgeCommandEndedAfterEffect(command) {
+  const active = state.bridgeCommands.get(command.requestId);
+  return active?.command === command && active.cancelled === true && active.effectPossible === true;
 }
 
 async function bindingFor(id, { fresh = false } = {}) {
@@ -1905,18 +2477,24 @@ async function reserveReceiptNow(command) {
 async function executeCanvas(binding, operation, args, expiresAt) {
   let sent = false;
   try {
+    const listResumeState = await claimCanvasListContinuation(binding, operation, args);
     await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
     sent = true;
-    return await chrome.tabs.sendMessage(binding.tabId, {
+    const result = await chrome.tabs.sendMessage(binding.tabId, {
       type: "morrow_canvas_execute",
       operation: { ...operation, morrowCourseTarget: canvasOperationAdmission(operation).courseTarget },
       arguments: args,
       principalId: binding.principalId,
       expiresAt,
       courseId: binding.courseId,
+      ...(listResumeState ? { listResumeState } : {}),
     }, { frameId: 0 });
+    return await issueCanvasListContinuation(binding, operation, args, result);
   } catch (error) {
-    return { ok: false, sent, outcomeUnknown: sent && !operation.readOnly, error: sent && !operation.readOnly ? "canvas_write_response_unknown" : "canvas_read_interrupted" };
+    const code = String(error?.message || error) === "canvas_pagination_resume_refused"
+      ? "canvas_pagination_resume_refused"
+      : sent && !operation.readOnly ? "canvas_write_response_unknown" : "canvas_read_interrupted";
+    return { ok: false, sent, outcomeUnknown: sent && !operation.readOnly, error: code };
   }
 }
 
@@ -1979,16 +2557,38 @@ function clearItemBankCredentialsForTab(tabId) {
   }
 }
 
+async function currentItemBankLaunch(binding) {
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
+    const result = await chrome.tabs.sendMessage(binding.tabId, {
+      type: "morrow_canvas_item_bank_tabs",
+      courseId: binding.courseId,
+    }, { frameId: 0 });
+    if (result?.ok !== true || result.profile?.origin !== binding.origin || result.profile?.id !== binding.principalId
+      || result.course?.id !== binding.courseId) return null;
+    return itemBankLaunchFromCourseTabs(result.tabs, binding.origin, binding.courseId);
+  } catch {
+    return null;
+  }
+}
+
 async function freshItemBankContext(binding) {
   const tab = await chrome.tabs.get(binding.tabId).catch(() => null);
-  const launchUrl = itemBankLaunchUrl(tab?.url, binding.origin, binding.courseId);
-  if (!launchUrl) return { error: "item_bank_launch_context_required" };
+  let tabUrl;
+  try { tabUrl = new URL(tab?.url || ""); } catch { tabUrl = null; }
+  if (!tabUrl || tabUrl.origin !== binding.origin
+    || tabUrl.pathname.match(/^\/courses\/([1-9][0-9]{0,18})(?:\/|$)/)?.[1] !== binding.courseId) {
+    return { error: "item_bank_launch_context_required" };
+  }
+  const deployment = await currentItemBankLaunch(binding);
+  if (!deployment) return { error: "item_bank_deployment_unavailable" };
+  const { externalToolId, launchUrl } = deployment;
   const launchedAt = Date.now();
   const launchNonce = crypto.randomUUID();
   const launchTab = await chrome.tabs.create({ active: false, windowId: tab.windowId }).catch(() => null);
   if (!Number.isInteger(launchTab?.id)) return { error: "item_bank_launch_failed" };
   const launchTabId = launchTab.id;
-  pendingItemBankLaunches.set(launchTabId, { tabId: launchTabId, canvasLocalContextId: binding.courseId, launchUrl, launchNonce, launchedAt });
+  pendingItemBankLaunches.set(launchTabId, { tabId: launchTabId, canvasLocalContextId: binding.courseId, externalToolId, launchUrl, launchNonce, launchedAt });
   try {
     await chrome.tabs.update(launchTabId, { url: launchUrl });
   } catch {
@@ -2015,7 +2615,7 @@ async function freshItemBankContext(binding) {
       const apiOrigin = itemBankApiOriginForFrame(frame?.url);
       const credential = usableItemBankCredential(
         itemBankCredentials.get(itemBankCredentialKey(launchTabId, frameId)),
-        { tabId: launchTabId, frameId, apiOrigin, canvasLocalContextId: binding.courseId, launchUrl, launchNonce, launchedAt },
+        { tabId: launchTabId, frameId, apiOrigin, canvasLocalContextId: binding.courseId, externalToolId, launchUrl, launchNonce, launchedAt },
       );
       if (credential) usable.push({ frameId, credential });
     }
@@ -2112,6 +2712,7 @@ async function executeItemBank(binding, operation, args) {
             authType: context.credential.authType,
             contextUuid: context.credential.contextUuid,
             canvasLocalContextId: context.credential.canvasLocalContextId,
+            externalToolId: context.credential.externalToolId,
             launchUrl: context.credential.launchUrl,
             launchNonce: context.credential.launchNonce,
             launchedAt: context.credential.launchedAt,
@@ -3175,7 +3776,8 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
     const prepared = await execute({ ...base, mode: "initialize" });
     if (prepared?.ok !== true || prepared?.sent !== false || !prepared.data
       || String(prepared.data.course_id) !== binding.courseId
-      || String(prepared.data.assignment_id) !== String(args.assignment_id)) {
+      || String(prepared.data.assignment_id) !== String(args.assignment_id)
+      || !Number.isSafeInteger(prepared.data.item_count) || prepared.data.item_count < 0) {
       return { ok: false, sent: false, error: prepared?.error || "canvas_hot_spot_upload_init_invalid" };
     }
     const uploadUrl = privateCanvasSignedUploadUrl(prepared.data.upload_url);
@@ -3235,10 +3837,30 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
         error: created.error || "canvas_hot_spot_create_invalid",
       };
     }
-    if (created.verification?.status !== "verified" || !created.data
+    const itemId = decimalId(created?.data?.item_id);
+    const expectedImageUrl = unsignedHotSpotImageUrl(uploadUrl.href);
+    const expectedTargets = [
+      { type: "canvas_course", id: binding.courseId },
+      { type: "canvas_new_quiz", id: String(args.assignment_id) },
+      { type: "canvas_new_quiz_item", id: itemId },
+    ];
+    if (created.schema !== "morrow.canvas-new-quiz-hot-spot.v1"
+      || created.sent !== true || created.outcomeUnknown !== false
+      || !created.verification || Object.keys(created.verification).length !== 5
+      || created.verification.schema !== "morrow.browser-verification.v1"
+      || created.verification.status !== "verified"
+      || created.verification.strategy !== "new-quiz-item-lifecycle"
+      || created.verification.evidence !== "complete_created_item_shape_and_item_list_reread"
+      || !Array.isArray(created.verification.targets)
+      || stableJson(created.verification.targets) !== stableJson(expectedTargets)
+      || !created.data
       || String(created.data.course_id) !== binding.courseId
       || String(created.data.assignment_id) !== String(args.assignment_id)
-      || !decimalId(created.data.item_id)) {
+      || !itemId
+      || created.data.interaction_type_slug !== "hot-spot"
+      || created.data.image_url !== expectedImageUrl
+      || created.data.payload_sha256 !== args.payload_sha256
+      || created.data.item_count !== prepared.data.item_count + 1) {
       return { ok: false, sent: true, outcomeUnknown: true, status: created.status, error: "canvas_hot_spot_create_unverified" };
     }
     return {
@@ -3255,6 +3877,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
         item_count: created.data.item_count,
         interaction_type_slug: "hot-spot",
         image_url: created.data.image_url,
+        payload_sha256: created.data.payload_sha256,
         sha256: privateAttachment.manifest.sha256,
         upload_host: uploadHost,
       },
@@ -3981,12 +4604,6 @@ async function itemBankRecoveryDescriptor(operation, args, result) {
   });
 }
 
-function stableJson(value) {
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`).join(",")}}`;
-  return JSON.stringify(value === undefined ? null : value);
-}
-
 async function canvasRecoveryDescriptor(operation, args, writeData, result) {
   const itemBank = await itemBankRecoveryDescriptor(operation, args, result);
   if (itemBank) return itemBank;
@@ -4085,6 +4702,7 @@ async function savedHtmlRenderCheck(command, operation, result) {
 }
 
 async function sendExecution(command, binding, operation, privateAttachment, privateConversation, privateAttachments) {
+  if (await bridgeCommandCancelled(command)) return "known";
   const semantic = canvasSemanticWrite(command, operation);
   let semanticResolution = null;
   if (semantic) {
@@ -4095,7 +4713,9 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
     }
     semanticResolution = resolved.resolution;
   }
+  if (await bridgeCommandCancelled(command)) return "known";
   const dispatched = semanticResolution ? { ...operation, morrowSemanticResolution: semanticResolution } : operation;
+  if (command.kind === "invoke_write" && !markBridgeEffectPossible(command)) return "known";
   const result = await executeOperation(binding, dispatched, command.arguments || {}, command.expiresAt, privateAttachment, privateConversation, privateAttachments);
   // A change can move the course site tab itself, so nothing kept from before it is used again.
   if (command.kind === "invoke_write") forgetSiteAnchorVerification(binding.siteAnchorId);
@@ -4141,6 +4761,7 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
   let verification;
   let readDescriptor = null;
   if (command.kind === "invoke_write") {
+    const privateHotSpot = privateCanvasNewQuizHotSpotOperation(operation);
     const guardedCanvasContent = command.arguments?.morrow_canvas_content_guard;
     const guardedPage = command.arguments?.morrow_page_guard;
     const guardedNewQuizSettings = command.arguments?.morrow_new_quiz_settings_guard;
@@ -4161,7 +4782,7 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
     const namedPlan = namedCanvasReadback
       ? planCanvasOperationReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data)
       : null;
-    const plan = guardedCanvasContent || guardedPage || guardedNewQuizSettings || guardedNewQuizLifecycle || guardedNewQuizItemLifecycle || guardedNewQuizItemPosition || newQuizResponseBound || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
+    const plan = guardedCanvasContent || guardedPage || guardedNewQuizSettings || guardedNewQuizLifecycle || guardedNewQuizItemLifecycle || guardedNewQuizItemPosition || newQuizResponseBound || guardedItemBank || privateConversation || privateCanvasCourseFileOperation(operation) || privateHotSpot || operation.provider !== "canvas" || namedCanvasReadback || semanticReadback ? null : planBrowserReadback([...state.operations.values()].filter((entry) => entry.provider === "canvas"), operation, command.arguments || {}, result.data);
     readDescriptor = genericCanvasWriteReadback(command, operation, privateConversation)
       ? await canvasRecoveryDescriptor(operation, command.arguments || {}, result.data, result)
       : null;
@@ -4193,6 +4814,9 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_conversation_verification_missing" };
     } else if (privateCanvasCourseFileOperation(operation)) {
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_file_transfer_verification_missing" };
+    } else if (privateHotSpot) {
+      verification = canvasNewQuizHotSpotVerification(operation, command.arguments || {}, result)
+        || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_hot_spot_verification_invalid" };
     } else if (semanticReadback) {
       verification = await verifyCanvasSemanticWrite(binding, operation, command.arguments || {}, result.data, semantic, semanticResolution);
     } else if (plan) {
@@ -4230,11 +4854,13 @@ async function reserveWriteAtHead(command) {
 
 async function handleQueuedWrite(command) {
   const reservation = await reserveWriteAtHead(command);
+  if (await bridgeCommandCancelled(command)) return "known";
   if (reservation.failure) {
     sendResult(command, false, null, reservation.failure);
     return "known";
   }
   const beforeSend = await commandContext(command);
+  if (await bridgeCommandCancelled(command)) return "known";
   if (beforeSend.failure) {
     sendResult(command, false, null, beforeSend.failure);
     return "known";
@@ -4255,7 +4881,15 @@ async function handleTrackedWrite(command) {
   }
   let outcome = "unknown";
   try {
+    if (await bridgeCommandCancelled(command)) {
+      outcome = "known";
+      return "known";
+    }
     const context = await commandContext(command);
+    if (await bridgeCommandCancelled(command)) {
+      outcome = "known";
+      return "known";
+    }
     if (context.failure) {
       outcome = "known";
       return sendResult(command, false, null, context.failure);
@@ -4264,13 +4898,16 @@ async function handleTrackedWrite(command) {
   } catch {
     return sendResult(command, false, null, problem("write_outcome_unknown", "Morrow could not determine the result of this course change. Check the existing course before another change.", false));
   } finally {
+    if (bridgeCommandEndedAfterEffect(command)) outcome = "unknown";
     try { await bridgeMaintenance.finishWrite(command.operationId, outcome); } catch { /* The durable receipt remains a safe update fence. */ }
   }
 }
 
 async function handleCommand(command) {
   if (command.kind === "invoke_write") return await handleTrackedWrite(command);
+  if (await bridgeCommandCancelled(command)) return "known";
   const context = await commandContext(command);
+  if (await bridgeCommandCancelled(command)) return "known";
   if (context.failure) return sendResult(command, false, null, context.failure);
   return await sendCheckedCommand(command, context);
 }
@@ -4303,7 +4940,7 @@ async function handleBridgeMaintenance(command) {
   }
 }
 
-async function handleBridgeMessage(message) {
+async function handleBridgeMessage(message, owner) {
   if (message?.schema === "morrow.bridge.ready.v1") {
     // Morrow answers the connection request with the connector identity it accepted. Keeping that
     // answer lets status() compare it with what this extension is now, instead of treating an open
@@ -4321,73 +4958,112 @@ async function handleBridgeMessage(message) {
     state.socket?.send(JSON.stringify({ schema: "morrow.bridge.pong.v1", protocolVersion: PROTOCOL_VERSION, generation: state.generation, sentAt: Date.now() }));
     return;
   }
+  if (message?.schema === "morrow.bridge.cancel.v1") {
+    handleBridgeCancellation(message);
+    return;
+  }
   if (message?.schema === "morrow.bridge.command.v1") {
-    if (message.kind === "edit_policy_set") await handleEditPolicySet(message);
-    else if (message.kind === "edit_policy_options_get") await handleEditPolicyOptionsGet(message);
-    else if (message.kind === "private_chat_exchange") await handlePrivateChatExchange(message);
-    else if (message.kind === "bridge_maintenance") await handleBridgeMaintenance(message);
-    else await handleCommand(message);
+    const requestId = typeof message.requestId === "string" ? message.requestId : null;
+    if (!requestId || state.bridgeCommands.has(requestId)
+      || !owner || !await bridgeConnectionAuthorityCurrent(owner.socket, owner.authorityGeneration)) {
+      sendResult(message, false, null, problem("bridge_command_identity_refused", "Morrow refused an invalid or duplicate Bridge command identity.", false));
+      return;
+    }
+    const active = {
+      command: message,
+      socket: owner.socket,
+      bridgeGeneration: state.generation,
+      authorityGeneration: owner.authorityGeneration,
+      cancelled: false,
+      effectPossible: false,
+      resultSent: false,
+    };
+    state.bridgeCommands.set(requestId, active);
+    try {
+      if (await bridgeCommandCancelled(message)) return;
+      if (message.kind === "edit_policy_set") await handleEditPolicySet(message);
+      else if (message.kind === "edit_policy_options_get") await handleEditPolicyOptionsGet(message);
+      else if (message.kind === "private_chat_exchange") await handlePrivateChatExchange(message);
+      else if (message.kind === "bridge_maintenance") await handleBridgeMaintenance(message);
+      else await handleCommand(message);
+    } finally {
+      if (state.bridgeCommands.get(requestId) === active) state.bridgeCommands.delete(requestId);
+    }
   }
 }
 
 async function requestPairing() {
+  const pairingGeneration = crypto.randomUUID();
+  await queueStorageMutation(async () => {
+    await chrome.storage.local.set({ [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, "requesting") });
+  });
   const api = await catalog();
-  const response = await fetch(httpUrl("/pair"), {
+  const { response, body } = await fetchPairing(httpUrl("/pair"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ extensionId: chrome.runtime.id, catalogDigest: api.catalogDigest, runtimeRevision: RUNTIME_REVISION }),
-  });
+  }, async (received, signal) => received.ok || received.status === 403 ? await boundedPairingJson(received, signal) : null);
   if (!response.ok) {
-    if (response.status === 403) {
-      const body = await response.json().catch(() => null);
-      if (body?.error === "connector_identity_refused") {
-        throw new Error("bridge_version_mismatch");
-      }
+    if (response.status === 403 && hasExactKeys(body, ["error"]) && body.error === "connector_identity_refused") {
+      throw new Error("bridge_version_mismatch");
     }
     throw new Error("bridge_not_connected");
   }
-  const pairing = await response.json();
-  await chrome.storage.local.set({ pairing });
-  await chrome.alarms.create("morrow-pairing", { periodInMinutes: 0.5 });
-  await chrome.tabs.create({ url: pairing.approvalUrl });
+  const offer = pairingOffer(body);
+  if (!offer) throw new Error("bridge_pairing_response_invalid");
+  const pairing = { ...offer, pairingGeneration };
+  const committed = await queueStorageMutation(async () => {
+    const latest = await chrome.storage.local.get(PAIRING_AUTHORITY_KEY);
+    if (!pairingAuthorityMatches(latest[PAIRING_AUTHORITY_KEY], pairingGeneration, "requesting")) return false;
+    await chrome.storage.local.set({ pairing, [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, "pending") });
+    await chrome.alarms.create("morrow-pairing", { periodInMinutes: 0.5 });
+    await chrome.tabs.create({ url: pairing.approvalUrl });
+    return true;
+  });
+  if (!committed) throw new Error("bridge_pairing_superseded");
   return pairing;
 }
 
 async function pollPairing() {
   if (!await courseDataConsentAccepted()) return;
-  const { pairing } = await storage();
-  if (!pairing?.statusUrl || !Number.isFinite(pairing.expiresAt) || Date.now() >= pairing.expiresAt) {
-    const latest = await storage();
-    if (latest.pairing?.statusUrl !== pairing?.statusUrl) return;
-    await chrome.storage.local.remove("pairing");
-    await chrome.alarms.clear("morrow-pairing");
+  const saved = await storage();
+  const { pairing } = saved;
+  if (!pairing) return;
+  if (!pairingOffer(pairing, pairing.pairingGeneration)
+    || !pairingAuthorityMatches(saved[PAIRING_AUTHORITY_KEY], pairing.pairingGeneration, "pending")) {
+    await queueStorageMutation(async () => {
+      const latest = await chrome.storage.local.get("pairing");
+      if (!pairingIdentityMatches(latest.pairing, pairing)) return;
+      await chrome.storage.local.set({ pairing: null, [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "invalid") });
+      await chrome.alarms.clear("morrow-pairing");
+    });
     return;
   }
-  const response = await fetch(pairing.statusUrl, {
+  if (!pairing?.statusUrl || !Number.isFinite(pairing.expiresAt) || Date.now() >= pairing.expiresAt) {
+    await settlePairing(pairing, "expired", { pairing: null });
+    return;
+  }
+  const received = await fetchPairing(pairing.statusUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ extensionId: chrome.runtime.id }),
-  }).catch(() => null);
+  }, async (response, signal) => response.ok ? await boundedPairingJson(response, signal) : null).catch(() => null);
+  const response = received?.response;
   if (response?.status === 404 || response?.status === 410) {
-    const latest = await storage();
-    if (latest.pairing?.statusUrl !== pairing.statusUrl) return;
-    await chrome.storage.local.remove("pairing");
-    await chrome.alarms.clear("morrow-pairing");
+    await settlePairing(pairing, "expired", { pairing: null });
     return;
   }
   if (!response?.ok) return;
-  const status = await response.json();
+  const status = pairingStatus(received.body, pairing);
+  if (!status) return;
   if (status.status === "approved" && status.token) {
-    const latest = await storage();
-    if (latest.pairing?.statusUrl !== pairing.statusUrl) return;
-    await chrome.storage.local.set({ token: status.token, pairing: null });
-    await chrome.alarms.clear("morrow-pairing");
-    await connectBridge();
+    const committed = await settlePairing(pairing, "approved", { token: status.token, pairing: null });
+    if (committed) {
+      state.authenticationProblem = null;
+      await connectBridge();
+    }
   } else if (status.status === "denied" || Date.now() >= status.expiresAt) {
-    const latest = await storage();
-    if (latest.pairing?.statusUrl !== pairing.statusUrl) return;
-    await chrome.storage.local.set({ pairing: null });
-    await chrome.alarms.clear("morrow-pairing");
+    await settlePairing(pairing, "denied", { pairing: null });
   }
 }
 
@@ -4402,66 +5078,40 @@ async function permissionOrigins(tabId, tabUrl) {
   return [...origins];
 }
 
-async function discoverItemBankPermissionOrigins(tab) {
-  let canvas;
-  try {
-    canvas = new URL(tab?.url || "");
-  } catch {
-    return [];
-  }
-  if (canvas.protocol !== "https:" || !/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/i.test(canvas.hostname)) return [];
-  const launchUrl = itemBankLaunchUrl(canvas.href, canvas.origin);
-  if (!launchUrl) return [];
-  const launchTab = await chrome.tabs.create({
-    active: false,
-    ...(Number.isInteger(tab.windowId) ? { windowId: tab.windowId } : {}),
-  }).catch(() => null);
-  if (!Number.isInteger(launchTab?.id)) return [];
-  try {
-    const launched = await chrome.tabs.update(launchTab.id, { url: launchUrl }).catch(() => null);
-    if (!launched) return [];
-    const deadline = Date.now() + ITEM_BANK_ORIGIN_DISCOVERY_WAIT_MS;
-    while (Date.now() < deadline) {
-      const frames = await chrome.webNavigation.getAllFrames({ tabId: launchTab.id }).catch(() => []);
-      const frameIds = itemBankFrameIds(frames);
-      const origins = itemBankPermissionOrigins(frames, canvas.origin);
-      if (frameIds.length > 1) return [];
-      if (frameIds.length === 1) return origins.length === 2 ? origins : [];
-      await new Promise((resolve) => setTimeout(resolve, 250));
-    }
-    return [];
-  } finally {
-    await chrome.tabs.remove(launchTab.id).catch(() => {});
-  }
-}
-
 async function preparedCourseConnection(intentId, { addedOrigins, popupConfirmed = false } = {}) {
-  const stored = await chrome.storage.local.get(COURSE_CONNECTION_INTENT_KEY);
+  const stored = await chrome.storage.local.get([COURSE_CONNECTION_INTENT_KEY, COURSE_CONNECTION_AUTHORITY_KEY]);
   const intent = stored[COURSE_CONNECTION_INTENT_KEY];
   const tab = await chrome.tabs.get(intent?.tabId).catch(() => null);
-  if (!validCourseConnectionIntent(intent, Date.now(), COURSE_CONNECTION_INTENT_TTL_MS)
+  if (!courseConnectionAuthorityMatches(stored[COURSE_CONNECTION_AUTHORITY_KEY], intent)
+    || !validCourseConnectionIntent(intent, Date.now(), COURSE_CONNECTION_INTENT_TTL_MS)
     || !canCompleteCourseConnectionIntent(intent, { intentId, tabId: tab?.id, url: tab?.url, permissionOrigins: intent?.origins || [], addedOrigins, popupConfirmed, ttlMs: COURSE_CONNECTION_INTENT_TTL_MS })) return null;
   if (!await chrome.permissions.contains({ origins: intent.origins })) return null;
   return intent;
 }
 
 async function prepareCourseConnection(requestedTabId) {
+  const courseDataGeneration = state.courseDataAuthorityGeneration;
+  if (!await courseDataAuthorityCurrent(courseDataGeneration)) throw new Error("course_data_consent_required");
   const tab = Number.isInteger(requestedTabId)
     ? await chrome.tabs.get(requestedTabId).catch(() => null)
     : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
   const url = normalizeCourseConnectionUrl(tab?.url);
   if (!tab?.id || !url) throw new Error("course_tab_missing");
   const origins = await permissionOrigins(tab.id, tab.url);
-  for (const origin of await discoverItemBankPermissionOrigins(tab)) {
-    if (!origins.includes(origin)) origins.push(origin);
-  }
   const preGrantedOrigins = [];
   for (const origin of origins) {
     if (await chrome.permissions.contains({ origins: [origin] })) preGrantedOrigins.push(origin);
   }
-  const intent = { id: crypto.randomUUID(), tabId: tab.id, url, origins, preGrantedOrigins, createdAt: Date.now() };
-  await chrome.storage.local.set({ [COURSE_CONNECTION_INTENT_KEY]: intent });
-  return intent;
+  return await queueStorageMutation(async () => {
+    if (!await courseDataAuthorityCurrent(courseDataGeneration)) throw new Error("course_data_consent_required");
+    const authority = courseConnectionAuthority("active");
+    const intent = {
+      id: crypto.randomUUID(), tabId: tab.id, url, origins, preGrantedOrigins,
+      authorityGeneration: authority.generation, createdAt: Date.now(),
+    };
+    await chrome.storage.local.set({ [COURSE_CONNECTION_AUTHORITY_KEY]: authority, [COURSE_CONNECTION_INTENT_KEY]: intent });
+    return intent;
+  });
 }
 
 // The action popup grants activeTab access when the person opens Morrow Bridge. This read-only
@@ -4487,21 +5137,24 @@ async function detectActiveCoursePlatform(requestedTabId) {
 }
 
 async function completePreparedCourseConnection({ intentId, addedOrigins, popupConfirmed = false, openCourseSelection = false } = {}) {
-  await requireCourseDataConsent();
+  const courseDataGeneration = state.courseDataAuthorityGeneration;
+  if (!await courseDataAuthorityCurrent(courseDataGeneration)) throw new Error("course_data_consent_required");
   const pending = await preparedCourseConnection(intentId, { addedOrigins, popupConfirmed });
   if (!pending) return { completed: false };
   const intent = await queueStorageMutation(async () => {
-    const stored = await chrome.storage.local.get(COURSE_CONNECTION_INTENT_KEY);
+    if (!await courseDataAuthorityCurrent(courseDataGeneration)) return null;
+    const stored = await chrome.storage.local.get([COURSE_CONNECTION_INTENT_KEY, COURSE_CONNECTION_AUTHORITY_KEY]);
     const candidate = stored[COURSE_CONNECTION_INTENT_KEY];
     const tab = await chrome.tabs.get(candidate?.tabId).catch(() => null);
-    if (!canClaimCourseConnectionIntent(candidate, { intentId, tabId: tab?.id, url: tab?.url, permissionOrigins: pending.origins, ttlMs: COURSE_CONNECTION_INTENT_TTL_MS })) return null;
+    if (!courseConnectionAuthorityMatches(stored[COURSE_CONNECTION_AUTHORITY_KEY], candidate)
+      || !canClaimCourseConnectionIntent(candidate, { intentId, tabId: tab?.id, url: tab?.url, permissionOrigins: pending.origins, ttlMs: COURSE_CONNECTION_INTENT_TTL_MS })) return null;
     await chrome.storage.local.remove(COURSE_CONNECTION_INTENT_KEY);
     return candidate;
   });
   if (!intent) return { completed: false };
   let result;
   try {
-    result = await connectCourseTab(intent.tabId, intent.url);
+    result = await connectCourseTab(intent.tabId, intent.url, intent.authorityGeneration, courseDataGeneration);
   } catch (error) {
     // Morrow connects Blackboard through the REST connection in the Morrow app, so this site can
     // never connect in Chrome and trying again cannot change that. The access the person just
@@ -4531,7 +5184,8 @@ async function cancelPreparedCourseConnection(intentId) {
   return { cancelled: true };
 }
 
-async function connectCourseTab(requestedTabId, expectedUrl) {
+async function connectCourseTab(requestedTabId, expectedUrl, expectedCourseConnectionGeneration = null, courseDataGeneration = state.courseDataAuthorityGeneration) {
+  if (!await courseDataAuthorityCurrent(courseDataGeneration)) throw new Error("course_data_consent_required");
   const tab = Number.isInteger(requestedTabId)
     ? await chrome.tabs.get(requestedTabId).catch(() => null)
     : (await chrome.tabs.query({ active: true, currentWindow: true }))[0];
@@ -4558,13 +5212,24 @@ async function connectCourseTab(requestedTabId, expectedUrl) {
     principalId: profile.principalId,
     tabId: tab.id,
   };
+  const api = await catalog();
+  let replacedSiteAnchorIds = [];
   const anchor = await queueStorageMutation(async () => {
+    if (!await courseDataAuthorityCurrent(courseDataGeneration)) throw new Error("course_data_consent_required");
     if (expectedUrl) {
       const latest = await chrome.tabs.get(tab.id).catch(() => null);
       if (normalizeCourseConnectionUrl(latest?.url) !== expectedUrl) throw new Error("course_tab_missing");
     }
     const stored = await storage();
-    const sameSite = [...storedAnchors(stored.siteAnchors), ...(stored.bindings || [])].filter((candidate) => sameSitePrincipal(candidate, anchorBase));
+    if (expectedCourseConnectionGeneration) {
+      const savedAuthority = await chrome.storage.local.get(COURSE_CONNECTION_AUTHORITY_KEY);
+      if (!validCourseConnectionAuthority(savedAuthority[COURSE_CONNECTION_AUTHORITY_KEY], "active")
+        || savedAuthority[COURSE_CONNECTION_AUTHORITY_KEY].generation !== expectedCourseConnectionGeneration) {
+        throw new Error("course_connection_superseded");
+      }
+    }
+    const anchors = storedAnchors(stored.siteAnchors);
+    const sameSite = [...anchors, ...(stored.bindings || [])].filter((candidate) => sameSitePrincipal(candidate, anchorBase));
     const sessionGeneration = sameSite.reduce((greatest, candidate) => (
       Math.max(greatest, Number.isInteger(candidate.sessionGeneration) ? candidate.sessionGeneration : 0)
     ), 0) + 1;
@@ -4572,14 +5237,53 @@ async function connectCourseTab(requestedTabId, expectedUrl) {
     const replaced = (stored.bindings || []).filter((candidate) => sameSitePrincipal(candidate, next));
     const bindings = (stored.bindings || []).filter((candidate) => !sameSitePrincipal(candidate, next));
     const editPolicies = { ...storedPolicies(stored.editPolicies) };
-    for (const prior of replaced) delete editPolicies[prior.sourceBindingId];
-    const siteAnchors = [...storedAnchors(stored.siteAnchors).filter((candidate) => !sameSitePrincipal(candidate, next)), next];
+    const editPolicyRevisions = { ...storedPolicyRevisions(stored.editPolicyRevisions) };
+    for (const prior of replaced) {
+      const sourceBindingId = `${next.siteAnchorId}:c${prior.courseId}`;
+      const migrated = {
+        ...prior,
+        sourceBindingId,
+        siteAnchorId: next.siteAnchorId,
+        sessionGeneration,
+        runtimeVerified: true,
+        lastSeenAt: anchorBase.lastSeenAt,
+      };
+      const permission = await validEditPermission({
+        permission: editPolicies[prior.sourceBindingId],
+        binding: prior,
+        catalogDigest: api.catalogDigest,
+        operations: [...state.operations.values()],
+      });
+      const priorRevision = Math.max(
+        Number.isSafeInteger(editPolicyRevisions[prior.sourceBindingId]) ? editPolicyRevisions[prior.sourceBindingId] : 0,
+        Number.isSafeInteger(editPolicies[prior.sourceBindingId]?.revision) ? editPolicies[prior.sourceBindingId].revision : 0,
+      );
+      delete editPolicies[prior.sourceBindingId];
+      delete editPolicyRevisions[prior.sourceBindingId];
+      if (permission) {
+        editPolicies[sourceBindingId] = await createEditPermission({
+          binding: migrated,
+          catalogDigest: api.catalogDigest,
+          revision: permission.revision,
+          enabledCategories: permission.enabledCategories,
+          operations: [...state.operations.values()],
+          expiresAt: permission.expiresAt,
+        });
+      }
+      if (priorRevision > 0) editPolicyRevisions[sourceBindingId] = priorRevision;
+      bindings.push(migrated);
+    }
+    const siteAnchors = [...anchors.filter((candidate) => !sameSitePrincipal(candidate, next)), next];
     const saved = await discoveries();
     const courseDiscoveries = Object.fromEntries(Object.entries(storedDiscoveries(saved.courseDiscoveries)).filter(([, receipt]) => !sameSitePrincipal(receipt, next)));
-    await chrome.storage.local.set({ bindings, siteAnchors, editPolicies });
+    if (!await courseDataAuthorityCurrent(courseDataGeneration)) throw new Error("course_data_consent_required");
+    await chrome.storage.local.set({ bindings, siteAnchors, editPolicies, editPolicyRevisions });
     await discoveryArea().set({ courseDiscoveries });
+    replacedSiteAnchorIds = anchors.filter((candidate) => sameSitePrincipal(candidate, next)).map((candidate) => candidate.siteAnchorId);
     return next;
   });
+  for (const siteAnchorId of replacedSiteAnchorIds) forgetSiteAnchorVerification(siteAnchorId);
+  forgetSiteAnchorVerification(anchor.siteAnchorId);
   await publishBindings();
   return { siteAnchorId: anchor.siteAnchorId, provider: anchor.provider, origin: anchor.origin, ...(anchor.siteUrl ? { siteUrl: anchor.siteUrl } : {}), sessionGeneration: anchor.sessionGeneration };
 }
@@ -4600,12 +5304,14 @@ function runtimeHealthy(connected) {
 }
 
 async function status() {
-  if (!await courseDataConsentAccepted()) return { consentRequired: true };
+  const authorityGeneration = state.courseDataAuthorityGeneration;
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) return { consentRequired: true };
   const before = await storage();
   if (before.pairing?.status === "pending") await pollPairing();
   const stored = await storage();
   const bindings = await publicBindings();
   const siteAnchors = await publicSiteAnchors(stored);
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) return { consentRequired: true };
   const connected = state.socket?.readyState === WebSocket.OPEN && state.generation > 0;
   const { firstCourseRead = null } = await chrome.storage.local.get("firstCourseRead");
   return {
@@ -4613,6 +5319,7 @@ async function status() {
     paired: Boolean(stored.token),
     pairing: stored.pairing?.status === "pending",
     connecting: state.socket?.readyState === WebSocket.CONNECTING || (state.socket?.readyState === WebSocket.OPEN && state.generation === 0),
+    authenticationFailed: Boolean(state.authenticationProblem),
     connected,
     runtimeHealthy: runtimeHealthy(connected),
     firstCourseRead,
@@ -4635,6 +5342,8 @@ async function openSetupGuide() {
 }
 
 async function disconnectConnector() {
+  abortPairingFetches();
+  invalidateCourseDataAuthority();
   clearPrivateChat({ answerPending: true });
   anchorVerifications.clear();
   itemBankCredentials.clear();
@@ -4645,16 +5354,34 @@ async function disconnectConnector() {
   state.socket = null;
   state.generation = 0;
   state.accepted = null;
+  state.authenticationProblem = null;
   socket?.close(1000, "user_disconnected");
   await chrome.alarms.clear("morrow-pairing");
   await queueStorageMutation(async () => {
+    const pendingState = await chrome.storage.local.get(COURSE_CONNECTION_INTENT_KEY);
+    const pendingIntent = pendingState[COURSE_CONNECTION_INTENT_KEY];
+    const revokedOrigins = validCourseConnectionIntent(pendingIntent, Date.now(), COURSE_CONNECTION_INTENT_TTL_MS)
+      ? pendingIntent.origins
+      : [];
     // The course file access opt-in goes with the connection. Every file read already re-checks the
     // Chrome permission, so this is state hygiene, not a new boundary: it keeps Settings reading off
     // after a disconnect where Chrome kept the optional HTTPS permission.
-    await chrome.storage.local.remove(["token", "bindings", "pairing", "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", COURSE_FILE_STORAGE_ACCESS_KEY]);
+    await chrome.storage.local.set({
+      token: null,
+      bindings: [],
+      pairing: null,
+      siteAnchors: [],
+      editPolicies: {},
+      editPolicyRevisions: {},
+      firstCourseRead: null,
+      [COURSE_FILE_STORAGE_ACCESS_KEY]: false,
+      [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "disconnected"),
+      [COURSE_CONNECTION_AUTHORITY_KEY]: courseConnectionAuthority("disconnected", revokedOrigins, Date.now() + COURSE_CONNECTION_INTENT_TTL_MS),
+    });
     // usedEffectReceiptFloorAt stays: it only rises, and clearing it would accept a change prepared
     // before this disconnect a second time.
-    await discoveryArea().remove(["courseDiscoveries", "usedEffectReceipts"]);
+    await discoveryArea().remove(["courseDiscoveries", "usedEffectReceipts", CANVAS_LIST_CONTINUATIONS_KEY]);
+    await chrome.storage.local.remove(["token", "bindings", "pairing", "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead", COURSE_FILE_STORAGE_ACCESS_KEY, COURSE_CONNECTION_INTENT_KEY]);
   });
   const permissions = await chrome.permissions.getAll();
   const optionalOrigins = (permissions.origins || []).filter((origin) => origin.startsWith("https://"));
@@ -4667,6 +5394,17 @@ async function disconnectConnector() {
     }
   }
   return { disconnected: true, permissionsRevoked };
+}
+
+async function handleCoursePermissionAdded(origins) {
+  const saved = await chrome.storage.local.get(COURSE_CONNECTION_AUTHORITY_KEY);
+  const authority = saved[COURSE_CONNECTION_AUTHORITY_KEY];
+  if (validCourseConnectionAuthority(authority, "disconnected") && Date.now() <= authority.expiresAt) {
+    const lateOrigins = Array.isArray(origins) ? authority.revokedOrigins.filter((origin) => origins.includes(origin)) : [];
+    if (lateOrigins.length > 0) await chrome.permissions.remove({ origins: lateOrigins }).catch(() => {});
+    return;
+  }
+  await completePreparedCourseConnection({ addedOrigins: origins, openCourseSelection: true });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -4714,7 +5452,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   });
   return true;
 });
-chrome.permissions.onAdded.addListener((permissions) => { void completePreparedCourseConnection({ addedOrigins: permissions.origins, openCourseSelection: true }).catch(() => {}); });
+chrome.permissions.onAdded.addListener((permissions) => { void handleCoursePermissionAdded(permissions.origins).catch(() => {}); });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "morrow-pairing") void pollPairing(); });
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearItemBankCredentialsForTab(tabId);
@@ -4739,6 +5477,8 @@ chrome.webNavigation?.onCommitted?.addListener((details) => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !Object.hasOwn(changes || {}, COURSE_DATA_CONSENT_KEY)
     || hasCourseDataConsent(changes[COURSE_DATA_CONSENT_KEY]?.newValue)) return;
+  invalidateCourseDataAuthority();
+  clearPrivateChat({ answerPending: true });
   anchorVerifications.clear();
   if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
   state.reconnectTimer = null;

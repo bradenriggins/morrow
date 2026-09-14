@@ -26,6 +26,63 @@ export function unsignedHotSpotImageUrl(value) {
 }
 
 /**
+ * Accepts only the complete result contract produced by the reviewed Hot Spot
+ * executor. This is the service worker's trust boundary: a generic Canvas page
+ * result cannot opt itself into the private verifier by returning `verified`.
+ */
+export function canvasNewQuizHotSpotVerification(operation, args, result) {
+  const plainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
+  const decimalId = (value) => {
+    const id = String(value ?? "");
+    return /^[1-9][0-9]{0,18}$/.test(id) ? id : "";
+  };
+  if (!plainObject(operation)
+    || operation.provider !== "canvas"
+    || operation.toolName !== "canvas_create_new_quiz_hot_spot"
+    || operation.key !== "canvas.private.new_quiz.hot_spot.create.v1"
+    || operation.service !== "canvas_new_quiz_hot_spot"
+    || !plainObject(args)
+    || !plainObject(result)
+    || result.schema !== "morrow.canvas-new-quiz-hot-spot.v1"
+    || result.ok !== true || result.sent !== true || result.outcomeUnknown !== false
+    || !plainObject(result.data) || !plainObject(result.verification)) return null;
+  const courseId = decimalId(args.course_id);
+  const assignmentId = decimalId(args.assignment_id);
+  const itemId = decimalId(result.data.item_id);
+  const payloadSha256 = typeof args.payload_sha256 === "string" && /^[a-f0-9]{64}$/.test(args.payload_sha256)
+    ? args.payload_sha256 : "";
+  if (!courseId || !assignmentId || !itemId || !payloadSha256
+    || result.data.course_id !== courseId
+    || result.data.assignment_id !== assignmentId
+    || result.data.interaction_type_slug !== "hot-spot"
+    || result.data.payload_sha256 !== payloadSha256
+    || !Number.isSafeInteger(result.data.item_count) || result.data.item_count < 1
+    || typeof result.data.image_url !== "string") return null;
+  try {
+    if (unsignedHotSpotImageUrl(result.data.image_url) !== result.data.image_url) return null;
+  } catch {
+    return null;
+  }
+  const verification = result.verification;
+  if (Object.keys(verification).length !== 5
+    || verification.schema !== "morrow.browser-verification.v1"
+    || verification.status !== "verified"
+    || verification.strategy !== "new-quiz-item-lifecycle"
+    || verification.evidence !== "complete_created_item_shape_and_item_list_reread"
+    || !Array.isArray(verification.targets) || verification.targets.length !== 3) return null;
+  const expectedTargets = [
+    ["canvas_course", courseId],
+    ["canvas_new_quiz", assignmentId],
+    ["canvas_new_quiz_item", itemId],
+  ];
+  if (!verification.targets.every((target, index) => plainObject(target)
+    && Object.keys(target).length === 2
+    && target.type === expectedTargets[index][0]
+    && target.id === expectedTargets[index][1])) return null;
+  return verification;
+}
+
+/**
  * This function is intentionally self-contained. Chrome serializes only the
  * supplied function body for a MAIN-world injection, so every helper it needs
  * lives inside it.
@@ -39,6 +96,8 @@ export function unsignedHotSpotImageUrl(value) {
  * worker can observe that cross-origin response.
  */
 export async function executeCanvasNewQuizHotSpotInPage(input) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const isOwnToken = (value) => /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+/.test(value);
   const plainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
   const decimalId = (value) => {
@@ -71,6 +130,24 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     if (url.href.includes("?") || url.href.includes("#")) throw new Error("canvas_hot_spot_upload_url_refused");
     return url.href;
   };
+  // Canvas may add provider-owned fields to the saved record. Every field the
+  // reviewed create supplied must still be present and equal. Canvas commonly
+  // serializes numeric identifiers and numeric form values as either strings or
+  // numbers, so those two JSON scalar forms compare by their exact text value.
+  const requestedShapeMatches = (actual, expected) => {
+    if (Array.isArray(expected)) {
+      return Array.isArray(actual) && actual.length === expected.length
+        && expected.every((value, index) => requestedShapeMatches(actual[index], value));
+    }
+    if (plainObject(expected)) {
+      return plainObject(actual) && Object.entries(expected)
+        .every(([key, value]) => Object.hasOwn(actual, key) && requestedShapeMatches(actual[key], value));
+    }
+    if (expected === null || typeof expected === "boolean") return actual === expected;
+    if ((typeof expected === "string" || typeof expected === "number")
+      && (typeof actual === "string" || typeof actual === "number")) return String(actual) === String(expected);
+    return actual === expected;
+  };
   const failure = (error, sent = false, outcomeUnknown = false, status) => ({
     schema: "morrow.canvas-new-quiz-hot-spot.v1",
     ok: false,
@@ -102,6 +179,54 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     const origin = new URL(canvasOrigin);
     if (origin.protocol !== "https:" || origin.href !== canvasOrigin + "/") throw new Error("canvas_hot_spot_binding_invalid");
 
+    const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
+    const COUNT = /^(?:0|[1-9][0-9]*)$/;
+    const cancelBody = (body) => {
+      try {
+        const canceled = body?.cancel?.();
+        if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+      } catch {}
+    };
+    const boundedText = async (response) => {
+      const declared = response.headers?.get?.("content-length");
+      if (declared !== null && (!COUNT.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+        cancelBody(response.body);
+        throw new Error("canvas_hot_spot_response_too_large");
+      }
+      const reader = response.body?.getReader?.();
+      if (!reader || typeof globalThis.TextDecoder !== "function") throw new Error("canvas_hot_spot_response_unavailable");
+      const decoder = new TextDecoder("utf-8", { fatal: true });
+      let size = 0;
+      let text = "";
+      try {
+        for (;;) {
+          const remaining = Number.isFinite(input.expiresAt) ? input.expiresAt - Date.now() : Infinity;
+          if (remaining <= 0) throw new Error("canvas_request_expired");
+          let timeout;
+          const next = Number.isFinite(remaining)
+            ? await Promise.race([
+                reader.read(),
+                new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("canvas_request_expired")), remaining); }),
+              ]).finally(() => clearTimeout(timeout))
+            : await reader.read();
+          if (next.done) break;
+          if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_RESPONSE_BYTES) {
+            cancelBody(reader);
+            throw new Error("canvas_hot_spot_response_too_large");
+          }
+          text += decoder.decode(next.value, { stream: true });
+        }
+        return text + decoder.decode();
+      } catch (error) {
+        cancelBody(reader);
+        throw error;
+      }
+    };
+    const boundedJson = async (response) => {
+      const text = await boundedText(response);
+      try { return JSON.parse(text); } catch { throw new Error("canvas_hot_spot_response_invalid"); }
+    };
+
     const canvasFetch = async (pathname, options = {}) => {
       let response;
       try {
@@ -111,6 +236,7 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
           redirect: "error",
           ...options,
           headers: { Accept: "application/json+canvas-string-ids", ...(options.headers || {}) },
+          signal: requestSignal(input?.expiresAt),
         });
       } catch {
         throw new Error("canvas_hot_spot_transport_unavailable");
@@ -123,7 +249,7 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     const canvasJson = async (pathname, options = {}) => {
       const response = await canvasFetch(pathname, options);
       if (!response.ok) throw new Error("canvas_hot_spot_http_" + response.status);
-      return await response.json();
+      return await boundedJson(response);
     };
     const quizPath = `/api/quiz/v1/courses/${encodeURIComponent(courseId)}/quizzes/${encodeURIComponent(assignmentId)}`;
     const currentBinding = async () => {
@@ -144,8 +270,8 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
       let pages = 0;
       while (next && pages < Math.ceil(MAX_ITEMS / PAGE_LIMIT)) {
         const response = await canvasFetch(next);
-        if (!response.ok) throw new Error("canvas_hot_spot_item_list_read_failed");
-        const page = await response.json();
+        if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("canvas_hot_spot_item_list_read_failed"); }
+        const page = await boundedJson(response);
         if (!Array.isArray(page) || page.length > PAGE_LIMIT || rows.length + page.length > MAX_ITEMS) {
           throw new Error("canvas_hot_spot_item_list_incomplete");
         }
@@ -241,18 +367,15 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     createStatus = created.status;
     if (!created.ok) throw new Error("canvas_hot_spot_create_http_" + created.status);
     let body;
-    try { body = await created.json(); } catch { throw new Error("canvas_hot_spot_create_response_invalid"); }
+    try { body = await boundedJson(created); } catch { throw new Error("canvas_hot_spot_create_response_invalid"); }
     const createdId = decimalId(plainObject(body) ? body.id : "");
     if (!createdId) throw new Error("canvas_hot_spot_create_response_invalid");
 
     // Nothing above is treated as proof. What Canvas saved is read back: the
     // question by the id Canvas returned, and the complete saved list again.
     const saved = await canvasJson(`${quizPath}/items/${encodeURIComponent(createdId)}`);
-    const savedEntry = plainObject(saved) ? saved.entry : null;
-    const savedInteraction = plainObject(savedEntry) ? savedEntry.interaction_data : null;
     if (!plainObject(saved) || decimalId(saved.id) !== createdId || saved.entry_type !== "Item"
-      || !plainObject(savedEntry) || savedEntry.interaction_type_slug !== "hot-spot"
-      || !plainObject(savedInteraction) || savedInteraction.image_url !== imageUrl) {
+      || !requestedShapeMatches(saved, item)) {
       return {
         schema: "morrow.canvas-new-quiz-hot-spot.v1",
         ok: false, sent: true, outcomeUnknown: true, status: createStatus,
@@ -265,7 +388,10 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
     const afterIds = after.map((entry) => entry.id);
     const additions = afterIds.filter((id) => !beforeIds.includes(id));
     const removed = beforeIds.filter((id) => !afterIds.includes(id));
-    if (after.length !== before.length + 1 || additions.length !== 1 || additions[0] !== createdId || removed.length !== 0) {
+    const createdMembership = after.find((entry) => entry.id === createdId);
+    const requestedPosition = Number.isSafeInteger(item.position) && item.position >= 1 ? item.position : null;
+    if (after.length !== before.length + 1 || additions.length !== 1 || additions[0] !== createdId || removed.length !== 0
+      || !createdMembership || (requestedPosition !== null && createdMembership.position !== requestedPosition)) {
       return {
         schema: "morrow.canvas-new-quiz-hot-spot.v1",
         ok: false, sent: true, outcomeUnknown: true, status: createStatus,
@@ -283,7 +409,7 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
         schema: "morrow.browser-verification.v1",
         status: "verified",
         strategy: "new-quiz-item-lifecycle",
-        evidence: "created_item_reread_and_complete_item_list_reread",
+        evidence: "complete_created_item_shape_and_item_list_reread",
         targets: [
           { type: "canvas_course", id: courseId },
           { type: "canvas_new_quiz", id: assignmentId },
@@ -297,6 +423,7 @@ export async function executeCanvasNewQuizHotSpotInPage(input) {
         item_count: after.length,
         image_url: imageUrl,
         interaction_type_slug: "hot-spot",
+        payload_sha256: input.payloadSha256,
       },
     };
   } catch (error) {

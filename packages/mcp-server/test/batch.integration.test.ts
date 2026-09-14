@@ -50,7 +50,7 @@ function config() {
         required: true,
         enabled: true,
         outputPrivacy: {
-          canvas_page_get: { allowedFields: ["source", "course_id"], dataClass: "course", maxRecords: 10, maxBytes: 10_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
+          canvas_page_get: { allowedFields: ["source", "course_id", "title"], dataClass: "course", maxRecords: 10, maxBytes: 10_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
           edit_page: { allowedFields: ["schema", "ok", "sourceToolName", "commandKind", "result", "approvalRequired", "taskId", "status", "operationId"], dataClass: "course", maxRecords: 20, maxBytes: 10_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
           morrow_legacy_task_get: { allowedFields: ["schema", "ok", "task", "taskId", "status", "outcome", "terminal", "verificationStatus", "resultCounts", "done", "unconfirmed", "failed", "rollbackFailed", "skipped", "undone", "notStarted", "sourceBindingId"], dataClass: "course", maxRecords: 20, maxBytes: 10_000, freeText: "deny", learnerTokens: false, artifactInspection: "deny" },
         },
@@ -60,16 +60,6 @@ function config() {
     operationJournal: { path: ":memory:" },
     maxCatalogTools: 50,
   });
-}
-
-function readback(courseId: string) {
-  return {
-    readback: {
-      tool: "canvas_page_get",
-      arguments: { course_id: courseId },
-      expected_digest: sha256Json({ source: "meridian", course_id: courseId }),
-    },
-  };
 }
 
 function connectorConfig(directory: string, port: number) {
@@ -357,6 +347,13 @@ describe("MorrowRuntime durable batches", () => {
 
       const first = await runtime.batchRun({ batchId: batch.batchId, maxChildren: 2 });
       expect(first).toMatchObject({ processed: 1, remaining: 1 });
+      const sourceOperationId = runtime.batches.get(batch.batchId).children
+        .find((child) => child.childId === "page-create")!.gatewayOperationId!;
+      expect(runtime.gateway.operationGet(sourceOperationId)).toMatchObject({
+        state: "verified",
+        verificationStatus: "verified",
+        hasResultBindingArtifact: true,
+      });
       const bound = runtime.batches.readArguments(batch.batchId, "page-place");
       expect(bound).toMatchObject({ module_item_page_url: "private-course-page" });
       expect(JSON.stringify(runtime.batches.readResult(batch.batchId, "page-create"))).not.toContain("Jane Doe");
@@ -379,6 +376,150 @@ describe("MorrowRuntime durable batches", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 20_000);
+
+  it("revokes a cancelled batch's approved outer effect before direct dispatch, including after restart", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-batch-parent-cancel-"));
+    const statePath = join(directory, "gateway.sqlite3");
+    const keyPath = join(directory, "batch.key");
+    const port = await reserveLoopbackPort();
+    const sourceBindingId = "canvas:cancel-parent-77";
+    const commands: BridgeCommand[] = [];
+    let first: MorrowRuntime | undefined;
+    let second: MorrowRuntime | undefined;
+    let socket: WebSocket | undefined;
+    let operationId = "";
+    try {
+      first = await MorrowRuntime.connect(connectorConfig(directory, port), { statePath, batchKeyPath: keyPath });
+      socket = await connectAuditBridge(port, [{ sourceBindingId, courseId: "77" }], commands, {
+        writeResultForCommand: () => ({
+          schema: "morrow.canvas-browser-result.v1",
+          ok: true,
+          sent: true,
+          status: 200,
+          data: { id: "77" },
+          verification: { schema: "morrow.browser-verification.v1", status: "verified" },
+        }),
+      });
+      const created = await first.batchCreate({
+        name: "Cancel one approved connector effect",
+        mode: "stage_writes",
+        concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["77"], complete: true },
+        operations: [{
+          childId: "course:77",
+          courseId: "77",
+          tool: "canvas_add_course_to_favorites",
+          sourceBindingId,
+          arguments: { id: "77" },
+        }],
+      });
+      const batchId = String((created.batch as { batchId: string }).batchId);
+      first.approveBatch(batchId);
+      operationId = String(first.batches.listChildren(batchId, 0, 1).children[0]!.gatewayOperationId);
+      expect(first.gateway.operationGet(operationId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+
+      expect(first.batchCancel(batchId)).toMatchObject({
+        batch: { state: "cancelled", pendingChildren: 0, cancelledChildren: 1 },
+        sourceSettlement: { outcome: "cancelled", cancelled: 1, terminal: true },
+      });
+      expect(first.gateway.operationGet(operationId)).toMatchObject({
+        state: "cancelled",
+        dispatchAttempt: 0,
+        attention: ["batch_cancelled"],
+      });
+      expect(first.batches.listChildren(batchId, 0, 1).children).toMatchObject([{
+        childId: "course:77",
+        state: "cancelled",
+        gatewayOperationState: "cancelled",
+      }]);
+      expect((await first.gateway.dispatchOperation(operationId)).isError).toBe(true);
+      expect(commands.filter((command) => command.kind === "invoke_write")).toHaveLength(0);
+
+      await first.close();
+      first = undefined;
+      socket.close();
+      socket = undefined;
+      second = await MorrowRuntime.connect(connectorConfig(directory, port), { statePath, batchKeyPath: keyPath });
+      expect(second.gateway.operationGet(operationId)).toMatchObject({ state: "cancelled", dispatchAttempt: 0 });
+      expect((await second.gateway.dispatchOperation(operationId)).isError).toBe(true);
+      expect(commands.filter((command) => command.kind === "invoke_write")).toHaveLength(0);
+    } finally {
+      socket?.close();
+      await second?.close();
+      await first?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 45_000);
+
+  it("compensates every outer effect when later batch planning fails", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-batch-create-compensation-"));
+    const port = await reserveLoopbackPort();
+    const sourceBindingId = "canvas:create-compensation-77";
+    let runtime: MorrowRuntime | undefined;
+    let socket: WebSocket | undefined;
+    try {
+      runtime = await MorrowRuntime.connect(connectorConfig(directory, port), {
+        statePath: join(directory, "gateway.sqlite3"),
+        batchKeyPath: join(directory, "batch.key"),
+      });
+      socket = await connectAuditBridge(port, [{ sourceBindingId, courseId: "77" }], []);
+      await expect(runtime.batchCreate({
+        name: "Fail after one ordinary child",
+        mode: "stage_writes",
+        concurrency: 1,
+        courseSet: { source: "explicit", courseIds: ["77"], complete: true },
+        operations: [
+          {
+            childId: "ordinary",
+            courseId: "77",
+            tool: "canvas_add_course_to_favorites",
+            sourceBindingId,
+            arguments: { id: "77" },
+          },
+          {
+            childId: "private-file",
+            courseId: "77",
+            tool: "canvas_transfer_course_file",
+            sourceBindingId,
+            arguments: {
+              course_id: 77,
+              folder_id: 9,
+              filename: "guide.txt",
+              size_bytes: 5,
+              sha256: "a".repeat(64),
+              content_type: "text/plain",
+            },
+          },
+        ],
+      })).rejects.toThrow("freeze outer effect private-file");
+
+      const batches = runtime.batches.list(10);
+      expect(batches).toHaveLength(1);
+      expect(batches[0]).toMatchObject({ state: "cancelled", pendingChildren: 0, cancelledChildren: 2 });
+      const batchId = batches[0]!.batchId;
+      expect(runtime.batches.listChildren(batchId, 0, 10).children).toMatchObject([
+        { childId: "ordinary", state: "cancelled", gatewayOperationState: "cancelled" },
+        { childId: "private-file", state: "cancelled", gatewayOperationId: null },
+      ]);
+      expect(runtime.sourceSettlements.summary(batchId)).toMatchObject({
+        outcome: "cancelled",
+        cancelled: 2,
+        terminal: true,
+      });
+      const operations = runtime.gateway.operationList(10).operations as Record<string, unknown>[];
+      expect(operations).toHaveLength(1);
+      expect(operations[0]).toMatchObject({
+        state: "cancelled",
+        dispatchAttempt: 0,
+        attention: ["batch_creation_failed"],
+      });
+      expect((await runtime.gateway.dispatchOperation(String(operations[0]!.operationId))).isError).toBe(true);
+    } finally {
+      socket?.close();
+      await runtime?.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 30_000);
 
   it("routes only an exact private Bridge maintenance control and never publishes it through full MCP", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-private-bridge-maintenance-"));
@@ -632,25 +773,76 @@ describe("MorrowRuntime durable batches", () => {
       });
       const operationId = String((planned.structuredContent as { operationId: string }).operationId);
       expect(operationId).toMatch(/^op:/);
+      const nextPlanned = await second.gateway.planOperationWithCurrentEditPermission("canvas_update_create_page_courses", {
+        course_id: "41",
+        url_or_id: "page-41-next",
+        private_note: "Jane Doe needs another follow-up",
+        _morrow: { source_binding_id: "canvas:audit-41" },
+      });
+      const nextOperationId = String((nextPlanned.structuredContent as { operationId: string }).operationId);
+      expect(nextOperationId).toMatch(/^op:/);
+      const localStatusSourceRead = vi.spyOn(second.gateway, "callSourceOwned");
+      const expectedControl = {
+        schema: "morrow.operation-control.v1",
+        operationId,
+        state: "awaiting_approval",
+        dispatchAttempt: 0,
+        verification: { status: "unconfirmed" },
+        contentOmittedReason: "historical_learner_scope_unavailable",
+      };
       const collectionEgress = await second.gateway.redactMcpEgress({
         structuredContent: { operations: [{ operationId, detail: "Jane Doe" }] },
       }, {}, { bound: false, toolName: "morrow_operations_recent" });
       const collectionText = JSON.stringify(collectionEgress);
       expect(collectionText).not.toContain("Jane Doe");
-      expect(collectionText).toMatch(/Student A[1-9][0-9]*/);
+      expect(collectionEgress.structuredContent).toEqual({ operations: [expectedControl] });
       for (const request of [
-        { name: "morrow_operation_get", arguments: { operation_id: operationId }, expectLearnerToken: true },
-        { name: "morrow_operation_list", arguments: { limit: 10 }, expectLearnerToken: true },
-        { name: "morrow_operations_recent", arguments: { limit: 10 }, expectLearnerToken: false },
-        { name: "morrow_batch_results_page", arguments: { batch_id: batchId, offset: 0, limit: 1, result_child_id: "course:41" }, expectLearnerToken: false },
+        { name: "morrow_operation_get", arguments: { operation_id: operationId } },
+        { name: "morrow_operations_recent", arguments: { limit: 10 } },
+        { name: "morrow_operation_cancel", arguments: { operation_id: operationId } },
       ] as const) {
         const result = await client.callTool(request);
         const serialized = JSON.stringify(result);
         expect(result.isError, serialized).not.toBe(true);
         expect(serialized).not.toContain("Jane Doe");
         expect(serialized).not.toContain("jane.doe@example.edu");
-        if (request.expectLearnerToken) expect(serialized).toMatch(/Student A[1-9][0-9]*/);
+        expect(serialized).not.toMatch(/Student A[1-9][0-9]*/);
       }
+
+      const listedOperationIds = new Set<string>();
+      let cursor: string | undefined;
+      do {
+        const listed = await client.callTool({
+          name: "morrow_operation_list",
+          arguments: { limit: 1, ...(cursor ? { cursor } : {}) },
+        });
+        const page = listed.structuredContent as {
+          returned: number;
+          total: number;
+          hasMore: boolean;
+          nextCursor: string | null;
+          operations: Array<{ schema: string; operationId: string }>;
+        };
+        expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+        expect(page.returned).toBe(1);
+        expect(page.total).toBe(2);
+        expect(page.operations[0]?.schema).toBe("morrow.operation-control.v1");
+        listedOperationIds.add(page.operations[0]!.operationId);
+        cursor = page.nextCursor ?? undefined;
+        expect(page.hasMore).toBe(Boolean(cursor));
+      } while (cursor);
+      expect(listedOperationIds).toEqual(new Set([operationId, nextOperationId]));
+      expect(localStatusSourceRead).not.toHaveBeenCalled();
+      localStatusSourceRead.mockRestore();
+
+      const batchPage = await client.callTool({
+        name: "morrow_batch_results_page",
+        arguments: { batch_id: batchId, offset: 0, limit: 1, result_child_id: "course:41" },
+      });
+      const batchPageText = JSON.stringify(batchPage);
+      expect(batchPage.isError, batchPageText).not.toBe(true);
+      expect(batchPageText).not.toContain("Jane Doe");
+      expect(batchPageText).not.toContain("jane.doe@example.edu");
     } finally {
       await client?.close();
       await server?.close();
@@ -684,10 +876,10 @@ describe("MorrowRuntime durable batches", () => {
       expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
       expect(operationId).toMatch(/^op:/);
 
+      const firstBridgeClosed = once(socket, "close");
       await first.close();
       first = undefined;
-      const firstBridgeClosed = once(socket, "close");
-      socket.close();
+      if (socket.readyState !== WebSocket.CLOSED) socket.close();
       await firstBridgeClosed;
       socket = undefined;
 
@@ -722,6 +914,10 @@ describe("MorrowRuntime durable batches", () => {
       expect(listed.structuredContent).toEqual({
         schema: "morrow.operations.list.v1",
         returned: 1,
+        total: 1,
+        unresolved: 1,
+        hasMore: false,
+        nextCursor: null,
         operations: [expectedControl],
       });
 
@@ -793,10 +989,10 @@ describe("MorrowRuntime durable batches", () => {
       expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
       expect(operationId).toMatch(/^op:/);
 
+      const firstBridgeClosed = once(socket, "close");
       await first.close();
       first = undefined;
-      const firstBridgeClosed = once(socket, "close");
-      socket.close();
+      if (socket.readyState !== WebSocket.CLOSED) socket.close();
       await firstBridgeClosed;
       socket = undefined;
 
@@ -830,7 +1026,15 @@ describe("MorrowRuntime durable batches", () => {
 
       const listed = await client.callTool({ name: "morrow_operation_list", arguments: { limit: 10 } });
       expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
-      expect(listed.structuredContent).toEqual({ schema: "morrow.operations.list.v1", returned: 1, operations: [control] });
+      expect(listed.structuredContent).toEqual({
+        schema: "morrow.operations.list.v1",
+        returned: 1,
+        total: 1,
+        unresolved: 1,
+        hasMore: false,
+        nextCursor: null,
+        operations: [control],
+      });
 
       const recent = await client.callTool({ name: "morrow_operations_recent", arguments: { limit: 10 } });
       expect(recent.isError, JSON.stringify(recent)).not.toBe(true);
@@ -913,7 +1117,7 @@ describe("MorrowRuntime durable batches", () => {
           childId: `course:${course}`,
           tool: "edit_page",
           sourceBindingId: `canvas:${course}`,
-          arguments: { course_id: String(course), title: `Course ${course}`, _morrow: readback(String(course)) },
+          arguments: { course_id: String(course), title: `Course ${course}` },
         })),
       });
       const batch = created.batch as { batchId: string; concurrency: number };
@@ -1036,7 +1240,6 @@ describe("MorrowRuntime durable batches", () => {
           arguments: {
             course_id: String(index + 1),
             fixture_outcome: entry.outcome,
-            _morrow: readback(String(index + 1)),
           },
         })),
       });
@@ -1058,6 +1261,45 @@ describe("MorrowRuntime durable batches", () => {
     }
   }, 20_000);
 
+  it("does not finalize a source success whose authoritative outer readback remains unconfirmed", async () => {
+    const runtime = await MorrowRuntime.connect(config(), { statePath: ":memory:" });
+    try {
+      const created = await runtime.batchCreate({
+        name: "Source success with mismatched outer evidence",
+        mode: "stage_writes",
+        concurrency: 1,
+        operations: [{
+          childId: "course:mismatch",
+          tool: "edit_page",
+          sourceBindingId: "canvas:mismatch",
+          arguments: {
+            course_id: "99",
+            title: "Reviewed value",
+            // The source completes the task but its own read still shows the
+            // old title, so Morrow's route readback cannot confirm the change.
+            fixture_outcome: "stale-read",
+          },
+        }],
+      });
+      const batch = created.batch as { batchId: string };
+      runtime.approveBatch(batch.batchId);
+      await runtime.batchRun({ batchId: batch.batchId, maxChildren: 1 });
+      await runtime.batchReconcile({ batchId: batch.batchId, maxChildren: 1 });
+      const reconciled = await runtime.batchReconcile({ batchId: batch.batchId, maxChildren: 1 });
+      expect(reconciled).toMatchObject({
+        providerOutcomeFinal: false,
+        sourceSettlement: { outcome: "inspection_required", inspectionRequired: 1, terminal: false, requiresAttention: true },
+        settlements: [{ state: "inspection_required", verificationStatus: "unconfirmed", resultCounts: { unconfirmed: 1 } }],
+      });
+      expect((reconciled.batch as { state: string }).state).not.toBe("completed");
+      expect(runtime.gateway.operationList(10)).toMatchObject({
+        operations: [{ state: "awaiting_verification", verificationStatus: "unconfirmed" }],
+      });
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+
   it("restores staged source-task identity after a process restart without exposing arguments", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-batch-restart-"));
     const statePath = join(directory, "morrow.sqlite3");
@@ -1074,7 +1316,7 @@ describe("MorrowRuntime durable batches", () => {
           childId: "course:700",
           tool: "edit_page",
           sourceBindingId: "canvas:700",
-          arguments: { course_id: "700", title: "Never returned", _morrow: readback("700") },
+          arguments: { course_id: "700", title: "Never returned" },
         }],
       });
       batchId = (created.batch as { batchId: string }).batchId;

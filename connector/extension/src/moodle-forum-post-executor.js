@@ -6,7 +6,7 @@
  *
  * Every operation binds the exact Forum through the native
  * `course/modedit.php` Forum form before anything else, sends exactly one
- * native POST, and then reads Moodle's own saved state back. A new discussion
+ * state-changing native POST, and then reads Moodle's own saved state back. A new discussion
  * or reply is visible to every learner who can see the Forum as soon as Moodle
  * saves it, and Morrow has no route that removes it, so both refuse unless the
  * approving person confirmed that.
@@ -15,6 +15,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleForumPostInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const SCHEMA = "morrow.moodle-forum-post-target.v1";
   const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -22,6 +24,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
   const MAX_FORM_BYTES = 256 * 1024;
   const MAX_VALUE_BYTES = 64 * 1024;
   const MAX_POSTS = 500;
+  const MAX_FORUM_POSTS = 10_000;
   const MAX_OWN_DISCUSSIONS = 500;
   const MAX_SUBJECT_LENGTH = 255;
   const MAX_MESSAGE_LENGTH = 40_000;
@@ -63,6 +66,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
   const MODEDIT_PATH = "/course/modedit.php";
   const AJAX_PATH = "/lib/ajax/service.php";
   const DRAFT_FILES_PATH = "/repository/draftfiles_ajax.php";
+  const EXPORT_PATH = "/mod/forum/export.php";
 
   const object = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
   const parseInput = () => {
@@ -194,11 +198,17 @@ export async function executeMoodleForumPostInPage(rawInput) {
   };
   const boundedText = async (response, endpoint, context) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext()) || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -206,14 +216,14 @@ export async function executeMoodleForumPostInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -222,6 +232,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
     try {
       response = await fetch(endpoint, {
         method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" },
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_forum_post_read_unavailable" }; }
     const html = await boundedText(response, endpoint, context);
@@ -242,6 +253,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname: method, args: methodArgs }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_forum_post_service_unavailable" }; }
     const raw = await boundedText(response, endpoint, context);
@@ -269,6 +281,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: new URLSearchParams({ sesskey: context.sesskey, itemid: itemId, filepath: "/" }),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return null; }
     const raw = await boundedText(response, endpoint, context);
@@ -327,74 +340,156 @@ export async function executeMoodleForumPostInPage(rawInput) {
     }
     return { forumId, forumName: name, visible: visible === "1", status: page.status };
   };
-  const postRecord = (value, discussionId) => {
-    if (!object(value)) return null;
-    const postId = id(value.id);
-    const hasParent = value.hasparent === true;
-    const parent = hasParent ? id(value.parentid) : (value.parentid === null || value.parentid === 0 ? "" : null);
-    if (!postId || parent === null || (hasParent && !parent) || id(value.discussionid) !== discussionId
-      || typeof value.subject !== "string" || typeof value.message !== "string" || typeof value.isdeleted !== "boolean"
-      || typeof value.isprivatereply !== "boolean" || !Array.isArray(value.attachments)) return null;
-    return {
-      post_id: postId,
-      parent_post_id: parent,
-      subject: value.subject,
-      deleted: value.isdeleted,
-      private_reply: value.isprivatereply,
-      attachment_count: value.attachments.length,
-      message: value.message,
-    };
+  const parseCsv = (raw) => {
+    const rows = [];
+    let row = [];
+    let field = "";
+    let quoted = false;
+    const source = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    for (let index = 0; index < source.length; index += 1) {
+      const character = source[index];
+      if (quoted) {
+        if (character === '"' && source[index + 1] === '"') { field += character; index += 1; }
+        else if (character === '"') quoted = false;
+        else field += character;
+        continue;
+      }
+      if (character === '"') {
+        if (field) return null;
+        quoted = true;
+      } else if (character === ",") {
+        row.push(field); field = "";
+      } else if (character === "\n") {
+        if (field.endsWith("\r")) field = field.slice(0, -1);
+        row.push(field); rows.push(row); row = []; field = "";
+        if (rows.length > MAX_FORUM_POSTS + 1) return "limit";
+      } else field += character;
+    }
+    if (quoted) return null;
+    if (field || row.length) { row.push(field); rows.push(row); }
+    return rows;
   };
   /**
-   * The exact discussion, read through Moodle's own AJAX post list. That
-   * response names the Forum and the course the discussion belongs to, which
-   * is what binds a caller-supplied discussion ID to the approved Forum.
+   * Moodle's native Forum export reads saved posts without changing unread
+   * tracking. The AJAX post-list methods are not used because Moodle 5.2.2
+   * marks the returned posts read.
    */
-  const discussionState = async (context, courseId, forumId, discussionId) => {
-    const result = await ajax(context, "mod_forum_get_discussion_posts", {
-      discussionid: Number(discussionId), sortby: "id", sortdirection: "ASC",
+  const forumPosts = async (context, forumId) => {
+    const endpoint = urlFor(context, EXPORT_PATH, { id: forumId });
+    const page = await readPage(context, endpoint);
+    if (page.limited) return { limited: true, status: page.status };
+    if (page.error) return { error: page.error, status: page.status };
+    const forms = [...page.document.querySelectorAll("form")].filter((form) => {
+      if (String(form.getAttribute("method") || "").toLowerCase() !== "post") return false;
+      try {
+        const action = new URL(form.getAttribute("action") || "", endpoint);
+        return action.origin === endpoint.origin && action.pathname === `${context.basePath}${EXPORT_PATH}`
+          && !action.search && !action.hash && !action.username && !action.password;
+      } catch { return false; }
     });
-    if (result.limited) return { limited: true, status: result.status };
-    if (result.error) return { error: result.error, status: result.status };
-    const data = result.data;
-    if (id(data.forumid) !== forumId || id(data.courseid) !== courseId || !Array.isArray(data.posts) || !Array.isArray(data.warnings)) {
-      return { error: "moodle_forum_post_discussion_unavailable", status: result.status };
+    if (forms.length !== 1) return { error: "moodle_forum_post_export_unavailable", status: page.status };
+    const form = forms[0];
+    const controls = [...form.querySelectorAll("input[name], select[name], textarea[name]")].filter((control) => !control.disabled);
+    const allowed = new Set(["id", "sesskey", "format", "striphtml", "humandates", "submitbutton", "cancel", "useridsselected", "discussionids"]);
+    const nativeField = (name) => allowed.has(name) || ["useridsselected[]", "discussionids[]"].includes(name)
+      || /^_qf__/.test(name) || /^mform_isexpanded_[A-Za-z0-9_]+$/.test(name)
+      || /^(?:from|to)\[(?:enabled|year|month|day|hour|minute)\]$/.test(name);
+    if (controls.some((control) => !nativeField(control.name))) {
+      return { error: "moodle_forum_post_export_unavailable", status: page.status };
     }
-    if (data.posts.length > MAX_POSTS) return { limited: true, status: result.status };
+    const values = new FormData();
+    for (const control of controls) {
+      if (!/^_qf__/.test(control.name) && !/^mform_isexpanded_[A-Za-z0-9_]+$/.test(control.name)
+        && control.name !== "id" && control.name !== "sesskey") continue;
+      if (!(control instanceof HTMLInputElement) || !["checkbox", "radio"].includes(control.type) || control.checked) {
+        values.append(control.name, control.value);
+      }
+    }
+    const formValues = [...values.entries()];
+    if (valuesOf(formValues, "id").length !== 1 || one(formValues, "id") !== forumId
+      || valuesOf(formValues, "sesskey").length !== 1 || one(formValues, "sesskey") !== context.sesskey) {
+      return { error: "moodle_forum_post_export_unavailable", status: page.status };
+    }
+    const formats = [...form.querySelectorAll('select[name="format"]')];
+    const submits = [...form.querySelectorAll('input[type="submit"][name], button[type="submit"][name]')]
+      .filter((control) => !control.disabled && control.name === "submitbutton");
+    if (formats.length !== 1 || ![...formats[0].options].some((option) => option.value === "csv")
+      || submits.length !== 1 || !validText(submits[0].value, 500)) {
+      return { error: "moodle_forum_post_export_unavailable", status: page.status };
+    }
+    values.append("format", "csv");
+    values.append("submitbutton", submits[0].value);
+    const action = new URL(forms[0].getAttribute("action") || "", endpoint);
+    let response;
+    try {
+      response = await fetch(action, {
+        method: "POST", credentials: "include", cache: "no-store", redirect: "error",
+        headers: { Accept: "text/csv" }, body: values,
+        signal: requestSignal(input?.expiresAt),
+      });
+    } catch { return { error: "moodle_forum_post_export_unavailable" }; }
+    const raw = await boundedText(response, action, context);
+    if (raw === "limit") return { limited: true, status: response.status };
+    if (typeof raw !== "string") return { error: "moodle_forum_post_export_unavailable", status: response.status };
+    const rows = parseCsv(raw);
+    if (rows === "limit") return { limited: true, status: response.status };
+    const expected = ["id", "discussion", "parent", "userid", "userfullname", "created", "modified", "mailed", "subject", "message",
+      "messageformat", "messagetrust", "attachment", "totalscore", "mailnow", "deleted", "privatereplyto",
+      "privatereplytofullname", "wordcount", "charcount"];
+    if (!Array.isArray(rows) || rows.length < 1 || rows[0].length !== expected.length
+      || expected.some((name, index) => rows[0][index] !== name)) {
+      return { error: "moodle_forum_post_response_invalid", status: response.status };
+    }
+    const columns = new Map(rows[0].map((name, index) => [name, index]));
     const posts = [];
     const seen = new Set();
-    for (const entry of data.posts) {
-      const post = postRecord(entry, discussionId);
-      if (!post || seen.has(post.post_id)) return { error: "moodle_forum_post_response_invalid", status: result.status };
-      seen.add(post.post_id);
-      posts.push(post);
+    for (const row of rows.slice(1)) {
+      const postId = row.length === expected.length ? id(row[columns.get("id")]) : "";
+      const discussionId = id(row[columns.get("discussion")]);
+      const parentRaw = row[columns.get("parent")];
+      const parentId = parentRaw === "0" || parentRaw === "" ? "" : id(parentRaw);
+      const authorId = id(row[columns.get("userid")]);
+      const deleted = row[columns.get("deleted")];
+      const privateReplyTo = row[columns.get("privatereplyto")];
+      const attachment = row[columns.get("attachment")];
+      if (!postId || !discussionId || parentId === null || (parentRaw !== "0" && parentRaw !== "" && !parentId) || !authorId
+        || seen.has(postId) || typeof row[columns.get("subject")] !== "string" || typeof row[columns.get("message")] !== "string"
+        || !["0", "1"].includes(deleted) || (privateReplyTo !== "0" && privateReplyTo !== "" && !id(privateReplyTo))) {
+        return { error: "moodle_forum_post_response_invalid", status: response.status };
+      }
+      seen.add(postId);
+      posts.push({
+        post_id: postId,
+        discussion_id: discussionId,
+        parent_post_id: parentId,
+        author_id: authorId,
+        subject: row[columns.get("subject")],
+        message: row[columns.get("message")],
+        deleted: deleted === "1",
+        private_reply: privateReplyTo !== "0" && privateReplyTo !== "",
+        has_attachment: attachment !== "0" && attachment !== "",
+      });
     }
+    return { posts, status: response.status };
+  };
+  const discussionState = async (context, courseId, forumId, discussionId) => {
+    const result = await forumPosts(context, forumId);
+    if (result.limited || result.error) return result;
+    const posts = result.posts.filter((post) => post.discussion_id === discussionId);
+    if (posts.length > MAX_POSTS) return { limited: true, status: result.status };
     const roots = posts.filter((post) => post.parent_post_id === "");
-    if (roots.length !== 1) return { error: "moodle_forum_post_response_invalid", status: result.status };
+    if (roots.length !== 1) return { error: "moodle_forum_post_discussion_unavailable", status: result.status };
     return { posts, subject: roots[0].subject, status: result.status };
   };
-  /**
-   * Every discussion in this exact Forum that the signed-in person has posted
-   * in. Moodle 5.2.2 registers no discussion-list read for the browser, so
-   * this is the only route that can name a discussion Morrow has just started.
-   */
-  const ownDiscussions = async (context, moduleId) => {
-    const result = await ajax(context, "mod_forum_get_discussion_posts_by_userid", {
-      userid: Number(context.principalId), cmid: Number(moduleId), sortby: "id", sortdirection: "ASC",
-    });
-    if (result.limited) return { limited: true, status: result.status };
-    if (result.error) return { error: result.error, status: result.status };
-    const discussions = result.data.discussions;
-    if (!Array.isArray(discussions) || discussions.length > MAX_OWN_DISCUSSIONS) {
-      return { error: "moodle_forum_post_response_invalid", status: result.status };
-    }
+  const ownDiscussions = async (context, forumId) => {
+    const result = await forumPosts(context, forumId);
+    if (result.limited || result.error) return result;
+    const roots = result.posts.filter((post) => post.parent_post_id === "" && post.author_id === context.principalId);
+    if (roots.length > MAX_OWN_DISCUSSIONS) return { limited: true, status: result.status };
     const found = new Map();
-    for (const entry of discussions) {
-      const discussionId = object(entry) ? id(entry.id) : "";
-      if (!discussionId || found.has(discussionId) || typeof entry.name !== "string") {
-        return { error: "moodle_forum_post_response_invalid", status: result.status };
-      }
-      found.set(discussionId, entry.name);
+    for (const post of roots) {
+      if (found.has(post.discussion_id)) return { error: "moodle_forum_post_response_invalid", status: result.status };
+      found.set(post.discussion_id, post.subject);
     }
     return { discussions: found, status: result.status };
   };
@@ -411,10 +506,10 @@ export async function executeMoodleForumPostInPage(rawInput) {
     subject: post.subject,
     deleted: post.deleted,
     private_reply: post.private_reply,
-    attachment_count: post.attachment_count,
+    has_attachment: post.has_attachment,
   }));
   const targetProof = (discussionBound) => ({
-    method: discussionBound ? "mod_forum_get_discussion_posts" : "course_modedit_form",
+    method: discussionBound ? "native_forum_csv_export" : "course_modedit_form",
     exact_module_binding: "course_modedit_form",
     required_capability: CAPABILITIES.target,
     scope: "one_forum_module",
@@ -443,11 +538,11 @@ export async function executeMoodleForumPostInPage(rawInput) {
     exact_module_binding: "course_modedit_form",
     required_capability: CAPABILITIES[kind],
     dispatch_count: 1,
-    readback: kind === "discussion" ? "mod_forum_get_discussion_posts_by_userid" : "mod_forum_get_discussion_posts",
+    readback: "native_forum_csv_export",
     // Moodle 5.2.2 has no browser-callable read that returns a discussion's
     // locked, pinned, or subscribed state. For those three the saved state is
     // the one Moodle's own set-state method returned after it saved, and the
-    // post-list read proves only the exact Forum binding and that no post
+    // The native export proves only the exact Forum binding and that no post
     // changed.
     saved_state_source: kind === "discussion" || kind === "reply" ? "native_readback" : "native_set_state_response",
     learner_visible: learnerVisible,
@@ -484,7 +579,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
     if (kind === "target") {
       return {
         ok: true,
-        sent: true,
+        sent: false,
         status: before?.status ?? bound.status,
         data: targetData(args.courseId, args.moduleId, bound, args.discussionId, before),
         targets: targetsFor(bound.forumName, args.discussionId ? before.subject : ""),
@@ -554,7 +649,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
       };
     }
 
-    const ownBefore = kind === "discussion" ? await ownDiscussions(context, args.moduleId) : null;
+    const ownBefore = kind === "discussion" ? await ownDiscussions(context, bound.forumId) : null;
     if (ownBefore?.limited) return incomplete("moodle_forum_post_incomplete");
     if (ownBefore?.error) return failure(ownBefore.error, ownBefore.status);
 
@@ -636,6 +731,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
       response = await fetch(postAction, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" }, body,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return unconfirmedWrite("moodle_forum_post_write_unconfirmed"); }
     if (!sameContext(context, currentContext())) return unconfirmedWrite("moodle_forum_post_write_unconfirmed", response.status);
@@ -668,7 +764,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
       }
       const saved = added[0];
       if (saved.parent_post_id !== args.parentPostId || saved.subject !== args.subject || saved.message !== args.messageHtml
-        || saved.deleted || saved.private_reply || saved.attachment_count !== 0) {
+        || saved.deleted || saved.private_reply || saved.has_attachment) {
         return mismatchWrite("moodle_forum_post_readback_mismatch", sentStatus);
       }
       return {
@@ -686,7 +782,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
       };
     }
 
-    const ownAfter = await ownDiscussions(context, args.moduleId);
+    const ownAfter = await ownDiscussions(context, bound.forumId);
     if (ownAfter.limited || ownAfter.error) return unconfirmedWrite("moodle_forum_post_readback_unconfirmed", sentStatus);
     const added = [...ownAfter.discussions.keys()].filter((entry) => !ownBefore.discussions.has(entry));
     if (added.length !== 1) return unconfirmedWrite("moodle_forum_post_readback_unconfirmed", sentStatus);
@@ -696,7 +792,7 @@ export async function executeMoodleForumPostInPage(rawInput) {
     if (created.limited || created.error) return unconfirmedWrite("moodle_forum_post_readback_unconfirmed", sentStatus);
     const saved = created.posts.length === 1 ? created.posts[0] : null;
     if (!saved || saved.parent_post_id !== "" || saved.subject !== args.subject || saved.message !== args.messageHtml
-      || saved.deleted || saved.private_reply || saved.attachment_count !== 0) {
+      || saved.deleted || saved.private_reply || saved.has_attachment) {
       return mismatchWrite("moodle_forum_post_readback_mismatch", sentStatus);
     }
     return {

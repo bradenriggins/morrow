@@ -109,7 +109,7 @@ async function inflate(bytes, format, budget, limit = MAX_PART_BYTES) {
       if (done) break;
       length += value.byteLength;
       if (length > cap) {
-        await reader.cancel();
+        try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
         return null;
       }
       chunks.push(value);

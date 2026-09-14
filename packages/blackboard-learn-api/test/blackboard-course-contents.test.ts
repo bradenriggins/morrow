@@ -88,7 +88,12 @@ const boundCourse: JsonObject = {
   id: courseId, courseId: "BIO-101", name: "Biology with Jane Doe", ultraStatus: "Ultra", availability: { available: "Yes" },
 };
 const unboundCourse: JsonObject = {
-  id: otherCourseId, courseId: "CHM-101", name: "Chemistry", ultraStatus: "Original", availability: { available: "No" },
+  id: otherCourseId,
+  courseId: "Morgan Lee Seminar",
+  name: "Chemistry with Morgan Lee",
+  description: "Morgan Lee leads this course.",
+  ultraStatus: "Original",
+  availability: { available: "No" },
 };
 
 interface FixtureOptions {
@@ -247,6 +252,7 @@ describe("Blackboard course and content-tree reads", () => {
     const coursesText = JSON.stringify(courses);
     expect(coursesText).not.toContain("Jane Doe");
     expect(coursesText).not.toContain("jane.doe@example.edu");
+    expect(coursesText).not.toContain("Morgan Lee");
     expect(coursesText).toContain("Biology with");
   });
 
@@ -321,9 +327,19 @@ describe("Blackboard course and content-tree reads", () => {
       id: courseId, courseId: "BIO-101", ultraStatus: "Ultra", availability: { available: "Yes" },
       connected: true, sourceBindingId: fixture.binding,
     });
-    expect(courses[1]).toMatchObject({ id: otherCourseId, courseId: "CHM-101", ultraStatus: "Original", connected: false });
+    expect(courses[1]).toEqual({
+      id: otherCourseId,
+      textWithheld: true,
+      textWithheldReason: "course_roster_unavailable",
+      ultraStatus: "Original",
+      availability: { available: "No" },
+      connected: false,
+    });
     expect(courses[1]?.sourceBindingId).toBeUndefined();
     expect(fixture.query(coursesPath)).toContain("expand=course");
+    expect(fixture.requests().filter((request) => request.endsWith("/users"))).toEqual([
+      `GET /learn/api/public/v1/courses/${courseId}/users`,
+    ]);
   });
 
   it("leaves out a membership with no course record and refuses one that names another account", async () => {

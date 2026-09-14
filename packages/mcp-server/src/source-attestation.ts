@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { realpathSync, statSync } from "node:fs";
-import { isAbsolute, relative, resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { accessSync, constants, readFileSync, realpathSync, statSync } from "node:fs";
+import { delimiter, isAbsolute, relative, resolve } from "node:path";
 import {
   sha256Json,
   sha256Text,
@@ -16,6 +17,27 @@ export interface LocalGitSourceAttestationConfig {
   readonly expectedTrackedPatchDigest?: string;
   readonly expectedToolCount?: number;
   readonly expectedCatalogDigest?: string;
+}
+
+export interface LocalGitLaunchAttestationConfig {
+  readonly entrypoint: string;
+  readonly entrypointArgumentIndex: number;
+  readonly expectedEntrypointSha256?: string;
+  readonly runtime:
+    | { readonly kind: "current-node" }
+    | { readonly kind: "sha256"; readonly expectedExecutableSha256: string };
+}
+
+export interface LocalStdioLaunch {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd?: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+export interface VerifiedLocalGitStdioLaunch {
+  readonly launch: LocalStdioLaunch;
+  readonly attestation: SourceAttestationHealth;
 }
 
 export interface RemoteGitSshSourceAttestationConfig {
@@ -248,6 +270,208 @@ function changedTrackedPaths(root: string): readonly string[] {
 
 function trackedPatchDigest(root: string): string {
   return sha256Text(gitRaw(root, "diff", "--binary", "--no-ext-diff", "HEAD", "--"));
+}
+
+function fileDigest(path: string): string {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
+}
+
+function canonicalExistingFile(path: string, code: string, message: string): string {
+  let canonical: string;
+  try {
+    canonical = realpathSync(path);
+  } catch {
+    throw new SourceAttestationError(code, message);
+  }
+  if (!statSync(canonical).isFile()) {
+    throw new SourceAttestationError(code, message);
+  }
+  return canonical;
+}
+
+function executableCandidates(command: string, cwd: string, environment: Readonly<Record<string, string>>): readonly string[] {
+  if (isAbsolute(command)) return [command];
+  if (command.includes("/") || command.includes("\\")) return [resolve(cwd, command)];
+  const paths = String(environment.PATH || environment.Path || "").split(delimiter).filter(Boolean);
+  if (process.platform !== "win32") return paths.map((path) => resolve(path, command));
+  const extensions = String(environment.PATHEXT || ".COM;.EXE;.BAT;.CMD")
+    .split(";")
+    .filter(Boolean);
+  return paths.flatMap((path) => extensions.map((extension) => resolve(path, `${command}${extension}`)));
+}
+
+function canonicalExecutable(
+  command: string,
+  cwd: string,
+  environment: Readonly<Record<string, string>>,
+): string {
+  for (const candidate of executableCandidates(command, cwd, environment)) {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return canonicalExistingFile(
+        candidate,
+        "source_launch_executable_unavailable",
+        "The attested launch executable does not exist or is not executable.",
+      );
+    } catch (error) {
+      if (error instanceof SourceAttestationError) continue;
+    }
+  }
+  throw new SourceAttestationError(
+    "source_launch_executable_unavailable",
+    "The attested launch executable could not be resolved through the exact launch environment.",
+  );
+}
+
+function isTrackedAtHead(root: string, path: string): boolean {
+  try {
+    execFileSync("git", ["-C", root, "ls-files", "--error-unmatch", "--", path], {
+      stdio: ["ignore", "ignore", "ignore"],
+      timeout: 15_000,
+      windowsHide: true,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function verifyLocalGitStdioLaunch(
+  sourceId: string,
+  repository: string | undefined,
+  config: LocalGitSourceAttestationConfig & { readonly launch: LocalGitLaunchAttestationConfig },
+  launch: LocalStdioLaunch,
+  now: () => Date = () => new Date(),
+): VerifiedLocalGitStdioLaunch {
+  const base = verifyLocalGitSourceAttestation(sourceId, repository, config, now);
+  const root = repositoryRoot(config.root);
+  if (!launch.cwd) {
+    throw new SourceAttestationError(
+      "source_launch_cwd_missing",
+      `Source ${sourceId} requires an explicit launch working directory.`,
+    );
+  }
+  let cwd: string;
+  try {
+    cwd = realpathSync(launch.cwd);
+  } catch {
+    throw new SourceAttestationError(
+      "source_launch_cwd_unavailable",
+      `Source ${sourceId} launch working directory does not exist.`,
+    );
+  }
+  if (cwd !== root) {
+    throw new SourceAttestationError(
+      "source_launch_cwd_mismatch",
+      `Source ${sourceId} must launch from its exact attested Git worktree root.`,
+    );
+  }
+
+  const entrypoint = exactTrackedPath(config.launch.entrypoint);
+  const expectedEntrypoint = canonicalExistingFile(
+    resolve(root, entrypoint),
+    "source_launch_entrypoint_unavailable",
+    `Source ${sourceId} attested entrypoint does not exist or is not a regular file.`,
+  );
+  const entrypointRelative = relative(root, expectedEntrypoint).replaceAll("\\", "/");
+  if (!entrypointRelative || entrypointRelative.startsWith("../") || isAbsolute(entrypointRelative)) {
+    throw new SourceAttestationError(
+      "source_launch_entrypoint_outside_root",
+      `Source ${sourceId} attested entrypoint resolves outside its Git worktree.`,
+    );
+  }
+  const argumentIndex = config.launch.entrypointArgumentIndex;
+  if (!Number.isSafeInteger(argumentIndex) || argumentIndex < 0 || argumentIndex >= launch.args.length) {
+    throw new SourceAttestationError(
+      "source_launch_entrypoint_argument_invalid",
+      `Source ${sourceId} attested entrypoint argument does not exist.`,
+    );
+  }
+  const configuredArgument = launch.args[argumentIndex]!;
+  const actualEntrypoint = canonicalExistingFile(
+    isAbsolute(configuredArgument) ? configuredArgument : resolve(cwd, configuredArgument),
+    "source_launch_entrypoint_unavailable",
+    `Source ${sourceId} launch entrypoint does not exist or is not a regular file.`,
+  );
+  if (actualEntrypoint !== expectedEntrypoint) {
+    throw new SourceAttestationError(
+      "source_launch_entrypoint_mismatch",
+      `Source ${sourceId} launch does not execute the entrypoint inside its attested Git worktree.`,
+    );
+  }
+
+  const entrypointDigest = fileDigest(actualEntrypoint);
+  const expectedEntrypointDigest = exactDigest(
+    config.launch.expectedEntrypointSha256,
+    "expectedEntrypointSha256",
+    "source_launch_entrypoint_digest_invalid",
+  );
+  if (!isTrackedAtHead(root, entrypoint) && !expectedEntrypointDigest) {
+    throw new SourceAttestationError(
+      "source_launch_entrypoint_untracked",
+      `Source ${sourceId} launch entrypoint is not tracked at the attested revision and has no expected byte digest.`,
+    );
+  }
+  if (expectedEntrypointDigest && entrypointDigest !== expectedEntrypointDigest) {
+    throw new SourceAttestationError(
+      "source_launch_entrypoint_digest_mismatch",
+      `Source ${sourceId} launch entrypoint bytes do not match the configured digest.`,
+    );
+  }
+
+  const executable = canonicalExecutable(launch.command, cwd, launch.env);
+  const executableDigest = fileDigest(executable);
+  if (config.launch.runtime.kind === "current-node") {
+    if (executable !== realpathSync(process.execPath)) {
+      throw new SourceAttestationError(
+        "source_launch_runtime_mismatch",
+        `Source ${sourceId} must use the current verified Node.js executable.`,
+      );
+    }
+  } else {
+    const expectedExecutableDigest = exactDigest(
+      config.launch.runtime.expectedExecutableSha256,
+      "expectedExecutableSha256",
+      "source_launch_executable_digest_invalid",
+    );
+    if (executableDigest !== expectedExecutableDigest) {
+      throw new SourceAttestationError(
+        "source_launch_executable_digest_mismatch",
+        `Source ${sourceId} launch executable bytes do not match the configured digest.`,
+      );
+    }
+  }
+
+  const args = [...launch.args];
+  args[argumentIndex] = expectedEntrypoint;
+  const canonicalLaunch: LocalStdioLaunch = {
+    command: executable,
+    args,
+    cwd,
+    env: { ...launch.env },
+  };
+  const launchDigest = sha256Json({
+    schema: "morrow.local-stdio-launch.v1",
+    sourceId,
+    rootDigest: base.rootDigest,
+    revision: base.actualRevision,
+    executable,
+    executableDigest,
+    args,
+    cwd,
+    environment: Object.entries(launch.env).sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0),
+    entrypointArgumentIndex: argumentIndex,
+    entrypointDigest,
+  });
+  return {
+    launch: canonicalLaunch,
+    attestation: {
+      ...base,
+      launchDigest,
+      executableDigest,
+      entrypointDigest,
+    },
+  };
 }
 
 export function verifyLocalGitSourceAttestation(

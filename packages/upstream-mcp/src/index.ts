@@ -27,6 +27,18 @@ export interface UpstreamSupervisionOptions {
   readonly maxBackoffMs?: number;
 }
 
+export interface StdioUpstreamLaunch {
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly cwd?: string;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+export interface PreparedStdioUpstreamLaunch {
+  readonly launch: StdioUpstreamLaunch;
+  readonly sourceAttestation?: SourceAttestationHealth;
+}
+
 export interface StdioUpstreamOptions {
   readonly internalSourceCapability?: string;
   readonly id: string;
@@ -45,6 +57,9 @@ export interface StdioUpstreamOptions {
   readonly supervision?: UpstreamSupervisionOptions;
   readonly now?: () => Date;
   readonly beforeConnect?: () => void | Promise<void>;
+  readonly prepareLaunch?: (
+    launch: StdioUpstreamLaunch,
+  ) => PreparedStdioUpstreamLaunch | Promise<PreparedStdioUpstreamLaunch>;
 }
 
 export interface UpstreamCallOptions {
@@ -111,11 +126,38 @@ function exactSupervision(value: UpstreamSupervisionOptions | undefined): ExactS
   return supervision;
 }
 
-function wait(milliseconds: number, unref: boolean): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, milliseconds);
+function closedError(id: string): Error {
+  return new Error(`Upstream ${id} is closed`);
+}
+
+function wait(milliseconds: number, unref: boolean, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error("Upstream reconnect cancelled"));
+  return new Promise((resolve, reject) => {
+    const finish = () => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      reject(signal.reason ?? new Error("Upstream reconnect cancelled"));
+    };
+    const timer = setTimeout(finish, milliseconds);
     if (unref) timer.unref();
+    signal.addEventListener("abort", onAbort, { once: true });
   });
+}
+
+interface ProvisionalConnection {
+  readonly client: Client;
+  readonly transport: StrictStdioClientTransport;
+  closePromise?: Promise<void>;
+}
+
+interface ConnectionRun {
+  readonly controller: AbortController;
+  phase: "preparing" | "backoff" | "initializing" | "established";
+  provisional: ProvisionalConnection | null;
 }
 
 export class StdioMcpUpstream {
@@ -127,7 +169,7 @@ export class StdioMcpUpstream {
   private readonly options: StdioUpstreamOptions;
   private readonly expectedToolCount: number | undefined;
   private readonly expectedCatalogDigest: string | undefined;
-  private readonly sourceAttestation: SourceAttestationHealth | undefined;
+  private sourceAttestation: SourceAttestationHealth | undefined;
   private readonly catalogTruth: CatalogTruthHealth | undefined;
   private readonly supervision: ExactSupervision;
   private readonly supervisionEnabled: boolean;
@@ -137,6 +179,8 @@ export class StdioMcpUpstream {
   private catalogDigest: string | undefined;
   private errorDigest: string | undefined;
   private connectionPromise: Promise<readonly UpstreamTool[]> | null = null;
+  private connectionRun: ConnectionRun | null = null;
+  private closePromise: Promise<void> | null = null;
   private closed = false;
   private connectionGeneration = 0;
   private startupAttempts = 0;
@@ -213,9 +257,34 @@ export class StdioMcpUpstream {
     return catalogDigest;
   }
 
-  private async connectOnce(): Promise<readonly UpstreamTool[]> {
-    if (this.closed) throw new Error(`Upstream ${this.id} is closed`);
+  private assertConnectionOpen(run: ConnectionRun): void {
+    if (this.closed || run.controller.signal.aborted) throw closedError(this.id);
+  }
+
+  private closeProvisional(connection: ProvisionalConnection): Promise<void> {
+    if (connection.closePromise) return connection.closePromise;
+    connection.client.onclose = undefined;
+    connection.closePromise = (async () => {
+      let clientError: unknown;
+      try {
+        await connection.client.close();
+      } catch (error) {
+        clientError = error;
+      }
+      try {
+        await connection.transport.close();
+      } catch (error) {
+        if (clientError === undefined) clientError = error;
+      }
+      if (clientError !== undefined) throw clientError;
+    })();
+    return connection.closePromise;
+  }
+
+  private async connectOnce(run: ConnectionRun): Promise<readonly UpstreamTool[]> {
+    this.assertConnectionOpen(run);
     await this.options.beforeConnect?.();
+    this.assertConnectionOpen(run);
     this.reconnectState = "connecting";
     this.nextRetryAt = undefined;
     const client = new Client({
@@ -232,7 +301,7 @@ export class StdioMcpUpstream {
       this.handleClientClose(client);
     };
 
-    const transport = new StrictStdioClientTransport({
+    const baseLaunch: StdioUpstreamLaunch = {
       command: this.options.command,
       args: [...(this.options.args ?? [])],
       env: {
@@ -241,6 +310,17 @@ export class StdioMcpUpstream {
         ...(this.options.internalSourceCapability ? { MORROW_INTERNAL_SOURCE_CAPABILITY: this.options.internalSourceCapability } : {}),
       },
       ...(this.options.cwd ? { cwd: this.options.cwd } : {}),
+    };
+    const prepared = this.options.prepareLaunch
+      ? await this.options.prepareLaunch(baseLaunch)
+      : { launch: baseLaunch };
+    this.assertConnectionOpen(run);
+    if (prepared.sourceAttestation) this.sourceAttestation = prepared.sourceAttestation;
+    const transport = new StrictStdioClientTransport({
+      command: prepared.launch.command,
+      args: [...prepared.launch.args],
+      env: { ...prepared.launch.env },
+      ...(prepared.launch.cwd ? { cwd: prepared.launch.cwd } : {}),
       maxBufferSize: UPSTREAM_MAX_BUFFER_SIZE,
     });
     let stderr = "";
@@ -248,18 +328,23 @@ export class StdioMcpUpstream {
       if (stderr.length >= UPSTREAM_STDERR_LIMIT) return;
       stderr += chunk.toString().slice(0, UPSTREAM_STDERR_LIMIT - stderr.length);
     });
+    const provisional: ProvisionalConnection = { client, transport };
+    run.provisional = provisional;
+    run.phase = "initializing";
 
     try {
-      await client.connect(transport);
+      await client.connect(transport, { signal: run.controller.signal });
       if (protocolError) throw protocolError;
-      const listed = await client.listTools();
+      const listed = await client.listTools(undefined, { signal: run.controller.signal });
       if (protocolError) throw protocolError;
       const normalized = this.normalizeTools(listed);
       const catalogDigest = this.assertCatalog(normalized);
-      if (connectionClosed || this.closed) {
+      if (connectionClosed || this.closed || run.controller.signal.aborted) {
         throw new Error(`Upstream ${this.id} closed during initialization`);
       }
       this.client = client;
+      run.provisional = null;
+      run.phase = "established";
       this.tools = normalized;
       this.catalogDigest = catalogDigest;
       this.errorDigest = undefined;
@@ -272,7 +357,9 @@ export class StdioMcpUpstream {
       const detail = error instanceof Error ? `${error.name}:${error.message}` : String(error);
       this.errorDigest = sha256Text(stderr ? `${detail}\n${stderr}` : detail);
       this.catalogDigest = undefined;
-      await client.close().catch(() => undefined);
+      await this.closeProvisional(provisional).catch(() => undefined);
+      if (run.provisional === provisional) run.provisional = null;
+      if (this.closed || run.controller.signal.aborted) throw closedError(this.id);
       throw error;
     }
   }
@@ -280,24 +367,30 @@ export class StdioMcpUpstream {
   private async runConnectionAttempts(
     maximum: number,
     reconnect: boolean,
+    run: ConnectionRun,
   ): Promise<readonly UpstreamTool[]> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= maximum; attempt += 1) {
-      if (this.closed) throw new Error(`Upstream ${this.id} is closed`);
+      this.assertConnectionOpen(run);
       if (reconnect || attempt > 1) {
         const delay = this.backoff(attempt);
+        run.phase = "backoff";
         this.reconnectState = "waiting";
         this.reconnectAttempt = attempt;
         this.nextRetryAt = new Date(this.now().getTime() + delay).toISOString();
-        await wait(delay, reconnect);
+        await wait(delay, reconnect, run.controller.signal);
+        this.assertConnectionOpen(run);
       }
       if (!reconnect) this.startupAttempts = attempt;
+      run.phase = "preparing";
       try {
-        return await this.connectOnce();
+        return await this.connectOnce(run);
       } catch (error) {
+        if (this.closed || run.controller.signal.aborted) throw closedError(this.id);
         lastError = error;
       }
     }
+    this.assertConnectionOpen(run);
     this.reconnectState = "exhausted";
     this.reconnectAttempt = maximum;
     this.nextRetryAt = undefined;
@@ -305,15 +398,23 @@ export class StdioMcpUpstream {
   }
 
   private startConnection(reconnect: boolean): Promise<readonly UpstreamTool[]> {
+    if (this.closed) return Promise.reject(closedError(this.id));
     if (this.client) return Promise.resolve(this.tools);
     if (this.connectionPromise) return this.connectionPromise;
     const maximum = reconnect
       ? this.supervision.reconnectAttempts
       : this.supervision.startupAttempts;
-    const pending = this.runConnectionAttempts(maximum, reconnect);
+    const run: ConnectionRun = {
+      controller: new AbortController(),
+      phase: "preparing",
+      provisional: null,
+    };
+    this.connectionRun = run;
+    const pending = this.runConnectionAttempts(maximum, reconnect, run);
     this.connectionPromise = pending;
     void pending.catch(() => undefined).finally(() => {
       if (this.connectionPromise === pending) this.connectionPromise = null;
+      if (this.connectionRun === run) this.connectionRun = null;
     });
     return pending;
   }
@@ -417,17 +518,28 @@ export class StdioMcpUpstream {
     };
   }
 
-  async close(): Promise<void> {
+  close(): Promise<void> {
+    if (this.closePromise) return this.closePromise;
     this.closed = true;
     this.reconnectState = "closed";
     this.nextRetryAt = undefined;
     const client = this.client;
+    const run = this.connectionRun;
+    const provisional = run?.provisional ?? null;
+    const pendingConnection = this.connectionPromise;
     this.client = null;
     this.tools = [];
     this.catalogDigest = undefined;
-    if (client) {
-      client.onclose = undefined;
-      await client.close();
-    }
+    run?.controller.abort(closedError(this.id));
+    const canJoinConnection = run?.phase !== "preparing";
+    this.closePromise = (async () => {
+      if (client) {
+        client.onclose = undefined;
+        await client.close();
+      }
+      if (provisional) await this.closeProvisional(provisional);
+      if (canJoinConnection) await pendingConnection?.catch(() => undefined);
+    })();
+    return this.closePromise;
   }
 }

@@ -2,9 +2,10 @@ import { canonicalJson, isJsonObject, sha256Text, type JsonObject, type SourceCa
 import * as z from "zod/v4";
 import type { BlackboardLearnClient } from "../client.js";
 import type { BlackboardEffectGrant } from "../effect-grant.js";
+import { BLACKBOARD_GROUP_MEMBERSHIP_IDENTITY_FIELD, BLACKBOARD_PROVIDER_CONTRACT } from "../provider-contract.js";
 import { redactInto, type BlackboardCourseRead, type BlackboardLearnRuntime, type PreparedRoster } from "../runtime.js";
 import { BLACKBOARD_ID, BlackboardApiError, withBlackboardDispatchState, type BlackboardDispatchState } from "../types.js";
-import { blackboardTool, effectGrantInput, patchInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
+import { blackboardTool, effectGrantInput, effectReceiptReferenceInput, patchInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
 import { READ_ANNOTATIONS, READ_BEHAVIOR, READ_PROFILES } from "./course-read.js";
 // One field list is pinned on a single-record read the same way everywhere in
 // this server, so this module uses that helper rather than a second copy.
@@ -49,7 +50,7 @@ const GROUP_MEMBERSHIP_ROUTE = `${GROUP_MEMBERS_ROUTE}/{user_id}`;
 const GROUP_FIELDS = ["id", "name", "description", "availability", "groupSetId"];
 
 /** The exact fields every group membership read asks for. */
-const MEMBER_FIELDS = ["id", "groupId", "userId"];
+const MEMBER_FIELDS = BLACKBOARD_PROVIDER_CONTRACT.groupMembership.fields;
 
 /**
  * Morrow's own bounds on one reviewed group. They are not tenant limits: no
@@ -146,6 +147,7 @@ const groupCreateInput = scopeInput.extend({
   description: z.string().min(1).max(MAX_DESCRIPTION).optional(),
   available: z.enum(["Yes", "No"]),
 });
+const groupCreateVerifyInput = groupCreateInput.extend({ _morrow_receipt: effectReceiptReferenceInput.optional() });
 const groupCreateApplyInput = groupCreateInput.extend({
   expected_plan_digest: z.string().regex(SHA256),
   _morrow: z.strictObject({ outer_grant: effectGrantInput }),
@@ -266,12 +268,9 @@ function collectGroupSets(client: BlackboardLearnClient, courseId: string, signa
  * reports that rather than reading a `404` on one membership as a person who is
  * not in the group.
  *
- * Morrow reads this collection through the same guarded reader as every other
- * Blackboard collection, which requires each record to carry an `id`. Whether a
- * Learn site returns a group membership record with one is not settled by
- * Anthology's public documentation and has not been tested on a live tenant. A
- * site that returns records without one gets `blackboard_response_incomplete`
- * rather than a list Morrow cannot check.
+ * The published Blackboard contract identifies each membership by `userId`.
+ * The guarded reader rejects a missing or repeated user identity, so a caller
+ * never receives a partial or ambiguous membership list.
  */
 async function collectGroupMembers(
   client: BlackboardLearnClient,
@@ -284,7 +283,7 @@ async function collectGroupMembers(
       return {
         apiVersion,
         records: await client.collect(groupMembersPath(apiVersion, courseId, groupId), {
-          label: "group membership", fields: MEMBER_FIELDS, signal,
+          label: "group membership", fields: MEMBER_FIELDS, identityField: BLACKBOARD_GROUP_MEMBERSHIP_IDENTITY_FIELD, signal,
         }),
       };
     } catch (error) {
@@ -306,7 +305,9 @@ async function collectGroupMembersAt(
 ): Promise<readonly JsonObject[]> {
   const path = groupMembersPath(apiVersion, courseId, groupId);
   try {
-    return await client.collect(path, { label: "group membership", fields: MEMBER_FIELDS, signal });
+    return await client.collect(path, {
+      label: "group membership", fields: MEMBER_FIELDS, identityField: BLACKBOARD_GROUP_MEMBERSHIP_IDENTITY_FIELD, signal,
+    });
   } catch (error) {
     if (routeMissing(error)) throw routeUnavailable("group membership collection", [path]);
     throw error;
@@ -574,6 +575,8 @@ function reservedGrant(value: z.output<typeof effectGrantInput>): BlackboardEffe
     effectReceiptId: value.effect_receipt_id,
     dispatchAttempt: value.dispatch_attempt,
     gatewayProcessId: value.gateway_process_id,
+    issuedAt: value.issued_at,
+    notAfter: value.not_after,
     dispatchToken: value.dispatch_token,
   };
 }
@@ -865,6 +868,7 @@ async function applyReviewedCourseGroup(
     if (existing.includes(groupId)) {
       throw mismatch("Blackboard named a group that was already in this course before this change.", dispatchState);
     }
+    dispatch.recordProviderEvidence({ kind: "course-group", apiVersion: groups.apiVersion, groupId });
     const record = await write.client.get(withFields(groupPath(groups.apiVersion, write.courseId, groupId), GROUP_FIELDS), signal);
     if (exactId(record.id) !== groupId) throw mismatch("Blackboard returned a different group than the one it created.", dispatchState);
     compareGroup(record, group, dispatchState);
@@ -904,23 +908,35 @@ async function applyReviewedCourseGroup(
  */
 async function verifyCourseGroup(
   runtime: BlackboardLearnRuntime,
-  input: GroupCreateInput,
+  input: z.output<typeof groupCreateVerifyInput>,
   signal?: AbortSignal,
 ): Promise<JsonObject> {
   const group = reviewedGroup(input);
-  const comparator = await runtime.beginComparatorRead({
-    tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
-  }, signal);
-  const groups = await collectGroups(comparator.client, comparator.courseId, signal);
-  const matches = groups.records.filter((record) => savedGroup(record, group));
-  const verified = matches.length === 1;
-  runtime.recordEffectComparison(groupCreateEffectTarget(runtime, input), verified);
+  const target = groupCreateEffectTarget(runtime, input);
+  const reference = input._morrow_receipt ? {
+    gatewayProcessId: input._morrow_receipt.gateway_process_id,
+    receiptId: input._morrow_receipt.effect_receipt_id,
+    operationId: input._morrow_receipt.operation_id,
+  } : null;
+  const evidence = reference ? runtime.effectCreateEvidence(reference, target, "course-group") : null;
+  let verified = false;
+  if (reference && evidence?.kind === "course-group") {
+    const comparator = await runtime.beginComparatorRead({
+      tenantId: input.tenant_id, sourceBindingId: input.source_binding_id, courseId: input.course_id,
+    }, signal);
+    const record = await comparator.client.get(
+      withFields(groupPath(evidence.apiVersion, comparator.courseId, evidence.groupId), GROUP_FIELDS),
+      signal,
+    );
+    verified = exactId(record.id) === evidence.groupId && savedGroup(record, group);
+    runtime.recordEffectCreateComparison(reference, target, "course-group", verified);
+  }
   return {
-    schema: "morrow.blackboard.course-group.comparator.v1",
+    schema: "morrow.blackboard.course-group.comparator.v2",
     ok: true,
-    tenantId: comparator.tenantId,
-    sourceBindingId: comparator.sourceBindingId,
-    courseId: comparator.courseId,
+    tenantId: input.tenant_id,
+    sourceBindingId: input.source_binding_id,
+    courseId: input.course_id,
     verified,
     readback: REVIEWED_FIELDS,
     status: "api_configured_live_untested",
@@ -1354,7 +1370,7 @@ function membershipCapability(action: MembershipAction, method: "PUT" | "DELETE"
       supportsDryRun: false, supportsReadback: true, supportsUndo: false, supportsBatch: false,
       requiresBrowser: false, requiresLiveCanvas: false,
     },
-    authority: { scopeClass: "tenant-course", approvalClass: "standard", dataClass: "learner" },
+    authority: { scopeClass: "tenant-course", approvalClass: action === "remove" ? "destructive" : "standard", dataClass: "learner" },
     route: { backend: "lms-api", dispatchBackend: "blackboard-rest" },
     profiles: WRITE_PROFILES,
     evidence: EVIDENCE,
@@ -1554,7 +1570,7 @@ export const blackboardGroupsModule: BlackboardOperationModule = {
       description: "Internal Morrow fresh-read comparator for one reviewed new Blackboard course group. It re-reads the course's groups and states whether exactly one of them carries the reviewed values.",
       private: true,
       gatewayDispatchOnly: true,
-      inputSchema: groupCreateInput,
+      inputSchema: groupCreateVerifyInput,
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true },
       capability: {
         family: "course-read",

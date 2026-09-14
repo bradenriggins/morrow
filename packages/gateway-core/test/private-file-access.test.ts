@@ -1,10 +1,19 @@
+import { spawnSync } from "node:child_process";
 import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { hardenPrivateDirectory, privateDirectoryAccessAccepted, privateFileAccessAccepted, type WindowsPrivateFileAccessClassification } from "../src/private-file-access.js";
+import { classifyMacAclListing, hardenPrivateDirectory, privateDirectoryAccessAccepted, privateFileAccessAccepted, type MacPrivateFileAccessClassification, type WindowsPrivateFileAccessClassification } from "../src/private-file-access.js";
 
 const roots: string[] = [];
+
+/** A darwin platform layer whose ACL decisions are fixed, so the darwin branch runs on any host. */
+const darwin = (overrides: { classifyMacAcl?: () => MacPrivateFileAccessClassification; removeMacAcl?: () => boolean } = {}) => ({
+  platform: "darwin" as const,
+  classifyMacAcl: () => "private" as const,
+  removeMacAcl: () => true,
+  ...overrides,
+});
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 async function fixture(): Promise<{ readonly root: string; readonly file: string }> {
@@ -21,9 +30,9 @@ describe("privateFileAccessAccepted", () => {
   it("requires POSIX private directory mode bits and trusted ancestors", async () => {
     const { root, file } = await fixture();
     const directory = dirname(file);
-    expect(privateDirectoryAccessAccepted(directory, { platform: "darwin", trustedRoot: root })).toBe(true);
+    expect(privateDirectoryAccessAccepted(directory, { ...darwin(), trustedRoot: root })).toBe(true);
     await (await import("node:fs/promises")).chmod(directory, 0o750);
-    expect(privateDirectoryAccessAccepted(directory, { platform: "darwin", trustedRoot: root })).toBe(false);
+    expect(privateDirectoryAccessAccepted(directory, { ...darwin(), trustedRoot: root })).toBe(false);
   });
 
   it("requires private Windows directory DACL classification", async () => {
@@ -37,16 +46,73 @@ describe("privateFileAccessAccepted", () => {
     const { file } = await fixture();
     const directory = dirname(file);
     await (await import("node:fs/promises")).chmod(directory, 0o755);
-    expect(hardenPrivateDirectory(directory, { platform: "darwin" })).toBe(true);
-    expect(privateDirectoryAccessAccepted(directory, { platform: "darwin" })).toBe(true);
+    const removed: string[] = [];
+    expect(hardenPrivateDirectory(directory, darwin({ removeMacAcl: () => { removed.push(directory); return true; } }))).toBe(true);
+    expect(removed).toEqual([directory]);
+    expect(privateDirectoryAccessAccepted(directory, darwin())).toBe(true);
     expect(hardenPrivateDirectory(directory, { platform: "win32", applyWindowsPrivateAcl: () => false, classifyWindowsAcl: () => "private" })).toBe(false);
     expect(hardenPrivateDirectory(directory, { platform: "win32", applyWindowsPrivateAcl: () => true, classifyWindowsAcl: () => "additional_principal_access_allow" })).toBe(false);
   });
 
+  it("fails closed for every non-private macOS ACL classification", async () => {
+    const { file } = await fixture();
+    const failures: readonly MacPrivateFileAccessClassification[] = ["extended_acl", "unavailable"];
+    for (const classification of failures) {
+      const options = { platform: "darwin" as const, classifyMacAcl: () => classification };
+      expect(privateDirectoryAccessAccepted(dirname(file), options)).toBe(false);
+      expect(privateFileAccessAccepted(file, 0o100600, options)).toBe(false);
+    }
+  });
+
+  it("removes and verifies macOS ACLs while hardening", async () => {
+    const { file } = await fixture();
+    const directory = dirname(file);
+    expect(hardenPrivateDirectory(directory, {
+      platform: "darwin",
+      removeMacAcl: () => false,
+      classifyMacAcl: () => "private",
+    })).toBe(false);
+    expect(hardenPrivateDirectory(directory, {
+      platform: "darwin",
+      removeMacAcl: () => true,
+      classifyMacAcl: () => "extended_acl",
+    })).toBe(false);
+  });
+
+  it.skipIf(process.platform !== "darwin")("rejects inherited macOS grants and prevents new inheritance after hardening", async () => {
+    const { file } = await fixture();
+    const directory = dirname(file);
+    const grant = spawnSync("/bin/chmod", ["+a", "everyone allow read,search,file_inherit,directory_inherit", directory]);
+    expect(grant.status).toBe(0);
+    const inherited = join(directory, "inherited.secret");
+    await writeFile(inherited, "secret\n", { mode: 0o600 });
+
+    expect(privateDirectoryAccessAccepted(directory, { platform: "darwin" })).toBe(false);
+    expect(privateFileAccessAccepted(inherited, 0o100600, { platform: "darwin" })).toBe(false);
+    expect(hardenPrivateDirectory(directory, { platform: "darwin" })).toBe(true);
+    expect(privateDirectoryAccessAccepted(directory, { platform: "darwin" })).toBe(true);
+
+    const createdAfterHardening = join(directory, "private.secret");
+    await writeFile(createdAfterHardening, "secret\n", { mode: 0o600 });
+    expect(privateFileAccessAccepted(createdAfterHardening, 0o100600, { platform: "darwin" })).toBe(true);
+  });
+
   it("requires POSIX private mode bits", async () => {
     const { file } = await fixture();
-    expect(privateFileAccessAccepted(file, 0o100600, { platform: "darwin" })).toBe(true);
+    expect(privateFileAccessAccepted(file, 0o100600, darwin())).toBe(true);
     expect(privateFileAccessAccepted(file, 0o100640, { platform: "linux" })).toBe(false);
+    expect(privateFileAccessAccepted(file, 0o100640, darwin())).toBe(false);
+  });
+
+  it("classifies real macOS ACL listings without a macOS host", () => {
+    const plain = "-rw-------  1 user  staff  7 Sep 13 10:00 /private/credential.secret\n";
+    const extended = "-rw-------+ 1 user  staff  7 Sep 13 10:00 /private/credential.secret\n 0: group:everyone allow read\n";
+    const entriesOnly = "-rw-------  1 user  staff  7 Sep 13 10:00 /private/credential.secret\n 0: user:guest allow read\n";
+    expect(classifyMacAclListing(plain)).toBe("private");
+    expect(classifyMacAclListing(extended)).toBe("extended_acl");
+    expect(classifyMacAclListing(entriesOnly)).toBe("extended_acl");
+    expect(classifyMacAclListing("")).toBe("unavailable");
+    expect(classifyMacAclListing("   \n")).toBe("unavailable");
   });
 
   it("rejects a POSIX parent that another principal can write", async () => {
@@ -87,7 +153,7 @@ describe("privateFileAccessAccepted", () => {
     await mkdir(leaf, { recursive: true, mode: 0o700 });
     const secret = join(leaf, "credential.secret");
     await writeFile(secret, "secret\n", { mode: 0o600 });
-    expect(privateFileAccessAccepted(secret, 0o100600, { platform: "darwin", trustedRoot: privateRoot })).toBe(false);
+    expect(privateFileAccessAccepted(secret, 0o100600, { ...darwin(), trustedRoot: privateRoot })).toBe(false);
   });
 
   it("fails closed when the file or immediate parent does not pass lstat", async () => {

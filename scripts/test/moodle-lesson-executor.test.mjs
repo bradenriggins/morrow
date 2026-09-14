@@ -180,6 +180,7 @@ test("Moodle Lesson page writes send one POST, require the approved graph back, 
     </form></body></html>`;
   };
   const editIndex = () => {
+    if (!pages.length) return `<!doctype html><html><body><div class="generalbox firstpageoptions"><a href="/mod/lesson/editpage.php?id=8&amp;pageid=0&amp;firstpage=1">Add a question page</a></div></body></html>`;
     const rows = pages.map((page) => `<tr>
       <td><a href="/mod/lesson/edit.php?id=8&amp;mode=single&amp;pageid=${page.id}" id="lesson-${page.id}">${escape(page.title)}</a></td>
       <td><a href="/mod/lesson/editpage.php?id=8&amp;pageid=${page.id}&amp;edit=1">Edit</a>
@@ -356,6 +357,31 @@ test("Moodle Lesson page writes send one POST, require the approved graph back, 
 
     const reviewed = await digest();
     assert.deepEqual(reviewed.data.pages.map((item) => item.page_id), [101, 102, 103, 104]);
+
+    // The same empty graph accepted by the read route owns the exact native
+    // first-page link. One reviewed create can turn it into a one-page Lesson.
+    pages = [];
+    nextId = 201;
+    const empty = await digest();
+    assert.equal(empty.data.schema, "morrow.moodle-lesson-page-list.v1");
+    assert.equal(empty.data.course_id, 2);
+    assert.equal(empty.data.module_id, 8);
+    assert.equal(empty.data.lesson_id, 71);
+    assert.equal(empty.data.page_count, 0);
+    assert.deepEqual(empty.data.pages, []);
+    assert.equal(empty.data.proof.page_request_count, 0);
+    const emptyPosts = posts();
+    const first = await write("create", {
+      course_id: 2, module_id: 8, after_page_id: 0, page_type: "content",
+      title: "Welcome", contents: "<p>Start here.</p>",
+      answers: [{ answer: "Begin", response: null, score: null, jump: { target: "next_page" } }],
+      expected_jump_changes: [], expected_digest: empty.snapshot_digest,
+    });
+    assert.equal(first.ok, true, JSON.stringify(first));
+    assert.deepEqual(first.data.pages.map((item) => item.page_id), [201]);
+    assert.equal(posts(), emptyPosts + 1);
+    assert.ok(requests.some((item) => item.pathname === "/mod/lesson/editpage.php" && item.search.includes("firstpage=1")));
+    reset();
 
     // Refusals that send nothing.
     let sent = posts();

@@ -29,4 +29,4 @@ export { createBlackboardLearnMcpServer } from "./server.js";
 export { BLACKBOARD_OPERATION_MODULES, BLACKBOARD_TOOL_DEFINITIONS, type BlackboardOperationModule, type BlackboardRestRoute, type BlackboardToolDefinition } from "./operations/index.js";
 export { blackboardRestCatalog } from "./operations/catalog.js";
 export { BlackboardApiError, type BlackboardContentPatchPlan, type BlackboardCourseBinding, type BlackboardTenant } from "./types.js";
-export { signBlackboardEffectGrant, type BlackboardEffectGrant } from "./effect-grant.js";
+export { BLACKBOARD_EFFECT_GRANT_MAX_LIFETIME_MS, signBlackboardEffectGrant, type BlackboardEffectGrant } from "./effect-grant.js";

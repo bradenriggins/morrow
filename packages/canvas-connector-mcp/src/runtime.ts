@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { BridgeOutcomeUnknownError, BridgePortInUseError, BridgeUnavailableError, LoopbackBridgeServer, bridgeFailureResult } from "@morrow/bridge-loopback";
+import { BridgeOutcomeUnknownError, BridgePortInUseError, BridgeRequestCancelledError, BridgeUnavailableError, LoopbackBridgeServer, bridgeFailureResult } from "@morrow/bridge-loopback";
 import {
   normalizeBridgeEditOptionsResult,
   normalizeBridgeEditPolicySet,
@@ -19,9 +19,11 @@ import {
 import { canvasAdmissionReason, canvasContextCodeCourseId, canvasOperationAdmission, canvasOperationMap, loadCanvasApiCatalog, type CanvasApiCatalog, type CanvasApiOperation, type CanvasSemanticCourseTarget } from "@morrow/canvas-api-catalog";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import {
+  PRIVATE_BRIDGE_OPERATION_CONTRACTS,
   bridgeCatalogDigest,
   loadCanvasBrowserCatalog,
   loadMoodleBrowserCatalog,
+  moodleArgumentsUseExactIntegers,
   type CanvasBrowserCatalog,
   type CanvasBrowserOperation,
   type MoodleBrowserCatalog,
@@ -35,36 +37,26 @@ function resultObject(value: unknown): JsonObject {
 }
 
 type ConnectorOperation = CanvasApiOperation | CanvasBrowserOperation | MoodleBrowserOperation;
-const PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS = ["course_id", "section_id", "name", "filename", "size_bytes", "sha256", "expected_digest"];
-const PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS = ["course_id", "module_id", "filename", "size_bytes", "sha256", "expected_digest"];
-const PRIVATE_MOODLE_STAGED_FILE_OPERATIONS: ReadonlyArray<{ toolName: string; key: string; argumentNames: readonly string[]; attachmentMode: "single" | "multiple" }> = [
-  { toolName: "moodle_create_resource_file", key: "moodle.form.course.modedit.resource.file.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
-  { toolName: "moodle_create_folder_file", key: "moodle.form.course.modedit.folder.file.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
-  { toolName: "moodle_create_imscp_package", key: "moodle.form.course.modedit.imscp.package.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
-  { toolName: "moodle_create_scorm_package", key: "moodle.form.course.modedit.scorm.package.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
-  { toolName: "moodle_replace_resource_file", key: "moodle.form.course.modedit.resource.file.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" },
-  { toolName: "moodle_replace_scorm_package", key: "moodle.form.course.modedit.scorm.package.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" },
-  { toolName: "moodle_replace_h5pactivity_package", key: "moodle.form.course.modedit.h5pactivity.package.replace.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_REPLACE_ARGUMENTS, attachmentMode: "single" },
-  { toolName: "moodle_add_folder_files", key: "moodle.form.course.modedit.folder.files.add.write.v1", argumentNames: ["course_id", "module_id", "folder_path", "files", "expected_digest"], attachmentMode: "multiple" },
-  { toolName: "moodle_create_h5pactivity", key: "moodle.form.course.modedit.h5pactivity.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
-];
-const PRIVATE_CANVAS_COURSE_FILE_TOOL = "canvas_transfer_course_file";
-const PRIVATE_CANVAS_COURSE_FILE_OPERATION = "canvas.private.course_file.transfer.v1";
-const PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS = ["course_id", "folder_id", "filename", "size_bytes", "sha256", "content_type"];
-const PRIVATE_CANVAS_HOT_SPOT_TOOL = "canvas_create_new_quiz_hot_spot";
-const PRIVATE_CANVAS_HOT_SPOT_OPERATION = "canvas.private.new_quiz.hot_spot.create.v1";
-const PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS = [
-  "course_id", "assignment_id", "item", "before_items_sha256", "payload_sha256",
-  "filename", "size_bytes", "sha256", "content_type",
-];
-const PRIVATE_CANVAS_HOT_SPOT_CONTENT_TYPES = ["image/png", "image/jpeg", "image/gif"];
-const PRIVATE_CANVAS_CONVERSATION_TOOL = "canvas_send_private_conversation";
-const PRIVATE_CANVAS_CONVERSATION_OPERATION = "canvas.private.conversation.send.v1";
-const PRIVATE_CANVAS_CONVERSATION_ARGUMENTS = ["course_id"];
-export const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL = "morrow_private_moodle_find_enrolment_candidate";
-export const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION = "moodle.private.enrolment_candidate.find.v1";
-const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_SCHEMA = "morrow.moodle-enrolment-candidate.private.v1";
-const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_ARGUMENTS = ["course_id", "query"];
+const PRIVATE_MOODLE_STAGED_FILE_OPERATIONS = PRIVATE_BRIDGE_OPERATION_CONTRACTS
+  .filter((operation) => operation.kind === "moodle_staged_file");
+const PRIVATE_CANVAS_COURSE_FILE = PRIVATE_BRIDGE_OPERATION_CONTRACTS.find((operation) => operation.toolName === "canvas_transfer_course_file")!;
+const PRIVATE_CANVAS_COURSE_FILE_TOOL = PRIVATE_CANVAS_COURSE_FILE.toolName;
+const PRIVATE_CANVAS_COURSE_FILE_OPERATION = PRIVATE_CANVAS_COURSE_FILE.key;
+const PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS = PRIVATE_CANVAS_COURSE_FILE.argumentNames;
+const PRIVATE_CANVAS_HOT_SPOT = PRIVATE_BRIDGE_OPERATION_CONTRACTS.find((operation) => operation.toolName === "canvas_create_new_quiz_hot_spot")!;
+const PRIVATE_CANVAS_HOT_SPOT_TOOL = PRIVATE_CANVAS_HOT_SPOT.toolName;
+const PRIVATE_CANVAS_HOT_SPOT_OPERATION = PRIVATE_CANVAS_HOT_SPOT.key;
+const PRIVATE_CANVAS_HOT_SPOT_ARGUMENTS = PRIVATE_CANVAS_HOT_SPOT.argumentNames;
+const PRIVATE_CANVAS_HOT_SPOT_CONTENT_TYPES: readonly string[] = "contentTypes" in PRIVATE_CANVAS_HOT_SPOT ? PRIVATE_CANVAS_HOT_SPOT.contentTypes : [];
+const PRIVATE_CANVAS_CONVERSATION = PRIVATE_BRIDGE_OPERATION_CONTRACTS.find((operation) => operation.toolName === "canvas_send_private_conversation")!;
+const PRIVATE_CANVAS_CONVERSATION_TOOL = PRIVATE_CANVAS_CONVERSATION.toolName;
+const PRIVATE_CANVAS_CONVERSATION_OPERATION = PRIVATE_CANVAS_CONVERSATION.key;
+const PRIVATE_CANVAS_CONVERSATION_ARGUMENTS = PRIVATE_CANVAS_CONVERSATION.argumentNames;
+const PRIVATE_MOODLE_ENROLMENT_CANDIDATE = PRIVATE_BRIDGE_OPERATION_CONTRACTS.find((operation) => operation.toolName === "morrow_private_moodle_find_enrolment_candidate")!;
+export const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL = PRIVATE_MOODLE_ENROLMENT_CANDIDATE.toolName;
+export const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION = PRIVATE_MOODLE_ENROLMENT_CANDIDATE.key;
+const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_SCHEMA = "resultSchema" in PRIVATE_MOODLE_ENROLMENT_CANDIDATE ? PRIVATE_MOODLE_ENROLMENT_CANDIDATE.resultSchema : "";
+const PRIVATE_MOODLE_ENROLMENT_CANDIDATE_ARGUMENTS = PRIVATE_MOODLE_ENROLMENT_CANDIDATE.argumentNames;
 const CANVAS_CONTENT_GUARD_OPERATIONS = [
   { kind: "page_text", toolName: "canvas_update_create_page_courses", key: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses" },
   { kind: "page_image_alt", toolName: "canvas_update_create_page_courses", key: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses" },
@@ -263,7 +255,7 @@ function privateMoodleEnrolmentCandidateResult(value: unknown, courseId: string)
     data: {
       schema: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_SCHEMA,
       provider: "moodle",
-      course_id: Number(courseId),
+      course_id: courseId,
       candidate: { user_id: userId },
       match: { kind: "exact_native_query", candidate_count: 1 },
       proof: {
@@ -321,7 +313,7 @@ function failedProblem(
       "edit_policy_authorization_invalid", "edit_policy_stale", "edit_policy_guard_ambiguous", "edit_policy_rule_refused",
       "edit_policy_canvas_content_guard_required", "edit_policy_canvas_content_guard_refused", "edit_policy_page_guard_required",
       "edit_policy_item_bank_guard_required", "edit_policy_fields_refused", "new_quiz_settings_review_required", "new_quiz_lifecycle_review_required", "new_quiz_effect_review_required",
-      "private_attachment_refused",
+      "private_attachment_refused", "request_cancelled_before_dispatch",
       "canvas_conversation_private_payload_refused", "canvas_private_attachment_required", "canvas_private_attachment_invalid",
       "canvas_private_attachment_mismatch", "moodle_private_attachment_required", "moodle_private_attachment_invalid",
       "moodle_private_attachment_mismatch"].includes(problem?.code || "") ? "not_sent" : undefined);
@@ -360,7 +352,7 @@ function failedBeforeSend(problem: BridgeProblem, provider: BridgeProvider = "ca
 
 function bridgeErrorResultState(error: unknown): { readonly resultState?: "not_sent" | "unknown" } {
   if (error instanceof BridgeOutcomeUnknownError) return { resultState: "unknown" };
-  if (error instanceof BridgeUnavailableError || error instanceof TypeError) return { resultState: "not_sent" };
+  if (error instanceof BridgeRequestCancelledError || error instanceof BridgeUnavailableError || error instanceof TypeError) return { resultState: "not_sent" };
   return {};
 }
 
@@ -560,8 +552,8 @@ export class CanvasConnectorRuntime {
         arguments: input,
         operationId: `private-chat:${randomUUID()}`,
         timeoutMs: 9 * 60_000,
+        ...(signal ? { signal } : {}),
       });
-      signal?.throwIfAborted();
       if (!response.ok || !isJsonObject(response.result)
         || response.result.schema !== "morrow.private-chat.exchange.v1"
         || !["message", "closed"].includes(String(response.result.status))) {
@@ -583,7 +575,10 @@ export class CanvasConnectorRuntime {
     }
   }
 
-  private async callPrivateCanvasCourseFileTransfer(rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+  private async callPrivateCanvasCourseFileTransfer(
+    rawArguments: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<JsonObject> {
     let separated: ReturnType<typeof splitPrivateAttachment>;
     try {
       separated = splitPrivateAttachment(rawArguments);
@@ -650,6 +645,7 @@ export class CanvasConnectorRuntime {
         sourceBindingId: split.options.sourceBindingId,
         operationId: split.options.operationId,
         outerGrant: split.options.outerGrant,
+        ...(signal ? { signal } : {}),
       });
       if (!response.ok) return failedProblem(response.problem);
       return {
@@ -675,7 +671,10 @@ export class CanvasConnectorRuntime {
     }
   }
 
-  private async callPrivateCanvasNewQuizHotSpot(rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+  private async callPrivateCanvasNewQuizHotSpot(
+    rawArguments: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<JsonObject> {
     let separated: ReturnType<typeof splitPrivateAttachment>;
     try {
       separated = splitPrivateAttachment(rawArguments);
@@ -742,6 +741,7 @@ export class CanvasConnectorRuntime {
         sourceBindingId: split.options.sourceBindingId,
         operationId: split.options.operationId,
         outerGrant: split.options.outerGrant,
+        ...(signal ? { signal } : {}),
       });
       if (!response.ok) return failedProblem(response.problem);
       return {
@@ -767,7 +767,10 @@ export class CanvasConnectorRuntime {
     }
   }
 
-  private async callPrivateCanvasConversation(rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+  private async callPrivateCanvasConversation(
+    rawArguments: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<JsonObject> {
     let separated: ReturnType<typeof splitPrivateAttachment>;
     try {
       separated = splitPrivateAttachment(rawArguments);
@@ -831,6 +834,7 @@ export class CanvasConnectorRuntime {
         sourceBindingId: split.options.sourceBindingId,
         operationId: split.options.operationId,
         outerGrant: split.options.outerGrant,
+        ...(signal ? { signal } : {}),
       });
       if (!response.ok) return failedProblem(response.problem);
       return {
@@ -856,7 +860,10 @@ export class CanvasConnectorRuntime {
     }
   }
 
-  private async callPrivateMoodleEnrolmentCandidate(rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+  private async callPrivateMoodleEnrolmentCandidate(
+    rawArguments: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<JsonObject> {
     let separated: ReturnType<typeof splitPrivateAttachment>;
     let split: ReturnType<typeof splitBridgeCallArguments>;
     try {
@@ -902,9 +909,10 @@ export class CanvasConnectorRuntime {
         kind: "invoke_read",
         toolName: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
         operationKey: PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
-        arguments: { course_id: Number(parsed.courseId), query: parsed.query },
+        arguments: { course_id: parsed.courseId, query: parsed.query },
         sourceBindingId: split.options.sourceBindingId,
         operationId: split.options.operationId || `private-moodle-enrolment-candidate:${randomUUID()}`,
+        ...(signal ? { signal } : {}),
       });
       if (!response.ok) return failedProblem(response.problem, "moodle");
       const result = privateMoodleEnrolmentCandidateResult(response.result, parsed.courseId);
@@ -939,18 +947,30 @@ export class CanvasConnectorRuntime {
     }
   }
 
-  async call(toolName: string, rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+  async call(
+    toolName: string,
+    rawArguments: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<JsonObject> {
+    if (signal?.aborted) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "request_cancelled_before_dispatch",
+        message: "Morrow cancelled this request before the provider operation started.",
+        recoverable: true,
+      });
+    }
     if (toolName === PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL) {
-      return await this.callPrivateMoodleEnrolmentCandidate(rawArguments);
+      return await this.callPrivateMoodleEnrolmentCandidate(rawArguments, signal);
     }
     if (toolName === PRIVATE_CANVAS_COURSE_FILE_TOOL) {
-      return await this.callPrivateCanvasCourseFileTransfer(rawArguments);
+      return await this.callPrivateCanvasCourseFileTransfer(rawArguments, signal);
     }
     if (toolName === PRIVATE_CANVAS_HOT_SPOT_TOOL) {
-      return await this.callPrivateCanvasNewQuizHotSpot(rawArguments);
+      return await this.callPrivateCanvasNewQuizHotSpot(rawArguments, signal);
     }
     if (toolName === PRIVATE_CANVAS_CONVERSATION_TOOL) {
-      return await this.callPrivateCanvasConversation(rawArguments);
+      return await this.callPrivateCanvasConversation(rawArguments, signal);
     }
     const operation = this.operations.get(toolName);
     if (!operation) throw new Error(`Canvas connector has no operation named ${toolName}`);
@@ -998,6 +1018,14 @@ export class CanvasConnectorRuntime {
       }, provider);
     }
     const split = splitBridgeCallArguments(separated.publicInput);
+    if (provider === "moodle" && !moodleArgumentsUseExactIntegers(operation.inputSchema, split.arguments)) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "moodle_integer_out_of_range",
+        message: "This Moodle action needs integer identifiers within JavaScript's exact integer range.",
+        recoverable: false,
+      }, provider);
+    }
     if (privateMoodleStagedFile && ((privateMoodleStagedFile.attachmentMode === "single"
       && (!separated.privateAttachment || !moodleStagedFileAttachmentMatches(split.arguments, separated.privateAttachment, privateMoodleStagedFile.argumentNames)))
       || (privateMoodleStagedFile.attachmentMode === "multiple"
@@ -1134,6 +1162,7 @@ export class CanvasConnectorRuntime {
         sourceBindingId: split.options.sourceBindingId,
         operationId: split.options.operationId || `operation:${randomUUID()}`,
         ...(split.options.outerGrant ? { outerGrant: split.options.outerGrant } : {}),
+        ...(signal ? { signal } : {}),
       });
       if (!response.ok) return failedProblem(response.problem, provider, readDescriptorOf(response.result));
       return {
@@ -1146,6 +1175,23 @@ export class CanvasConnectorRuntime {
         result: resultObject(response.result),
       };
     } catch (error) {
+      // A cancellation that lands before the provider operation is dispatched
+      // must read as "not sent", never as an unclassified bridge failure.
+      // The bridge's pre-dispatch checkpoints throw the signal's own
+      // AbortError (for example when the edit-permission detail round trip
+      // resolves after the abort), and a queued bridge command rejects with
+      // BridgeRequestCancelledError. For a write, both mean the provider
+      // never saw the change.
+      const cancelledBeforeDispatch = error instanceof DOMException && error.name === "AbortError"
+        || (error instanceof BridgeRequestCancelledError && kind !== "invoke_read");
+      if (cancelledBeforeDispatch) {
+        return failedBeforeSend({
+          schema: "morrow.bridge.problem.v1",
+          code: "request_cancelled_before_dispatch",
+          message: "Morrow cancelled this request before the provider operation started.",
+          recoverable: true,
+        }, provider);
+      }
       return {
         schema: "morrow.canvas-connector.result.v1",
         ok: false,

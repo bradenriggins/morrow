@@ -98,7 +98,7 @@ function Run-App([string] $Label, [bool] $RequireGatewayReady = $true, [bool] $A
 
 function Package-Source {
   $manifest = Get-Content -LiteralPath "$InstallDirectory\resources\MorrowPayload\app\package-input-manifest.json" -Raw | ConvertFrom-Json
-  if ($manifest.schema -ne 'morrow.desktop-package-input.v1' -or $manifest.source.dirty -ne $false) {
+  if ($manifest.schema -ne 'morrow.desktop-package-input.v2' -or $manifest.source.dirty -ne $false) {
     throw 'The installed package source binding is unavailable or dirty.'
   }
   return $manifest.source.head

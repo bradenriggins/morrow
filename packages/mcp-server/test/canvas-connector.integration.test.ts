@@ -104,6 +104,7 @@ describe("Canvas connector gateway path", () => {
     const root = resolve("../..");
     const extensionId = "a".repeat(32);
     const sourceBindingId = "canvas:test-account";
+    const exactConversationBody = "\n  Jane Doe private body marker must not leave the Canvas Inbox review.  \n";
     const browserCatalogDigest = bridgeCatalogDigestForTests(root);
     const detailedEditPermission = (
       editPolicy: "canvas_page_content" | "canvas_assignment_due_date" | "canvas_new_quiz_nested_image_alt" | "canvas_inbox_messages" | false,
@@ -266,7 +267,7 @@ describe("Canvas connector gateway path", () => {
               courseId: "42",
               recipients: ["9001", "group_12_students"],
               subject: "Jane Doe private subject marker",
-              body: "Jane Doe private body marker must not leave the Canvas Inbox review.",
+              body: exactConversationBody,
               groupConversation: true,
             });
           }
@@ -489,6 +490,25 @@ describe("Canvas connector gateway path", () => {
       runtime.cancelOperation(pagePlanOperationId);
     }, CASE_TIMEOUT_MS);
 
+    it("refuses a caller-supplied readback on the Canvas connector route", async () => {
+      activeEditPermission = detailedEditPermission("canvas_page_content");
+      bridge?.updateBindings([binding()]);
+      await bindingsApplied();
+      const before = writeCommands;
+      const refused = await runtime.call("canvas_update_create_page_courses", {
+        course_id: "42",
+        url_or_id: "lesson",
+        _morrow: {
+          source_binding_id: sourceBindingId,
+          canvas_content_guard: pageContentGuard,
+          readback: { tool: "canvas_list_favorite_courses", arguments: {}, expected_digest: "a".repeat(64) },
+        },
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      expect(writeCommands).toBe(before);
+    }, CASE_TIMEOUT_MS);
+
     it("saves one guarded Page edit under the Edit grant", async () => {
       activeEditPermission = detailedEditPermission("canvas_page_content");
       bridge?.updateBindings([binding()]);
@@ -657,7 +677,7 @@ describe("Canvas connector gateway path", () => {
             recipient_tokens: [learnerToken!],
             recipient_contexts: ["group_12_students"],
             subject: "Jane Doe private subject marker",
-            body: "Jane Doe private body marker must not leave the Canvas Inbox review.",
+            body: exactConversationBody,
             group_conversation: true,
           },
         }) as unknown as JsonObject;
@@ -666,7 +686,7 @@ describe("Canvas connector gateway path", () => {
           arguments: {
             action: "create",
             source_binding_id: sourceBindingId,
-            course_id: 42,
+            course_id: "42",
             recipient_tokens: [learnerToken!],
             recipient_contexts: ["group_12_students"],
             subject: "Jane Doe cancelled subject marker",
@@ -697,12 +717,14 @@ describe("Canvas connector gateway path", () => {
       conversationId = operationId(conversationPlan);
       const cancelledConversationId = operationId(cancelledConversationPlan);
       const savedConversationPlan = runtime.effects.get(conversationId);
+      const frozenConversation = (((savedConversationPlan.plan.arguments as JsonObject)._morrow as JsonObject).canvas_conversation as JsonObject);
+      expect(frozenConversation.body).toBe(exactConversationBody);
       expect(savedConversationPlan).toMatchObject({
         state: "approved",
         plan: {
           authorization: { kind: "edit_scope", policyDigest: "d".repeat(64), policyRevision: 1 },
           arguments: {
-            course_id: 42,
+            course_id: "42",
             _morrow: {
               source_binding_id: sourceBindingId,
               canvas_conversation: {
@@ -1184,6 +1206,8 @@ describe("Canvas connector gateway path", () => {
     const runtime = morrow.gateway;
     const extensionId = "a".repeat(32);
     const sourceBindingId = "canvas:write-outcome-account";
+    const wrongCourseBindingId = "canvas:wrong-course-account";
+    const wrongConnectionBindingId = "canvas:other-course-42-session";
     const browserCatalogDigest = bridgeCatalogDigestForTests(root);
     const editPermission = {
       schema: "morrow.bridge.edit-permission.v1" as const,
@@ -1214,6 +1238,7 @@ describe("Canvas connector gateway path", () => {
     // status: HTTP 422 is a refusal Canvas never saved, HTTP 502 may already be
     // saved.
     let nextWrite: "saved" | 422 | 502 = "saved";
+    let failNextPageRead = false;
     let writeCommands = 0;
 
     try {
@@ -1243,6 +1268,26 @@ describe("Canvas connector gateway path", () => {
             catalogDigest: editPermission.catalogDigest,
             sourceBindingId: editPermission.sourceBindingId,
           },
+        }, {
+          sourceBindingId: wrongCourseBindingId,
+          provider: "canvas" as const,
+          origin: "https://school.instructure.com",
+          courseId: "43",
+          principalFingerprint: "e".repeat(64),
+          sessionGeneration: 1,
+          catalogDigest: browserCatalogDigest,
+          runtimeVerified: true,
+          editPolicyRevision: 0,
+        }, {
+          sourceBindingId: wrongConnectionBindingId,
+          provider: "canvas" as const,
+          origin: "https://school.instructure.com",
+          courseId: "42",
+          principalFingerprint: "f".repeat(64),
+          sessionGeneration: 2,
+          catalogDigest: browserCatalogDigest,
+          runtimeVerified: true,
+          editPolicyRevision: 0,
         }],
       });
 
@@ -1277,6 +1322,16 @@ describe("Canvas connector gateway path", () => {
           }
           revision += 1;
           lesson.body = "<h2>Cell structure</h2><p>Cells have protective membranes.</p>";
+        }
+        if (command.kind === "invoke_read" && command.toolName === "canvas_show_page_courses" && failNextPageRead) {
+          failNextPageRead = false;
+          bridge?.respondProblem(command, {
+            schema: "morrow.bridge.problem.v1",
+            code: "canvas_read_failed",
+            message: "Canvas did not return this page.",
+            recoverable: true,
+          });
+          return;
         }
         bridge?.respond(command, {
           schema: "morrow.canvas-browser-result.v1",
@@ -1314,6 +1369,74 @@ describe("Canvas connector gateway path", () => {
         expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
         return operationId(planned as unknown as JsonObject);
       };
+
+      // A caller-supplied comparator is refused before any operation exists;
+      // the connector-owned policy is the only readback a plan carries.
+      // Existing saved operations from before this invariant also remain
+      // unresolved instead of running their unrelated comparator.
+      const suppliedReadback = {
+        tool: "canvas_show_page_courses",
+        arguments: { course_id: "999", url_or_id: "unrelated" },
+        expected_digest: "a".repeat(64),
+      };
+      const beforeSupplied = writeCommands;
+      const refusedSupplied = await runtime.planOperationWithCurrentEditPermission("canvas_update_create_page_courses", {
+        course_id: "42",
+        url_or_id: "legacy-lesson",
+        wiki_page_title: "Legacy cell structure",
+        _morrow: { source_binding_id: sourceBindingId, readback: suppliedReadback },
+      });
+      expect(refusedSupplied.isError).toBe(true);
+      expect(refusedSupplied.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      expect(writeCommands).toBe(beforeSupplied);
+      const guardedPlan = await runtime.planOperationWithCurrentEditPermission("canvas_update_create_page_courses", {
+        course_id: "42",
+        url_or_id: "legacy-lesson",
+        wiki_page_title: "Legacy cell structure",
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      const guardedId = operationId(guardedPlan);
+      const guarded = runtime.effects.get(guardedId);
+      expect(guarded.readback).toMatchObject({
+        tool: "morrow_connector_embedded_readback",
+        arguments: {
+          schema: "morrow.connector-readback-policy.v1",
+          source: guarded.sourceId,
+          tool: guarded.publicToolName,
+          sourceTool: guarded.sourceToolName,
+        },
+      });
+      expect(guarded.readback?.arguments).not.toEqual(suppliedReadback.arguments);
+      runtime.cancelOperation(guardedId);
+
+      const historical = runtime.effects.create({
+        publicToolName: guarded.publicToolName,
+        sourceId: guarded.sourceId,
+        sourceToolName: guarded.sourceToolName,
+        catalogDigest: guarded.catalogDigest,
+        request: guarded.plan.arguments as JsonObject,
+        forwardedRequest: guarded.forwardedRequest,
+        ...(guarded.sourceBindingId ? { sourceBindingId: guarded.sourceBindingId } : {}),
+        readback: {
+          tool: suppliedReadback.tool,
+          arguments: suppliedReadback.arguments,
+          expectedDigest: suppliedReadback.expected_digest,
+        },
+        authority: guarded.plan.authority as never,
+      });
+      runtime.effects.approve(historical.operationId);
+      runtime.effects.reserveDispatch(historical.operationId);
+      runtime.effects.settleFailure(historical.operationId, { code: "lost_response" }, true);
+      const refusedHistoricalReadback = await runtime.verifyOperation(historical.operationId);
+      expect(refusedHistoricalReadback.structuredContent).toMatchObject({
+        phase: "verification_unsupported",
+        effectState: "applied_or_unknown",
+      });
+      expect(runtime.effects.get(historical.operationId)).toMatchObject({
+        state: "applied_or_unknown",
+        verificationStatus: "unconfirmed",
+      });
+      expect(writeCommands).toBe(0);
 
       // Canvas refused the change: the record is failed, and the page is not
       // locked by a change that never happened.
@@ -1369,6 +1492,42 @@ describe("Canvas connector gateway path", () => {
       const withoutRead = runtime.closeUnresolvedOperation(uncertainId, "b".repeat(64), true);
       expect(withoutRead.isError).toBe(true);
       expect(withoutRead.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
+      expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
+
+      const wrongCourseRead = await runtime.call("canvas_show_page_courses", {
+        course_id: "43",
+        url_or_id: "lesson",
+        _morrow: { source_binding_id: wrongCourseBindingId },
+      });
+      expect(wrongCourseRead.isError, JSON.stringify(wrongCourseRead)).not.toBe(true);
+      const wrongCourseState = ((wrongCourseRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
+      const wrongCourseClose = runtime.closeUnresolvedOperation(uncertainId, String(wrongCourseState), true);
+      expect(wrongCourseClose.isError).toBe(true);
+      expect(wrongCourseClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
+
+      const wrongConnectionRead = await runtime.call("canvas_show_page_courses", {
+        course_id: "42",
+        url_or_id: "lesson",
+        _morrow: { source_binding_id: wrongConnectionBindingId },
+      });
+      expect(wrongConnectionRead.isError, JSON.stringify(wrongConnectionRead)).not.toBe(true);
+      const wrongConnectionState = ((wrongConnectionRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
+      const wrongConnectionClose = runtime.closeUnresolvedOperation(uncertainId, String(wrongConnectionState), true);
+      expect(wrongConnectionClose.isError).toBe(true);
+      expect(wrongConnectionClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
+      expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
+
+      failNextPageRead = true;
+      const failedExactRead = await runtime.call("canvas_show_page_courses", {
+        course_id: "42",
+        url_or_id: "lesson",
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(failedExactRead.isError).toBe(true);
+      const failedExactState = ((failedExactRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256;
+      const failedExactClose = runtime.closeUnresolvedOperation(uncertainId, String(failedExactState), true);
+      expect(failedExactClose.isError).toBe(true);
+      expect(failedExactClose.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
 
       const freshRead = await runtime.call("canvas_show_page_courses", {

@@ -1,12 +1,10 @@
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
-import { loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
 import type { JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
 import { parseGatewayConfig } from "../src/config.js";
@@ -14,6 +12,7 @@ import { GatewayRuntime } from "../src/runtime.js";
 import { createMorrowServer } from "../src/server.js";
 import { buildLocalCanvasConfig } from "../../client-config/src/index.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
+import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 
 const SOURCE_BINDINGS = new Map([
   ["2", "moodle:complete"],
@@ -36,16 +35,6 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-function bridgeCatalogDigest(root: string): string {
-  const canvas = loadCanvasApiCatalog(resolve(root, "artifacts/canvas-api/canvas-api-catalog.json"));
-  const canvasBrowser = createHash("sha256")
-    .update(readFileSync(resolve(root, "connector/extension/generated/canvas-browser-catalog.json")))
-    .digest("hex");
-  const moodle = createHash("sha256")
-    .update(readFileSync(resolve(root, "connector/extension/generated/moodle-browser-catalog.json")))
-    .digest("hex");
-  return createHash("sha256").update(`${canvas.catalogDigest}\n${canvasBrowser}\n${moodle}`).digest("hex");
-}
 
 function connectorConfig(root: string, directory: string, port: number) {
   const generated = structuredClone(buildLocalCanvasConfig(root, process.execPath)) as {
@@ -117,7 +106,7 @@ describe("Moodle source-bound roster egress", () => {
     const root = resolve("../..");
     const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-roster-egress-"));
     const port = await availablePort();
-    const catalogDigest = bridgeCatalogDigest(root);
+    const catalogDigest = bridgeCatalogDigestForTests(root);
     const config = connectorConfig(root, directory, port);
     expect(config.upstreams[0]?.outputPrivacyDefault?.dataClass).toBe("learner");
     const runtime = await GatewayRuntime.connect(config);
@@ -212,6 +201,36 @@ describe("Moodle source-bound roster egress", () => {
       expect(planned.isError, JSON.stringify(planned)).not.toBe(true);
       expect(approvalUrl).toEqual(expect.stringMatching(/^http:\/\/127\.0\.0\.1:4317\/operations\/op%3A/));
       expect(String(approvalUrl)).toContain("%3A");
+
+      const refused = await client.callTool({
+        name: "morrow_capability_change",
+        arguments: {
+          name: "moodle_update_page",
+          arguments: {
+            course_id: 2,
+            module_id: 8,
+            name: "Self-certified",
+            expected_digest: SNAPSHOT_DIGEST,
+            _morrow: {
+              source_binding_id: "moodle:complete",
+              readback: { tool: "moodle_get_page", arguments: { course_id: 2, module_id: 8 }, expected_digest: "a".repeat(64) },
+            },
+          },
+        },
+      });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ code: "capability_input_invalid" });
+      const refusedPlan = runtime.planOperation("moodle_update_page", {
+        course_id: 2,
+        module_id: 8,
+        name: "Self-certified",
+        expected_digest: SNAPSHOT_DIGEST,
+        _morrow: {
+          source_binding_id: "moodle:complete",
+          readback: { tool: "moodle_get_page", arguments: { course_id: 2, module_id: 8 }, expected_digest: "a".repeat(64) },
+        },
+      });
+      expect(refusedPlan.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
 
       const audit = async (courseId: number) => await client!.callTool({
         name: "morrow_audit_course",

@@ -142,17 +142,17 @@ their `<summary>`.
 | `assistant-pending` | "Waiting for your approval in Claude Desktop." | **Open Claude Desktop**, **Show Morrow extension**, **Check setup**, or **Remove** | `installer/shared/setup-view.mjs:169`, `installer/shared/setup-view.mjs:180` |
 | `assistant-available` | "Not set up yet." | **Set up <assistant>** | `installer/shared/setup-view.mjs:172`, `installer/shared/setup-view.mjs:186` |
 | `assistant-absent` | "Not found on this computer." or "Not available in this Morrow version." | None. The row carries no control | `installer/shared/setup-view.mjs:170-171` |
-| `updates-hidden` | Nothing | None. No update record, or delivery is unavailable | `installer/renderer/renderer.js:151-158` |
-| `updates-idle` | "Morrow checks for updates automatically. You can also check now." or "Morrow is ready to check for an update." | **Check for updates** | `installer/renderer/renderer.js:163-164` |
-| `updates-checking` | "Morrow is checking for an update." | None. It answers itself | `installer/renderer/renderer.js:168` |
-| `updates-downloading` | "Morrow found version N and will download it in the background." or "Morrow is downloading … You can keep working while it finishes." | None. It answers itself | `installer/renderer/renderer.js:172-178` |
-| `updates-held` | "Morrow will restart after course work finishes or its current state is clear." | None. Morrow restarts when the work is settled | `installer/renderer/renderer.js:181` |
-| `updates-install-failed` | "Morrow could not install the update. Try again when course work is idle." | **Try restart again** | `installer/renderer/renderer.js:186-187` |
-| `updates-ready` | "Version N is ready." and "Restart Morrow when course work is idle to finish the update." | **Restart to update** | `installer/renderer/renderer.js:190-191` |
-| `updates-installing` | "Morrow is installing its update. It will reopen when the update is complete." | None. Morrow reopens | `installer/renderer/renderer.js:195` |
-| `updates-rolled-back` | "The update did not start; Morrow is running version N." | **Retry the update** | `installer/renderer/renderer.js:201-203` |
-| `updates-no-space` | "Morrow could not download the update: this computer does not have enough free space for it." | Free space, then **Try again** | `installer/renderer/renderer.js:207-208` |
-| `updates-check-failed` | "Morrow could not check for an update." | **Try again** | `installer/renderer/renderer.js:211-212` |
+| `updates-hidden` | Nothing | None. No update record, or delivery is unavailable | `installer/renderer/renderer.js:200-204` |
+| `updates-idle` | "Morrow checks for updates automatically. You can also check now." or "Morrow is ready to check for an update." | **Check for updates** | `installer/renderer/renderer.js:209-212` |
+| `updates-checking` | "Morrow is checking for an update." | None. It answers itself | `installer/renderer/renderer.js:214-217` |
+| `updates-downloading` | "Morrow found version N and will download it in the background." or "Morrow is downloading … You can keep working while it finishes." | None. It answers itself | `installer/renderer/renderer.js:219-224` |
+| `updates-held` | "Morrow will restart after course work finishes or its current state is clear." | None. Morrow restarts when the work is settled | `installer/renderer/renderer.js:226-230` |
+| `updates-install-failed` | "Morrow could not install the update. Try again when course work is idle." | **Try restart again** | `installer/renderer/renderer.js:232-235` |
+| `updates-ready` | "Version N is ready." and "Restart Morrow when course work is idle to finish the update." | **Restart to update** | `installer/renderer/renderer.js:237-239` |
+| `updates-installing` | "Morrow is installing its update. It will reopen when the update is complete." | None. Morrow reopens | `installer/renderer/renderer.js:241-244` |
+| `updates-rolled-back` | "The update did not start; Morrow is running version N." | **Retry the update** | `installer/renderer/renderer.js:246-251` |
+| `updates-no-space` | "Morrow could not download the update: this computer does not have enough free space for it." | Free space, then **Try again** | `installer/renderer/renderer.js:253-256` |
+| `updates-check-failed` | "Morrow could not check for an update." | **Try again** | `installer/renderer/renderer.js:258-259` |
 | `blackboard-hidden` | Nothing | None. The panel appears only after an assistant is configured and the local runtime is ready, so the first screen never asks for credentials | `installer/shared/setup-view.mjs:47-49`, `installer/renderer/renderer.js:285` |
 | `blackboard-empty` | "Connect a Blackboard Learn site (optional)", "Most people do not need this…" and four fields | Ask a Blackboard administrator for the key and secret, then **Save Blackboard connection** | `installer/renderer/index.html:48-85`, `installer/renderer/renderer.js:288` |
 | `blackboard-invalid` | One message under each field that is not ready, and focus moves to the first of them | Correct the named field. Messages clear as the value becomes right | `installer/renderer/renderer.js:570-610`, `installer/renderer/renderer.js:614-623` |
@@ -194,18 +194,19 @@ choose the assistant, finish Morrow Bridge, then open and connect the course
 
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
-| `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:82` |
-| `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:91` |
-| `pairing` | Morrow "Waiting for approval" and the detail names the Morrow page that opened. | **Allow connection** on that page. | `connector/extension/popup/popup-view.js:89` |
-| `connecting` | Morrow "Connecting…" and a settled waiting detail. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:93` |
-| `paired-not-connected` | Morrow "Not available" and the popup says the assistant must be open. | Open the assistant. | `connector/extension/popup/popup-view.js:95` |
-| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | **Open setup guide**, update or repair, then reload Bridge. | `connector/extension/popup/popup-view.js:83` |
-| `connected-no-site` | Morrow "Connected", Course "Not connected", disabled **Open Canvas or Moodle**, and instructions to open a signed-in course. | Open a signed-in Canvas or Moodle course in this tab. | `connector/extension/popup/popup-view.js:106` |
-| `detected-platform` | The active Moodle course is detected. The primary action and detail both say **Connect Moodle**. Canvas produces **Connect Canvas** in the same branch. | Select the platform button and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:72` |
-| `site-ready-no-course` | Course "Ready", **Choose courses**, and a Plan explanation. | **Choose courses**, which opens Plan and Edit settings. | `connector/extension/popup/popup-view.js:101` |
-| `site-stale` | Course "Canvas tab needed" and the detail names the saved Canvas connection. | Open a signed-in Canvas course, then **Connect Canvas**. | `connector/extension/popup/popup-view.js:78` |
-| `course-ready` | Course "Connected", the selected course and last-check time, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:97` |
-| `course-tab-closed` | Course "Canvas tab needed" and a detail that names the closed Canvas tab. | Open the course, sign in, then **Connect Canvas**. | `connector/extension/popup/popup-view.js:74` |
+| `read-failed` | Morrow and Course are "Not checked". The detail names the failed read and retry. | **Try again**. | `connector/extension/popup/popup-view.js:90` |
+| `not-paired` | Morrow "Not connected", Course "Not connected", and the detail says to add Morrow to the assistant. | **Connect Morrow**. | `connector/extension/popup/popup-view.js:101` |
+| `pairing` | Morrow "Waiting for approval" and the detail names the Morrow page that opened. | **Allow connection** on that page. | `connector/extension/popup/popup-view.js:97` |
+| `connecting` | Morrow "Connecting…" and a settled waiting detail. | No action. Return in a moment. | `connector/extension/popup/popup-view.js:103` |
+| `paired-not-connected` | Morrow "Not available" and the popup says the assistant must be open. | Open the assistant. | `connector/extension/popup/popup-view.js:105` |
+| `runtime-mismatch` | Morrow "Reload needed", Course "Not available", and a version-mismatch detail. | **Open setup guide**, update or repair, then reload Bridge. | `connector/extension/popup/popup-view.js:91` |
+| `authentication-failed` | Morrow "Reconnect needed", Course "Not connected", and the detail says the saved local connection was refused. | **Reconnect Morrow**, then approve the new local connection. | `connector/extension/popup/popup-view.js:99` |
+| `connected-no-site` | Morrow "Connected", Course "Not connected", disabled **Open Canvas or Moodle**, and instructions to open a signed-in course. | Open a signed-in Canvas or Moodle course in this tab. | `connector/extension/popup/popup-view.js:116` |
+| `detected-platform` | The active Moodle course is detected. The primary action and detail both say **Connect Moodle**. Canvas produces **Connect Canvas** in the same branch. | Select the platform button and allow the exact address Chrome shows. | `connector/extension/popup/popup-view.js:115` |
+| `site-ready-no-course` | Course "Ready", **Choose courses**, and a Plan explanation. | **Choose courses**, which opens Plan and Edit settings. | `connector/extension/popup/popup-view.js:111` |
+| `site-stale` | Course "Canvas tab needed" and the detail names the saved Canvas connection. | Open a signed-in Canvas course, then **Connect Canvas**. | `connector/extension/popup/popup-view.js:86` |
+| `course-ready` | Course "Connected", the selected course and last-check time, and a detail that names the Canvas course tab. | Ask the assistant, or use **Check or switch course**. | `connector/extension/popup/popup-view.js:107` |
+| `course-tab-closed` | Course "Canvas tab needed" and a detail that names the closed Canvas tab. | Open the course, sign in, then **Connect Canvas**. | `connector/extension/popup/popup-view.js:82` |
 
 The exact status, course, action, and detail strings emitted for these branches are:
 
@@ -225,6 +226,9 @@ The exact status, course, action, and detail strings emitted for these branches 
 - "Reload needed"
 - "Open setup guide"
 - "The Morrow app and Morrow Bridge versions do not match. Open the setup guide, update or repair Morrow Bridge, then reload Morrow Bridge in Chrome."
+- "Reconnect needed"
+- "Reconnect Morrow"
+- "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved."
 - "Connected"
 - "Open Canvas or Moodle"
 - "Open a signed-in Canvas or Moodle course in Chrome. Morrow Bridge will detect the platform and show Connect Canvas or Connect Moodle."
@@ -331,7 +335,6 @@ The exact heading, summary, next action, detail, and checklist strings emitted f
 The status dot is decorative, and every state also carries a heading, so colour alone never separates
 waiting from ready (`connector/extension/onboarding/onboarding.html:26`).
 
-### The five checks
 ### The five checks
 
 The checklist reports the five states the completion goal names
@@ -492,62 +495,62 @@ stale name here.
 | `Choose an assistant` | Morrow app | `installer/shared/setup-view.mjs:160` |
 | `Choose folder` | Morrow app | `installer/shared/setup-view.mjs:181`, `installer/shared/setup-view.mjs:181` |
 | `Change folder` | Morrow app | `installer/shared/setup-view.mjs:189` |
-| `Remove` | Morrow app | `installer/shared/setup-view.mjs:210`, `installer/renderer/renderer.js:252` |
+| `Remove` | Morrow app | `installer/shared/setup-view.mjs:210`, `installer/renderer/renderer.js:398` |
 | `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:311` |
 | `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:297` |
 | `Check connection` | Morrow app | `installer/shared/setup-view.mjs:348` |
-| `Check for updates` | Morrow app | `installer/renderer/renderer.js:172` |
-| `Restart to update` | Morrow app | `installer/renderer/renderer.js:199` |
-| `Try restart again` | Morrow app | `installer/renderer/renderer.js:195` |
-| `Retry the update` | Morrow app | `installer/renderer/renderer.js:211` |
-| `Try again` | Morrow app | `installer/renderer/renderer.js:194` |
+| `Check for updates` | Morrow app | `installer/renderer/renderer.js:211` |
+| `Restart to update` | Morrow app | `installer/renderer/renderer.js:238` |
+| `Try restart again` | Morrow app | `installer/renderer/renderer.js:234` |
+| `Retry the update` | Morrow app | `installer/renderer/renderer.js:250` |
+| `Try again` | Morrow app | `installer/renderer/renderer.js:255` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:78` |
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:418` |
-| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:439` |
-| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:439` |
-| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:439` |
-| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:26`, `connector/extension/popup/popup-view.js:59` |
-| `Try again` | Popup | `connector/extension/popup/popup-view.js:56` |
-| `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:41` |
-| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:61` |
-| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:60` |
-| `Open Canvas or Moodle` | Popup | `connector/extension/popup/popup-view.js:63` |
-| `Connect Canvas` | Popup | `connector/extension/popup/popup-view.js:106` |
-| `Connect Moodle` | Popup | `connector/extension/popup/popup-view.js:106` |
-| `Check or switch course` | Popup | `connector/extension/popup/popup.html:27` |
-| `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:28` |
-| `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:30` |
-| `Open setup guide` | Popup | `connector/extension/popup/popup.html:32` |
-| `How to connect` | Popup | `connector/extension/popup/popup.html:34` |
+| `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:520` |
+| `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:520` |
+| `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:520` |
+| `Connect Morrow` | Popup | `connector/extension/popup/popup.html:27`, `connector/extension/popup/popup-view.js:67` |
+| `Try again` | Popup | `connector/extension/popup/popup-view.js:63` |
+| `Waiting for approval` | Popup | `connector/extension/popup/popup-view.js:42` |
+| `Waiting for your assistant` | Popup | `connector/extension/popup/popup-view.js:69` |
+| `Choose courses` | Popup | `connector/extension/popup/popup-view.js:68` |
+| `Open Canvas or Moodle` | Popup | `connector/extension/popup/popup-view.js:71` |
+| `Connect Canvas` | Popup | `connector/extension/popup/popup-view.js:116` |
+| `Connect Moodle` | Popup | `connector/extension/popup/popup-view.js:116` |
+| `Check or switch course` | Popup | `connector/extension/popup/popup.html:28` |
+| `Disconnect Morrow` | Popup | `connector/extension/popup/popup.html:29` |
+| `Open Plan and Edit settings` | Popup | `connector/extension/popup/popup.html:31` |
+| `Open setup guide` | Popup | `connector/extension/popup/popup.html:33` |
+| `How to connect` | Popup | `connector/extension/popup/popup.html:35` |
 | `Guide me` | Setup guide | `connector/extension/onboarding/onboarding.html:29` |
 | `Setup overview` | Setup guide | `connector/extension/onboarding/onboarding.html:30` |
 | `Open Plan and Edit settings` | Setup guide | `connector/extension/onboarding/onboarding.html:51`, `connector/extension/onboarding/onboarding.html:51` |
 | `Refresh connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:31` |
 | `Find available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:42` |
-| `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:750` |
-| `Select this page to connect` | Plan and Edit settings | `connector/extension/settings/settings.js:750` |
-| `Clear this page` | Plan and Edit settings | `connector/extension/settings/settings.js:749` |
+| `Select this page` | Plan and Edit settings | `connector/extension/settings/settings.js:796` |
+| `Select this page to connect` | Plan and Edit settings | `connector/extension/settings/settings.js:796` |
+| `Clear this page` | Plan and Edit settings | `connector/extension/settings/settings.js:795` |
 | `Previous page` | Plan and Edit settings | `connector/extension/settings/settings.html:60` |
 | `Next page` | Plan and Edit settings | `connector/extension/settings/settings.html:62` |
-| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:66`, `connector/extension/settings/settings.js:702` |
+| `Load more available courses` | Plan and Edit settings | `connector/extension/settings/settings.html:66`, `connector/extension/settings/settings.js:748` |
 | `View connected courses` | Plan and Edit settings | `connector/extension/settings/settings.html:74` |
-| `Connect selected courses in Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:75`, `connector/extension/settings/settings.js:782` |
-| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:93`, `connector/extension/settings/settings.js:888` |
-| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:888` |
+| `Connect selected courses in Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:75`, `connector/extension/settings/settings.js:828` |
+| `Enable course file access` | Plan and Edit settings | `connector/extension/settings/settings.html:93`, `connector/extension/settings/settings.js:934` |
+| `Turn on course file access` | Plan and Edit settings | `connector/extension/settings/settings.js:934` |
 | `Remove HTTPS file access` | Plan and Edit settings | `connector/extension/settings/settings.html:94` |
 | `Return selected courses to Plan` | Plan and Edit settings | `connector/extension/settings/settings.html:142` |
-| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:143`, `connector/extension/settings/settings.js:439` |
+| `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:143`, `connector/extension/settings/settings.js:476` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:152` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:153` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:844` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:666` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:834` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:831` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:833` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:963` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:946` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:943` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:945` |
 
 Names a person reads as landmarks rather than presses:
 
@@ -557,9 +560,9 @@ Names a person reads as landmarks rather than presses:
 | `Setup you can change` | Morrow app | `installer/shared/setup-view.mjs:232` |
 | `Materials folder` | Morrow app | `installer/shared/setup-view.mjs:181` |
 | `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:468` |
-| `Assistant` | Morrow app progress rail | `installer/shared/setup-view.mjs:14` |
-| `Morrow Bridge` | Morrow app progress rail | `installer/shared/setup-view.mjs:89` |
-| `Course` | Morrow app progress rail | `installer/shared/setup-view.mjs:51` |
+| `Assistant` | Morrow app progress rail | `installer/shared/setup-view.mjs:137` |
+| `Morrow Bridge` | Morrow app progress rail | `installer/shared/setup-view.mjs:138` |
+| `Course` | Morrow app progress rail | `installer/shared/setup-view.mjs:139` |
 | `Connect a Blackboard Learn site (optional)` | Morrow app | `installer/renderer/index.html:50` |
 | `Morrow setup` | Setup guide | `connector/extension/onboarding/onboarding.html:6` |
 | `Plan and Edit settings` | Plan and Edit settings | `connector/extension/settings/settings.html:6` |

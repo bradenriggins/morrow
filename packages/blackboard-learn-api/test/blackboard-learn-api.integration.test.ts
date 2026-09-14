@@ -152,14 +152,16 @@ function reviewedConnection(runtime: BlackboardLearnRuntime, binding: string): J
 
 function effectGrant(planDigest: string, receipt = "effect:00000000-0000-4000-8000-000000000001"): BlackboardEffectGrant {
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-effect-1",
     planDigest,
     outerPlanDigest: "a".repeat(64),
     approvalGrantDigest: "b".repeat(64),
     effectReceiptId: receipt,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:test",
+   gatewayProcessId: "gateway:test",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return { ...unsigned, dispatchToken: signBlackboardEffectGrant(effectSecret, unsigned) };
 }
@@ -174,6 +176,8 @@ function grantArguments(grant: BlackboardEffectGrant): JsonObject {
     effect_receipt_id: grant.effectReceiptId,
     dispatch_attempt: grant.dispatchAttempt,
     gateway_process_id: grant.gatewayProcessId,
+    issued_at: grant.issuedAt,
+    not_after: grant.notAfter,
     dispatch_token: grant.dispatchToken,
   };
 }

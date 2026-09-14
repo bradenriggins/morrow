@@ -123,6 +123,7 @@ async function executeItemBankRequest(nickname, argumentsValue, { status, throwO
         authType: "Signature",
         contextUuid: "course-context-uuid",
         canvasLocalContextId: "42",
+        externalToolId: "54065",
         launchUrl: `${ORIGIN}/courses/42/external_tools/54065`,
         launchNonce: "b28f3aae-8888-4c5b-9a17-458f2e1fe309",
         launchedAt: capturedAt - 1_000,

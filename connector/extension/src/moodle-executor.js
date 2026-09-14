@@ -1,4 +1,6 @@
 export async function executeMoodleInPage(input) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   try { input = JSON.parse(input); } catch { return { ok: false, sent: false, error: "moodle_arguments_invalid" }; }
   const MAX_BYTES = 2 * 1024 * 1024;
   const MAX_ITEMS = 100;
@@ -10,7 +12,11 @@ export async function executeMoodleInPage(input) {
   const MAX_DISCOVERY_OFFSET = 10_000;
   const PROVIDER = "moodle";
   const isObject = (value) => Boolean(value) && typeof value === "object" && !Array.isArray(value);
-  const id = (value) => Number.isSafeInteger(value) && value > 0 ? String(value) : /^[1-9][0-9]*$/.test(String(value || "")) ? String(value) : "";
+  const id = (value) => {
+    const exact = Number.isSafeInteger(value) && value > 0 ? String(value)
+      : /^[1-9][0-9]*$/.test(String(value || "")) ? String(value) : "";
+    return exact && Number.isSafeInteger(Number(exact)) && String(Number(exact)) === exact ? exact : "";
+  };
   const sectionNumber = (value) => Number.isSafeInteger(value) && value >= 0 ? String(value) : "";
   const error = (code, extra = {}) => ({ ok: false, sent: false, error: code, ...extra });
   const definitions = Object.freeze({
@@ -952,7 +958,10 @@ export async function executeMoodleInPage(input) {
   };
   const readText = async (response) => {
     const declaredLength = Number(response.headers?.get?.("content-length") || 0);
-    if (Number.isSafeInteger(declaredLength) && declaredLength > MAX_BYTES) throw new Error("too large");
+    if (Number.isSafeInteger(declaredLength) && declaredLength > MAX_BYTES) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      throw new Error("too large");
+    }
     const reader = response.body?.getReader?.();
     if (!reader) {
       if (!response.body) return "";
@@ -970,7 +979,7 @@ export async function executeMoodleInPage(input) {
         for (let index = 0; index < raw.byteLength; index += 1) chunk[index] = raw[index];
         total += chunk.byteLength;
         if (total > MAX_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           throw new Error("too large");
         }
         chunks.push(chunk);
@@ -984,7 +993,7 @@ export async function executeMoodleInPage(input) {
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    return new TextDecoder().decode(bytes);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   };
   const draftItemId = (value) => typeof value === "string" && /^[1-9][0-9]*$/.test(value) && Number.isSafeInteger(Number(value)) ? value : "";
   // Moodle's own draft-area actions. Source:
@@ -998,6 +1007,7 @@ export async function executeMoodleInPage(input) {
         cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: new URLSearchParams({ sesskey: context.sesskey, ...params }),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch {
       return null;
@@ -1042,6 +1052,7 @@ export async function executeMoodleInPage(input) {
         cache: "no-store",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify([{ index: 0, methodname: methodName, args }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch {
       return { ok: false, sent: write, outcomeUnknown: write, error: "moodle_ajax_request_failed" };
@@ -1434,7 +1445,7 @@ export async function executeMoodleInPage(input) {
   };
   const loadForm = async (context, descriptor) => {
     let response;
-    try { response = await fetch(descriptor.endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } }); } catch { return { ok: false, sent: false, error: "moodle_form_read_failed" }; }
+    try { response = await fetch(descriptor.endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return { ok: false, sent: false, error: "moodle_form_read_failed" }; }
     let text;
     try { text = await readText(response); } catch { return { ok: false, sent: false, status: response.status, error: "moodle_form_read_failed" }; }
     if (!response.ok || typeof DOMParser === "undefined" || typeof FormData === "undefined" || (descriptor.finalRoute && !finalRouteMatches(response.url, descriptor.endpoint, descriptor.finalRoute))) return { ok: false, sent: false, status: response.status, error: "moodle_form_read_failed" };
@@ -1527,7 +1538,7 @@ export async function executeMoodleInPage(input) {
     } catch { return { ok: false, sent: false, error: "moodle_form_invalid" }; }
     let response;
     try {
-      response = await fetch(form.action, { method: "POST", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: params });
+      response = await fetch(form.action, { method: "POST", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: params, signal: requestSignal(input?.expiresAt) });
     } catch { return { ok: false, sent: true, outcomeUnknown: true, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_write_response_unknown" }, error: "moodle_write_response_unknown" }; }
     let text;
     try { text = await readText(response); } catch { return { ok: false, sent: true, status: response.status, outcomeUnknown: true, verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "moodle_write_response_unknown" }, error: "moodle_write_response_unknown" }; }
@@ -1624,7 +1635,7 @@ export async function executeMoodleInPage(input) {
     if (!sameContext(context, currentContext())) return error("moodle_binding_mismatch");
     const endpoint = urlFor(context, "/course/view.php", { id: courseId });
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } }); } catch { return error("moodle_course_unavailable"); }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return error("moodle_course_unavailable"); }
     let text;
     try { text = await readText(response); } catch { return { ...error("moodle_course_unavailable"), status: response.status }; }
     if (!sameContext(context, currentContext())) return error("moodle_binding_mismatch");
@@ -1641,7 +1652,7 @@ export async function executeMoodleInPage(input) {
   const loadQuizDocument = async (context, path, params, failure) => {
     const endpoint = urlFor(context, path, params);
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } }); } catch { return error(failure); }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return error(failure); }
     let text;
     try { text = await readText(response); } catch { return { ...error(failure), status: response.status }; }
     if (!response.ok || typeof DOMParser === "undefined" || !finalRouteMatches(response.url, endpoint, params)) return { ...error(failure), status: response.status };
@@ -1724,7 +1735,10 @@ export async function executeMoodleInPage(input) {
   };
   const readLimitedBytes = async (response, maximum = 1024 * 1024) => {
     const declaredLength = Number(response.headers?.get?.("content-length") || 0);
-    if (Number.isSafeInteger(declaredLength) && declaredLength > maximum) throw new Error("too large");
+    if (Number.isSafeInteger(declaredLength) && declaredLength > maximum) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      throw new Error("too large");
+    }
     const reader = response.body?.getReader?.();
     if (!reader) throw new Error("stream unavailable");
     const chunks = [];
@@ -1738,7 +1752,7 @@ export async function executeMoodleInPage(input) {
         const chunk = new Uint8Array(raw.byteLength);
         for (let index = 0; index < raw.byteLength; index += 1) chunk[index] = raw[index];
         total += chunk.byteLength;
-        if (total > maximum) { await reader.cancel(); throw new Error("too large"); }
+        if (total > maximum) { try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("too large"); }
         chunks.push(chunk);
       }
     } finally { reader.releaseLock(); }
@@ -1998,7 +2012,7 @@ export async function executeMoodleInPage(input) {
     if (manager.author !== null) body.append("author", manager.author);
     const endpoint = urlFor(context, "/repository/repository_ajax.php", { action: "upload" });
     let response;
-    try { response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" }, body }); } catch { return { ok: false, sent: true, outcomeUnknown: true, error: `moodle_${module}_draft_upload_unknown` }; }
+    try { response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" }, body, signal: requestSignal(input?.expiresAt) }); } catch { return { ok: false, sent: true, outcomeUnknown: true, error: `moodle_${module}_draft_upload_unknown` }; }
     let text;
     try { text = await readText(response); } catch { return { ok: false, sent: true, outcomeUnknown: true, status: response.status, error: `moodle_${module}_draft_upload_unknown` }; }
     let result;
@@ -2011,8 +2025,8 @@ export async function executeMoodleInPage(input) {
   // bytes Morrow has not seen in the draft area itself.
   const draftBytesMatch = async (context, draftUrl, manifest) => {
     let response;
-    try { response = await fetch(draftUrl, { method: "GET", credentials: "include", cache: "no-store", redirect: "error" }); } catch { return false; }
-    if (!response.ok || response.url !== draftUrl) return false;
+    try { response = await fetch(draftUrl, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return false; }
+    if (!response.ok || response.url !== draftUrl) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} return false; }
     let bytes;
     try { bytes = await readLimitedBytes(response); } catch { return false; }
     if (bytes.byteLength !== manifest.size_bytes) return false;
@@ -2174,7 +2188,7 @@ export async function executeMoodleInPage(input) {
     for (const [name, value] of Object.entries(overrides)) params.set(name, value);
     params.set("submitbutton2", form.submit.value);
     let response;
-    try { response = await fetch(form.action, { method: "POST", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: params }); } catch { return unconfirmedResourceCreate(undefined, `moodle_${module}_save_unknown`); }
+    try { response = await fetch(form.action, { method: "POST", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: params, signal: requestSignal(input?.expiresAt) }); } catch { return unconfirmedResourceCreate(undefined, `moodle_${module}_save_unknown`); }
     let text;
     try { text = await readText(response); } catch { return unconfirmedResourceCreate(response.status, `moodle_${module}_save_unknown`); }
     if (!response.ok) return unconfirmedResourceCreate(response.status, `moodle_${module}_save_unknown`);
@@ -2190,7 +2204,7 @@ export async function executeMoodleInPage(input) {
     const directory = filepath.split("/").filter(Boolean).map((part) => `${encodeURIComponent(part)}/`).join("");
     const endpoint = urlFor(context, `/pluginfile.php/${manager.contextId}/mod_${module}/${area}${revisionPath}/${directory}${encodeURIComponent(manifest.filename)}`, { forcedownload: 1 });
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error" }); } catch { return null; }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", signal: requestSignal(input?.expiresAt) }); } catch { return null; }
     let bytes;
     try { bytes = await readLimitedBytes(response); } catch { return null; }
     if (!response.ok || response.url !== endpoint || bytes.byteLength !== manifest.size_bytes) return null;
@@ -3897,7 +3911,7 @@ export async function executeMoodleInPage(input) {
     const route = { cmid: moduleId, mode: scope };
     const endpoint = urlFor(context, `/mod/${module}/overrides.php`, route);
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } }); } catch { return error(failure); }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return error(failure); }
     let text;
     try { text = await readText(response); } catch { return { ...error(failure), status: response.status }; }
     if (!response.ok || typeof DOMParser === "undefined" || !finalRouteMatches(response.url, endpoint, route)) return { ...error(failure), status: response.status };
@@ -4520,7 +4534,7 @@ export async function executeMoodleInPage(input) {
   const loadBookTocChapterIds = async (context, args) => {
     const endpoint = urlFor(context, "/mod/book/edit.php", { cmid: args.module_id, pagenum: 0 });
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } }); } catch { return error("moodle_book_chapters_unavailable"); }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return error("moodle_book_chapters_unavailable"); }
     let text;
     try { text = await readText(response); } catch { return { ...error("moodle_book_chapters_unavailable"), status: response.status }; }
     if (!sameContext(context, currentContext()) || !response.ok || typeof DOMParser === "undefined") return { ...error("moodle_book_chapters_unavailable"), status: response.status };
@@ -4708,7 +4722,7 @@ export async function executeMoodleInPage(input) {
     if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
     const endpoint = urlFor(rechecked, "/mod/book/move.php", { id: args.module_id, chapterid: args.chapter_id, up: args.direction === "up" ? 1 : 0, sesskey: rechecked.sesskey });
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" } }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_move_response_unknown"); }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_move_response_unknown"); }
     // Fetch exposes a manual same-origin redirect as an opaque redirect. The fixed native endpoint and the authoritative chapter-list readback bind that response without following an activity view.
     if (response.type !== "opaqueredirect") {
       let redirect;
@@ -4749,7 +4763,7 @@ export async function executeMoodleInPage(input) {
     if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
     const endpoint = urlFor(rechecked, "/mod/book/show.php", { id: args.module_id, chapterid: args.chapter_id, sesskey: rechecked.sesskey });
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" } }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_visibility_response_unknown"); }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_visibility_response_unknown"); }
     if (response.type !== "opaqueredirect") {
       let redirect;
       try { redirect = new URL(response.headers.get("location") || "", endpoint); } catch { return unconfirmedCreate(response.status, "moodle_book_chapter_visibility_redirect_unconfirmed"); }
@@ -4790,7 +4804,7 @@ export async function executeMoodleInPage(input) {
     if (preflight.snapshot_digest !== before.snapshot_digest) return error("moodle_form_changed");
     const endpoint = urlFor(rechecked, "/mod/book/delete.php", { id: args.module_id, chapterid: args.chapter_id, confirm: 1, sesskey: rechecked.sesskey });
     let response;
-    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" } }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_delete_response_unknown"); }
+    try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_delete_response_unknown"); }
     // Fetch exposes a manual same-origin redirect as an opaque redirect. The fixed native endpoint and the authoritative chapter-list readback bind that response without following the Book view.
     if (response.type !== "opaqueredirect") {
       let redirect;
@@ -4816,7 +4830,9 @@ export async function executeMoodleInPage(input) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_ITEMS
       || !Number.isSafeInteger(offset) || offset < 0 || offset > MAX_DISCOVERY_OFFSET) return error("moodle_arguments_invalid");
     try {
-      const response = await ajax(context, "core_course_get_enrolled_courses_by_timeline_classification", { classification: "allincludinghidden", limit, offset, sort: null, customfieldname: null, customfieldvalue: null, searchvalue: null, requiredfields: [] });
+      // Read one item beyond the visible page. A full page alone cannot prove
+      // that another page exists when the total is an exact multiple of limit.
+      const response = await ajax(context, "core_course_get_enrolled_courses_by_timeline_classification", { classification: "allincludinghidden", limit: limit + 1, offset, sort: null, customfieldname: null, customfieldvalue: null, searchvalue: null, requiredfields: [] });
       if (!response.ok || !isObject(response.data) || !Array.isArray(response.data.courses)) return error(response.error || "moodle_courses_invalid", { status: response.status });
       const timelineCourses = response.data.courses.slice(0, limit).map((course) => {
         const courseId = id(course?.id);
@@ -4840,7 +4856,7 @@ export async function executeMoodleInPage(input) {
           }
         }
       }
-      const complete = response.data.courses.length < limit;
+      const complete = response.data.courses.length <= emittedTimelineCount;
       const data = { courses, offset, limit, next_offset: complete ? null : offset + emittedTimelineCount, complete };
       return { ok: true, sent: true, status: response.status, data, snapshot_digest: await digest(data) };
     } catch {

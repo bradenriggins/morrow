@@ -1,12 +1,10 @@
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
-import { loadCanvasApiCatalog } from "@morrow/canvas-api-catalog";
 import type { JsonObject } from "@morrow/contracts";
 import { describe, expect, it } from "vitest";
 import { parseGatewayConfig } from "../src/config.js";
@@ -14,6 +12,7 @@ import { GatewayRuntime } from "../src/runtime.js";
 import { createMorrowServer } from "../src/server.js";
 import { buildLocalCanvasConfig } from "../../client-config/src/index.js";
 import { connectBridgeTestClient, type BridgeTestClient } from "./fixtures/bridge-client.js";
+import { bridgeCatalogDigestForTests } from "./fixtures/bridge-catalog-digest.js";
 
 const SOURCE_BINDINGS = new Map([
   ["2", "canvas:complete"],
@@ -36,16 +35,6 @@ async function availablePort(): Promise<number> {
   return address.port;
 }
 
-function bridgeCatalogDigest(root: string): string {
-  const canvas = loadCanvasApiCatalog(resolve(root, "artifacts/canvas-api/canvas-api-catalog.json"));
-  const canvasBrowser = createHash("sha256")
-    .update(readFileSync(resolve(root, "connector/extension/generated/canvas-browser-catalog.json")))
-    .digest("hex");
-  const moodle = createHash("sha256")
-    .update(readFileSync(resolve(root, "connector/extension/generated/moodle-browser-catalog.json")))
-    .digest("hex");
-  return createHash("sha256").update(`${canvas.catalogDigest}\n${canvasBrowser}\n${moodle}`).digest("hex");
-}
 
 function connectorConfig(root: string, directory: string, port: number) {
   const generated = structuredClone(buildLocalCanvasConfig(root, process.execPath)) as {
@@ -77,7 +66,7 @@ describe("Canvas historical learner dictionary", () => {
     const root = resolve("../..");
     const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-history-"));
     const port = await availablePort();
-    const catalogDigest = bridgeCatalogDigest(root);
+    const catalogDigest = bridgeCatalogDigestForTests(root);
     const runtime = await GatewayRuntime.connect(connectorConfig(root, directory, port));
     let bridge: BridgeTestClient | undefined;
     const contentCourses: string[] = [];

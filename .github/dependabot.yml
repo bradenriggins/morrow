@@ -1,0 +1,21 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: America/Chicago
+    versioning-strategy: increase-if-necessary
+    open-pull-requests-limit: 10
+
+  - package-ecosystem: npm
+    directory: /installer
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:15"
+      timezone: America/Chicago
+    versioning-strategy: increase-if-necessary
+    open-pull-requests-limit: 10

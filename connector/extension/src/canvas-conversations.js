@@ -122,6 +122,7 @@ function failure(error, sent, status) {
  */
 export async function executeCanvasConversationInPage(input) {
   const privateSchema = "morrow.canvas-conversation.private.v1";
+  const maxResponseBytes = 2 * 1024 * 1024;
   const decimalId = /^[1-9][0-9]{0,18}$/;
   const recipientContext = /^(course|section|group)_([1-9][0-9]{0,18})(?:_(students|teachers|tas|observers|designers))?$/;
 
@@ -169,22 +170,76 @@ export async function executeCanvasConversationInPage(input) {
     || !instruction || instruction.courseId !== binding.courseId) {
     return { ok: false, sent: false, error: "canvas_conversation_private_payload_invalid" };
   }
+  if (!Number.isSafeInteger(request.expiresAt) || Date.now() >= request.expiresAt) {
+    return { ok: false, sent: false, error: "canvas_conversation_request_expired" };
+  }
+  const requestController = new AbortController();
+  const requestTimeout = setTimeout(
+    () => requestController.abort(),
+    Math.max(1, Math.min(request.expiresAt - Date.now(), 2_147_483_647)),
+  );
 
   const currentCourseId = () => {
     const match = location.pathname.match(/(?:^|\/)courses\/([1-9][0-9]*)(?:\/|$)/);
     return match ? match[1] : null;
   };
+  const cancelBody = (body) => {
+    try {
+      const cancellation = body?.cancel?.();
+      if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {});
+    } catch { /* The response is already refused. */ }
+  };
+  const readText = async (response) => {
+    const declared = response?.headers?.get?.("content-length");
+    if (declared !== null && declared !== undefined
+      && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > maxResponseBytes)) {
+      cancelBody(response?.body);
+      fail("canvas_conversation_response_too_large");
+    }
+    if (response?.body === null) return "";
+    const reader = response?.body?.getReader?.();
+    if (!reader) fail("canvas_conversation_response_unreadable");
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let raw = "";
+    let received = 0;
+    try {
+      while (true) {
+        const remaining = request.expiresAt - Date.now();
+        if (remaining <= 0 || requestController.signal.aborted) fail("canvas_conversation_request_expired");
+        let timer;
+        const chunk = await Promise.race([
+          reader.read(),
+          new Promise((unused, reject) => {
+            timer = setTimeout(() => reject(new Error("canvas_conversation_request_expired")), Math.max(1, Math.min(remaining, 2_147_483_647)));
+          }),
+        ]).finally(() => clearTimeout(timer));
+        if (chunk.done) break;
+        if (!(chunk.value instanceof Uint8Array)) fail("canvas_conversation_response_unreadable");
+        received += chunk.value.byteLength;
+        if (received > maxResponseBytes) fail("canvas_conversation_response_too_large");
+        raw += decoder.decode(chunk.value, { stream: true });
+      }
+      return raw + decoder.decode();
+    } catch (error) {
+      cancelBody(reader);
+      throw error;
+    }
+  };
   const readJson = async (response, code) => {
-    const raw = await response.text();
+    const raw = await readText(response);
     try { return raw ? JSON.parse(raw) : null; } catch { fail(code); }
   };
   const get = async (path, code) => {
     let response;
     try {
       response = await fetch(new URL(path, location.origin), {
-        credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" },
+        credentials: "include", cache: "no-store", redirect: "error", signal: requestController.signal,
+        headers: { Accept: "application/json+canvas-string-ids" },
       });
-    } catch { fail(code); }
+    } catch {
+      if (requestController.signal.aborted) fail("canvas_conversation_request_expired");
+      fail(code);
+    }
     if (!response.ok) fail(code);
     return await readJson(response, code);
   };
@@ -247,7 +302,10 @@ export async function executeCanvasConversationInPage(input) {
       "X-CSRF-Token": csrfToken,
       "X-Requested-With": "XMLHttpRequest",
     });
-    return await fetch(new URL(path, location.origin), { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers, body: JSON.stringify(body) });
+    return await fetch(new URL(path, location.origin), {
+      method: "POST", credentials: "include", cache: "no-store", redirect: "error",
+      signal: requestController.signal, headers, body: JSON.stringify(body),
+    });
   };
   const responseMessageId = (conversation) => {
     const direct = id(conversation?.last_message?.id);
@@ -285,7 +343,7 @@ export async function executeCanvasConversationInPage(input) {
     }
 
     await validateBinding();
-    if (!Number.isSafeInteger(request.expiresAt) || Date.now() >= request.expiresAt) fail("canvas_conversation_request_expired");
+    if (Date.now() >= request.expiresAt) fail("canvas_conversation_request_expired");
     const body = instruction.action === "create"
       ? {
         recipients: instruction.recipients,
@@ -336,5 +394,7 @@ export async function executeCanvasConversationInPage(input) {
     };
   } catch (error) {
     return failure(error, sent, responseStatus);
+  } finally {
+    clearTimeout(requestTimeout);
   }
 }

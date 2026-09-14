@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import { serveStdio, StdioServerTransport, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { loadLegacyBridgeConfig } from "./config.js";
 import { LegacyBridgeRuntime } from "./runtime.js";
 import { createLegacyBridgeMcpServer } from "./server.js";
@@ -14,16 +14,31 @@ console.error(
 );
 
 let closing = false;
+let serverHandle: StdioServerHandle | null = null;
 async function close(): Promise<void> {
   if (closing) return;
   closing = true;
+  const handle = serverHandle;
+  serverHandle = null;
+  if (handle) await handle.close().catch(() => undefined);
   await runtime.close().catch(() => undefined);
+}
+function shutdown(): void {
+  void close();
+}
+class LegacyBridgeStdioTransport extends StdioServerTransport {
+  override async close(): Promise<void> {
+    await super.close();
+    shutdown();
+  }
 }
 process.once("SIGINT", () => void close().finally(() => process.exit(0)));
 process.once("SIGTERM", () => void close().finally(() => process.exit(0)));
 process.once("exit", () => {
   if (!closing) void runtime.close();
 });
+process.stdin.once("end", shutdown);
+process.stdin.once("close", shutdown);
 
-await serveStdio(() => createLegacyBridgeMcpServer(runtime, { internalSourceCapability: process.env.MORROW_INTERNAL_SOURCE_CAPABILITY,
-  learnerVaultPath: join(homedir(), ".morrow", "source-learner-vault.legacy.json") }));
+serverHandle = serveStdio(() => createLegacyBridgeMcpServer(runtime, { internalSourceCapability: process.env.MORROW_INTERNAL_SOURCE_CAPABILITY,
+  learnerVaultPath: join(homedir(), ".morrow", "source-learner-vault.legacy.json") }), { transport: new LegacyBridgeStdioTransport() });

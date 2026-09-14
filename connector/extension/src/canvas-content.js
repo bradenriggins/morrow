@@ -1,4 +1,6 @@
 (() => {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   if (globalThis.__morrowCanvasConnectorInstalled) return;
   globalThis.__morrowCanvasConnectorInstalled = true;
 
@@ -7,6 +9,7 @@
   // Total Canvas pages one resumed list sequence may read across every bounded call.
   const MAX_RESUMED_PAGES = 500;
   const MAX_DISCOVERED_COURSES = 100;
+  const MAX_DISCOVERY_NEXT_BYTES = 4 * 1024;
   // Every deliberate error this connector throws leads with a lowercase,
   // underscore-joined token (e.g. "canvas_x_y", optionally followed by free
   // text). A genuine unexpected exception (a browser TypeError, a network
@@ -1130,8 +1133,8 @@
   }
 
   async function pageJson(url) {
-    const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" } });
-    if (!response.ok) throw new Error("page_check_unavailable");
+    const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
+    if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("page_check_unavailable"); }
     return JSON.parse(await readBounded(response));
   }
 
@@ -1153,6 +1156,7 @@
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
       redirect: "error",
+      signal: requestSignal(),
     });
     if (!response.ok) throw new Error(`canvas_course_http_${response.status}`);
     const course = JSON.parse(await readBounded(response));
@@ -1160,42 +1164,39 @@
     return course;
   }
 
-  function discoveryPage(value) {
-    if (value === undefined) return 1;
-    return Number.isSafeInteger(value) && value >= 1 ? value : null;
-  }
-
-  function discoveryNextPage(value, currentPage) {
+  function discoveryUrl(value) {
     if (!value) return null;
-    const url = new URL(value);
-    if (url.origin !== location.origin || url.pathname !== "/api/v1/courses") throw new Error("canvas_courses_next_invalid");
-    const allowed = new Set(["enrollment_state", "per_page", "page"]);
-    if ([...url.searchParams.keys()].some((key) => !allowed.has(key))
-      || url.searchParams.getAll("enrollment_state").length !== 1 || url.searchParams.get("enrollment_state") !== "active"
-      || url.searchParams.getAll("per_page").length !== 1 || url.searchParams.get("per_page") !== String(MAX_DISCOVERED_COURSES)
-      || url.searchParams.getAll("page").length !== 1) throw new Error("canvas_courses_next_invalid");
-    const rawPage = url.searchParams.get("page");
-    if (!/^[1-9][0-9]*$/.test(rawPage || "")) throw new Error("canvas_courses_next_invalid");
-    const page = discoveryPage(Number(rawPage));
-    if (!page || page !== currentPage + 1) throw new Error("canvas_courses_next_invalid");
-    return page;
+    if (typeof value !== "string" || new TextEncoder().encode(value).byteLength > MAX_DISCOVERY_NEXT_BYTES) {
+      throw new Error("canvas_courses_next_invalid");
+    }
+    let url;
+    try { url = new URL(value); } catch { throw new Error("canvas_courses_next_invalid"); }
+    const authority = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(value)?.[1] || "";
+    if (url.protocol !== "https:" || url.origin !== location.origin || url.pathname !== "/api/v1/courses"
+      || authority.includes("@") || url.username || url.password || value.includes("#")) {
+      throw new Error("canvas_courses_next_invalid");
+    }
+    return url;
   }
 
-  async function listCourses(pageValue) {
-    const page = discoveryPage(pageValue);
-    if (!page) throw new Error("canvas_courses_page_invalid");
-    const url = new URL(`/api/v1/courses?enrollment_state=active&per_page=${MAX_DISCOVERED_COURSES}&page=${page}`, location.origin);
+  async function listCourses(nextValue) {
+    const url = nextValue === undefined
+      ? new URL(`/api/v1/courses?enrollment_state=active&per_page=${MAX_DISCOVERED_COURSES}&page=1`, location.origin)
+      : discoveryUrl(nextValue);
+    if (!url) throw new Error("canvas_courses_next_invalid");
     const response = await fetch(url, {
       credentials: "include",
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
       redirect: "error",
+      signal: requestSignal(),
     });
     if (!response.ok) throw new Error(`canvas_courses_http_${response.status}`);
     const courses = JSON.parse(await readBounded(response));
     if (!Array.isArray(courses) || courses.length > MAX_DISCOVERED_COURSES) throw new Error("canvas_courses_invalid");
-    const nextPage = discoveryNextPage(nextLink(response.headers.get("Link"), location.origin, url.pathname), page);
-    return { courses: courses.map(courseSummary).filter(Boolean), complete: nextPage === null, nextPage };
+    const next = discoveryUrl(nextLink(response.headers.get("Link"), location.origin, url.pathname));
+    if (next?.href === url.href) throw new Error("canvas_courses_next_invalid");
+    return { courses: courses.map(courseSummary).filter(Boolean), complete: next === null, pageUrl: url.href, nextUrl: next?.href || null };
   }
 
   async function checkedCourse(id) {
@@ -1203,6 +1204,33 @@
     const summary = courseSummary(course);
     if (!summary) throw new Error("canvas_course_invalid");
     return { profile, course: summary };
+  }
+
+  async function itemBankCourseTabs(id) {
+    const exactId = courseId(id);
+    if (!exactId) throw new Error("canvas_course_id_invalid");
+    const [checked, response] = await Promise.all([
+      checkedCourse(exactId),
+      fetch(new URL(`/api/v1/courses/${exactId}/tabs`, location.origin), {
+        credentials: "include",
+        headers: { Accept: "application/json+canvas-string-ids" },
+        cache: "no-store",
+        redirect: "error",
+        signal: requestSignal(),
+      }),
+    ]);
+    if (!response.ok) throw new Error(`canvas_item_bank_tabs_http_${response.status}`);
+    const tabs = JSON.parse(await readBounded(response));
+    if (!Array.isArray(tabs) || tabs.length > 1_000) throw new Error("canvas_item_bank_tabs_invalid");
+    return {
+      ...checked,
+      tabs: tabs.map((tab) => ({
+        ...(typeof tab?.id === "string" ? { id: tab.id } : {}),
+        ...(typeof tab?.type === "string" ? { type: tab.type } : {}),
+        ...(typeof tab?.label === "string" ? { label: tab.label } : {}),
+        ...(typeof tab?.html_url === "string" ? { html_url: tab.html_url } : {}),
+      })),
+    };
   }
 
   function pageTextChange(body, find, replacement) {
@@ -1520,7 +1548,7 @@
   // A Classic Quiz question repair names one answer field or none: the image is
   // in the question text, or in exactly one field of exactly one answer.
   const CLASSIC_QUIZ_ANSWER_SELECTOR_FIELDS = ["answer_id", "answer_field"];
-  const CLASSIC_QUIZ_ANSWER_SELECTOR_HTML_FIELDS = ["answer_text", "answer_html"];
+  const CLASSIC_QUIZ_ANSWER_SELECTOR_HTML_FIELDS = ["text", "html", "answer_text", "answer_html"];
 
   function validClassicQuizAnswerSelector(guard) {
     if (!Object.hasOwn(guard, "answer_id") && !Object.hasOwn(guard, "answer_field")) return true;
@@ -1531,103 +1559,236 @@
     return Object.hasOwn(guard, "answer_id");
   }
 
-  // Canvas rebuilds a Classic Quiz question from the whole request through
-  // AssessmentQuestion.parse_question, so a field this write leaves out is
-  // rebuilt from a default rather than preserved. Every field below is read
-  // fresh and sent back unchanged, and a question whose fresh read cannot
-  // supply one of them is refused instead of rebuilt. That round trip is
-  // live-unverified: no connected Canvas tenant has proved it.
-  const CLASSIC_QUIZ_QUESTION_TEXT_FIELDS = ["question_name", "question_text", "correct_comments", "incorrect_comments", "neutral_comments"];
-  // Canvas derives these from the request. The write has no parameter for them,
-  // and the protected-state digest still covers them.
-  const CLASSIC_QUIZ_QUESTION_DERIVED_FIELDS = ["id", "quiz_id", "quiz_group_id", "assessment_question_id", "correct_comments_html", "incorrect_comments_html", "neutral_comments_html"];
-  const CLASSIC_QUIZ_QUESTION_TYPES = ["multiple_choice_question", "true_false_question", "multiple_answers_question", "short_answer_question", "essay_question"];
-  const CLASSIC_QUIZ_ANSWERLESS_QUESTION_TYPES = ["essay_question"];
-  const CLASSIC_QUIZ_ANSWER_DERIVED_FIELDS = ["answer_comment_html"];
+  function classicQuizAnswerRequestField(field) {
+    return field === "text" ? "answer_text" : field === "html" ? "answer_html" : field;
+  }
+
+  /* BEGIN GENERATED CLASSIC QUIZ QUESTION CONTRACT */
+  // Generated from packages/canvas-api-catalog/src/classic-quiz-question-contract.ts sha256:b129e580d232fdc1402b2c9b34ed1719e69c1afa1ac06069efda593881c6e192
+  const CLASSIC_QUIZ_SUPPORTED_QUESTION_TYPES = Object.freeze([
+      "multiple_choice_question",
+      "true_false_question",
+      "multiple_answers_question",
+      "short_answer_question",
+      "essay_question",
+  ]);
+  const CLASSIC_QUIZ_ANSWERLESS_QUESTION_TYPES = new Set(["essay_question"]);
+  const CLASSIC_QUIZ_REQUIRED_TEXT_FIELDS = Object.freeze([
+      "question_name",
+      "question_text",
+      "correct_comments",
+      "incorrect_comments",
+      "neutral_comments",
+  ]);
+  const CLASSIC_QUIZ_OPTIONAL_TEXT_FIELDS = Object.freeze([
+      "correct_comments_html",
+      "incorrect_comments_html",
+      "neutral_comments_html",
+      "text_after_answers",
+  ]);
+  const CLASSIC_QUIZ_NULLABLE_TYPE_FIELDS = Object.freeze([
+      "variables",
+      "formulas",
+      "answer_tolerance",
+      "formula_decimal_places",
+      "matches",
+      "matching_answer_incorrect_matches",
+  ]);
+  const CLASSIC_QUIZ_RESPONSE_FIELDS = new Set([
+      "id",
+      "quiz_id",
+      "quiz_group_id",
+      "assessment_question_id",
+      "assessment_question_bank_id",
+      "created_at",
+      "updated_at",
+      "regrade_option",
+      "question_type",
+      "points_possible",
+      "position",
+      "answers",
+      ...CLASSIC_QUIZ_REQUIRED_TEXT_FIELDS,
+      ...CLASSIC_QUIZ_OPTIONAL_TEXT_FIELDS,
+      ...CLASSIC_QUIZ_NULLABLE_TYPE_FIELDS,
+  ]);
+  const CLASSIC_QUIZ_RESPONSE_ANSWER_FIELDS = new Set([
+      "id",
+      "text",
+      "html",
+      "weight",
+      "comments",
+      "comments_html",
+      "answer_text",
+      "answer_html",
+      "answer_weight",
+      "answer_comments",
+      "answer_comment_html",
+      "text_after_answers",
+  ]);
   const MAX_CLASSIC_QUIZ_ANSWERS = 100;
-
-  // A field name Canvas returned is untrusted text, so a refusal repeats it
-  // only when it is a plain identifier and says "an unexpected field" otherwise.
-  function reportableFieldName(name) {
-    return /^[A-Za-z0-9_]{1,60}$/.test(String(name)) ? String(name) : "an unexpected field";
+  const CLASSIC_QUIZ_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+  function classicQuizPlainObject(value) {
+      return Boolean(value) && typeof value === "object" && !Array.isArray(value);
   }
-
+  function classicQuizReportableField(name) {
+      return /^[A-Za-z0-9_]{1,60}$/.test(name) ? name : "an unexpected field";
+  }
+  function classicQuizIssue(category, message) {
+      return { ok: false, category, message };
+  }
+  function classicQuizId(value) {
+      if (typeof value === "number" && Number.isSafeInteger(value) && value > 0)
+          return String(value);
+      return typeof value === "string" && /^[1-9][0-9]{0,18}$/.test(value) ? value : null;
+  }
   function classicQuizPoints(value) {
-    if (typeof value === "number" && Number.isFinite(value)) return String(value);
-    return typeof value === "string" && /^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(value) ? value : null;
+      if (typeof value === "number" && Number.isFinite(value) && value >= 0)
+          return String(value);
+      return typeof value === "string" && /^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/.test(value) ? value : null;
   }
-
-  function classicQuizQuestionAnswers(value) {
-    const answers = value.answers;
-    if (CLASSIC_QUIZ_ANSWERLESS_QUESTION_TYPES.includes(value.question_type)) {
-      if (answers !== undefined && (!Array.isArray(answers) || answers.length > 0)) {
-        throw new Error("classic_quiz_question_unmodelled_state: Canvas returned answers for this essay question, and this repair cannot send them back. No change was sent.");
+  function classicQuizAlias(value, providerField, requestField) {
+      const providerPresent = Object.hasOwn(value, providerField);
+      const requestPresent = Object.hasOwn(value, requestField);
+      if (providerPresent && requestPresent && value[providerField] !== value[requestField]) {
+          return {
+              present: false,
+              value: undefined,
+              issue: classicQuizIssue("unmodelled_state", `Canvas returned conflicting ${providerField} and ${requestField} values on an answer of this question, and this repair cannot choose between them.`),
+          };
       }
-      return [];
-    }
-    if (!Array.isArray(answers) || answers.length < 1 || answers.length > MAX_CLASSIC_QUIZ_ANSWERS) {
-      throw new Error("classic_quiz_question_incomplete: Canvas did not return the answers for this question, and Morrow will not rebuild a question without them. No change was sent.");
-    }
-    const seen = new Set();
-    return answers.map((answer) => {
-      if (!plainObject(answer)) {
-        throw new Error("classic_quiz_question_incomplete: Canvas did not return one of this question's answers as a record, and Morrow will not rebuild a question without it. No change was sent.");
+      return providerPresent ? { present: true, value: value[providerField] }
+          : requestPresent ? { present: true, value: value[requestField] }
+              : { present: false, value: undefined };
+  }
+  function classicQuizAnswers(question) {
+      const rawAnswers = question.answers;
+      if (CLASSIC_QUIZ_ANSWERLESS_QUESTION_TYPES.has(String(question.question_type))) {
+          if (rawAnswers !== undefined && rawAnswers !== null && (!Array.isArray(rawAnswers) || rawAnswers.length > 0)) {
+              return classicQuizIssue("unmodelled_state", "Canvas returned answers for this essay question, and this repair cannot send them back.");
+          }
+          return [];
       }
-      const unmodelled = Object.keys(answer).find((field) => !CLASSIC_QUIZ_ANSWER_FIELDS.includes(field) && !CLASSIC_QUIZ_ANSWER_DERIVED_FIELDS.includes(field));
-      if (unmodelled) {
-        throw new Error(`classic_quiz_question_unmodelled_state: Canvas returned ${reportableFieldName(unmodelled)} on an answer of this question, and this repair cannot send it back. No change was sent.`);
+      if (!Array.isArray(rawAnswers) || rawAnswers.length < 1 || rawAnswers.length > MAX_CLASSIC_QUIZ_ANSWERS) {
+          return classicQuizIssue("incomplete", "Canvas did not return the answers for this question, and Morrow will not rebuild a question without them.");
       }
-      const id = pageId(answer.id);
-      if (!id || seen.has(id)) {
-        throw new Error("classic_quiz_question_incomplete: Canvas did not return one exact identifier for every answer of this question, and Morrow will not rebuild a question without them. No change was sent.");
-      }
-      seen.add(id);
-      if (typeof answer.answer_text !== "string" || !Number.isInteger(answer.answer_weight) || answer.answer_weight < 0 || answer.answer_weight > 100) {
-        throw new Error("classic_quiz_question_incomplete: Canvas did not return answer_text and answer_weight for every answer of this question, and Morrow will not rebuild a question without them. No change was sent.");
-      }
-      const rebuilt = { id, answer_text: answer.answer_text, answer_weight: answer.answer_weight };
-      for (const field of ["answer_comments", "answer_html", "text_after_answers"]) {
-        if (!Object.hasOwn(answer, field)) continue;
-        if (typeof answer[field] !== "string") {
-          throw new Error(`classic_quiz_question_incomplete: Canvas returned ${field} on an answer of this question in a form Morrow cannot send back. No change was sent.`);
-        }
-        rebuilt[field] = answer[field];
+      const seen = new Set();
+      const rebuilt = [];
+      for (const rawAnswer of rawAnswers) {
+          if (!classicQuizPlainObject(rawAnswer)) {
+              return classicQuizIssue("incomplete", "Canvas did not return one of this question's answers as a record, and Morrow will not rebuild a question without it.");
+          }
+          const unmodelled = Object.keys(rawAnswer).find((field) => !CLASSIC_QUIZ_RESPONSE_ANSWER_FIELDS.has(field));
+          if (unmodelled) {
+              return classicQuizIssue("unmodelled_state", `Canvas returned ${classicQuizReportableField(unmodelled)} on an answer of this question, and this repair cannot send it back.`);
+          }
+          const id = classicQuizId(rawAnswer.id);
+          if (!id || seen.has(id)) {
+              return classicQuizIssue("incomplete", "Canvas did not return one exact identifier for every answer of this question, and Morrow will not rebuild a question without them.");
+          }
+          seen.add(id);
+          const text = classicQuizAlias(rawAnswer, "text", "answer_text");
+          const weight = classicQuizAlias(rawAnswer, "weight", "answer_weight");
+          const comments = classicQuizAlias(rawAnswer, "comments", "answer_comments");
+          const commentsHtml = classicQuizAlias(rawAnswer, "comments_html", "answer_comment_html");
+          const html = classicQuizAlias(rawAnswer, "html", "answer_html");
+          for (const alias of [text, weight, comments, commentsHtml, html]) {
+              if (alias.issue)
+                  return alias.issue;
+          }
+          if (typeof text.value !== "string" || typeof weight.value !== "number" || !Number.isInteger(weight.value)
+              || weight.value < 0 || weight.value > 100) {
+              return classicQuizIssue("incomplete", "Canvas did not return text and weight for every answer of this question.");
+          }
+          for (const [field, alias] of [["comments", comments], ["comments_html", commentsHtml], ["html", html]]) {
+              if (alias.present && typeof alias.value !== "string") {
+                  return classicQuizIssue("incomplete", `Canvas returned ${field} on an answer of this question in a form Morrow cannot send back.`);
+              }
+          }
+          if (Object.hasOwn(rawAnswer, "text_after_answers") && typeof rawAnswer.text_after_answers !== "string") {
+              return classicQuizIssue("incomplete", "Canvas returned text_after_answers on an answer of this question in a form Morrow cannot send back.");
+          }
+          rebuilt.push({
+              id,
+              answer_text: text.value,
+              answer_weight: weight.value,
+              ...(comments.present ? { answer_comments: comments.value } : {}),
+              ...(commentsHtml.present ? { answer_comment_html: commentsHtml.value } : {}),
+              ...(html.present ? { answer_html: html.value } : {}),
+              ...(Object.hasOwn(rawAnswer, "text_after_answers") ? { text_after_answers: rawAnswer.text_after_answers } : {}),
+          });
       }
       return rebuilt;
-    });
+  }
+  function classicQuizQuestionContract(value) {
+      if (!classicQuizPlainObject(value)) {
+          return classicQuizIssue("incomplete", "Canvas did not return this question as a record.");
+      }
+      if (value.quiz_group_id !== undefined && value.quiz_group_id !== null) {
+          return classicQuizIssue("group_linked", "This question belongs to a question group, so Canvas can rebuild it from a question bank and a change here could reach other quizzes. Morrow does not repair it.");
+      }
+      if (typeof value.question_type !== "string"
+          || !CLASSIC_QUIZ_SUPPORTED_QUESTION_TYPES.includes(value.question_type)) {
+          return classicQuizIssue("type_unsupported", "Morrow repairs images only in multiple choice, true or false, multiple answers, short answer, and essay Classic Quiz questions.");
+      }
+      const unmodelled = Object.keys(value).find((field) => !CLASSIC_QUIZ_RESPONSE_FIELDS.has(field));
+      if (unmodelled) {
+          return classicQuizIssue("unmodelled_state", `Canvas returned ${classicQuizReportableField(unmodelled)} for this question, and this repair cannot send it back.`);
+      }
+      for (const field of CLASSIC_QUIZ_REQUIRED_TEXT_FIELDS) {
+          if (typeof value[field] !== "string") {
+              return classicQuizIssue("incomplete", `Canvas did not return ${field} for this question, and Morrow will not rebuild a question without it.`);
+          }
+      }
+      for (const field of CLASSIC_QUIZ_OPTIONAL_TEXT_FIELDS) {
+          if (Object.hasOwn(value, field) && value[field] !== null && typeof value[field] !== "string") {
+              return classicQuizIssue("incomplete", `Canvas returned ${field} for this question in a form Morrow cannot preserve.`);
+          }
+      }
+      const points = classicQuizPoints(value.points_possible);
+      if (points === null) {
+          return classicQuizIssue("incomplete", "Canvas did not return points_possible for this question, and Morrow will not rebuild a question without it.");
+      }
+      if (!Number.isSafeInteger(value.position) || value.position < 1) {
+          return classicQuizIssue("incomplete", "Canvas did not return position for this question, and Morrow will not rebuild a question without it.");
+      }
+      for (const field of ["assessment_question_id", "assessment_question_bank_id"]) {
+          if (Object.hasOwn(value, field) && value[field] !== null && classicQuizId(value[field]) === null) {
+              return classicQuizIssue("incomplete", `Canvas returned ${field} for this question in a form Morrow cannot preserve.`);
+          }
+      }
+      for (const field of ["created_at", "updated_at"]) {
+          if (Object.hasOwn(value, field) && (typeof value[field] !== "string" || !CLASSIC_QUIZ_TIMESTAMP.test(value[field])
+              || !Number.isFinite(Date.parse(value[field])))) {
+              return classicQuizIssue("incomplete", `Canvas returned ${field} for this question in a form Morrow cannot preserve.`);
+          }
+      }
+      if (value.regrade_option !== undefined && value.regrade_option !== null) {
+          return classicQuizIssue("unmodelled_state", "Canvas returned a nonempty regrade_option for this question, and this repair cannot preserve its regrade meaning.");
+      }
+      for (const field of CLASSIC_QUIZ_NULLABLE_TYPE_FIELDS) {
+          if (value[field] !== undefined && value[field] !== null) {
+              return classicQuizIssue("unmodelled_state", `Canvas returned nonempty ${field} for this question type, and this repair cannot send it back.`);
+          }
+      }
+      const answers = classicQuizAnswers(value);
+      return Array.isArray(answers) ? { ok: true, points, answers } : answers;
+  }
+  /* END GENERATED CLASSIC QUIZ QUESTION CONTRACT */
+
+  function classicQuizQuestionError(issue) {
+    const token = issue.category === "group_linked" ? "classic_quiz_question_group_linked"
+      : issue.category === "type_unsupported" ? "classic_quiz_question_type_unsupported"
+      : issue.category === "unmodelled_state" ? "classic_quiz_question_unmodelled_state"
+      : "classic_quiz_question_incomplete";
+    return new Error(`${token}: ${issue.message} No change was sent.`);
   }
 
   /** The complete Classic Quiz question payload rebuilt from one fresh read, or a refusal that names what stopped it. */
   function classicQuizQuestion(value, guard) {
     if (!plainObject(value) || pageId(value.quiz_id) !== guard.quiz_id) throw new Error("canvas_content_target_changed");
-    if (value.quiz_group_id !== undefined && value.quiz_group_id !== null) {
-      throw new Error("classic_quiz_question_group_linked: This question belongs to a question group, so Canvas can rebuild it from a question bank and a change here could reach other quizzes. No change was sent.");
-    }
-    if (!CLASSIC_QUIZ_QUESTION_TYPES.includes(value.question_type)) {
-      throw new Error("classic_quiz_question_type_unsupported: Morrow repairs images only in multiple choice, true or false, multiple answers, short answer, and essay Classic Quiz questions. No change was sent.");
-    }
-    const unmodelled = Object.keys(value).find((field) => !CLASSIC_QUIZ_QUESTION_TEXT_FIELDS.includes(field)
-      && !CLASSIC_QUIZ_QUESTION_DERIVED_FIELDS.includes(field)
-      && !["question_type", "points_possible", "position", "text_after_answers", "answers"].includes(field));
-    if (unmodelled) {
-      throw new Error(`classic_quiz_question_unmodelled_state: Canvas returned ${reportableFieldName(unmodelled)} for this question, and this repair cannot send it back. No change was sent.`);
-    }
-    for (const field of CLASSIC_QUIZ_QUESTION_TEXT_FIELDS) {
-      if (typeof value[field] !== "string") {
-        throw new Error(`classic_quiz_question_incomplete: Canvas did not return ${field} for this question, and Morrow will not rebuild a question without it. No change was sent.`);
-      }
-    }
-    const points = classicQuizPoints(value.points_possible);
-    if (points === null) {
-      throw new Error("classic_quiz_question_incomplete: Canvas did not return points_possible for this question, and Morrow will not rebuild a question without it. No change was sent.");
-    }
-    if (!Number.isSafeInteger(value.position) || value.position < 1) {
-      throw new Error("classic_quiz_question_incomplete: Canvas did not return position for this question, and Morrow will not rebuild a question without it. No change was sent.");
-    }
-    if (Object.hasOwn(value, "text_after_answers") && typeof value.text_after_answers !== "string") {
-      throw new Error("classic_quiz_question_incomplete: Canvas returned text_after_answers for this question in a form Morrow cannot send back. No change was sent.");
-    }
-    const answers = classicQuizQuestionAnswers(value);
+    const result = classicQuizQuestionContract(value);
+    if (!result.ok) throw classicQuizQuestionError(result);
+    const { points, answers } = result;
     if (classicQuizAnswerSelected(guard) && answers.filter((answer) => answer.id === guard.answer_id).length !== 1) {
       throw new Error("classic_quiz_question_answer_unavailable: The selected answer is no longer one exact answer of this question. No change was sent.");
     }
@@ -1635,10 +1796,12 @@
   }
 
   function classicQuizQuestionBody(value, guard) {
-    const { answers } = classicQuizQuestion(value, guard);
+    classicQuizQuestion(value, guard);
     if (!classicQuizAnswerSelected(guard)) return value.question_text;
-    const selected = answers.find((answer) => answer.id === guard.answer_id);
-    if (typeof selected[guard.answer_field] !== "string") {
+    const selected = Array.isArray(value.answers)
+      ? value.answers.find((answer) => plainObject(answer) && pageId(answer.id) === guard.answer_id)
+      : null;
+    if (typeof selected?.[guard.answer_field] !== "string") {
       throw new Error("classic_quiz_question_answer_unavailable: Canvas did not return the selected answer field of this question. No change was sent.");
     }
     return selected[guard.answer_field];
@@ -1669,8 +1832,9 @@
     if (target.contentKind === "classic_quiz_question") {
       const { points, answers } = classicQuizQuestion(before, guard);
       const selected = classicQuizAnswerSelected(guard);
+      const requestAnswerField = classicQuizAnswerRequestField(guard.answer_field);
       const rebuilt = selected
-        ? answers.map((answer) => answer.id === guard.answer_id ? { ...answer, [guard.answer_field]: body } : answer)
+        ? answers.map((answer) => answer.id === guard.answer_id ? { ...answer, [requestAnswerField]: body } : answer)
         : answers;
       return {
         question_question_name: before.question_name,
@@ -1705,7 +1869,8 @@
       if (!classicQuizAnswerSelected(guard)) return typeof args.question_question_text === "string" ? args.question_question_text : null;
       const answers = Array.isArray(args.question_answers) ? args.question_answers : [];
       const selected = answers.filter((answer) => plainObject(answer) && answer.id === guard.answer_id);
-      return selected.length === 1 && typeof selected[0][guard.answer_field] === "string" ? selected[0][guard.answer_field] : null;
+      const requestAnswerField = classicQuizAnswerRequestField(guard.answer_field);
+      return selected.length === 1 && typeof selected[0][requestAnswerField] === "string" ? selected[0][requestAnswerField] : null;
     }
     if (target.contentKind === "new_quiz_choice") {
       const interaction = args.item_entry_interaction_data;
@@ -1824,7 +1989,7 @@
       if (done) break;
       size += value.byteLength;
       if (size > MAX_RESPONSE_BYTES) {
-        await reader.cancel();
+        try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
         throw new Error("canvas_response_too_large");
       }
       chunks.push(value);
@@ -1835,7 +2000,7 @@
       bytes.set(chunk, offset);
       offset += chunk.byteLength;
     }
-    return new TextDecoder().decode(bytes);
+    return new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   }
 
   function parsePayload(text, contentType) {
@@ -1917,31 +2082,22 @@
     return true;
   }
 
-  function encodeResumeToken(href, pagesRead) {
-    return btoa(JSON.stringify({ v: 1, p: pagesRead, u: href })).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-  }
-
-  // The token is opaque to every caller: it is only ever decoded here, and it is
-  // accepted only when it names this origin, the exact path of the request the
-  // caller just made, and a page count inside the resumed-sequence cap.
-  function decodeResumeToken(value, requested) {
+  // The public token is only an identifier. The service worker atomically claims
+  // its one-use record before it sends this private state into the course tab.
+  function decodeResumeToken(value, requested, state) {
     if (typeof value !== "string" || value.length < 8 || value.length > 4_096 || !/^[A-Za-z0-9_-]+$/.test(value)) {
       throw new Error("canvas_pagination_resume_refused");
     }
-    let decoded;
-    try {
-      decoded = JSON.parse(atob(value.replaceAll("-", "+").replaceAll("_", "/")));
-    } catch {
-      throw new Error("canvas_pagination_resume_refused");
-    }
-    if (!decoded || typeof decoded !== "object" || Array.isArray(decoded) || decoded.v !== 1
-      || !Number.isSafeInteger(decoded.p) || decoded.p < 1 || decoded.p >= MAX_RESUMED_PAGES
-      || typeof decoded.u !== "string") {
+    if (!state || typeof state !== "object" || Array.isArray(state)
+      || Object.keys(state).some((key) => !["schema", "nextUrl", "pagesRead"].includes(key))
+      || state.schema !== "morrow.canvas-list-resume-state.v1"
+      || !Number.isSafeInteger(state.pagesRead) || state.pagesRead < 1 || state.pagesRead >= MAX_RESUMED_PAGES
+      || typeof state.nextUrl !== "string") {
       throw new Error("canvas_pagination_resume_refused");
     }
     let url;
     try {
-      url = new URL(decoded.u);
+      url = new URL(state.nextUrl);
     } catch {
       throw new Error("canvas_pagination_resume_refused");
     }
@@ -1949,7 +2105,7 @@
       || url.pathname !== requested.pathname || url.hash !== "" || !sameRequestParameters(url, requested)) {
       throw new Error("canvas_pagination_resume_refused");
     }
-    return { href: url.href, pagesRead: decoded.p };
+    return { href: url.href, pagesRead: state.pagesRead };
   }
 
   function listResumeRequest(args, isRead) {
@@ -2087,10 +2243,16 @@
     if (await bodyDigest(stable(before.quiz_settings)) !== guard.current_quiz_settings_sha256) {
       throw new Error("new_quiz_settings_stale: These New Quiz settings changed in Canvas after they were read. No change was sent. Read the settings again and make a new change.");
     }
-    return { ...mergeQuizSettings(before.quiz_settings, settings), before: before.quiz_settings };
+    const requestedQuizFields = newQuizPayloadFromArguments(operation, args);
+    delete requestedQuizFields.quiz_settings;
+    return {
+      ...mergeQuizSettings(before.quiz_settings, settings),
+      before: before.quiz_settings,
+      requestedQuizFields,
+    };
   }
 
-  async function verifyNewQuizSettingsChange(args, url, expectedSettings, previousSettings = null) {
+  async function verifyNewQuizSettingsChange(args, url, expectedSettings, previousSettings = null, requestedQuizFields = {}) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-settings" };
     let saved;
     try {
@@ -2112,7 +2274,16 @@
       }
       return { ...base, status: "mismatch", reason: "new_quiz_settings_readback_mismatch" };
     }
-    return { ...base, status: "verified", evidence: "complete_settings_reread_after_write" };
+    if (!requestedNewQuizItemShapeMatches(saved, requestedQuizFields)) {
+      return { ...base, status: "mismatch", reason: "new_quiz_requested_fields_readback_mismatch" };
+    }
+    return {
+      ...base,
+      status: "verified",
+      evidence: Object.keys(requestedQuizFields).length > 0
+        ? "complete_settings_and_requested_quiz_fields_reread_after_write"
+        : "complete_settings_reread_after_write",
+    };
   }
 
   // The New Quiz item id rule, copied from src/new-quiz-item-guard.js because
@@ -2336,8 +2507,8 @@
     let next = requested.href;
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
-      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" } });
-      if (!response.ok) throw new Error("new_quiz_list_read_failed");
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
+      if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_list_read_failed"); }
       const rows = JSON.parse(await readBounded(response));
       if (!Array.isArray(rows) || rows.length > NEW_QUIZ_ITEM_PAGE_LIMIT || ids.length + rows.length > NEW_QUIZ_ITEM_LIMIT) {
         throw new Error("new_quiz_list_incomplete");
@@ -2544,8 +2715,8 @@
     let next = requested.href;
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
-      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" } });
-      if (!response.ok) throw new Error("new_quiz_item_position_list_read_failed");
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
+      if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_item_position_list_read_failed"); }
       const page = JSON.parse(await readBounded(response));
       if (!Array.isArray(page) || page.length > NEW_QUIZ_ITEM_PAGE_LIMIT || rows.length + page.length > NEW_QUIZ_ITEM_LIMIT) {
         throw new Error("new_quiz_item_position_list_incomplete");
@@ -2584,8 +2755,8 @@
     let next = requested.href;
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
-      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" } });
-      if (!response.ok) throw new Error("new_quiz_item_list_read_failed");
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
+      if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_item_list_read_failed"); }
       const page = JSON.parse(await readBounded(response));
       if (!Array.isArray(page) || page.length > NEW_QUIZ_ITEM_PAGE_LIMIT || rows.length + page.length > NEW_QUIZ_ITEM_LIMIT) {
         throw new Error("new_quiz_item_list_incomplete");
@@ -2633,7 +2804,9 @@
       throw new Error("new_quiz_item_position_guard_invalid: The requested item position does not match the expected saved order. No change was sent.");
     }
     const item = await readEditableStandaloneNewQuizItem(args, url);
-    return { expected, url, item };
+    const requestedItemFields = newQuizItemPayloadFromArguments(operation, args) || {};
+    delete requestedItemFields.position;
+    return { expected, url, item, requestedItemFields };
   }
 
   async function verifyNewQuizItemPositionChange(change) {
@@ -2642,7 +2815,20 @@
       if (saved.length !== change.expected.length || saved.some((id, index) => id !== change.expected[index])) {
         return { schema: "morrow.browser-verification.v1", status: "mismatch", reason: "new_quiz_item_position_readback_mismatch" };
       }
-      return { schema: "morrow.browser-verification.v1", status: "verified", evidence: "complete_new_quiz_item_order_reread_after_write" };
+      if (Object.keys(change.requestedItemFields).length > 0) {
+        const savedItem = await pageJson(change.url);
+        if (!plainObject(savedItem) || pageId(savedItem.id) !== pageId(change.item.id)
+          || !requestedNewQuizItemShapeMatches(savedItem, change.requestedItemFields)) {
+          return { schema: "morrow.browser-verification.v1", status: "mismatch", reason: "new_quiz_item_requested_fields_readback_mismatch" };
+        }
+      }
+      return {
+        schema: "morrow.browser-verification.v1",
+        status: "verified",
+        evidence: Object.keys(change.requestedItemFields).length > 0
+          ? "complete_new_quiz_item_order_and_requested_fields_reread_after_write"
+          : "complete_new_quiz_item_order_reread_after_write",
+      };
     } catch {
       return { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "new_quiz_item_position_readback_unavailable" };
     }
@@ -2756,7 +2942,7 @@
     "POST /v1/courses/{course_id}/quizzes/{quiz_id}/questions#create_single_quiz_question",
     "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}#update_existing_quiz_question",
   ]);
-  const CLASSIC_QUIZ_ANSWER_FIELDS = ["id", "answer_text", "answer_weight", "answer_comments", "answer_html", "text_after_answers"];
+  const CLASSIC_QUIZ_ANSWER_FIELDS = ["id", "answer_text", "answer_weight", "answer_comments", "answer_comment_html", "answer_html", "text_after_answers"];
 
   function classicQuizAnswerEntries(operation, parameter, value) {
     if (!CLASSIC_QUIZ_ANSWER_OPERATIONS.has(operation.key) || parameter.location !== "form"
@@ -2814,8 +3000,12 @@
         && Boolean(args.morrow_page_guard || args.morrow_canvas_content_guard) && parameter.inputName === "wiki_page_body";
       const preserveNewQuizValue = usesJsonBody(operation) && operation.path.startsWith("/quiz/v1/")
         && parameter.location === "form";
+      const guardedPageBody = operation.toolName === "canvas_update_create_page_courses"
+        && parameter.inputName === "wiki_page_body";
+      const preserveExplicitEmptyForm = parameter.location === "form"
+        && (!guardedPageBody || preserveGuardedEmptyPageBody);
       if (value === undefined || (value === null && !preserveNewQuizValue)
-        || (value === "" && !preserveGuardedEmptyPageBody && !preserveNewQuizValue)) {
+        || (value === "" && !preserveExplicitEmptyForm && !preserveNewQuizValue)) {
         if (parameter.required) throw new TypeError(`${parameter.inputName} is required`);
         continue;
       }
@@ -3007,6 +3197,7 @@
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
       redirect: "error",
+      signal: requestSignal(),
     });
     if (!response.ok) throw new Error(`canvas_profile_http_${response.status}`);
     const profile = JSON.parse(await readBounded(response));
@@ -3019,7 +3210,7 @@
     return { id, name: String(profile?.name || profile?.short_name || "Canvas user").slice(0, 200), origin: location.origin, courseId: currentCourseId, ...(courseName ? { courseName } : {}) };
   }
 
-  async function executeCanvas(operation, args, expectedPrincipalId, expiresAt, expectedCourseId) {
+  async function executeCanvas(operation, args, expectedPrincipalId, expiresAt, expectedCourseId, listResumeState) {
     const profile = await canvasProfile();
     if (profile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
     let { url, body } = requestParts(operation, args);
@@ -3124,7 +3315,7 @@
       }
     }
     const listResume = listResumeRequest(args, isRead);
-    const resumed = listResume && listResume.next_page !== undefined ? decodeResumeToken(listResume.next_page, url) : null;
+    const resumed = listResume && listResume.next_page !== undefined ? decodeResumeToken(listResume.next_page, url, listResumeState) : null;
     const pagesBefore = resumed ? resumed.pagesRead : 0;
     const maxPages = Math.max(1, Math.min(Number(args.morrow_max_pages || 25), MAX_PAGES, MAX_RESUMED_PAGES - pagesBefore));
     if (!isRead && (!Number.isFinite(expiresAt) || Date.now() >= expiresAt)) throw new Error("canvas_request_expired_before_send");
@@ -3137,7 +3328,7 @@
       let payload;
       try {
         for (let attempt = 0; attempt < (isRead ? 3 : 1); attempt += 1) {
-          response = await fetch(next, options);
+          response = await fetch(next, { ...options, signal: requestSignal(expiresAt) });
           if (response.status !== 429 || !isRead || attempt === 2) break;
           const seconds = Math.min(30, Math.max(1, Number(response.headers.get("Retry-After") || 1)));
           await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
@@ -3172,7 +3363,9 @@
           return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_write_response_unknown", verification };
         }
         if (!isRead && newQuizSettings) {
-          const verification = await verifyNewQuizSettingsChange(args, url, newQuizSettings.merged, newQuizSettings.before);
+          const verification = await verifyNewQuizSettingsChange(
+            args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields,
+          );
           if (verification.status === "verified") {
             return {
               ok: true,
@@ -3233,7 +3426,9 @@
           return { ok: false, sent: true, status: response.status, outcomeUnknown: true, error: payload, requestUrl: url.pathname, verification };
         }
         if (outcomeUnknown && newQuizSettings) {
-          const verification = await verifyNewQuizSettingsChange(args, url, newQuizSettings.merged, newQuizSettings.before);
+          const verification = await verifyNewQuizSettingsChange(
+            args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields,
+          );
           if (verification.status === "verified") {
             return {
               ok: true,
@@ -3276,7 +3471,9 @@
       // current settings, so the person reads what was kept rather than trusting it.
       ...(newQuizSettings ? {
         newQuizSettingsPreserved: newQuizSettings.preserved,
-        verification: await verifyNewQuizSettingsChange(args, url, newQuizSettings.merged, newQuizSettings.before),
+        verification: await verifyNewQuizSettingsChange(
+          args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields,
+        ),
       } : {}),
       ...(args.morrow_page_guard ? { verification: await verifyPageChange(args, url) } : {}),
       ...(canvasContentChange ? { verification: await verifyCanvasContentChange(args, url, exactCourseId) } : {}),
@@ -3293,7 +3490,9 @@
       ...(listResume ? {
         morrow_pages_read: pagesRead,
         ...(next ? { morrow_unread_pages: unreadPageCount(links) } : {}),
-        ...(next && pagesRead < MAX_RESUMED_PAGES ? { morrow_next_page: encodeResumeToken(next, pagesRead) } : {}),
+        ...(next && pagesRead < MAX_RESUMED_PAGES ? {
+          _morrowListResumeState: { schema: "morrow.canvas-list-resume-state.v1", nextUrl: next, pagesRead },
+        } : {}),
       } : {}),
       requestCost: lastResponse?.headers.get("X-Request-Cost") || null,
       rateLimitRemaining: lastResponse?.headers.get("X-Rate-Limit-Remaining") || null,
@@ -3313,7 +3512,7 @@
         sendResponse({ ok: false, sent: false, error: "canvas_private_attachment_refused" });
         return false;
       }
-      executeCanvas(message.operation, message.arguments || {}, message.principalId, message.expiresAt, message.courseId)
+      executeCanvas(message.operation, message.arguments || {}, message.principalId, message.expiresAt, message.courseId, message.listResumeState)
         .then((result) => sendResponse(result), (error) => {
           const text = String(error?.message || error);
           sendResponse({ ok: false, sent: false, error: MORROW_OWN_ERROR_TOKEN.test(text) ? text : "canvas_operation_execution_failed" });
@@ -3321,7 +3520,7 @@
       return true;
     }
     if (message?.type === "morrow_canvas_list_courses") {
-      Promise.all([canvasProfile(), listCourses(message.page)])
+      Promise.all([canvasProfile(), listCourses(message.next)])
         .then(([profile, result]) => sendResponse({ ok: true, profile, ...result }), (error) => {
           const text = String(error?.message || error);
           sendResponse({ ok: false, error: MORROW_OWN_ERROR_TOKEN.test(text) ? text : "canvas_list_courses_execution_failed" });
@@ -3333,6 +3532,14 @@
         .then((result) => sendResponse({ ok: true, ...result }), (error) => {
           const text = String(error?.message || error);
           sendResponse({ ok: false, error: MORROW_OWN_ERROR_TOKEN.test(text) ? text : "canvas_check_course_execution_failed" });
+        });
+      return true;
+    }
+    if (message?.type === "morrow_canvas_item_bank_tabs") {
+      itemBankCourseTabs(message.courseId)
+        .then((result) => sendResponse({ ok: true, ...result }), (error) => {
+          const text = String(error?.message || error);
+          sendResponse({ ok: false, error: MORROW_OWN_ERROR_TOKEN.test(text) ? text : "canvas_item_bank_tabs_execution_failed" });
         });
       return true;
     }

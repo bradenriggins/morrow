@@ -28,6 +28,8 @@ import {
   bridgeError,
 } from './morrow-gateway-bridge-protocol.js';
 
+export const LEGACY_BRIDGE_OVERLAY_DIGEST = 'c08c88dee4a3f526109b03a1f88341beb6277d7b41dcd57d47f8972dd0a6bf15';
+
 const TOOL_BY_NAME = new Map(
   [...TOOL_DEFINITIONS, ...ADMIN_TOOL_DEFINITIONS]
     .map((definition) => [String(definition?.name || '').trim(), definition])
@@ -38,6 +40,20 @@ function exactCommandInput(command) {
   return command.arguments && typeof command.arguments === 'object' && !Array.isArray(command.arguments)
     ? command.arguments
     : {};
+}
+
+function throwIfAborted(signal) {
+  if (!signal?.aborted) return;
+  if (typeof signal.throwIfAborted === 'function') signal.throwIfAborted();
+  throw new DOMException('Aborted', 'AbortError');
+}
+
+function runtimeWithCommandSignal(runtime, signal) {
+  const current = runtime?.signal || null;
+  const combined = current && signal
+    ? AbortSignal.any([current, signal])
+    : (signal || current);
+  return { ...runtime, signal: combined || null };
 }
 
 function verifiedOuterGrant(command) {
@@ -78,12 +94,15 @@ function admittedCapability(toolName, expectedWrite) {
   return { definition, capability };
 }
 
-async function invokeRead(command) {
+async function invokeRead(command, signal) {
+  throwIfAborted(signal);
   const toolName = String(command.toolName || '').trim();
   if (toolName !== 'morrow_legacy_private_roster') admittedCapability(toolName, false);
   const input = exactCommandInput(command);
   const binding = resolveMorrowBridgeBinding(String(command.sourceBindingId || '').trim(), input);
-  const { runtime } = await buildMorrowBridgeCommandRuntime(binding);
+  const built = await buildMorrowBridgeCommandRuntime(binding);
+  const runtime = runtimeWithCommandSignal(built.runtime, signal);
+  throwIfAborted(signal);
   if (toolName === 'morrow_legacy_private_roster') {
     if (command.operationKey !== 'legacy:privacy_roster') throw bridgeError('bridge_read_not_admitted', 'The roster read is private.');
     const courseId = resolveMorrowBridgeCourseId(input, binding);
@@ -92,12 +111,14 @@ async function invokeRead(command) {
       `/courses/${courseId}/users?enrollment_type[]=student&enrollment_state[]=active&enrollment_state[]=invited&enrollment_state[]=rejected&enrollment_state[]=completed&enrollment_state[]=inactive&include[]=uuid`,
       runtime.cookieHeader || '', 50, { ...runtime, transientRetryLimit: 0 },
     );
+    throwIfAborted(signal);
     if (!Array.isArray(roster) || roster._truncated || roster.truncated || roster.incomplete
       || Date.now() >= Number(command.expiresAt)) throw bridgeError('learner_roster_result_incomplete', 'A complete current roster is required.');
     const deletedEnrollments = await canvasGetPaginated(
       `/courses/${courseId}/enrollments?type[]=StudentEnrollment&state[]=deleted`,
       runtime.cookieHeader || '', 50, { ...runtime, transientRetryLimit: 0 },
     );
+    throwIfAborted(signal);
     if (!Array.isArray(deletedEnrollments) || deletedEnrollments._truncated || deletedEnrollments.truncated || deletedEnrollments.incomplete
       || Date.now() >= Number(command.expiresAt)) throw bridgeError('learner_roster_result_incomplete', 'A complete enrollment history is required.');
     const current = resolveMorrowBridgeBinding(String(command.sourceBindingId || '').trim(), input);
@@ -122,6 +143,7 @@ async function invokeRead(command) {
   } else {
     result = await executeTool(toolName, input, runtime);
   }
+  throwIfAborted(signal);
   return {
     kind: 'read_result',
     sourceBindingId: String(binding.bindingId || '').trim(),
@@ -130,12 +152,14 @@ async function invokeRead(command) {
   };
 }
 
-async function stageWrite(command) {
+async function stageWrite(command, signal, markEffectPossible) {
+  throwIfAborted(signal);
   const toolName = String(command.toolName || '').trim();
   const { definition, capability } = admittedCapability(toolName, true);
   const input = exactCommandInput(command);
   const binding = resolveMorrowBridgeBinding(String(command.sourceBindingId || '').trim(), input);
   const active = await getMorrowBridgeActiveConversation();
+  throwIfAborted(signal);
   if (!active.conversation || !active.conversationId) {
     throw bridgeError(
       'bridge_active_conversation_required',
@@ -146,6 +170,8 @@ async function stageWrite(command) {
   const courseId = resolveMorrowBridgeCourseId(input, binding);
   const operationId = String(command.operationId || '').trim();
   const outerGrant = verifiedOuterGrant(command);
+  throwIfAborted(signal);
+  markEffectPossible();
   const task = await stageChatTask({
     plan: {
       kind: 'morrow_gateway_write',
@@ -193,10 +219,12 @@ async function stageWrite(command) {
   };
 }
 
-async function taskGet(command) {
+async function taskGet(command, signal) {
+  throwIfAborted(signal);
   const binding = resolveMorrowBridgeBinding(String(command.sourceBindingId || '').trim(), {});
   const courseId = resolveMorrowBridgeCourseId({}, binding);
   const active = await getMorrowBridgeActiveConversation();
+  throwIfAborted(signal);
   if (!active.conversation || !active.conversationId) {
     throw bridgeError(
       'bridge_active_conversation_required',
@@ -206,6 +234,7 @@ async function taskGet(command) {
   const taskId = String(command.taskId || '').trim();
   if (!taskId) throw bridgeError('bridge_task_id_required', 'taskId is required.');
   const task = await getHydratedChatTask(taskId, { projectId: active.projectId });
+  throwIfAborted(signal);
   if (!task) {
     throw bridgeError(
       'bridge_task_not_found',
@@ -228,7 +257,12 @@ async function taskGet(command) {
   return projectMorrowBridgeTask(task);
 }
 
-export async function handleMorrowGatewayBridgeCommand(command, generation) {
+export async function handleMorrowGatewayBridgeCommand(
+  command,
+  generation,
+  { signal = null, markEffectPossible = () => undefined } = {},
+) {
+  throwIfAborted(signal);
   if (
     !command
     || command.schema !== BRIDGE_SCHEMA.command
@@ -248,10 +282,10 @@ export async function handleMorrowGatewayBridgeCommand(command, generation) {
       'The bridge command expired before execution began.',
     );
   }
-  if (command.kind === 'invoke_read') return invokeRead(command);
-  if (command.kind === 'stage_write') return stageWrite(command);
-  if (command.kind === 'task_get') return taskGet(command);
-  if (command.kind === 'bindings_get') return { bindings: currentMorrowBridgeBindings() };
+  if (command.kind === 'invoke_read') return invokeRead(command, signal);
+  if (command.kind === 'stage_write') return stageWrite(command, signal, markEffectPossible);
+  if (command.kind === 'task_get') return taskGet(command, signal);
+  if (command.kind === 'bindings_get') return { bindings: await currentMorrowBridgeBindings() };
   throw bridgeError(
     'bridge_command_unsupported',
     'The bridge command kind is unsupported.',

@@ -1,17 +1,40 @@
-import { describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { fromJsonSchema } from "@modelcontextprotocol/server";
+import { augmentBridgeInputSchema } from "@morrow/bridge-protocol";
 import type { UpstreamTool } from "@morrow/contracts";
+import { MAX_PUBLIC_CATALOG_BYTES } from "@morrow/canvas-api-catalog";
 import {
+  CANVAS_BROWSER_CATALOG_PATH,
+  MOODLE_BROWSER_CATALOG_PATH,
+  browserCatalogCompatibilityDigest,
   canvasBrowserCatalogTools,
   loadCanvasBrowserCatalog,
   loadMoodleBrowserCatalog,
+  MAX_MOODLE_JSON_INTEGER,
   moodleCatalogTools,
   parseMoodleBrowserCatalog,
 } from "../src/browser-catalog.js";
 
 const digest = "a".repeat(64);
+const temporaryDirectories: string[] = [];
 
 const moodleTools = new Map(moodleCatalogTools(loadMoodleBrowserCatalog()).map((tool) => [tool.name, tool]));
 const canvasTools = new Map(canvasBrowserCatalogTools(loadCanvasBrowserCatalog()).map((tool) => [tool.name, tool]));
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+function temporaryPath(name: string): string {
+  const directory = mkdtempSync(join(tmpdir(), "morrow-browser-catalog-"));
+  temporaryDirectories.push(directory);
+  return join(directory, name);
+}
 
 function tool(name: string): UpstreamTool {
   const found = moodleTools.get(name);
@@ -39,6 +62,61 @@ function moodleCatalog(...operations: Record<string, unknown>[]): unknown {
 }
 
 describe("browser catalog capability metadata", () => {
+  it("loads ordinary Canvas and Moodle catalogs without changing their raw-byte digests", () => {
+    const canvasBytes = readFileSync(CANVAS_BROWSER_CATALOG_PATH);
+    const moodleBytes = readFileSync(MOODLE_BROWSER_CATALOG_PATH);
+    expect(loadCanvasBrowserCatalog().rawDigest).toBe(createHash("sha256").update(canvasBytes).digest("hex"));
+    expect(loadMoodleBrowserCatalog().rawDigest).toBe(createHash("sha256").update(moodleBytes).digest("hex"));
+  });
+
+  it("keeps presentation edits out of browser operational compatibility", () => {
+    const first = parseMoodleBrowserCatalog(moodleCatalog({
+      inputSchema: {
+        type: "object",
+        properties: { description: { type: "string", description: "Original field help." } },
+        additionalProperties: false,
+      },
+    }), "a".repeat(64));
+    const presentation = parseMoodleBrowserCatalog(moodleCatalog({
+      summary: "New visible title",
+      description: "New visible explanation.",
+      documentation: "https://example.invalid/new-docs",
+      inputSchema: {
+        type: "object",
+        description: "New schema help.",
+        properties: { description: { type: "string", description: "New field help." } },
+        additionalProperties: false,
+      },
+    }), "b".repeat(64));
+    expect(presentation.rawDigest).not.toBe(first.rawDigest);
+    expect(browserCatalogCompatibilityDigest(presentation)).toBe(browserCatalogCompatibilityDigest(first));
+    expect(presentation.compatibilityDigest).toBe(first.compatibilityDigest);
+
+    const changedKey = parseMoodleBrowserCatalog(moodleCatalog({ key: "moodle.form.test.changed.read.v1" }), "c".repeat(64));
+    expect(changedKey.compatibilityDigest).not.toBe(first.compatibilityDigest);
+  });
+
+  it("refuses an oversized sparse browser catalog before allocating or parsing it", () => {
+    const path = temporaryPath("oversized-catalog.json");
+    writeFileSync(path, "{");
+    truncateSync(path, MAX_PUBLIC_CATALOG_BYTES + 1);
+    expect(() => loadCanvasBrowserCatalog(path)).toThrow(/16 MiB/u);
+  });
+
+  it.skipIf(process.platform === "win32")("refuses a browser-catalog FIFO without waiting for a writer", () => {
+    const path = temporaryPath("catalog.pipe");
+    expect(spawnSync("mkfifo", [path]).status).toBe(0);
+    const startedAt = Date.now();
+    expect(() => loadMoodleBrowserCatalog(path)).toThrow(/stable regular file/u);
+    expect(Date.now() - startedAt).toBeLessThan(500);
+  });
+
+  it("refuses invalid UTF-8 before browser catalog JSON parsing", () => {
+    const path = temporaryPath("invalid-utf8.json");
+    writeFileSync(path, Buffer.from([0x7b, 0xc3, 0x28, 0x7d]));
+    expect(() => loadCanvasBrowserCatalog(path)).toThrow(/strict UTF-8/u);
+  });
+
   it("gives the destructive approval class to the Moodle write that removes content", () => {
     const remove = tool("moodle_delete_book_chapter");
     expect(remove.capability?.authority?.approvalClass).toBe("destructive");
@@ -102,6 +180,33 @@ describe("browser catalog capability metadata", () => {
     }
   });
 
+  it("publishes one exact safe-integer boundary for representative Moodle identifiers", async () => {
+    const cases: ReadonlyArray<{ name: string; field: string; arguments: Record<string, unknown> }> = [
+      { name: "moodle_get_course", field: "course_id", arguments: { course_id: 42 } },
+      {
+        name: "moodle_update_page",
+        field: "module_id",
+        arguments: { course_id: 42, module_id: 7, name: "Exact page", expected_digest: "a".repeat(64) },
+      },
+      {
+        name: "moodle_get_assignment_submission",
+        field: "user_id",
+        arguments: { course_id: 42, module_id: 7, user_id: 21 },
+      },
+      {
+        name: "moodle_delete_section",
+        field: "section_id",
+        arguments: { course_id: 42, section_id: 8, expected_digest: "b".repeat(64) },
+      },
+    ];
+    for (const example of cases) {
+      const validate = fromJsonSchema(augmentBridgeInputSchema(tool(example.name).inputSchema, false, false))["~standard"].validate;
+      expect((await validate({ ...example.arguments, [example.field]: MAX_MOODLE_JSON_INTEGER })).issues, example.name).toBeUndefined();
+      expect((await validate({ ...example.arguments, [example.field]: MAX_MOODLE_JSON_INTEGER + 1 })).issues, example.name).toBeTruthy();
+      expect((await validate({ ...example.arguments, [example.field]: String(MAX_MOODLE_JSON_INTEGER + 2) })).issues, example.name).toBeTruthy();
+    }
+  });
+
   it("leaves Canvas browser-catalog entries at their existing values", () => {
     expect(canvasTools.size).toBeGreaterThan(0);
     for (const entry of canvasTools.values()) {
@@ -124,6 +229,11 @@ describe("browser catalog capability metadata", () => {
       .toThrow("Moodle browser catalog dataClass is invalid");
     expect(() => parseMoodleBrowserCatalog(moodleCatalog({ family: "" }), digest))
       .toThrow("Moodle browser catalog family is invalid");
+    expect(() => parseMoodleBrowserCatalog(moodleCatalog({ inputSchema: {
+      type: "object",
+      properties: { course_id: { type: "integer", minimum: 1 } },
+      additionalProperties: false,
+    } }), digest)).toThrow("Moodle browser catalog operation moodle_test_read has an unbounded or inexact integer schema");
   });
 
   it("carries a declared destructive write through the parser", () => {

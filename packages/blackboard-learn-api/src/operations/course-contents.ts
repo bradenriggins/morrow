@@ -1,6 +1,12 @@
 import { isJsonObject, type JsonObject, type SourceCapabilityMetadata } from "@morrow/contracts";
 import { BLACKBOARD_CONTENT_FIELDS, BLACKBOARD_ONE_LEVEL } from "../client.js";
-import { safeContent, safeCourse, type BlackboardCourseRead, type BlackboardLearnRuntime } from "../runtime.js";
+import {
+  identityOnlyCourse,
+  safeContent,
+  safeCourseWithRoster,
+  type BlackboardCourseRead,
+  type BlackboardLearnRuntime,
+} from "../runtime.js";
 import { BLACKBOARD_ID, BlackboardApiError, type BlackboardApiFailureCode } from "../types.js";
 import { blackboardTool, contentScopeInput, scopeInput, type BlackboardOperationModule } from "./definition.js";
 import { READ_ANNOTATIONS, READ_BEHAVIOR, READ_PROFILES } from "./course-read.js";
@@ -163,7 +169,7 @@ async function listMyCourses(
     const ultraStatus = providerValue(course.ultraStatus);
     const available = isJsonObject(course.availability) ? providerValue(course.availability.available) : null;
     courses.push({
-      ...safeCourse(course, read.roster),
+      ...(id === read.roster.courseId ? safeCourseWithRoster(course, read.roster) : identityOnlyCourse(course)),
       ...(ultraStatus ? { ultraStatus } : {}),
       ...(available ? { availability: { available } } : {}),
       connected: Boolean(binding),
@@ -260,7 +266,7 @@ async function getCourseAvailability(
     sourceBindingId: read.sourceBindingId,
     courseId: read.courseId,
     apiVersion,
-    course: safeCourse(course, read.roster),
+    course: safeCourseWithRoster(course, read.roster),
     ...(ultraStatus ? { ultraStatus } : {}),
     ...(available ? { availability: { available } } : {}),
     ...(closedComplete === null ? {} : { closedComplete }),

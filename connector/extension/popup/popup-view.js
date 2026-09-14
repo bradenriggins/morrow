@@ -38,12 +38,14 @@ export function canChooseCourses(status, binding = currentBinding(status), ancho
 export function statusValue(status) {
   if (!status) return NOT_CHECKED;
   if (runtimeNeedsReload(status)) return "Reload needed";
+  if (status.authenticationFailed === true) return "Reconnect needed";
   return status.connected ? "Connected" : status.pairing ? "Waiting for approval" : status.connecting ? "Connecting…" : status.paired ? "Not available" : "Not connected";
 }
 
 export function courseValue(status) {
   if (!status) return NOT_CHECKED;
   if (runtimeNeedsReload(status)) return "Not available";
+  if (status.authenticationFailed === true) return currentBinding(status) || currentSiteAnchor(status) ? "Saved" : "Not connected";
   const binding = currentBinding(status);
   const anchor = currentSiteAnchor(status);
   const platform = currentPlatform(status);
@@ -52,10 +54,16 @@ export function courseValue(status) {
     : anchor?.runtimeVerified === true ? "Ready" : anchor ? `${platform || "Course"} tab needed` : "Not connected";
 }
 
+export function statusAnnouncement(status) {
+  if (status?.consentRequired === true) return "Morrow: Agreement required. Course: Not checked.";
+  return `Morrow: ${statusValue(status)}. Course: ${courseValue(status)}.`;
+}
+
 export function primaryLabel(status, detectedProvider = null) {
   if (!status) return "Try again";
   if (runtimeNeedsReload(status)) return "Open setup guide";
   if (status.pairing) return "Waiting for approval";
+  if (status.authenticationFailed === true) return "Reconnect Morrow";
   if (!status.paired) return "Connect Morrow";
   if (canChooseCourses(status)) return "Choose courses";
   if (!status.connected) return "Waiting for your assistant";
@@ -87,6 +95,8 @@ export function detailText(status, detectedProvider = null) {
   const savedPlatform = currentPlatform(status);
   return status.pairing
     ? "Confirm this connection on the Morrow page that opens. Then return to this popup."
+    : status.authenticationFailed === true
+      ? "Morrow Bridge refused the saved local connection. Select Reconnect Morrow, then approve the new connection in Morrow. Your selected courses stay saved."
     : !status.paired
       ? "Add Morrow to your assistant, then open it. Select Connect Morrow to continue."
       : status.connecting
@@ -108,7 +118,7 @@ export function detailText(status, detectedProvider = null) {
 
 export function controlState(status, { actionInFlight = false, detectedProvider = null } = {}) {
   if (!status) return { primaryDisabled: actionInFlight, primaryBusy: actionInFlight, secondaryDisabled: true };
-  const waiting = Boolean(status.pairing || (!canChooseCourses(status) && status.paired && !status.connected));
+  const waiting = Boolean(status.pairing || (status.authenticationFailed !== true && !canChooseCourses(status) && status.paired && !status.connected));
   const needsDetectedCourse = status.paired === true && status.connected === true
     && !canChooseCourses(status) && currentBinding(status)?.runtimeVerified !== true;
   return {

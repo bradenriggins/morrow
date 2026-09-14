@@ -20,7 +20,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: pnpm
 
       - name: Install workspace dependencies
@@ -40,49 +40,34 @@ jobs:
         timeout-minutes: 7
         run: pnpm --dir installer --ignore-workspace test:bounded:suite
 
-      - name: Prepare isolated Windows payload and private artifact directory
+      - name: Prepare private Windows artifact directory
         shell: pwsh
         run: |
           $runId = [guid]::NewGuid().ToString("N")
-          $payload = Join-Path $env:RUNNER_TEMP "morrow-desktop-payload-$runId"
-          $installerOutput = Join-Path $env:RUNNER_TEMP "morrow-installer-output-$runId"
+          $packageOutput = Join-Path $env:RUNNER_TEMP "morrow-desktop-package-$runId"
           $artifactRoot = Join-Path $PWD "artifacts\desktop-windows-private-qa"
           if (Test-Path -LiteralPath $artifactRoot) { throw "Private QA artifact directory already exists: $artifactRoot" }
           New-Item -ItemType Directory -Path $artifactRoot -Force | Out-Null
-          $prepared = $false
-          for ($attempt = 1; $attempt -le 3; $attempt += 1) {
-            & node scripts/package-mcp-bundle.mjs --target win32-x64 --prepare-desktop-payload $payload
-            if ($LASTEXITCODE -eq 0) {
-              $prepared = $true
-              break
-            }
-            if (Test-Path -LiteralPath $payload) { throw "Desktop payload exists after failed preparation attempt ${attempt}: $payload" }
-            if ($attempt -lt 3) { Start-Sleep -Seconds 2 }
-          }
-          if (-not $prepared) { throw 'Desktop payload preparation failed after 3 attempts.' }
-          "MORROW_DESKTOP_PAYLOAD=$payload" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          "MORROW_INSTALLER_OUTPUT=$installerOutput" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "MORROW_WINDOWS_PACKAGE_OUTPUT=$packageOutput" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           "MORROW_WINDOWS_ARTIFACT_ROOT=$artifactRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Package unsigned Windows NSIS installer
         shell: pwsh
         run: |
-          $env:MORROW_INSTALLER_PAYLOAD = $env:MORROW_DESKTOP_PAYLOAD
-          $env:MORROW_SIGNED_RELEASE = "0"
-          $env:CSC_IDENTITY_AUTO_DISCOVERY = "false"
           Remove-Item Env:CSC_LINK -ErrorAction SilentlyContinue
           Remove-Item Env:CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
           Remove-Item Env:WIN_CSC_LINK -ErrorAction SilentlyContinue
           Remove-Item Env:WIN_CSC_KEY_PASSWORD -ErrorAction SilentlyContinue
           Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
           Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
-          pnpm --dir installer --ignore-workspace package:win
-          $installers = @(Get-ChildItem $env:MORROW_INSTALLER_OUTPUT -File | Where-Object { $_.Name -match '^Morrow-.+-win-x64\.exe$' })
+          node scripts/package-mcp-bundle.mjs --target win32-x64 --unsigned-qa --output $env:MORROW_WINDOWS_PACKAGE_OUTPUT
+          $installers = @(Get-ChildItem $env:MORROW_WINDOWS_PACKAGE_OUTPUT -File | Where-Object { $_.Name -match '^Morrow-.+-win-x64\.exe$' })
           if ($installers.Count -ne 1) { throw "Expected exactly one Windows NSIS installer; found $($installers.Count)." }
           $artifactInstaller = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT $installers[0].Name
           if (Test-Path -LiteralPath $artifactInstaller) { throw "Private QA installer already exists: $artifactInstaller" }
           Copy-Item -LiteralPath $installers[0].FullName -Destination $artifactInstaller
-          "MORROW_WINDOWS_INSTALLER=$($installers[0].FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Copy-Item -LiteralPath (Join-Path $env:MORROW_WINDOWS_PACKAGE_OUTPUT 'receipt.json') -Destination (Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt.json')
+          "MORROW_WINDOWS_INSTALLER=$artifactInstaller" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Upgrade the exact published 3720 build and preserve its state
         timeout-minutes: 32
@@ -113,15 +98,15 @@ jobs:
           $runId = [guid]::NewGuid().ToString("N")
           $installDir = Join-Path $env:RUNNER_TEMP "morrow-install-$runId"
           $receipt = Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT "smoke.json"
-          node scripts/test/desktop-windows-smoke.mjs --installer $env:MORROW_WINDOWS_INSTALLER --install-dir $installDir --receipt $receipt
+          node scripts/test/desktop-windows-smoke.mjs --installer $env:MORROW_WINDOWS_INSTALLER --package-receipt (Join-Path $env:MORROW_WINDOWS_ARTIFACT_ROOT 'package-receipt.json') --install-dir $installDir --receipt $receipt --source $env:GITHUB_SHA --run-id $runId
 
       - name: Upload private QA installer and sanitized smoke receipts
-        if: always()
+        if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: morrow-windows-desktop-${{ github.run_id }}
           path: artifacts/desktop-windows-private-qa
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
   macos-installer:
@@ -137,7 +122,7 @@ jobs:
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: 22
+          node-version: 22.23.2
           cache: pnpm
 
       - name: Install workspace dependencies
@@ -179,23 +164,23 @@ jobs:
           fi
           cp "$packageOutput/receipt.json" "$artifactRoot/package-receipt.json"
           cp "${images[0]}" "$artifactRoot/$(basename "${images[0]}")"
-          echo "MORROW_MAC_ARCHIVE=${archives[0]}" >> "$GITHUB_ENV"
+          cp "${archives[0]}" "$artifactRoot/$(basename "${archives[0]}")"
+          runId="$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+          echo "MORROW_MAC_DISK_IMAGE=$artifactRoot/$(basename "${images[0]}")" >> "$GITHUB_ENV"
           echo "MORROW_MAC_ARTIFACT_ROOT=$artifactRoot" >> "$GITHUB_ENV"
+          echo "MORROW_MAC_RUN_ID=$runId" >> "$GITHUB_ENV"
 
       - name: Start the built application and record one contained run
         shell: bash
         run: |
           set -euo pipefail
-          bundleRoot="$RUNNER_TEMP/morrow-desktop-app-$(uuidgen)"
-          mkdir -p "$bundleRoot"
-          ditto -x -k "$MORROW_MAC_ARCHIVE" "$bundleRoot"
-          node scripts/test/desktop-mac-smoke.mjs --app "$bundleRoot/Morrow.app" --receipt "$MORROW_MAC_ARTIFACT_ROOT/receipt.json"
+          node scripts/test/desktop-mac-smoke.mjs --disk-image "$MORROW_MAC_DISK_IMAGE" --package-receipt "$MORROW_MAC_ARTIFACT_ROOT/package-receipt.json" --receipt "$MORROW_MAC_ARTIFACT_ROOT/receipt.json" --source "$GITHUB_SHA" --run-id "$MORROW_MAC_RUN_ID"
 
       - name: Upload private QA disk image and sanitized smoke receipts
-        if: always()
+        if: success()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: morrow-macos-desktop-${{ github.run_id }}
           path: artifacts/desktop-macos-private-qa
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14

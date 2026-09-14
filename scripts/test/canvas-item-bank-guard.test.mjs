@@ -214,6 +214,7 @@ async function repair({ guard: guardOverrides = {}, server = {}, args, guardItem
         authType: "Signature",
         contextUuid: CONTEXT_UUID,
         canvasLocalContextId: COURSE,
+        externalToolId: "54065",
         launchUrl: `https://school.instructure.com/courses/${COURSE}/external_tools/54065`,
         launchNonce: "b28f3aae-8888-4c5b-9a17-458f2e1fe309",
         launchedAt: capturedAt - 1_000,
@@ -445,7 +446,7 @@ test("a guard on any operation other than the item update is refused", async () 
       arguments: { bank_id: BANK, title: "Renamed", morrow_item_bank_guard: guard },
       credential: {
         apiOrigin: "https://school.quiz-api.instructure.com", token, authType: "Signature", contextUuid: CONTEXT_UUID,
-        canvasLocalContextId: COURSE, launchUrl: `https://school.instructure.com/courses/${COURSE}/external_tools/54065`,
+        canvasLocalContextId: COURSE, externalToolId: "54065", launchUrl: `https://school.instructure.com/courses/${COURSE}/external_tools/54065`,
         launchNonce: "b28f3aae-8888-4c5b-9a17-458f2e1fe309", launchedAt: capturedAt - 1_000, capturedAt,
       },
     });

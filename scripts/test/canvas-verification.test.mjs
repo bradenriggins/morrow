@@ -373,8 +373,21 @@ test("readback proof binds to the exact declared target record", () => {
     status: 200,
     data: [{ url: "/api/v1/courses/42/outcome_groups/7/outcomes/9", outcome: { id: "9", title: "Analyse evidence" }, can_unlink: true }],
   });
-  assert.equal(outcomeLinks.status, "unconfirmed");
-  assert.equal(outcomeLinks.evidence, "readback_records_lack_target_field");
+  assert.equal(unlink.targetField, "outcome.id");
+  assert.equal(outcomeLinks.status, "mismatch");
+  assert.equal(outcomeLinks.evidence, "target_still_present");
+  assert.equal(evaluateBrowserReadback(unlink, {
+    ok: true,
+    status: 200,
+    data: [{ id: "9", url: "/api/v1/courses/42/outcome_groups/7/outcomes/10", outcome: { id: "10", title: "Synthesize evidence" }, can_unlink: true }],
+  }).status, "verified");
+  const malformedOutcomeLinks = evaluateBrowserReadback(unlink, {
+    ok: true,
+    status: 200,
+    data: [{ id: "10", url: "/api/v1/courses/42/outcome_groups/7/outcomes/10", outcome: { title: "Synthesize evidence" }, can_unlink: true }],
+  });
+  assert.equal(malformedOutcomeLinks.status, "unconfirmed");
+  assert.equal(malformedOutcomeLinks.evidence, "readback_records_lack_target_field");
 
   const declaredPath = {
     strategy: "collection-contains-target",

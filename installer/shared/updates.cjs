@@ -6,8 +6,10 @@
 // update attempt store below, which owns exactly one file.
 
 const crypto = require("node:crypto");
+const { constants: fsConstants } = require("node:fs");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { parseStrictJson } = require("./strict-utf8.cjs");
 
 const SUPPORTED_PLATFORMS = new Set(["darwin", "win32"]);
 const UPDATE_EVENTS = Object.freeze([
@@ -28,6 +30,7 @@ const MAX_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const REQUIRED_FREE_SPACE_MULTIPLE = 3;
 const UPDATE_ATTEMPT_SCHEMA = "morrow.desktop-update-attempt.v1";
 const UPDATE_ATTEMPT_FILE = "update-attempt.json";
+const MAX_UPDATE_ATTEMPT_BYTES = 4 * 1024;
 
 function plainSnapshot(state) {
   return {
@@ -114,6 +117,7 @@ function updaterErrorReason(error, phase) {
   const code = typeof error?.code === "string" ? error.code.toLowerCase() : "";
   const message = typeof error?.message === "string" ? error.message.toLowerCase() : "";
   if (code.includes("cancel") || message.includes("cancel")) return "download_cancelled";
+  if (code.includes("generation") || message.includes("generation changed")) return "update_generation_mismatch";
   if (code.includes("signature") || code.includes("checksum") || code.includes("integrity")
     || message.includes("signature") || message.includes("checksum") || message.includes("sha512")
     || message.includes("integrity") || message.includes("code sign")) return "update_verification_failed";
@@ -166,6 +170,70 @@ function updateAttemptRecord(value) {
   return Object.freeze({ schema: UPDATE_ATTEMPT_SCHEMA, fromVersion: from.raw, toVersion: to.raw, at: value.at });
 }
 
+function sameUpdateAttempt(left, right) {
+  return Boolean(left && right
+    && left.schema === right.schema
+    && left.fromVersion === right.fromVersion
+    && left.toVersion === right.toVersion
+    && left.at === right.at);
+}
+
+function attemptState(status, record = null, reason = null) {
+  return Object.freeze({ status, record, reason });
+}
+
+function privateStateEntry(info, kind) {
+  if (!info || (kind === "directory" ? !info.isDirectory() : !info.isFile()) || info.isSymbolicLink()) return false;
+  if (typeof process.getuid === "function" && info.uid !== process.getuid()) return false;
+  if (process.platform !== "win32" && (info.mode & 0o077) !== 0) return false;
+  return true;
+}
+
+async function privateStateDirectory(stateDirectory) {
+  let info;
+  try { info = await fs.lstat(stateDirectory); }
+  catch (error) {
+    return error?.code === "ENOENT"
+      ? attemptState("absent")
+      : attemptState("damaged", null, "update_attempt_state_unreadable");
+  }
+  return privateStateEntry(info, "directory")
+    ? attemptState("valid")
+    : attemptState("damaged", null, "update_attempt_state_not_private");
+}
+
+async function ensurePrivateStateDirectory(stateDirectory) {
+  await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+  const info = await fs.lstat(stateDirectory);
+  if (!info.isDirectory() || info.isSymbolicLink()
+    || (typeof process.getuid === "function" && info.uid !== process.getuid())) {
+    throw new Error("update attempt state directory is invalid");
+  }
+  if (process.platform !== "win32") {
+    await fs.chmod(stateDirectory, 0o700);
+    if (!privateStateEntry(await fs.lstat(stateDirectory), "directory")) {
+      throw new Error("update attempt state directory is not private");
+    }
+  }
+}
+
+async function boundedFileBytes(handle) {
+  const output = Buffer.alloc(MAX_UPDATE_ATTEMPT_BYTES + 1);
+  let offset = 0;
+  while (offset < output.byteLength) {
+    const { bytesRead } = await handle.read(output, offset, output.byteLength - offset, offset);
+    if (bytesRead === 0) break;
+    offset += bytesRead;
+  }
+  return offset > MAX_UPDATE_ATTEMPT_BYTES ? null : output.subarray(0, offset);
+}
+
+async function syncDirectory(directory) {
+  if (process.platform === "win32") return;
+  const handle = await fs.open(directory, "r");
+  try { await handle.sync(); } finally { await handle.close(); }
+}
+
 /**
  * The one file this contract owns: `State/update-attempt.json`. It records the
  * version Morrow was running and the version it handed to the updater, so the
@@ -177,25 +245,87 @@ function createUpdateAttemptStore({ stateDirectory } = {}) {
     throw new TypeError("update attempt stateDirectory must be an absolute path");
   }
   const file = path.join(stateDirectory, UPDATE_ATTEMPT_FILE);
-  return Object.freeze({
-    async read() {
+  async function read() {
+    const directory = await privateStateDirectory(stateDirectory);
+    if (directory.status !== "valid") return directory;
+    let linkInfo;
+    try { linkInfo = await fs.lstat(file); }
+    catch (error) {
+      return error?.code === "ENOENT"
+        ? attemptState("absent")
+        : attemptState("damaged", null, "update_attempt_unreadable");
+    }
+    if (!privateStateEntry(linkInfo, "file") || linkInfo.size > MAX_UPDATE_ATTEMPT_BYTES) {
+      return attemptState("damaged", null, linkInfo.size > MAX_UPDATE_ATTEMPT_BYTES ? "update_attempt_too_large" : "update_attempt_not_private");
+    }
+    let handle = null;
+    try {
+      const flags = fsConstants.O_RDONLY | (process.platform === "win32" ? 0 : fsConstants.O_NOFOLLOW || 0);
+      handle = await fs.open(file, flags);
+      const openedInfo = await handle.stat();
+      if (!privateStateEntry(openedInfo, "file")
+        || openedInfo.dev !== linkInfo.dev || openedInfo.ino !== linkInfo.ino
+        || openedInfo.size > MAX_UPDATE_ATTEMPT_BYTES) {
+        return attemptState("damaged", null, "update_attempt_changed_or_invalid");
+      }
+      const bytes = await boundedFileBytes(handle);
+      if (!bytes) return attemptState("damaged", null, "update_attempt_too_large");
       let parsed;
-      try { parsed = JSON.parse(await fs.readFile(file, "utf8")); }
-      catch { return null; }
-      return updateAttemptRecord(parsed);
-    },
-    async write(attempt) {
+      try { parsed = parseStrictJson(bytes, "desktop update attempt"); }
+      catch { return attemptState("damaged", null, "update_attempt_invalid"); }
+      const record = updateAttemptRecord(parsed);
+      return record
+        ? attemptState("valid", record)
+        : attemptState("damaged", null, "update_attempt_invalid");
+    } catch {
+      return attemptState("damaged", null, "update_attempt_unreadable");
+    } finally {
+      await handle?.close().catch(() => undefined);
+    }
+  }
+  return Object.freeze({
+    read,
+    async write(attempt, options = {}) {
       const record = updateAttemptRecord({ ...attempt, schema: UPDATE_ATTEMPT_SCHEMA });
       if (!record) throw new TypeError("update attempt record is invalid");
-      await fs.mkdir(stateDirectory, { recursive: true, mode: 0o700 });
+      const expected = options.expected === undefined ? null : updateAttemptRecord(options.expected);
+      if (options.expected !== undefined && !expected) throw new TypeError("expected update attempt record is invalid");
+      await ensurePrivateStateDirectory(stateDirectory);
       const temporary = `${file}.tmp-${crypto.randomUUID()}`;
-      await fs.writeFile(temporary, `${JSON.stringify(record)}\n`, { mode: 0o600, flag: "wx" });
-      await fs.rename(temporary, file);
-      if (process.platform !== "win32") await fs.chmod(file, 0o600);
-      return record;
+      let handle = null;
+      try {
+        handle = await fs.open(temporary, "wx", 0o600);
+        await handle.writeFile(`${JSON.stringify(record)}\n`);
+        await handle.sync();
+        await handle.close();
+        handle = null;
+        if (expected) {
+          const current = await read();
+          if (current.status !== "valid" || !sameUpdateAttempt(current.record, expected)) throw new Error("update attempt ownership changed");
+          await fs.rename(temporary, file);
+        } else {
+          await fs.link(temporary, file);
+          await fs.rm(temporary);
+        }
+        if (process.platform !== "win32") await fs.chmod(file, 0o600);
+        await syncDirectory(stateDirectory);
+        const written = await read();
+        if (written.status !== "valid" || !sameUpdateAttempt(written.record, record)) throw new Error("update attempt write is unconfirmed");
+        return written.record;
+      } catch (error) {
+        await handle?.close().catch(() => undefined);
+        await fs.rm(temporary, { force: true }).catch(() => undefined);
+        throw error;
+      }
     },
-    async clear() {
+    async clear(expectedValue) {
+      const expected = updateAttemptRecord(expectedValue);
+      if (!expected) throw new TypeError("expected update attempt record is invalid");
+      const current = await read();
+      if (current.status !== "valid" || !sameUpdateAttempt(current.record, expected)) return false;
       await fs.rm(file, { force: true });
+      await syncDirectory(stateDirectory);
+      return (await read()).status === "absent";
     }
   });
 }
@@ -207,6 +337,20 @@ function normalizeAttemptStore(value) {
     throw new TypeError("update attempt store is incomplete");
   }
   return value;
+}
+
+function normalizeAttemptState(value) {
+  // Older injected stores used `null` for confirmed absence. The on-disk store
+  // always returns the explicit state above; accepting the old empty value here
+  // keeps the controller API compatible without turning any read failure into
+  // absence.
+  if (value === null) return attemptState("absent");
+  if (!value || typeof value !== "object" || Array.isArray(value)) return attemptState("damaged", null, "update_attempt_state_invalid");
+  if (value.status === "absent") return attemptState("absent");
+  if (value.status === "damaged") return attemptState("damaged", null, typeof value.reason === "string" ? value.reason : "update_attempt_state_invalid");
+  if (value.status !== "valid") return attemptState("damaged", null, "update_attempt_state_invalid");
+  const record = updateAttemptRecord(value.record);
+  return record ? attemptState("valid", record) : attemptState("damaged", null, "update_attempt_state_invalid");
 }
 
 function createUpdateController({
@@ -249,14 +393,21 @@ function createUpdateController({
   let checkPromise = null;
   let downloadPromise = null;
   let installPromise = null;
+  let lifecycleGeneration = 0;
+  let checkGeneration = null;
+  let downloadGeneration = null;
+  let downloadStarted = false;
   // The size the updater reported for the candidate now in `available`. Only
   // `acceptCandidate` reaches that status, and only `download` reads this.
   let acceptedBytes = null;
-  let attemptReconciled = false;
+  let attemptReconciliationTerminal = attempts === null;
+  let attemptReconciliationPromise = null;
+  let restartCommitted = false;
   // A recorded update that did not start blocks automatic checking, so Morrow
   // reports what happened and waits for the person to ask for the retry instead
   // of downloading the same version again on its own.
   let automaticCheckBlocked = false;
+  let unresolvedAttemptBlocked = false;
 
   function publish() {
     const snapshot = plainSnapshot(state);
@@ -267,6 +418,9 @@ function createUpdateController({
   }
 
   function transition(status, availableVersion, reason) {
+    if (state.status === status && state.availableVersion === availableVersion && state.reason === reason) {
+      return plainSnapshot(state);
+    }
     state.status = status;
     state.availableVersion = availableVersion;
     state.reason = reason;
@@ -300,6 +454,7 @@ function createUpdateController({
 
   function acceptCandidate(value) {
     if (setUnavailableIfNeeded()) return false;
+    if (unresolvedAttemptBlocked) return false;
     if (state.status === "ready") return true;
     const candidate = candidateFrom(value);
     const reason = candidateReason(candidate);
@@ -334,6 +489,10 @@ function createUpdateController({
       return;
     }
     if (phase === "installing" && state.availableVersion) {
+      if (restartCommitted) {
+        transition("installing", state.availableVersion, reason);
+        return;
+      }
       transition("ready", state.availableVersion, reason);
       return;
     }
@@ -345,28 +504,40 @@ function createUpdateController({
     started = true;
     const handlers = {
       "checking-for-update": () => {
-        if (!admissionReason() && state.status !== "ready") transition("checking", null, null);
+        if (checkGeneration === lifecycleGeneration
+          && !admissionReason() && !unresolvedAttemptBlocked && state.status !== "ready") transition("checking", null, null);
       },
-      "update-available": (info) => acceptCandidate(info),
+      "update-available": (info) => {
+        if (checkGeneration === lifecycleGeneration) acceptCandidate(info);
+      },
       "update-not-available": () => {
-        if (!setUnavailableIfNeeded() && state.status !== "ready") transition("idle", null, "up_to_date");
+        if (checkGeneration === lifecycleGeneration
+          && !setUnavailableIfNeeded() && !unresolvedAttemptBlocked && state.status !== "ready") transition("idle", null, "up_to_date");
       },
       "update-downloaded": (info) => {
-        if (setUnavailableIfNeeded()) return;
-        if (state.status === "ready") return;
+        if (downloadGeneration !== lifecycleGeneration || !downloadStarted || state.status !== "downloading") return;
+        if (setUnavailableIfNeeded() || unresolvedAttemptBlocked) return;
         const candidate = candidateFrom(info);
-        const version = candidate?.version || state.availableVersion;
-        if (!version || candidateReason({ version, platform: candidate?.platform || null, arch: candidate?.arch || null })) {
-          transition("error", null, "update_version_invalid");
+        if (!candidate?.version || candidate.version !== state.availableVersion || candidateReason(candidate)) {
+          transition("error", null, "update_generation_mismatch");
           return;
         }
-        transition("ready", version, null);
+        // Readiness belongs to the matching download promise. electron-updater
+        // emits this event before that promise finishes its staging work.
       },
       "update-cancelled": () => {
-        if (!setUnavailableIfNeeded() && state.status !== "ready") transition("available", state.availableVersion, "download_cancelled");
+        if (downloadGeneration === lifecycleGeneration && downloadStarted
+          && !setUnavailableIfNeeded() && !unresolvedAttemptBlocked && state.status !== "ready") {
+          transition("available", state.availableVersion, "download_cancelled");
+        }
       },
       error: (error) => {
-        if (!setUnavailableIfNeeded() && state.status !== "ready") handleError(error, state.status);
+        const activeOperation = checkGeneration === lifecycleGeneration
+          || (downloadGeneration === lifecycleGeneration && downloadStarted)
+          || state.status === "installing";
+        if (activeOperation && !setUnavailableIfNeeded() && !unresolvedAttemptBlocked && state.status !== "ready") {
+          handleError(error, state.status);
+        }
       }
     };
     for (const event of UPDATE_EVENTS) {
@@ -378,20 +549,27 @@ function createUpdateController({
   async function check() {
     bindEvents();
     if (setUnavailableIfNeeded()) return plainSnapshot(state);
+    if (unresolvedAttemptBlocked) {
+      await reconcileAttempt();
+      if (unresolvedAttemptBlocked) return plainSnapshot(state);
+    }
     // An explicit check is the person asking to try the update again, so it
     // lifts the block a failed launch put on automatic checking.
     automaticCheckBlocked = false;
     if (state.status === "ready") return plainSnapshot(state);
     if (checkPromise || downloadPromise || installPromise) return checkPromise || downloadPromise || installPromise;
+    const generation = lifecycleGeneration;
+    checkGeneration = generation;
     transition("checking", null, null);
     const pending = Promise.resolve()
       .then(() => adapter.checkForUpdates())
       .then((result) => {
+        if (generation !== lifecycleGeneration) return plainSnapshot(state);
         const candidate = candidateFrom(result);
         if (result && result.isUpdateAvailable === false) {
-          if (state.status === "checking") transition("idle", null, "up_to_date");
+          if (state.status === "checking" || state.status === "available") transition("idle", null, "up_to_date");
         } else if (candidate?.version) {
-          if (state.status === "checking") acceptCandidate(candidate);
+          if (state.status === "checking" || state.status === "available") acceptCandidate(candidate);
         } else if (state.status === "checking") {
           transition("idle", null, "up_to_date");
         }
@@ -403,40 +581,57 @@ function createUpdateController({
         return plainSnapshot(state);
       })
       .catch((error) => {
-        handleError(error, "checking");
+        if (generation === lifecycleGeneration) handleError(error, "checking");
         return plainSnapshot(state);
       })
-      .finally(() => { if (checkPromise === pending) checkPromise = null; });
+      .finally(() => {
+        if (checkPromise === pending) checkPromise = null;
+        if (checkGeneration === generation) checkGeneration = null;
+      });
     checkPromise = pending;
     return pending;
   }
 
   async function download() {
     if (setUnavailableIfNeeded()) return plainSnapshot(state);
+    if (unresolvedAttemptBlocked) return plainSnapshot(state);
     if (downloadPromise || installPromise) return downloadPromise || installPromise;
     if (state.status !== "available" || !state.availableVersion) return plainSnapshot(state);
     const version = state.availableVersion;
+    const generation = lifecycleGeneration;
+    downloadGeneration = generation;
+    downloadStarted = false;
     const pending = Promise.resolve()
       .then(() => freeSpaceAdmits())
       .then((admitted) => {
+        if (generation !== lifecycleGeneration) return plainSnapshot(state);
         if (!admitted) return transition("error", null, "disk_space_unavailable");
         transition("downloading", version, null);
+        downloadStarted = true;
         return Promise.resolve().then(() => adapter.downloadUpdate()).then(() => {
+          if (generation !== lifecycleGeneration) return plainSnapshot(state);
           if (state.status === "downloading") transition("ready", version, null);
           return plainSnapshot(state);
         });
       })
       .catch((error) => {
-        handleError(error, "downloading");
+        if (generation === lifecycleGeneration) handleError(error, "downloading");
         return plainSnapshot(state);
       })
-      .finally(() => { if (downloadPromise === pending) downloadPromise = null; });
+      .finally(() => {
+        if (downloadPromise === pending) downloadPromise = null;
+        if (downloadGeneration === generation) {
+          downloadGeneration = null;
+          downloadStarted = false;
+        }
+      });
     downloadPromise = pending;
     return pending;
   }
 
   /**
-   * Resolves the recorded install attempt from the last run, once per process.
+   * Resolves the recorded install attempt from the last run. Calls share the
+   * active reconciliation and memoize it only after one terminal outcome.
    *
    * The running version equal to the version the updater installed is the only
    * case that can complete the update, and it completes only when the runtime
@@ -448,29 +643,77 @@ function createUpdateController({
    * A record naming neither version cannot describe this installation, so it is
    * removed instead of guessed.
    */
-  async function reconcileAttempt() {
-    if (attemptReconciled || !attempts) return;
-    attemptReconciled = true;
-    let record = null;
-    try { record = await attempts.read(); }
-    catch { return; }
-    if (!record) return;
+  async function readAttemptState() {
+    if (!attempts) return attemptState("absent");
+    try { return normalizeAttemptState(await attempts.read()); }
+    catch { return attemptState("damaged", null, "update_attempt_state_unreadable"); }
+  }
+
+  function blockAttemptReconciliation(reason = null) {
+    automaticCheckBlocked = true;
+    unresolvedAttemptBlocked = true;
+    return reason ? transition("error", null, reason) : plainSnapshot(state);
+  }
+
+  function completeAttemptReconciliation() {
+    attemptReconciliationTerminal = true;
+    automaticCheckBlocked = false;
+    unresolvedAttemptBlocked = false;
+  }
+
+  async function runAttemptReconciliation() {
+    const stored = await readAttemptState();
+    if (stored.status === "damaged") return blockAttemptReconciliation("update_attempt_repair_required");
+    if (stored.status === "absent") {
+      completeAttemptReconciliation();
+      return state.reason === "update_attempt_repair_required" ? transition("idle", null, null) : plainSnapshot(state);
+    }
+    const record = stored.record;
     if (record.toVersion === identity.currentVersion) {
       let confirmation = null;
       try { confirmation = await confirmUpdatedRuntime(); }
       catch { confirmation = null; }
-      if (confirmation?.status !== "verified") return;
-      try { await attempts.clear(); }
-      catch { return; }
-      transition("idle", null, "update_complete");
-      return;
+      if (confirmation?.status !== "verified") {
+        return blockAttemptReconciliation();
+      }
+      try {
+        if (!await attempts.clear(record)) {
+          return blockAttemptReconciliation();
+        }
+      }
+      catch {
+        return blockAttemptReconciliation();
+      }
+      completeAttemptReconciliation();
+      return transition("idle", null, "update_complete");
     }
     if (record.fromVersion === identity.currentVersion) {
+      attemptReconciliationTerminal = true;
       automaticCheckBlocked = true;
-      transition("error", null, "update_rolled_back");
-      return;
+      unresolvedAttemptBlocked = false;
+      return transition("error", null, "update_rolled_back");
     }
-    await attempts.clear().catch(() => { /* The next start reads it again. */ });
+    try {
+      if (!await attempts.clear(record)) return blockAttemptReconciliation();
+    } catch {
+      return blockAttemptReconciliation();
+    }
+    completeAttemptReconciliation();
+    return plainSnapshot(state);
+  }
+
+  function reconcileAttempt() {
+    if (attemptReconciliationTerminal) return Promise.resolve(plainSnapshot(state));
+    if (attemptReconciliationPromise) return attemptReconciliationPromise;
+    const pending = Promise.resolve()
+      .then(runAttemptReconciliation)
+      .finally(() => { if (attemptReconciliationPromise === pending) attemptReconciliationPromise = null; });
+    attemptReconciliationPromise = pending;
+    return pending;
+  }
+
+  function reconcileAfterRepair() {
+    return reconcileAttempt();
   }
 
   async function start() {
@@ -490,12 +733,20 @@ function createUpdateController({
   }
 
   async function recordAttempt(version) {
-    if (!attempts) return true;
+    if (!attempts) return Object.freeze({ record: null });
     try {
-      await attempts.write({ fromVersion: identity.currentVersion, toVersion: version, at: new Date().toISOString() });
-      return true;
+      const stored = normalizeAttemptState(await attempts.read());
+      if (stored.status === "damaged") return null;
+      const current = stored.status === "valid" ? stored.record : null;
+      if (current?.toVersion === identity.currentVersion) return null;
+      if (current && current.fromVersion !== identity.currentVersion) return null;
+      const next = { fromVersion: identity.currentVersion, toVersion: version, at: new Date().toISOString() };
+      const written = await attempts.write(next, current ? { expected: current } : undefined);
+      const record = updateAttemptRecord(written);
+      if (!record || record.fromVersion !== next.fromVersion || record.toVersion !== next.toVersion || record.at !== next.at) return null;
+      return Object.freeze({ record });
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -512,16 +763,31 @@ function createUpdateController({
       && value.status === "closing");
   }
 
-  function releaseFailedCommit(leaseId, version) {
-    return Promise.resolve()
-      .then(() => releaseRestartLease(leaseId))
-      .then(() => transition("ready", version, "update_install_failed"))
-      .catch(() => deferredInstall(version));
+  async function releaseFailedCommit(leaseId, version, attempt) {
+    let recordCleared = attempt.record === null;
+    if (!recordCleared) {
+      try { recordCleared = await attempts.clear(attempt.record) === true; }
+      catch { recordCleared = false; }
+    }
+    let leaseReleased = false;
+    try {
+      await releaseRestartLease(leaseId);
+      leaseReleased = true;
+    } catch { /* A failed release leaves the restart decision uncertain. */ }
+    if (!recordCleared || !leaseReleased) return deferredInstall(version);
+    return transition("ready", version, "update_install_failed");
+  }
+
+  async function releaseUncommittedLease(leaseId, version) {
+    try { await releaseRestartLease(leaseId); }
+    catch { return deferredInstall(version); }
+    return deferredInstall(version);
   }
 
   function installWhenIdle() {
     bindEvents();
     if (setUnavailableIfNeeded()) return plainSnapshot(state);
+    if (unresolvedAttemptBlocked) return plainSnapshot(state);
     if (installPromise) return installPromise;
     if (state.status !== "ready" || !state.availableVersion) return plainSnapshot(state);
     const version = state.availableVersion;
@@ -529,28 +795,24 @@ function createUpdateController({
     // click must join this attempt instead of obtaining a second lease.
     const pending = Promise.resolve()
       .then(() => acquireRestartLease())
-      .then((lease) => {
+      .then(async (lease) => {
         if (!isGrantedRestartLease(lease)) return deferredInstall(version);
+        const attempt = await recordAttempt(version);
+        // The attempt is durable before the owner crosses its closing boundary.
+        // A failed claim releases the still-reversible lease.
+        if (!attempt) return releaseUncommittedLease(lease.leaseId, version);
+        let committed;
+        try { committed = await commitRestartLease(lease.leaseId); }
+        catch { return releaseFailedCommit(lease.leaseId, version, attempt); }
+        if (!isCommittedRestartLease(committed)) return releaseFailedCommit(lease.leaseId, version, attempt);
+        restartCommitted = true;
+        transition("installing", version, null);
         return Promise.resolve()
-          .then(() => commitRestartLease(lease.leaseId))
-          .then((committed) => {
-            if (!isCommittedRestartLease(committed)) return releaseFailedCommit(lease.leaseId, version);
-            transition("installing", version, null);
-            return Promise.resolve()
-              .then(() => recordAttempt(version))
-              .then((recorded) => {
-                // Without the record a new version that never starts cannot be
-                // told apart from an ordinary start, so Morrow keeps the
-                // verified update instead of handing it over unrecorded.
-                if (!recorded) return deferredInstall(version);
-                return Promise.resolve()
-                  .then(() => adapter.quitAndInstall())
-                  // A closing owner can no longer resume ordinary work. Keep its
-                  // lease through process exit, even when the updater call fails.
-                  .then(() => plainSnapshot(state))
-                  .catch(() => deferredInstall(version));
-              });
-          }, () => releaseFailedCommit(lease.leaseId, version));
+          .then(() => adapter.quitAndInstall())
+          // A closing owner can no longer resume ordinary work. Keep its lease
+          // and attempt record through process exit, including updater failure.
+          .then(() => plainSnapshot(state))
+          .catch(() => transition("installing", version, "update_install_failed"));
       })
       .catch(() => deferredInstall(version))
       .finally(() => { if (installPromise === pending) installPromise = null; });
@@ -570,16 +832,21 @@ function createUpdateController({
   }
 
   function stop() {
+    lifecycleGeneration += 1;
+    checkGeneration = null;
+    downloadGeneration = null;
+    downloadStarted = false;
     if (interval !== null && typeof timers.clearInterval === "function") timers.clearInterval(interval);
     interval = null;
     while (unlisteners.length > 0) {
       try { unlisteners.pop()(); } catch { /* Adapter cleanup cannot change app state. */ }
     }
     started = false;
+    try { adapter.cancelUpdate?.(); } catch { /* Stopping never reopens updater work. */ }
   }
 
   setUnavailableIfNeeded();
-  return Object.freeze({ snapshot, start, check, installWhenIdle, subscribe, stop });
+  return Object.freeze({ snapshot, start, check, installWhenIdle, reconcileAfterRepair, subscribe, stop });
 }
 
 module.exports = {

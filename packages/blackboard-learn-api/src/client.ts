@@ -1,5 +1,6 @@
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
-import type { BlackboardApiError, BlackboardPrincipalResolution, BlackboardResponseDiagnostics, BlackboardTenant } from "./types.js";
+import type { BlackboardCollectionIdentityField } from "./provider-contract.js";
+import type { BlackboardApiError, BlackboardDispatchState, BlackboardPrincipalResolution, BlackboardResponseDiagnostics, BlackboardTenant } from "./types.js";
 import { BLACKBOARD_ID, BlackboardApiError as ApiError } from "./types.js";
 
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
@@ -61,6 +62,8 @@ export interface BlackboardCollectionOptions {
   readonly expand?: readonly string[];
   readonly maxPages?: number;
   readonly maxRecords?: number;
+  /** The provider field that uniquely identifies one record on this route. */
+  readonly identityField?: BlackboardCollectionIdentityField;
   /** Names these records in a refusal a person reads, as in "content" or "roster". */
   readonly label?: string;
   readonly signal?: AbortSignal;
@@ -111,19 +114,65 @@ function responseError(response: Response, diagnosticHeaders: readonly string[])
 }
 
 /** The response body, or null when Blackboard answered without one. */
-async function jsonResponse(response: Response): Promise<JsonObject | null> {
-  const length = Number(response.headers.get("content-length") || 0);
-  if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
-    throw new ApiError("blackboard_response_oversized", "Blackboard returned a response that exceeds the safe limit.");
+async function jsonResponse(
+  response: Response,
+  signal?: AbortSignal,
+  dispatchState: BlackboardDispatchState = "not_sent",
+): Promise<JsonObject | null> {
+  const cancelBody = (body: ReadableStream<Uint8Array> | ReadableStreamDefaultReader<Uint8Array> | null): void => {
+    try { void body?.cancel().catch(() => undefined); } catch {}
+  };
+  const length = response.headers.get("content-length");
+  if (length !== null && (!/^(?:0|[1-9][0-9]*)$/.test(length) || Number(length) > MAX_RESPONSE_BYTES)) {
+    cancelBody(response.body);
+    throw new ApiError("blackboard_response_oversized", "Blackboard returned a response that exceeds the safe limit.", undefined, dispatchState);
   }
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (bytes.byteLength > MAX_RESPONSE_BYTES) {
-    throw new ApiError("blackboard_response_oversized", "Blackboard returned a response that exceeds the safe limit.");
+  if (!response.body) {
+    if (response.status === 204) return null;
+    throw new ApiError("blackboard_response_invalid", "Blackboard returned an unreadable response.", undefined, dispatchState);
   }
-  const text = new TextDecoder().decode(bytes);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const decode = (bytes?: Uint8Array, stream = false): string => {
+    try {
+      return bytes ? decoder.decode(bytes, { stream }) : decoder.decode();
+    } catch {
+      throw new ApiError("blackboard_response_invalid", "Blackboard returned invalid UTF-8.", undefined, dispatchState);
+    }
+  };
+  let bytes = 0;
+  let text = "";
+  try {
+    for (;;) {
+      if (signal?.aborted) throw new DOMException("The operation was aborted.", "AbortError");
+      let onAbort: (() => void) | undefined;
+      const next = await (signal
+        ? Promise.race([
+            reader.read(),
+            new Promise<never>((_, reject) => {
+              onAbort = () => reject(new DOMException("The operation was aborted.", "AbortError"));
+              signal.addEventListener("abort", onAbort, { once: true });
+            }),
+          ]).finally(() => { if (onAbort) signal.removeEventListener("abort", onAbort); })
+        : reader.read());
+      if (next.done) break;
+      bytes += next.value.byteLength;
+      if (bytes > MAX_RESPONSE_BYTES) {
+        cancelBody(reader);
+        throw new ApiError("blackboard_response_oversized", "Blackboard returned a response that exceeds the safe limit.", undefined, dispatchState);
+      }
+      text += decode(next.value, true);
+    }
+    text += decode();
+  } catch (error) {
+    cancelBody(reader);
+    const cancelled = abortError(error);
+    if (cancelled) throw new ApiError(cancelled.code, cancelled.message, cancelled.status, dispatchState, cancelled.diagnostics);
+    throw error;
+  }
   if (response.status === 204 || !text.trim()) return null;
   try { return object(JSON.parse(text) as unknown); }
-  catch { throw new ApiError("blackboard_response_invalid", "Blackboard returned invalid JSON."); }
+  catch { throw new ApiError("blackboard_response_invalid", "Blackboard returned invalid JSON.", undefined, dispatchState); }
 }
 
 function collectionUrl(path: string, tenant: BlackboardTenant, options: BlackboardCollectionOptions): URL {
@@ -206,7 +255,7 @@ export class BlackboardLearnClient {
           signal,
         });
         if (response.status !== 200) throw responseError(response, this.diagnosticHeaders);
-        const payload = await jsonResponse(response);
+        const payload = await jsonResponse(response, signal);
         if (!payload || typeof payload.access_token !== "string" || !payload.access_token || typeof payload.expires_in !== "number" || !Number.isFinite(payload.expires_in) || payload.expires_in < 1) {
           throw new ApiError("blackboard_response_invalid", "Blackboard returned an invalid OAuth response.");
         }
@@ -234,7 +283,11 @@ export class BlackboardLearnClient {
   ): Promise<JsonObject | null> {
     const response = await this.response(url, init, signal, retryUnauthorized);
     if (!ACCEPTED_STATUS.has(response.status)) throw responseError(response, this.diagnosticHeaders);
-    return jsonResponse(response);
+    const method = String(init.method || "GET").toUpperCase();
+    const dispatchState: BlackboardDispatchState = ["POST", "PUT", "PATCH", "DELETE"].includes(method)
+      ? "applied_or_unknown"
+      : "not_sent";
+    return jsonResponse(response, signal, dispatchState);
   }
 
   /** Sends one authenticated request after proving it stays on this Learn site. */
@@ -336,7 +389,7 @@ export class BlackboardLearnClient {
     const task = new URL(this.courseCopyTaskPath(taskPath, courseId), this.tenant.baseUrl);
     const response = await this.response(task, { method: "GET", redirect: "manual" }, signal);
     if (response.status === 200) {
-      await jsonResponse(response);
+      await jsonResponse(response, signal);
       return { state: "pending" };
     }
     if (response.status !== 303) throw responseError(response, this.diagnosticHeaders);
@@ -404,6 +457,7 @@ export class BlackboardLearnClient {
    */
   async collect(path: string, options: BlackboardCollectionOptions = {}): Promise<readonly JsonObject[]> {
     const label = options.label || "collection";
+    const identityField = options.identityField || "id";
     const maxPages = options.maxPages ?? MAX_COLLECTION_PAGES;
     const maxRecords = options.maxRecords ?? MAX_COLLECTION_RECORDS;
     let url = collectionUrl(path, this.tenant, options);
@@ -416,13 +470,14 @@ export class BlackboardLearnClient {
       visited.add(url.href);
       const current = resultsPage(await this.requestRecord(url, { method: "GET" }, options.signal));
       for (const entry of current.results) {
-        if (typeof entry.id !== "string" || !entry.id || identities.has(entry.id)) {
+        const identity = entry[identityField];
+        if (typeof identity !== "string" || !identity || identities.has(identity)) {
           throw new ApiError("blackboard_response_incomplete", `Blackboard returned duplicate or invalid ${label} identities.`);
         }
         if (results.length >= maxRecords) {
           throw new ApiError("blackboard_response_incomplete", `Blackboard returned too many ${label} records.`);
         }
-        identities.add(entry.id); results.push(entry);
+        identities.add(identity); results.push(entry);
       }
       const next = exactPaginationUrl(current.next, this.tenant, expectedPath);
       if (!next) return results;

@@ -1,12 +1,14 @@
+import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { StdioMcpUpstream } from "../src/index.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 const duplicateFixturePath = fileURLToPath(new URL("./fixtures/raw-duplicate-tools-upstream.mjs", import.meta.url));
+const silentFixturePath = fileURLToPath(new URL("./fixtures/silent-upstream.mjs", import.meta.url));
 
 const openUpstreams: StdioMcpUpstream[] = [];
 function tracked(upstream: StdioMcpUpstream): StdioMcpUpstream {
@@ -20,6 +22,40 @@ afterEach(async () => {
 async function tempDirectory(): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), "morrow-upstream-mcp-"));
   return directory;
+}
+
+async function readPid(path: string): Promise<number> {
+  const deadline = Date.now() + 2_000;
+  for (;;) {
+    try {
+      const pid = Number((await readFile(path, "utf8")).trim());
+      if (Number.isSafeInteger(pid) && pid > 0) return pid;
+    } catch {}
+    if (Date.now() >= deadline) throw new Error("upstream child did not record its PID");
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}
+
+function processIsAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function within<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`operation did not settle within ${milliseconds} ms`)), milliseconds);
+    timer.unref();
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 describe("StdioMcpUpstream", () => {
@@ -97,15 +133,128 @@ describe("StdioMcpUpstream", () => {
     const directory = await tempDirectory();
     try {
       const marker = join(directory, "startup-marker");
+      let preparedLaunches = 0;
       const upstream = tracked(new StdioMcpUpstream({
         id: "fixture", label: "Fixture upstream", command: process.execPath, args: [fixturePath],
         env: { FAKE_TOOL_COUNT: "2", FAKE_FAIL_STARTUP_MARKER: marker },
+        prepareLaunch: (launch) => {
+          preparedLaunches += 1;
+          return { launch };
+        },
         supervision: { startupAttempts: 2, reconnectAttempts: 2, initialBackoffMs: 5, maxBackoffMs: 10 },
       }));
       await upstream.connect();
+      expect(preparedLaunches).toBe(2);
       expect(upstream.health()).toMatchObject({ connected: true, reconnect: { state: "idle", startupAttempts: 2 } });
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("closes before launch preparation settles and refuses to spawn afterward", async () => {
+    const directory = await tempDirectory();
+    try {
+      const marker = join(directory, "launched");
+      let releasePreparation!: () => void;
+      const preparation = new Promise<void>((resolve) => {
+        releasePreparation = resolve;
+      });
+      let preparing!: () => void;
+      const startedPreparing = new Promise<void>((resolve) => {
+        preparing = resolve;
+      });
+      const upstream = tracked(new StdioMcpUpstream({
+        id: "fixture",
+        label: "Fixture upstream",
+        command: process.execPath,
+        args: [fixturePath],
+        env: { FAKE_FAIL_STARTUP_MARKER: marker },
+        prepareLaunch: async (launch) => {
+          preparing();
+          await preparation;
+          return { launch };
+        },
+      }));
+      const connecting = upstream.connect();
+      const refused = expect(connecting).rejects.toThrow(/is closed/);
+      await startedPreparing;
+      const closing = upstream.close();
+      expect(upstream.close()).toBe(closing);
+      await within(closing, 1_000);
+      expect(existsSync(marker)).toBe(false);
+      releasePreparation();
+      await refused;
+      expect(existsSync(marker)).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("closes and reaps a child that spawned but never answered initialization", async () => {
+    const directory = await tempDirectory();
+    try {
+      const pidPath = join(directory, "silent.pid");
+      const upstream = tracked(new StdioMcpUpstream({
+        id: "fixture",
+        label: "Silent upstream",
+        command: process.execPath,
+        args: [silentFixturePath],
+        env: { SILENT_UPSTREAM_PID_PATH: pidPath },
+      }));
+      const connecting = upstream.connect();
+      const refused = expect(connecting).rejects.toThrow(/is closed/);
+      const pid = await readPid(pidPath);
+      expect(processIsAlive(pid)).toBe(true);
+
+      const closing = upstream.close();
+      expect(upstream.close()).toBe(closing);
+      await within(closing, 4_000);
+      await refused;
+      expect(processIsAlive(pid)).toBe(false);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("cancels the maximum reconnect backoff without spawning a later child", async () => {
+    let preparedLaunches = 0;
+    vi.useFakeTimers();
+    try {
+      const upstream = tracked(new StdioMcpUpstream({
+        id: "fixture",
+        label: "Fixture upstream",
+        command: process.execPath,
+        args: [fixturePath],
+        prepareLaunch: () => {
+          preparedLaunches += 1;
+          throw new Error("synthetic launch refusal");
+        },
+        supervision: {
+          startupAttempts: 1,
+          reconnectAttempts: 8,
+          initialBackoffMs: 30_000,
+          maxBackoffMs: 60_000,
+        },
+      }));
+      const reconnecting = (upstream as unknown as {
+        startConnection(reconnect: boolean): Promise<readonly unknown[]>;
+      }).startConnection(true);
+      const refused = expect(reconnecting).rejects.toThrow(/is closed/);
+      expect(upstream.health().reconnect).toMatchObject({ state: "waiting", attempt: 1 });
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(preparedLaunches).toBe(1);
+      expect(upstream.health().reconnect).toMatchObject({ state: "waiting", attempt: 2 });
+      vi.useRealTimers();
+
+      const closing = upstream.close();
+      expect(upstream.close()).toBe(closing);
+      await within(closing, 1_000);
+      await refused;
+      expect(preparedLaunches).toBe(1);
+      expect(upstream.health().reconnect).toMatchObject({ state: "closed" });
+    } finally {
+      vi.useRealTimers();
     }
   });
 

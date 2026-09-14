@@ -23,6 +23,7 @@ const assignmentOperationKey = "PUT /v1/courses/{course_id}/assignments/{id}#edi
 const pageOperationKey = "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page_courses";
 const newQuizItemOperationKey = "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item";
 const classicQuizOperationKey = "PUT /v1/courses/{course_id}/quizzes/{id}#edit_quiz";
+const classicQuizQuestionOperationKey = "PUT /v1/courses/{course_id}/quizzes/{quiz_id}/questions/{id}#update_existing_quiz_question";
 const assignmentImageAltGuard = {
   kind: "assignment_image_alt",
   course_id: "42",
@@ -151,7 +152,9 @@ describe("bridge protocol", () => {
     expect(() => parseBridgeHello({
       schema: BRIDGE_SCHEMAS.hello,
       protocolVersion: BRIDGE_PROTOCOL_VERSION,
-      token: "x".repeat(48),
+      clientNonce: "b".repeat(64),
+      serverNonce: "c".repeat(64),
+      clientProof: "d".repeat(64),
       extensionId: "a".repeat(32),
       runtimeRevision: "revision-1",
       catalogDigest: digest,
@@ -171,6 +174,15 @@ describe("bridge protocol", () => {
   it("admits only exact private Bridge maintenance controls", () => {
     expect(normalizeBridgeMaintenanceControl({ action: "quiesce" })).toEqual({ action: "quiesce" });
     expect(normalizeBridgeMaintenanceControl({
+      action: "commit",
+      previousManifestVersion: "1.0.1",
+      quiesceEpoch: "quiesce-12345678-1234-1234-1234-123456789abc",
+    })).toEqual({
+      action: "commit",
+      previousManifestVersion: "1.0.1",
+      quiesceEpoch: "quiesce-12345678-1234-1234-1234-123456789abc",
+    });
+    expect(normalizeBridgeMaintenanceControl({
       action: "resume",
       quiesceEpoch: "quiesce-12345678-1234-1234-1234-123456789abc",
       fileLayerRestored: true,
@@ -183,6 +195,8 @@ describe("bridge protocol", () => {
       .toThrow("bridge maintenance control");
     expect(() => normalizeBridgeMaintenanceControl({ action: "status", path: "/tmp/bridge" }))
       .toThrow("unsupported fields");
+    expect(() => normalizeBridgeMaintenanceControl({ action: "commit", previousManifestVersion: "latest", quiesceEpoch: "quiesce-12345678-1234-1234" }))
+      .toThrow("commit is invalid");
   });
 
   it("admits one exact private Moodle file attachment without placing bytes in public arguments", () => {
@@ -222,16 +236,18 @@ describe("bridge protocol", () => {
   });
 
   it("admits only resolved Canvas Inbox payloads", () => {
+    const exactBody = "\n  Preserve this indentation.  \n";
     const create = {
       schema: "morrow.canvas-conversation.private.v1",
       action: "create",
       courseId: "42",
       recipients: ["27", "group_9_students", "section_4_tas", "course_42_teachers"],
       subject: "Week 3",
-      body: "Please review the lab notes.",
+      body: exactBody,
       groupConversation: true,
     } as const;
     expect(normalizeBridgePrivateConversation(create)).toEqual(create);
+    expect(normalizeBridgePrivateConversation(create).body).toBe(exactBody);
     expect(normalizeBridgePrivateConversation({
       schema: "morrow.canvas-conversation.private.v1",
       action: "reply",
@@ -252,6 +268,10 @@ describe("bridge protocol", () => {
       .toThrow("must be unique");
     expect(() => normalizeBridgePrivateConversation({ ...create, rawRecipientId: "27" }))
       .toThrow("unsupported fields");
+    expect(() => normalizeBridgePrivateConversation({ ...create, body: " \n\t " }))
+      .toThrow("privateConversation.body");
+    expect(() => normalizeBridgePrivateConversation({ ...create, body: "é".repeat((MAX_BRIDGE_MESSAGE_BYTES / 2) + 1) }))
+      .toThrow("UTF-8 bytes");
   });
 
   it("normalizes and sorts binding snapshots", () => {
@@ -284,7 +304,9 @@ describe("bridge protocol", () => {
     const serialized = serializeBridgeMessage({
       schema: BRIDGE_SCHEMAS.hello,
       protocolVersion: BRIDGE_PROTOCOL_VERSION,
-      token: "x".repeat(48),
+      clientNonce: "b".repeat(64),
+      serverNonce: "c".repeat(64),
+      clientProof: "d".repeat(64),
       extensionId: "a".repeat(32),
       runtimeRevision: "revision-1",
       catalogDigest: digest,
@@ -344,7 +366,9 @@ describe("bridge protocol", () => {
     const hello = parseBridgeHello({
       schema: BRIDGE_SCHEMAS.hello,
       protocolVersion: BRIDGE_PROTOCOL_VERSION,
-      token: "x".repeat(48),
+      clientNonce: "b".repeat(64),
+      serverNonce: "c".repeat(64),
+      clientProof: "d".repeat(64),
       extensionId: "a".repeat(32),
       runtimeRevision: "revision-1",
       catalogDigest: digest,
@@ -502,6 +526,46 @@ describe("bridge protocol", () => {
       ...input,
       arguments: { ...input.arguments, quiz_description: "unreviewed" },
     })).toBe(false);
+  });
+
+  it("admits the exact provider answer field on a guarded Classic Quiz question repair", () => {
+    const { assignment_id: _assignmentId, ...guardBase } = assignmentImageAltGuard;
+    const guard = {
+      ...guardBase,
+      kind: "classic_quiz_question_image_alt",
+      quiz_id: "77",
+      question_id: "301",
+      answer_id: "6656",
+      answer_field: "html",
+    };
+    const binding = {
+      ...assignmentImageAltBinding(),
+      editPermission: {
+        ...assignmentImageAltBinding().editPermission,
+        enabledCategories: ["canvas_classic_quiz_question_image_alt"],
+        rules: [{
+          operationKey: classicQuizQuestionOperationKey,
+          toolName: "canvas_update_existing_quiz_question",
+          allowedChangedFields: [],
+          requiresCanvasContentGuard: true,
+          canvasContentGuardKind: "classic_quiz_question_image_alt" as const,
+        }],
+      },
+    };
+    const input = {
+      provider: "canvas" as const,
+      catalogDigest: digest,
+      operationKey: classicQuizQuestionOperationKey,
+      toolName: "canvas_update_existing_quiz_question",
+      arguments: { course_id: "42", quiz_id: "77", id: "301", morrow_canvas_content_guard: guard },
+    };
+    expect(matchesBridgeEditPermission(binding, input)).toBe(true);
+    expect(splitBridgeCallArguments({
+      course_id: "42",
+      quiz_id: "77",
+      id: "301",
+      _morrow: { source_binding_id: "canvas-assignment-42", canvas_content_guard: guard },
+    }).options.canvasContentGuard).toEqual(guard);
   });
 
   it("admits only one exact guarded New Quiz choice or feedback image repair", () => {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, truncate, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,7 +10,7 @@ import { LoopbackBridgeServer, bridgePortInUseMessage } from "@morrow/bridge-loo
 import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
-import { GatewayRuntime, mcpRuntimeHealthFromPayload } from "../src/runtime.js";
+import { GatewayRuntime, MAX_MCP_RUNTIME_MANIFEST_BYTES, mcpRuntimeHealthFromPayload } from "../src/runtime.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
@@ -113,14 +113,8 @@ describe("GatewayRuntime stdio federation", () => {
 
       const firstDedupe = await runtime.call("morrow_legacy_only", {
         value: "write-once",
-        _morrow: {
-          operation_id: "operation:dedupe-1234",
-          readback: {
-            tool: "canvas_page_get",
-            arguments: { course_id: "101" },
-            expected_digest: "a".repeat(64),
-          },
-        },
+        course_id: "101",
+        _morrow: { operation_id: "operation:dedupe-1234" },
       });
       expect(firstDedupe.isError).not.toBe(true);
       expect(firstDedupe.structuredContent).toMatchObject({
@@ -130,14 +124,8 @@ describe("GatewayRuntime stdio federation", () => {
       });
       const replay = await runtime.call("morrow_legacy_only", {
         value: "write-once",
-        _morrow: {
-          operation_id: "operation:dedupe-1234",
-          readback: {
-            tool: "canvas_page_get",
-            arguments: { course_id: "101" },
-            expected_digest: "a".repeat(64),
-          },
-        },
+        course_id: "101",
+        _morrow: { operation_id: "operation:dedupe-1234" },
       });
       expect(replay.isError).not.toBe(true);
       expect(replay.structuredContent).toMatchObject({
@@ -196,7 +184,7 @@ describe("packaged MCP runtime identity", () => {
     const entrypointDirectory = join(root, "app", "packages", "mcp-server", "dist");
     const manifestPath = join(root, "app", "mcp-runtime-manifest.json");
     const manifest = {
-      schema: "morrow.mcp-runtime-manifest.v1",
+      schema: "morrow.mcp-runtime-manifest.v2",
       package: { name: "@morrow-lms/gateway", version: "1.0.0-rc.0" },
       entrypoint: { path: "packages/mcp-server/dist/index.js", bytes: 341, sha256: "c".repeat(64) },
       dependencies: [],
@@ -222,6 +210,27 @@ describe("packaged MCP runtime identity", () => {
       expect(mcpRuntimeHealthFromPayload(entrypointDirectory)).toBeUndefined();
 
       await writeFile(manifestPath, "{ not json");
+      expect(mcpRuntimeHealthFromPayload(entrypointDirectory)).toBeUndefined();
+
+      const malformedUtf8Manifest = Buffer.concat([
+        Buffer.from(`${JSON.stringify(manifest).slice(0, -1)},"note":"mor`),
+        Buffer.from([0xff]),
+        Buffer.from('row"}\n'),
+      ]);
+      await writeFile(manifestPath, malformedUtf8Manifest);
+      expect(mcpRuntimeHealthFromPayload(entrypointDirectory)).toBeUndefined();
+
+      if (process.platform !== "win32") {
+        const linkedManifest = join(root, "linked-runtime-manifest.json");
+        await writeFile(linkedManifest, bytes);
+        await unlink(manifestPath);
+        await symlink(linkedManifest, manifestPath);
+        expect(mcpRuntimeHealthFromPayload(entrypointDirectory)).toBeUndefined();
+        await unlink(manifestPath);
+      }
+
+      await writeFile(manifestPath, "{}");
+      await truncate(manifestPath, MAX_MCP_RUNTIME_MANIFEST_BYTES + 1);
       expect(mcpRuntimeHealthFromPayload(entrypointDirectory)).toBeUndefined();
     } finally {
       if (suppliedVersion === undefined) delete process.env.MORROW_MCP_RUNTIME_PACKAGE_VERSION;

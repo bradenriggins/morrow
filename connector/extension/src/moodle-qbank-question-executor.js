@@ -70,6 +70,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleQbankQuestionInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const QUESTION_SCHEMA = "morrow.moodle-qbank-question.v1";
   const SLOT_SCHEMA = "morrow.moodle-qbank-quiz-slot.v1";
@@ -280,12 +282,46 @@ export async function executeMoodleQbankQuestionInPage(rawInput) {
       || received.hash || received.username || received.password) return false;
     return stable(sortedEntries([...received.searchParams.entries()])) === stable(sortedEntries([...expected.searchParams.entries()]));
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
   const boundedText = async (response) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!COUNT.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return null;
-    let text;
-    try { text = await response.text(); } catch { return null; }
-    return typeof text === "string" && text.length <= MAX_RESPONSE_BYTES ? text : null;
+    if (declared !== null && (!COUNT.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      cancelBody(response?.body);
+      return null;
+    }
+    const reader = response?.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") return null;
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const remaining = Number.isFinite(input?.expiresAt) ? input.expiresAt - Date.now() : Infinity;
+        if (remaining <= 0) throw new Error("moodle_execution_expired");
+        let timeout;
+        const next = Number.isFinite(remaining)
+          ? await Promise.race([
+              reader.read(),
+              new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+            ]).finally(() => clearTimeout(timeout))
+          : await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_RESPONSE_BYTES) {
+          cancelBody(reader);
+          return null;
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch {
+      cancelBody(reader);
+      return null;
+    }
   };
   const parseDocument = async (response) => {
     const html = await boundedText(response);
@@ -295,7 +331,7 @@ export async function executeMoodleQbankQuestionInPage(rawInput) {
   const readPage = async (context, endpoint, error) => {
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error }; }
     if (!response.ok || !sameRoute(response.url, endpoint) || !sameContext(context, currentContext())) return { error, status: response.status };
     const documentValue = await parseDocument(response);
@@ -304,7 +340,7 @@ export async function executeMoodleQbankQuestionInPage(rawInput) {
   const followPage = async (context, endpoint, error) => {
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error }; }
     if (!response.ok || !sameContext(context, currentContext())) return { error, status: response.status };
     let landed;
@@ -320,6 +356,7 @@ export async function executeMoodleQbankQuestionInPage(rawInput) {
         method: "POST", credentials: "include", cache: "no-store", redirect: "error",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
         body: JSON.stringify([{ index: 0, methodname: STATE_METHOD, args: { courseid: Number(courseId) } }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_qbank_question_course_state_unavailable" }; }
     if (!response.ok || !sameContext(context, currentContext())) return { error: "moodle_qbank_question_course_state_unavailable", status: response.status };
@@ -806,6 +843,7 @@ export async function executeMoodleQbankQuestionInPage(rawInput) {
       response = await fetch(form.action, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "follow",
         headers: { "Content-Type": "application/x-www-form-urlencoded", Accept: "text/html" }, body: creationBody(form, args),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_qbank_question_create_unconfirmed" }; }
     if (!response.ok || !sameContext(context, currentContext())) return { error: "moodle_qbank_question_create_unconfirmed", status: response.status };
@@ -1037,7 +1075,7 @@ export async function executeMoodleQbankQuestionInPage(rawInput) {
     let response;
     try {
       dispatched = true;
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return unconfirmedWrite("moodle_qbank_quiz_slot_unconfirmed"); }
     if (!response.ok || !sameContext(context, currentContext())) return unconfirmedWrite("moodle_qbank_quiz_slot_unconfirmed", response.status);
     let landed;

@@ -1,10 +1,79 @@
-import { describe, expect, it } from "vitest";
-import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasCatalogTools, canvasOperationAdmission, canvasReadbackAssessment, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasOperationAdmission, canvasReadbackAssessment, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
 import catalogJson from "../../../artifacts/canvas-api/canvas-api-catalog.json";
 
 const catalog = parseCanvasApiCatalog(catalogJson);
+const temporaryDirectories: string[] = [];
+
+afterEach(() => {
+  for (const directory of temporaryDirectories.splice(0)) rmSync(directory, { recursive: true, force: true });
+});
+
+function catalogFixture(): { directory: string; path: string } {
+  const directory = mkdtempSync(join(tmpdir(), "morrow-public-catalog-"));
+  temporaryDirectories.push(directory);
+  const path = join(directory, "canvas-api-catalog.json");
+  writeFileSync(path, JSON.stringify(catalogJson));
+  return { directory, path };
+}
 
 describe("Canvas API catalog", () => {
+  it("loads an ordinary catalog through the exact public catalog reader", () => {
+    const { path } = catalogFixture();
+    const loaded = loadCanvasApiCatalog(path);
+    expect(loaded.catalogDigest).toBe(catalog.catalogDigest);
+    expect(loaded.operations.length).toBe(catalog.operations.length);
+  });
+
+  it("separates transport and presentation metadata from operational compatibility", () => {
+    const expected = canvasApiCompatibilityDigest(catalog);
+    const presentation = structuredClone(catalog);
+    Object.assign(presentation.source, { indexUrl: "https://docs.example.invalid/new-index", lastModified: "tomorrow" });
+    Object.assign(presentation.operations[0]!, {
+      source: "new-provenance-label",
+      resource: "New visible group",
+      summary: "New visible title",
+      description: "New visible explanation.",
+    });
+    const firstProperty = Object.values(presentation.operations[0]!.inputSchema.properties || {})[0];
+    if (firstProperty && typeof firstProperty === "object") Object.assign(firstProperty, { description: "New field help." });
+    expect(canvasApiCompatibilityDigest(presentation)).toBe(expected);
+
+    const changedRoute = structuredClone(catalog);
+    Object.assign(changedRoute.operations[0]!, { path: "/v1/changed-operational-route" });
+    expect(canvasApiCompatibilityDigest(changedRoute)).not.toBe(expected);
+  });
+
+  it("removes schema annotations without removing fields named title or description", () => {
+    expect(operationalJsonSchema({
+      type: "object",
+      title: "Visible schema title",
+      description: "Visible schema help.",
+      properties: {
+        title: { type: "string", description: "Visible field help." },
+        description: { type: "string", title: "Visible field title" },
+      },
+      additionalProperties: false,
+    })).toEqual({
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        description: { type: "string" },
+      },
+      additionalProperties: false,
+    });
+  });
+
+  it.skipIf(process.platform === "win32")("refuses a final symbolic link before catalog parsing", () => {
+    const { directory, path } = catalogFixture();
+    const linked = join(directory, "linked-catalog.json");
+    symlinkSync(path, linked);
+    expect(() => loadCanvasApiCatalog(linked)).toThrow(/stable regular file/u);
+  });
+
   it("covers the official surface plus the browser-session Item Banks contract", () => {
     expect(catalog.counts.officialOperations).toBeGreaterThanOrEqual(1_100);
     expect(catalog.counts.itemBankOperations).toBe(18);
@@ -19,6 +88,28 @@ describe("Canvas API catalog", () => {
     expect(course?.schema).toMatchObject({ type: "string", pattern: "^[1-9][0-9]*$" });
     expect(operationArguments(operation!, { course_id: "9007199254740993", assignment_id: "9223372036854775807" }).path)
       .toBe("/quiz/v1/courses/9007199254740993/quizzes/9223372036854775807");
+  });
+
+  it("binds a collection readback to the exact updated discussion entry", () => {
+    const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_update_entry_courses")!;
+    const plan = planBrowserReadback(catalog.operations, operation, {
+      course_id: "42", topic_id: "51", id: "77", message: "Edited body",
+    }, {});
+
+    expect(plan?.readOperation.toolName).toBe("canvas_list_topic_entries_courses");
+    expect(plan?.arguments).toEqual({ course_id: "42", topic_id: "51" });
+    expect(plan?.strategy).toBe("collection-contains-target");
+    expect(plan?.targetId).toBe("77");
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: [
+      { id: "76", message: "Other body" },
+      { id: "77", message: "Edited body" },
+    ] }).status).toBe("verified");
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, truncated: true, data: [
+      { id: "77", message: "Edited body" },
+    ] })).toMatchObject({ status: "unconfirmed", evidence: "collection_readback_incomplete" });
+    expect(evaluateBrowserReadback(plan, { ok: true, status: 200, data: [
+      { id: "77", message: "Old body" },
+    ] }).status).toBe("mismatch");
   });
 
   it("retains New Quiz IP ranges and explicit setting resets through request and readback", () => {

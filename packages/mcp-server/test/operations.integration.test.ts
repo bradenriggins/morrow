@@ -32,7 +32,7 @@ function config(options: { readonly delayMs?: number } = {}) {
         enabled: true,
         outputPrivacy: {
           canvas_page_get: {
-            allowedFields: ["source", "course_id"],
+            allowedFields: ["source", "course_id", "value", "page_id"],
             dataClass: "course",
             maxRecords: 10,
             maxBytes: 2_000,
@@ -73,20 +73,116 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 2_000): Promise<v
 }
 
 describe("outer provider effects", () => {
+  it("cancels before planning or source dispatch and keeps a post-dispatch abort uncertain", async () => {
+    const runtime = await GatewayRuntime.connect(config({ delayMs: 200 }), { journalPath: ":memory:" });
+    const request = (suffix: string) => ({
+      value: suffix,
+      course_id: "101",
+      _morrow: { operation_id: `operation:cancel-${suffix}-1234` },
+    });
+    try {
+      const beforePlan = new AbortController();
+      beforePlan.abort();
+      expect(await runtime.call("morrow_legacy_only", request("before-plan"), { signal: beforePlan.signal })).toMatchObject({
+        isError: true,
+        structuredContent: { data: { code: "request_cancelled_before_dispatch" } },
+      });
+      expect(runtime.operationList(200)).toMatchObject({ returned: 0, operations: [] });
+
+      const planned = runtime.planOperation("morrow_legacy_only", request("before-send"));
+      const plannedId = operationId(planned);
+      runtime.approveOperation(plannedId);
+      const beforeSend = new AbortController();
+      beforeSend.abort();
+      expect(await runtime.dispatchOperation(plannedId, { signal: beforeSend.signal })).toMatchObject({
+        structuredContent: { effectState: "cancelled" },
+      });
+      expect(runtime.operationGet(plannedId)).toMatchObject({ state: "cancelled", dispatchAttempt: 0 });
+
+      const possible = runtime.planOperation("morrow_legacy_only", request("after-send"));
+      const possibleId = operationId(possible);
+      runtime.approveOperation(possibleId);
+      const afterSend = new AbortController();
+      const running = runtime.dispatchOperation(possibleId, { signal: afterSend.signal });
+      await waitUntil(() => runtime.effects.get(possibleId).state === "dispatching");
+      afterSend.abort();
+      await running;
+      expect(runtime.operationGet(possibleId)).toMatchObject({
+        state: "applied_or_unknown",
+        attention: expect.arrayContaining(["provider_effect_may_have_landed"]),
+      });
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+
+  it("pages every saved effect and reports complete health counts beyond the recent window", async () => {
+    const runtime = await GatewayRuntime.connect(config(), { journalPath: ":memory:" });
+    const request = (suffix: string) => ({
+      value: suffix,
+      course_id: "101",
+      _morrow: { operation_id: `operation:page-${suffix}-1234` },
+    });
+    try {
+      const oldest = runtime.planOperation("morrow_legacy_only", request("oldest-unresolved"));
+      const oldestId = operationId(oldest);
+      runtime.effects.approve(oldestId);
+      runtime.effects.reserveDispatch(oldestId);
+      runtime.effects.settleResponse(oldestId, { upstreamResultDigest: "a".repeat(64) });
+
+      for (let index = 0; index < 205; index += 1) {
+        const planned = runtime.planOperation("morrow_legacy_only", request(`decoy-${String(index).padStart(3, "0")}`));
+        runtime.cancelOperation(operationId(planned));
+      }
+
+      const discovered = new Set<string>();
+      let cursor: string | undefined;
+      let firstPage = true;
+      do {
+        const page = runtime.operationList(50, cursor) as {
+          returned: number;
+          total: number;
+          unresolved: number;
+          hasMore: boolean;
+          nextCursor: string | null;
+          operations: Array<{ operationId: string }>;
+        };
+        expect(page.returned).toBeGreaterThan(0);
+        expect(page.total).toBe(206);
+        expect(page.unresolved).toBe(1);
+        if (firstPage) expect(page.operations.map((operation) => operation.operationId)).not.toContain(oldestId);
+        for (const operation of page.operations) {
+          expect(discovered.has(operation.operationId)).toBe(false);
+          discovered.add(operation.operationId);
+        }
+        cursor = page.nextCursor ?? undefined;
+        firstPage = false;
+        if (!page.hasMore) expect(page.nextCursor).toBeNull();
+      } while (cursor);
+
+      expect(discovered.size).toBe(206);
+      expect(discovered.has(oldestId)).toBe(true);
+      expect(runtime.effectHealth()).toMatchObject({
+        totalOperationCount: 206,
+        recentOperationCount: 200,
+        recentCoverageComplete: false,
+        unresolvedOperationCount: 1,
+        appliedOrUnknownCount: 0,
+        dispatchingCount: 0,
+      });
+      expect(() => runtime.operationList(50, "")).toThrow("operation list cursor is invalid");
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+
   it("plans, separately approves, dispatches once, verifies fresh evidence, and corrects with a new operation", async () => {
     const runtime = await GatewayRuntime.connect(config(), { journalPath: ":memory:" });
     try {
-      const expectedReadbackDigest = sha256Json({ source: "morrow-legacy", course_id: "101" });
       const planned = await runtime.call("morrow_legacy_only", {
         value: "first",
-        _morrow: {
-          operation_id: "operation:outer-1234",
-          readback: {
-            tool: "canvas_page_get",
-            arguments: { course_id: "101" },
-            expected_digest: expectedReadbackDigest,
-          },
-        },
+        course_id: "101",
+        _morrow: { operation_id: "operation:outer-1234" },
       });
       const id = operationId(planned);
       expect(planned.structuredContent).toMatchObject({
@@ -102,7 +198,8 @@ describe("outer provider effects", () => {
       });
       expect(runtime.operationGet(id)).toMatchObject({
         schema: "morrow.operation.v1",
-        plan: { arguments: { value: "first" } },
+        plan: { arguments: { value: "first", course_id: "101" } },
+        readback: { tool: "morrow_route_embedded_readback" },
       });
 
       runtime.approveOperation(id);
@@ -123,6 +220,35 @@ describe("outer provider effects", () => {
     }
   }, 20_000);
 
+  it("refuses a caller-supplied readback on the MCP route and verifies only through the route's own read", async () => {
+    const runtime = await GatewayRuntime.connect(config(), { journalPath: ":memory:" });
+    try {
+      const unrelated = { tool: "canvas_page_get", arguments: { course_id: "101" }, expected_digest: sha256Json({ source: "morrow-legacy", course_id: "101" }) };
+      const refused = await runtime.call("morrow_legacy_only", { value: "self-certified", course_id: "101", _morrow: { readback: unrelated } });
+      expect(refused.isError).toBe(true);
+      expect(refused.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      const refusedPlan = runtime.planOperation("morrow_legacy_only", { value: "self-certified", course_id: "101", _morrow: { readback: unrelated } });
+      expect(refusedPlan.structuredContent).toMatchObject({ phase: "rejected", data: { code: "caller_readback_refused" } });
+      expect(runtime.operationList(10)).toMatchObject({ returned: 0 });
+
+      // Without a caller comparator the route's own read decides. A write the
+      // source did not keep stays unconfirmed; one it kept verifies.
+      const kept = await runtime.call("morrow_legacy_only", { value: "kept", course_id: "301" });
+      const keptId = operationId(kept);
+      expect(runtime.operationGet(keptId)).toMatchObject({ readback: { tool: "morrow_route_embedded_readback" } });
+      runtime.approveOperation(keptId);
+      expect((await runtime.dispatchOperation(keptId)).structuredContent).toMatchObject({ effectState: "verified", verification: { status: "verified" } });
+
+      const lost = await runtime.call("morrow_legacy_only", { value: "lost", course_id: "302", note: "the source's read never returns this field" });
+      const lostId = operationId(lost);
+      runtime.approveOperation(lostId);
+      expect((await runtime.dispatchOperation(lostId)).structuredContent).toMatchObject({ effectState: "awaiting_verification", verification: { status: "unconfirmed" } });
+      expect(runtime.operationGet(lostId)).toMatchObject({ attention: ["readback_did_not_match_frozen_comparator"] });
+    } finally {
+      await runtime.close();
+    }
+  }, 20_000);
+
   it("blocks an overlapping target across gateway instances while independent courses dispatch", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-effect-target-runtime-"));
     const journalPath = join(directory, "gateway.sqlite3");
@@ -132,13 +258,6 @@ describe("outer provider effects", () => {
       value,
       course_id: courseId,
       page_id: pageId,
-      _morrow: {
-        readback: {
-          tool: "canvas_page_get",
-          arguments: { course_id: courseId },
-          expected_digest: sha256Json({ source: "morrow-legacy", course_id: courseId }),
-        },
-      },
     });
     try {
       first = await GatewayRuntime.connect(config({ delayMs: 150 }), { journalPath });
@@ -187,13 +306,7 @@ describe("outer provider effects", () => {
     try {
       const planned = await runtime.gateway.call("morrow_legacy_only", {
         value: "approve-through-loopback",
-        _morrow: {
-          readback: {
-            tool: "canvas_page_get",
-            arguments: { course_id: "101" },
-            expected_digest: sha256Json({ source: "morrow-legacy", course_id: "101" }),
-          },
-        },
+        course_id: "101",
       });
       const id = operationId(planned);
       const structured = planned.structuredContent as { receipts?: { approvalUrl?: unknown } };

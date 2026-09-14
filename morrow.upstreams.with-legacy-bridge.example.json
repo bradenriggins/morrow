@@ -1,7 +1,7 @@
 {
   "schema": "morrow.upstreams.v1",
   "profile": "private-full",
-  "disposition": "Development-only example. The morrow-legacy bridge is a development adaptation path for the donor Morrow extension. It is not part of the Morrow 1.0 product, no public release profile in config/release-profiles.json contains packages/legacy-bridge-mcp/, and it needs an external morrow-legacy donor checkout at revision 1111111111111111111111111111111111111111. See docs/implementation/MORROW-LEGACY-BRIDGE.md.",
+  "disposition": "Development-only example. The morrow-legacy bridge is a development adaptation path for the donor Morrow extension. It is not part of the Morrow 1.0 product, no public release profile in config/release-profiles.json contains packages/legacy-bridge-mcp/, and it needs an external morrow-legacy donor checkout at revision 7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4. See docs/implementation/MORROW-LEGACY-BRIDGE.md.",
   "sourcePolicy": {
     "requireAttestation": true
   },
@@ -43,23 +43,29 @@
       "id": "morrow-legacy",
       "label": "Morrow legacy browser runtime",
       "kind": "mcp-stdio",
-      "command": "pnpm",
-      "args": ["--filter", "@morrow/legacy-bridge-mcp", "start"],
+      "command": "${MORROW_NODE_COMMAND:-node}",
+      "args": ["packages/legacy-bridge-mcp/dist/index.js"],
       "cwd": "${MORROW_NEW_REPO_ROOT}",
-      "repository": "example-org/morrow-legacy-source",
-      "revision": "1111111111111111111111111111111111111111",
+      "repository": "bradenriggins/morrow",
+      "revision": "${MORROW_RELEASE_REVISION}",
       "attestation": {
         "kind": "local-git",
-        "root": "${MORROW_LEGACY_ROOT}",
-        "expectedRevision": "1111111111111111111111111111111111111111",
-        "requireTrackedClean": true
+        "root": "${MORROW_NEW_REPO_ROOT}",
+        "expectedRevision": "${MORROW_RELEASE_REVISION}",
+        "requireTrackedClean": true,
+        "launch": {
+          "entrypoint": "packages/legacy-bridge-mcp/dist/index.js",
+          "entrypointArgumentIndex": 0,
+          "expectedEntrypointSha256": "${MORROW_LEGACY_ENTRYPOINT_SHA256}",
+          "runtime": { "kind": "current-node" }
+        }
       },
       "priority": 50,
       "required": true,
       "enabled": true,
       "env": {
         "MORROW_LEGACY_CATALOG_PATH": "${MORROW_LEGACY_CATALOG_PATH}",
-        "MORROW_LEGACY_EXPECTED_REVISION": "1111111111111111111111111111111111111111",
+        "MORROW_LEGACY_EXPECTED_REVISION": "7275bfbc1c24dd6baff58f9435f1ce5a50fbb5d4",
         "MORROW_LEGACY_BRIDGE_TOKEN": "${MORROW_LEGACY_BRIDGE_TOKEN}",
         "MORROW_LEGACY_BRIDGE_PORT": "${MORROW_LEGACY_BRIDGE_PORT:-32145}",
         "MORROW_LEGACY_ALLOWED_EXTENSION_IDS": "${MORROW_LEGACY_ALLOWED_EXTENSION_IDS:-}"

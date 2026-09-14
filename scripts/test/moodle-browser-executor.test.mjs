@@ -690,6 +690,7 @@ test("Moodle discovery includes a fresh verified current course without dropping
   execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", key, "-out", certificate], { stdio: "ignore" });
   let origin = "";
   let timeline = [];
+  let unsafeTimelineId = false;
   let currentCourseAllowed = true;
   const stateRequests = [];
   const courseViews = [];
@@ -711,7 +712,9 @@ test("Moodle discovery includes a fresh verified current course without dropping
         if (call?.methodname === "core_course_get_enrolled_courses_by_timeline_classification") {
           const courses = timeline.slice(call.args.offset, call.args.offset + call.args.limit);
           response.writeHead(200, { "content-type": "application/json" });
-          response.end(JSON.stringify([{ data: { courses } }]));
+          response.end(unsafeTimelineId
+            ? '[{"data":{"courses":[{"id":9007199254740993,"fullname":"Unsafe course"}]}}]'
+            : JSON.stringify([{ data: { courses } }]));
           return;
         }
         if (call?.methodname === "core_courseformat_get_state") {
@@ -766,6 +769,28 @@ test("Moodle discovery includes a fresh verified current course without dropping
       courses: [{ id: "3", name: "Timeline three" }], offset: 2, limit: 3, next_offset: null, complete: true,
     });
     assert.deepEqual(stateRequests, [99]);
+
+    unsafeTimelineId = true;
+    assert.deepEqual(await discover(3), { ok: false, sent: false, error: "moodle_courses_invalid", status: 200 });
+    unsafeTimelineId = false;
+
+    for (const total of [99, 100, 101, 199, 200, 201]) {
+      timeline = Array.from({ length: total }, (unused, index) => ({ id: index + 1, fullname: `Timeline ${index + 1}` }));
+      const pages = [];
+      let offset = 0;
+      while (true) {
+        const pageResult = await discover(100, offset);
+        assert.equal(pageResult.ok, true, `discovery failed for ${total} courses at offset ${offset}`);
+        assert.ok(pageResult.data.courses.length > 0, `discovery exposed an empty terminal page for ${total} courses`);
+        pages.push(pageResult.data.courses);
+        if (pageResult.data.complete) break;
+        assert.ok(pageResult.data.next_offset > offset);
+        offset = pageResult.data.next_offset;
+      }
+      const courseIds = pages.flat().map((course) => course.id);
+      assert.deepEqual(courseIds, timeline.map((course) => String(course.id)), `discovery lost or repeated a course for total ${total}`);
+      assert.equal(new Set(courseIds).size, total);
+    }
 
     timeline = [];
     currentCourseAllowed = false;
@@ -1440,12 +1465,12 @@ test("Moodle executor updates and creates hidden Pages and Assignments from nati
       courses: [{ id: "2", name: "Week 2" }],
       offset: 1,
       limit: 1,
-      next_offset: 2,
-      complete: false,
+      next_offset: null,
+      complete: true,
     });
     assert.deepEqual(discoveryArgs, {
       classification: "allincludinghidden",
-      limit: 1,
+      limit: 2,
       offset: 1,
       sort: null,
       customfieldname: null,

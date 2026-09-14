@@ -690,7 +690,7 @@ const FIXED_WIDTH_TAGS = new Set([
 ]);
 const INLINE_PIXEL_WIDTH = /(?:^|[;\s])width\s*:\s*([0-9]+(?:\.[0-9]+)?)px/i;
 /** The signal lists this audit reads from one saved HTML field, in result order. */
-const SOURCE_SIGNAL_NAMES = [
+export const COURSE_AUDIT_SOURCE_SIGNAL_NAMES = [
   "image_tags_without_alt", "images_marked_decorative_with_alt_text", "heading_level_jumps", "empty_headings",
   "tables_without_th", "tables_without_caption", "table_headers_without_scope", "unclosed_tables",
   "embedded_media_tags", "media_without_caption_track", "autoplay_media",
@@ -858,7 +858,7 @@ function htmlSignals(html: string): JsonObject {
   // rather than the usual path: a table still open here is reported exactly
   // like one whose closing tag the saved source never provided.
   while (tables.length) closeTable(tables.pop()!, true);
-  const signalLists: Record<(typeof SOURCE_SIGNAL_NAMES)[number], readonly unknown[]> = {
+  const signalLists: Record<(typeof COURSE_AUDIT_SOURCE_SIGNAL_NAMES)[number], readonly unknown[]> = {
     image_tags_without_alt: missingAltImages,
     images_marked_decorative_with_alt_text: decorativeImagesWithAltText,
     heading_level_jumps: headingLevelJumps,
@@ -880,7 +880,7 @@ function htmlSignals(html: string): JsonObject {
   };
   const observedSourceSignals: JsonObject = {};
   const truncatedSignals: JsonObject[] = [];
-  for (const signal of SOURCE_SIGNAL_NAMES) {
+  for (const signal of COURSE_AUDIT_SOURCE_SIGNAL_NAMES) {
     const entries = signalLists[signal];
     observedSourceSignals[signal] = entries.slice(0, MAX_SOURCE_SIGNAL_ENTRIES);
     if (entries.length > MAX_SOURCE_SIGNAL_ENTRIES) truncatedSignals.push({ signal, returned_count: MAX_SOURCE_SIGNAL_ENTRIES, total_count: entries.length });
@@ -1377,6 +1377,7 @@ async function auditCanvas(runtime: GatewayRuntime, input: CanvasInput, signal: 
           observed_at: new Date().toISOString(),
           read_started_at: startedAt,
           source_binding_id: input.source_binding_id,
+          selected_target: structuredClone(input.target),
           course: { id: input.course_id, name: course.name },
           target: { kind: "file", id: fileTarget.file_id, course_association: "observed_by_course_scoped_read", ...(fileTitle ? { title: fileTitle } : {}) },
           upstream_read_provenance: provenance,
@@ -1421,6 +1422,7 @@ async function auditCanvas(runtime: GatewayRuntime, input: CanvasInput, signal: 
           observed_at: new Date().toISOString(),
           read_started_at: startedAt,
           source_binding_id: input.source_binding_id,
+          selected_target: structuredClone(input.target),
           course: { id: input.course_id, name: course.name },
           target: { kind: "file", id: fileTarget.file_id, course_association: "observed_by_course_scoped_read", ...(fileTitle ? { title: fileTitle } : {}) },
           upstream_read_provenance: [courseResult.readProvenance, metadataRead.readProvenance, signalCall.provenance],
@@ -1482,6 +1484,7 @@ async function auditCanvas(runtime: GatewayRuntime, input: CanvasInput, signal: 
     observed_at: new Date().toISOString(),
     read_started_at: startedAt,
     source_binding_id: input.source_binding_id,
+    selected_target: structuredClone(input.target),
     course: { id: input.course_id, name: course.name },
     target: {
       kind: input.target.kind, id: targetId,
@@ -1816,6 +1819,7 @@ async function auditMoodle(runtime: GatewayRuntime, input: MoodleInput, signal: 
     provider: "moodle",
     status: contentEvidence.status === "observed" && (!target.assessment || target.assessment.status === "observed") ? "evidence_ready" : "evidence_incomplete",
     observed_at: new Date().toISOString(), read_started_at: startedAt, source_binding_id: input.source_binding_id,
+    selected_target: structuredClone(input.target),
     course: { id: input.course_id, name: courseName },
     target: { kind: target.kind, id: target.id, course_association: "observed_by_course_scoped_read", source_snapshot_digest: targetRead.snapshotDigest, observed_targets: targetRead.targets, observation_scope: target.observationScope ?? "exact_target_field_only", ...(target.title ? { title: target.title } : {}) },
     upstream_read_provenance: [courseResult.readProvenance, targetRead.readProvenance],
@@ -1918,6 +1922,7 @@ function blackboardUnavailable(input: BlackboardInput, reason: string): JsonObje
   return {
     schema: "morrow.course-audit.v1", provider: "blackboard", status: "provider_unavailable", observed_at: new Date().toISOString(),
     tenant_id: input.tenant_id, source_binding_id: input.source_binding_id,
+    selected_target: structuredClone(input.target),
     course: { id: input.course_id }, target: { kind: input.target.kind, id: input.target.item_id, course_association: "not_established" },
     remediation: { status: "blocked_provider_connection_unavailable", reason },
     limits: ["No Blackboard provider read or edit was attempted.", "This is not evidence about the selected Blackboard course item."],
@@ -1990,6 +1995,7 @@ async function auditBlackboard(runtime: GatewayRuntime, input: BlackboardInput, 
     status: contentEvidence.status === "observed" && additionalFields.every((entry) => entry.status === "observed") ? "evidence_ready" : "evidence_incomplete",
     observed_at: new Date().toISOString(), read_started_at: startedAt,
     tenant_id: input.tenant_id, source_binding_id: input.source_binding_id,
+    selected_target: structuredClone(input.target),
     source_evidence_state: sourceEvidenceState,
     course: { id: input.course_id, ...(courseName ? { name: courseName } : {}) },
     target: {

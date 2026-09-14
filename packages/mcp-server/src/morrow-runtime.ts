@@ -4,7 +4,6 @@ import {
   BatchSourceSettlementStore,
   DurableBatchStore,
   loadOrCreateBatchEncryptionKey,
-  recoverBatchState,
   runBatchWindow,
   taskProjectionFromGatewayResult,
   type BatchChildRecord,
@@ -38,31 +37,22 @@ import {
 import { GatewayRuntime, type PreparedEffectAuthority } from "./runtime.js";
 import { BatchWindowScheduler } from "./batch-window-scheduler.js";
 
-export const MORROW_BATCH_TOOL_NAMES = Object.freeze([
-  "morrow_batch_health",
-  "morrow_batch_create",
-  "morrow_batch_get",
-  "morrow_batch_results_page",
-  "morrow_batches_recent",
-  "morrow_batch_run",
-  "morrow_batch_resume",
-  "morrow_batch_reconcile",
-  "morrow_batch_pause",
-  "morrow_batch_cancel",
-  "morrow_program_inventory_create",
-  "morrow_program_inventory_create_audit_batch",
-] as const);
+import { MORROW_NATIVE_EXCLUDED_NAMES } from "./native-tool-manifest.js";
 
 export type BridgeMaintenanceControl =
   | { readonly action: "status" }
   | { readonly action: "quiesce" }
   | { readonly action: "readback" }
+  | { readonly action: "commit"; readonly previousManifestVersion: string; readonly quiesceEpoch: string }
   | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true };
 
 const BRIDGE_EXTENSION_ID = /^[a-p]{32}$/;
 const BRIDGE_VERSION = /^(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*)){0,3}$/;
 const BRIDGE_IDENTIFIER = /^[A-Za-z0-9._-]{16,256}$/;
 const BRIDGE_SHA256 = /^[0-9a-f]{64}$/;
+const TERMINAL_BATCH_AUTHORITY_STATES = new Set<BatchState>([
+  "completed", "partial", "failed", "cancelled", "inspection_required",
+]);
 
 function exactKeys(value: unknown, keys: readonly string[]): value is Record<string, unknown> {
   return isJsonObject(value)
@@ -76,6 +66,11 @@ function normalizeBridgeMaintenanceControl(value: unknown): BridgeMaintenanceCon
   }
   if ((value.action === "status" || value.action === "quiesce" || value.action === "readback")
     && exactKeys(value, ["action"])) return { action: value.action };
+  if (value.action === "commit" && exactKeys(value, ["action", "previousManifestVersion", "quiesceEpoch"])
+    && typeof value.previousManifestVersion === "string" && BRIDGE_VERSION.test(value.previousManifestVersion)
+    && typeof value.quiesceEpoch === "string" && BRIDGE_IDENTIFIER.test(value.quiesceEpoch)) {
+    return { action: "commit", previousManifestVersion: value.previousManifestVersion, quiesceEpoch: value.quiesceEpoch };
+  }
   if (value.action !== "resume" || !exactKeys(value, ["action", "quiesceEpoch", "fileLayerRestored"])
     || typeof value.quiesceEpoch !== "string" || !BRIDGE_IDENTIFIER.test(value.quiesceEpoch)
     || value.fileLayerRestored !== true) {
@@ -124,6 +119,14 @@ function privateBridgeMaintenanceResult(control: BridgeMaintenanceControl, value
       || source.schema !== "morrow.bridge.update-readback.v1" || source.installType !== "development"
       || !activeFolderProof(source.activeFolderProof, extensionId, manifestVersion)) {
       throw new Error("The private Bridge readback result is invalid.");
+    }
+  } else if (control.action === "commit") {
+    if (!exactKeys(source, ["schema", "extensionId", "previousManifestVersion", "manifestVersion", "quiesceEpoch", "committed", "activeFolderProof"])
+      || source.schema !== "morrow.bridge.update-committed.v1"
+      || source.previousManifestVersion !== control.previousManifestVersion
+      || source.quiesceEpoch !== control.quiesceEpoch || source.committed !== true
+      || !activeFolderProof(source.activeFolderProof, extensionId, manifestVersion)) {
+      throw new Error("The private Bridge commit result is invalid.");
     }
   } else if (!exactKeys(source, ["schema", "extensionId", "manifestVersion", "quiesceEpoch", "resumed"])
     || source.schema !== "morrow.bridge.update-resumed.v1" || source.quiesceEpoch !== control.quiesceEpoch || source.resumed !== true) {
@@ -675,7 +678,7 @@ export class MorrowRuntime {
   ): Promise<MorrowRuntime> {
     const reserved = new Set([
       ...config.filters.excludeNames,
-      ...MORROW_BATCH_TOOL_NAMES,
+      ...MORROW_NATIVE_EXCLUDED_NAMES,
     ]);
     const effectiveConfig: GatewayConfig = {
       ...config,
@@ -685,13 +688,16 @@ export class MorrowRuntime {
       },
     };
     const path = statePath(effectiveConfig, options.statePath);
-    const gateway = await GatewayRuntime.connect(effectiveConfig, { journalPath: path });
+    const key = path === ":memory:"
+      ? randomBytes(32)
+      : loadOrCreateBatchEncryptionKey(
+        resolve(options.batchKeyPath || `${path}.batch.key`),
+      );
+    const gateway = await GatewayRuntime.connect(effectiveConfig, {
+      journalPath: path,
+      resultBindingEncryptionKey: key,
+    });
     try {
-      const key = path === ":memory:"
-        ? randomBytes(32)
-        : loadOrCreateBatchEncryptionKey(
-          resolve(options.batchKeyPath || `${path}.batch.key`),
-        );
       const batches = new DurableBatchStore({ path, encryptionKey: key });
       const sourceSettlements = new BatchSourceSettlementStore({ path });
       try {
@@ -701,7 +707,7 @@ export class MorrowRuntime {
           operationList: (limit) => gateway.operationList(limit),
           operationReviewContext: (operationId, cache) => gateway.operationReviewContext(operationId, cache),
           approveOperation: (operationId) => gateway.approveOperation(operationId),
-          runApprovedOperation: (operationId) => gateway.dispatchOperation(operationId),
+          runApprovedOperation: (operationId, signal) => gateway.dispatchOperation(operationId, { signal }),
           cancelOperation: (operationId) => gateway.cancelOperation(operationId),
           setApprovalBaseUrl: (baseUrl) => gateway.setApprovalBaseUrl(baseUrl),
           batchApprovalGet: (batchId) => runtime.batchApprovalGet(batchId),
@@ -711,6 +717,7 @@ export class MorrowRuntime {
           cancelBatchApproval: (batchId) => runtime.cancelBatchApproval(batchId),
         });
         runtime = new MorrowRuntime(gateway, batches, sourceSettlements, approval);
+        runtime.synchronizeEffectBatchAuthority();
         await approval.start();
         await runtime.recoverStartupBatches();
         return runtime;
@@ -725,6 +732,72 @@ export class MorrowRuntime {
     }
   }
 
+  /** Restores the exact parent-child authority graph before any approval endpoint is reachable. */
+  private synchronizeEffectBatchAuthority(): void {
+    let offset = 0;
+    for (;;) {
+      const page = this.batches.listPage(offset, 500);
+      for (const batch of page.batches) {
+        if (batch.mode !== "stage_writes") continue;
+        this.ensureSourceSettlementRows(batch.batchId);
+        const parentState = this.gateway.registerEffectBatch(batch.batchId);
+        let childOffset = 0;
+        for (;;) {
+          const children = this.batches.listChildren(batch.batchId, childOffset, 500);
+          for (const child of children.children) {
+            if (child.gatewayOperationId) {
+              this.gateway.bindEffectBatchOperation(batch.batchId, child.childId, child.gatewayOperationId);
+            }
+          }
+          if (children.nextOffset === null) break;
+          childOffset = children.nextOffset;
+        }
+        if (parentState === "revoked" || TERMINAL_BATCH_AUTHORITY_STATES.has(batch.state)) {
+          const irreversible = this.revokeBatchEffects(
+            batch.batchId,
+            parentState === "revoked" ? "parent_batch_inactive" : "batch_terminal",
+          );
+          if (parentState === "revoked" && !TERMINAL_BATCH_AUTHORITY_STATES.has(batch.state)) {
+            this.batches.cancel(batch.batchId, irreversible);
+            this.sourceSettlements.cancelNotStarted(batch.batchId);
+          }
+        }
+      }
+      if (page.nextOffset === null) break;
+      offset = page.nextOffset;
+    }
+  }
+
+  private revokeBatchEffects(batchId: string, reason: string): readonly string[] {
+    const revocation = this.gateway.revokeEffectBatch(batchId, reason);
+    const irreversible: string[] = [];
+    for (const binding of revocation.operations) {
+      const operation = binding.operation;
+      let settlement: BatchSourceSettlementRecord | null = null;
+      try {
+        settlement = this.sourceSettlements.get(batchId, binding.childId);
+      } catch {
+        // A source-settlement row can be absent only in a legacy or interrupted creation.
+      }
+      if (operation.dispatchAttempt > 0) {
+        irreversible.push(operation.operationId);
+        if (settlement && !new Set(["succeeded", "failed_no_effect", "failed_effect_possible", "cancelled", "reverted"]).has(settlement.state)) {
+          this.sourceSettlements.markDispatchResult(batchId, binding.childId, "unknown", operation.operationId);
+        }
+      } else if (settlement) {
+        this.sourceSettlements.cancelBeforeDispatch(batchId, binding.childId, operation.operationId);
+      }
+    }
+    return irreversible;
+  }
+
+  private cancelEffectBatch(batchId: string, reason: string): BatchRecord {
+    const irreversible = this.revokeBatchEffects(batchId, reason);
+    const batch = this.batches.cancel(batchId, irreversible);
+    this.sourceSettlements.cancelNotStarted(batchId);
+    return batch;
+  }
+
   private async recoverStartupBatches(): Promise<void> {
     const batches: BatchRecord[] = [];
     let offset = 0;
@@ -737,8 +810,7 @@ export class MorrowRuntime {
     for (const batch of batches) {
       try {
         if (["paused", "inspection_required"].includes(batch.state)) {
-          recoverBatchState({
-            path: this.batches.path,
+          this.batches.recover({
             batchId: batch.batchId,
             mode: "apply_safe",
           });
@@ -757,7 +829,7 @@ export class MorrowRuntime {
           reconciliationOffset = nextOffset;
         }
       } catch {
-        this.batches.quarantine(batch.batchId);
+        this.cancelEffectBatch(batch.batchId, "batch_recovery_failed");
       }
     }
   }
@@ -1045,6 +1117,10 @@ export class MorrowRuntime {
     });
 
     if (input.mode === "stage_writes") {
+      if (this.gateway.registerEffectBatch(detail.batch.batchId) !== "active") {
+        this.cancelEffectBatch(detail.batch.batchId, "batch_creation_parent_inactive");
+        throw new Error("Morrow could not create an active batch authority.");
+      }
       this.sourceSettlements.initialize(
         detail.batch.batchId,
         detail.children.map((child, index) => ({
@@ -1086,6 +1162,7 @@ export class MorrowRuntime {
           if (planned.isError === true || !operationId || plannedContent.effectState !== expectedState) {
             throw new Error(`Morrow could not freeze outer effect ${child.childId}`);
           }
+          this.gateway.bindEffectBatchOperation(detail.batch.batchId, child.childId, operationId);
           this.batches.bindGatewayOperation(
             detail.batch.batchId,
             child.childId,
@@ -1094,7 +1171,7 @@ export class MorrowRuntime {
           );
         }
       } catch (error) {
-        this.batches.quarantine(detail.batch.batchId);
+        this.cancelEffectBatch(detail.batch.batchId, "batch_creation_failed");
         throw error;
       }
     }
@@ -1418,12 +1495,6 @@ export class MorrowRuntime {
   }
 
   cancelBatchApproval(batchId: string): JsonObject {
-    const snapshot = this.batchApprovalGet(batchId);
-    for (const child of snapshot.children as JsonObject[]) {
-      if (isJsonObject(child.operation) && ["awaiting_approval", "approved"].includes(String(child.operation.state))) {
-        this.gateway.cancelOperation(String(child.operation.operationId));
-      }
-    }
     return this.batchCancel(batchId);
   }
 
@@ -1462,7 +1533,7 @@ export class MorrowRuntime {
       }
       this.batches.pause(batchId);
     } catch (error) {
-      this.batches.quarantine(batchId);
+      this.cancelEffectBatch(batchId, "approved_batch_run_failed");
       throw error;
     }
   }
@@ -1620,10 +1691,16 @@ export class MorrowRuntime {
         const plannedContent = isJsonObject(planned.structuredContent) ? planned.structuredContent : {};
         const expectedState = authority.authorization.kind === "edit_scope" ? "approved" : "awaiting_approval";
         if (planned.isError === true || !operationId || plannedContent.effectState !== expectedState) {
-          this.batches.quarantine(batchId);
+          this.cancelEffectBatch(batchId, "result_bound_effect_planning_failed");
           throw new Error(`Morrow could not freeze result-bound effect ${child.childId}`);
         }
-        this.batches.bindGatewayOperation(batchId, child.childId, operationId, expectedState);
+        try {
+          this.gateway.bindEffectBatchOperation(batchId, child.childId, operationId);
+          this.batches.bindGatewayOperation(batchId, child.childId, operationId, expectedState);
+        } catch (error) {
+          this.cancelEffectBatch(batchId, "result_bound_effect_binding_failed");
+          throw error;
+        }
         awaitingApproval ||= expectedState === "awaiting_approval";
       }
       if (page.nextOffset === null) break;
@@ -1732,7 +1809,7 @@ export class MorrowRuntime {
           ? await collectCourseAudit(this.gateway, forwarded, input.signal) as unknown as JsonObject
           : undefined;
         const resultValue = batch.mode === "stage_writes"
-          ? await this.gateway.dispatchOperation(String(child.gatewayOperationId || ""))
+          ? await this.gateway.dispatchOperation(String(child.gatewayOperationId || ""), { signal: input.signal })
           : nativeInventory
             ? boundedNativeCourseInventoryResult(await this.gateway.redactMcpEgress(
               { structuredContent: nativeInventory },
@@ -1747,7 +1824,7 @@ export class MorrowRuntime {
                 forwarded,
                 { signal: input.signal, bound: false, toolName: NATIVE_COURSE_AUDIT_TOOL },
               )
-            : await this.gateway.callSourceOwned(child.publicToolName, forwarded);
+            : await this.gateway.callSourceOwned(child.publicToolName, forwarded, { signal: input.signal });
         const outcome = isNativeCourseInventoryChild(child)
           ? nativeCourseInventoryResult(resultValue)
           : isNativeCourseAuditChild(child)
@@ -1803,6 +1880,9 @@ export class MorrowRuntime {
     const finalBatch = result.batch.mode === "stage_writes" && !sourceSettlement.terminal && result.batch.pendingChildren === 0
       ? this.batches.deferSourceSettlement(input.batchId)
       : result.batch;
+    if (finalBatch.mode === "stage_writes" && TERMINAL_BATCH_AUTHORITY_STATES.has(finalBatch.state)) {
+      this.gateway.revokeEffectBatch(input.batchId, "batch_terminal");
+    }
     return {
       ...result,
       batch: finalBatch,
@@ -1886,7 +1966,7 @@ export class MorrowRuntime {
       const reconciliationOperationId = gatewayOperationId(result);
       const projection = taskProjectionFromGatewayResult(result);
       if (projection) {
-        const applied = this.sourceSettlements.applyTaskProjection(
+        let applied = this.sourceSettlements.applyTaskProjection(
           input.batchId,
           settlement.childId,
           projection,
@@ -1897,6 +1977,25 @@ export class MorrowRuntime {
           if (outer.state === "awaiting_inner_approval") {
             if (applied.state === "succeeded") {
               await this.gateway.settleInnerOperation(applied.stageGatewayOperationId, "ready_for_readback");
+              const authoritativeOuter = this.gateway.operationGet(applied.stageGatewayOperationId);
+              if (authoritativeOuter.state !== "verified" || authoritativeOuter.verificationStatus !== "verified") {
+                const projectedCounts = isJsonObject(projection.resultCounts) ? projection.resultCounts : {};
+                applied = this.sourceSettlements.applyTaskProjection(
+                  input.batchId,
+                  settlement.childId,
+                  {
+                    ...projection,
+                    outcome: "inspection_required",
+                    terminal: false,
+                    verificationStatus: "unconfirmed",
+                    resultCounts: {
+                      ...projectedCounts,
+                      unconfirmed: Math.max(1, Number(projectedCounts.unconfirmed || 0)),
+                    },
+                  },
+                  reconciliationOperationId,
+                );
+              }
             } else if (["failed_no_effect", "cancelled"].includes(applied.state)) {
               await this.gateway.settleInnerOperation(applied.stageGatewayOperationId, "failed_no_effect");
             } else if (["failed_effect_possible", "inspection_required", "unknown", "reverted"].includes(applied.state)) {
@@ -1942,6 +2041,7 @@ export class MorrowRuntime {
               ? "inspection_required"
               : "partial";
       settledBatch = this.batches.finalizeSourceSettlement(input.batchId, terminalState);
+      this.gateway.revokeEffectBatch(input.batchId, "batch_terminal");
     }
     const nextOffset = offset + page.length < sourceSettlement.total
       ? offset + page.length
@@ -1977,7 +2077,7 @@ export class MorrowRuntime {
   }
 
   batchCancel(batchId: string): JsonObject {
-    const batch = this.batches.cancel(batchId);
+    const batch = this.cancelEffectBatch(batchId, "batch_cancelled");
     return {
       schema: "morrow.batch-cancelled.v1",
       batch,

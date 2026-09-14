@@ -70,6 +70,8 @@
  * dependency inside the function body.
  */
 export async function executeMoodleWorkshopInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "moodle";
   const MODULE = "workshop";
   const MODEDIT_PATH = "/course/modedit.php";
@@ -243,12 +245,46 @@ export async function executeMoodleWorkshopInPage(rawInput) {
     if (!optional.some((key) => Object.hasOwn(value, key)) || !authoredValid(value, true)) return null;
     return { courseId, moduleId: id(value.module_id), expectedDigest: value.expected_digest, settings: value };
   };
+  const cancelBody = (body) => {
+    try {
+      const canceled = body?.cancel?.();
+      if (canceled && typeof canceled.catch === "function") canceled.catch(() => {});
+    } catch {}
+  };
   const readText = async (response) => {
-    const declared = Number(response.headers?.get?.("content-length") || 0);
-    if (Number.isSafeInteger(declared) && declared > MAX_BYTES) throw new Error("moodle_workshop_response_too_large");
-    const text = await response.text();
-    if (typeof text !== "string" || text.length > MAX_BYTES) throw new Error("moodle_workshop_response_too_large");
-    return text;
+    const declared = response.headers?.get?.("content-length");
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_BYTES)) {
+      cancelBody(response.body);
+      throw new Error("moodle_workshop_response_too_large");
+    }
+    const reader = response.body?.getReader?.();
+    if (!reader || typeof globalThis.TextDecoder !== "function") throw new Error("moodle_workshop_response_unavailable");
+    const decoder = new TextDecoder("utf-8", { fatal: true });
+    let size = 0;
+    let text = "";
+    try {
+      for (;;) {
+        const remaining = Number.isFinite(input?.expiresAt) ? input.expiresAt - Date.now() : Infinity;
+        if (remaining <= 0) throw new Error("moodle_execution_expired");
+        let timeout;
+        const next = Number.isFinite(remaining)
+          ? await Promise.race([
+              reader.read(),
+              new Promise((_, reject) => { timeout = setTimeout(() => reject(new Error("moodle_execution_expired")), remaining); }),
+            ]).finally(() => clearTimeout(timeout))
+          : await reader.read();
+        if (next.done) break;
+        if (!(next.value instanceof Uint8Array) || (size += next.value.byteLength) > MAX_BYTES) {
+          cancelBody(reader);
+          throw new Error("moodle_workshop_response_too_large");
+        }
+        text += decoder.decode(next.value, { stream: true });
+      }
+      return text + decoder.decode();
+    } catch (error) {
+      cancelBody(reader);
+      throw error;
+    }
   };
   const draftItemId = (value) => typeof value === "string" && ID.test(value) && Number.isSafeInteger(Number(value)) ? value : "";
   const readDraftListing = async (context, itemId) => {
@@ -261,6 +297,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
         redirect: "error",
         headers: { Accept: "application/json", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
         body: new URLSearchParams({ sesskey: context.sesskey, itemid: itemId, filepath: "/" }),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return null; }
     let text;
@@ -382,6 +419,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
         redirect: "error",
         headers: { Accept: "application/json", "Content-Type": "application/json" },
         body: JSON.stringify([{ index: 0, methodname: methodName, args }]),
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { error: "moodle_workshop_ajax_failed" }; }
     let text;
@@ -406,7 +444,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
     const endpoint = urlFor(context, MODEDIT_PATH, descriptor.route);
     let response;
     try {
-      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" } });
+      response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) });
     } catch { return { error: "moodle_workshop_form_read_failed" }; }
     let text;
     try { text = await readText(response); } catch { return { error: "moodle_workshop_form_read_failed", status: response.status }; }
@@ -590,6 +628,7 @@ export async function executeMoodleWorkshopInPage(rawInput) {
       response = await fetch(form.action, {
         method: "POST", credentials: "include", cache: "no-store", redirect: "manual",
         headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: params,
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return { unconfirmed: "moodle_workshop_save_unknown" }; }
     // The redirect is never followed. That is what keeps /mod/workshop/view.php,

@@ -1,10 +1,20 @@
+import { fileURLToPath } from "node:url";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { McpServer } from "@modelcontextprotocol/server";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
 import { describe, expect, it } from "vitest";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
-import { collectCanvasProgramInventory, collectCourseInventoryTool, registerCourseInventoryTool } from "../src/course-inventory.js";
-import type { GatewayRuntime } from "../src/runtime.js";
+import { parseGatewayConfig } from "../src/config.js";
+import {
+  collectCanvasProgramInventory,
+  collectCourseInventoryTool,
+  parseCanvasProgramInventoryInput,
+  parseProgramInventoryInput,
+  registerCourseInventoryTool,
+} from "../src/course-inventory.js";
+import { GatewayRuntime } from "../src/runtime.js";
+
+const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
 const selection = {
   provider: "canvas" as const,
@@ -130,6 +140,66 @@ function itemBankEntry(course: JsonObject): JsonObject {
 }
 
 describe("Canvas course inventory", () => {
+  it("uses provider, source binding, and course id as the selected-course identity", () => {
+    const twoSites = {
+      provider: "canvas" as const,
+      scope: "selected_program" as const,
+      courses: [
+        { course_id: "42", expected_name: "Biology A", source_binding_id: "canvas-site-a-course-42" },
+        { course_id: "42", expected_name: "Biology B", source_binding_id: "canvas-site-b-course-42" },
+      ],
+    };
+    expect(parseCanvasProgramInventoryInput(twoSites).courses).toHaveLength(2);
+    expect(parseProgramInventoryInput(twoSites).courses).toHaveLength(2);
+    expect(() => parseProgramInventoryInput({ ...twoSites, courses: [twoSites.courses[0], twoSites.courses[0]] })).toThrow(/connection once/);
+
+    const moodleTwoSites = {
+      provider: "moodle" as const,
+      scope: "selected_program" as const,
+      courses: [
+        { course_id: 42, expected_name: "Biology A", source_binding_id: "moodle-site-a-course-42" },
+        { course_id: 42, expected_name: "Biology B", source_binding_id: "moodle-site-b-course-42" },
+      ],
+    };
+    expect(parseProgramInventoryInput(moodleTwoSites).courses).toHaveLength(2);
+  });
+
+  it("preserves a bounded inventory failure through the final MCP egress boundary", async () => {
+    const runtime = await GatewayRuntime.connect(parseGatewayConfig({
+      schema: "morrow.upstreams.v1",
+      profile: "private-full",
+      upstreams: [{
+        id: "fixture",
+        label: "Synthetic source",
+        kind: "mcp-stdio",
+        command: process.execPath,
+        args: [fixturePath],
+        env: { FAKE_SOURCE: "fixture" },
+        required: true,
+        enabled: true,
+      }],
+      operationJournal: { path: ":memory:" },
+      maxCatalogTools: 20,
+    }), { journalPath: ":memory:" });
+    try {
+      const controller = new AbortController();
+      controller.abort();
+      const failure = await collectCourseInventoryTool(fixture().runtime, selection, controller.signal);
+      const egress = await runtime.redactMcpEgress(failure, selection, { toolName: "morrow_inventory_courses" });
+
+      expect(egress).toMatchObject({
+        isError: true,
+        structuredContent: {
+          schema: "morrow.problem.v1",
+          code: "course_inventory_unavailable",
+        },
+      });
+      expect(egress.structuredContent).not.toHaveProperty("detail");
+    } finally {
+      await runtime.close();
+    }
+  });
+
   it("discovers exact supported targets and emits a batch-ready manifest only after complete lists", async () => {
     const { runtime, calls } = fixture();
     const report = object(await collectCanvasProgramInventory(runtime, selection));

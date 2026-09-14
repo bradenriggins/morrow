@@ -28,7 +28,7 @@ test("the authoritative gate runs the desktop installer suites and the update ha
   assert.match(rootPackage.scripts["test:desktop"], / && pnpm test:desktop:update$/);
   assert.equal(rootPackage.scripts["test:desktop:update"], "node --test scripts/test/desktop-update-harness.test.mjs");
   assert.match(rootPackage.scripts.test, /&& pnpm test:desktop/);
-  assert.equal(rootPackage.scripts.check, "pnpm test");
+  assert.equal(rootPackage.scripts.check, "pnpm audit:dependencies && pnpm generated:check && pnpm test");
   const workspace = readFileSync(join(root, "pnpm-workspace.yaml"), "utf8");
   assert.doesNotMatch(workspace, /installer/, "the installer pins its own Electron toolchain and stays outside the workspace");
 });

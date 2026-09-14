@@ -42,6 +42,16 @@ describe("private Moodle enrolment candidate tool", () => {
       query: "Mary Jackson",
       _morrow: { source_binding_id: "moodle:course-42" },
     })).issues).toBeUndefined();
+    expect((await validate({
+      course_id: "9007199254740993",
+      query: "Mary Jackson",
+      _morrow: { source_binding_id: "moodle:course-9007199254740993" },
+    })).issues).toBeUndefined();
+    expect((await validate({
+      course_id: 9007199254740992,
+      query: "Mary Jackson",
+      _morrow: { source_binding_id: "moodle:course-9007199254740992" },
+    })).issues).toBeTruthy();
     expect((await validate({ course_id: 0, query: "Mary Jackson" })).issues).toBeTruthy();
     expect((await validate({ course_id: 42, query: "" })).issues).toBeTruthy();
     expect((await validate({ course_id: 42, query: "Mary Jackson", user_id: 21 })).issues).toBeTruthy();

@@ -145,13 +145,15 @@ interface FixtureOptions {
   readonly ignoreGradePatch?: boolean;
   /** Replace the whole `grading` object on a column PATCH instead of merging it. */
   readonly replaceGrading?: boolean;
+  /** Replace the selected person's initial grade with an official provider shape. */
+  readonly initialGrade?: JsonObject;
 }
 
 async function harness(options: FixtureOptions = {}) {
   const requests: string[] = [];
   const patches: JsonObject[] = [];
   let savedColumn = column();
-  let savedGrade = grade();
+  let savedGrade = options.initialGrade || grade();
   let gradeReads = 0;
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     const url = new URL(request.url || "/", "http://fixture");
@@ -313,14 +315,16 @@ let receipts = 0;
 function effectGrant(planDigest: string): BlackboardEffectGrant {
   receipts += 1;
   const unsigned = {
-    schema: "morrow.blackboard.effect-grant.v1" as const,
+    schema: "morrow.blackboard.effect-grant.v2" as const,
     operationId: "op:blackboard-gradebook-test",
     planDigest,
     outerPlanDigest: "b".repeat(64),
     approvalGrantDigest: "c".repeat(64),
     effectReceiptId: `effect:00000000-0000-4000-8000-${String(receipts).padStart(12, "0")}`,
     dispatchAttempt: 1,
-    gatewayProcessId: "gateway:test",
+   gatewayProcessId: "gateway:test",
+    issuedAt: Date.now(),
+    notAfter: Date.now() + 60_000,
   };
   return { ...unsigned, dispatchToken: signBlackboardEffectGrant(effectSecret, unsigned) };
 }
@@ -335,6 +339,8 @@ function grantArguments(grant: BlackboardEffectGrant): JsonObject {
     effect_receipt_id: grant.effectReceiptId,
     dispatch_attempt: grant.dispatchAttempt,
     gateway_process_id: grant.gatewayProcessId,
+    issued_at: grant.issuedAt,
+    not_after: grant.notAfter,
     dispatch_token: grant.dispatchToken,
   };
 }
@@ -479,6 +485,52 @@ describe("Blackboard gradebook columns and attempts", () => {
     expect(fixture.requests()).toContain(`GET ${gradePath}`);
     expectNoLearnerData(result, "the grade read");
     expect(summary(result)).toBe("Morrow read one person's grade in the selected Blackboard gradebook column.");
+  });
+
+  it("returns the normal displayed grade and keeps it separate from instructor overrides", async () => {
+    const normal = await harness({
+      initialGrade: {
+        userId: studentId,
+        columnId,
+        status: "Graded",
+        displayGrade: { score: 8, possible: 10, scaleType: "Percent", text: "80%" },
+        exempt: false,
+      },
+    });
+    const normalReference = await studentReference(normal);
+    const normalResult = structured(await normal.call("blackboard_read_gradebook_grade", { learner_reference: normalReference }));
+    expect(normalResult).toMatchObject({
+      ok: true,
+      grade: {
+        learnerToken: normalReference,
+        displayGrade: { score: 8, possible: 10, scaleType: "Percent", text: "80%" },
+        status: "Graded",
+        exempt: false,
+      },
+    });
+    expect(normalResult.grade).not.toHaveProperty("score");
+    expect(normalResult.grade).not.toHaveProperty("text");
+    await close?.(); close = undefined;
+
+    const overridden = await harness({
+      initialGrade: {
+        userId: studentId,
+        columnId,
+        status: "Graded",
+        displayGrade: { score: 9, possible: 10, scaleType: "Score", text: "9/10" },
+        score: 7,
+        text: "override",
+      },
+    });
+    const overrideReference = await studentReference(overridden);
+    const overrideResult = structured(await overridden.call("blackboard_read_gradebook_grade", { learner_reference: overrideReference }));
+    expect(overrideResult).toMatchObject({
+      grade: {
+        displayGrade: { score: 9, possible: 10, scaleType: "Score", text: "9/10" },
+        score: 7,
+        text: "override",
+      },
+    });
   });
 
   it("refuses a Blackboard user id in place of a protected learner reference, and sends nothing", async () => {

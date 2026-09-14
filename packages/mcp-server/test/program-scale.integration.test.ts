@@ -17,9 +17,11 @@ import { assertPortListening, reserveLoopbackPort } from "./fixtures/loopback-po
  * The deadline for one case, and for the fixture the cases share. Every case
  * below drives a real connector process over a real loopback bridge, and the
  * two restart cases start a second one; the slowest measured about four
- * seconds on this machine. Change the deadline here, not per case.
+ * seconds on this machine, and the shared fixture passed thirty seconds on a
+ * two-CPU host running a second vitest worker. Change the deadline here, not
+ * per case.
  */
-const CASE_TIMEOUT_MS = 30_000;
+const CASE_TIMEOUT_MS = 60_000;
 
 const EXTENSION_ID = "a".repeat(32);
 const TOKEN = "program-scale-connector-token-".repeat(3);
@@ -75,6 +77,17 @@ function root(): string {
 }
 
 function connectorConfig(directory: string, port: number) {
+  const courseContentPrivacy = {
+    allowedFields: [],
+    fieldPolicy: "scrub-sensitive" as const,
+    dataClass: "course" as const,
+    maxRecords: 10_000,
+    maxBytes: 2_000_000,
+    freeText: "allow" as const,
+    learnerTokens: true,
+    artifactInspection: "deny" as const,
+    aiClientAdmission: "allow" as const,
+  };
   return parseGatewayConfig({
     schema: "morrow.upstreams.v1",
     profile: "private-full",
@@ -93,7 +106,10 @@ function connectorConfig(directory: string, port: number) {
         MORROW_CANVAS_CONNECTOR_EXTENSION_IDS: EXTENSION_ID,
       },
       sourceDisposition: "adapted_owned",
-      outputPrivacy: {},
+      outputPrivacy: {
+        moodle_get_course: courseContentPrivacy,
+        moodle_get_quiz_question: courseContentPrivacy,
+      },
       outputPrivacyDefault: {
         allowedFields: [],
         fieldPolicy: "scrub-sensitive",
@@ -486,7 +502,7 @@ describe("program-scale runtime proof", () => {
       const processed = windows.map(structured).reduce((total, value) => total + Number(value.processed || 0), 0);
       expect(processed).toBe(40);
       const completedBatch = runtime.batchGet({ batchId: auditBatchId, limit: 50 });
-      expect(completedBatch.batch).toMatchObject({
+      expect(completedBatch.batch, JSON.stringify(completedBatch, null, 2)).toMatchObject({
         state: "completed",
         totalChildren: 40,
         succeededChildren: 40,
@@ -532,7 +548,8 @@ describe("program-scale runtime proof", () => {
       })));
       for (const [index, result] of parallelResults.entries()) {
         expect(structured(result)).toMatchObject({ processed: 8 });
-        expect(runtime.batchGet({ batchId: parallelRuns[index]!.batchId, limit: 8 }).batch).toMatchObject({
+        const completed = runtime.batchGet({ batchId: parallelRuns[index]!.batchId, limit: 8 });
+        expect(completed.batch, JSON.stringify(completed, null, 2)).toMatchObject({
           state: "completed",
           totalChildren: 8,
           succeededChildren: 8,
@@ -691,7 +708,7 @@ describe("program-scale runtime proof", () => {
       });
       const conflictOperationId = String((conflictDetail.children[0] as JsonObject).gatewayOperationId || "");
       expect(runtime.gateway.operationGet(conflictOperationId)).toMatchObject({
-        state: "approved", dispatchAttempt: 0, attention: [],
+        state: "cancelled", dispatchAttempt: 0, attention: ["batch_terminal"],
       });
       expect(state.writeCommands).toBe(1);
     }, CASE_TIMEOUT_MS);

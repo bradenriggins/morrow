@@ -15,6 +15,8 @@
  * aggregation. A partial count is never returned.
  */
 export async function executeCanvasCourseSummaryInPage(rawInput) {
+  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
+    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const PROVIDER = "canvas";
   const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
   const MAX_PAGES = 25;
@@ -107,11 +109,17 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
   };
   const boundedText = async (response, expected) => {
     const declared = response?.headers?.get?.("content-length");
-    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) return "limit";
+    if (declared !== null && (!/^(?:0|[1-9][0-9]*)$/.test(declared) || Number(declared) > MAX_RESPONSE_BYTES)) {
+      try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+      return "limit";
+    }
     if (!response?.ok || !exactResponseUrl(response.url, expected) || !sameContext() || !response.body
-      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") return null;
+      || typeof response.body.getReader !== "function" || typeof globalThis.TextDecoder !== "function") {
+        try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
+        return null;
+      }
     const reader = response.body.getReader();
-    const decoder = new TextDecoder();
+    const decoder = new TextDecoder("utf-8", { fatal: true });
     let bytes = 0;
     let result = "";
     try {
@@ -119,14 +127,14 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
         const next = await reader.read();
         if (next.done) break;
         if (!(next.value instanceof Uint8Array) || (bytes += next.value.byteLength) > MAX_RESPONSE_BYTES) {
-          await reader.cancel();
+          try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
           return "limit";
         }
         result += decoder.decode(next.value, { stream: true });
       }
       return result + decoder.decode();
     } catch {
-      try { await reader.cancel(); } catch {}
+      try { const cancellation = reader.cancel(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {}
       return null;
     }
   };
@@ -135,6 +143,7 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
       return await fetch(expected, {
         method: "GET", credentials: "include", cache: "no-store", redirect: "error",
         headers: { Accept: "application/json+canvas-string-ids" },
+        signal: requestSignal(input?.expiresAt),
       });
     } catch { return null; }
   };
@@ -283,8 +292,8 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
       data = {
         schema: spec.schema,
         provider: PROVIDER,
-        course_id: Number(courseId),
-        assignment_id: Number(assignmentId),
+        course_id: courseId,
+        assignment_id: assignmentId,
         submission_count: rowCount,
         workflow_state_counts: counts,
         late_count: lateCount,
@@ -353,7 +362,7 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
       });
       if (submissionList.state !== "complete") return listFailure(submissionList);
       const rows = [...assignments.entries()]
-        .sort((left, right) => Number(left[0]) - Number(right[0]))
+        .sort((left, right) => left[0].length - right[0].length || left[0].localeCompare(right[0], "en-US"))
         .map(([rowId, entry]) => {
           // A distribution is published only when every published bucket holds
           // at least MINIMUM_COHORT scores. A cohort under that threshold, or a
@@ -367,7 +376,7 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
                 ? "suppressed_bucket_below_minimum"
                 : "reported";
           return {
-            assignment_id: Number(rowId),
+            assignment_id: rowId,
             submitted_count: entry.submitted,
             graded_count: entry.graded,
             ungraded_count: entry.submitted + entry.pendingReview,
@@ -379,7 +388,7 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
       data = {
         schema: spec.schema,
         provider: PROVIDER,
-        course_id: Number(courseId),
+        course_id: courseId,
         assignment_count: rows.length,
         submission_count: rowCount,
         minimum_cohort: MINIMUM_COHORT,
@@ -432,7 +441,7 @@ export async function executeCanvasCourseSummaryInPage(rawInput) {
       data = {
         schema: spec.schema,
         provider: PROVIDER,
-        course_id: Number(courseId),
+        course_id: courseId,
         window_days: days,
         window_start: new Date(windowStart).toISOString(),
         kinds,

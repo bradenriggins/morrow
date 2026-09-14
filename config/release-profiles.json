@@ -1,15 +1,46 @@
 {
-  "schema": "morrow.release-profiles.v1",
-  "candidateVersion": "1.0.0",
+  "schema": "morrow.release-profiles.v2",
   "profiles": {
     "private-full": {
       "visibility": "private",
+      "providers": {
+        "canvas": {
+          "authorizationReceipt": "canvas_authorization",
+          "liveProofReceipt": "canvas_live_proof"
+        },
+        "moodle": {
+          "authorizationReceipt": "moodle_authorization",
+          "liveProofReceipt": "moodle_live_proof"
+        },
+        "blackboard": {
+          "authorizationReceipt": "blackboard_authorization",
+          "liveProofExceptionReceipt": "blackboard_no_live_tenant_exception"
+        }
+      },
+      "externalEvidenceReceipts": ["client_parity"],
+      "promotionEvidenceReceipts": ["independent_clean_machine", "publication_authorization"],
       "include": ["*"],
       "exclude": ["packages/*/test/", "scripts/test/", "config/source-origin-ledger.json"],
       "description": "Complete tracked Morrow source for local evidence and private candidate use. It is not a publication payload."
     },
     "public-canvas": {
       "visibility": "public",
+      "providers": {
+        "canvas": {
+          "authorizationReceipt": "canvas_authorization",
+          "liveProofReceipt": "canvas_live_proof"
+        },
+        "moodle": {
+          "authorizationReceipt": "moodle_authorization",
+          "liveProofReceipt": "moodle_live_proof"
+        },
+        "blackboard": {
+          "authorizationReceipt": "blackboard_authorization",
+          "liveProofExceptionReceipt": "blackboard_no_live_tenant_exception"
+        }
+      },
+      "externalEvidenceReceipts": ["client_parity"],
+      "promotionEvidenceReceipts": ["independent_clean_machine", "publication_authorization"],
       "include": [
         "package.json",
         "pnpm-lock.yaml",
@@ -46,7 +77,11 @@
         "scripts/sync-canvas-readback-plan.mjs",
         "scripts/package-canvas-connector.mjs",
         "scripts/package-mcp-bundle.mjs",
-        "scripts/lib/deterministic-archive.mjs"
+        "scripts/lib/deterministic-archive.mjs",
+        "installer/shared/bridge-delivery.cjs",
+        "installer/shared/bridge-updates.cjs",
+        "installer/shared/packager-admission.cjs",
+        "installer/shared/process-lifetime.cjs"
       ],
       "exclude": [
         "packages/*/test/",

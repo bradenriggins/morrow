@@ -6,11 +6,18 @@ import { executeCanvasCourseFileTextInPage } from "../../connector/extension/src
 const CANVAS = "https://canvas.example.test";
 
 function response({ status = 200, url = CANVAS + "/", json = {} } = {}) {
+  const bytes = new TextEncoder().encode(JSON.stringify(json));
   return {
     status,
     ok: status >= 200 && status < 300,
     url,
-    async json() { return json; },
+    headers: new Headers(),
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(bytes);
+        controller.close();
+      },
+    }),
   };
 }
 
