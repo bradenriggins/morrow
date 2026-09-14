@@ -174,7 +174,7 @@ function mcpRuntimeManifest(root, expectedSha256) {
   };
   validateAppRecord(value.entrypoint);
   const directPaths = new Set(value.directFiles.map((record) => validateAppRecord(record).path));
-  for (const required of ["packages/client-config/dist/cli.js", "packages/mcp-server/dist/index.js", "packages/canvas-connector-mcp/dist/index.js", "installer/runtime-monitor.mjs"]) {
+  for (const required of ["packages/client-config/dist/cli.js", "packages/mcp-server/dist/index.js", "packages/canvas-connector-mcp/dist/index.js", "installer/runtime-monitor.mjs", "installer/process-lifetime.cjs"]) {
     if (!directPaths.has(required)) throw new Error("Prepared Morrow payload MCP runtime direct-file graph is incomplete.");
   }
   const packageNames = new Set();

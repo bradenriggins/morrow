@@ -1,6 +1,11 @@
 export async function executeMoodleInPage(input) {
+  const remainingRequestTime = (expiresAt) => {
+    const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000;
+    if (remaining <= 0) throw new Error("moodle_execution_expired");
+    return remaining;
+  };
   const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
-    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
+    remainingRequestTime(expiresAt))));
   try { input = JSON.parse(input); } catch { return { ok: false, sent: false, error: "moodle_arguments_invalid" }; }
   const MAX_BYTES = 2 * 1024 * 1024;
   const MAX_ITEMS = 100;
@@ -19,6 +24,7 @@ export async function executeMoodleInPage(input) {
   };
   const sectionNumber = (value) => Number.isSafeInteger(value) && value >= 0 ? String(value) : "";
   const error = (code, extra = {}) => ({ ok: false, sent: false, error: code, ...extra });
+  const executionExpired = () => !Number.isSafeInteger(input?.expiresAt) || Date.now() >= input.expiresAt;
   const definitions = Object.freeze({
     "moodle.ajax.core_course_get_enrolled_courses_by_timeline_classification.v1": { toolName: "moodle_list_my_courses", readOnly: true, kind: "list-courses" },
     "moodle.form.course.edit.read.v1": { toolName: "moodle_get_course", readOnly: true, kind: "course-form-read" },
@@ -999,6 +1005,7 @@ export async function executeMoodleInPage(input) {
   // Moodle's own draft-area actions. Source:
   // https://github.com/moodle/moodle/blob/v5.2.2/public/repository/draftfiles_ajax.php
   const draftFilesAction = async (context, action, params) => {
+    if (action !== "list" && executionExpired()) return null;
     let response;
     try {
       response = await fetch(urlFor(context, "/repository/draftfiles_ajax.php", { action }), {
@@ -1044,6 +1051,7 @@ export async function executeMoodleInPage(input) {
     return managers;
   };
   const ajax = async (context, methodName, args, write = false) => {
+    if (write && executionExpired()) return error("moodle_execution_expired");
     let response;
     try {
       response = await fetch(urlFor(context, "/lib/ajax/service.php", { sesskey: context.sesskey, info: methodName }), {
@@ -1536,6 +1544,7 @@ export async function executeMoodleInPage(input) {
       }
       params.set(form.submit.name, form.submit.value);
     } catch { return { ok: false, sent: false, error: "moodle_form_invalid" }; }
+    if (executionExpired()) return error("moodle_execution_expired");
     let response;
     try {
       response = await fetch(form.action, { method: "POST", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: params, signal: requestSignal(input?.expiresAt) });
@@ -2011,6 +2020,7 @@ export async function executeMoodleInPage(input) {
     for (const acceptedType of manager.acceptedTypes) body.append("accepted_types[]", acceptedType);
     if (manager.author !== null) body.append("author", manager.author);
     const endpoint = urlFor(context, "/repository/repository_ajax.php", { action: "upload" });
+    if (executionExpired()) return error("moodle_execution_expired");
     let response;
     try { response = await fetch(endpoint, { method: "POST", credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json" }, body, signal: requestSignal(input?.expiresAt) }); } catch { return { ok: false, sent: true, outcomeUnknown: true, error: `moodle_${module}_draft_upload_unknown` }; }
     let text;
@@ -2187,6 +2197,7 @@ export async function executeMoodleInPage(input) {
     } catch { return error(invalidError); }
     for (const [name, value] of Object.entries(overrides)) params.set(name, value);
     params.set("submitbutton2", form.submit.value);
+    if (executionExpired()) return error("moodle_execution_expired");
     let response;
     try { response = await fetch(form.action, { method: "POST", credentials: "include", cache: "no-store", redirect: "follow", headers: { Accept: "text/html", "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" }, body: params, signal: requestSignal(input?.expiresAt) }); } catch { return unconfirmedResourceCreate(undefined, `moodle_${module}_save_unknown`); }
     let text;
@@ -4721,6 +4732,7 @@ export async function executeMoodleInPage(input) {
     const rechecked = currentContext();
     if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
     const endpoint = urlFor(rechecked, "/mod/book/move.php", { id: args.module_id, chapterid: args.chapter_id, up: args.direction === "up" ? 1 : 0, sesskey: rechecked.sesskey });
+    if (executionExpired()) return error("moodle_execution_expired");
     let response;
     try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_move_response_unknown"); }
     // Fetch exposes a manual same-origin redirect as an opaque redirect. The fixed native endpoint and the authoritative chapter-list readback bind that response without following an activity view.
@@ -4762,6 +4774,7 @@ export async function executeMoodleInPage(input) {
     const rechecked = currentContext();
     if (!sameContext(context, rechecked) || validateBinding(rechecked, inputValue.binding)) return error("moodle_binding_mismatch");
     const endpoint = urlFor(rechecked, "/mod/book/show.php", { id: args.module_id, chapterid: args.chapter_id, sesskey: rechecked.sesskey });
+    if (executionExpired()) return error("moodle_execution_expired");
     let response;
     try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_visibility_response_unknown"); }
     if (response.type !== "opaqueredirect") {
@@ -4803,6 +4816,7 @@ export async function executeMoodleInPage(input) {
     if (!preflight.ok) return preflight;
     if (preflight.snapshot_digest !== before.snapshot_digest) return error("moodle_form_changed");
     const endpoint = urlFor(rechecked, "/mod/book/delete.php", { id: args.module_id, chapterid: args.chapter_id, confirm: 1, sesskey: rechecked.sesskey });
+    if (executionExpired()) return error("moodle_execution_expired");
     let response;
     try { response = await fetch(endpoint, { method: "GET", credentials: "include", cache: "no-store", redirect: "manual", headers: { Accept: "text/html" }, signal: requestSignal(input?.expiresAt) }); } catch { return unconfirmedCreate(undefined, "moodle_book_chapter_delete_response_unknown"); }
     // Fetch exposes a manual same-origin redirect as an opaque redirect. The fixed native endpoint and the authoritative chapter-list readback bind that response without following the Book view.

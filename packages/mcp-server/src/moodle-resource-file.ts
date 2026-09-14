@@ -205,6 +205,17 @@ export function assertNoPrivateAttachmentInput(value: unknown): void {
   }
 }
 
+function sameStableWorkspaceFile(left: Awaited<ReturnType<typeof lstat>>, right: Awaited<ReturnType<typeof lstat>>): boolean {
+  // ctime can gain precision after a fresh write without any file mutation.
+  return left.dev === right.dev && left.ino === right.ino
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid;
+}
+
 export async function readWorkspaceFile(
   filePath: string,
   workingDirectory: string,
@@ -228,7 +239,7 @@ export async function readWorkspaceFile(
     if (!before.isFile() || before.size < 1 || before.size > MAX_STAGED_FILE_BYTES) throw new Error("file_size_or_type_invalid");
     handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
     const opened = await handle.stat();
-    if (!opened.isFile() || opened.dev !== before.dev || opened.ino !== before.ino || opened.size !== before.size) {
+    if (!opened.isFile() || !sameStableWorkspaceFile(before, opened)) {
       throw new Error("file_changed_before_read");
     }
     bytes = Buffer.alloc(before.size);
@@ -240,8 +251,8 @@ export async function readWorkspaceFile(
     }
     const after = await handle.stat();
     const current = await lstat(target);
-    if (after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs
-      || current.dev !== before.dev || current.ino !== before.ino || await realpath(candidate) !== target
+    if (!sameStableWorkspaceFile(before, after) || !sameStableWorkspaceFile(after, current)
+      || await realpath(candidate) !== target
       || relative(await realpath(admittedDirectory), target).startsWith(".." + sep)) {
       throw new Error("file_changed_during_read");
     }

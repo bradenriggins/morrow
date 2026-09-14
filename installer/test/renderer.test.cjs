@@ -268,7 +268,12 @@ const BASE = {
 };
 
 function state(overrides = {}) {
-  return installerState({ ...BASE, ...overrides });
+  const input = { ...BASE, ...overrides };
+  const current = installerState(input);
+  if (Number.isSafeInteger(input.updates?.revision) && input.updates.revision >= 0) {
+    current.updates = { ...current.updates, revision: input.updates.revision };
+  }
+  return current;
 }
 
 async function settle() {
@@ -948,6 +953,7 @@ test("a background update event redraws the open update status without another s
   const methods = [];
   const idle = {
     schema: "morrow.desktop-update.v1",
+    revision: 1,
     status: "idle",
     currentVersion: "1.0.0",
     availableVersion: null,
@@ -963,6 +969,7 @@ test("a background update event redraws the open update status without another s
 
   const ready = {
     schema: "morrow.desktop-update.v1",
+    revision: 2,
     status: "ready",
     currentVersion: "1.0.0",
     availableVersion: "1.0.1",
@@ -981,6 +988,46 @@ test("a background update event redraws the open update status without another s
 
   await dom.publishUpdate({ schema: "morrow.desktop-update.v1", status: "ready", currentVersion: 1 });
   assert.equal(dom.element("#updates-copy").textContent, "Version 1.0.1 is ready. Restart Morrow when course work is idle to finish the update.");
+});
+
+test("an older full state response cannot replace a newer pushed update snapshot", async () => {
+  const idle = (revision) => ({
+    schema: "morrow.desktop-update.v1",
+    revision,
+    status: "idle",
+    currentVersion: "1.0.0",
+    availableVersion: null,
+    automatic: true,
+    reason: "up_to_date"
+  });
+  const ready = {
+    schema: "morrow.desktop-update.v1",
+    revision: 3,
+    status: "ready",
+    currentVersion: "1.0.0",
+    availableVersion: "1.0.1",
+    automatic: true,
+    reason: null
+  };
+  let finishRefresh = null;
+  let calls = 0;
+  const dom = await load("update-out-of-order", async () => {
+    calls += 1;
+    if (calls === 1) return ok(state({ updates: idle(1) }));
+    return new Promise((resolve) => { finishRefresh = () => resolve(ok(state({ updates: idle(2) }))); });
+  });
+
+  void dom.element("#refresh").dispatch("click");
+  await settle();
+  assert.equal(typeof finishRefresh, "function");
+  await dom.publishUpdate(ready);
+  finishRefresh();
+  await settle();
+
+  assert.equal(dom.element("#updates-copy").textContent, "Version 1.0.1 is ready. Restart Morrow when course work is idle to finish the update.");
+  assert.equal(dom.element("#updates-actions").querySelector("[data-action]").dataset.action, "install-update");
+  await dom.publishUpdate(idle(2));
+  assert.equal(dom.element("#updates-actions").querySelector("[data-action]").dataset.action, "install-update");
 });
 
 test("the data-retention panel names every path and shows the removal Morrow reports", async () => {

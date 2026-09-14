@@ -43,6 +43,7 @@ async function writeMcpRuntimeFixture(root) {
     "packages/client-config/dist/cli.js",
     "packages/canvas-connector-mcp/dist/index.js",
     "installer/runtime-monitor.mjs",
+    "installer/process-lifetime.cjs",
   ]) {
     const content = await fs.readFile(path.join(app, relative));
     directFiles.push({ path: relative, bytes: content.byteLength, sha256: sha256(content) });
@@ -82,6 +83,7 @@ async function payload(root) {
     "app/packages/canvas-connector-mcp/dist/index.js",
     "app/connector/extension/manifest.json",
     "app/installer/runtime-monitor.mjs",
+    "app/installer/process-lifetime.cjs",
     "app/bridge-release/manifest.json",
     "app/bridge-release/extension/manifest.json"
   );
@@ -127,6 +129,7 @@ test("MCP startup verification rejects every damaged direct executable tree", as
     "app/packages/client-config/dist/cli.js",
     "app/packages/canvas-connector-mcp/dist/index.js",
     "app/installer/runtime-monitor.mjs",
+    "app/installer/process-lifetime.cjs",
   ];
   for (const [index, relative] of directRuntimeFiles.entries()) {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), `morrow-installer-direct-runtime-${index}-`));

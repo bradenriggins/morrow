@@ -47,6 +47,17 @@ function sameFile(left, right) {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+function sameStableFile(left, right) {
+  // ctime can gain precision after a fresh write without any file mutation.
+  return sameFile(left, right)
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid;
+}
+
 async function inspectFile(path, { label, maxBytes, optional = false }) {
   let handle;
   try {
@@ -72,9 +83,8 @@ async function inspectFile(path, { label, maxBytes, optional = false }) {
     }
     const openedAfter = await handle.stat();
     const namedAfter = await lstat(path);
-    if (!sameFile(openedBefore, openedAfter) || !sameFile(openedAfter, namedAfter)
-      || openedAfter.size !== openedBefore.size || openedAfter.mtimeMs !== openedBefore.mtimeMs
-      || openedAfter.ctimeMs !== openedBefore.ctimeMs || bytes !== openedAfter.size) {
+    if (!sameStableFile(openedBefore, openedAfter) || !sameStableFile(openedAfter, namedAfter)
+      || bytes !== openedAfter.size) {
       throw new Error(`${label} changed while it was inspected`);
     }
     return Object.freeze({ exists: true, bytes: Buffer.concat(chunks, bytes), mode: openedAfter.mode & 0o777 });

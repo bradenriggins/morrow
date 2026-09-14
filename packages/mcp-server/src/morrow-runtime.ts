@@ -674,8 +674,13 @@ export class MorrowRuntime {
 
   static async connect(
     config: GatewayConfig,
-    options: { readonly statePath?: string; readonly batchKeyPath?: string } = {},
+    options: {
+      readonly statePath?: string;
+      readonly batchKeyPath?: string;
+      readonly signal?: AbortSignal;
+    } = {},
   ): Promise<MorrowRuntime> {
+    options.signal?.throwIfAborted();
     const reserved = new Set([
       ...config.filters.excludeNames,
       ...MORROW_NATIVE_EXCLUDED_NAMES,
@@ -696,38 +701,49 @@ export class MorrowRuntime {
     const gateway = await GatewayRuntime.connect(effectiveConfig, {
       journalPath: path,
       resultBindingEncryptionKey: key,
+      signal: options.signal,
     });
+    let batches: DurableBatchStore | null = null;
+    let sourceSettlements: BatchSourceSettlementStore | null = null;
+    let approval: LoopbackApprovalServer | null = null;
+    let runtime: MorrowRuntime | null = null;
     try {
-      const batches = new DurableBatchStore({ path, encryptionKey: key });
-      const sourceSettlements = new BatchSourceSettlementStore({ path });
-      try {
-        let runtime: MorrowRuntime;
-        const approval = new LoopbackApprovalServer({
-          operationGet: (operationId) => gateway.operationGet(operationId),
-          operationList: (limit) => gateway.operationList(limit),
-          operationReviewContext: (operationId, cache) => gateway.operationReviewContext(operationId, cache),
-          approveOperation: (operationId) => gateway.approveOperation(operationId),
-          runApprovedOperation: (operationId, signal) => gateway.dispatchOperation(operationId, { signal }),
-          cancelOperation: (operationId) => gateway.cancelOperation(operationId),
-          setApprovalBaseUrl: (baseUrl) => gateway.setApprovalBaseUrl(baseUrl),
-          batchApprovalGet: (batchId) => runtime.batchApprovalGet(batchId),
-          batchApprovalStatus: (batchId) => runtime.batchApprovalStatus(batchId),
-          approveBatch: (batchId) => runtime.approveBatch(batchId),
-          runApprovedBatch: (batchId, signal) => runtime.runApprovedBatch(batchId, signal),
-          cancelBatchApproval: (batchId) => runtime.cancelBatchApproval(batchId),
-        });
-        runtime = new MorrowRuntime(gateway, batches, sourceSettlements, approval);
-        runtime.synchronizeEffectBatchAuthority();
-        await approval.start();
-        await runtime.recoverStartupBatches();
-        return runtime;
-      } catch (error) {
-        sourceSettlements.close();
-        batches.close();
-        throw error;
-      }
+      options.signal?.throwIfAborted();
+      batches = new DurableBatchStore({ path, encryptionKey: key });
+      options.signal?.throwIfAborted();
+      sourceSettlements = new BatchSourceSettlementStore({ path });
+      options.signal?.throwIfAborted();
+      approval = new LoopbackApprovalServer({
+        operationGet: (operationId) => gateway.operationGet(operationId),
+        operationList: (limit) => gateway.operationList(limit),
+        operationReviewContext: (operationId, cache) => gateway.operationReviewContext(operationId, cache),
+        approveOperation: (operationId) => gateway.approveOperation(operationId),
+        runApprovedOperation: (operationId, signal) => gateway.dispatchOperation(operationId, { signal }),
+        cancelOperation: (operationId) => gateway.cancelOperation(operationId),
+        setApprovalBaseUrl: (baseUrl) => gateway.setApprovalBaseUrl(baseUrl),
+        batchApprovalGet: (batchId) => runtime!.batchApprovalGet(batchId),
+        batchApprovalStatus: (batchId) => runtime!.batchApprovalStatus(batchId),
+        approveBatch: (batchId) => runtime!.approveBatch(batchId),
+        runApprovedBatch: (batchId, signal) => runtime!.runApprovedBatch(batchId, signal),
+        cancelBatchApproval: (batchId) => runtime!.cancelBatchApproval(batchId),
+      });
+      runtime = new MorrowRuntime(gateway, batches, sourceSettlements, approval);
+      runtime.synchronizeEffectBatchAuthority();
+      options.signal?.throwIfAborted();
+      await approval.start();
+      options.signal?.throwIfAborted();
+      await runtime.recoverStartupBatches();
+      options.signal?.throwIfAborted();
+      return runtime;
     } catch (error) {
-      await gateway.close();
+      if (runtime) {
+        await runtime.close().catch(() => undefined);
+      } else {
+        await approval?.close().catch(() => undefined);
+        try { sourceSettlements?.close(); } catch {}
+        try { batches?.close(); } catch {}
+        await gateway.close().catch(() => undefined);
+      }
       throw error;
     }
   }
@@ -2087,10 +2103,12 @@ export class MorrowRuntime {
   }
 
   async close(): Promise<void> {
-    await this.approval.close();
-    this.batchScheduler.close();
-    this.sourceSettlements.close();
-    this.batches.close();
-    await this.gateway.close();
+    let firstError: unknown;
+    try { await this.approval.close(); } catch (error) { firstError = error; }
+    try { this.batchScheduler.close(); } catch (error) { firstError ??= error; }
+    try { this.sourceSettlements.close(); } catch (error) { firstError ??= error; }
+    try { this.batches.close(); } catch (error) { firstError ??= error; }
+    try { await this.gateway.close(); } catch (error) { firstError ??= error; }
+    if (firstError !== undefined) throw firstError;
   }
 }

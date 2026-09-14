@@ -1,11 +1,16 @@
 const assert = require("node:assert/strict");
+const { EventEmitter } = require("node:events");
 const path = require("node:path");
+const { PassThrough } = require("node:stream");
 const test = require("node:test");
 const {
   CODEX_BUNDLE_IDENTIFIER,
   commandDirectories,
   detectAssistantApplication,
   detectAssistantCommand,
+  probeWindowsCommandShim,
+  WINDOWS_COMMAND_SHIM_ENV,
+  windowsCommandShimInvocation,
 } = require("../shared/assistant-app-detection.cjs");
 
 function readerFixture(directory, entries, identifiers) {
@@ -111,6 +116,80 @@ test("probes the documented native Windows Claude executable outside PATH", asyn
 
   assert.equal(detected, true);
   assert.deepEqual(probes, [nativeClaude]);
+});
+
+test("routes an absolute Windows command shim through cmd.exe without putting its path in command text", async () => {
+  const home = String.raw`C:\Users\Example & Team`;
+  const shim = path.win32.join(home, ".local", "bin", "claude 100% & (safe)!^.cmd");
+  const comSpec = String.raw`C:\Windows\System32\cmd.exe`;
+  const invocation = windowsCommandShimInvocation(shim, {
+    comSpec,
+    environment: { PATH: String.raw`C:\Windows\System32` },
+  });
+  assert.equal(invocation.executable, comSpec);
+  assert.deepEqual(invocation.argumentsValue, [
+    "/d", "/s", "/v:off", "/c", `""%${WINDOWS_COMMAND_SHIM_ENV}%" --version"`,
+  ]);
+  assert.equal(invocation.argumentsValue.some((value) => value.includes(shim)), false);
+  assert.equal(invocation.environment[WINDOWS_COMMAND_SHIM_ENV], shim);
+
+  const ordinaryProbes = [];
+  const shimProbes = [];
+  const detected = await detectAssistantCommand({
+    command: "claude",
+    platform: "win32",
+    home,
+    pathValue: "",
+    realpath: async (candidate) => {
+      if (!candidate.toLowerCase().endsWith(".cmd")) throw new Error("missing");
+      return shim;
+    },
+    stat: async () => ({ isFile: () => true }),
+    probe: async (candidate) => { ordinaryProbes.push(candidate); return false; },
+    probeWindowsShim: async (candidate) => { shimProbes.push(candidate); return true; },
+  });
+  assert.equal(detected, true);
+  assert.deepEqual(ordinaryProbes, []);
+  assert.deepEqual(shimProbes, [shim]);
+});
+
+function stalledChild(pid = 43_210) {
+  const child = new EventEmitter();
+  child.pid = pid;
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.unref = () => {};
+  child.kill = () => true;
+  return child;
+}
+
+test("a stalled Windows command shim probe is bounded and reclaims the complete process tree", async () => {
+  const shim = String.raw`C:\Users\Example & Team\claude.cmd`;
+  const command = stalledChild();
+  const calls = [];
+  const terminations = [];
+  const spawnProcess = (executable, argumentsValue, options) => {
+    calls.push([executable, argumentsValue, options]);
+    return command;
+  };
+
+  const available = await probeWindowsCommandShim(shim, {
+    comSpec: String.raw`C:\Windows\System32\cmd.exe`,
+    environment: { PATH: String.raw`C:\Windows\System32` },
+    spawnProcess,
+    terminateTree: (child, force) => { terminations.push([child, force]); },
+    timeoutMs: 10,
+    killGraceMs: 10,
+    finalGraceMs: 10,
+    maxBytes: 64,
+  });
+
+  assert.equal(available, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], String.raw`C:\Windows\System32\cmd.exe`);
+  assert.equal(calls[0][1].some((value) => value.includes(shim)), false);
+  assert.equal(calls[0][2].env[WINDOWS_COMMAND_SHIM_ENV], shim);
+  assert.deepEqual(terminations, [[command, false], [command, true]]);
 });
 
 test("requires a real executable with a successful bounded version probe", async () => {

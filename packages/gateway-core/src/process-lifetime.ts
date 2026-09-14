@@ -268,6 +268,22 @@ export function processMatchesRecordedLifetime(
   return startedAt === null ? null : startedAt <= boundary;
 }
 
+/**
+ * The asynchronous form for lifecycle decisions that must wait for an
+ * authoritative process-start answer without blocking the event loop.
+ */
+export async function processMatchesRecordedLifetimeAsync(
+  pid: number,
+  observedAt: string,
+  readStartedAt: (pid: number) => Promise<number | null> = readProcessStartedAtAsync,
+): Promise<boolean | null> {
+  const boundary = Date.parse(observedAt);
+  if (!exactPid(pid) || !Number.isFinite(boundary) || !processAlive(pid)) return false;
+  const startedAt = await readStartedAt(pid);
+  if (!processAlive(pid)) return false;
+  return startedAt === null ? null : startedAt <= boundary;
+}
+
 /** Whether this PID has the exact start time recorded by current authority. */
 export function processMatchesExactStart(
   pid: number,

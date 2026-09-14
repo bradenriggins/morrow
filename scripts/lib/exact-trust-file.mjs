@@ -21,10 +21,14 @@ function sameFile(left, right) {
 }
 
 function sameSnapshot(left, right) {
+  // ctime can gain precision after a fresh write without any file mutation.
   return sameFile(left, right)
     && left.size === right.size
     && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs;
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.uid === right.uid
+    && left.gid === right.gid;
 }
 
 /** Reads one bounded regular file through a descriptor while preserving its named path identity. */
@@ -66,7 +70,7 @@ export function readExactTrustFile(pathValue, { label, maxBytes }) {
     const currentCanonicalParent = realpathSync(requestedParent);
     const currentCanonicalParentIdentity = lstatSync(currentCanonicalParent, { bigint: true });
     const current = lstatSync(requestedPath, { bigint: true });
-    if (!sameSnapshot(opened, afterRead) || !sameFile(opened, current)
+    if (!sameSnapshot(opened, afterRead) || !sameSnapshot(afterRead, current)
       || !sameFile(namedParent, currentParent)
       || currentCanonicalParent !== canonicalParent
       || !sameFile(canonicalParentIdentity, currentCanonicalParentIdentity)) {

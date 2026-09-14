@@ -303,7 +303,7 @@ describe("Canvas unresolved-operation recovery", () => {
       const created = await runtime.call("canvas_create_assignment_group", {
         course_id: "42",
         name: "Weekly labs",
-        position: "2",
+        position: 2,
         _morrow: {
           operation_id: "operation:canvas-recovery-create",
           source_binding_id: SOURCE_BINDING_ID,

@@ -352,7 +352,9 @@ export function applyPublicationPolicy(
               canonicalName: rule.publicName,
               profiles: {
                 ...tool.capability.profiles,
-                "public-canvas": { state: "supported" },
+                "public-canvas": tool.capability.profiles["public-canvas"].state === "rights_hold"
+                  ? { state: "supported" }
+                  : tool.capability.profiles["public-canvas"],
               },
             },
           }

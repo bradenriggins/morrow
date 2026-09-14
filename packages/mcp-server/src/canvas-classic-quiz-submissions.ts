@@ -10,8 +10,8 @@ type WorkflowState = typeof WORKFLOW_STATES[number];
 export type CanvasClassicQuizSubmissionSummary = Readonly<{
   schema: typeof CANVAS_CLASSIC_QUIZ_SUBMISSION_SUMMARY_SCHEMA;
   provider: "canvas";
-  course_id: number;
-  quiz_id: number;
+  course_id: string;
+  quiz_id: string;
   attempt_count: number;
   complete_count: number;
   pending_review_count: number;
@@ -26,10 +26,10 @@ export type CanvasClassicQuizSubmissionSummary = Readonly<{
   }>;
 }>;
 
-export type CanvasClassicQuizSubmissionSummaryExpectation = Readonly<{ courseId: number; quizId: number }>;
+export type CanvasClassicQuizSubmissionSummaryExpectation = Readonly<{ courseId: string; quizId: string }>;
 
-function positiveId(value: unknown): number | null {
-  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null;
+function positiveId(value: unknown): string | null {
+  return typeof value === "string" && /^[1-9][0-9]{0,18}$/u.test(value) ? value : null;
 }
 
 function count(value: unknown, maximum: number): number | null {

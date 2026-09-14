@@ -299,11 +299,25 @@ function readDescriptorOf(value: unknown): JsonObject | undefined {
     : undefined;
 }
 
+function providerReadFailureOf(value: unknown): JsonObject | undefined {
+  if (!isJsonObject(value) || value.schema !== "morrow.canvas-browser-failure.v1"
+    || !["canvas", "moodle"].includes(String(value.provider)) || typeof value.sent !== "boolean"
+    || (value.status !== undefined && (!Number.isInteger(value.status) || Number(value.status) < 100 || Number(value.status) > 599))
+    || Object.keys(value).some((key) => !["provider", "schema", "sent", "status"].includes(key))) return undefined;
+  return {
+    schema: value.schema,
+    provider: value.provider,
+    sent: value.sent,
+    ...(value.status === undefined ? {} : { status: value.status }),
+  };
+}
+
 function failedProblem(
   problem: BridgeProblem | undefined,
   provider: BridgeProvider = "canvas",
   readDescriptor?: JsonObject,
   resultState?: "not_sent" | "unknown",
+  providerFailure?: JsonObject,
 ): JsonObject {
   const classifiedState = resultState
     || (problem?.code === "write_outcome_unknown" ? "unknown" : undefined)
@@ -324,6 +338,7 @@ function failedProblem(
     // A write whose outcome is unknown still returns its read-only comparator so
     // Morrow can check the saved result later instead of sending the change again.
     ...(readDescriptor ? { readDescriptor } : {}),
+    ...(providerFailure ? { providerFailure } : {}),
     // These endings changed nothing at the provider, so the gateway settles
     // the record as failed and keeps the target unlocked. A local preflight
     // passes `not_sent` directly. The named codes are refusals the extension
@@ -1092,11 +1107,11 @@ export class CanvasConnectorRuntime {
       }, provider);
     }
     const scopedCourse = courseScope(operation, split.arguments);
-    if (!operation.readOnly && !scopedCourse.scoped) {
+    if (provider === "canvas" && !scopedCourse.scoped) {
       return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "course_scope_required",
-        message: "This unscoped provider change remains held because Morrow cannot prove one exact course binding.",
+        message: "This Canvas action remains held because Morrow cannot prove that it belongs to the selected course.",
         recoverable: true,
       }, provider);
     }
@@ -1164,7 +1179,13 @@ export class CanvasConnectorRuntime {
         ...(split.options.outerGrant ? { outerGrant: split.options.outerGrant } : {}),
         ...(signal ? { signal } : {}),
       });
-      if (!response.ok) return failedProblem(response.problem, provider, readDescriptorOf(response.result));
+      if (!response.ok) return failedProblem(
+        response.problem,
+        provider,
+        readDescriptorOf(response.result),
+        undefined,
+        kind === "invoke_read" ? providerReadFailureOf(response.result) : undefined,
+      );
       return {
         schema: "morrow.canvas-connector.result.v1",
         ok: true,

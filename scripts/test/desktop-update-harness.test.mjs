@@ -473,7 +473,7 @@ test("a cancelled download returns to available with download_cancelled", {
   assert.deepEqual(stagedArtifacts(harness.pendingDirectory), [], "a cancelled download stages nothing");
 });
 
-test("a feed that does not answer reports update_check_failed", async (t) => {
+test("an unreachable feed reports update_check_failed", async (t) => {
   const release = releaseFeed({
     version: NEXT_VERSION,
     channel: "latest-mac",

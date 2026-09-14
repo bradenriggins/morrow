@@ -84,22 +84,46 @@ function publicToolInputSchema(toolName: string, schema: JsonObject): JsonObject
   };
 }
 
-type PublicInputValidator = {
-  readonly "~standard": {
-    readonly validate: (value: unknown) => unknown | Promise<unknown>;
-  };
-};
+type PublicInputValidator = ReturnType<typeof fromJsonSchema>;
+
+interface PublicToolContract {
+  readonly inputSchema: JsonObject;
+  readonly validator: PublicInputValidator;
+}
+
+// Modern HTTP serving creates one short-lived MCP server per request. Compile
+// the immutable public schemas once per runtime instead of rebuilding the full
+// catalog for every request server.
+const publicToolContractsByRuntime = new WeakMap<GatewayRuntime, ReadonlyMap<string, PublicToolContract>>();
+
+function publicToolContracts(runtime: GatewayRuntime): ReadonlyMap<string, PublicToolContract> {
+  const cached = publicToolContractsByRuntime.get(runtime);
+  if (cached) return cached;
+  const contracts = new Map<string, PublicToolContract>();
+  for (const tool of runtime.catalog.tools) {
+    if (isPrivateSourceTool(tool)) continue;
+    const inputSchema = publicToolInputSchema(tool.publicName, tool.inputSchema);
+    contracts.set(tool.publicName, {
+      inputSchema,
+      validator: fromJsonSchema(inputSchema),
+    });
+  }
+  publicToolContractsByRuntime.set(runtime, contracts);
+  return contracts;
+}
 
 function publicCapabilityDescriptor(runtime: GatewayRuntime, name: string): JsonObject {
   const result = runtime.capabilityGet(name);
   const mapping = runtime.catalog.tools.find((tool) => tool.publicName === name.trim() && !isPrivateSourceTool(tool));
   if (!mapping || !isJsonObject(result.descriptor)) return result;
+  const inputSchema = publicToolContracts(runtime).get(mapping.publicName)?.inputSchema;
+  if (!inputSchema) return result;
   return {
     ...result,
     descriptor: {
       ...result.descriptor,
-      inputSchema: publicToolInputSchema(mapping.publicName, mapping.inputSchema),
-      inputSchemaSha256: sha256Json(publicToolInputSchema(mapping.publicName, mapping.inputSchema)),
+      inputSchema,
+      inputSchemaSha256: sha256Json(inputSchema),
     },
   };
 }
@@ -201,6 +225,10 @@ function installMcpEgressBoundary(
     const result = boundaryRuntime.runAsRequester
       ? await boundaryRuntime.runAsRequester(requestedBy(context), call)
       : await call();
+    // This tool returns only a descriptor built from the sealed public catalog
+    // and public input schema. Treating JSON Schema property names as provider
+    // data can misclassify fields such as `user_id` and corrupt the contract.
+    if (name === "morrow_capability_get") return result;
     if (!boundaryRuntime.redactMcpEgress || !isJsonObject(result)) return result;
     const projected = await boundaryRuntime.redactMcpEgress(result, egressInput(name, input), {
       signal: context.mcpReq.signal,
@@ -406,12 +434,7 @@ export function createMorrowServer(
     ),
   );
 
-  const publicInputValidators = new Map(
-    runtime.catalog.tools.filter((tool) => !isPrivateSourceTool(tool)).map((tool) => [
-      tool.publicName,
-      fromJsonSchema(publicToolInputSchema(tool.publicName, tool.inputSchema)) as unknown as PublicInputValidator,
-    ]),
-  );
+  const publicContracts = publicToolContracts(runtime);
   const registerCapabilityInvocation = (
     name: "morrow_capability_read" | "morrow_capability_change",
     readOnly: boolean,
@@ -431,7 +454,7 @@ export function createMorrowServer(
       },
       async ({ name: publicName, arguments: argumentsValue }, context: ServerContext): Promise<CallToolResult> => {
         const mapping = runtime.catalog.tools.find((tool) => tool.publicName === publicName && !isPrivateSourceTool(tool));
-        const validator = publicInputValidators.get(publicName);
+        const validator = publicContracts.get(publicName)?.validator;
         if (!mapping || !validator) return safeCapabilityInvocationFailure("capability_not_found");
         if ((mapping.annotations?.readOnlyHint === true) !== readOnly) {
           return safeCapabilityInvocationFailure("capability_mode_mismatch");
@@ -517,7 +540,7 @@ export function createMorrowServer(
         {
           ...(tool.title ? { title: tool.title } : {}),
           ...(tool.description ? { description: tool.description } : {}),
-          inputSchema: fromJsonSchema(publicToolInputSchema(tool.publicName, tool.inputSchema)),
+          inputSchema: publicContracts.get(tool.publicName)!.validator,
           ...(tool.annotations
             ? { annotations: tool.annotations as McpToolAnnotations }
             : {}),

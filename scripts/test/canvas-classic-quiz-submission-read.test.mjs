@@ -77,7 +77,7 @@ test("Canvas Classic Quiz submission summary follows only bounded exact paginati
     browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     await page.goto(`${origin}/courses/2/quizzes/8`);
-    const invoke = (args = { course_id: 2, quiz_id: 8 }, binding = { origin, siteUrl: `${origin}/courses/2/quizzes/8`, principalId: "3", courseId: "2" }, expiresAt = Date.now() + 60_000) => page.evaluate(
+    const invoke = (args = { course_id: "2", quiz_id: "8" }, binding = { origin, siteUrl: `${origin}/courses/2/quizzes/8`, principalId: "3", courseId: "2" }, expiresAt = Date.now() + 60_000) => page.evaluate(
       executeCanvasClassicQuizSubmissionSummaryInPage,
       JSON.stringify({ operation: OPERATION, arguments: args, binding, expiresAt }),
     );

@@ -480,6 +480,8 @@ export interface LearnerTextRedactionContext {
   readonly learnerRoster: LearnerRoster;
   readonly learnerVault: LearnerVault;
   readonly learnerScope: LearnerScope;
+  /** Canvas course reads may include instructors and editors outside the student roster. */
+  readonly allowUnrosteredCanvasIdentities?: boolean;
 }
 
 interface LearnerAlias {
@@ -812,6 +814,7 @@ function preparedLearnerTextContext(
     learnerRoster: context.learnerRoster,
     learnerVault: context.learnerVault,
     learnerScope: scope,
+    ...(context.allowUnrosteredCanvasIdentities === true ? { allowUnrosteredCanvasIdentities: true } : {}),
     identities,
     identityById,
     tokensById,
@@ -983,6 +986,8 @@ export interface OutputPrivacyContext {
    * refused, and every other projection here still applies.
    */
   readonly learnerBoundary?: "gateway" | "source";
+  /** Verified Canvas course reads can contain instructors and editors outside the student roster. */
+  readonly allowUnrosteredCanvasIdentities?: boolean;
 }
 
 export interface ProjectedOutput {
@@ -990,7 +995,7 @@ export interface ProjectedOutput {
   readonly structuredContent?: JsonObject;
 }
 
-type IdentityRecordKind = "learner" | "student" | "user" | "enrollment" | "submission" | "grade" | "recipient" | "member";
+type IdentityRecordKind = "learner" | "student" | "user" | "author" | "enrollment" | "submission" | "grade" | "recipient" | "member";
 
 const IDENTITY_VALUE_FIELDS = new Set([
   "userid", "learnerid", "studentid", "canvasuserid", "sisuserid", "sispersonid", "pseudonymid",
@@ -1008,8 +1013,10 @@ const IDENTITY_CONTAINER_KEYS = new Map<string, IdentityRecordKind>([
   ["enrollment", "enrollment"], ["enrollments", "enrollment"],
   ["submission", "submission"], ["submissions", "submission"],
   ["grade", "grade"], ["grades", "grade"], ["gradebook", "grade"],
-  ["participant", "user"], ["participants", "user"], ["author", "user"], ["authors", "user"],
+  ["participant", "user"], ["participants", "user"], ["author", "author"], ["authors", "author"],
+  ["lasteditedby", "author"], ["editor", "author"], ["createdby", "author"], ["updatedby", "author"],
   ["recipient", "recipient"], ["recipients", "recipient"], ["member", "member"], ["members", "member"],
+  ["membership", "member"], ["memberships", "member"],
 ]);
 const SECRET_FIELD = /(?:^|_)(?:authorization|bearer|access_token|refresh_token|csrf|cookie|secret|credential|jwt)(?:$|_)/i;
 const SECRET_FIELD_NORMALIZED = new Set([
@@ -1060,6 +1067,10 @@ function identityRecordKind(key: string): IdentityRecordKind | undefined {
   return IDENTITY_CONTAINER_KEYS.get(normalizePrivacyKey(key));
 }
 
+function hasIdentityRecordSignal(value: JsonObject): boolean {
+  return Object.keys(value).some((key) => isIdentityValueField(key, true));
+}
+
 function normalizedIdentityFields(value: JsonObject): ReadonlyMap<string, unknown> {
   return new Map(Object.entries(value).map(([key, candidate]) => [normalizePrivacyKey(key), candidate]));
 }
@@ -1085,12 +1096,15 @@ function learnerIdentity(value: JsonObject, kind?: IdentityRecordKind, context?:
     return current;
   }
   const normalizedKeys = new Set(fields.keys());
-  const hasGenericSignal = ["userid", "learnerid", "studentid", "canvasuserid", "sisuserid", "email", "loginid", "sortablename"]
-    .some((key) => normalizedKeys.has(key))
+  const directId = identityValue(fields, ["user_id", "userId", "learner_id", "learnerId", "student_id", "studentId", "canvas_user_id", "canvasUserId", "sis_user_id", "sisUserId"]);
+  const hasPersonId = ["userid", "learnerid", "studentid", "canvasuserid", "sisuserid"]
+    .some((key) => normalizedKeys.has(key));
+  const hasIdentityProfile = ["email", "loginid", "sortablename", "displayname", "fullname", "studentname", "avatarimageurl", "pronouns", "firstname", "lastname"]
+    .some((key) => normalizedKeys.has(key));
+  const hasGenericSignal = (hasPersonId && (hasIdentityProfile || Boolean(directId && context?.identityById.has(directId))))
     || (Boolean(context) && normalizedKeys.has("id") && normalizedKeys.has("name") && ["grade", "score", "enrollments", "grades", "submission", "attempts"].some((key) => normalizedKeys.has(key)))
     || ((normalizedKeys.has("avatarimageurl") || normalizedKeys.has("pronouns")) && (normalizedKeys.has("name") || normalizedKeys.has("displayname")));
   if (!kind && !hasGenericSignal) return null;
-  const directId = identityValue(fields, ["user_id", "userId", "learner_id", "learnerId", "student_id", "studentId", "canvas_user_id", "canvasUserId", "sis_user_id", "sisUserId"]);
   const fallbackId = (kind || hasGenericSignal) && kind !== "submission" && kind !== "enrollment"
     ? identityValue(fields, ["id"])
     : undefined;
@@ -1162,21 +1176,32 @@ function projectValue(
     return value.map((item) => projectValue(item, descriptor, context, depth + 1, kind, inheritedLearnerPrivacy, preparedTextContext, scalarKey));
   }
   if (!isJsonObject(value)) return value;
-  const learner = learnerIdentity(value, kind, preparedTextContext);
+  const detectedIdentity = learnerIdentity(value, kind, preparedTextContext);
+  const mayScrubUnrosteredCanvasIdentity = context.allowUnrosteredCanvasIdentities === true
+    && (kind !== undefined || detectedIdentity !== null);
   // A source that states it returns learner tokens and no learner identity is
   // held to that. A record shaped like a learner identity is a boundary
   // failure there, not a record to tokenize here; a record that carries only a
   // token is already resolved and is not an unresolved identity.
-  if (sourceRedacted && learner) throw new Error("privacy_source_learner_identity_refused");
-  if (!sourceRedacted && kind && !learner) throw new Error("privacy_identity_record_unresolved");
-  const needsTextRedaction = requiresLearnerRedaction || learner !== null;
+  if (sourceRedacted && detectedIdentity) throw new Error("privacy_source_learner_identity_refused");
+  if (!sourceRedacted && kind && !detectedIdentity && Object.keys(value).length !== 0
+    && !inheritedLearnerPrivacy && !mayScrubUnrosteredCanvasIdentity
+    && !((kind === "author" || kind === "member") && !hasIdentityRecordSignal(value))) {
+    throw new Error("privacy_identity_record_unresolved");
+  }
+  let learner = detectedIdentity;
+  const needsTextRedaction = requiresLearnerRedaction || detectedIdentity !== null;
   let textContext: PreparedLearnerTextRedactionContext | undefined;
   if (needsTextRedaction) {
     textContext = preparedTextContext ?? learnerTextContext(context);
     if (learner) {
       const current = textContext.identityById.get(learner.id);
-      if (!current) throw new Error("learner_roster_identity_unavailable");
-      mergeLearnerIdentity(current, learner);
+      if (!current) {
+        if (!mayScrubUnrosteredCanvasIdentity) throw new Error("learner_roster_identity_unavailable");
+        learner = null;
+      } else {
+        learner = mergeLearnerIdentity(current, learner);
+      }
     }
   }
   const output: JsonObject = {};
@@ -1189,7 +1214,7 @@ function projectValue(
   for (const [key, child] of Object.entries(value)) {
     const normalizedKey = normalizePrivacyKey(key);
     const allowField = descriptor.fieldPolicy === "scrub-sensitive" || descriptor.allowedFields.includes(key);
-    if (!allowField || isSecretField(key) || isIdentityValueField(key, learner !== null) || (learner && normalizedKey === "learnertoken")) continue;
+    if (!allowField || isSecretField(key) || isIdentityValueField(key, detectedIdentity !== null || mayScrubUnrosteredCanvasIdentity) || (learner && normalizedKey === "learnertoken")) continue;
     if (descriptor.freeText === "deny" && (normalizedKey === "html" || normalizedKey === "body" || normalizedKey === "content")) continue;
     const childKind = identityRecordKind(key);
     const projected = projectValue(
@@ -1198,7 +1223,7 @@ function projectValue(
       context,
       depth + 1,
       childKind,
-      needsTextRedaction,
+      inheritedLearnerPrivacy || detectedIdentity !== null,
       textContext ?? preparedTextContext,
       key === "id" ? `${resourceKind}_id` : key,
     );
@@ -1258,13 +1283,23 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
     if ((["image", "audio"].includes(String(candidate.type)) || candidate.encoding === "base64") && typeof candidate.data === "string") {
       throw new Error("privacy_opaque_artifact_refused");
     }
-    const learner = learnerIdentity(candidate, kind, exactContext);
-    if (kind && !learner) throw new Error("privacy_identity_record_unresolved");
+    let learner = learnerIdentity(candidate, kind, exactContext);
+    const detectedIdentity = learner !== null;
+    const mayScrubUnrosteredCanvasIdentity = exactContext.allowUnrosteredCanvasIdentities === true
+      && (kind !== undefined || detectedIdentity);
+    if (kind && !learner && Object.keys(candidate).length !== 0 && !inheritedLearnerPrivacy
+      && !((kind === "author" || kind === "member" || mayScrubUnrosteredCanvasIdentity) && !hasIdentityRecordSignal(candidate))) {
+      throw new Error("privacy_identity_record_unresolved");
+    }
     const needsLearnerPrivacy = inheritedLearnerPrivacy || kind !== undefined || learner !== null;
     if (learner) {
       const current = exactContext.identityById.get(learner.id);
-      if (!current) throw new Error("learner_roster_identity_unavailable");
-      mergeLearnerIdentity(current, learner);
+      if (!current) {
+        if (!mayScrubUnrosteredCanvasIdentity) throw new Error("learner_roster_identity_unavailable");
+        learner = null;
+      } else {
+        learner = mergeLearnerIdentity(current, learner);
+      }
     }
     const resourceKind = typeof candidate.kind === "string" && /^(?:course|assignment|quiz|module|section|file|page|discussion|topic|question|item|group|rubric|context|account)$/iu.test(candidate.kind)
       ? candidate.kind
@@ -1273,7 +1308,7 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
     if (learner) output.learnerToken = snapshotLearnerToken(exactContext, learner);
     for (const [key, child] of Object.entries(candidate)) {
       const normalizedKey = normalizePrivacyKey(key);
-      if (isSecretField(key) || isIdentityValueField(key, learner !== null) || (learner && normalizedKey === "learnertoken")) continue;
+      if (isSecretField(key) || isIdentityValueField(key, detectedIdentity || mayScrubUnrosteredCanvasIdentity) || (learner && normalizedKey === "learnertoken")) continue;
       // A binary MCP resource has no safe text projection at this boundary.
       // Returning its encoded bytes could expose learner identities without a
       // chance to apply the exact-scope roster aliases.
@@ -1282,7 +1317,7 @@ function redactLearnerEgressPrepared(value: unknown, exactContext: PreparedLearn
       }
       const safeKey = redactLearnerKey(key, exactContext);
       if (Object.hasOwn(output, safeKey)) throw new Error("privacy_identity_key_collision");
-      Object.defineProperty(output, safeKey, { value: walk(child, depth + 1, identityRecordKind(key), needsLearnerPrivacy, key === "id" ? `${resourceKind}_id` : key), enumerable: true, writable: true, configurable: true });
+      Object.defineProperty(output, safeKey, { value: walk(child, depth + 1, identityRecordKind(key), inheritedLearnerPrivacy || detectedIdentity, key === "id" ? `${resourceKind}_id` : key), enumerable: true, writable: true, configurable: true });
     }
     return output;
   };

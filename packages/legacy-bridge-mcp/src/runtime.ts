@@ -93,7 +93,11 @@ export class LegacyBridgeRuntime {
     return this.bridge.listBindings();
   }
 
-  async call(sourceToolName: string, rawArguments: Readonly<Record<string, unknown>>): Promise<JsonObject> {
+  async call(
+    sourceToolName: string,
+    rawArguments: Readonly<Record<string, unknown>>,
+    signal?: AbortSignal,
+  ): Promise<JsonObject> {
     const tool = toolByName(this.catalog, sourceToolName);
     const split = splitBridgeCallArguments(rawArguments);
     const kind = tool.annotations?.readOnlyHint === true ? "invoke_read" : "stage_write";
@@ -106,6 +110,7 @@ export class LegacyBridgeRuntime {
         sourceBindingId: split.options.sourceBindingId,
         operationId: operationId(split.options.operationId),
         ...(split.options.outerGrant ? { outerGrant: split.options.outerGrant } : {}),
+        signal,
       });
       if (!response.ok) {
         const failed = failedProblem(response.problem);
@@ -140,12 +145,13 @@ export class LegacyBridgeRuntime {
     }
   }
 
-  async taskGet(taskId: string, sourceBindingId?: string): Promise<JsonObject> {
+  async taskGet(taskId: string, sourceBindingId?: string, signal?: AbortSignal): Promise<JsonObject> {
     try {
       const response = await this.bridge.invoke({
         kind: "task_get",
         taskId,
         sourceBindingId,
+        signal,
       });
       if (!response.ok) return failedProblem(response.problem);
       return {

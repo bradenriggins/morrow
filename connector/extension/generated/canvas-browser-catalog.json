@@ -12,8 +12,8 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "course_id": { "type": "integer", "minimum": 1 },
-          "quiz_id": { "type": "integer", "minimum": 1 }
+          "course_id": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" },
+          "quiz_id": { "type": "string", "pattern": "^[1-9][0-9]{0,18}$" }
         },
         "required": ["course_id", "quiz_id"],
         "additionalProperties": false

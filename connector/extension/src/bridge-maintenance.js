@@ -13,6 +13,7 @@ const COMMIT_KEY = "morrowBridgeMaintenanceCommit";
 const RECEIPTS_KEY = "morrowBridgeMaintenanceReceipts";
 const MAX_RECEIPTS = 2_000;
 const MAX_MARKER_BYTES = 16 * 1024;
+const ACTIVE_FOLDER_TIMEOUT_MS = 5_000;
 const EXTENSION_ID = /^[a-p]{32}$/;
 const CHALLENGE_ID = /^[A-Za-z0-9._-]{16,128}$/;
 const NONCE = /^[A-Za-z0-9._-]{16,512}$/;
@@ -93,9 +94,10 @@ function maintenanceControl(value) {
   fail("bridge_maintenance_control_invalid");
 }
 
-export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch, randomUUID = () => crypto.randomUUID() } = {}) {
+export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch, randomUUID = () => crypto.randomUUID(), activeFolderTimeoutMs = ACTIVE_FOLDER_TIMEOUT_MS } = {}) {
   if (!chromeApi?.runtime?.getManifest || !chromeApi?.runtime?.getURL || !chromeApi?.storage?.local
-    || !chromeApi?.management?.getSelf || typeof fetchImpl !== "function" || typeof randomUUID !== "function") {
+    || !chromeApi?.management?.getSelf || typeof fetchImpl !== "function" || typeof randomUUID !== "function"
+    || !Number.isSafeInteger(activeFolderTimeoutMs) || activeFolderTimeoutMs < 1) {
     throw new TypeError("bridge maintenance requires Chrome runtime, storage, management, and fetch");
   }
 
@@ -124,33 +126,79 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
   }
 
   async function activeFolderProof(expected) {
-    let response;
+    const controller = new AbortController();
+    let rejectAbort;
+    const aborted = new Promise((_, reject) => { rejectAbort = reject; });
+    const onAbort = () => rejectAbort(new Error("bridge_active_folder_unconfirmed"));
+    controller.signal.addEventListener("abort", onAbort, { once: true });
+    const timeout = setTimeout(() => controller.abort(), activeFolderTimeoutMs);
+    let response = null;
+    let reader = null;
     try {
-      response = await fetchImpl(chromeApi.runtime.getURL(ACTIVE_FOLDER_MARKER), { cache: "no-store" });
-    } catch { fail("bridge_active_folder_unconfirmed"); }
-    if (!response?.ok) fail("bridge_active_folder_unconfirmed");
-    let bytes;
-    try { bytes = new Uint8Array(await response.arrayBuffer()); } catch { fail("bridge_active_folder_unconfirmed"); }
-    if (bytes.byteLength === 0 || bytes.byteLength > MAX_MARKER_BYTES) fail("bridge_active_folder_unconfirmed");
-    let marker;
-    try { marker = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { fail("bridge_active_folder_unconfirmed"); }
-    if (!exactKeys(marker, ["challengeId", "extensionId", "manifestVersion", "nonce", "schema"])
-      || marker.schema !== CHALLENGE_SCHEMA || marker.extensionId !== expected.extensionId
-      || marker.manifestVersion !== expected.manifestVersion
-      || typeof marker.challengeId !== "string" || !CHALLENGE_ID.test(marker.challengeId)
-      || typeof marker.nonce !== "string" || !NONCE.test(marker.nonce)) {
+      response = await Promise.race([
+        fetchImpl(chromeApi.runtime.getURL(ACTIVE_FOLDER_MARKER), { cache: "no-store", redirect: "error", signal: controller.signal }),
+        aborted,
+      ]);
+      if (!response?.ok) fail("bridge_active_folder_unconfirmed");
+      const declaredLength = response.headers?.get?.("content-length");
+      if (declaredLength !== null && declaredLength !== undefined
+        && (!/^(?:0|[1-9][0-9]*)$/.test(declaredLength) || Number(declaredLength) > MAX_MARKER_BYTES)) {
+        try { const cancellation = response.body?.cancel?.("bridge_active_folder_unconfirmed"); if (cancellation?.catch) void cancellation.catch(() => {}); } catch {}
+        fail("bridge_active_folder_unconfirmed");
+      }
+      if (!response.body?.getReader) fail("bridge_active_folder_unconfirmed");
+      reader = response.body.getReader();
+      const chunks = [];
+      let length = 0;
+      while (true) {
+        const { done, value } = await Promise.race([reader.read(), aborted]);
+        if (done) break;
+        if (!(value instanceof Uint8Array)) fail("bridge_active_folder_unconfirmed");
+        length += value.byteLength;
+        if (length > MAX_MARKER_BYTES) {
+          try { const cancellation = reader.cancel("bridge_active_folder_unconfirmed"); if (cancellation?.catch) void cancellation.catch(() => {}); } catch {}
+          fail("bridge_active_folder_unconfirmed");
+        }
+        chunks.push(value);
+      }
+      if (length === 0 || controller.signal.aborted) fail("bridge_active_folder_unconfirmed");
+      const bytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      let marker;
+      try { marker = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { fail("bridge_active_folder_unconfirmed"); }
+      if (!exactKeys(marker, ["challengeId", "extensionId", "manifestVersion", "nonce", "schema"])
+        || marker.schema !== CHALLENGE_SCHEMA || marker.extensionId !== expected.extensionId
+        || marker.manifestVersion !== expected.manifestVersion
+        || typeof marker.challengeId !== "string" || !CHALLENGE_ID.test(marker.challengeId)
+        || typeof marker.nonce !== "string" || !NONCE.test(marker.nonce)) {
+        fail("bridge_active_folder_unconfirmed");
+      }
+      const challengeSha256 = await crypto.subtle.digest("SHA-256", bytes);
+      if (controller.signal.aborted) fail("bridge_active_folder_unconfirmed");
+      const digest = [...new Uint8Array(challengeSha256)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      return {
+        schema: PROOF_SCHEMA,
+        extensionId: expected.extensionId,
+        manifestVersion: expected.manifestVersion,
+        challengeId: marker.challengeId,
+        nonce: marker.nonce,
+        challengeSha256: digest,
+      };
+    } catch (error) {
+      if (error instanceof BridgeMaintenanceError) throw error;
       fail("bridge_active_folder_unconfirmed");
+    } finally {
+      clearTimeout(timeout);
+      controller.signal.removeEventListener("abort", onAbort);
+      if (controller.signal.aborted && reader) {
+        try { const cancellation = reader.cancel("bridge_active_folder_unconfirmed"); if (cancellation?.catch) void cancellation.catch(() => {}); } catch {}
+      }
+      try { reader?.releaseLock(); } catch {}
     }
-    const challengeSha256 = await crypto.subtle.digest("SHA-256", bytes);
-    const digest = [...new Uint8Array(challengeSha256)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-    return {
-      schema: PROOF_SCHEMA,
-      extensionId: expected.extensionId,
-      manifestVersion: expected.manifestVersion,
-      challengeId: marker.challengeId,
-      nonce: marker.nonce,
-      challengeSha256: digest,
-    };
   }
 
   async function loadFence() {
@@ -238,7 +286,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     };
   }
 
-  async function quiesce() {
+  async function quiesce(beforeMutation) {
     if (inMemoryFence || activeWrites.size > 0) fail("bridge_quiesce_busy");
     const quiesceEpoch = `quiesce-${randomUUID()}`;
     if (!EPOCH.test(quiesceEpoch)) fail("bridge_quiesce_epoch_invalid");
@@ -254,6 +302,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
       if (current.installType !== "development") fail("bridge_store_install_refused");
       const proof = await activeFolderProof(current);
       const nextFence = { schema: FENCE_SCHEMA, extensionId: current.extensionId, manifestVersion: current.manifestVersion, quiesceEpoch };
+      await beforeMutation?.();
       await chromeApi.storage.local.set({ [FENCE_KEY]: nextFence });
       await chromeApi.storage.local.remove(COMMIT_KEY);
       inMemoryFence = nextFence;
@@ -272,7 +321,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     }
   }
 
-  async function resume(control) {
+  async function resume(control, beforeMutation) {
     const request = maintenanceControl(control);
     if (request.action !== "resume") fail("bridge_maintenance_control_invalid");
     const persistedFence = await loadFence();
@@ -283,6 +332,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
       fail("bridge_resume_file_layer_unconfirmed");
     }
     await activeFolderProof(current);
+    await beforeMutation?.();
     await chromeApi.storage.local.remove(FENCE_KEY);
     inMemoryFence = null;
     return {
@@ -294,7 +344,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     };
   }
 
-  async function commit(control) {
+  async function commit(control, beforeMutation) {
     const request = maintenanceControl(control);
     if (request.action !== "commit") fail("bridge_maintenance_control_invalid");
     const current = await identity();
@@ -321,6 +371,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
         manifestVersion: current.manifestVersion,
         quiesceEpoch: persistedFence.quiesceEpoch,
       };
+      await beforeMutation?.();
       await chromeApi.storage.local.set({ [COMMIT_KEY]: nextCommit });
       await chromeApi.storage.local.remove(FENCE_KEY);
       if (await loadFence()) fail("bridge_update_commit_unavailable");
@@ -354,12 +405,13 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     };
   }
 
-  async function control(value) {
+  async function control(value, { beforeMutation } = {}) {
+    if (beforeMutation !== undefined && typeof beforeMutation !== "function") fail("bridge_maintenance_control_invalid");
     const request = maintenanceControl(value);
     if (request.action === "status") return await status();
-    if (request.action === "quiesce") return await quiesce();
-    if (request.action === "resume") return await resume(request);
-    if (request.action === "commit") return await commit(request);
+    if (request.action === "quiesce") return await quiesce(beforeMutation);
+    if (request.action === "resume") return await resume(request, beforeMutation);
+    if (request.action === "commit") return await commit(request, beforeMutation);
     return await readback();
   }
 

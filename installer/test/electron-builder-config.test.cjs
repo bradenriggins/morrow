@@ -93,6 +93,7 @@ async function preparedPayload(t, { invalidBridge = false, invalidMcp = false, i
   const definitions = [
     ["connector/extension/manifest.json", ["app/connector/extension/manifest.json"], '{"name":"Morrow Bridge"}\n'],
     ["installer/runtime-monitor.mjs", ["app/installer/runtime-monitor.mjs"], "export const monitor = true;\n"],
+    ["installer/process-lifetime.cjs", ["app/installer/process-lifetime.cjs"], "module.exports = {};\n"],
     ["packages/canvas-connector-mcp/dist/index.js", ["app/packages/canvas-connector-mcp/dist/index.js"], "export const connector = true;\n"],
     ["packages/client-config/dist/cli.js", ["app/packages/client-config/dist/cli.js"], "export const cli = true;\n"],
     ["packages/mcp-server/dist/index.js", ["app/node_modules/@morrow-lms/gateway/dist/index.js", "app/packages/mcp-server/dist/index.js"], "export const gateway = true;\n"],
@@ -113,6 +114,7 @@ async function preparedPayload(t, { invalidBridge = false, invalidMcp = false, i
   const gatewayEntry = await appRecord("node_modules/@morrow-lms/gateway/dist/index.js");
   const directFiles = await Promise.all([
     "installer/runtime-monitor.mjs",
+    "installer/process-lifetime.cjs",
     "packages/canvas-connector-mcp/dist/index.js",
     "packages/client-config/dist/cli.js",
     "packages/mcp-server/dist/index.js",
@@ -281,7 +283,8 @@ test("an unsigned build does not code-sign and ships with updates turned off", a
   const config = loadConfig({ payload });
   assert.equal(config.forceCodeSigning, false);
   assert.equal(config.mac.identity, null);
-  assert.equal(config.win.sign, false);
+  assert.equal(config.win.signExecutable, false);
+  assert.equal(Object.hasOwn(config.win, "sign"), false);
   // The unsigned bundle still gets an ad-hoc seal after packing, or Gatekeeper
   // reports a quarantined download as damaged instead of offering Open Anyway.
   assert.equal(typeof config.afterPack, "function");
@@ -295,6 +298,7 @@ test("a signed release of a stable version code-signs and turns updates on", asy
   assert.equal(config.forceCodeSigning, true);
   assert.equal(Object.hasOwn(config.mac, "identity"), false);
   assert.equal(Object.hasOwn(config.win, "sign"), false);
+  assert.equal(Object.hasOwn(config.win, "signExecutable"), false);
   assert.equal(config.extraMetadata.morrow.desktopUpdates.enabled, true);
   assert.deepEqual(config.publish, [{
     provider: "github",

@@ -9,6 +9,7 @@ import {
   linuxProcessStartedAtFromStat,
   parseProcessStartOutput,
   processMatchesExactStart,
+  processMatchesRecordedLifetimeAsync,
   readProcessStartedAt,
   readProcessStartedAtAsync,
 } from "../src/process-lifetime.js";
@@ -75,6 +76,15 @@ describe("process lifetime", () => {
     expect(processMatchesExactStart(process.pid, new Date(1_700_000_001_000).toISOString(), read)).toBe(false);
     expect(processMatchesExactStart(process.pid, "not-a-time", read)).toBe(false);
     expect(processMatchesExactStart(process.pid, new Date(1_700_000_000_000).toISOString(), () => null)).toBeNull();
+  });
+
+  it("waits for an authoritative process lifetime on lifecycle paths", async () => {
+    const observedAt = new Date(1_700_000_001_000).toISOString();
+    expect(await processMatchesRecordedLifetimeAsync(process.pid, observedAt, async () => 1_700_000_000_000)).toBe(true);
+    expect(await processMatchesRecordedLifetimeAsync(process.pid, observedAt, async () => 1_700_000_002_000)).toBe(false);
+    expect(await processMatchesRecordedLifetimeAsync(process.pid, observedAt, async () => null)).toBeNull();
+    expect(await processMatchesRecordedLifetimeAsync(process.pid, "not-a-time", async () => 1_700_000_000_000)).toBe(false);
+    expect(await processMatchesRecordedLifetimeAsync(2_147_483_647, observedAt, async () => 1_700_000_000_000)).toBe(false);
   });
 
   it("serves concurrent request-path liveness checks from one background query and never blocks", async () => {

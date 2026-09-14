@@ -342,7 +342,7 @@ export async function planNewQuizModulePlacement(runtime: LifecycleRuntime, valu
     const args: JsonObject = {
       course_id: input.course_id, module_id: input.module_id,
       module_item_type: "Assignment", module_item_content_id: input.quiz_id,
-      ...(input.position === undefined ? {} : { module_item_position: String(input.position) }),
+      ...(input.position === undefined ? {} : { module_item_position: input.position }),
       _morrow: context.routing,
     };
     const report: JsonObject = {
@@ -404,7 +404,7 @@ export async function planNewQuizModuleMove(runtime: LifecycleRuntime, value: z.
     }
     const args: JsonObject = {
       course_id: input.course_id, module_id: input.module_id, id: input.module_item_id,
-      ...(input.position === undefined ? {} : { module_item_position: String(input.position) }),
+      ...(input.position === undefined ? {} : { module_item_position: input.position }),
       ...(target ? { module_item_module_id: target } : {}),
       _morrow: context.routing,
     };
@@ -446,7 +446,7 @@ export async function planNewQuizAssignmentGroupOrder(runtime: LifecycleRuntime,
       refuse("The selected New Quiz is not in the complete current assignment list for its group.");
     }
     if (input.position > members.length) refuse(`That assignment group holds ${members.length} assignments, so position ${input.position} is past its end.`);
-    const args: JsonObject = { course_id: input.course_id, id: input.quiz_id, assignment_position: String(input.position), _morrow: context.routing };
+    const args: JsonObject = { course_id: input.course_id, id: input.quiz_id, assignment_position: input.position, _morrow: context.routing };
     const report: JsonObject = {
       schema: "morrow.new-quiz-lifecycle.plan.v1", action: "assignment_group_order", status: "planned", planned_at: new Date().toISOString(),
       course: { id: input.course_id, name: courseName }, quiz: { id: input.quiz_id, title },

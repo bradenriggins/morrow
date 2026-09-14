@@ -168,16 +168,18 @@ describe("LegacyBridgeRuntime", () => {
     Object.defineProperty(runtime, "catalog", { value: catalog });
     const invoke = vi.fn();
     Object.defineProperty(runtime, "bridge", { value: { invoke } });
+    const controller = new AbortController();
     invoke.mockResolvedValueOnce({
       ok: false,
       operationId: "operation:cancelled-before-stage",
       problem: { schema: "morrow.bridge.problem.v1", code: "request_cancelled_before_dispatch", message: "cancelled", recoverable: true },
     });
-    await expect(runtime.call("edit_page", { course_id: "42" })).resolves.toMatchObject({
+    await expect(runtime.call("edit_page", { course_id: "42" }, controller.signal)).resolves.toMatchObject({
       ok: false,
       resultState: "not_sent",
       operationId: "operation:cancelled-before-stage",
     });
+    expect(invoke).toHaveBeenLastCalledWith(expect.objectContaining({ signal: controller.signal }));
     invoke.mockResolvedValueOnce({
       ok: false,
       operationId: "operation:cancelled-during-stage",
@@ -187,6 +189,22 @@ describe("LegacyBridgeRuntime", () => {
       ok: false,
       resultState: "unknown",
       operationId: "operation:cancelled-during-stage",
+    });
+  });
+
+  it("forwards task cancellation to the exact loopback invocation", async () => {
+    const runtime = Object.create(LegacyBridgeRuntime.prototype) as LegacyBridgeRuntime;
+    const invoke = vi.fn(async () => ({ ok: true, result: { taskId: "task-1" } }));
+    Object.defineProperty(runtime, "bridge", { value: { invoke } });
+    const controller = new AbortController();
+
+    await runtime.taskGet("task-1", "binding-42", controller.signal);
+
+    expect(invoke).toHaveBeenCalledWith({
+      kind: "task_get",
+      taskId: "task-1",
+      sourceBindingId: "binding-42",
+      signal: controller.signal,
     });
   });
 });

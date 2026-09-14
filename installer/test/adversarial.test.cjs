@@ -106,13 +106,18 @@ async function startedMorrow(options = {}) {
     commitRestartLease: answer("commitRestartLease", undefined),
     closeRuntimeMonitor: answer("closeRuntimeMonitor", undefined)
   };
+  let currentUpdateSnapshot = options.updateSnapshot || null;
   const updateController = {
-    snapshot: () => null,
+    snapshot: () => currentUpdateSnapshot,
     subscribe() { return () => {}; },
     async start() { updateCalls.push("start"); },
     async check() { updateCalls.push("check"); },
     async installWhenIdle() { updateCalls.push("installWhenIdle"); },
-    async reconcileAfterRepair() { updateCalls.push("reconcileAfterRepair"); },
+    async reconcileAfterRepair() {
+      updateCalls.push("reconcileAfterRepair");
+      currentUpdateSnapshot = options.reconciledUpdateSnapshot || currentUpdateSnapshot;
+      return currentUpdateSnapshot;
+    },
     stop() { updateCalls.push("stop"); }
   };
   const undo = [
@@ -279,6 +284,7 @@ async function completePayload(root, options = {}) {
   }
   await fs.mkdir(path.join(app, "installer"), { recursive: true });
   await fs.writeFile(path.join(app, "installer", "runtime-monitor.mjs"), "export function createRuntimeMonitor() { return {}; }\n");
+  await fs.writeFile(path.join(app, "installer", "process-lifetime.cjs"), "module.exports = {};\n");
   // Writing an assistant's configuration restricts the file to this account on
   // win32 before checking its digest, through the real client-config module.
   await fs.writeFile(path.join(app, "packages", "client-config", "dist", "index.js"), "export function restrictToCurrentAccount() {}\n");
@@ -312,6 +318,7 @@ async function completePayload(root, options = {}) {
     "packages/client-config/dist/index.js",
     "packages/canvas-connector-mcp/dist/index.js",
     "installer/runtime-monitor.mjs",
+    "installer/process-lifetime.cjs",
   ]) {
     const content = await fs.readFile(path.join(app, relative));
     directFiles.push({ path: relative, bytes: content.byteLength, sha256: sha256(content) });
@@ -440,15 +447,24 @@ test("every action that takes no input refuses one, and performs its step only w
 });
 
 test("a successful runtime repair retries the durable update reconciliation", async () => {
+  const before = {
+    schema: "morrow.desktop-update.v1", revision: 3, status: "error", currentVersion: "1.0.0",
+    availableVersion: null, automatic: true, reason: "update_attempt_repair_required"
+  };
+  const reconciled = {
+    schema: "morrow.desktop-update.v1", revision: 4, status: "idle", currentVersion: "1.0.0",
+    availableVersion: null, automatic: true, reason: "update_complete"
+  };
   const repaired = {
     schema: "morrow.installer-state.v1",
     lifecycle: "ready_for_workspace",
-    runtime: { status: "ready" }
+    runtime: { status: "ready" },
+    updates: before
   };
-  const started = await startedMorrow({ repairState: repaired });
+  const started = await startedMorrow({ repairState: repaired, updateSnapshot: before, reconciledUpdateSnapshot: reconciled });
   const answer = await started.handlers.get("installer:repair")(trustedRequest(started));
   assert.equal(answer.ok, true);
-  assert.deepEqual(answer.state, repaired);
+  assert.deepEqual(answer.state, { ...repaired, updates: reconciled });
   assert.deepEqual(started.calls.map((call) => call.name), ["repair"]);
   assert.deepEqual(started.updateCalls, ["reconcileAfterRepair"]);
 });

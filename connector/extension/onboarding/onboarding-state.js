@@ -17,13 +17,13 @@ export function shouldRefreshForStorageChange(changes, areaName) {
   return Object.keys(changes || {}).some((key) => key !== SETUP_MODE_KEY);
 }
 
-// The recorded read names the course Morrow read. A record that names no course completes nothing,
-// because the line it would write could not say where the read happened.
-function readCourseName(record) {
-  if (!record || typeof record !== "object") return "";
-  const name = String(record.courseName || "").trim().slice(0, 200);
+// Only a current runtime-verified binding can carry the Bridge's exact durable first-read proof.
+// A binding that names no course completes nothing because the guide could not say where it read.
+function readCourseName(binding) {
+  if (!binding || typeof binding !== "object" || binding.runtimeVerified !== true || binding.firstReadCompleted !== true) return "";
+  const name = String(binding.courseName || "").trim().slice(0, 200);
   if (name) return name;
-  const courseId = String(record.courseId || "").trim().slice(0, 40);
+  const courseId = String(binding.courseId || "").trim().slice(0, 40);
   return courseId ? `course ${courseId}` : "";
 }
 
@@ -119,7 +119,8 @@ function readState(status) {
   // Morrow Bridge compares versions through the connection, so a closed connection reports no
   // version result at all rather than a failed one.
   const runtimeHealthy = connected && status?.runtimeHealthy === true;
-  const readCourse = readCourseName(status?.firstCourseRead);
+  const readBinding = bindings.find((binding) => binding?.runtimeVerified === true && binding?.firstReadCompleted === true);
+  const readCourse = readCourseName(readBinding);
   const platform = platformName(status);
   const checks = [
     {

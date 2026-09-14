@@ -753,12 +753,14 @@ function sameExactFile(left: BigIntStats, right: BigIntStats): boolean {
 }
 
 function sameExactSnapshot(left: BigIntStats, right: BigIntStats): boolean {
+  // ctime can gain precision after a fresh write without any file mutation.
   return sameExactFile(left, right)
     && left.size === right.size
     && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs
     && left.mode === right.mode
-    && left.nlink === right.nlink;
+    && left.nlink === right.nlink
+    && left.uid === right.uid
+    && left.gid === right.gid;
 }
 
 function unlinkExactFile(path: string, expected: BigIntStats): void {

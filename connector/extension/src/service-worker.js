@@ -1,6 +1,6 @@
 import { shouldOpenSetupOnInstall } from "../onboarding/onboarding-install.js";
 import { COURSE_DATA_CONSENT_KEY, COURSE_DATA_CONSENT_VALUE, hasCourseDataConsent } from "./course-data-consent.js";
-import { executeItemBankInPage } from "./item-bank-executor.js";
+import { absoluteItemBankTabUrls, executeItemBankInPage } from "./item-bank-executor.js";
 import { itemBankCredentialFromRequest, itemBankLaunchFromCourseTabs, itemBankPermissionOrigins, usableItemBankCredential } from "./item-bank-credential.js";
 import { itemBankApiOriginForFrame, itemBankFrameIds } from "./item-bank-frames.js";
 import { executeQuizBankDrawInPage } from "./quiz-bank-draw-executor.js";
@@ -9,7 +9,7 @@ import { itemBankMediaFindings } from "./item-bank-guard.js";
 import { canClaimCourseConnectionIntent, canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl, validCourseConnectionIntent } from "./course-connection-intent.js";
 import { MAX_FILE_TEXT_BYTES, canvasFileTextContentTypeSupported, executeCanvasCourseFileTextInPage } from "./canvas-file-content.js";
 import { CANVAS_FILE_SIGNALS_OPERATION_KEY, CANVAS_FILE_SIGNALS_SCHEMA, CANVAS_FILE_SIGNALS_TOOL_NAME, canvasCourseFileSignals, canvasFileSignalsContentTypeSupported } from "./canvas-file-signals.js";
-import { executeCanvasCourseFileTransferInPage } from "./canvas-file-transfer.js";
+import { canonicalCanvasCourseFolderIds, executeCanvasCourseFileTransferInPage } from "./canvas-file-transfer.js";
 import { canvasNewQuizHotSpotVerification, executeCanvasNewQuizHotSpotInPage, unsignedHotSpotImageUrl } from "./canvas-new-quiz-hot-spot.js";
 import { CANVAS_CONVERSATION_PRIVATE_SCHEMA, PRIVATE_CANVAS_CONVERSATION_OPERATION, PRIVATE_CANVAS_CONVERSATION_TOOL, canvasConversationOperationMatches, executeCanvasConversationInPage, normalizeCanvasConversationPrivatePayload } from "./canvas-conversations.js";
 import { problemCopy, problemText } from "./bridge-problem-copy.js";
@@ -84,11 +84,26 @@ const PAIRING_AUTHORITY_KEY = "pairingAuthority";
 const PAIRING_AUTHORITY_SCHEMA = "morrow.bridge-pairing-authority.v1";
 const PAIRING_RESPONSE_MAX_BYTES = 4 * 1024;
 const PAIRING_RESPONSE_TIMEOUT_MS = 10_000;
+const BRIDGE_HANDSHAKE_TIMEOUT_MS = 10_000;
+const BRIDGE_RECONNECT_BASE_MS = 2_000;
+const BRIDGE_RECONNECT_MAX_MS = 30_000;
 const CANVAS_LIST_CONTINUATIONS_KEY = "canvasListContinuations";
 const CANVAS_LIST_CONTINUATION_SCHEMA = "morrow.canvas-list-continuation.v1";
 const CANVAS_LIST_CONTINUATION_STATE_SCHEMA = "morrow.canvas-list-resume-state.v1";
 const CANVAS_LIST_CONTINUATION_LIMIT = 128;
 const CANVAS_LIST_CONTINUATION_TTL_MS = 5 * 60 * 1_000;
+const FIRST_COURSE_READ_SCHEMA = "morrow.first-course-read.v1";
+
+function boundedCommandDeadline(expiresAt, maximumMs) {
+  const now = Date.now();
+  return Number.isSafeInteger(expiresAt) && expiresAt > now
+    ? Math.min(expiresAt, now + maximumMs)
+    : null;
+}
+
+function commandDeadlineCurrent(deadline) {
+  return Number.isSafeInteger(deadline) && deadline > Date.now();
+}
 
 // The private banks.build token is held only in this service worker. Canvas's
 // own Item Banks client sends it to quiz-api after each LTI launch. Capturing
@@ -523,7 +538,7 @@ const CANVAS_CONTENT_GUARD_OPERATIONS = Object.freeze([
   Object.freeze({ kind: "new_quiz_answer_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
   Object.freeze({ kind: "new_quiz_feedback_image_alt", toolName: "canvas_update_quiz_item", key: "PATCH /quiz/v1/courses/{course_id}/quizzes/{assignment_id}/items/{item_id}#update_quiz_item" }),
 ]);
-const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, catalog: null, operations: new Map(), reconnectTimer: null, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null };
+const state = { socket: null, generation: 0, courseDataAuthorityGeneration: 0, accepted: null, authenticationProblem: null, catalog: null, operations: new Map(), handshakeDeadline: null, reconnectTimer: null, reconnectAttempt: 0, writeQueues: new Map(), storageQueue: Promise.resolve(), pairingFetchControllers: new Set(), bridgeCommands: new Map(), privateChat: null, privateChatClosed: null };
 const canvasUploadObservers = new Map();
 // siteAnchorId -> the last course-site match, or the probe that is finding one now.
 const anchorVerifications = new Map();
@@ -650,11 +665,10 @@ async function boundedResponseBytes(response, limit, signal) {
  * same file version. The signed download URL never leaves this function.
  */
 async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentTypeSupported) {
+  const deadline = boundedCommandDeadline(expiresAt, COURSE_FILE_READ_TIMEOUT_MS);
+  if (!deadline) return { ok: false, sent: false, error: "canvas_file_content_timeout" };
   if (!await courseFileStorageAccessEnabled()) return { ok: false, sent: false, error: "canvas_file_storage_access_required" };
-  const deadline = Math.min(
-    Number.isSafeInteger(expiresAt) && expiresAt > Date.now() ? expiresAt : Date.now() + COURSE_FILE_READ_TIMEOUT_MS,
-    Date.now() + COURSE_FILE_READ_TIMEOUT_MS,
-  );
+  if (!commandDeadlineCurrent(deadline)) return { ok: false, sent: false, error: "canvas_file_content_timeout" };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
   try {
@@ -663,6 +677,7 @@ async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentType
       fileId,
       includeDownloadUrl: true,
     };
+    if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_content_timeout");
     const [preparedExecution] = await chrome.scripting.executeScript({
       target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasCourseFileTextInPage, args: [pageInput],
     });
@@ -676,6 +691,7 @@ async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentType
     if (!Number.isSafeInteger(prepared.version.size) || prepared.version.size < 0 || prepared.version.size > MAX_FILE_TEXT_BYTES) {
       return { ok: false, sent: false, error: "canvas_file_content_too_large" };
     }
+    if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_content_timeout");
     const response = await fetch(prepared.downloadUrl, {
       credentials: "omit",
       redirect: "follow",
@@ -692,6 +708,7 @@ async function readCanvasCourseFileBytes(binding, fileId, expiresAt, contentType
     const bytes = await boundedResponseBytes(response, MAX_FILE_TEXT_BYTES, controller.signal);
     if (bytes.byteLength !== prepared.version.size) return { ok: false, sent: true, status: response.status, error: "canvas_file_content_size_mismatch" };
     const digest = await sha256Bytes(bytes);
+    if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_content_timeout");
     const [verificationExecution] = await chrome.scripting.executeScript({
       target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasCourseFileTextInPage,
       args: [{ ...pageInput, includeDownloadUrl: false }],
@@ -788,7 +805,7 @@ function httpUrl(path = "") {
 }
 
 async function storage() {
-  return await chrome.storage.local.get(["token", "bindings", "pairing", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions"]);
+  return await chrome.storage.local.get(["token", "bindings", "pairing", PAIRING_AUTHORITY_KEY, "siteAnchors", "editPolicies", "editPolicyRevisions", "firstCourseRead"]);
 }
 
 async function courseDataConsentAccepted() {
@@ -798,6 +815,10 @@ async function courseDataConsentAccepted() {
 
 async function requireCourseDataConsent() {
   if (!await courseDataConsentAccepted()) throw new Error("course_data_consent_required");
+}
+
+async function requireCourseDataAuthority(generation) {
+  if (!await courseDataAuthorityCurrent(generation)) throw new Error("course_data_consent_required");
 }
 
 function invalidateCourseDataAuthority(socket = null) {
@@ -837,6 +858,25 @@ function queueStorageMutation(work) {
   const queued = state.storageQueue.catch(() => undefined).then(work);
   state.storageQueue = queued.catch(() => undefined);
   return queued;
+}
+
+async function restoreStorageFields(area, prior, keys) {
+  const values = {};
+  const removals = [];
+  for (const key of keys) {
+    if (prior[key] === undefined) removals.push(key);
+    else values[key] = prior[key];
+  }
+  if (Object.keys(values).length > 0) await area.set(values);
+  if (removals.length > 0) await area.remove(removals);
+}
+
+async function setCourseDataBoundFields(area, values, prior, authorityGeneration) {
+  await requireCourseDataAuthority(authorityGeneration);
+  await area.set(values);
+  if (await courseDataAuthorityCurrent(authorityGeneration)) return;
+  await restoreStorageFields(area, prior, Object.keys(values));
+  throw new Error("course_data_consent_required");
 }
 
 function courseConnectionAuthority(status, revokedOrigins = [], expiresAt = 0) {
@@ -982,12 +1022,18 @@ function abortPairingFetches() {
   state.pairingFetchControllers.clear();
 }
 
-async function settlePairing(expected, status, values) {
+async function settlePairing(expected, status, values, authorityGeneration = null) {
   return await queueStorageMutation(async () => {
-    const latest = await chrome.storage.local.get(["pairing", PAIRING_AUTHORITY_KEY]);
+    if (authorityGeneration !== null && !await courseDataAuthorityCurrent(authorityGeneration)) return false;
+    const keys = [...new Set(["pairing", PAIRING_AUTHORITY_KEY, ...Object.keys(values)])];
+    const latest = await chrome.storage.local.get(keys);
     if (!pairingIdentityMatches(latest.pairing, expected)
       || !pairingAuthorityMatches(latest[PAIRING_AUTHORITY_KEY], expected?.pairingGeneration, "pending")) return false;
     await chrome.storage.local.set({ ...values, [PAIRING_AUTHORITY_KEY]: pairingAuthority(expected.pairingGeneration, status) });
+    if (authorityGeneration !== null && !await courseDataAuthorityCurrent(authorityGeneration)) {
+      await restoreStorageFields(chrome.storage.local, latest, keys);
+      return false;
+    }
     await chrome.alarms.clear("morrow-pairing");
     return true;
   });
@@ -1389,6 +1435,18 @@ function sameSitePrincipal(left, right) {
     && left.principalFingerprint === right.principalFingerprint;
 }
 
+function firstCourseReadMatchesBinding(receipt, binding) {
+  return receipt?.schema === FIRST_COURSE_READ_SCHEMA
+    && receipt.provider === binding.provider
+    && receipt.origin === binding.origin
+    && receipt.courseId === String(binding.courseId || "")
+    && receipt.sourceBindingId === binding.sourceBindingId
+    && receipt.principalFingerprint === binding.principalFingerprint
+    && receipt.sessionGeneration === binding.sessionGeneration
+    && Number.isSafeInteger(receipt.at)
+    && receipt.at > 0;
+}
+
 async function publicBindings() {
   const api = await catalog();
   const stored = await storage();
@@ -1401,13 +1459,17 @@ async function publicBindings() {
     const privateBinding = materializeBinding({ ...binding, siteAnchorId: _siteAnchorId, principalId: _principalId }, anchor);
     const editPermission = await editPermissionFor(privateBinding, stored, api);
     const editPolicyRevision = Math.max(Number.isSafeInteger(revisions[binding.sourceBindingId]) ? revisions[binding.sourceBindingId] : 0, Number.isSafeInteger(policies[binding.sourceBindingId]?.revision) ? policies[binding.sourceBindingId].revision : 0);
+    const runtimeVerified = binding.runtimeVerified && verified.get(_siteAnchorId) === true;
     return {
       ...binding,
       catalogDigest: api.catalogDigest,
       editPolicyRevision,
       editOptionsAvailable: true,
       ...(editPermission ? { editPermission: editPermissionSummary(editPermission) } : {}),
-      runtimeVerified: binding.runtimeVerified && verified.get(_siteAnchorId) === true,
+      ...(runtimeVerified && firstCourseReadMatchesBinding(stored.firstCourseRead, privateBinding)
+        ? { firstReadCompleted: true }
+        : {}),
+      runtimeVerified,
     };
   }));
 }
@@ -1444,6 +1506,12 @@ async function probeSiteAnchor(anchor, tab) {
  */
 async function siteAnchorMatches(anchor, { fresh = false } = {}) {
   const siteAnchorId = anchor?.siteAnchorId;
+  let originPermission;
+  try { originPermission = permissionPattern(anchor?.origin); } catch { return false; }
+  if (!await chrome.permissions.contains({ origins: [originPermission] }).catch(() => false)) {
+    anchorVerifications.delete(siteAnchorId);
+    return false;
+  }
   const tab = await chrome.tabs.get(anchor?.tabId).catch(() => null);
   if (!tab?.url) {
     anchorVerifications.delete(siteAnchorId);
@@ -1531,8 +1599,10 @@ function messageCode(error) {
   return /^[a-z][a-z0-9_]{2,80}$/.test(code) ? code : "bridge_request_failed";
 }
 
-async function editPolicyStatus() {
+async function editPolicyStatus(authorityGeneration = state.courseDataAuthorityGeneration) {
+  await requireCourseDataAuthority(authorityGeneration);
   const api = await catalog();
+  await requireCourseDataAuthority(authorityGeneration);
   const stored = await storage();
   const published = new Map((await publicBindings()).map((binding) => [binding.sourceBindingId, binding]));
   const siteAnchors = await publicSiteAnchors(stored);
@@ -1555,6 +1625,7 @@ async function editPolicyStatus() {
       ...(staleEditPermission ? { staleEditPermission: editPermissionSummary(staleEditPermission) } : {}),
     };
   }));
+  await requireCourseDataAuthority(authorityGeneration);
   return {
     catalogDigest: api.catalogDigest,
     bindingLimit: BRIDGE_BINDING_LIMIT,
@@ -1791,11 +1862,13 @@ function editPermissionSummary(permission) {
   };
 }
 
-async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs) {
+async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs, authorityGeneration = state.courseDataAuthorityGeneration) {
   if (typeof sourceBindingId !== "string" || !sourceBindingId || !Array.isArray(enabledCategories) || !enabledCategories.length) throw new Error("edit_policy_categories_invalid");
   if (!validEditDuration(expiresInMs)) throw new Error("edit_policy_expiration_invalid");
+  await requireCourseDataAuthority(authorityGeneration);
   const api = await catalog();
   const result = await queueStorageMutation(async () => {
+    await requireCourseDataAuthority(authorityGeneration);
     const stored = await storage();
     const binding = (stored.bindings || []).find((candidate) => candidate.sourceBindingId === sourceBindingId);
     if (!binding) throw new Error("edit_policy_binding_missing");
@@ -1805,16 +1878,22 @@ async function saveEditPolicy(sourceBindingId, enabledCategories, expiresInMs) {
     const revisions = storedPolicyRevisions(stored.editPolicyRevisions);
     const priorRevision = Math.max(Number.isSafeInteger(revisions[sourceBindingId]) ? revisions[sourceBindingId] : 0, Number.isSafeInteger(policies[sourceBindingId]?.revision) ? policies[sourceBindingId].revision : 0);
     const editPermission = await createEditPermission({ binding, catalogDigest: api.catalogDigest, revision: priorRevision + 1, enabledCategories, operations: [...state.operations.values()], expiresAt: Date.now() + expiresInMs });
-    await chrome.storage.local.set({ editPolicies: { ...policies, [sourceBindingId]: editPermission }, editPolicyRevisions: { ...revisions, [sourceBindingId]: editPermission.revision } });
+    await setCourseDataBoundFields(chrome.storage.local, {
+      editPolicies: { ...policies, [sourceBindingId]: editPermission },
+      editPolicyRevisions: { ...revisions, [sourceBindingId]: editPermission.revision },
+    }, stored, authorityGeneration);
     return editPermission;
   });
+  await requireCourseDataAuthority(authorityGeneration);
   await publishBindings();
+  await requireCourseDataAuthority(authorityGeneration);
   return { editPermission: result };
 }
 
-async function revokeEditPolicy(sourceBindingId) {
+async function revokeEditPolicy(sourceBindingId, authorityGeneration = state.courseDataAuthorityGeneration) {
   if (typeof sourceBindingId !== "string" || !sourceBindingId) throw new Error("edit_policy_binding_missing");
   const result = await queueStorageMutation(async () => {
+    await requireCourseDataAuthority(authorityGeneration);
     const stored = await storage();
     if (!(stored.bindings || []).some((candidate) => candidate.sourceBindingId === sourceBindingId)) throw new Error("edit_policy_binding_missing");
     const policies = storedPolicies(stored.editPolicies);
@@ -1822,10 +1901,15 @@ async function revokeEditPolicy(sourceBindingId) {
     const priorRevision = Math.max(Number.isSafeInteger(revisions[sourceBindingId]) ? revisions[sourceBindingId] : 0, Number.isSafeInteger(policies[sourceBindingId]?.revision) ? policies[sourceBindingId].revision : 0);
     const nextPolicies = { ...policies };
     delete nextPolicies[sourceBindingId];
-    await chrome.storage.local.set({ editPolicies: nextPolicies, editPolicyRevisions: { ...revisions, [sourceBindingId]: priorRevision + 1 } });
+    await setCourseDataBoundFields(chrome.storage.local, {
+      editPolicies: nextPolicies,
+      editPolicyRevisions: { ...revisions, [sourceBindingId]: priorRevision + 1 },
+    }, stored, authorityGeneration);
     return priorRevision + 1;
   });
+  await requireCourseDataAuthority(authorityGeneration);
   await publishBindings();
+  await requireCourseDataAuthority(authorityGeneration);
   return { revoked: true, revision: result };
 }
 
@@ -1882,8 +1966,10 @@ function bridgePolicyOptionsGet(command) {
   return command.sourceBindingId;
 }
 
-async function editPolicyOptions(sourceBindingId) {
+async function editPolicyOptions(sourceBindingId, authorityGeneration = state.courseDataAuthorityGeneration) {
+  await requireCourseDataAuthority(authorityGeneration);
   const api = await catalog();
+  await requireCourseDataAuthority(authorityGeneration);
   const stored = await storage();
   const binding = (stored.bindings || []).find((candidate) => candidate.sourceBindingId === sourceBindingId);
   if (!binding) throw new Error("edit_policy_binding_missing");
@@ -1895,19 +1981,21 @@ async function editPolicyOptions(sourceBindingId) {
     Number.isSafeInteger(revisions[sourceBindingId]) ? revisions[sourceBindingId] : 0,
     Number.isSafeInteger(permissions[sourceBindingId]?.revision) ? permissions[sourceBindingId].revision : 0,
   );
+  const runtimeVerified = Boolean(anchor && await siteAnchorMatches(anchor, { fresh: true }));
+  await requireCourseDataAuthority(authorityGeneration);
   return {
     schema: "morrow.bridge.edit-options.v1",
     sourceBindingId,
     provider: binding.provider,
     catalogDigest: api.catalogDigest,
     policyRevision,
-    runtimeVerified: Boolean(anchor && await siteAnchorMatches(anchor, { fresh: true })),
+    runtimeVerified,
     options: categoriesForBinding(binding, [...state.operations.values()]),
     ...(editPermission ? { editPermission } : {}),
   };
 }
 
-async function applyBridgePolicySet(policySet) {
+async function applyBridgePolicySet(policySet, command) {
   const api = await catalog();
   const result = await queueStorageMutation(async () => {
     const stored = await storage();
@@ -1962,7 +2050,10 @@ async function applyBridgePolicySet(policySet) {
         entries.push({ sourceBindingId: selection.sourceBindingId, state: permission ? "edit" : "plan", revision: priorRevision, ...(permission ? { editPermission: permission } : {}), code: policyCode(error) });
       }
     }
-    if (changed) await chrome.storage.local.set({ editPolicies: nextPolicies, editPolicyRevisions: nextRevisions });
+    if (changed) {
+      if (await bridgeCommandCancelled(command)) throw new Error("edit_policy_set_stale");
+      await chrome.storage.local.set({ editPolicies: nextPolicies, editPolicyRevisions: nextRevisions });
+    }
     return { schema: "morrow.bridge.edit-policy-set.v1", mode: policySet.mode, entries };
   });
   await publishBindings();
@@ -2074,9 +2165,10 @@ async function checkAnchorCourse(anchor, courseId) {
   throw new Error("course_selection_target_refused");
 }
 
-async function startCourseDiscovery(siteAnchorId) {
+async function startCourseDiscovery(siteAnchorId, authorityGeneration = state.courseDataAuthorityGeneration) {
   if (typeof siteAnchorId !== "string" || !siteAnchorId) throw new Error("course_discovery_anchor_missing");
   return await queueStorageMutation(async () => {
+    await requireCourseDataAuthority(authorityGeneration);
     const stored = await storage();
     const anchor = storedAnchors(stored.siteAnchors).find((candidate) => candidate.siteAnchorId === siteAnchorId);
     if (!anchor) throw new Error("course_discovery_anchor_missing");
@@ -2105,7 +2197,7 @@ async function startCourseDiscovery(siteAnchorId) {
     const saved = await discoveries();
     const next = Object.fromEntries(Object.entries(storedDiscoveries(saved.courseDiscoveries)).filter(([, prior]) => prior?.siteAnchorId !== anchor.siteAnchorId));
     next[receipt.discoveryReceiptId] = receipt;
-    await discoveryArea().set({ courseDiscoveries: next });
+    await setCourseDataBoundFields(discoveryArea(), { courseDiscoveries: next }, saved, authorityGeneration);
     return publicDiscoveryReceipt(anchor, receipt);
   });
 }
@@ -2127,9 +2219,10 @@ function publicDiscoveryReceipt(anchor, receipt) {
   };
 }
 
-async function continueCourseDiscovery(siteAnchorId, discoveryReceiptId) {
+async function continueCourseDiscovery(siteAnchorId, discoveryReceiptId, authorityGeneration = state.courseDataAuthorityGeneration) {
   if (typeof siteAnchorId !== "string" || !siteAnchorId || typeof discoveryReceiptId !== "string" || !discoveryReceiptId) throw new Error("course_discovery_receipt_missing");
   return await queueStorageMutation(async () => {
+    await requireCourseDataAuthority(authorityGeneration);
     const stored = await storage();
     const anchor = storedAnchors(stored.siteAnchors).find((candidate) => candidate.siteAnchorId === siteAnchorId);
     if (!anchor) throw new Error("course_discovery_anchor_missing");
@@ -2159,17 +2252,18 @@ async function continueCourseDiscovery(siteAnchorId, discoveryReceiptId) {
       next: listed.next,
     };
     const nextDiscoveries = { ...storedDiscoveries(saved.courseDiscoveries), [discoveryReceiptId]: updated };
-    await discoveryArea().set({ courseDiscoveries: nextDiscoveries });
+    await setCourseDataBoundFields(discoveryArea(), { courseDiscoveries: nextDiscoveries }, saved, authorityGeneration);
     return publicDiscoveryReceipt(anchor, updated);
   });
 }
 
-async function saveCourseSelection(siteAnchorId, discoveryReceiptId, courseIds) {
+async function saveCourseSelection(siteAnchorId, discoveryReceiptId, courseIds, authorityGeneration = state.courseDataAuthorityGeneration) {
   if (typeof siteAnchorId !== "string" || !siteAnchorId || typeof discoveryReceiptId !== "string" || !discoveryReceiptId
     || !Array.isArray(courseIds) || !courseIds.length || courseIds.length > DISCOVERY_PAGE_LIMIT) throw new Error("course_selection_invalid");
   const requestedIds = courseIds.map(decimalId);
   if (requestedIds.some((courseId) => !courseId) || new Set(requestedIds).size !== requestedIds.length) throw new Error("course_selection_invalid");
   const result = await queueStorageMutation(async () => {
+    await requireCourseDataAuthority(authorityGeneration);
     const stored = await storage();
     const anchor = storedAnchors(stored.siteAnchors).find((candidate) => candidate.siteAnchorId === siteAnchorId);
     if (!anchor) throw new Error("course_discovery_anchor_missing");
@@ -2213,11 +2307,51 @@ async function saveCourseSelection(siteAnchorId, discoveryReceiptId, courseIds) 
       delete policies[binding.sourceBindingId];
       added.push(binding);
     }
-    await chrome.storage.local.set({ bindings, editPolicies: policies });
+    await setCourseDataBoundFields(chrome.storage.local, { bindings, editPolicies: policies }, stored, authorityGeneration);
     return { siteAnchorId: anchor.siteAnchorId, bindings: added.map(({ principalId: _principalId, siteAnchorId: _siteAnchorId, ...binding }) => binding) };
   });
+  await requireCourseDataAuthority(authorityGeneration);
   await publishBindings();
+  await requireCourseDataAuthority(authorityGeneration);
   return result;
+}
+
+function clearBridgeHandshakeDeadline(socket = null) {
+  const pending = state.handshakeDeadline;
+  if (!pending || (socket && pending.socket !== socket)) return;
+  clearTimeout(pending.timer);
+  state.handshakeDeadline = null;
+}
+
+function resetBridgeReconnect() {
+  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = null;
+  state.reconnectAttempt = 0;
+}
+
+function retireBridgeSocket(socket, { closeCode = null, reason = "", reconnect = true } = {}) {
+  if (state.socket !== socket) return false;
+  clearBridgeHandshakeDeadline(socket);
+  invalidateCourseDataAuthority(socket);
+  state.socket = null;
+  state.generation = 0;
+  state.accepted = null;
+  clearPrivateChat();
+  if (Number.isInteger(closeCode)) {
+    try { socket.close(closeCode, reason); } catch {}
+  }
+  void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+  if (reconnect) scheduleReconnect();
+  return true;
+}
+
+function startBridgeHandshakeDeadline(socket) {
+  clearBridgeHandshakeDeadline();
+  const timer = setTimeout(() => {
+    if (state.handshakeDeadline?.socket !== socket) return;
+    retireBridgeSocket(socket, { closeCode: 4408, reason: "bridge_handshake_timeout", reconnect: true });
+  }, BRIDGE_HANDSHAKE_TIMEOUT_MS);
+  state.handshakeDeadline = { socket, timer };
 }
 
 async function connectBridge() {
@@ -2241,7 +2375,10 @@ async function connectBridge() {
   let phase = "opening";
   let serverAuthenticated = false;
   let messageQueue = Promise.resolve();
+  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
+  state.reconnectTimer = null;
   state.socket = socket;
+  startBridgeHandshakeDeadline(socket);
   socket.onopen = () => {
     void bridgeConnectionAuthorityCurrent(socket, authorityGeneration).then((current) => {
       if (!current) {
@@ -2319,6 +2456,8 @@ async function connectBridge() {
         if (!await bridgeConnectionAuthorityCurrent(socket, authorityGeneration)) return;
         state.authenticationProblem = null;
         phase = "active";
+        clearBridgeHandshakeDeadline(socket);
+        resetBridgeReconnect();
         if (state.socket === socket) void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
         return;
       }
@@ -2335,30 +2474,24 @@ async function connectBridge() {
   };
   socket.onclose = (event) => {
     if (state.socket !== socket) return;
-    invalidateCourseDataAuthority(socket);
-    state.socket = null;
-    state.generation = 0;
-    state.accepted = null;
-    clearPrivateChat();
-    void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
     if (event.code === 4403 && ["bridge_identity_refused", "bridge_server_identity_refused", "bridge_ready_mismatch"].includes(event.reason)) {
-      if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-      state.reconnectTimer = null;
       state.authenticationProblem = event.reason;
-      void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
+      retireBridgeSocket(socket, { reconnect: false });
       return;
     }
-    scheduleReconnect();
+    retireBridgeSocket(socket, { reconnect: true });
   };
   socket.onerror = () => undefined;
 }
 
 function scheduleReconnect() {
   if (state.reconnectTimer) return;
+  const delay = Math.min(BRIDGE_RECONNECT_BASE_MS * (2 ** Math.min(state.reconnectAttempt, 4)), BRIDGE_RECONNECT_MAX_MS);
+  state.reconnectAttempt = Math.min(state.reconnectAttempt + 1, 5);
   state.reconnectTimer = setTimeout(() => {
     state.reconnectTimer = null;
     void connectBridge();
-  }, 2_000);
+  }, delay);
 }
 
 function problem(code, message, recoverable = false) {
@@ -2404,9 +2537,11 @@ function bridgeCommandOwned(active, command) {
 
 async function bridgeCommandCancelled(command) {
   const active = state.bridgeCommands.get(command.requestId);
-  if (!bridgeCommandOwned(active, command) || active.cancelled === true) return true;
+  if (!bridgeCommandOwned(active, command) || active.cancelled === true
+    || !Number.isSafeInteger(command.expiresAt) || command.expiresAt <= Date.now()) return true;
   if (!await courseDataAuthorityCurrent(active.authorityGeneration)) return true;
-  return !bridgeCommandOwned(active, command) || active.cancelled === true;
+  return !bridgeCommandOwned(active, command) || active.cancelled === true
+    || !Number.isSafeInteger(command.expiresAt) || command.expiresAt <= Date.now();
 }
 
 function markBridgeEffectPossible(command) {
@@ -2557,45 +2692,84 @@ function clearItemBankCredentialsForTab(tabId) {
   }
 }
 
-async function currentItemBankLaunch(binding) {
+async function currentItemBankLaunch(binding, deadline) {
   try {
+    if (!commandDeadlineCurrent(deadline)) return null;
     await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
+    if (!commandDeadlineCurrent(deadline)) return null;
     const result = await chrome.tabs.sendMessage(binding.tabId, {
       type: "morrow_canvas_item_bank_tabs",
       courseId: binding.courseId,
     }, { frameId: 0 });
     if (result?.ok !== true || result.profile?.origin !== binding.origin || result.profile?.id !== binding.principalId
       || result.course?.id !== binding.courseId) return null;
-    return itemBankLaunchFromCourseTabs(result.tabs, binding.origin, binding.courseId);
+    return itemBankLaunchFromCourseTabs(absoluteItemBankTabUrls(result.tabs, binding.origin), binding.origin, binding.courseId);
   } catch {
     return null;
   }
 }
 
-async function freshItemBankContext(binding) {
+async function freshItemBankContext(binding, operation, expiresAt) {
+  const deadline = boundedCommandDeadline(expiresAt, ITEM_BANK_CREDENTIAL_WAIT_MS);
+  if (!deadline) return { error: "item_bank_operation_timeout" };
   const tab = await chrome.tabs.get(binding.tabId).catch(() => null);
+  if (!commandDeadlineCurrent(deadline)) return { error: "item_bank_operation_timeout" };
   let tabUrl;
   try { tabUrl = new URL(tab?.url || ""); } catch { tabUrl = null; }
   if (!tabUrl || tabUrl.origin !== binding.origin
     || tabUrl.pathname.match(/^\/courses\/([1-9][0-9]{0,18})(?:\/|$)/)?.[1] !== binding.courseId) {
     return { error: "item_bank_launch_context_required" };
   }
-  const deployment = await currentItemBankLaunch(binding);
+  const deployment = await currentItemBankLaunch(binding, deadline);
+  if (!commandDeadlineCurrent(deadline)) return { error: "item_bank_operation_timeout" };
   if (!deployment) return { error: "item_bank_deployment_unavailable" };
   const { externalToolId, launchUrl } = deployment;
+  const native = deployment.native === true;
   const launchedAt = Date.now();
   const launchNonce = crypto.randomUUID();
   const launchTab = await chrome.tabs.create({ active: false, windowId: tab.windowId }).catch(() => null);
   if (!Number.isInteger(launchTab?.id)) return { error: "item_bank_launch_failed" };
   const launchTabId = launchTab.id;
-  pendingItemBankLaunches.set(launchTabId, { tabId: launchTabId, canvasLocalContextId: binding.courseId, externalToolId, launchUrl, launchNonce, launchedAt });
+  if (!commandDeadlineCurrent(deadline)) return { tabId: launchTabId, error: "item_bank_operation_timeout" };
+  if (!native) {
+    pendingItemBankLaunches.set(launchTabId, { tabId: launchTabId, canvasLocalContextId: binding.courseId, externalToolId, launchUrl, launchNonce, launchedAt });
+  }
   try {
     await chrome.tabs.update(launchTabId, { url: launchUrl });
   } catch {
     clearItemBankCredentialsForTab(launchTabId);
     return { tabId: launchTabId, error: "item_bank_launch_failed" };
   }
-  const deadline = launchedAt + ITEM_BANK_CREDENTIAL_WAIT_MS;
+  if (native) {
+    while (Date.now() < deadline) {
+      const frames = await chrome.webNavigation.getAllFrames({ tabId: launchTabId }).catch(() => []);
+      const topFrames = frames.filter((frame) => frame?.frameId === 0 && frame?.url === launchUrl);
+      if (topFrames.length > 1 || itemBankFrameIds(frames).length > 0) {
+        return { tabId: launchTabId, error: "item_bank_context_ambiguous" };
+      }
+      if (topFrames.length === 1) {
+        try {
+          const [probe] = await chrome.scripting.executeScript({
+            target: { tabId: launchTabId, frameIds: [0] },
+            world: "MAIN",
+            func: executeItemBankInPage,
+            args: [{ operation, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true, expiresAt }],
+          });
+          if (probe?.result?.matched === true && probe.result.ok === true) {
+            return { tabId: launchTabId, frameId: 0, native: true };
+          }
+          if (probe?.result?.matched === false) {
+            return { tabId: launchTabId, error: "item_bank_context_not_established" };
+          }
+          if (probe?.result?.error && probe.result.error !== "item_bank_credential_unavailable") {
+            return { tabId: launchTabId, error: probe.result.error };
+          }
+        } catch {}
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, deadline - Date.now()))));
+    }
+    return { tabId: launchTabId, error: "item_bank_credential_unavailable" };
+  }
   while (Date.now() < deadline) {
     const launch = pendingItemBankLaunches.get(launchTabId);
     if (launch?.ambiguous === true) return { tabId: launchTabId, error: "item_bank_context_ambiguous" };
@@ -2621,7 +2795,7 @@ async function freshItemBankContext(binding) {
     }
     if (usable.length === 1) return { tabId: launchTabId, ...usable[0] };
     if (usable.length > 1) return { tabId: launchTabId, error: "item_bank_context_ambiguous" };
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, deadline - Date.now()))));
   }
   clearItemBankCredentialsForTab(launchTabId);
   return { tabId: launchTabId, error: "item_bank_credential_not_captured" };
@@ -2655,7 +2829,10 @@ function withoutMediaElements(value, findings) {
   return replace(value, 0);
 }
 
-async function executeItemBank(binding, operation, args) {
+async function executeItemBank(binding, operation, args, expiresAt) {
+  if (!boundedCommandDeadline(expiresAt, ITEM_BANK_CREDENTIAL_WAIT_MS)) {
+    return { ok: false, sent: false, error: "item_bank_operation_timeout" };
+  }
   let context;
   try {
     let payloadContractSha256;
@@ -2686,26 +2863,27 @@ async function executeItemBank(binding, operation, args) {
     // credential is cleared first, and only a quiz-api request observed after
     // this launch can authorize the read. The request payload is injected only
     // after one exact frame has proved its principal and numeric course.
-    context = await freshItemBankContext(binding);
+    if (!commandDeadlineCurrent(expiresAt)) return { ok: false, sent: false, error: "item_bank_operation_timeout" };
+    context = await freshItemBankContext(binding, operation, expiresAt);
     if (context.error) return { ok: false, sent: false, error: context.error };
+    if (!commandDeadlineCurrent(expiresAt)) return { ok: false, sent: false, error: "item_bank_operation_timeout" };
     const [probe] = await chrome.scripting.executeScript({
       target: { tabId: context.tabId, frameIds: [context.frameId] },
       world: "MAIN",
       func: executeItemBankInPage,
-      args: [{ operation, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true }],
+      args: [{ operation, principalId: binding.principalId, canvasOrigin: binding.origin, courseId: binding.courseId, contextOnly: true, expiresAt }],
     });
     if (probe?.result?.matched !== true) return { ok: false, sent: false, error: "item_bank_context_not_established" };
+    if (!commandDeadlineCurrent(expiresAt)) return { ok: false, sent: false, error: "item_bank_operation_timeout" };
     try {
-      const [execution] = await chrome.scripting.executeScript({
-        target: { tabId: context.tabId, frameIds: [context.frameId] },
-        world: "MAIN",
-        func: executeItemBankInPage,
-        args: [{
-          operation,
-          arguments: args,
-          principalId: binding.principalId,
-          canvasOrigin: binding.origin,
-          courseId: binding.courseId,
+      const executionInput = {
+        operation,
+        arguments: args,
+        principalId: binding.principalId,
+        canvasOrigin: binding.origin,
+        courseId: binding.courseId,
+        expiresAt,
+        ...(context.credential ? {
           credential: {
             apiOrigin: context.credential.apiOrigin,
             token: context.credential.token,
@@ -2718,8 +2896,14 @@ async function executeItemBank(binding, operation, args) {
             launchedAt: context.credential.launchedAt,
             capturedAt: context.credential.capturedAt,
           },
-          ...(payloadContractSha256 ? { payloadContractSha256 } : {}),
-        }],
+        } : {}),
+        ...(payloadContractSha256 ? { payloadContractSha256 } : {}),
+      };
+      const [execution] = await chrome.scripting.executeScript({
+        target: { tabId: context.tabId, frameIds: [context.frameId] },
+        world: "MAIN",
+        func: executeItemBankInPage,
+        args: [executionInput],
       });
       return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "item_bank_result_missing" };
     } catch {
@@ -2735,8 +2919,11 @@ async function executeItemBank(binding, operation, args) {
   }
 }
 
-async function freshQuizBankBuilderContext(binding, assignmentId, operation, args, verifiedBankSha256) {
+async function freshQuizBankBuilderContext(binding, assignmentId, operation, args, verifiedBankSha256, expiresAt) {
+  const deadline = boundedCommandDeadline(expiresAt, ITEM_BANK_CREDENTIAL_WAIT_MS);
+  if (!deadline) return { error: "quiz_bank_operation_timeout" };
   const tab = await chrome.tabs.get(binding.tabId).catch(() => null);
+  if (!commandDeadlineCurrent(deadline)) return { error: "quiz_bank_operation_timeout" };
   let currentUrl;
   try { currentUrl = new URL(tab?.url || ""); } catch { currentUrl = null; }
   if (!currentUrl || currentUrl.origin !== binding.origin
@@ -2747,12 +2934,12 @@ async function freshQuizBankBuilderContext(binding, assignmentId, operation, arg
   const launchTab = await chrome.tabs.create({ active: false, windowId: tab.windowId }).catch(() => null);
   if (!Number.isInteger(launchTab?.id)) return { error: "quiz_bank_launch_failed" };
   const tabId = launchTab.id;
+  if (!commandDeadlineCurrent(deadline)) return { tabId, error: "quiz_bank_operation_timeout" };
   try {
     await chrome.tabs.update(tabId, { url: launchUrl });
   } catch {
     return { tabId, error: "quiz_bank_launch_failed" };
   }
-  const deadline = Date.now() + ITEM_BANK_CREDENTIAL_WAIT_MS;
   while (Date.now() < deadline) {
     const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
     const frameIds = itemBankFrameIds(frames);
@@ -2777,6 +2964,7 @@ async function freshQuizBankBuilderContext(binding, assignmentId, operation, arg
             courseId: binding.courseId,
             assignmentId,
             contextOnly: true,
+            expiresAt,
           }],
         });
         if (probe?.result?.matched === true && probe.result.ok === true) {
@@ -2787,12 +2975,15 @@ async function freshQuizBankBuilderContext(binding, assignmentId, operation, arg
         }
       } catch {}
     }
-    await new Promise((resolve) => setTimeout(resolve, 250));
+    await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, deadline - Date.now()))));
   }
   return { tabId, error: "quiz_bank_builder_credential_unavailable" };
 }
 
-async function executeQuizBankDraw(binding, operation, args) {
+async function executeQuizBankDraw(binding, operation, args, expiresAt) {
+  if (!boundedCommandDeadline(expiresAt, ITEM_BANK_CREDENTIAL_WAIT_MS)) {
+    return { ok: false, sent: false, error: "quiz_bank_operation_timeout" };
+  }
   const assignmentId = decimalId(args?.assignment_id);
   if (!assignmentId || String(args?.course_id) !== binding.courseId) {
     return { ok: false, sent: false, error: "quiz_bank_course_assignment_mismatch" };
@@ -2803,7 +2994,7 @@ async function executeQuizBankDraw(binding, operation, args) {
     const api = await catalog();
     const getBank = api.operations.find((candidate) => candidate.toolName === "canvas_item_bank_get_bank");
     if (!getBank || !decimalId(args?.bank_id)) return { ok: false, sent: false, error: "quiz_bank_bank_contract_missing" };
-    const bank = await executeItemBank(binding, getBank, { course_id: binding.courseId, bank_id: String(args.bank_id) });
+    const bank = await executeItemBank(binding, getBank, { course_id: binding.courseId, bank_id: String(args.bank_id) }, expiresAt);
     if (!bank?.ok || typeof bank.snapshotSha256 !== "string") {
       return { ok: false, sent: false, error: "quiz_bank_bank_unreadable" };
     }
@@ -2815,7 +3006,7 @@ async function executeQuizBankDraw(binding, operation, args) {
         course_id: binding.courseId,
         bank_id: String(args.bank_id),
         bank_entry_id: String(args.bank_entry_id),
-      });
+      }, expiresAt);
       if (!entry?.ok || typeof entry.snapshotSha256 !== "string") {
         return { ok: false, sent: false, error: "quiz_bank_entry_unreadable" };
       }
@@ -2824,8 +3015,9 @@ async function executeQuizBankDraw(binding, operation, args) {
   }
   let context;
   try {
-    context = await freshQuizBankBuilderContext(binding, assignmentId, operation, args, verifiedBankSha256);
+    context = await freshQuizBankBuilderContext(binding, assignmentId, operation, args, verifiedBankSha256, expiresAt);
     if (context.error) return { ok: false, sent: false, error: context.error };
+    if (!commandDeadlineCurrent(expiresAt)) return { ok: false, sent: false, error: "quiz_bank_operation_timeout" };
     const [execution] = await chrome.scripting.executeScript({
       target: { tabId: context.tabId, frameIds: [context.frameId] },
       world: "MAIN",
@@ -2838,6 +3030,7 @@ async function executeQuizBankDraw(binding, operation, args) {
         assignmentId,
         verifiedBankSha256,
         verifiedEntrySha256,
+        expiresAt,
       }],
     });
     return execution?.result || { ok: false, sent: !operation.readOnly, outcomeUnknown: !operation.readOnly, error: "quiz_bank_result_missing" };
@@ -3615,8 +3808,8 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
   }
   return operation.service === "item_bank"
     ? ["list_quiz_draws", "attach_bank_to_quiz", "attach_bank_entry_to_quiz", "delete_quiz_bank_entry"].includes(operation.nickname)
-      ? await executeQuizBankDraw(binding, operation, args)
-      : await executeItemBank(binding, operation, args)
+      ? await executeQuizBankDraw(binding, operation, args, expiresAt)
+      : await executeItemBank(binding, operation, args, expiresAt)
     : await executeCanvas(binding, operation, args, expiresAt);
 }
 
@@ -3749,11 +3942,10 @@ function hotSpotFailureMessage(error) {
 }
 
 async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, privateAttachment) {
+  const deadline = boundedCommandDeadline(expiresAt, COURSE_FILE_READ_TIMEOUT_MS);
+  if (!deadline) return { ok: false, sent: false, error: "canvas_hot_spot_transfer_timeout" };
   if (!await courseFileStorageAccessEnabled()) return { ok: false, sent: false, error: "canvas_file_storage_access_required" };
-  const deadline = Math.min(
-    Number.isSafeInteger(expiresAt) && expiresAt > Date.now() ? expiresAt : Date.now() + COURSE_FILE_READ_TIMEOUT_MS,
-    Date.now() + COURSE_FILE_READ_TIMEOUT_MS,
-  );
+  if (!commandDeadlineCurrent(deadline)) return { ok: false, sent: false, error: "canvas_hot_spot_transfer_timeout" };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
   let uploadDispatched = false;
@@ -3762,6 +3954,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
   let uploadHost;
   try {
     const execute = async (input) => {
+      if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_hot_spot_transfer_timeout");
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasNewQuizHotSpotInPage,
         args: [input],
@@ -3790,6 +3983,7 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
       || await sha256Bytes(bytes) !== privateAttachment.manifest.sha256) {
       return { ok: false, sent: false, error: "canvas_private_attachment_invalid" };
     }
+    if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_hot_spot_transfer_timeout");
     uploadDispatched = true;
     const upload = await fetch(uploadUrl, {
       method: "PUT",
@@ -3898,11 +4092,10 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
 }
 
 async function executeCanvasCourseFileTransfer(binding, args, expiresAt, privateAttachment) {
+  const deadline = boundedCommandDeadline(expiresAt, COURSE_FILE_READ_TIMEOUT_MS);
+  if (!deadline) return { ok: false, sent: false, error: "canvas_file_transfer_timeout" };
   if (!await courseFileStorageAccessEnabled()) return { ok: false, sent: false, error: "canvas_file_storage_access_required" };
-  const deadline = Math.min(
-    Number.isSafeInteger(expiresAt) && expiresAt > Date.now() ? expiresAt : Date.now() + COURSE_FILE_READ_TIMEOUT_MS,
-    Date.now() + COURSE_FILE_READ_TIMEOUT_MS,
-  );
+  if (!commandDeadlineCurrent(deadline)) return { ok: false, sent: false, error: "canvas_file_transfer_timeout" };
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(1, deadline - Date.now()));
   let uploadDispatched = false;
@@ -3910,6 +4103,7 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
   let uploadObserver;
   try {
     const execute = async (input) => {
+      if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_transfer_timeout");
       const [execution] = await chrome.scripting.executeScript({
         target: { tabId: binding.tabId, frameIds: [0] }, world: "MAIN", func: executeCanvasCourseFileTransferInPage,
         args: [input],
@@ -3920,6 +4114,7 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       binding: { origin: binding.origin, courseId: binding.courseId, principalId: binding.principalId },
       folderId: String(args.folder_id),
       attachment: privateAttachment,
+      expiresAt: deadline,
     };
     const prepared = await execute({ ...transferInput, mode: "initialize" });
     const plan = prepared?.ok === true && prepared?.sent === false && privateCanvasUploadPlan(prepared.data);
@@ -3933,6 +4128,7 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
     }), privateAttachment.manifest.filename);
     uploadObserver = observeCanvasUploadConfirmation(plan.uploadUrl, binding.origin, controller.signal);
     if (!uploadObserver) return { ok: false, sent: false, error: "canvas_file_upload_observer_unavailable" };
+    if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_transfer_timeout");
     uploadDispatched = true;
     const upload = await fetch(plan.uploadUrl, {
       method: "POST",
@@ -3963,6 +4159,7 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       || String(completed.data.folder_id) !== String(args.folder_id) || completed.data.sha256 !== privateAttachment.manifest.sha256) {
       return { ok: false, sent: true, outcomeUnknown: true, status: uploadStatus, error: "canvas_file_readback_mismatch" };
     }
+    if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_transfer_timeout");
     const download = await fetch(downloadUrl, {
       credentials: "omit",
       cache: "no-store",
@@ -3986,7 +4183,7 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
         { type: "canvas_file", id: String(completed.data.file.id) },
       ] },
       data: {
-        course_id: Number(binding.courseId), folder_id: Number(args.folder_id),
+        ...canonicalCanvasCourseFolderIds(binding.courseId, args.folder_id),
         file: completed.data.file, sha256: privateAttachment.manifest.sha256,
       },
     };
@@ -4099,6 +4296,11 @@ function courseScopeProblem(command, binding, operation, canvasConversation) {
       : problem("course_binding_mismatch", "This request does not match the selected course.", true);
   }
   const admission = canvasOperationAdmission(operation);
+  if (command.kind === "invoke_read"
+    && (admission.courseTarget.kind === "none"
+      || (admission.courseTarget.kind === "self_path" && !admission.courseTarget.argument))) {
+    return problem("course_scope_required", "This read needs one selected course target.", true);
+  }
   // The Item Bank routes name a bank, never a course, so the guarded repair proves the course
   // through the guard instead of through a path argument. The frame checks the same course again
   // before it sends anything.
@@ -4231,18 +4433,43 @@ async function commandContext(command) {
   return { binding, operation, ...(privateAttachment ? { privateAttachment } : {}), ...(privateAttachments ? { privateAttachments } : {}) };
 }
 
-async function executeNamedCanvasReadback(binding, plan) {
+function internalCanvasCourseRead(binding, operation) {
+  return operation?.provider === "canvas" && operation.readOnly === true
+    ? {
+        ...operation,
+        morrowInternalCourseRead: {
+          schema: "morrow.canvas-internal-course-read.v1",
+          courseId: binding.courseId,
+        },
+      }
+    : operation;
+}
+
+async function executeNamedCanvasReadback(binding, plan, expiresAt) {
   if (plan.progressReadOperation) {
     for (let attempt = 0; attempt < 6; attempt += 1) {
-      const progress = await executeOperation(binding, plan.progressReadOperation, plan.progressArguments);
+      const progress = await executeOperation(
+        binding,
+        internalCanvasCourseRead(binding, plan.progressReadOperation),
+        plan.progressArguments,
+        expiresAt,
+      );
       const assessed = evaluateCanvasOperationProgress(plan, progress);
       if (assessed?.settled) break;
       if (!assessed || assessed.terminal || attempt === 5) return assessed?.verification
         || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_operation_progress_unavailable" };
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      if (!commandDeadlineCurrent(expiresAt)) {
+        return { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_operation_deadline_expired" };
+      }
+      await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, expiresAt - Date.now()))));
     }
   }
-  const readback = await executeOperation(binding, plan.readOperation, plan.arguments);
+  const readback = await executeOperation(
+    binding,
+    internalCanvasCourseRead(binding, plan.readOperation),
+    plan.arguments,
+    expiresAt,
+  );
   return evaluateCanvasOperationReadback(plan, readback)
     || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_operation_readback_unavailable" };
 }
@@ -4320,13 +4547,18 @@ function canvasSemanticInputProblem(semantic, operation) {
  * by its context code and for the whole of it, and every entry has to name that same calendar: a
  * listing Canvas did not narrow to this course says nothing about what the course holds.
  */
-async function canvasSemanticCourseCollection(binding, semantic) {
+async function canvasSemanticCourseCollection(binding, semantic, expiresAt) {
   const collection = state.operations.get(semantic.target.courseCollectionRead);
   const args = canvasSemanticCourseCollectionArguments(semantic.target, binding.courseId);
   if (collection?.provider !== "canvas" || collection.readOnly !== true || Object.keys(args).length === 0) {
     return { collection: null, state: "unreadable" };
   }
-  const listed = await executeOperation(binding, collection, args);
+  const listed = await executeOperation(
+    binding,
+    internalCanvasCourseRead(binding, collection),
+    args,
+    expiresAt,
+  );
   return { collection, state: canvasSemanticCourseCollectionState(semantic.target, listed, semantic.objectId, binding.courseId) };
 }
 
@@ -4335,7 +4567,7 @@ async function canvasSemanticCourseCollection(binding, semantic) {
  * only when this exact object is the selected course's own. Nothing has been sent when this
  * refuses, so the request stays free for another attempt.
  */
-async function resolveCanvasSemanticTarget(binding, operation, semantic) {
+async function resolveCanvasSemanticTarget(binding, operation, semantic, expiresAt) {
   const refused = problem(
     "canvas_semantic_target_course_mismatch",
     `Morrow could not confirm that this Canvas ${semantic.target.object} belongs to the selected course, so it changed nothing.`,
@@ -4365,17 +4597,22 @@ async function resolveCanvasSemanticTarget(binding, operation, semantic) {
   const readOperation = state.operations.get(semantic.target.resolverRead);
   if (!semantic.objectId || readOperation?.provider !== "canvas" || readOperation.readOnly !== true) return { failure: refused };
   const readParameter = semantic.target.readParameter || semantic.target.objectParameter;
-  const read = await executeOperation(binding, readOperation, { [readParameter]: semantic.objectId });
+  const read = await executeOperation(
+    binding,
+    internalCanvasCourseRead(binding, readOperation),
+    { [readParameter]: semantic.objectId },
+    expiresAt,
+  );
   const context = canvasSemanticObjectContext(semantic.target, read, semantic.objectId);
   if (context.state === "multi_context") return { failure: multiContext };
   if (context.state !== "course" || context.courseId !== binding.courseId) return { failure: refused };
   if (semantic.target.courseCollectionProof === true) {
-    const listing = await canvasSemanticCourseCollection(binding, semantic);
+    const listing = await canvasSemanticCourseCollection(binding, semantic, expiresAt);
     if (listing.state !== "listed") return { failure: refused };
   }
   // Where the change lands is its own object, so it is proved from the course side as well: the
   // selected course's own complete listing has to name the destination before anything is sent.
-  if (destinationId && !await canvasSemanticDestinationListed(binding, semantic.target, destinationId)) {
+  if (destinationId && !await canvasSemanticDestinationListed(binding, semantic.target, destinationId, expiresAt)) {
     return { failure: refused };
   }
   const version = canvasSemanticObjectVersion(semantic.target, read, semantic.objectId);
@@ -4402,10 +4639,15 @@ async function resolveCanvasSemanticTarget(binding, operation, semantic) {
  * The folder a file moves into, read from the selected course's own complete list of folders. A list
  * that could not be read to its last page is not proof.
  */
-async function canvasSemanticDestinationListed(binding, target, destinationId) {
+async function canvasSemanticDestinationListed(binding, target, destinationId, expiresAt) {
   const collection = state.operations.get(target.destinationCollectionRead);
   if (collection?.provider !== "canvas" || collection.readOnly !== true) return false;
-  const listed = await executeOperation(binding, collection, { course_id: binding.courseId });
+  const listed = await executeOperation(
+    binding,
+    internalCanvasCourseRead(binding, collection),
+    { course_id: binding.courseId },
+    expiresAt,
+  );
   return canvasSemanticCourseCollectionState(target, listed, destinationId) === "listed";
 }
 
@@ -4423,8 +4665,8 @@ function semanticVerification(status, plan, detail) {
  * Proves a deletion from the selected course's own listing when the object route still answers.
  * A listing that could not be read to its last page proves nothing either way.
  */
-async function verifyCanvasSemanticAbsence(binding, semantic, fallback) {
-  const listing = await canvasSemanticCourseCollection(binding, semantic);
+async function verifyCanvasSemanticAbsence(binding, semantic, fallback, expiresAt) {
+  const listing = await canvasSemanticCourseCollection(binding, semantic, expiresAt);
   if (!listing.collection) return fallback;
   const plan = { strategy: "collection-omits-target", readOperation: listing.collection };
   if (listing.state === "unreadable") return semanticVerification("unconfirmed", plan, { evidence: "collection_readback_incomplete" });
@@ -4470,6 +4712,28 @@ function canvasSemanticPlan(plan, semantic) {
   };
 }
 
+async function canvasSemanticOwnerBindingState(binding, semantic, expiresAt) {
+  if (!commandDeadlineCurrent(expiresAt)) return "unconfirmed";
+  const readOperation = state.operations.get(semantic.target.resolverRead);
+  if (readOperation?.provider !== "canvas" || readOperation.readOnly !== true) return "unconfirmed";
+  const readParameter = semantic.target.readParameter || semantic.target.objectParameter;
+  const read = await executeOperation(
+    binding,
+    internalCanvasCourseRead(binding, readOperation),
+    { [readParameter]: semantic.objectId },
+    expiresAt,
+  );
+  const context = canvasSemanticObjectContext(semantic.target, read, semantic.objectId);
+  if (context.state !== "course") return read?.ok === true && read.truncated !== true ? "mismatch" : "unconfirmed";
+  if (context.courseId !== binding.courseId) return "mismatch";
+  if (semantic.target.courseCollectionProof === true) {
+    const listing = await canvasSemanticCourseCollection(binding, semantic, expiresAt);
+    if (listing.state === "unreadable") return "unconfirmed";
+    if (listing.state !== "listed") return "mismatch";
+  }
+  return "bound";
+}
+
 /**
  * Reads the changed thing again through its own route, compares the requested fields, and keeps the
  * reading inside the object the resolution proved. A change to the object itself has to come back as
@@ -4477,17 +4741,29 @@ function canvasSemanticPlan(plan, semantic) {
  * proved object as its parent. A deletion of the object itself is also proved against the selected
  * course's own listing when the object's route still answers.
  */
-async function verifyCanvasSemanticWrite(binding, operation, args, writeData, semantic, resolution) {
+async function verifyCanvasSemanticWrite(binding, operation, args, writeData, semantic, resolution, expiresAt) {
   const planned = planBrowserReadback(canvasOperationList(), operation, args, writeData);
   const plan = planned ? canvasSemanticPlan(planned, semantic) : null;
   const target = plan ? canvasSemanticReadbackTarget(plan, semantic) : "";
   if (!target) return { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "no_safe_readback_route" };
-  const readback = await executeOperation(binding, plan.readOperation, plan.arguments);
+  const readback = await executeOperation(
+    binding,
+    internalCanvasCourseRead(binding, plan.readOperation),
+    plan.arguments,
+    expiresAt,
+  );
   const verification = evaluateBrowserReadback(plan, readback);
   if (operation.method === "DELETE" && target === "object") {
-    return verification.status === "verified" ? verification : await verifyCanvasSemanticAbsence(binding, semantic, verification);
+    return verification.status === "verified" ? verification : await verifyCanvasSemanticAbsence(binding, semantic, verification, expiresAt);
   }
-  if (verification.status !== "verified" || target === "content") return verification;
+  if (verification.status !== "verified") return verification;
+  if (target === "content") {
+    const ownerState = await canvasSemanticOwnerBindingState(binding, semantic, expiresAt);
+    if (ownerState === "bound") return verification;
+    return semanticVerification(ownerState === "mismatch" ? "mismatch" : "unconfirmed", plan, {
+      evidence: ownerState === "mismatch" ? "canvas_semantic_target_course_mismatch" : "canvas_semantic_target_course_unconfirmed",
+    });
+  }
   const readObjectId = ["created_child", "created_object"].includes(target) ? decimalId(plan.targetId) : semantic.objectId;
   if (canvasSemanticResolvedCourseId(semantic.target, readback, readObjectId) !== binding.courseId) {
     return semanticVerification("mismatch", plan, { evidence: "canvas_semantic_target_course_mismatch" });
@@ -4627,17 +4903,19 @@ async function canvasRecoveryDescriptor(operation, args, writeData, result) {
  */
 async function recordCourseRead(binding) {
   const record = {
+    schema: FIRST_COURSE_READ_SCHEMA,
     provider: binding.provider,
     origin: binding.origin,
     courseId: String(binding.courseId || ""),
     courseName: String(binding.courseName || "").trim().slice(0, 200),
+    sourceBindingId: binding.sourceBindingId,
+    principalFingerprint: binding.principalFingerprint,
+    sessionGeneration: binding.sessionGeneration,
     at: Date.now(),
   };
   await queueStorageMutation(async () => {
     const { firstCourseRead } = await chrome.storage.local.get("firstCourseRead");
-    if (firstCourseRead?.provider === record.provider
-      && firstCourseRead?.origin === record.origin
-      && firstCourseRead?.courseId === record.courseId) return;
+    if (firstCourseReadMatchesBinding(firstCourseRead, binding)) return;
     await chrome.storage.local.set({ firstCourseRead: record });
   });
 }
@@ -4706,7 +4984,7 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
   const semantic = canvasSemanticWrite(command, operation);
   let semanticResolution = null;
   if (semantic) {
-    const resolved = await resolveCanvasSemanticTarget(binding, operation, semantic);
+    const resolved = await resolveCanvasSemanticTarget(binding, operation, semantic, command.expiresAt);
     if (resolved.failure) {
       sendResult(command, false, null, resolved.failure);
       return "known";
@@ -4750,10 +5028,18 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       kind: command.kind,
       status: result?.status,
     });
+    const readFailure = command.kind === "invoke_read"
+      ? {
+          schema: "morrow.canvas-browser-failure.v1",
+          provider: operation.provider,
+          sent: result?.sent === true,
+          ...(Number.isInteger(result?.status) ? { status: result.status } : {}),
+        }
+      : null;
     sendResult(
       command,
       false,
-      unresolvedDescriptor ? { schema: "morrow.canvas-browser-result.v1", readDescriptor: unresolvedDescriptor } : null,
+      unresolvedDescriptor ? { schema: "morrow.canvas-browser-result.v1", readDescriptor: unresolvedDescriptor } : readFailure,
       problem(code, message, !unknown),
     );
     return unknown ? "unknown" : "known";
@@ -4808,7 +5094,7 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "assignment_due_date_verification_missing" };
     } else if (namedCanvasReadback) {
       verification = namedPlan
-        ? await executeNamedCanvasReadback(binding, namedPlan)
+        ? await executeNamedCanvasReadback(binding, namedPlan, command.expiresAt)
         : { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_operation_readback_plan_unavailable" };
     } else if (privateConversation) {
       verification = result.verification || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_conversation_verification_missing" };
@@ -4818,9 +5104,14 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
       verification = canvasNewQuizHotSpotVerification(operation, command.arguments || {}, result)
         || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_hot_spot_verification_invalid" };
     } else if (semanticReadback) {
-      verification = await verifyCanvasSemanticWrite(binding, operation, command.arguments || {}, result.data, semantic, semanticResolution);
+      verification = await verifyCanvasSemanticWrite(binding, operation, command.arguments || {}, result.data, semantic, semanticResolution, command.expiresAt);
     } else if (plan) {
-      const readback = await executeOperation(binding, plan.readOperation, plan.arguments);
+      const readback = await executeOperation(
+        binding,
+        internalCanvasCourseRead(binding, plan.readOperation),
+        plan.arguments,
+        command.expiresAt,
+      );
       verification = evaluateBrowserReadback(plan, readback);
     } else {
       verification = { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "no_safe_readback_route" };
@@ -4914,7 +5205,9 @@ async function handleCommand(command) {
 
 async function handleEditPolicySet(command) {
   try {
-    const result = await applyBridgePolicySet(bridgePolicySet(command));
+    const policySet = bridgePolicySet(command);
+    if (await bridgeCommandCancelled(command)) return;
+    const result = await applyBridgePolicySet(policySet, command);
     return sendResult(command, true, result, null);
   } catch (error) {
     const code = policyCode(error);
@@ -4934,7 +5227,10 @@ async function handleEditPolicyOptionsGet(command) {
 
 async function handleBridgeMaintenance(command) {
   try {
-    return sendResult(command, true, await bridgeMaintenance.control(command.maintenance), null);
+    const beforeMutation = async () => {
+      if (await bridgeCommandCancelled(command)) throw new BridgeMaintenanceError("bridge_maintenance_request_stale");
+    };
+    return sendResult(command, true, await bridgeMaintenance.control(command.maintenance, { beforeMutation }), null);
   } catch (error) {
     return sendResult(command, false, null, problem(maintenanceCode(error), "Morrow could not complete the private Bridge update control.", false));
   }
@@ -4965,7 +5261,7 @@ async function handleBridgeMessage(message, owner) {
   if (message?.schema === "morrow.bridge.command.v1") {
     const requestId = typeof message.requestId === "string" ? message.requestId : null;
     if (!requestId || state.bridgeCommands.has(requestId)
-      || !owner || !await bridgeConnectionAuthorityCurrent(owner.socket, owner.authorityGeneration)) {
+      || !owner || !bridgeConnectionCurrent(owner.socket, owner.authorityGeneration)) {
       sendResult(message, false, null, problem("bridge_command_identity_refused", "Morrow refused an invalid or duplicate Bridge command identity.", false));
       return;
     }
@@ -4980,6 +5276,10 @@ async function handleBridgeMessage(message, owner) {
     };
     state.bridgeCommands.set(requestId, active);
     try {
+      if (!await bridgeConnectionAuthorityCurrent(owner.socket, owner.authorityGeneration)) {
+        sendResult(message, false, null, problem("bridge_command_identity_refused", "Morrow refused an invalid or duplicate Bridge command identity.", false));
+        return;
+      }
       if (await bridgeCommandCancelled(message)) return;
       if (message.kind === "edit_policy_set") await handleEditPolicySet(message);
       else if (message.kind === "edit_policy_options_get") await handleEditPolicyOptionsGet(message);
@@ -4993,11 +5293,17 @@ async function handleBridgeMessage(message, owner) {
 }
 
 async function requestPairing() {
+  const authorityGeneration = state.courseDataAuthorityGeneration;
+  await requireCourseDataAuthority(authorityGeneration);
   const pairingGeneration = crypto.randomUUID();
   await queueStorageMutation(async () => {
-    await chrome.storage.local.set({ [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, "requesting") });
+    const prior = await chrome.storage.local.get(PAIRING_AUTHORITY_KEY);
+    await setCourseDataBoundFields(chrome.storage.local, {
+      [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, "requesting"),
+    }, prior, authorityGeneration);
   });
   const api = await catalog();
+  await requireCourseDataAuthority(authorityGeneration);
   const { response, body } = await fetchPairing(httpUrl("/pair"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -5013,34 +5319,55 @@ async function requestPairing() {
   if (!offer) throw new Error("bridge_pairing_response_invalid");
   const pairing = { ...offer, pairingGeneration };
   const committed = await queueStorageMutation(async () => {
-    const latest = await chrome.storage.local.get(PAIRING_AUTHORITY_KEY);
+    await requireCourseDataAuthority(authorityGeneration);
+    const latest = await chrome.storage.local.get(["pairing", PAIRING_AUTHORITY_KEY]);
     if (!pairingAuthorityMatches(latest[PAIRING_AUTHORITY_KEY], pairingGeneration, "requesting")) return false;
-    await chrome.storage.local.set({ pairing, [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, "pending") });
-    await chrome.alarms.create("morrow-pairing", { periodInMinutes: 0.5 });
-    await chrome.tabs.create({ url: pairing.approvalUrl });
+    await setCourseDataBoundFields(chrome.storage.local, {
+      pairing,
+      [PAIRING_AUTHORITY_KEY]: pairingAuthority(pairingGeneration, "pending"),
+    }, latest, authorityGeneration);
     return true;
   });
   if (!committed) throw new Error("bridge_pairing_superseded");
+  let approvalTab = null;
+  try {
+    await requireCourseDataAuthority(authorityGeneration);
+    await chrome.alarms.create("morrow-pairing", { periodInMinutes: 1 });
+    await requireCourseDataAuthority(authorityGeneration);
+    approvalTab = await chrome.tabs.create({ url: pairing.approvalUrl });
+    await requireCourseDataAuthority(authorityGeneration);
+  } catch (error) {
+    await settlePairing(pairing, "interrupted", { pairing: null });
+    await chrome.alarms.clear("morrow-pairing");
+    if (Number.isInteger(approvalTab?.id)) await chrome.tabs.remove(approvalTab.id).catch(() => undefined);
+    throw error;
+  }
   return pairing;
 }
 
 async function pollPairing() {
-  if (!await courseDataConsentAccepted()) return;
+  const authorityGeneration = state.courseDataAuthorityGeneration;
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
   const saved = await storage();
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
   const { pairing } = saved;
   if (!pairing) return;
   if (!pairingOffer(pairing, pairing.pairingGeneration)
     || !pairingAuthorityMatches(saved[PAIRING_AUTHORITY_KEY], pairing.pairingGeneration, "pending")) {
     await queueStorageMutation(async () => {
-      const latest = await chrome.storage.local.get("pairing");
+      if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
+      const latest = await chrome.storage.local.get(["pairing", PAIRING_AUTHORITY_KEY]);
       if (!pairingIdentityMatches(latest.pairing, pairing)) return;
-      await chrome.storage.local.set({ pairing: null, [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "invalid") });
+      await setCourseDataBoundFields(chrome.storage.local, {
+        pairing: null,
+        [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "invalid"),
+      }, latest, authorityGeneration);
       await chrome.alarms.clear("morrow-pairing");
     });
     return;
   }
   if (!pairing?.statusUrl || !Number.isFinite(pairing.expiresAt) || Date.now() >= pairing.expiresAt) {
-    await settlePairing(pairing, "expired", { pairing: null });
+    await settlePairing(pairing, "expired", { pairing: null }, authorityGeneration);
     return;
   }
   const received = await fetchPairing(pairing.statusUrl, {
@@ -5048,30 +5375,32 @@ async function pollPairing() {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ extensionId: chrome.runtime.id }),
   }, async (response, signal) => response.ok ? await boundedPairingJson(response, signal) : null).catch(() => null);
+  if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
   const response = received?.response;
   if (response?.status === 404 || response?.status === 410) {
-    await settlePairing(pairing, "expired", { pairing: null });
+    await settlePairing(pairing, "expired", { pairing: null }, authorityGeneration);
     return;
   }
   if (!response?.ok) return;
   const status = pairingStatus(received.body, pairing);
   if (!status) return;
   if (status.status === "approved" && status.token) {
-    const committed = await settlePairing(pairing, "approved", { token: status.token, pairing: null });
+    const committed = await settlePairing(pairing, "approved", { token: status.token, pairing: null }, authorityGeneration);
     if (committed) {
       state.authenticationProblem = null;
       await connectBridge();
     }
   } else if (status.status === "denied" || Date.now() >= status.expiresAt) {
-    await settlePairing(pairing, "denied", { pairing: null });
+    await settlePairing(pairing, "denied", { pairing: null }, authorityGeneration);
   }
 }
 
+function permissionPattern(value) {
+  const url = new URL(value);
+  return `${url.protocol}//${url.hostname}/*`;
+}
+
 async function permissionOrigins(tabId, tabUrl) {
-  const permissionPattern = (value) => {
-    const url = new URL(value);
-    return `${url.protocol}//${url.hostname}/*`;
-  };
   const origins = new Set([permissionPattern(tabUrl)]);
   const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
   for (const origin of itemBankPermissionOrigins(frames, new URL(tabUrl).origin)) origins.add(origin);
@@ -5313,7 +5642,10 @@ async function status() {
   const siteAnchors = await publicSiteAnchors(stored);
   if (!await courseDataAuthorityCurrent(authorityGeneration)) return { consentRequired: true };
   const connected = state.socket?.readyState === WebSocket.OPEN && state.generation > 0;
-  const { firstCourseRead = null } = await chrome.storage.local.get("firstCourseRead");
+  const completedBinding = bindings.find((binding) => binding.runtimeVerified && binding.firstReadCompleted);
+  const firstCourseRead = completedBinding && firstCourseReadMatchesBinding(stored.firstCourseRead, completedBinding)
+    ? stored.firstCourseRead
+    : null;
   return {
     consentRequired: false,
     paired: Boolean(stored.token),
@@ -5326,7 +5658,7 @@ async function status() {
     anchorCount: siteAnchors.length,
     siteAnchors,
     bindingCount: bindings.length,
-    bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, lastSeenAt: binding.lastSeenAt })),
+    bindings: bindings.map((binding) => ({ sourceBindingId: binding.sourceBindingId, provider: binding.provider, origin: binding.origin, siteUrl: binding.siteUrl, courseId: binding.courseId, courseName: binding.courseName, runtimeVerified: binding.runtimeVerified, ...(binding.firstReadCompleted ? { firstReadCompleted: true } : {}), lastSeenAt: binding.lastSeenAt })),
   };
 }
 
@@ -5348,8 +5680,8 @@ async function disconnectConnector() {
   anchorVerifications.clear();
   itemBankCredentials.clear();
   pendingItemBankLaunches.clear();
-  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-  state.reconnectTimer = null;
+  clearBridgeHandshakeDeadline();
+  resetBridgeReconnect();
   const socket = state.socket;
   state.socket = null;
   state.generation = 0;
@@ -5407,14 +5739,36 @@ async function handleCoursePermissionAdded(origins) {
   await completePreparedCourseConnection({ addedOrigins: origins, openCourseSelection: true });
 }
 
+async function handleCoursePermissionRemoved() {
+  anchorVerifications.clear();
+  const stored = await chrome.storage.local.get(COURSE_FILE_STORAGE_ACCESS_KEY);
+  if (stored[COURSE_FILE_STORAGE_ACCESS_KEY] === true
+    && !await chrome.permissions.contains({ origins: COURSE_FILE_STORAGE_ORIGINS }).catch(() => false)) {
+    await chrome.storage.local.set({ [COURSE_FILE_STORAGE_ACCESS_KEY]: false });
+  }
+  await publishBindings();
+}
+
+async function cancelPairingAfterConsentWithdrawal() {
+  await queueStorageMutation(async () => {
+    const stored = await chrome.storage.local.get(["pairing", PAIRING_AUTHORITY_KEY]);
+    if (!stored.pairing && !["requesting", "pending"].includes(stored[PAIRING_AUTHORITY_KEY]?.status)) return;
+    await chrome.storage.local.set({
+      pairing: null,
+      [PAIRING_AUTHORITY_KEY]: pairingAuthority(crypto.randomUUID(), "consent_withdrawn"),
+    });
+    await chrome.alarms.clear("morrow-pairing");
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  const settingsAction = message?.type === "morrow_edit_policy_status" ? editPolicyStatus
-    : message?.type === "morrow_edit_policy_options" ? () => editPolicyOptions(message.sourceBindingId)
-      : message?.type === "morrow_edit_policy_save" ? () => saveEditPolicy(message.sourceBindingId, message.enabledCategories, message.expiresInMs)
-        : message?.type === "morrow_edit_policy_revoke" ? () => revokeEditPolicy(message.sourceBindingId)
-          : message?.type === "morrow_course_discovery_start" ? () => startCourseDiscovery(message.siteAnchorId)
-            : message?.type === "morrow_course_discovery_more" ? () => continueCourseDiscovery(message.siteAnchorId, message.discoveryReceiptId)
-              : message?.type === "morrow_course_selection_save" ? () => saveCourseSelection(message.siteAnchorId, message.discoveryReceiptId, message.courseIds)
+  const settingsAction = message?.type === "morrow_edit_policy_status" ? (authorityGeneration) => editPolicyStatus(authorityGeneration)
+    : message?.type === "morrow_edit_policy_options" ? (authorityGeneration) => editPolicyOptions(message.sourceBindingId, authorityGeneration)
+      : message?.type === "morrow_edit_policy_save" ? (authorityGeneration) => saveEditPolicy(message.sourceBindingId, message.enabledCategories, message.expiresInMs, authorityGeneration)
+        : message?.type === "morrow_edit_policy_revoke" ? (authorityGeneration) => revokeEditPolicy(message.sourceBindingId, authorityGeneration)
+          : message?.type === "morrow_course_discovery_start" ? (authorityGeneration) => startCourseDiscovery(message.siteAnchorId, authorityGeneration)
+            : message?.type === "morrow_course_discovery_more" ? (authorityGeneration) => continueCourseDiscovery(message.siteAnchorId, message.discoveryReceiptId, authorityGeneration)
+              : message?.type === "morrow_course_selection_save" ? (authorityGeneration) => saveCourseSelection(message.siteAnchorId, message.discoveryReceiptId, message.courseIds, authorityGeneration)
                 : message?.type === "morrow_private_chat_send" ? () => submitPrivateChatMessage(message.sourceBindingId, message.text, message.assertedIdentifiers)
                   : message?.type === "morrow_private_chat_close" ? () => { clearPrivateChat({ answerPending: true, rememberClosed: true }); return { status: "closed" }; }
         : null;
@@ -5424,7 +5778,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ ok: false, code, error: code });
       return false;
     }
-    Promise.resolve(requireCourseDataConsent()).then(settingsAction).then((result) => sendResponse({ ok: true, result }), (error) => {
+    const authorityGeneration = state.courseDataAuthorityGeneration;
+    Promise.resolve(requireCourseDataAuthority(authorityGeneration)).then(() => settingsAction(authorityGeneration)).then((result) => sendResponse({ ok: true, result }), (error) => {
       const code = policyCode(error);
       sendResponse({ ok: false, code, error: code });
     });
@@ -5453,6 +5808,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 chrome.permissions.onAdded.addListener((permissions) => { void handleCoursePermissionAdded(permissions.origins).catch(() => {}); });
+chrome.permissions.onRemoved?.addListener(() => { void handleCoursePermissionRemoved().catch(() => {}); });
 chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "morrow-pairing") void pollPairing(); });
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearItemBankCredentialsForTab(tabId);
@@ -5477,16 +5833,18 @@ chrome.webNavigation?.onCommitted?.addListener((details) => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !Object.hasOwn(changes || {}, COURSE_DATA_CONSENT_KEY)
     || hasCourseDataConsent(changes[COURSE_DATA_CONSENT_KEY]?.newValue)) return;
+  abortPairingFetches();
   invalidateCourseDataAuthority();
   clearPrivateChat({ answerPending: true });
   anchorVerifications.clear();
-  if (state.reconnectTimer) clearTimeout(state.reconnectTimer);
-  state.reconnectTimer = null;
+  clearBridgeHandshakeDeadline();
+  resetBridgeReconnect();
   const socket = state.socket;
   state.socket = null;
   state.generation = 0;
   state.accepted = null;
   socket?.close(1000, "course_data_consent_removed");
+  void cancelPairingAfterConsentWithdrawal().catch(() => {});
   void chrome.runtime.sendMessage({ type: "morrow_bridge_status_changed" }).catch(() => undefined);
 });
 chrome.runtime.onStartup.addListener(() => { void pollPairing(); void connectBridge(); });

@@ -11,9 +11,7 @@ const productionRoots = [
   "packages/blackboard-learn-api/src",
 ];
 
-const localExceptions = new Set([
-  "connector/extension/src/bridge-maintenance.js:try { bytes = new Uint8Array(await response.arrayBuffer()); } catch { fail(\"bridge_active_folder_unconfirmed\"); }",
-]);
+const localExceptions = new Set();
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -225,6 +223,19 @@ async function boundedText(response) {
 }`,
     expected: { awaitedCancellations: [], unconsumedExits: ["7:leaves response live without cancelling its body"] },
   },
+  {
+    name: "a retry loop that overwrites the prior response",
+    source: `
+async function load(url) {
+  let response;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    response = await fetch(url);
+    if (response.ok) break;
+  }
+  return readBounded(response);
+}`,
+    expected: { awaitedCancellations: [], unconsumedExits: ["5:can overwrite live response on the next iteration"] },
+  },
 ];
 
 const PERMITTED = [
@@ -280,6 +291,20 @@ async function boundedText(response) {
   const body = response.body;
   const reader = body.getReader();
   return read(reader);
+}`,
+  },
+  {
+    name: "a retry loop cancels the response before another iteration",
+    source: `
+const discard = (response) => { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} };
+async function load(url) {
+  let response;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    response = await fetch(url);
+    if (response.ok) break;
+    discard(response);
+  }
+  return readBounded(response);
 }`,
   },
 ];

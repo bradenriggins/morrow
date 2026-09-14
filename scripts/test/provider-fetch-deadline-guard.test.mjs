@@ -32,8 +32,12 @@ test("every in-page provider fetch has a bounded abort signal", async () => {
           unbounded.push(location);
         } else {
           const initializer = signal.initializer.getText(syntax);
-          if (!["requestSignal()", "requestSignal(expiresAt)", "requestSignal(input?.expiresAt)", "requestController.signal", "signal"].includes(initializer)) {
+          if (!["requestSignal()", "requestSignal(expiresAt)", "requestSignal(input?.expiresAt)", "requestController.signal", "signal", "uploadSignal"].includes(initializer)) {
             invalidSignal.push(`${location}:${initializer}`);
+          } else if (initializer === "uploadSignal") {
+            let scope = node.parent;
+            while (scope && !ts.isFunctionLike(scope)) scope = scope.parent;
+            if (!scope?.getText(syntax).includes("const uploadSignal = requestSignal(")) invalidSignal.push(`${location}:unowned uploadSignal`);
           } else if (initializer === "signal") {
             let scope = node.parent;
             while (scope && !ts.isFunctionLike(scope)) scope = scope.parent;
@@ -58,7 +62,7 @@ test("every in-page provider fetch has a bounded abort signal", async () => {
     })) {
       const text = declaration.getText(syntax);
       if (text.includes("requestSignal(")) {
-        assert.match(text, /const requestSignal = \(expiresAt\) => AbortSignal\.timeout\(Math\.max\(1, Math\.min\(2_147_483_647,/);
+        assert.match(text, /const requestSignal = \(expiresAt\) => (?:AbortSignal\.timeout\(Math\.max\(1, Math\.min\(2_147_483_647,|\{[\s\S]*?if \(remaining <= 0\) throw new Error\("[a-z0-9_]+"\);[\s\S]*?return AbortSignal\.timeout\(Math\.min\(2_147_483_647, remaining\)\);)/);
       }
     }
     if (name === "canvas-content.js") {

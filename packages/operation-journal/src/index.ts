@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
 import { sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
 import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
+import {
+  ensureCausalSequenceTable,
+  exactCausalSequence,
+  nextDurableCausalSequence,
+  type CausalSequenceAllocator,
+} from "./causal-sequence.js";
 
 export const GATEWAY_OPERATION_STATES = Object.freeze([
   "prepared",
@@ -54,6 +60,7 @@ export interface GatewayOperationRecord {
   readonly state: GatewayOperationState;
   readonly responseSucceeded: boolean | null;
   readonly publicResultDelivered: boolean;
+  readonly preparedCausalSequence: number | null;
   readonly upstreamResultDigest: string | null;
   readonly normalizedResultDigest: string | null;
   readonly sourceResultState: string | null;
@@ -93,12 +100,13 @@ export interface FindSuccessfulReadEvidenceInput {
   readonly targetIdentityDigest: string;
   readonly actorDigest: string;
   readonly upstreamResultDigest: string;
-  readonly notBefore: string;
+  readonly afterCausalSequence: number;
 }
 
 export interface GatewayOperationJournalOptions {
   readonly path: string;
   readonly now?: () => Date;
+  readonly nextCausalSequence?: CausalSequenceAllocator;
 }
 
 export class GatewayOperationConflictError extends Error {
@@ -134,6 +142,7 @@ interface SqlRow {
   state: GatewayOperationState;
   response_succeeded: number | null;
   public_result_delivered: number;
+  prepared_causal_sequence: number | null;
   upstream_result_digest: string | null;
   normalized_result_digest: string | null;
   source_result_state: string | null;
@@ -195,15 +204,6 @@ function optionalBoundedString(value: unknown, label: string, maximum: number): 
   return exactString(value, label, maximum);
 }
 
-function exactIsoInstant(value: unknown, label: string): string {
-  const normalized = exactString(value, label, 40);
-  const time = Date.parse(normalized);
-  if (!Number.isFinite(time) || new Date(time).toISOString() !== normalized) {
-    throw new TypeError(`${label} must be an exact ISO instant`);
-  }
-  return normalized;
-}
-
 function rowRecord(row: SqlRow): GatewayOperationRecord {
   const sourceBindingId = optionalBindingIdentity(row.source_binding_id, "source binding id");
   const targetIdentityDigest = row.target_identity_digest === null
@@ -220,6 +220,9 @@ function rowRecord(row: SqlRow): GatewayOperationRecord {
   if (row.public_result_delivered !== 0 && row.public_result_delivered !== 1) {
     throw new Error("gateway public delivery evidence is invalid");
   }
+  const preparedCausalSequence = row.prepared_causal_sequence === null
+    ? null
+    : exactCausalSequence(row.prepared_causal_sequence, "gateway prepare causal sequence");
   return {
     schema: "morrow.gateway-operation.v1",
     operationId: row.operation_id,
@@ -238,6 +241,7 @@ function rowRecord(row: SqlRow): GatewayOperationRecord {
     state: row.state,
     responseSucceeded: row.response_succeeded === null ? null : row.response_succeeded === 1,
     publicResultDelivered: row.public_result_delivered === 1,
+    preparedCausalSequence,
     upstreamResultDigest: row.upstream_result_digest,
     normalizedResultDigest: row.normalized_result_digest,
     sourceResultState: row.source_result_state,
@@ -300,6 +304,7 @@ export class GatewayOperationJournal {
   readonly path: string;
   private readonly database: DatabaseSync;
   private readonly now: () => Date;
+  private readonly allocateCausalSequence: CausalSequenceAllocator | null;
   private closed = false;
   private readonly selectById: StatementSync;
 
@@ -310,6 +315,7 @@ export class GatewayOperationJournal {
     });
     this.path = opened.path;
     this.now = options.now ?? (() => new Date());
+    this.allocateCausalSequence = options.nextCausalSequence ?? null;
     this.database = opened.database;
     this.database.exec(`
       PRAGMA busy_timeout = 5000;
@@ -333,6 +339,7 @@ export class GatewayOperationJournal {
         state TEXT NOT NULL CHECK(state IN ('prepared','dispatched','response_received','failed_before_send','source_unknown')),
         response_succeeded INTEGER CHECK(response_succeeded IN (0,1)),
         public_result_delivered INTEGER NOT NULL DEFAULT 0 CHECK(public_result_delivered IN (0,1)),
+        prepared_causal_sequence INTEGER CHECK(prepared_causal_sequence >= 1),
         upstream_result_digest TEXT,
         normalized_result_digest TEXT,
         source_result_state TEXT,
@@ -362,12 +369,14 @@ export class GatewayOperationJournal {
       CREATE INDEX IF NOT EXISTS gateway_operation_events_operation
         ON gateway_operation_events(operation_id, event_id);
     `);
+    ensureCausalSequenceTable(this.database);
     this.migrateReadAuthorityEvidence();
     this.database.exec(`
+      DROP INDEX IF EXISTS gateway_operations_read_evidence;
       CREATE INDEX IF NOT EXISTS gateway_operations_read_evidence
         ON gateway_operations(
           source_id, source_binding_id, target_identity_digest, actor_digest,
-          upstream_result_digest, public_result_delivered, created_at DESC
+          upstream_result_digest, public_result_delivered, prepared_causal_sequence DESC
         )
         WHERE read_only=1 AND state='response_received' AND response_succeeded=1 AND public_result_delivered=1;
     `);
@@ -395,6 +404,17 @@ export class GatewayOperationJournal {
     if (!columns.has("public_result_delivered")) {
       this.database.exec("ALTER TABLE gateway_operations ADD COLUMN public_result_delivered INTEGER NOT NULL DEFAULT 0 CHECK(public_result_delivered IN (0,1))");
     }
+    if (!columns.has("prepared_causal_sequence")) {
+      // An operation from an older runtime has no durable causal relation to a
+      // current effect. It stays in history but cannot close an effect.
+      this.database.exec("ALTER TABLE gateway_operations ADD COLUMN prepared_causal_sequence INTEGER CHECK(prepared_causal_sequence >= 1)");
+    }
+  }
+
+  private nextCausalSequence(): number {
+    return this.allocateCausalSequence
+      ? exactCausalSequence(this.allocateCausalSequence(), "Morrow causal sequence")
+      : nextDurableCausalSequence(this.database);
   }
 
   private instant(): string {
@@ -518,13 +538,14 @@ export class GatewayOperationJournal {
       }
 
       const operationId = `gop:${randomUUID()}`;
+      const preparedCausalSequence = this.nextCausalSequence();
       this.database.prepare(`
         INSERT INTO gateway_operations(
           operation_id, public_tool_name, source_id, source_tool_name, catalog_digest,
           request_digest, forwarded_request_digest, source_operation_id, idempotency_key,
           read_only, source_binding_id, target_identity_digest, actor_digest,
-          state, created_at, updated_at, revision
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, 1)
+          state, prepared_causal_sequence, created_at, updated_at, revision
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'prepared', ?, ?, ?, 1)
       `).run(
         operationId,
         publicToolName,
@@ -539,6 +560,7 @@ export class GatewayOperationJournal {
         sourceBindingId,
         targetIdentityDigest,
         actorDigest,
+        preparedCausalSequence,
         now,
         now,
       );
@@ -735,14 +757,15 @@ export class GatewayOperationJournal {
     this.assertOpen();
     const sourceBindingId = optionalBindingIdentity(input.sourceBindingId, "source binding id");
     if (!sourceBindingId) throw new TypeError("source binding id is required");
+    const afterCausalSequence = exactCausalSequence(input.afterCausalSequence, "read evidence causal lower bound");
     const row = this.database.prepare(`
       SELECT * FROM gateway_operations
       WHERE source_id=? AND source_binding_id=?
         AND target_identity_digest=? AND actor_digest=?
-        AND upstream_result_digest=? AND created_at>=?
+        AND upstream_result_digest=? AND prepared_causal_sequence>?
         AND read_only=1 AND state='response_received' AND response_succeeded=1
         AND public_result_delivered=1
-      ORDER BY created_at DESC, operation_id DESC
+      ORDER BY prepared_causal_sequence DESC, operation_id DESC
       LIMIT 1
     `).get(
       exactName(input.sourceId, "source id"),
@@ -750,7 +773,7 @@ export class GatewayOperationJournal {
       exactDigest(input.targetIdentityDigest, "target identity digest"),
       exactDigest(input.actorDigest, "actor digest"),
       exactDigest(input.upstreamResultDigest, "upstream result digest"),
-      exactIsoInstant(input.notBefore, "read evidence lower bound"),
+      afterCausalSequence,
     ) as SqlRow | undefined;
     return row ? rowRecord(row) : null;
   }

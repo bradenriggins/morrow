@@ -21,12 +21,16 @@ describe("legacy source MCP privacy", () => {
       call: vi.fn(async () => result), taskGet: vi.fn(async () => result),
     } as unknown as LegacyBridgeRuntime;
     createLegacyBridgeMcpServer(runtime, { internalSourceCapability: "a".repeat(64) });
-    const read = await callbacks.get("read")!({ course_id: 42, _morrow: { source_binding_id: "binding-42" } }, { mcpReq: {} });
+    const controller = new AbortController();
+    const request = { mcpReq: { signal: controller.signal } };
+    const read = await callbacks.get("read")!({ course_id: 42, _morrow: { source_binding_id: "binding-42" } }, request);
     expect(read.isError).not.toBe(true);
     expect(JSON.stringify(read)).toContain("Student A");
     expect(JSON.stringify(read)).not.toContain("Mary");
-    const task = await callbacks.get("morrow_legacy_task_get")!({ task_id: "task-1", source_binding_id: "binding-42" }, { mcpReq: {} });
+    expect(runtime.call).toHaveBeenLastCalledWith("read", expect.any(Object), controller.signal);
+    const task = await callbacks.get("morrow_legacy_task_get")!({ task_id: "task-1", source_binding_id: "binding-42" }, request);
     expect(JSON.stringify(task)).not.toContain("Mary");
+    expect(runtime.taskGet).toHaveBeenLastCalledWith("task-1", "binding-42", controller.signal);
     const raw = await callbacks.get("read")!({}, { mcpReq: { _meta: { [INTERNAL_SOURCE_CAPABILITY_META]: "a".repeat(64) } } });
     expect(raw.structuredContent).toEqual(result);
   });

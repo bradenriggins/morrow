@@ -83,7 +83,7 @@ describe("New Quiz accommodation planner", () => {
 });
 
 describe("New Quiz report planner", () => {
-  it("binds one report request to the exact quiz and official Progress reader", async () => {
+  it("binds one report request to the exact quiz without exposing the global Progress reader", async () => {
     const { runtime, plans } = fixture();
     const result = await planNewQuizReport(runtime, {
       source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", report_type: "item_analysis", format: "csv",
@@ -91,8 +91,9 @@ describe("New Quiz report planner", () => {
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
     expect(result.structuredContent).toMatchObject({ new_quiz_effect_plan: {
       target: { course_id: "42", quiz_id: "77" }, payload: { report_type: "item_analysis", format: "csv" },
-      progress_tool: "canvas_query_progress_v1_progress_id_get",
     } });
+    expect((result.structuredContent as { new_quiz_effect_plan: Record<string, unknown> }).new_quiz_effect_plan)
+      .not.toHaveProperty("progress_tool");
     expect(plans[0]!.args.morrow_new_quiz_effect_guard).toEqual({
       kind: "report", payload_sha256: sha256Json({ report_type: "item_analysis", format: "csv" }),
     });

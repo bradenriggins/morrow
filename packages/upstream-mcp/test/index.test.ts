@@ -190,6 +190,29 @@ describe("StdioMcpUpstream", () => {
     }
   });
 
+  it("settles caller cancellation while launch preparation never settles", async () => {
+    let preparing!: () => void;
+    const startedPreparing = new Promise<void>((resolve) => { preparing = resolve; });
+    const upstream = tracked(new StdioMcpUpstream({
+      id: "fixture",
+      label: "Never prepared upstream",
+      command: process.execPath,
+      args: [fixturePath],
+      prepareLaunch: async () => {
+        preparing();
+        return await new Promise<never>(() => undefined);
+      },
+    }));
+    const controller = new AbortController();
+    const connecting = upstream.connect({ signal: controller.signal });
+    await startedPreparing;
+
+    controller.abort(new Error("cancelled never-settling upstream startup"));
+
+    await expect(within(connecting, 1_000)).rejects.toThrow("cancelled never-settling upstream startup");
+    await within(upstream.close(), 1_000);
+  });
+
   it("closes and reaps a child that spawned but never answered initialization", async () => {
     const directory = await tempDirectory();
     try {
@@ -291,6 +314,17 @@ describe("StdioMcpUpstream", () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 10_000);
+
+  it("uses the caller-owned timeout for a long-running upstream tool", async () => {
+    const upstream = tracked(new StdioMcpUpstream({
+      id: "fixture", label: "Fixture upstream", command: process.execPath, args: [fixturePath],
+      env: { FAKE_TOOL_COUNT: "1", FAKE_TOOL_DELAY_MS: "150" },
+    }));
+    await upstream.connect();
+    await expect(upstream.callTool("fake_tool_1", {}, { timeoutMs: 25 })).rejects.toThrow(/timed out/i);
+    await expect(upstream.callTool("fake_tool_1", { value: "bounded" }, { timeoutMs: 1_000 }))
+      .resolves.toMatchObject({ structuredContent: { name: "fake_tool_1", value: "bounded" } });
+  });
 
   it("refuses a call to a disconnected upstream when the caller has not opted into a retry", async () => {
     const upstream = tracked(new StdioMcpUpstream({

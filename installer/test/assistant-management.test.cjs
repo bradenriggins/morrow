@@ -184,6 +184,57 @@ test("setting up an assistant for the first time does not require a recorded con
   assert.equal((await installer.record()).configured.codex.sha256, sha256(await fs.readFile(target)));
 });
 
+test("a first-time setup rollback removes only Morrow from the configuration generation the client accepted", async () => {
+  const root = await temporaryRoot();
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const capturedBefore = "[mcp_servers.other]\ncommand = \"old\"\n";
+  const acceptedBefore = "[mcp_servers.other]\ncommand = \"new\"\n";
+  await writeFile(target, capturedBefore);
+  const { installer } = controller(root, {
+    beforeClientInstall: async () => fs.writeFile(target, acceptedBefore),
+  });
+  installer.ensureRuntime = async () => installer.paths;
+  installer.writeRecord = async () => { throw new Error("simulated later record failure"); };
+
+  await assert.rejects(() => installer.installAssistant("codex", null), (error) => error.code === "setup_failed");
+
+  assert.equal(await fs.readFile(target, "utf8"), acceptedBefore);
+});
+
+test("an edit at the first-time rollback boundary wins and is never replaced", async () => {
+  const root = await temporaryRoot();
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const capturedBefore = "[mcp_servers.other]\ncommand = \"old\"\n";
+  const acceptedBefore = "[mcp_servers.other]\ncommand = \"new\"\n";
+  const boundaryEdit = "[mcp_servers.other]\ncommand = \"newest\"\n";
+  const boundaryPath = `${target}.boundary-edit`;
+  await writeFile(target, capturedBefore);
+  await writeFile(boundaryPath, boundaryEdit);
+  const { installer } = controller(root, {
+    beforeClientInstall: async () => fs.writeFile(target, acceptedBefore),
+  });
+  installer.ensureRuntime = async () => installer.paths;
+  installer.writeRecord = async () => { throw new Error("simulated later record failure"); };
+  const originalRename = fs.rename;
+  let injected = false;
+  fs.rename = async (source, destination) => {
+    if (!injected && source === target && String(destination).includes(".morrow-displaced-")) {
+      injected = true;
+      await originalRename(boundaryPath, target);
+    }
+    return originalRename(source, destination);
+  };
+  try {
+    await assert.rejects(() => installer.installAssistant("codex", null), (error) => error.code === "setup_failed");
+  } finally {
+    fs.rename = originalRename;
+  }
+
+  assert.equal(injected, true);
+  assert.equal(await fs.readFile(target, "utf8"), boundaryEdit);
+  assert.deepEqual((await fs.readdir(path.dirname(target))).sort(), ["config.toml"]);
+});
+
 test("an assistant configuration changed during its atomic write is reported as a configuration conflict", async () => {
   const root = await temporaryRoot();
   const target = path.join(root, "Home", ".codex", "config.toml");
@@ -223,6 +274,86 @@ test("removing an assistant whose settings file changed after Morrow wrote it is
   assert.equal(await fs.readFile(target, "utf8"), edited, "the file is exactly as it was, byte for byte");
   assert.deepEqual((await installer.record()).configured, { codex: { target, sha256: recorded } });
   assert.deepEqual(calls, [], "no command ran against that file");
+});
+
+test("assistant removal preserves a pathname replaced at its final write boundary and keeps its tombstone", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const original = `[mcp_servers.other]\ncommand = "other"\n\n${codexTable(path.join(root, "Materials"))}`;
+  const replacement = "[mcp_servers.other]\ncommand = \"concurrent\"\n";
+  const replacementPath = `${target}.concurrent`;
+  const recorded = await writeFile(target, original);
+  await writeFile(replacementPath, replacement);
+  const record = {
+    ...freshRecord(),
+    selectedAssistantId: "codex",
+    configured: { codex: { target, sha256: recorded } }
+  };
+  await installer.writeRecord(record);
+  const originalRename = fs.rename;
+  let injected = false;
+  fs.rename = async (source, destination) => {
+    if (!injected && source === target && String(destination).includes(".morrow-displaced-")) {
+      injected = true;
+      await originalRename(replacementPath, target);
+    }
+    return originalRename(source, destination);
+  };
+  try {
+    await assert.rejects(
+      () => installer.removeAssistant("codex"),
+      (error) => error.code === "assistant_configuration_changed",
+    );
+  } finally {
+    fs.rename = originalRename;
+  }
+
+  assert.equal(injected, true);
+  assert.equal(await fs.readFile(target, "utf8"), replacement);
+  assert.deepEqual(JSON.parse(await fs.readFile(installer.recordPath, "utf8")), record);
+  assert.equal(JSON.parse(await fs.readFile(installer.assistantRemovalPath, "utf8")).beforeSha256, recorded);
+  assert.deepEqual((await fs.readdir(path.dirname(target))).sort(), ["config.toml"]);
+});
+
+test("assistant removal preserves bytes edited in place at its final write boundary", async () => {
+  const root = await temporaryRoot();
+  const { installer } = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const original = `[mcp_servers.other]\ncommand = "other"\n\n${codexTable(path.join(root, "Materials"))}`;
+  const boundaryEdit = "[mcp_servers.other]\ncommand = \"edited-in-place\"\n";
+  const recorded = await writeFile(target, original);
+  const admittedInode = (await fs.lstat(target)).ino;
+  const record = {
+    ...freshRecord(),
+    selectedAssistantId: "codex",
+    configured: { codex: { target, sha256: recorded } }
+  };
+  await installer.writeRecord(record);
+  const originalRename = fs.rename;
+  let injected = false;
+  fs.rename = async (source, destination) => {
+    if (!injected && source === target && String(destination).includes(".morrow-displaced-")) {
+      injected = true;
+      await fs.writeFile(target, boundaryEdit);
+      assert.equal((await fs.lstat(target)).ino, admittedInode, "the boundary edit kept the admitted inode");
+    }
+    return originalRename(source, destination);
+  };
+  try {
+    await assert.rejects(
+      () => installer.removeAssistant("codex"),
+      (error) => error.code === "assistant_configuration_changed",
+    );
+  } finally {
+    fs.rename = originalRename;
+  }
+
+  assert.equal(injected, true);
+  assert.equal(await fs.readFile(target, "utf8"), boundaryEdit);
+  assert.deepEqual(JSON.parse(await fs.readFile(installer.recordPath, "utf8")), record);
+  assert.equal(JSON.parse(await fs.readFile(installer.assistantRemovalPath, "utf8")).beforeSha256, recorded);
+  assert.deepEqual((await fs.readdir(path.dirname(target))).sort(), ["config.toml"]);
 });
 
 test("removing one assistant removes only its own entry, and leaves every other setting", async () => {

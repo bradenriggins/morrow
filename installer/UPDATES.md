@@ -284,11 +284,15 @@ attempt record is written; a corrupted artifact, whose bytes do not match the
 SHA-512 its own channel file declares, which reports
 `update_verification_failed`, reaches neither `ready` nor `quitAndInstall()`,
 and leaves nothing staged; a cancelled download, which returns to `available`
-with `download_cancelled` and stages nothing; a feed that does not answer, which
+with `download_cancelled` and stages nothing; an unreachable feed, which
 reports `update_check_failed`; a downgrade, which is refused before the artifact
-is ever requested, both by the adapter's `allowDowngrade = false` and by the
-controller's own admission check; and the Windows channel file driving the same
-flow.
+is ever requested, both by the
+adapter's `allowDowngrade = false` and by the controller's own admission check;
+and the Windows channel file driving the same flow.
+
+The controller suite separately proves that an updater check which never
+settles reaches `update_check_timeout`, releases its operation ownership, and
+ignores a late result.
 
 `electron-updater` 6.8.9 runs outside Electron when an app adapter is passed as
 the second `AppUpdater` argument, so that harness drives the library itself, not

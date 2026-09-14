@@ -51,6 +51,7 @@ async function sendCanvas(toolName, args, {
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const operation = catalogOperation(toolName);
   const requests = [];
+  const requestUrls = [];
   const listeners = [];
   const values = {
     location: { origin: ORIGIN, protocol: "https:", pathname: `/courses/${COURSE_ID}/quizzes` },
@@ -60,6 +61,7 @@ async function sendCanvas(toolName, args, {
       if (url.pathname === "/api/v1/users/self/profile") return jsonResponse({ id: "7", name: "Teacher" });
       if (url.pathname === `/api/v1/courses/${COURSE_ID}`) return jsonResponse({ id: COURSE_ID, name: "Biology" });
       const method = options.method || "GET";
+      requestUrls.push(url.href);
       requests.push({
         method,
         pathname: url.pathname,
@@ -100,7 +102,7 @@ async function sendCanvas(toolName, args, {
       }, null, resolve);
       if (handled !== true) reject(new Error("the content script did not accept the execute message"));
     });
-    return { result, requests, operation };
+    return { result, requests, requestUrls, operation };
   } finally {
     for (const key of keys) {
       const descriptor = descriptors.get(key);
@@ -240,6 +242,127 @@ test("a Canvas REST write keeps its form encoding", async () => {
   assert.equal(requests.length, 1);
   assert.match(requests[0].contentType, /^application\/x-www-form-urlencoded/);
   assert.equal(requests[0].body, "name=Weekly+labs");
+});
+
+test("Canvas REST arrays and nested hashes use Rails bracket form encoding", async () => {
+  const assignment = await sendCanvas("canvas_create_assignment", {
+    course_id: COURSE_ID,
+    assignment_name: "Lab report",
+    assignment_submission_types: ["online_upload", "online_text_entry"],
+    assignment_allowed_extensions: ["pdf", "docx"],
+  }, {
+    writeData: {
+      id: QUIZ_ID,
+      name: "Lab report",
+      submission_types: ["online_upload", "online_text_entry"],
+      allowed_extensions: ["pdf", "docx"],
+    },
+  });
+  const assignmentWrite = assignment.requests.find((request) => request.method === "POST");
+  assert.ok(assignmentWrite, "the assignment create was never sent");
+  const assignmentBody = new URLSearchParams(assignmentWrite.body);
+  assert.deepEqual(assignmentBody.getAll("assignment[submission_types][]"), ["online_upload", "online_text_entry"]);
+  assert.deepEqual(assignmentBody.getAll("assignment[allowed_extensions][]"), ["pdf", "docx"]);
+  assert.equal(assignmentBody.has("assignment[submission_types]"), false);
+  assert.equal(assignmentBody.has("assignment[allowed_extensions]"), false);
+
+  const rubric = await sendCanvas("canvas_create_single_rubric", {
+    course_id: COURSE_ID,
+    rubric_title: "Lab rubric",
+    rubric_criteria: {
+      criterion_1: { description: "Accuracy", points: 5 },
+    },
+  }, {
+    writeData: {
+      rubric: { id: QUIZ_ID, title: "Lab rubric", data: [{ id: "criterion_1", description: "Accuracy", points: 5 }] },
+      rubric_association: null,
+    },
+  });
+  const rubricWrite = rubric.requests.find((request) => request.method === "POST");
+  assert.ok(rubricWrite, "the rubric create was never sent");
+  const rubricBody = new URLSearchParams(rubricWrite.body);
+  assert.equal(rubricBody.get("rubric[criteria][criterion_1][description]"), "Accuracy");
+  assert.equal(rubricBody.get("rubric[criteria][criterion_1][points]"), "5");
+  assert.equal(rubricBody.has("rubric[criteria]"), false);
+});
+
+test("Canvas record-array fields keep the provider's bracket axis", async () => {
+  const cases = [
+    ["canvas_batch_update_grading_periods_courses", {
+      course_id: COURSE_ID,
+      set_id: "8",
+      grading_periods_id: ["11", "12"],
+      grading_periods_title: ["First", "Second"],
+      grading_periods_start_date: ["2026-08-01", "2026-10-01"],
+      grading_periods_end_date: ["2026-09-30", "2026-12-15"],
+      grading_periods_close_date: ["2026-10-07", "2026-12-22"],
+    }, "grading_periods[][id]", ["11", "12"]],
+    ["canvas_create_new_grading_standard_courses", {
+      course_id: COURSE_ID,
+      title: "Course scale",
+      grading_scheme_entry_name: ["A", "B"],
+      grading_scheme_entry_value: [90, 80],
+    }, "grading_scheme_entry[][name]", ["A", "B"]],
+    ["canvas_create_update_proficiency_ratings_courses", { course_id: COURSE_ID, ratings_points: [4, 3] }, "ratings[][points]", ["4", "3"]],
+    ["canvas_create_or_update_events_directly_for_course_timetable", { course_id: COURSE_ID, events_start_at: ["2026-09-14T15:00:00Z"] }, "events[][start_at]", ["2026-09-14T15:00:00Z"]],
+    ["canvas_create_question_group", { course_id: COURSE_ID, quiz_id: QUIZ_ID, quiz_groups_name: ["Cells"] }, "quiz_groups[][name]", ["Cells"]],
+    ["canvas_reorder_question_groups", { course_id: COURSE_ID, quiz_id: QUIZ_ID, id: "91", order_id: ["92"] }, "order[][id]", ["92"]],
+    ["canvas_set_course_timetable", { course_id: COURSE_ID, timetables_course_section_id_weekdays: ["Mon,Wed"] }, "timetables[course_section_id][][weekdays]", ["Mon,Wed"]],
+  ];
+  for (const [toolName, args, wireName, values] of cases) {
+    const { requests } = await sendCanvas(toolName, args);
+    assert.equal(requests.length, 1, toolName);
+    const body = new URLSearchParams(requests[0].body);
+    assert.deepEqual(body.getAll(wireName), values, toolName);
+  }
+});
+
+test("Canvas record arrays expand objects under one bracketed member", async () => {
+  const { requests } = await sendCanvas("canvas_update_list_of_blackout_dates", {
+    course_id: COURSE_ID,
+    blackout_dates: [{ id: "31", start_date: "2026-12-24", event_title: "Winter break" }],
+  });
+  assert.equal(requests.length, 1);
+  const body = new URLSearchParams(requests[0].body);
+  assert.equal(body.get("blackout_dates[][id]"), "31");
+  assert.equal(body.get("blackout_dates[][start_date]"), "2026-12-24");
+  assert.equal(body.get("blackout_dates[][event_title]"), "Winter break");
+  assert.equal([...body.keys()].some((key) => key.startsWith("blackout_dates:")), false);
+});
+
+test("Canvas multipart writes keep the file and use the same bracket encoder", async () => {
+  const { requests } = await sendCanvas("canvas_create_new_discussion_topic_courses", {
+    course_id: COURSE_ID,
+    title: "Lab notes",
+    attachment: {
+      name: "notes.txt",
+      type: "text/plain",
+      base64: Buffer.from("mitosis notes").toString("base64"),
+    },
+  }, { writeData: { id: QUIZ_ID, title: "Lab notes" } });
+  const write = requests.find((request) => request.method === "POST");
+  assert.ok(write, "the multipart discussion create was never sent");
+  assert.equal(write.contentType, null, "the browser must add the multipart boundary");
+  assert.ok(write.body instanceof FormData);
+  assert.equal(write.body.get("title"), "Lab notes");
+  const attachment = write.body.get("attachment");
+  assert.ok(attachment instanceof File);
+  assert.equal(attachment.name, "notes.txt");
+  assert.equal(attachment.type, "text/plain");
+  assert.equal(await attachment.text(), "mitosis notes");
+});
+
+test("array-valued Canvas readback queries use bracket keys", async () => {
+  const { requestUrls } = await sendCanvas("canvas_list_assignments_assignments", {
+    course_id: COURSE_ID,
+    assignment_ids: ["88", "99"],
+    include: ["all_dates"],
+  }, { quiz: [] });
+  const request = new URL(requestUrls.at(-1));
+  assert.deepEqual(request.searchParams.getAll("assignment_ids[]"), ["88", "99"]);
+  assert.deepEqual(request.searchParams.getAll("include[]"), ["all_dates"]);
+  assert.equal(request.searchParams.has("assignment_ids"), false);
+  assert.equal(request.searchParams.has("include"), false);
 });
 
 test("a New Quiz settings change without its guard is refused before any request", async () => {

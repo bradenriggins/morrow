@@ -5,7 +5,12 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const test = require("node:test");
-const { createUpdateAttemptStore, createUpdateController } = require("../shared/updates.cjs");
+const {
+  UPDATE_CHECK_TIMEOUT_MS,
+  UPDATE_DOWNLOAD_TIMEOUT_MS,
+  createUpdateAttemptStore,
+  createUpdateController
+} = require("../shared/updates.cjs");
 
 const ATTEMPT_SCHEMA = "morrow.desktop-update-attempt.v1";
 const ATTEMPT_AT = "2026-01-01T00:00:00.000Z";
@@ -127,12 +132,25 @@ function restartLeaseStatus(status) {
 function testClock() {
   return {
     intervals: [],
+    timeouts: [],
     setInterval(callback, milliseconds) {
       const entry = { callback, milliseconds, cleared: false, unref() {} };
       this.intervals.push(entry);
       return entry;
     },
-    clearInterval(entry) { entry.cleared = true; }
+    clearInterval(entry) { entry.cleared = true; },
+    setTimeout(callback, milliseconds) {
+      const entry = { callback, milliseconds, cleared: false, unref() {} };
+      this.timeouts.push(entry);
+      return entry;
+    },
+    clearTimeout(entry) { entry.cleared = true; },
+    fireTimeout(milliseconds) {
+      const entry = this.timeouts.find((candidate) => !candidate.cleared && candidate.milliseconds === milliseconds);
+      assert.ok(entry, `no active ${milliseconds} ms timeout`);
+      entry.cleared = true;
+      entry.callback();
+    }
   };
 }
 
@@ -156,6 +174,7 @@ test("disabled or unbound policies cannot initiate an update network check", asy
   const disabled = createUpdateController({ adapter, ...grantedRestartLease() });
   assert.deepEqual(await disabled.start(), {
     schema: "morrow.desktop-update.v1",
+    revision: 1,
     status: "unavailable",
     currentVersion: "1.0.0",
     availableVersion: null,
@@ -185,6 +204,7 @@ test("an enabled controller checks, downloads, and becomes ready without exposin
   assert.equal(adapter.downloads, 1);
   assert.deepEqual(controller.snapshot(), {
     schema: "morrow.desktop-update.v1",
+    revision: 4,
     status: "ready",
     currentVersion: "1.0.0",
     availableVersion: "1.0.1",
@@ -193,6 +213,24 @@ test("an enabled controller checks, downloads, and becomes ready without exposin
   });
   assert.equal(Object.hasOwn(controller.snapshot(), "path"), false);
   controller.stop();
+});
+
+test("every update snapshot carries the controller's monotonic revision", async () => {
+  const adapter = createAdapter({ check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }) });
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy({ automatic: false }),
+    ...grantedRestartLease(),
+    clock: testClock()
+  });
+  const snapshots = [];
+  controller.subscribe((snapshot) => snapshots.push(snapshot));
+
+  const available = await controller.check();
+
+  assert.deepEqual(snapshots.map((snapshot) => snapshot.revision), [0, 1, 2]);
+  assert.equal(available.revision, 2);
+  assert.equal(controller.snapshot().revision, 2);
 });
 
 test("an updater availability event cannot start a download before its matching check has supplied the cancellation token", async () => {
@@ -264,12 +302,134 @@ test("stop revokes a pending check before it can start a download", async () => 
   await settle();
   assert.equal(adapter.checks, 1);
   controller.stop();
-  discovery.resolve({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } });
   await pending;
-  await settle();
   assert.equal(adapter.cancellations, 1);
   assert.equal(adapter.downloads, 0);
   assert.equal(controller.snapshot().status, "checking");
+  discovery.resolve({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } });
+  await settle();
+  assert.equal(adapter.downloads, 0);
+  assert.equal(controller.snapshot().status, "checking");
+});
+
+test("a never-settling update check times out, releases ownership, and ignores its late result", async () => {
+  const firstCheck = deferred();
+  const clock = testClock();
+  const adapter = createAdapter({
+    check: (source) => source.checks === 1 ? firstCheck.promise : { isUpdateAvailable: false }
+  });
+  const controller = createUpdateController({
+    adapter,
+    policy: enabledPolicy({ automatic: false }),
+    ...grantedRestartLease(),
+    clock
+  });
+
+  const pending = controller.check();
+  await settle();
+  clock.fireTimeout(UPDATE_CHECK_TIMEOUT_MS);
+  assert.deepEqual(await pending, {
+    schema: "morrow.desktop-update.v1",
+    revision: 2,
+    status: "error",
+    currentVersion: "1.0.0",
+    availableVersion: null,
+    automatic: false,
+    reason: "update_check_timeout"
+  });
+  assert.equal(adapter.cancellations, 1);
+
+  const recovered = await controller.check();
+  assert.equal(recovered.status, "idle");
+  assert.equal(recovered.reason, "up_to_date");
+  assert.equal(adapter.checks, 2, "the timed-out shared promise still owned later checks");
+  firstCheck.resolve({ isUpdateAvailable: true, updateInfo: { version: "9.0.0" } });
+  await settle();
+  assert.equal(controller.snapshot().status, "idle");
+  assert.equal(controller.snapshot().availableVersion, null);
+  assert.equal(adapter.downloads, 0);
+});
+
+test("a never-settling download times out to a retryable candidate and ignores its late result", async () => {
+  const firstDownload = deferred();
+  const clock = testClock();
+  const adapter = createAdapter({
+    check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }),
+    download: (source) => source.downloads === 1 ? firstDownload.promise : ["private-updater-cache"]
+  });
+  const controller = createUpdateController({ adapter, policy: enabledPolicy(), ...grantedRestartLease(), clock });
+
+  await controller.check();
+  await settle();
+  assert.equal(controller.snapshot().status, "downloading");
+  const pending = controller.check();
+  clock.fireTimeout(UPDATE_DOWNLOAD_TIMEOUT_MS);
+  assert.deepEqual(await pending, {
+    schema: "morrow.desktop-update.v1",
+    revision: 4,
+    status: "available",
+    currentVersion: "1.0.0",
+    availableVersion: "1.0.1",
+    automatic: true,
+    reason: "update_download_timeout"
+  });
+  assert.equal(adapter.cancellations, 1);
+
+  await controller.check();
+  await settle();
+  assert.equal(adapter.downloads, 2, "the timed-out shared promise still owned the retry");
+  assert.equal(controller.snapshot().status, "ready");
+  firstDownload.resolve(["late-private-updater-cache"]);
+  await settle();
+  assert.equal(controller.snapshot().status, "ready");
+  assert.equal(controller.snapshot().availableVersion, "1.0.1");
+});
+
+test("a download timeout does not replace an updater verification failure", async () => {
+  const staging = deferred();
+  const clock = testClock();
+  const adapter = createAdapter({
+    check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }),
+    download: () => staging.promise
+  });
+  const controller = createUpdateController({ adapter, policy: enabledPolicy(), ...grantedRestartLease(), clock });
+
+  await controller.check();
+  await settle();
+  const pending = controller.check();
+  adapter.emit("error", Object.assign(new Error("sha512 checksum mismatch"), { code: "ERR_CHECKSUM_MISMATCH" }));
+  assert.equal(controller.snapshot().reason, "update_verification_failed");
+  clock.fireTimeout(UPDATE_DOWNLOAD_TIMEOUT_MS);
+  const result = await pending;
+  assert.equal(result.status, "error");
+  assert.equal(result.reason, "update_verification_failed");
+  assert.equal(result.availableVersion, null);
+  assert.equal(adapter.cancellations, 1);
+});
+
+test("stop promptly settles an active download and permits a clean restart", async () => {
+  const firstDownload = deferred();
+  const adapter = createAdapter({
+    check: () => ({ isUpdateAvailable: true, updateInfo: { version: "1.0.1" } }),
+    download: (source) => source.downloads === 1 ? firstDownload.promise : ["private-updater-cache"]
+  });
+  const controller = createUpdateController({ adapter, policy: enabledPolicy(), ...grantedRestartLease() });
+
+  await controller.check();
+  await settle();
+  const pending = controller.check();
+  controller.stop();
+  await pending;
+  assert.equal(adapter.cancellations, 1);
+  assert.equal(controller.snapshot().status, "downloading");
+
+  await controller.start();
+  await settle();
+  assert.equal(adapter.downloads, 2);
+  assert.equal(controller.snapshot().status, "ready");
+  firstDownload.resolve(["late-private-updater-cache"]);
+  await settle();
+  assert.equal(controller.snapshot().status, "ready");
 });
 
 test("a controller rejects malformed, prerelease, stale, downgraded, and wrong-platform candidates before download", async (t) => {
@@ -303,6 +463,7 @@ test("a prerelease build can advance on its own channel but a stable build canno
   const controller = createUpdateController({ adapter, policy: enabledPolicy({ automatic: false }), ...grantedRestartLease() });
   assert.deepEqual(await controller.check(), {
     schema: "morrow.desktop-update.v1",
+    revision: 2,
     status: "available",
     currentVersion: "1.0.0-rc.0",
     availableVersion: "1.0.0-rc.1",
@@ -468,6 +629,7 @@ test("a failed release after a failed commit leaves the verified update deferred
   const result = await controller.installWhenIdle();
   assert.deepEqual(result, {
     schema: "morrow.desktop-update.v1",
+    revision: 5,
     status: "ready",
     currentVersion: "1.0.0",
     availableVersion: "1.0.1",
@@ -526,7 +688,7 @@ test("concurrent checks share one network action and subscription data is the fi
   pendingCheck.resolve({ isUpdateAvailable: false });
   await Promise.all([first, second]);
   assert.equal(adapter.checks, 1);
-  assert.deepEqual(Object.keys(values.at(-1)).sort(), ["automatic", "availableVersion", "currentVersion", "reason", "schema", "status"]);
+  assert.deepEqual(Object.keys(values.at(-1)).sort(), ["automatic", "availableVersion", "currentVersion", "reason", "revision", "schema", "status"]);
   unsubscribe();
 });
 
@@ -563,6 +725,7 @@ test("a candidate the updater cache volume cannot hold is refused before the dow
   await settle();
   assert.deepEqual(refused.snapshot(), {
     schema: "morrow.desktop-update.v1",
+    revision: 3,
     status: "error",
     currentVersion: "1.0.0",
     availableVersion: null,

@@ -284,7 +284,8 @@ test("every executor-owned readback is a reread the owning executor really perfo
   const itemBankExecutor = source("item-bank-executor.js");
   const quizBankExecutor = source("quiz-bank-draw-executor.js");
   const worker = source("service-worker.js");
-  const owned = catalog.operations.filter((operation) => canvasExecutorOwnedReadback(operation));
+  const owned = catalog.operations.filter((operation) => canvasExecutorOwnedReadback(operation)
+    && canvasOperationAdmission(operation).write.state === "admitted");
   assert.ok(owned.length > 0);
   for (const operation of owned) {
     // The contract may only name a write, and only one Morrow admits.

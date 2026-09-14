@@ -177,11 +177,15 @@ test("every section route that carries a learner's own record stays held with it
     canvasAdmissionReason({ state: "held", reason: "learner_scope_requires_separate_authority" }),
     "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas.",
   );
-  // The learner rule reaches routes under one object, never a course route Morrow already admits.
+  // The learner-object helper recognizes object routes. The full admission rule also holds the
+  // course-nested forms before the normal course-path admission branch.
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_grade_or_comment_on_submission_sections")), true);
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_edit_section")), false);
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_grade_or_comment_on_submission_courses")), false);
-  assert.equal(canvasOperationAdmission(operation("canvas_grade_or_comment_on_submission_courses")).write.state, "admitted");
+  assert.deepEqual(canvasOperationAdmission(operation("canvas_grade_or_comment_on_submission_courses")).write, {
+    state: "held",
+    reason: "learner_scope_requires_separate_authority",
+  });
 });
 
 test("a reading proves a section only when it names this object and the selected course", () => {

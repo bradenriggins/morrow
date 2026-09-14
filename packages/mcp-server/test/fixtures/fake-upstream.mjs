@@ -68,6 +68,8 @@ function createServer() {
       description: `Read a fake page from ${source}.`,
       inputSchema: z.object({
         course_id: z.string().optional(),
+        user_id: z.string().optional(),
+        email: z.string().optional(),
       }),
       annotations: {
         readOnlyHint: true,

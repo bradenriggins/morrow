@@ -30,6 +30,61 @@ function processIsAlive(pid: number): boolean {
 }
 
 describe("StrictStdioClientTransport shutdown", () => {
+  it("serializes outbound writes, bounds queued bytes, and rejects every send on close", async () => {
+    const transport = new StrictStdioClientTransport({
+      command: process.execPath,
+      args: ["--input-type=module", "-e", "process.stdin.pause(); setInterval(() => undefined, 1_000);"],
+      env: Object.fromEntries(
+        Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+      ),
+      maxBufferSize: 1024 * 1024,
+      shutdownGraceMs: 75,
+      shutdownKillWaitMs: 2_000,
+    });
+    await transport.start();
+    const message = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: { name: "large", arguments: { value: "x".repeat(900_000) } },
+    } as const;
+    const first = transport.send(message).catch((error: unknown) => error);
+    const second = transport.send({ ...message, id: 2 }).catch((error: unknown) => error);
+
+    await expect(transport.send({ ...message, id: 3 })).rejects.toThrow("output queue limit exceeded");
+    const stdin = (transport as unknown as { process: { stdin: NodeJS.WritableStream } }).process.stdin;
+    expect(stdin.listenerCount("drain")).toBe(1);
+    expect(stdin.listenerCount("error")).toBeLessThanOrEqual(2);
+
+    await transport.close();
+    await expect(first).resolves.toBeInstanceOf(Error);
+    await expect(second).resolves.toBeInstanceOf(Error);
+    expect(stdin.listenerCount("drain")).toBe(0);
+    expect(stdin.listenerCount("error")).toBe(0);
+  });
+
+  it("rejects one outbound message above the wire limit before writing it", async () => {
+    const transport = new StrictStdioClientTransport({
+      command: process.execPath,
+      args: ["--input-type=module", "-e", "process.stdin.resume();"],
+      env: Object.fromEntries(
+        Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+      ),
+      maxBufferSize: 1_024,
+    });
+    await transport.start();
+    try {
+      await expect(transport.send({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "tools/call",
+        params: { name: "large", arguments: { value: "x".repeat(1_024) } },
+      })).rejects.toThrow("message exceeds the stdio limit");
+    } finally {
+      await transport.close();
+    }
+  });
+
   it("waits for exit and force-kills a child that ignores graceful shutdown", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-stubborn-upstream-"));
     const pidPath = join(directory, "pid");

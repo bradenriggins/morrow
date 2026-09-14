@@ -62,6 +62,10 @@ const RUNTIME_DEPENDENCY_NAMES = Object.freeze([
   "htmlparser2", "is-plain-object", "isexe", "jose", "launder", "nanoid", "parse-srcset", "path-key", "picocolors", "pkce-challenge",
   "postcss", "sanitize-html", "shebang-command", "shebang-regex", "source-map-js", "which", "ws", "zod"
 ]);
+const INSTALLER_RUNTIME_FILES = Object.freeze([
+  "runtime-monitor.mjs",
+  "process-lifetime.cjs",
+]);
 const SECRET_MARKERS = Object.freeze([
   ["private_key", /-----BEGIN(?: [A-Z]+)? PRIVATE KEY-----[\s\S]{32,}-----END(?: [A-Z]+)? PRIVATE KEY-----/],
   ["openai_secret", /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b/],
@@ -207,10 +211,11 @@ export function captureBridgeRelease(extensionRoot = resolve(ROOT, "connector", 
   exactList(extensionManifest.permissions, ["activeTab", "alarms", "offscreen", "scripting", "storage", "tabs", "webNavigation", "webRequest"], "Morrow Bridge permissions");
   exactList(extensionManifest.host_permissions, ["http://127.0.0.1/*"], "Morrow Bridge host permissions");
   exactList(extensionManifest.optional_host_permissions, ["https://*/*"], "Morrow Bridge optional host permissions");
-  // The one sandboxed page, with a policy that forbids every network load it could make.
+  // The one sandboxed page, with a policy that allows the inline declarations
+  // the detached parser inspects and forbids every network load it could make.
   exactList(extensionManifest.sandbox.pages, ["render-check/render-check.html"], "Morrow Bridge sandbox pages");
   assertObjectKeys(extensionManifest.content_security_policy, ["sandbox"], "Morrow Bridge content security policy");
-  if (extensionManifest.content_security_policy.sandbox !== "sandbox allow-scripts; default-src 'none'; script-src 'self'; base-uri 'none'; form-action 'none'") {
+  if (extensionManifest.content_security_policy.sandbox !== "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'") {
     throw new Error("Morrow Bridge sandbox content security policy is invalid.");
   }
   assertObjectKeys(extensionManifest.background, ["service_worker", "type"], "Morrow Bridge background");
@@ -511,6 +516,7 @@ function mcpRuntimeManifest(stage, records, packages, dependencies) {
     "packages/mcp-server/dist/index.js",
     "packages/canvas-connector-mcp/dist/index.js",
     "installer/runtime-monitor.mjs",
+    "installer/process-lifetime.cjs",
   ];
   if (!requiredDirectFiles.every((required) => directFiles.some((file) => file.path === required))) {
     throw new Error("Sealed runtime manifest is missing a direct executable root.");
@@ -561,7 +567,9 @@ function stagePayloadInput(staging, packages, dependencies, checkpoint, dependen
       writeFileSync(destination, file.data, { mode: 0o600, flag: "wx" });
     }
     recordTree(resolve(stage, "connector/extension"), "connector/extension", (path) => [`app/connector/extension/${path}`], records);
-    copy(resolve(INSTALLER, "shared/runtime-monitor.mjs"), resolve(stage, "installer/runtime-monitor.mjs"));
+    for (const file of INSTALLER_RUNTIME_FILES) {
+      copy(resolve(INSTALLER, "shared", file), resolve(stage, "installer", file));
+    }
     recordTree(resolve(stage, "installer"), "installer", (path) => [`app/installer/${path}`], records);
     records.sort((left, right) => left.path.localeCompare(right.path));
     const mcpRuntime = mcpRuntimeManifest(stage, records, stagedPackages, stagedDependencies);
@@ -724,6 +732,7 @@ function assertPayload(payload, target, input, { executable = false } = {}) {
     resolve(payload, "app/packages/mcp-server/dist/local-owner-sidecar-access.js"),
     resolve(payload, "app/packages/canvas-connector-mcp/dist/index.js"),
     resolve(payload, "app/installer/runtime-monitor.mjs"),
+    resolve(payload, "app/installer/process-lifetime.cjs"),
     resolve(payload, "app/connector/extension/manifest.json"),
     resolve(payload, "app/bridge-release/manifest.json"),
     resolve(payload, "app/bridge-release/extension/manifest.json"),
@@ -750,7 +759,9 @@ function assertPayload(payload, target, input, { executable = false } = {}) {
   if (executable) {
     run(node, ["--check", resolve(payload, "app/packages/client-config/dist/cli.js")], { cwd: resolve(payload, "app") });
     run(node, ["--check", resolve(payload, "app/packages/mcp-server/dist/index.js")], { cwd: resolve(payload, "app") });
-    run(node, ["--check", resolve(payload, "app/installer/runtime-monitor.mjs")], { cwd: resolve(payload, "app") });
+    // Executing the module resolves every direct import and require. `--check`
+    // alone accepts a monitor whose packaged sibling dependency is missing.
+    run(node, [resolve(payload, "app/installer/runtime-monitor.mjs")], { cwd: resolve(payload, "app") });
   }
 }
 
@@ -842,7 +853,7 @@ async function preparePayload(target, destination, replace) {
     copy(resolve(input.stage, "artifacts/canvas-api/canvas-api-catalog.json"), resolve(appRoot, "artifacts/canvas-api/canvas-api-catalog.json"));
     copy(resolve(input.stage, "connector/extension"), resolve(appRoot, "connector/extension"));
     const bridgeRelease = copyBridgeRelease(appRoot, resolve(input.stage, "connector/extension"));
-    copy(resolve(input.stage, "installer/runtime-monitor.mjs"), resolve(appRoot, "installer/runtime-monitor.mjs"));
+    copy(resolve(input.stage, "installer"), resolve(appRoot, "installer"));
     writeFileSync(resolve(appRoot, "package-input-manifest.json"), input.manifestBytes, { mode: 0o600, flag: "wx" });
     writeFileSync(resolve(appRoot, "mcp-runtime-manifest.json"), input.mcpRuntime.bytes, { mode: 0o600, flag: "wx" });
     const sealedInput = { manifest: input.manifest, manifestBytes: input.manifestBytes, mcpRuntime: input.mcpRuntime };

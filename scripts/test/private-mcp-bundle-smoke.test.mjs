@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
@@ -24,6 +25,7 @@ smoke("prepared desktop payload keeps executable runtime immutable and Bridge re
     join(payloadRoot, "app", "packages", "client-config", "dist", "cli.js"),
     join(payloadRoot, "app", "packages", "mcp-server", "dist", "index.js"),
     join(payloadRoot, "app", "installer", "runtime-monitor.mjs"),
+    join(payloadRoot, "app", "installer", "process-lifetime.cjs"),
     join(payloadRoot, "app", "bridge-release", "manifest.json"),
     join(payloadRoot, "app", "bridge-release", "extension", "manifest.json"),
   ]) assert.equal(statSync(file).isFile(), true, `${file} is missing`);
@@ -37,4 +39,10 @@ smoke("prepared desktop payload keeps executable runtime immutable and Bridge re
   assert.equal(release.files.some((file) => file.path === "morrow-bridge-active-folder.json"), false);
   assert.ok(release.files.length > 0);
   assert.equal(regularFiles(join(payloadRoot, "app", "node_modules")).length > 0, true);
+  const monitor = spawnSync(node, [join(payloadRoot, "app", "installer", "runtime-monitor.mjs")], {
+    cwd: join(payloadRoot, "app"),
+    encoding: "utf8",
+    windowsHide: true,
+  });
+  assert.equal(monitor.status, 0, `packaged runtime monitor could not load:\n${monitor.stderr || monitor.stdout}`);
 });

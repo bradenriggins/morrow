@@ -3,7 +3,7 @@ import type { ServerContext } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Text, type JsonObject } from "@morrow/contracts";
 
 export const MAX_INLINE_RESULT_CHARACTERS = 64_000;
-export const MAX_RESULT_ARTIFACT_CHARACTERS = 1_000_000;
+export const MAX_RESULT_ARTIFACT_CHARACTERS = 2_000_000;
 export const MAX_RESULT_ARTIFACTS = 16;
 export const MAX_RESULT_PAGE_CHARACTERS = 16_000;
 

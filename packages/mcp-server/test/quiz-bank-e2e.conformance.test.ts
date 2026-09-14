@@ -43,6 +43,7 @@ type ItemBankCredentialContract = {
 };
 
 type ItemBankExecutor = {
+  absoluteItemBankTabUrls(tabs: readonly JsonObject[], canvasOrigin: string): JsonObject[];
   executeItemBankInPage(input: JsonObject): Promise<JsonObject>;
 };
 
@@ -180,13 +181,15 @@ function itemBankWorkerLifecycle(dependencies: {
   readonly launches: Map<number, JsonObject>;
 }) {
   const worker = readFileSync(resolve(ROOT, "connector/extension/src/service-worker.js"), "utf8");
+  const deadlineBegin = worker.indexOf("function boundedCommandDeadline");
+  const deadlineEnd = worker.indexOf("// The private banks.build token", deadlineBegin);
   const begin = worker.indexOf("function clearItemBankCredentialsForTab");
   const end = worker.indexOf("async function executeOperation", begin);
-  if (begin < 0 || end < 0) throw new Error("Item Bank worker lifecycle is missing");
-  const source = worker.slice(begin, end);
+  if (deadlineBegin < 0 || deadlineEnd < 0 || begin < 0 || end < 0) throw new Error("Item Bank worker lifecycle is missing");
+  const source = `${worker.slice(deadlineBegin, deadlineEnd)}\n${worker.slice(begin, end)}`;
   return Function(
     "chrome", "crypto", "itemBankCredentials", "pendingItemBankLaunches", "itemBankCredentialKey",
-    "itemBankLaunchUrl", "itemBankLaunchFromCourseTabs", "itemBankPermissionOrigins", "usableItemBankCredential", "itemBankFrameIds",
+    "itemBankLaunchUrl", "itemBankLaunchFromCourseTabs", "absoluteItemBankTabUrls", "itemBankPermissionOrigins", "usableItemBankCredential", "itemBankFrameIds",
     "itemBankApiOriginForFrame", "executeItemBankInPage", "stableJson", "ITEM_BANK_CREDENTIAL_WAIT_MS", "setTimeout",
     `"use strict"; ${source}; return { executeItemBank, freshItemBankContext, clearItemBankCredentialsForTab };`,
   )(
@@ -197,6 +200,7 @@ function itemBankWorkerLifecycle(dependencies: {
     (tabId: number, frameId: number) => `${tabId}:${frameId}`,
     dependencies.credential.itemBankLaunchUrl,
     dependencies.credential.itemBankLaunchFromCourseTabs,
+    dependencies.executor.absoluteItemBankTabUrls,
     dependencies.credential.itemBankPermissionOrigins,
     dependencies.credential.usableItemBankCredential,
     dependencies.frames.itemBankFrameIds,
@@ -206,7 +210,7 @@ function itemBankWorkerLifecycle(dependencies: {
     45_000,
     (resolveDelay: () => void) => resolveDelay(),
   ) as {
-    executeItemBank(binding: JsonObject, operation: JsonObject, args: JsonObject): Promise<JsonObject>;
+    executeItemBank(binding: JsonObject, operation: JsonObject, args: JsonObject, expiresAt: number): Promise<JsonObject>;
   };
 }
 
@@ -817,7 +821,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
               id: `context_external_tool_${ITEM_BANK_EXTERNAL_TOOL_ID}`,
               type: "external",
               label: "Item Banks",
-              html_url: launchUrl,
+              html_url: `/courses/${COURSE_ID}/external_tools/${ITEM_BANK_EXTERNAL_TOOL_ID}`,
             }],
           }),
           remove: async (tabId: number) => { records.removes.push(tabId); },
@@ -843,12 +847,12 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       const lifecycle = itemBankWorkerLifecycle({ chrome, credential: credentialContract, executor, frames: frameContract, credentials, launches });
       const result = await lifecycle.executeItemBank({
         tabId: 5, windowId: 3, origin: canvasOrigin, courseId: COURSE_ID, principalId: "7",
-      }, operationFor("canvas_item_bank_list_banks") as unknown as JsonObject, { course_id: COURSE_ID });
+      }, operationFor("canvas_item_bank_list_banks") as unknown as JsonObject, { course_id: COURSE_ID }, Date.now() + 45_000);
       return { result, records, credentials, launches, tempTabId };
     };
 
     const workerSuccess = await exerciseWorker(false);
-    expect(workerSuccess.result).toMatchObject({ matched: true, ok: true, sent: true, data: [] });
+    expect(workerSuccess.result, JSON.stringify(workerSuccess)).toMatchObject({ matched: true, ok: true, sent: true, data: [] });
     expect(workerSuccess.records.gets).toEqual([5]);
     expect(workerSuccess.records.creates).toEqual([{ active: false, windowId: 3 }]);
     expect(workerSuccess.records.updates).toEqual([{ tabId: 99, url: launchUrl }]);
@@ -1753,13 +1757,20 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
 
       const admitted = relevantOperations.filter((operation) => operation.readOnly || canvasOperationAdmission(operation).write.state === "admitted");
       const held = relevantOperations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "held");
+      const published = admitted.filter((operation) => operation.toolName !== "canvas_get_items_media_upload_url");
+      const hidden = relevantOperations.filter((operation) => held.includes(operation)
+        || operation.toolName === "canvas_get_items_media_upload_url");
       expect(relevantOperations).toHaveLength(32);
-      expect(admitted).toHaveLength(32);
-      expect(held).toHaveLength(0);
+      expect(admitted).toHaveLength(30);
+      expect(held).toHaveLength(2);
+      expect(held.map((operation) => operation.toolName).sort()).toEqual([
+        "canvas_set_course_level_accommodations",
+        "canvas_set_quiz_level_accommodations",
+      ]);
       expect(relevantOperations.filter((operation) => operation.service === "item_bank" && !operation.readOnly
         && canvasOperationAdmission(operation).write.state === "admitted").map((operation) => operation.toolName))
         .toHaveLength(11);
-      for (const operation of admitted) {
+      for (const operation of published) {
         const capability = await client!.callTool({ name: "morrow_capability_get", arguments: { name: operation.toolName } });
         expect(capability.isError, operation.toolName).not.toBe(true);
         expect(structured(capability), operation.toolName).toMatchObject({ descriptor: { canonicalName: operation.toolName, behavior: { readOnly: operation.readOnly } } });
@@ -1780,7 +1791,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         canvas_list_new_quizzes: { course_id: COURSE_ID },
         canvas_list_quiz_items: { course_id: COURSE_ID, assignment_id: "77" },
       };
-      for (const operation of admitted.filter((candidate) => candidate.readOnly)) {
+      for (const operation of published.filter((candidate) => candidate.readOnly)) {
         const result = await callRead(operation.toolName, readArguments[operation.toolName]!);
         expect(structured(result), operation.toolName).toMatchObject({ status: "succeeded" });
         provedCatalog.set(operation.toolName, "mcp_read_bridge_fixture");
@@ -1809,7 +1820,7 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       expect((quizItems.get("77") ?? []).find((item) => exactId(item.id) === directItemId)?.points_possible).toBe(4);
       provedCatalog.set("canvas_update_quiz_item", "plan_approval_bridge_exact_readback");
 
-      for (const operation of held) {
+      for (const operation of hidden) {
         const before = writeCommands.length;
         const capability = await client!.callTool({ name: "morrow_capability_get", arguments: { name: operation.toolName } });
         expect(structured(capability), operation.toolName).toMatchObject({ code: "capability_not_found" });
@@ -1817,7 +1828,9 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
         expect(refused.isError, operation.toolName).toBe(true);
         expect(structured(refused), operation.toolName).toMatchObject({ code: "capability_not_found" });
         expect(writeCommands, `${operation.toolName} reached a write`).toHaveLength(before);
-        provedCatalog.set(operation.toolName, `held_${canvasOperationAdmission(operation).write.state}`);
+        if (operation.toolName === "canvas_get_items_media_upload_url") {
+          provedCatalog.set(operation.toolName, "held_upload_credential_output");
+        }
       }
 
       const wrongBankWriteBefore = writeCommands.length;
@@ -2118,7 +2131,8 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       // course-local label and the Canvas user id is resolved only inside the dispatch path.
 
       // A report create must answer with an Assignment-bound Progress record carrying its own
-      // official Progress URL. That URL is the durable follow-up read.
+      // official Progress URL. The global Progress reader stays unavailable because its route
+      // cannot prove the selected course; the person opens the report from this quiz in Canvas.
       const report = await client!.callTool({
         name: "morrow_plan_new_quiz_report",
         arguments: { source_binding_id: SOURCE_BINDING_ID, course_id: COURSE_ID, quiz_id: "77", report_type: "student_analysis", format: "csv" },

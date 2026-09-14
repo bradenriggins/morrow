@@ -47,7 +47,7 @@ const win = {
   icon: "assets/morrow.ico",
   target: [{ target: "nsis", arch: ["x64"] }]
 };
-if (!signedRelease) win.sign = false;
+if (!signedRelease) win.signExecutable = false;
 
 // With identity null, electron-builder skips signing and the bundle keeps only
 // Electron's linker-signed binary with no sealed resources. Gatekeeper reads a

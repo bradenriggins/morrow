@@ -10,7 +10,7 @@ import { MAX_BATCH_RESULT_BYTES } from "@morrow/batch-engine";
 import { WebSocket } from "ws";
 import { describe, expect, it, vi } from "vitest";
 import type { BridgeCommand } from "@morrow/bridge-protocol";
-import { canonicalJson, sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
+import { canonicalJson, isJsonObject, sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { createFullMorrowServer } from "../src/full-server.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
@@ -408,9 +408,9 @@ describe("MorrowRuntime durable batches", () => {
         operations: [{
           childId: "course:77",
           courseId: "77",
-          tool: "canvas_add_course_to_favorites",
+          tool: "canvas_update_course_settings",
           sourceBindingId,
-          arguments: { id: "77" },
+          arguments: { course_id: "77", hide_final_grades: true },
         }],
       });
       const batchId = String((created.batch as { batchId: string }).batchId);
@@ -472,9 +472,9 @@ describe("MorrowRuntime durable batches", () => {
           {
             childId: "ordinary",
             courseId: "77",
-            tool: "canvas_add_course_to_favorites",
+            tool: "canvas_update_course_settings",
             sourceBindingId,
-            arguments: { id: "77" },
+            arguments: { course_id: "77", hide_final_grades: true },
           },
           {
             childId: "private-file",
@@ -1390,7 +1390,7 @@ describe("MorrowRuntime durable batches", () => {
             schema: "morrow.browser-verification.v1",
             status: "verified",
             strategy: "collection-contains-target",
-            readTool: "canvas_list_favorite_courses",
+            readTool: "canvas_get_single_course_courses",
             evidence: "fresh_readback_matches_requested_postcondition",
           },
         });
@@ -1404,9 +1404,9 @@ describe("MorrowRuntime durable batches", () => {
         operations: [{
           childId: "course:77",
           courseId: "77",
-          tool: "canvas_add_course_to_favorites",
+          tool: "canvas_update_course_settings",
           sourceBindingId,
-          arguments: { id: "77" },
+          arguments: { course_id: "77", hide_final_grades: true },
         }],
       });
       const batchId = String((created.batch as { batchId: string }).batchId);
@@ -1648,7 +1648,7 @@ describe("MorrowRuntime durable batches", () => {
     }
   }, 45_000);
 
-  it("removes an audit target whose exact identifier would change during learner redaction", async () => {
+  it("keeps a learner-named Canvas Page auditable through its exact numeric page id", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-inventory-identifier-privacy-"));
     const statePath = join(directory, "morrow.sqlite3");
     const keyPath = join(directory, "batch.key");
@@ -1680,21 +1680,38 @@ describe("MorrowRuntime durable batches", () => {
       expect(storedText).not.toContain("Jane Doe");
       expect(storedText).not.toContain("Jane%20Doe");
       expect(storedText).not.toMatch(/learner_[\w-]+/);
-      expect(stored).toMatchObject({
-        audit_children: [{ arguments: { target: { kind: "syllabus" } } }],
-        coverage: { complete: false, status: "inventory_incomplete", audit_child_count: 1 },
+      expect(stored.coverage).toMatchObject({
+        complete: true,
+        status: "supported_inventory_complete",
+        audit_child_count: 2,
       });
-      const course = (stored.courses as JsonObject[])[0]!;
-      expect(course.targets).toEqual([expect.objectContaining({ target: { kind: "syllabus" } })]);
-      expect(course.coverage_gaps).toEqual(expect.arrayContaining([
-        expect.objectContaining({ code: "target_identifier_redacted", list: "privacy", blocking: true }),
+      const storedAuditTargets = (stored.audit_children as JsonObject[]).map((child) => (
+        isJsonObject(child.arguments) && isJsonObject(child.arguments.target)
+          ? child.arguments.target
+          : undefined
+      ));
+      expect(storedAuditTargets).toEqual(expect.arrayContaining([
+        expect.objectContaining({ kind: "syllabus" }),
+        expect.objectContaining({ kind: "page", page_url: "101" }),
       ]));
+      const course = (stored.courses as JsonObject[])[0]!;
+      expect(course.targets).toEqual(expect.arrayContaining([
+        expect.objectContaining({ target: { kind: "syllabus" } }),
+        expect.objectContaining({ target: { kind: "page", page_url: "101" } }),
+      ]));
+      expect(course.coverage_gaps).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: "target_identifier_redacted" }),
+      ]));
+      const pageChild = (stored.audit_children as JsonObject[]).find((candidate) => (
+        isJsonObject(candidate.arguments) && isJsonObject(candidate.arguments.target)
+          && candidate.arguments.target.kind === "page"
+      ))!;
       await expect(runtime.programInventoryCreateAuditBatch({
         inventoryBatchId,
-        name: "No tokenized identifier audit",
+        name: "Exact numeric Page audit",
         concurrency: 1,
-        targetIds: ["Jane%20Doe"],
-      })).rejects.toThrow();
+        targetIds: [String(pageChild.childId)],
+      })).resolves.toMatchObject({ auditBatch: { mode: "read_only" } });
     } finally {
       socket?.close();
       await runtime?.close();
@@ -1707,7 +1724,7 @@ describe("MorrowRuntime durable batches", () => {
     const statePath = join(directory, "morrow.sqlite3");
     const keyPath = join(directory, "batch.key");
     const port = await reserveLoopbackPort();
-    const pages = Array.from({ length: 2_500 }, (_, index) => ({
+    const pages = Array.from({ length: 5_000 }, (_, index) => ({
       page_id: String(index + 10_000),
       url: `large-page-${index + 1}`,
       title: `Feedback for ${"Jane Doe ".repeat(35)}`.trim(),

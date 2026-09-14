@@ -77,7 +77,7 @@ describe("New Quiz module placement and ordering", () => {
     expect(plans).toHaveLength(1);
     expect(plans[0]).toMatchObject({
       tool: "canvas_create_module_item",
-      args: { course_id: "42", module_id: "7", module_item_type: "Assignment", module_item_content_id: "77", module_item_position: "2" },
+      args: { course_id: "42", module_id: "7", module_item_type: "Assignment", module_item_content_id: "77", module_item_position: 2 },
     });
     expect(report(result)).toMatchObject({
       action: "module_placement", quiz: { id: "77", title: "Cell structure" },
@@ -116,7 +116,7 @@ describe("New Quiz module placement and ordering", () => {
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
     expect(plans[0]).toMatchObject({
       tool: "canvas_update_module_item",
-      args: { course_id: "42", module_id: "7", id: "555", module_item_position: "1" },
+      args: { course_id: "42", module_id: "7", id: "555", module_item_position: 1 },
     });
     expect(plans[0]!.args).not.toHaveProperty("module_item_module_id");
     expect(report(result)).toMatchObject({
@@ -129,7 +129,7 @@ describe("New Quiz module placement and ordering", () => {
     const { runtime, plans } = fixture();
     const result = await planNewQuizModuleMove(runtime, { source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", module_id: "7", module_item_id: "555", target_module_id: "9", position: 1 });
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
-    expect(plans[0]!.args).toMatchObject({ module_item_module_id: "9", module_item_position: "1", id: "555" });
+    expect(plans[0]!.args).toMatchObject({ module_item_module_id: "9", module_item_position: 1, id: "555" });
     expect(report(result)).toMatchObject({
       target_module: { id: "9", name: "Week two", item_count: 0 },
       before_target_module_items_sha256: sha256Json([]),
@@ -171,7 +171,7 @@ describe("New Quiz module placement and ordering", () => {
     const { runtime, plans } = fixture();
     const result = await planNewQuizAssignmentGroupOrder(runtime, { source_binding_id: sourceBindingId, course_id: "42", quiz_id: "77", position: 1 });
     expect(result.isError, JSON.stringify(result)).not.toBe(true);
-    expect(plans[0]).toMatchObject({ tool: "canvas_edit_assignment", args: { course_id: "42", id: "77", assignment_position: "1" } });
+    expect(plans[0]).toMatchObject({ tool: "canvas_edit_assignment", args: { course_id: "42", id: "77", assignment_position: 1 } });
     expect(report(result)).toMatchObject({
       action: "assignment_group_order", assignment_group: { id: "5", assignment_count: 3 },
       current_position: 2, requested_position: 1,

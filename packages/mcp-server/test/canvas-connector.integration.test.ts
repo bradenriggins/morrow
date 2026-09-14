@@ -4,6 +4,7 @@ import { join, resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { Client, InMemoryTransport } from "@modelcontextprotocol/client";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
+import type { BridgeCommand } from "@morrow/bridge-protocol";
 import { isJsonObject, sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
@@ -153,9 +154,9 @@ describe("Canvas connector gateway path", () => {
       sessionGeneration: 1,
       catalogDigest: browserCatalogDigest,
       runtimeVerified: true,
+      editPolicyRevision: permission?.revision ?? 0,
+      editOptionsAvailable: true,
       ...(permission ? {
-        editPolicyRevision: permission.revision,
-        editOptionsAvailable: true,
         editPermission: {
           schema: permission.schema,
           revision: permission.revision,
@@ -211,6 +212,7 @@ describe("Canvas connector gateway path", () => {
     let runtime: GatewayRuntime;
     let bridge: BridgeTestClient | undefined;
     let activeEditPermission = detailedEditPermission("canvas_page_content");
+    let activeEditOptions: JsonObject[] = [];
     let writeCommands = 0;
     let partialQuiz = false;
     let filteredPage = false;
@@ -242,9 +244,9 @@ describe("Canvas connector gateway path", () => {
             sourceBindingId,
             provider: "canvas",
             catalogDigest: browserCatalogDigest,
-            policyRevision: 1,
+            policyRevision: activeEditPermission?.revision ?? 0,
             runtimeVerified: true,
-            options: [],
+            options: activeEditOptions,
             ...(activeEditPermission ? { editPermission: activeEditPermission } : {}),
           });
           return;
@@ -281,13 +283,14 @@ describe("Canvas connector gateway path", () => {
           ...(command.toolName === "canvas_show_page_courses" ? { pageBodySha256: sha256Text(lesson.body) } : {}),
           data: command.toolName === "canvas_show_page_courses" ? { ...lesson, body: filteredPage ? "[filtered]" : lesson.body }
             : command.toolName === "canvas_show_revision_courses_latest" ? { revision_id: "1", latest: true, url: lesson.url, title: lesson.title, body: lesson.body }
+            : command.toolName === "canvas_get_course_settings" ? { image: "https://school.instructure.com/course-image?token=private", allow_student_discussion_topics: true }
             : command.toolName === "canvas_get_new_quiz"
             ? { id: command.arguments.assignment_id, course_id: "42", title: command.arguments.assignment_id === "77" ? "Cell Structure Check" : "Practice quiz" }
               : command.toolName === "canvas_list_quiz_items"
                 ? command.arguments.assignment_id === "77" ? quizItems : [{ ...quizItems[3], id: "8" }]
               : command.toolName === "canvas_list_users_in_course_users"
                 ? [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
-              : command.toolName === "canvas_add_course_to_favorites"
+              : command.toolName === "canvas_update_course_settings"
                 ? {
                   id: "42",
                   message: "Student Jane Doe added this course to favorites.",
@@ -299,13 +302,22 @@ describe("Canvas connector gateway path", () => {
                 ? discussion
                 : command.toolName === "canvas_get_single_quiz"
                   ? classicQuiz
-                : { id: "42", name: "Biology" },
+                : command.toolName === "canvas_get_single_course_courses"
+                  ? {
+                      id: "42",
+                      name: "Biology",
+                      course_code: "BIOL 101",
+                      workflow_state: "available",
+                      enrollments: [{ type: "teacher", role: "TeacherEnrollment", user_id: "8000", enrollment_state: "active" }],
+                      teachers: [{ id: "8000", display_name: "Course Teacher", avatar_image_url: "https://school.instructure.com/avatar/8000" }],
+                    }
+                  : { id: "42", name: "Biology" },
           ...(command.kind === "invoke_write" ? {
             verification: {
               schema: "morrow.browser-verification.v1",
               status: "verified",
               strategy: "collection-contains-target",
-              readTool: "canvas_list_favorite_courses",
+              readTool: command.toolName === "canvas_update_course_settings" ? "canvas_get_course_settings" : "canvas_list_favorite_courses",
               evidence: "fresh_readback_matches_requested_postcondition",
             },
           } : {}),
@@ -317,6 +329,205 @@ describe("Canvas connector gateway path", () => {
       await bridge?.close();
       await morrow?.close();
       if (directory) rmSync(directory, { recursive: true, force: true });
+    });
+
+    it("publishes the Canvas-only and cross-provider binding capabilities through the compact boundary", async () => {
+      await bindingsApplied();
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client(
+        { name: "morrow-canvas-binding-read", version: "1" },
+        { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+      );
+      try {
+        await client.connect(clientTransport);
+        for (const [name, schema] of [
+          ["morrow_canvas_bindings", "morrow.canvas-bindings.v1"],
+          ["morrow_browser_bindings", "morrow.browser-bindings.v1"],
+        ] as const) {
+          const result = await client.callTool({
+            name: "morrow_capability_read",
+            arguments: { name, arguments: {} },
+          });
+          expect(result.isError, JSON.stringify(result)).not.toBe(true);
+          expect(result.structuredContent).toMatchObject({
+            schema: "morrow.result.v1",
+            data: {
+              schema,
+              ok: true,
+              count: 1,
+              bindings: [{ sourceBindingId, provider: "canvas", courseId: "42", runtimeVerified: true }],
+            },
+          });
+        }
+        const health = await client.callTool({
+          name: "morrow_capability_read",
+          arguments: { name: "morrow_canvas_connector_health", arguments: {} },
+        });
+        expect(health.isError, JSON.stringify(health)).not.toBe(true);
+        expect(health.structuredContent).toMatchObject({
+          schema: "morrow.result.v1",
+          status: "succeeded",
+          data: {
+            schema: "morrow.canvas-connector.health.v1",
+            ready: true,
+            catalogDigest: browserCatalogDigest,
+            bridge: {
+              schema: "morrow.bridge.health.v1",
+              listening: true,
+              connected: true,
+              extensionId,
+              bindingCount: 1,
+            },
+          },
+        });
+        const editOptions = await client.callTool({
+          name: "morrow_capability_read",
+          arguments: { name: "morrow_browser_edit_options", arguments: { source_binding_id: sourceBindingId } },
+        });
+        expect(editOptions.isError, JSON.stringify(editOptions)).not.toBe(true);
+        expect(editOptions.structuredContent).toMatchObject({
+          schema: "morrow.result.v1",
+          status: "succeeded",
+          data: {
+            schema: "morrow.bridge.edit-options.v1",
+            sourceBindingId,
+            provider: "canvas",
+            catalogDigest: browserCatalogDigest,
+            policyRevision: 1,
+            runtimeVerified: true,
+          },
+        });
+      } finally {
+        await client.close();
+        await server.close();
+      }
+      expect(writeCommands).toBe(0);
+    });
+
+    it("publishes current Edit actions while the course remains in Plan state", async () => {
+      activeEditPermission = undefined;
+      bridge!.updateBindings([binding(false)]);
+      await bindingsApplied();
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client(
+        { name: "morrow-canvas-plan-edit-options", version: "1" },
+        { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+      );
+      try {
+        await client.connect(clientTransport);
+        const editOptions = await client.callTool({
+          name: "morrow_capability_read",
+          arguments: { name: "morrow_browser_edit_options", arguments: { source_binding_id: sourceBindingId } },
+        });
+        expect(editOptions.isError, JSON.stringify(editOptions)).not.toBe(true);
+        expect(editOptions.structuredContent).toMatchObject({
+          schema: "morrow.result.v1",
+          status: "succeeded",
+          data: {
+            schema: "morrow.bridge.edit-options.v1",
+            sourceBindingId,
+            provider: "canvas",
+            catalogDigest: browserCatalogDigest,
+            policyRevision: 0,
+            runtimeVerified: true,
+            options: [],
+          },
+        });
+        expect((editOptions.structuredContent as JsonObject).data).not.toHaveProperty("editPermission");
+      } finally {
+        await client.close();
+        await server.close();
+        activeEditPermission = detailedEditPermission("canvas_page_content");
+        bridge!.updateBindings([binding()]);
+        await bindingsApplied();
+      }
+      expect(writeCommands).toBe(0);
+    });
+
+    it("publishes an oversized live-shape Edit catalog through a final bounded artifact", async () => {
+      activeEditPermission = undefined;
+      activeEditOptions = Array.from({ length: 150 }, (_, index) => ({
+        id: `canvas_test_action_${String(index + 1).padStart(3, "0")}`,
+        group: `Canvas group ${String((index % 46) + 1).padStart(2, "0")}`,
+        label: `Canvas action ${index + 1}`,
+        description: `Verified Canvas Edit action ${index + 1}. ${"This description preserves the complete live catalog across the final MCP privacy boundary. ".repeat(10)}`,
+        availability: "edit",
+        tier: "standard",
+        destructive: false,
+        verification: "checked",
+      }));
+      bridge!.updateBindings([binding(false)]);
+      await bindingsApplied();
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client(
+        { name: "morrow-canvas-large-edit-options", version: "1" },
+        { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+      );
+      try {
+        await client.connect(clientTransport);
+        const editOptions = await client.callTool({
+          name: "morrow_capability_read",
+          arguments: { name: "morrow_browser_edit_options", arguments: { source_binding_id: sourceBindingId } },
+        });
+        expect(editOptions.isError, JSON.stringify(editOptions)).not.toBe(true);
+        expect(editOptions.structuredContent).toMatchObject({
+          schema: "morrow.result-artifact.v1",
+          totalCharacters: expect.any(Number),
+          sha256: expect.any(String),
+        });
+        const artifact = editOptions.structuredContent as JsonObject;
+        expect(Number(artifact.totalCharacters)).toBeGreaterThan(64_000);
+        const handle = String(artifact.handle);
+        let offset = 0;
+        let serialized = "";
+        for (;;) {
+          const result = await client.callTool({
+            name: "morrow_result_page",
+            arguments: { handle, offset, limit: 16_000 },
+          });
+          expect(result.isError, JSON.stringify(result)).not.toBe(true);
+          const page = result.structuredContent as JsonObject;
+          expect(page).toMatchObject({
+            schema: "morrow.result-page.v1",
+            handle,
+            offset,
+          });
+          serialized += String(page.text);
+          if (page.nextOffset === null) break;
+          offset = Number(page.nextOffset);
+        }
+        expect(serialized.length).toBe(artifact.totalCharacters);
+        expect(sha256Text(serialized)).toBe(artifact.sha256);
+        expect(JSON.parse(serialized)).toMatchObject({
+          structuredContent: {
+            schema: "morrow.result.v1",
+            status: "succeeded",
+            data: {
+              schema: "morrow.bridge.edit-options.v1",
+              sourceBindingId,
+              provider: "canvas",
+              policyRevision: 0,
+              runtimeVerified: true,
+              options: [
+                { id: "canvas_test_action_001", availability: "edit", verification: "checked" },
+                ...Array.from({ length: 148 }, () => expect.anything()),
+                { id: "canvas_test_action_150", availability: "edit", verification: "checked" },
+              ],
+            },
+          },
+        });
+      } finally {
+        await client.close();
+        await server.close();
+        activeEditOptions = [];
+        activeEditPermission = detailedEditPermission("canvas_page_content");
+        bridge!.updateBindings([binding()]);
+        await bindingsApplied();
+      }
+      expect(writeCommands).toBe(0);
     });
 
     it("reads the selected Canvas course through its API id field", async () => {
@@ -334,7 +545,7 @@ describe("Canvas connector gateway path", () => {
           ok: true,
           provider: "canvas",
           commandKind: "invoke_read",
-          result: { data: { id: "42", name: "Biology" } },
+          result: { data: { id: "42", name: "Biology", course_code: "BIOL 101", workflow_state: "available" } },
         },
       });
       expect(writeCommands).toBe(0);
@@ -364,14 +575,16 @@ describe("Canvas connector gateway path", () => {
         expect(course.structuredContent).toMatchObject({
           schema: "morrow.result.v1",
           status: "succeeded",
-          data: {
-            schema: "morrow.canvas-connector.result.v1",
-            ok: true,
-            provider: "canvas",
-            commandKind: "invoke_read",
-            result: { data: { id: "42", name: "Biology" } },
-          },
-        });
+            data: {
+              schema: "morrow.canvas-connector.result.v1",
+              ok: true,
+              provider: "canvas",
+              commandKind: "invoke_read",
+              result: { data: { id: "42", name: "Biology", course_code: "BIOL 101", workflow_state: "available" } },
+            },
+          });
+          expect(JSON.stringify(course)).not.toContain("8000");
+          expect(JSON.stringify(course)).not.toContain("Course Teacher");
       } finally {
         await client.close();
         await server.close();
@@ -582,6 +795,31 @@ describe("Canvas connector gateway path", () => {
       lesson.body = originalLessonBody;
     }, CASE_TIMEOUT_MS);
 
+    it("returns visible Canvas page HTML without hidden markup or signed setting URLs", async () => {
+      const originalLessonBody = lesson.body;
+      lesson.body = '<p>Visible lesson text.</p><div hidden>Hidden answer.</div><div style="display:none">Hidden note.</div><script>privateScript()</script>';
+      try {
+        for (const name of ["canvas_show_page_courses", "canvas_show_revision_courses_latest"] as const) {
+          const result = await runtime.call(name, {
+            course_id: "42", url_or_id: "lesson", _morrow: { source_binding_id: sourceBindingId },
+          });
+          const serialized = JSON.stringify(result);
+          expect(result.isError, serialized).not.toBe(true);
+          expect(serialized).toContain("Visible lesson text.");
+          expect(serialized).not.toMatch(/Hidden answer|Hidden note|privateScript|display:none| hidden/u);
+        }
+        const settings = await runtime.call("canvas_get_course_settings", {
+          course_id: "42", _morrow: { source_binding_id: sourceBindingId },
+        });
+        const serializedSettings = JSON.stringify(settings);
+        expect(settings.isError, serializedSettings).not.toBe(true);
+        expect(serializedSettings).toContain("allow_student_discussion_topics");
+        expect(serializedSettings).not.toMatch(/course-image|token=private/u);
+      } finally {
+        lesson.body = originalLessonBody;
+      }
+    }, CASE_TIMEOUT_MS);
+
     it("names the course and quiz a change would touch, for review", async () => {
       const reviewPlan = await runtime.call("canvas_create_quiz_item", {
         course_id: "42", assignment_id: "77", item_entry_title: "Cell structure",
@@ -596,8 +834,9 @@ describe("Canvas connector gateway path", () => {
     }, CASE_TIMEOUT_MS);
 
     it("sends one approved course change, checks it again, and keeps learner identity out of the result", async () => {
-      const planned = await runtime.call("canvas_add_course_to_favorites", {
-        id: "42",
+      const planned = await runtime.call("canvas_update_course_settings", {
+        course_id: "42",
+        hide_final_grades: true,
         _morrow: {
           operation_id: "operation:canvas-connector-gateway-test",
           source_binding_id: sourceBindingId,
@@ -619,8 +858,10 @@ describe("Canvas connector gateway path", () => {
         ]),
       });
       expect(writeCommands).toBe(3);
-      const unboundEgress = await runtime.redactMcpEgress(dispatched, { operation_id: id }, { bound: false });
-      expect(unboundEgress).toMatchObject({ isError: true, structuredContent: { code: "learner_roster_binding_unavailable" } });
+      const operationScopedEgress = await runtime.redactMcpEgress(dispatched, { operation_id: id }, { bound: false });
+      expect(JSON.stringify(operationScopedEgress)).not.toContain("Jane Doe");
+      expect(JSON.stringify(operationScopedEgress)).not.toContain("jane.doe@example.edu");
+      expect(JSON.stringify(operationScopedEgress)).toMatch(/Student A[1-9][0-9]*/);
       const operationEgress = await runtime.redactMcpEgress(dispatched, {
         operation_id: id, course_id: "42", _morrow: { source_binding_id: sourceBindingId },
       }, { bound: false });
@@ -856,14 +1097,16 @@ describe("Canvas connector gateway path", () => {
     }, CASE_TIMEOUT_MS);
 
     it("refuses a plan with no course connection, and one whose course connection changed", async () => {
-      const unbound = await runtime.call("canvas_add_course_to_favorites", {
-        id: "43",
+      const unbound = await runtime.call("canvas_update_course_settings", {
+        course_id: "43",
+        hide_final_grades: true,
         _morrow: { operation_id: "operation:unbound-connector-test" },
       });
       expect(unbound).toMatchObject({ isError: true, structuredContent: { data: { code: "operation_plan_invalid" } } });
 
-      const stalePlan = await runtime.call("canvas_add_course_to_favorites", {
-        id: "42",
+      const stalePlan = await runtime.call("canvas_update_course_settings", {
+        course_id: "42",
+        hide_final_grades: true,
         _morrow: {
           operation_id: "operation:stale-binding-connector-test",
           source_binding_id: sourceBindingId,
@@ -1050,23 +1293,23 @@ describe("Canvas connector gateway path", () => {
             schema: "morrow.browser-verification.v1",
             status: confirmed ? "verified" : "unconfirmed",
             strategy: "collection-contains-target",
-            readTool: "canvas_list_favorite_courses",
+            readTool: command.toolName === "canvas_update_course_settings" ? "canvas_get_course_settings" : "canvas_list_favorite_courses",
             evidence: "fresh_readback_matches_requested_postcondition",
           },
         });
       });
 
       const created = await runtime.batchCreate({
-        name: "Favorite two courses",
+        name: "Update two course names",
         mode: "stage_writes",
         concurrency: 1,
         courseSet: { source: "explicit", courseIds: ["41", "42"], complete: true },
         operations: ["41", "42"].map((courseId) => ({
           childId: `course:${courseId}`,
           courseId,
-          tool: "canvas_add_course_to_favorites",
+          tool: "canvas_update_course_settings",
           sourceBindingId: courseBindingId(courseId),
-          arguments: { id: courseId },
+          arguments: { course_id: courseId, hide_final_grades: true },
         })),
       });
       const batchId = String((created.batch as JsonObject).batchId);
@@ -1141,7 +1384,7 @@ describe("Canvas connector gateway path", () => {
             childId: "page:mixed", courseId: "42", tool: "canvas_update_create_page_courses", sourceBindingId,
             arguments: { course_id: "42", url_or_id: "mixed-page", _morrow: { canvas_content_guard: { ...guard, page_id: "93", fields: { ...guard.fields, url: "mixed-page" } } } },
           },
-          { childId: "course:42", courseId: "42", tool: "canvas_add_course_to_favorites", sourceBindingId, arguments: { id: "42" } },
+          { childId: "course:42", courseId: "42", tool: "canvas_update_course_settings", sourceBindingId, arguments: { course_id: "42", hide_final_grades: true } },
         ],
       });
       const mixedId = String((mixed.batch as JsonObject).batchId);
@@ -1154,8 +1397,8 @@ describe("Canvas connector gateway path", () => {
         name: "Stop after an unconfirmed result", mode: "stage_writes", concurrency: 1,
         courseSet: { source: "explicit", courseIds: ["41", "42"], complete: true },
         operations: ["41", "42"].map((courseId) => ({
-          childId: `course:${courseId}`, courseId, tool: "canvas_add_course_to_favorites",
-          sourceBindingId: courseBindingId(courseId), arguments: { id: courseId },
+          childId: `course:${courseId}`, courseId, tool: "canvas_update_course_settings",
+          sourceBindingId: courseBindingId(courseId), arguments: { course_id: courseId, hide_final_grades: true },
         })),
       });
       const uncertainId = String((uncertain.batch as JsonObject).batchId);
@@ -1173,8 +1416,8 @@ describe("Canvas connector gateway path", () => {
       const queued = await runtime.batchCreate({
         name: "Do not start queued work during shutdown", mode: "stage_writes", concurrency: 1,
         courseSet: { source: "explicit", courseIds: ["43"], complete: true },
-        operations: [{ childId: "course:43", courseId: "43", tool: "canvas_add_course_to_favorites",
-          sourceBindingId: courseBindingId("43"), arguments: { id: "43" } }],
+        operations: [{ childId: "course:43", courseId: "43", tool: "canvas_update_course_settings",
+          sourceBindingId: courseBindingId("43"), arguments: { course_id: "43", hide_final_grades: true } }],
       });
       const queuedId = String((queued.batch as JsonObject).batchId);
       runtime.approveBatch(queuedId);
@@ -1237,7 +1480,8 @@ describe("Canvas connector gateway path", () => {
     // scripts/test/canvas-write-outcome-class.test.mjs executes for every
     // status: HTTP 422 is a refusal Canvas never saved, HTTP 502 may already be
     // saved.
-    let nextWrite: "saved" | 422 | 502 = "saved";
+    let nextWrite: "saved" | "hold_unknown" | 422 | 502 = "saved";
+    let heldUnknownWrite: BridgeCommand | null = null;
     let failNextPageRead = false;
     let writeCommands = 0;
 
@@ -1307,6 +1551,11 @@ describe("Canvas connector gateway path", () => {
         }
         if (command.kind === "invoke_write") {
           writeCommands += 1;
+          if (nextWrite === "hold_unknown") {
+            nextWrite = "saved";
+            heldUnknownWrite = command;
+            return;
+          }
           if (nextWrite !== "saved") {
             const refused = nextWrite === 422;
             nextWrite = "saved";
@@ -1456,9 +1705,32 @@ describe("Canvas connector gateway path", () => {
 
       // Canvas may have saved the change: the record stays unresolved and the
       // page is locked until that record is settled.
-      nextWrite = 502;
+      nextWrite = "hold_unknown";
       const uncertainId = await correction("Cells have protective membranes.", "Cells have cell membranes.");
-      const uncertain = await runtime.dispatchOperation(uncertainId);
+      const uncertainDispatch = runtime.dispatchOperation(uncertainId);
+      await expect.poll(() => heldUnknownWrite).not.toBeNull();
+
+      // This exact read finishes while the write is still in flight. Its value
+      // can be stale even though its wall-clock timestamp follows reservation.
+      const duringDispatchRead = await runtime.call("canvas_show_page_courses", {
+        course_id: "42",
+        url_or_id: "lesson",
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(duringDispatchRead.isError, JSON.stringify(duringDispatchRead)).not.toBe(true);
+      const duringDispatchState = String(
+        ((duringDispatchRead._meta as JsonObject)["io.morrow/gateway"] as JsonObject).upstreamResultSha256,
+      );
+      expect(duringDispatchState).toMatch(/^[0-9a-f]{64}$/);
+
+      bridge.respondProblem(heldUnknownWrite!, {
+        schema: "morrow.bridge.problem.v1",
+        code: "write_outcome_unknown",
+        message: "Canvas did not answer this change, so it may have been saved.",
+        recoverable: false,
+      });
+      heldUnknownWrite = null;
+      const uncertain = await uncertainDispatch;
       expect(uncertain.isError).toBe(true);
       expect(uncertain.structuredContent).toMatchObject({ effectState: "applied_or_unknown" });
       expect(runtime.effects.get(uncertainId)).toMatchObject({ state: "applied_or_unknown", dispatchAttempt: 1 });
@@ -1493,6 +1765,20 @@ describe("Canvas connector gateway path", () => {
       expect(withoutRead.isError).toBe(true);
       expect(withoutRead.structuredContent).toMatchObject({ data: { code: "observed_state_not_from_fresh_read" } });
       expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
+
+      const duringDispatchClose = runtime.closeUnresolvedOperation(uncertainId, duringDispatchState, true);
+      expect(duringDispatchClose.isError).toBe(true);
+      expect(duringDispatchClose.structuredContent).toMatchObject({
+        data: { code: "observed_state_not_from_fresh_read" },
+      });
+      expect(runtime.effects.get(uncertainId).state).toBe("applied_or_unknown");
+      const stillBlocked = await runtime.dispatchOperation(blockedId);
+      expect(stillBlocked.isError).toBe(true);
+      expect(stillBlocked.structuredContent).toMatchObject({
+        data: { reason: "provider_effect_target_conflict", blockingOperationId: uncertainId },
+      });
+      expect(runtime.effects.get(blockedId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
+      expect(writeCommands).toBe(3);
 
       const wrongCourseRead = await runtime.call("canvas_show_page_courses", {
         course_id: "43",

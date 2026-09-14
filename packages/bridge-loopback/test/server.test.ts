@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   BRIDGE_PROTOCOL_VERSION,
   BRIDGE_SCHEMAS,
+  MAX_BRIDGE_MESSAGE_BYTES,
   bridgeAuthenticationProofPayload,
   parseBridgeJson,
   serializeBridgeMessage,
@@ -14,6 +15,7 @@ import {
 import {
   BridgeOutcomeUnknownError,
   BridgePortInUseError,
+  BridgeRequestCapacityError,
   BridgeRequestCancelledError,
   BridgeUnavailableError,
   BridgeWriteRecordFullError,
@@ -1086,6 +1088,74 @@ describe("LoopbackBridgeServer", () => {
     await expect(server.invoke(invocation))
       .rejects.toBeInstanceOf(BridgeOutcomeUnknownError);
     expect(calls).toBe(1);
+  });
+
+  it("does not consume an effect receipt until its command is serialized and sent", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const socket = await connect(server, [editableCanvasBinding()]);
+    let writes = 0;
+    commandHandler(socket, (command) => {
+      if (command.kind === "edit_policy_options_get") return editOptions(editableCanvasPermission());
+      writes += 1;
+      return { taskId: "task-after-serialization-refusal" };
+    });
+    const outerGrant = {
+      planDigest: digest,
+      approvalGrantDigest: "b".repeat(64),
+      effectReceiptId: "effect:serialize-refusal",
+      dispatchAttempt: 1 as const,
+      gatewayProcessId: "gateway:12345678",
+      authorization: { kind: "review" as const },
+    };
+    const write = (body: string) => server.invoke({
+      kind: "invoke_write",
+      toolName: "canvas_update_create_page_courses",
+      operationKey: "PUT /v1/courses/{course_id}/pages/{url_or_id}#update_create_page",
+      sourceBindingId: "canvas-course-42",
+      arguments: { course_id: "42", url_or_id: "week-1", wiki_page_body: body, morrow_page_guard: pageGuard },
+      outerGrant,
+    });
+
+    await expect(write("x".repeat(MAX_BRIDGE_MESSAGE_BYTES))).rejects.toThrow();
+    await expect(write("small body")).resolves.toMatchObject({ ok: true });
+    expect(writes).toBe(1);
+  });
+
+  it("bounds aggregate pending Bridge requests before sending another command", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+      callTimeoutMs: 100,
+    });
+    servers.push(server);
+    await connect(server, [editableCanvasBinding()]);
+    const pending = Array.from({ length: 64 }, (_, index) => server.invoke({
+      kind: "invoke_read",
+      toolName: "canvas_fixture_read",
+      operationKey: `GET /v1/courses/{course_id}/fixture/${index}`,
+      sourceBindingId: "canvas-course-42",
+      arguments: { course_id: "42" },
+    }).catch((error) => error));
+    await expect(server.invoke({
+      kind: "invoke_read",
+      toolName: "canvas_fixture_read",
+      operationKey: "GET /v1/courses/{course_id}/fixture/overflow",
+      sourceBindingId: "canvas-course-42",
+      arguments: { course_id: "42" },
+    })).rejects.toBeInstanceOf(BridgeRequestCapacityError);
+    expect(server.health().pendingCount).toBe(64);
+    await Promise.all(pending);
+    expect(server.health().pendingCount).toBe(0);
   });
 
   // The record of sent receipts is bounded, so a bridge that runs for days cannot grow without a

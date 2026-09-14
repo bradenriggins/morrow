@@ -19,6 +19,16 @@ export interface StrictStdioClientOptions {
 
 const DEFAULT_SHUTDOWN_GRACE_MS = 1_500;
 const DEFAULT_SHUTDOWN_KILL_WAIT_MS = 1_500;
+const MAX_PENDING_OUTPUT_MESSAGES = 32;
+
+type PendingOutput = {
+  readonly wire: string;
+  readonly bytes: number;
+  readonly resolve: () => void;
+  readonly reject: (error: Error) => void;
+  onError: ((error: Error) => void) | null;
+  onDrain: (() => void) | null;
+};
 
 export class StrictStdioClientTransport implements Transport {
   onclose?: () => void;
@@ -32,6 +42,9 @@ export class StrictStdioClientTransport implements Transport {
   private closed = false;
   private closePromise: Promise<void> | undefined;
   private closeNotified = false;
+  private activeOutput: PendingOutput | null = null;
+  private readonly outputQueue: PendingOutput[] = [];
+  private pendingOutputBytes = 0;
 
   constructor(private readonly options: StrictStdioClientOptions) {}
 
@@ -56,34 +69,44 @@ export class StrictStdioClientTransport implements Transport {
     child.on("error", this.onStreamError);
     child.on("close", this.onClose);
     await new Promise<void>((resolve, reject) => {
-      child.once("spawn", resolve);
-      child.once("error", reject);
+      const cleanup = () => {
+        child.off("spawn", onSpawn);
+        child.off("error", onError);
+      };
+      const onSpawn = () => {
+        cleanup();
+        resolve();
+      };
+      const onError = (error: Error) => {
+        cleanup();
+        reject(error);
+      };
+      child.once("spawn", onSpawn);
+      child.once("error", onError);
     });
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
     const child = this.process;
     if (!child || this.closed) throw new Error("StrictStdioClientTransport is not connected");
+    const serialized = JSON.stringify(message);
+    if (typeof serialized !== "string") throw new Error("StrictStdioClientTransport message is not serializable");
+    const wire = `${serialized}\n`;
+    const bytes = Buffer.byteLength(wire);
+    if (bytes > this.options.maxBufferSize) {
+      throw new Error("StrictStdioClientTransport message exceeds the stdio limit");
+    }
+    const pendingCount = this.outputQueue.length + (this.activeOutput ? 1 : 0);
+    if (
+      pendingCount >= MAX_PENDING_OUTPUT_MESSAGES
+      || this.pendingOutputBytes + bytes > 2 * this.options.maxBufferSize
+    ) {
+      throw new Error("StrictStdioClientTransport output queue limit exceeded");
+    }
     await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error) => {
-        cleanup();
-        reject(error);
-      };
-      const onDrain = () => {
-        cleanup();
-        resolve();
-      };
-      const cleanup = () => {
-        child.stdin.off("error", onError);
-        child.stdin.off("drain", onDrain);
-      };
-      child.stdin.once("error", onError);
-      if (child.stdin.write(`${JSON.stringify(message)}\n`)) {
-        cleanup();
-        resolve();
-      } else {
-        child.stdin.once("drain", onDrain);
-      }
+      this.pendingOutputBytes += bytes;
+      this.outputQueue.push({ wire, bytes, resolve, reject, onError: null, onDrain: null });
+      this.pumpOutput();
     });
   }
 
@@ -92,13 +115,69 @@ export class StrictStdioClientTransport implements Transport {
     if (this.closed && !this.process) return;
     this.closed = true;
     this.buffer = "";
+    this.rejectPendingOutput(new Error("StrictStdioClientTransport closed before output drained"));
     const child = this.process;
     this.closePromise = this.stopChild(child).finally(() => {
+      this.detachChild(child);
       this.process = undefined;
       this.stderrStream.end();
       this.notifyClose();
     });
     return this.closePromise;
+  }
+
+  private detachChild(child: ChildProcessWithoutNullStreams | undefined): void {
+    if (!child) return;
+    child.stdout.off("data", this.onStdout);
+    child.stdout.off("error", this.onStreamError);
+    child.stdin.off("error", this.onStreamError);
+    child.off("error", this.onStreamError);
+    child.off("close", this.onClose);
+    child.stderr.unpipe(this.stderrStream);
+  }
+
+  private pumpOutput(): void {
+    const child = this.process;
+    if (!child || this.closed || this.activeOutput) return;
+    const pending = this.outputQueue.shift();
+    if (!pending) return;
+    this.activeOutput = pending;
+    pending.onError = (error: Error) => this.finishOutput(pending, error);
+    pending.onDrain = () => this.finishOutput(pending, null);
+    child.stdin.once("error", pending.onError);
+    child.stdin.once("drain", pending.onDrain);
+    try {
+      if (child.stdin.write(pending.wire)) this.finishOutput(pending, null);
+    } catch (error) {
+      this.finishOutput(pending, error instanceof Error ? error : new Error(String(error)));
+    }
+  }
+
+  private finishOutput(pending: PendingOutput, error: Error | null): void {
+    if (this.activeOutput !== pending) return;
+    const child = this.process;
+    if (child) {
+      if (pending.onError) child.stdin.off("error", pending.onError);
+      if (pending.onDrain) child.stdin.off("drain", pending.onDrain);
+    }
+    this.activeOutput = null;
+    this.pendingOutputBytes -= pending.bytes;
+    if (error) pending.reject(error);
+    else pending.resolve();
+    this.pumpOutput();
+  }
+
+  private rejectPendingOutput(error: Error): void {
+    const active = this.activeOutput;
+    this.activeOutput = null;
+    const child = this.process;
+    if (active) {
+      if (child && active.onError) child.stdin.off("error", active.onError);
+      if (child && active.onDrain) child.stdin.off("drain", active.onDrain);
+      active.reject(error);
+    }
+    for (const pending of this.outputQueue.splice(0)) pending.reject(error);
+    this.pendingOutputBytes = 0;
   }
 
   private childExited(child: ChildProcessWithoutNullStreams): boolean {
@@ -147,12 +226,7 @@ export class StrictStdioClientTransport implements Transport {
       this.options.shutdownKillWaitMs ?? DEFAULT_SHUTDOWN_KILL_WAIT_MS,
     );
     if (!killed) {
-      child.stdout.off("data", this.onStdout);
-      child.stdout.off("error", this.onStreamError);
-      child.stdin.off("error", this.onStreamError);
-      child.off("error", this.onStreamError);
-      child.off("close", this.onClose);
-      child.stderr.unpipe(this.stderrStream);
+      this.detachChild(child);
       child.stdin.destroy();
       child.stdout.destroy();
       child.stderr.destroy();
@@ -212,6 +286,7 @@ export class StrictStdioClientTransport implements Transport {
   private readonly onStreamError = (error: Error): void => this.fail(error.message);
 
   private readonly onClose = (): void => {
+    this.rejectPendingOutput(new Error("StrictStdioClientTransport closed before output drained"));
     this.process = undefined;
     this.stderrStream.end();
     if (!this.closed) {

@@ -9,8 +9,7 @@ import {
   shouldRefreshForStorageChange,
 } from "../../connector/extension/onboarding/onboarding-state.js";
 
-// One recorded read, as connector/extension/src/service-worker.js writes it after an invoke_read
-// that returned ok.
+// One durable read receipt is exposed only through the exact current binding it matches.
 const FIRST_READ = Object.freeze({
   provider: "canvas",
   origin: "https://canvas.example",
@@ -19,13 +18,22 @@ const FIRST_READ = Object.freeze({
   at: 1_700_000_000_000,
 });
 
+const READ_BINDING = Object.freeze({
+  sourceBindingId: "canvas:principal:g1:c42",
+  provider: "canvas",
+  courseId: "42",
+  courseName: "Biology 101",
+  runtimeVerified: true,
+  firstReadCompleted: true,
+});
+
 const READY_STATUS = Object.freeze({
   paired: true,
   pairing: false,
   connecting: false,
   connected: true,
   runtimeHealthy: true,
-  bindings: [{ runtimeVerified: true }],
+  bindings: [READ_BINDING],
   siteAnchors: [{ runtimeVerified: true }],
   firstCourseRead: FIRST_READ,
 });
@@ -122,7 +130,7 @@ test("the version check separates a matching Morrow from one this connection can
 
 // "Ready to use" is the claim a person acts on, so only a read that happened can raise it, and the
 // line that raises it names the course that was read.
-test("Ready to use waits for a recorded course read, and the record names the course", () => {
+test("Ready to use waits for an exact current binding read, and the binding names the course", () => {
   const connected = { paired: true, connected: true, runtimeHealthy: true, bindings: [{ runtimeVerified: true }], siteAnchors: [{ runtimeVerified: true }] };
   const waiting = setupGuideState(connected);
   assert.equal(waiting.ready, false);
@@ -131,23 +139,23 @@ test("Ready to use waits for a recorded course read, and the record names the co
   assert.equal(waiting.title, "Try a first read");
   assert.equal(textOf(waiting, "read"), "No first read is completed yet");
 
-  const read = setupGuideState({ ...connected, firstCourseRead: FIRST_READ });
+  const read = setupGuideState({ ...connected, bindings: [READ_BINDING], firstCourseRead: FIRST_READ });
   assert.equal(read.ready, true);
   assert.equal(read.heading, "Ready to use");
   assert.equal(read.summary, "1 selected course is ready in this Chrome session. Morrow completed a first read in Biology 101.");
   assert.equal(textOf(read, "read"), "First read completed in Biology 101");
 
-  // A record that cannot name its course completes nothing, and a record that carries only the
-  // course id still names that course.
-  for (const record of [{}, { courseName: "   " }, { at: 1 }, "read", null]) {
-    assert.equal(setupGuideState({ ...connected, firstCourseRead: record }).ready, false, JSON.stringify(record));
+  // A stale naked receipt and a flagged binding that cannot name its course complete nothing.
+  assert.equal(setupGuideState({ ...connected, firstCourseRead: FIRST_READ }).ready, false);
+  for (const binding of [{}, { runtimeVerified: true }, { runtimeVerified: true, firstReadCompleted: true }, { runtimeVerified: false, firstReadCompleted: true, courseId: "42" }]) {
+    assert.equal(setupGuideState({ ...connected, bindings: [binding], firstCourseRead: FIRST_READ }).ready, false, JSON.stringify(binding));
   }
-  const byId = setupGuideState({ ...connected, firstCourseRead: { provider: "moodle", courseId: "7", at: 1 } });
+  const byId = setupGuideState({ ...connected, bindings: [{ runtimeVerified: true, firstReadCompleted: true, provider: "moodle", courseId: "7" }] });
   assert.equal(byId.ready, true);
   assert.equal(textOf(byId, "read"), "First read completed in course 7");
 
   // A read is not a substitute for the checks in front of it.
-  assert.equal(setupGuideState({ ...connected, connected: false, firstCourseRead: FIRST_READ }).ready, false);
+  assert.equal(setupGuideState({ ...connected, connected: false, bindings: [READ_BINDING] }).ready, false);
   assert.equal(setupGuideState({ ...connected, bindings: [], firstCourseRead: FIRST_READ }).ready, false);
 });
 
@@ -206,7 +214,7 @@ test("each readiness state carries its own words, so the coloured dot is never t
   assert.equal(oneLeft.heading, "One step left");
   assert.equal(ready.heading, "Ready to use");
   assert.equal(ready.summary, "1 selected course is ready in this Chrome session. Morrow completed a first read in Biology 101.");
-  assert.equal(of({ ...READY_STATUS, bindings: [{ runtimeVerified: true }, { runtimeVerified: true }] }).summary,
+  assert.equal(of({ ...READY_STATUS, bindings: [READ_BINDING, { runtimeVerified: true }] }).summary,
     "2 selected courses are ready in this Chrome session. Morrow completed a first read in Biology 101.");
 });
 

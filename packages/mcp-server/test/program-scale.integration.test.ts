@@ -653,16 +653,16 @@ describe("program-scale runtime proof", () => {
 
     it("records a write with an uncertain ending, and refuses the next group aimed at the same course", async () => {
       const writeInput = {
-        name: "Applied-or-unknown favorite",
+        name: "Applied-or-unknown course update",
         mode: "stage_writes",
         concurrency: 1,
         operation_family: "program-scale-write-proof",
         operations: [{
           child_id: "write:canvas:101",
           course_id: canvasCourses[0]!.courseId,
-          tool: "canvas_add_course_to_favorites",
+          tool: "canvas_update_course_settings",
           source_binding_id: canvasCourses[0]!.sourceBindingId,
-          arguments: { id: canvasCourses[0]!.courseId },
+          arguments: { course_id: canvasCourses[0]!.courseId, hide_final_grades: true },
         }],
         course_set: {
           source: "explicit",
@@ -680,7 +680,7 @@ describe("program-scale runtime proof", () => {
       const writeBatchId = writeBatch.batchId;
       const conflicting = structured(await clientA().callTool({
         name: "morrow_batch_create",
-        arguments: { ...writeInput, name: "Conflicting favorite target" },
+        arguments: { ...writeInput, name: "Conflicting course update" },
       }));
       const conflictingBatch = conflicting.batch;
       if (!isJsonObject(conflictingBatch) || typeof conflictingBatch.batchId !== "string") throw new Error("conflicting batch id missing");

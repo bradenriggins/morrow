@@ -2,6 +2,8 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { DomUtils, parseDocument } from "htmlparser2";
+import sanitizeHtml from "sanitize-html";
 import {
   normalizeBridgeBindings,
   normalizeBridgeEditOptionsResult,
@@ -385,6 +387,83 @@ export function isPrivateSourceTool(tool: Pick<CatalogTool, "upstreamName">): bo
 const PRIVATE_EGRESS_FIELD_KEYS = new Set(["privateattachment", "bytesbase64"]);
 const MAX_INVENTORY_EGRESS_CONTEXTS = 4;
 const MAX_BROWSER_BINDING_EGRESS_CONTEXTS = 4;
+const CANVAS_COURSE_PUBLIC_FIELDS = new Set([
+  "access_restricted_by_date",
+  "account_id",
+  "apply_assignment_group_weights",
+  "banner_image",
+  "blueprint",
+  "concluded",
+  "course_code",
+  "course_color",
+  "course_format",
+  "created_at",
+  "default_view",
+  "end_at",
+  "enrollment_term_id",
+  "friendly_name",
+  "grade_passback_setting",
+  "grading_standard_id",
+  "hide_final_grades",
+  "homeroom_course",
+  "id",
+  "image_download_url",
+  "integration_id",
+  "is_public",
+  "is_public_to_auth_users",
+  "license",
+  "lti_context_id",
+  "name",
+  "needs_grading_count",
+  "overridden_course_visibility",
+  "permissions",
+  "post_manually",
+  "public_description",
+  "public_syllabus",
+  "public_syllabus_to_auth",
+  "restrict_enrollments_to_course_dates",
+  "root_account_id",
+  "sections",
+  "sis_course_id",
+  "sis_import_id",
+  "start_at",
+  "storage_quota_mb",
+  "storage_quota_used_mb",
+  "syllabus_body",
+  "template",
+  "term",
+  "time_zone",
+  "total_students",
+  "uuid",
+  "workflow_state",
+]);
+
+const CANVAS_PAGE_HTML_READS = new Set([
+  "canvas_show_page_courses",
+  "canvas_show_front_page_courses",
+  "canvas_show_revision_courses_latest",
+  "canvas_show_revision_courses_revision_id",
+]);
+
+function sanitizeCanvasPageHtml(value: string): string {
+  const document = parseDocument(value);
+  const hidden = DomUtils.findAll((element) => Object.hasOwn(element.attribs, "hidden")
+    || element.attribs["aria-hidden"]?.toLocaleLowerCase("en-US") === "true"
+    || /(?:^|;)\s*(?:display\s*:\s*none|visibility\s*:\s*hidden)\s*(?:;|$)/iu.test(element.attribs.style || ""), document.children);
+  hidden.forEach((element) => DomUtils.removeElement(element));
+  return sanitizeHtml(DomUtils.getInnerHTML(document), {
+    allowedTags: ["p", "br", "hr", "div", "span", "h1", "h2", "h3", "h4", "h5", "h6", "strong", "b", "em", "i", "u", "s", "del", "ins", "sub", "sup", "small", "mark", "blockquote", "pre", "code", "kbd", "ul", "ol", "li", "dl", "dt", "dd", "table", "caption", "thead", "tbody", "tfoot", "tr", "th", "td", "figure", "figcaption", "a", "img"],
+    allowedAttributes: {
+      "*": ["lang", "dir", "title", "role", "aria-label"],
+      a: ["href", "title"], img: ["src", "alt", "title", "width", "height"],
+      ol: ["start", "reversed", "type"], li: ["value"],
+      th: ["colspan", "rowspan", "scope"], td: ["colspan", "rowspan"],
+    },
+    allowedSchemes: ["http", "https", "mailto"],
+    allowProtocolRelative: false,
+    nonTextTags: ["script", "style", "textarea", "option", "noscript", "template"],
+  });
+}
 const MCP_RUNTIME_HEALTH_SCHEMA = "morrow.mcp-runtime.health.v1";
 const MCP_RUNTIME_MANIFEST_SCHEMA = "morrow.mcp-runtime-manifest.v2";
 const MCP_RUNTIME_PACKAGE_NAME = "@morrow-lms/gateway";
@@ -1545,8 +1624,10 @@ export class GatewayRuntime {
       readonly journalPath?: string;
       readonly mcpRuntime?: McpRuntimeHealth;
       readonly resultBindingEncryptionKey?: Uint8Array;
+      readonly signal?: AbortSignal;
     } = {},
   ): Promise<GatewayRuntime> {
+    options.signal?.throwIfAborted();
     assertUniqueCanonicalUpstreamIds(config.upstreams);
     const sourceAttestations = verifyConfiguredSources(config);
     const catalogTruth = new Map<string, ReturnType<typeof loadExamplePlatformCatalogTruth>>(config.upstreams
@@ -1555,147 +1636,160 @@ export class GatewayRuntime {
         source.id,
         loadExamplePlatformCatalogTruth(source, config.filters),
       ]));
+    const journalPath = options.journalPath || config.operationJournal.path;
+    let memoryCausalSequence = 0;
+    const nextCausalSequence = journalPath === ":memory:" ? () => ++memoryCausalSequence : undefined;
     const journal = new GatewayOperationJournal({
-      path: options.journalPath || config.operationJournal.path,
+      path: journalPath,
+      ...(nextCausalSequence ? { nextCausalSequence } : {}),
     });
-    const learnerVault = new LearnerVault(
-      (options.journalPath || config.operationJournal.path) === ":memory:"
-        ? ":memory:"
-        : config.privacy.learnerVaultPath,
-    );
-    const effects = new ProviderEffectBroker({
-      path: options.journalPath || config.operationJournal.path,
-    });
+    let learnerVault: LearnerVault;
+    let effects: ProviderEffectBroker;
+    try {
+      learnerVault = new LearnerVault(
+        (options.journalPath || config.operationJournal.path) === ":memory:"
+          ? ":memory:"
+          : config.privacy.learnerVaultPath,
+      );
+      effects = new ProviderEffectBroker({
+        path: journalPath,
+        ...(nextCausalSequence ? { nextCausalSequence } : {}),
+      });
+    } catch (error) {
+      journal.close();
+      throw error;
+    }
     const upstreams = new Map<string, StdioMcpUpstream>();
     const sources: CatalogSource[] = [];
     const excludedSourceNames = new Set([...config.filters.excludeNames, ...INTERNAL_SOURCE_TOOL_NAMES]);
     const blackboardEffectDispatchSecret = randomBytes(32).toString("base64url");
 
-    for (const upstreamConfig of [...config.upstreams].sort((left, right) => (
-      right.priority - left.priority || compareAscii(left.id, right.id)
-    ))) {
-      const attestation = sourceAttestations.get(upstreamConfig.id);
-      const truth = catalogTruth.get(upstreamConfig.id);
-      const privateAdapterModule = "./meridian-runtime-adapter.js";
-      const upstreamEnvironment = upstreamConfig.kind === "mcp-stdio"
-        ? {
-            ...upstreamConfig.env,
-            ...(upstreamConfig.id === "blackboard-rest" ? {
-              MORROW_BLACKBOARD_GATEWAY_INTERNAL: "1",
-              MORROW_BLACKBOARD_EFFECT_DISPATCH_SECRET: blackboardEffectDispatchSecret,
-            } : {}),
-          }
-        : undefined;
-      const launch = upstreamConfig.kind === "meridian-ssh"
-        ? (await import(privateAdapterModule)).buildExamplePlatformSshLaunch({
-            host: upstreamConfig.host,
-            remoteRoot: upstreamConfig.remoteRoot,
-            serverPath: upstreamConfig.serverPath,
-            runtimeProfile: upstreamConfig.runtimeProfile,
-          })
-        : {
-            command: upstreamConfig.command,
-            args: upstreamConfig.args,
-            ...(upstreamConfig.cwd ? { cwd: upstreamConfig.cwd } : {}),
-            env: upstreamEnvironment,
-          };
-      // Windows paths carry backslashes, so the capability matcher compares on
-      // one normalized slash direction.
-      const internalSourceCapability = upstreamConfig.kind === "mcp-stdio"
-        && upstreamConfig.args.some((arg) => /packages\/(?:canvas-connector-mcp|legacy-bridge-mcp)\/dist\/index\.js$/u.test(String(arg).replaceAll("\\", "/")))
-        ? randomBytes(32).toString("hex") : undefined;
-      const upstream = new StdioMcpUpstream({
-        ...(internalSourceCapability ? { internalSourceCapability } : {}),
-        id: upstreamConfig.id,
-        label: upstreamConfig.label,
-        command: launch.command,
-        args: launch.args,
-        ...(upstreamConfig.kind === "mcp-stdio" && upstreamConfig.cwd
-          ? { cwd: upstreamConfig.cwd }
-          : {}),
-        ...(upstreamConfig.kind === "mcp-stdio" ? { env: upstreamEnvironment } : {}),
-        ...(upstreamConfig.kind === "meridian-ssh" ? { stderr: "ignore" as const } : {}),
-        priority: upstreamConfig.priority,
-        required: upstreamConfig.required,
-        ...(truth
-          ? { expectedToolCount: truth.health.totalToolCount }
-          : upstreamConfig.attestation?.kind === "local-git"
-            && upstreamConfig.attestation.expectedToolCount !== undefined
-          ? { expectedToolCount: upstreamConfig.attestation.expectedToolCount }
-          : {}),
-        ...(truth
-          ? { expectedCatalogDigest: truth.health.upstreamCatalogDigest }
-          : upstreamConfig.attestation?.kind === "local-git"
-            && upstreamConfig.attestation.expectedCatalogDigest
-          ? { expectedCatalogDigest: upstreamConfig.attestation.expectedCatalogDigest }
-          : {}),
-        ...(attestation ? { sourceAttestation: attestation } : {}),
-        ...(truth ? { catalogTruth: truth.health } : {}),
-        ...(upstreamConfig.kind === "meridian-ssh"
+    try {
+      for (const upstreamConfig of [...config.upstreams].sort((left, right) => (
+        right.priority - left.priority || compareAscii(left.id, right.id)
+      ))) {
+        options.signal?.throwIfAborted();
+        const attestation = sourceAttestations.get(upstreamConfig.id);
+        const truth = catalogTruth.get(upstreamConfig.id);
+        const privateAdapterModule = "./meridian-runtime-adapter.js";
+        const upstreamEnvironment = upstreamConfig.kind === "mcp-stdio"
           ? {
-              supervision: upstreamConfig.supervision,
-              beforeConnect: () => {
-                verifyRemoteGitSshSourceAttestation(
+              ...upstreamConfig.env,
+              ...(upstreamConfig.id === "blackboard-rest" ? {
+                MORROW_BLACKBOARD_GATEWAY_INTERNAL: "1",
+                MORROW_BLACKBOARD_EFFECT_DISPATCH_SECRET: blackboardEffectDispatchSecret,
+              } : {}),
+            }
+          : undefined;
+        const launch = upstreamConfig.kind === "meridian-ssh"
+          ? (await import(privateAdapterModule)).buildExamplePlatformSshLaunch({
+              host: upstreamConfig.host,
+              remoteRoot: upstreamConfig.remoteRoot,
+              serverPath: upstreamConfig.serverPath,
+              runtimeProfile: upstreamConfig.runtimeProfile,
+            })
+          : {
+              command: upstreamConfig.command,
+              args: upstreamConfig.args,
+              ...(upstreamConfig.cwd ? { cwd: upstreamConfig.cwd } : {}),
+              env: upstreamEnvironment,
+            };
+        // Windows paths carry backslashes, so the capability matcher compares on
+        // one normalized slash direction.
+        const internalSourceCapability = upstreamConfig.kind === "mcp-stdio"
+          && upstreamConfig.args.some((arg) => /packages\/(?:canvas-connector-mcp|legacy-bridge-mcp)\/dist\/index\.js$/u.test(String(arg).replaceAll("\\", "/")))
+          ? randomBytes(32).toString("hex") : undefined;
+        const upstream = new StdioMcpUpstream({
+          ...(internalSourceCapability ? { internalSourceCapability } : {}),
+          id: upstreamConfig.id,
+          label: upstreamConfig.label,
+          command: launch.command,
+          args: launch.args,
+          ...(upstreamConfig.kind === "mcp-stdio" && upstreamConfig.cwd
+            ? { cwd: upstreamConfig.cwd }
+            : {}),
+          ...(upstreamConfig.kind === "mcp-stdio" ? { env: upstreamEnvironment } : {}),
+          ...(upstreamConfig.kind === "meridian-ssh" ? { stderr: "ignore" as const } : {}),
+          priority: upstreamConfig.priority,
+          required: upstreamConfig.required,
+          ...(truth
+            ? { expectedToolCount: truth.health.totalToolCount }
+            : upstreamConfig.attestation?.kind === "local-git"
+              && upstreamConfig.attestation.expectedToolCount !== undefined
+            ? { expectedToolCount: upstreamConfig.attestation.expectedToolCount }
+            : {}),
+          ...(truth
+            ? { expectedCatalogDigest: truth.health.upstreamCatalogDigest }
+            : upstreamConfig.attestation?.kind === "local-git"
+              && upstreamConfig.attestation.expectedCatalogDigest
+            ? { expectedCatalogDigest: upstreamConfig.attestation.expectedCatalogDigest }
+            : {}),
+          ...(attestation ? { sourceAttestation: attestation } : {}),
+          ...(truth ? { catalogTruth: truth.health } : {}),
+          ...(upstreamConfig.kind === "meridian-ssh"
+            ? {
+                supervision: upstreamConfig.supervision,
+                beforeConnect: () => {
+                  verifyRemoteGitSshSourceAttestation(
+                    upstreamConfig.id,
+                    upstreamConfig.repository,
+                    upstreamConfig.attestation,
+                  );
+                },
+              }
+            : {}),
+          ...(upstreamConfig.kind === "mcp-stdio" && upstreamConfig.attestation?.kind === "local-git"
+            ? {
+                prepareLaunch: (stdioLaunch) => verifyLocalGitStdioLaunch(
                   upstreamConfig.id,
                   upstreamConfig.repository,
-                  upstreamConfig.attestation,
-                );
-              },
-            }
-          : {}),
-        ...(upstreamConfig.kind === "mcp-stdio" && upstreamConfig.attestation?.kind === "local-git"
-          ? {
-              prepareLaunch: (stdioLaunch) => verifyLocalGitStdioLaunch(
-                upstreamConfig.id,
-                upstreamConfig.repository,
-                upstreamConfig.attestation!,
-                stdioLaunch,
-              ),
-            }
-          : {}),
-      });
-      upstreams.set(upstream.id, upstream);
+                  upstreamConfig.attestation!,
+                  stdioLaunch,
+                ),
+              }
+            : {}),
+        });
+        upstreams.set(upstream.id, upstream);
 
-      try {
-        const tools = await upstream.connect();
-        if (truth) {
-          const eligibleTools = tools.filter((tool) => (
-            !excludedSourceNames.has(tool.name)
-            && !config.filters.excludePrefixes.some((prefix) => tool.name.startsWith(prefix))
-          ));
-          if (
-            eligibleTools.length !== truth.health.eligibleToolCount
-            || upstreamCatalogDigest(upstream.id, eligibleTools) !== truth.health.eligibleCatalogDigest
-          ) {
-            throw new Error(`Source ${upstream.id} eligible catalog does not match generated truth.`);
+        try {
+          const tools = await upstream.connect({ signal: options.signal });
+          if (truth) {
+            const eligibleTools = tools.filter((tool) => (
+              !excludedSourceNames.has(tool.name)
+              && !config.filters.excludePrefixes.some((prefix) => tool.name.startsWith(prefix))
+            ));
+            if (
+              eligibleTools.length !== truth.health.eligibleToolCount
+              || upstreamCatalogDigest(upstream.id, eligibleTools) !== truth.health.eligibleCatalogDigest
+            ) {
+              throw new Error(`Source ${upstream.id} eligible catalog does not match generated truth.`);
+            }
+          }
+          // A Meridian server publishes no capability metadata of its own; the
+          // attested catalog truth is the authority that declares each tool's
+          // route, including the review read a write verifies through.
+          const truthCapabilities = new Map((truth?.tools ?? []).map((tool) => [tool.name, tool.capability]));
+          sources.push({
+            id: upstream.id,
+            label: upstream.label,
+            priority: upstream.priority,
+            ...(upstreamConfig.revision ? { revision: upstreamConfig.revision } : {}),
+            tools: tools.map((tool) => {
+              const declared = truthCapabilities.get(tool.name);
+              return tool.capability || !declared ? tool : { ...tool, capability: declared };
+            }),
+          });
+        } catch (error) {
+          options.signal?.throwIfAborted();
+          if (upstream.required) {
+            throw new Error(
+              `Required upstream ${upstream.id} failed to connect`,
+              { cause: error },
+            );
           }
         }
-        // A Meridian server publishes no capability metadata of its own; the
-        // attested catalog truth is the authority that declares each tool's
-        // route, including the review read a write verifies through.
-        const truthCapabilities = new Map((truth?.tools ?? []).map((tool) => [tool.name, tool.capability]));
-        sources.push({
-          id: upstream.id,
-          label: upstream.label,
-          priority: upstream.priority,
-          ...(upstreamConfig.revision ? { revision: upstreamConfig.revision } : {}),
-          tools: tools.map((tool) => {
-            const declared = truthCapabilities.get(tool.name);
-            return tool.capability || !declared ? tool : { ...tool, capability: declared };
-          }),
-        });
-      } catch (error) {
-        if (upstream.required) {
-          await closeStartupResources(upstreams, journal, effects);
-          throw new Error(
-            `Required upstream ${upstream.id} failed to connect`,
-            { cause: error },
-          );
-        }
       }
-    }
-
-    try {
+      options.signal?.throwIfAborted();
       const mergedCatalog = mergeCatalog(sources, {
         excludePrefixes: config.filters.excludePrefixes,
         excludeNames: [...excludedSourceNames],
@@ -1747,6 +1841,7 @@ export class GatewayRuntime {
         ? mcpRuntimeHealthFromPayload()
         : normalizeMcpRuntimeHealth(options.mcpRuntime);
       if (options.mcpRuntime !== undefined && !mcpRuntime) throw new TypeError("MCP runtime health binding is invalid");
+      options.signal?.throwIfAborted();
       return new GatewayRuntime(
         config,
         upstreams,
@@ -3227,11 +3322,11 @@ export class GatewayRuntime {
 
   private canvasClassicQuizSubmissionSummaryRequest(
     request: Readonly<Record<string, unknown>>,
-  ): Readonly<{ courseId: string; quizId: number }> | null {
+  ): Readonly<{ courseId: string; quizId: string }> | null {
     const courseId = this.requestCourseId(request);
     const quizId = request.quiz_id;
-    return courseId && Number.isSafeInteger(quizId) && Number(quizId) > 0 && Number.isSafeInteger(Number(courseId))
-      ? { courseId, quizId: Number(quizId) }
+    return courseId && typeof quizId === "string" && /^[1-9][0-9]{0,18}$/u.test(quizId)
+      ? { courseId, quizId }
       : null;
   }
 
@@ -3257,7 +3352,7 @@ export class GatewayRuntime {
       throw new Error("canvas_classic_quiz_submission_summary_invalid");
     }
     const summary = projectCanvasClassicQuizSubmissionSummaryBrowserResult(browser.data, {
-      courseId: Number(target.courseId),
+      courseId: target.courseId,
       quizId: target.quizId,
     });
     return canonicalMorrowResult({
@@ -3294,7 +3389,7 @@ export class GatewayRuntime {
       || !result || result.schema !== "morrow.result.v1" || result.tool !== CANVAS_CLASSIC_QUIZ_SUBMISSION_SUMMARY_TOOL
       || !isJsonObject(result.data)) throw new Error("canvas_classic_quiz_submission_summary_result_invalid");
     const summary = projectCanvasClassicQuizSubmissionSummaryBrowserResult(result.data, {
-      courseId: Number(target.courseId),
+      courseId: target.courseId,
       quizId: target.quizId,
     });
     const output = canonicalMorrowResult({
@@ -5401,8 +5496,85 @@ export class GatewayRuntime {
   }
 
   private isBrowserBindings(mapping: CatalogTool): boolean {
-    return mapping.upstreamName === "morrow_browser_bindings"
+    return (mapping.upstreamName === "morrow_browser_bindings" || mapping.upstreamName === "morrow_canvas_bindings")
       && this.catalog.tools.some((candidate) => candidate.upstreamId === mapping.upstreamId && isCanvasConnector(candidate));
+  }
+
+  private isBrowserConnectorHealth(mapping: CatalogTool): boolean {
+    return mapping.upstreamName === "morrow_canvas_connector_health"
+      && mapping.annotations?.readOnlyHint === true
+      && this.catalog.tools.some((candidate) => candidate.upstreamId === mapping.upstreamId && isCanvasConnector(candidate));
+  }
+
+  /**
+   * Connector health is fixed local control state. It has no course selector
+   * and no learner records, so rebuilding its exact schema is both safer and
+   * more accurate than forcing it through a selected-course roster lookup.
+   */
+  private publicBrowserConnectorHealth(raw: JsonObject): JsonObject {
+    const health = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
+    const bridge = health && isJsonObject(health.bridge) ? health.bridge : null;
+    const integer = (value: unknown, minimum = 0): value is number => (
+      Number.isSafeInteger(value) && Number(value) >= minimum
+    );
+    const nullableTimestamp = (value: unknown): value is number | null => value === null || integer(value, 1);
+    const exactKeys = (value: JsonObject, allowed: readonly string[]): boolean => (
+      Object.keys(value).every((key) => allowed.includes(key))
+    );
+    const problem = bridge && isJsonObject(bridge.problem) ? bridge.problem : null;
+    const validProblem = !problem || (
+      exactKeys(problem, ["code", "port", "message"])
+      && problem.code === "bridge_port_in_use"
+      && integer(problem.port, 1) && Number(problem.port) <= 65_535
+      && problem.message === `Another Morrow is already connected to Morrow Bridge on port ${problem.port}. Close the other Morrow, or use one Morrow for all your assistants.`
+    );
+    if (raw.isError === true || !health || health.schema !== "morrow.canvas-connector.health.v1"
+      || !exactKeys(health, ["schema", "ready", "catalogDigest", "operationCount", "newQuizzesOperationCount", "itemBankOperationCount", "courseFileContentOperationCount", "bridge"])
+      || typeof health.ready !== "boolean" || typeof health.catalogDigest !== "string" || !/^[a-f0-9]{64}$/u.test(health.catalogDigest)
+      || !integer(health.operationCount) || !integer(health.newQuizzesOperationCount)
+      || !integer(health.itemBankOperationCount) || !integer(health.courseFileContentOperationCount)
+      || !bridge || bridge.schema !== "morrow.bridge.health.v1"
+      || !exactKeys(bridge, ["schema", "listening", "problem", "host", "port", "path", "connected", "generation", "extensionId", "runtimeRevision", "catalogDigest", "bindingCount", "pendingCount", "connectedAt", "lastSeenAt"])
+      || typeof bridge.listening !== "boolean" || bridge.host !== "127.0.0.1" || bridge.path !== "/morrow-bridge/v1"
+      || (bridge.port !== null && (!integer(bridge.port, 1) || Number(bridge.port) > 65_535))
+      || typeof bridge.connected !== "boolean" || !integer(bridge.generation)
+      || (bridge.extensionId !== null && (typeof bridge.extensionId !== "string" || !/^[a-p]{32}$/u.test(bridge.extensionId)))
+      || (bridge.runtimeRevision !== null && (typeof bridge.runtimeRevision !== "string" || !/^[A-Za-z0-9._-]{1,100}$/u.test(bridge.runtimeRevision)))
+      || bridge.catalogDigest !== health.catalogDigest || !integer(bridge.bindingCount) || !integer(bridge.pendingCount)
+      || !nullableTimestamp(bridge.connectedAt) || !nullableTimestamp(bridge.lastSeenAt)
+      || health.ready !== bridge.connected || !validProblem) {
+      throw new Error("privacy_browser_connector_health_invalid");
+    }
+    const publicBridge: JsonObject = {
+      schema: bridge.schema,
+      listening: bridge.listening,
+      ...(problem ? { problem: structuredClone(problem) } : {}),
+      host: bridge.host,
+      port: bridge.port,
+      path: bridge.path,
+      connected: bridge.connected,
+      generation: bridge.generation,
+      extensionId: bridge.extensionId,
+      runtimeRevision: bridge.runtimeRevision,
+      catalogDigest: bridge.catalogDigest,
+      bindingCount: bridge.bindingCount,
+      pendingCount: bridge.pendingCount,
+      connectedAt: bridge.connectedAt,
+      lastSeenAt: bridge.lastSeenAt,
+    };
+    return {
+      content: [{ type: "text", text: "Morrow checked the current Chrome and Bridge connection." }],
+      structuredContent: {
+        schema: health.schema,
+        ready: health.ready,
+        catalogDigest: health.catalogDigest,
+        operationCount: health.operationCount,
+        newQuizzesOperationCount: health.newQuizzesOperationCount,
+        itemBankOperationCount: health.itemBankOperationCount,
+        courseFileContentOperationCount: health.courseFileContentOperationCount,
+        bridge: publicBridge,
+      },
+    };
   }
 
   private publicBrowserBindingIdentity(binding: BridgeBinding): JsonObject {
@@ -5417,6 +5589,7 @@ export class GatewayRuntime {
       ...(binding.catalogDigest ? { catalogDigest: binding.catalogDigest } : {}),
       ...(binding.editPolicyRevision !== undefined ? { editPolicyRevision: binding.editPolicyRevision } : {}),
       ...(binding.editOptionsAvailable ? { editOptionsAvailable: true } : {}),
+      ...(binding.firstReadCompleted ? { firstReadCompleted: true } : {}),
       runtimeVerified: binding.runtimeVerified,
     };
   }
@@ -5467,8 +5640,11 @@ export class GatewayRuntime {
     raw: JsonObject,
     options: { readonly signal?: AbortSignal } = {},
   ): Promise<JsonObject> {
+    const schema = mapping.upstreamName === "morrow_canvas_bindings"
+      ? "morrow.canvas-bindings.v1"
+      : "morrow.browser-bindings.v1";
     const content = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
-    if (raw.isError === true || !content || content.schema !== "morrow.browser-bindings.v1"
+    if (raw.isError === true || !content || content.schema !== schema
       || content.ok !== true || !Array.isArray(content.bindings)
       || !Number.isSafeInteger(content.count) || Number(content.count) !== content.bindings.length) {
       throw new Error("privacy_browser_bindings_invalid");
@@ -5479,13 +5655,16 @@ export class GatewayRuntime {
     } catch {
       throw new Error("privacy_browser_bindings_invalid");
     }
+    if (mapping.upstreamName === "morrow_canvas_bindings" && bindings.some((binding) => binding.provider !== "canvas")) {
+      throw new Error("privacy_browser_bindings_invalid");
+    }
     const projected = await mapBounded(bindings, MAX_BROWSER_BINDING_EGRESS_CONTEXTS, async (binding) => (
       this.publicBrowserBindingMetadata(mapping, binding, options)
     ));
     return this.resultArtifacts.bound({
       content: [{ type: "text", text: "Morrow read the current browser course connections." }],
       structuredContent: {
-        schema: "morrow.browser-bindings.v1",
+        schema,
         ok: true,
         count: projected.length,
         bindings: projected,
@@ -5510,7 +5689,7 @@ export class GatewayRuntime {
     const bindingTool = this.browserBindingsTool(mapping);
     if (!bindingTool) throw new Error("learner_roster_source_unavailable");
     const bindings = await this.callSourceOwned(bindingTool.publicName, {}, options);
-    if (bindings.isError === true) throw new Error("learner_roster_binding_unavailable");
+    if (bindings.isError === true) throw new Error("privacy_edit_options_bindings_source_failed");
     const matches = browserBindingContent(bindings).filter((binding) => {
       const provider = this.exactString(binding.provider, 30);
       return binding.runtimeVerified === true
@@ -5528,7 +5707,7 @@ export class GatewayRuntime {
         && Number.isSafeInteger(binding.editPolicyRevision)
         && Number(binding.editPolicyRevision) >= 0;
     });
-    if (matches.length !== 1) throw new Error("learner_roster_binding_unavailable");
+    if (matches.length !== 1) throw new Error("privacy_edit_options_binding_mismatch");
     return matches[0]!;
   }
 
@@ -5537,7 +5716,12 @@ export class GatewayRuntime {
     value: unknown,
     expectedSourceBindingId: string,
   ): JsonObject {
-    const options = normalizeBridgeEditOptionsResult(value, expectedSourceBindingId);
+    let options: ReturnType<typeof normalizeBridgeEditOptionsResult>;
+    try {
+      options = normalizeBridgeEditOptionsResult(value, expectedSourceBindingId);
+    } catch {
+      throw new Error("privacy_edit_options_shape_invalid");
+    }
     const bindingPermission = isJsonObject(binding.editPermission) ? binding.editPermission : null;
     const detailPermission = options.editPermission as unknown as JsonObject | undefined;
     if (options.runtimeVerified !== true
@@ -5545,13 +5729,13 @@ export class GatewayRuntime {
       || options.catalogDigest !== binding.catalogDigest
       || options.policyRevision !== binding.editPolicyRevision
       || Boolean(bindingPermission) !== Boolean(detailPermission)) {
-      throw new Error("learner_roster_binding_unavailable");
+      throw new Error("privacy_edit_options_binding_changed");
     }
     if (bindingPermission && detailPermission) {
       const fields = ["schema", "revision", "scopeDigest", "catalogDigest", "sourceBindingId", "expiresAt"] as const;
       if (fields.some((field) => bindingPermission[field] !== detailPermission[field])
         || detailPermission.catalogDigest !== options.catalogDigest) {
-        throw new Error("learner_roster_binding_unavailable");
+        throw new Error("privacy_edit_options_permission_changed");
       }
     }
     return options as unknown as JsonObject;
@@ -5566,14 +5750,16 @@ export class GatewayRuntime {
     const sourceBindingId = this.requestSourceBindingId(request);
     const structured = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
     if (raw.isError === true || !sourceBindingId || !structured) {
-      throw new Error("learner_roster_binding_unavailable");
+      throw new Error("privacy_edit_options_source_failed");
     }
     const binding = await this.verifiedBrowserBindingBySource(mapping, request, options);
     const publicOptions = this.canonicalBrowserEditOptions(binding, structured, sourceBindingId);
-    return this.resultArtifacts.bound({
+    // The final MCP egress pass must inspect the complete canonical catalog
+    // before it may replace a large result with an artifact handle.
+    return {
       content: [{ type: "text", text: "Morrow read the available Edit actions for this saved browser connection." }],
       structuredContent: publicOptions,
-    });
+    };
   }
 
   private async verifiedBrowserBinding(
@@ -5753,13 +5939,8 @@ export class GatewayRuntime {
   ): Promise<BoundLearnerTextRedactionContext | undefined> {
     if (!isCanvasConnector(mapping) || mapping.capability?.provider !== "canvas") return undefined;
     const sourceBindingId = this.requestSourceBindingId(request);
-    // Canvas's single-course API names the course path parameter `id`. Keep
-    // that exceptional meaning bound to this exact tool; other Canvas tools
-    // also use `id` for assignments, quizzes, files, and other resources.
     const requestedCourseId = this.requestCourseId(request)
-      ?? (mapping.upstreamName === "canvas_get_single_course_courses"
-        ? this.requestCourseId({ course_id: request.id })
-        : null);
+      ?? courseIdFromCourseTarget(mapping, request as JsonObject);
     if (!sourceBindingId || !requestedCourseId) return undefined;
     const binding = await this.verifiedBrowserBinding(mapping, {
       ...request,
@@ -5938,6 +6119,8 @@ export class GatewayRuntime {
     const course = this.requestCourseId(request);
     return {
       descriptor: this.outputPrivacy(mapping),
+      allowUnrosteredCanvasIdentities: mapping.capability?.provider === "canvas"
+        && mapping.annotations?.readOnlyHint === true,
       learnerVault: this.learnerVault,
       // The Blackboard Learn REST source holds its course roster inside its own
       // process and returns learner tokens, never learner identities. Morrow's
@@ -5968,6 +6151,72 @@ export class GatewayRuntime {
       isError: true,
       structuredContent: { schema: "morrow.problem.v1", code },
     };
+  }
+
+  /**
+   * Canvas includes the current person's enrollment and can include teacher
+   * records inside a Course response. Those records are not part of the
+   * selected-course read contract and cannot be resolved through its student
+   * roster. Rebuild the provider Course from its identity-free documented
+   * fields before the generic exact-roster boundary inspects its text.
+   */
+  private publicCanvasCourseRaw(
+    mapping: CatalogTool,
+    request: Readonly<Record<string, unknown>>,
+    raw: JsonObject,
+  ): JsonObject {
+    if (mapping.upstreamName !== "canvas_get_single_course_courses"
+      || mapping.annotations?.readOnlyHint !== true
+      || mapping.capability?.provider !== "canvas"
+      || !isCanvasConnector(mapping)) return raw;
+    const courseId = this.exactString(request.id, 19);
+    const structured = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
+    const result = structured && isJsonObject(structured.result) ? structured.result : null;
+    const course = result && isJsonObject(result.data) ? result.data : null;
+    if (raw.isError === true || !courseId || !/^[1-9][0-9]{0,18}$/u.test(courseId)
+      || !structured || structured.schema !== "morrow.canvas-connector.result.v1"
+      || structured.ok !== true || structured.provider !== "canvas" || structured.commandKind !== "invoke_read"
+      || !result || result.ok !== true || result.sent !== true || result.truncated !== false
+      || !course || exactDecimalId(course.id) !== courseId) {
+      throw new Error("privacy_canvas_course_result_invalid");
+    }
+    const projectedCourse: JsonObject = {};
+    for (const [key, value] of Object.entries(course)) {
+      if (CANVAS_COURSE_PUBLIC_FIELDS.has(key)) projectedCourse[key] = structuredClone(value) as JsonObject[string];
+    }
+    const projected = structuredClone(raw);
+    const projectedStructured = projected.structuredContent as JsonObject;
+    const projectedResult = projectedStructured.result as JsonObject;
+    projectedResult.data = projectedCourse;
+    return projected;
+  }
+
+  /** Remove browser-only hidden markup and credential URLs before course data reaches the AI boundary. */
+  private publicCanvasCourseContentRaw(mapping: CatalogTool, raw: JsonObject): JsonObject {
+    if (mapping.annotations?.readOnlyHint !== true || mapping.capability?.provider !== "canvas"
+      || !isCanvasConnector(mapping) || raw.isError === true) return raw;
+    const structured = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
+    const result = structured && isJsonObject(structured.result) ? structured.result : null;
+    if (structured?.schema !== "morrow.canvas-connector.result.v1" || structured.ok !== true
+      || structured.commandKind !== "invoke_read" || !result || result.ok !== true || result.sent !== true) return raw;
+    const projected = structuredClone(raw);
+    const projectedResult = (projected.structuredContent as JsonObject).result as JsonObject;
+    if (mapping.upstreamName === "canvas_get_course_settings" && isJsonObject(projectedResult.data)) {
+      delete projectedResult.data.image;
+    }
+    if (CANVAS_PAGE_HTML_READS.has(mapping.upstreamName)) {
+      const sanitizeBodies = (value: unknown, depth = 0): void => {
+        if (depth > 12 || value === null || typeof value !== "object") return;
+        if (Array.isArray(value)) { value.forEach((entry) => sanitizeBodies(entry, depth + 1)); return; }
+        const object = value as JsonObject;
+        for (const [key, child] of Object.entries(object)) {
+          if (key === "body" && typeof child === "string") object[key] = sanitizeCanvasPageHtml(child);
+          else sanitizeBodies(child, depth + 1);
+        }
+      };
+      sanitizeBodies(projectedResult.data);
+    }
+    return projected;
   }
 
   private async publicSourceResult(
@@ -6003,6 +6252,9 @@ export class GatewayRuntime {
       }
       if (this.isBrowserBindings(mapping)) {
         return await this.publicBrowserBindings(mapping, raw, options);
+      }
+      if (this.isBrowserConnectorHealth(mapping)) {
+        return this.publicBrowserConnectorHealth(raw);
       }
       if (this.isBrowserEditOptions(mapping)) {
         return await this.publicBrowserEditOptions(mapping, request, raw, options);
@@ -6241,11 +6493,12 @@ export class GatewayRuntime {
         }
         return this.resultArtifacts.bound(projected);
       }
+      const projectedRaw = this.publicCanvasCourseRaw(mapping, request, this.publicCanvasCourseContentRaw(mapping, raw));
       const learner = mapping.capability?.provider === "moodle"
         ? await this.moodleLearnerContext(mapping, request, options)
         : await this.canvasLearnerContext(mapping, request, options);
       if (isCanvasConnector(mapping) && !learner) throw new Error("learner_roster_binding_unavailable");
-      const normalized = normalizeUpstreamResult(raw, {
+      const normalized = normalizeUpstreamResult(projectedRaw, {
         mapping,
         catalogDigest: this.catalog.digest,
         privacy: this.privacyContext(mapping, request, learner),
@@ -6257,7 +6510,11 @@ export class GatewayRuntime {
         };
       }
       return this.resultArtifacts.bound(normalized, learner
-        ? (value) => redactLearnerEgress(value, learner) as JsonObject
+        ? (value) => redactLearnerEgress(value, {
+            ...learner,
+            allowUnrosteredCanvasIdentities: mapping.capability?.provider === "canvas"
+              && mapping.annotations?.readOnlyHint === true,
+          }) as JsonObject
         : undefined);
     } catch (error) {
       return this.privacyFailure(error);
@@ -6460,9 +6717,9 @@ export class GatewayRuntime {
       options.toolName ? this.toolByPublicName.get(options.toolName) : undefined,
     ].find((candidate) => candidate && isCanvasConnector(candidate));
     const mapping = exactMapping || candidates.find((candidate) => candidate.upstreamId === sourceIds[0])!;
-    const bindingRequest = mapping.upstreamName === "canvas_get_single_course_courses"
-      ? { ...request, course_id: request.id }
-      : request;
+    const derivedCourseId = this.requestCourseId(request)
+      ?? courseIdFromCourseTarget(mapping, request as JsonObject);
+    const bindingRequest = derivedCourseId ? { ...request, course_id: derivedCourseId } : request;
     const binding = await this.verifiedBrowserBinding(mapping, bindingRequest, options);
     const scopedMapping = this.browserProviderMapping(mapping, binding);
     if (binding.provider === "moodle") {
@@ -6475,7 +6732,10 @@ export class GatewayRuntime {
     }
     const context = await this.canvasLearnerContext(scopedMapping, request, options);
     if (!context) throw new Error("learner_roster_binding_unavailable");
-    return redactLearnerEgress(value, context) as JsonObject;
+    return redactLearnerEgress(value, {
+      ...context,
+      allowUnrosteredCanvasIdentities: mapping.annotations?.readOnlyHint === true,
+    }) as JsonObject;
   }
 
   private operationVerificationStatus(record: EffectOperationRecord): "not_requested" | "unconfirmed" | "verified" {
@@ -7145,9 +7405,7 @@ export class GatewayRuntime {
         return this.privacyFailure(new Error("privacy_moodle_history_dictionary_unavailable"));
       }
       const scopedCourseId = this.requestCourseId(args)
-        ?? (mapping.upstreamName === "canvas_get_single_course_courses"
-          ? this.requestCourseId({ course_id: args.id })
-          : null);
+        ?? courseIdFromCourseTarget(mapping, args as JsonObject);
       if (isCanvasConnector(mapping) && scopedCourseId) {
         try {
           const context = mapping.capability?.provider === "moodle"
@@ -7973,8 +8231,9 @@ export class GatewayRuntime {
 
   /**
    * Finds the Morrow read the person actually looked at: a read-only call to the
-   * same connection that answered after this change was sent, whose exact result
-   * digest is the one supplied. A failed read, a read from before the change,
+   * same connection that started after this change became unresolved, was then
+   * delivered, and whose exact result digest is the one supplied. A failed read,
+   * a read started before the unresolved transition,
    * from another item, course, connection, sign-in, or one Morrow never made is
    * not evidence. The journal performs one exact indexed lookup.
    */
@@ -7982,18 +8241,17 @@ export class GatewayRuntime {
     operation: EffectOperationRecord,
     observedState: string,
   ): GatewayOperationRecord | null {
-    const sentAt = Date.parse(operation.approvalConsumedAt || operation.createdAt);
     const authority = isJsonObject(operation.plan.authority) ? operation.plan.authority : null;
     const actorDigest = authority && typeof authority.actorDigest === "string" && /^[0-9a-f]{64}$/u.test(authority.actorDigest)
       ? authority.actorDigest : null;
-    if (!Number.isFinite(sentAt) || !operation.sourceBindingId || !operation.targetIdentityDigest || !actorDigest) return null;
+    if (!operation.personCloseCausalSequence || !operation.sourceBindingId || !operation.targetIdentityDigest || !actorDigest) return null;
     return this.journal.findSuccessfulReadEvidence({
       sourceId: operation.sourceId,
       sourceBindingId: operation.sourceBindingId,
       targetIdentityDigest: operation.targetIdentityDigest,
       actorDigest,
       upstreamResultDigest: observedState,
-      notBefore: new Date(sentAt).toISOString(),
+      afterCausalSequence: operation.personCloseCausalSequence,
     });
   }
 
@@ -8049,7 +8307,15 @@ export class GatewayRuntime {
         [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
       );
     }
-    const closed = this.effects.closeAfterPersonCheck(operationId, observedState);
+    if (!evidence.preparedCausalSequence) {
+      return refused(
+        "observed_state_not_from_fresh_read",
+        "That digest does not match a successful Morrow read of this exact item, course, browser connection and sign-in made after the change was sent. Read the item with Morrow again and close this request with the digest that read returns.",
+        {},
+        [PERSON_CLOSE_READ_REQUIRED_LIMITATION],
+      );
+    }
+    const closed = this.effects.closeAfterPersonCheck(operationId, observedState, evidence.preparedCausalSequence);
     return this.effectResult(closed, "closed_by_person", {
       content: [{
         type: "text",
@@ -8433,6 +8699,7 @@ export class GatewayRuntime {
       readonly privateAttachments?: readonly BridgePrivateAttachment[];
       readonly privateConversation?: BridgePrivateConversation;
       readonly readAuthorityScope?: ReadAuthorityScope;
+      readonly upstreamTimeoutMs?: number;
     } = {},
   ): Promise<JsonObject> {
     const mapping = this.toolByPublicName.get(publicName);
@@ -8644,6 +8911,7 @@ export class GatewayRuntime {
       if (options.privateConversation) dispatchedArguments.privateConversation = options.privateConversation;
       const result = await upstream.callTool(mapping.upstreamName, dispatchedArguments, {
         signal: options.signal,
+        ...(options.upstreamTimeoutMs === undefined ? {} : { timeoutMs: options.upstreamTimeoutMs }),
         safeToRetry: mapping.upstreamId === "meridian"
           && mapping.annotations?.readOnlyHint === true,
       });

@@ -257,9 +257,14 @@ function currentInstallerRecord() {
       const after = fs.fstatSync(descriptor);
       const afterPath = fs.lstatSync(config.installerRecordPath);
       if (!accepted(after) || !accepted(afterPath)
-        || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs
         || after.dev !== opened.dev || after.ino !== opened.ino
-        || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino) return false;
+        || afterPath.dev !== opened.dev || afterPath.ino !== opened.ino
+        || after.nlink !== opened.nlink || afterPath.nlink !== after.nlink
+        || after.size !== opened.size || afterPath.size !== after.size
+        || after.mtimeMs !== opened.mtimeMs || afterPath.mtimeMs !== after.mtimeMs
+        || after.mode !== opened.mode || afterPath.mode !== after.mode
+        || after.uid !== opened.uid || afterPath.uid !== after.uid
+        || after.gid !== opened.gid || afterPath.gid !== after.gid) return false;
     } finally { fs.closeSync(descriptor); }
     const record = JSON.parse(strictUtf8(bytes));
     const allowedKeys = ["schema", "version", "selectedAssistantId", "materialsFolder", "configured"];

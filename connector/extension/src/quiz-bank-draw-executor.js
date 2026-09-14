@@ -1,4 +1,5 @@
 export async function executeQuizBankDrawInPage(input) {
+  const requestExpired = () => Number.isSafeInteger(input?.expiresAt) && input.expiresAt <= Date.now();
   const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
     Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const MAX_BYTES = 2 * 1024 * 1024;
@@ -39,6 +40,7 @@ export async function executeQuizBankDrawInPage(input) {
   if (id(input.arguments?.course_id) !== courseId || id(input.arguments?.assignment_id) !== assignmentId) {
     return { matched: true, ok: false, sent: false, error: "quiz_bank_course_assignment_mismatch" };
   }
+  if (requestExpired()) return { matched: true, ok: false, sent: false, error: "quiz_bank_operation_timeout" };
   const backend = String(localStorage.getItem("backend_url") || "").replace(/\/$/, "");
   const token = String(localStorage.getItem("quiz.build_token") || sessionStorage.getItem("quiz.build_token") || "");
   let backendUrl;
@@ -84,6 +86,7 @@ export async function executeQuizBankDrawInPage(input) {
     }
   };
   const request = async (method, path, body) => {
+    if (requestExpired()) return { timeout: true };
     let response;
     try {
       response = await fetch(`https://${apiHost}${path}`, {

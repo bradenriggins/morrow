@@ -355,13 +355,20 @@ describe("ProviderEffectBroker", () => {
     first.close();
 
     const restarted = new ProviderEffectBroker({ path });
-    expect(restarted.get(operation.operationId)).toMatchObject({
+    const recovered = restarted.get(operation.operationId);
+    expect(recovered).toMatchObject({
       state: "applied_or_unknown",
       dispatchAttempt: 1,
       attention: ["process_restart_after_dispatch"],
     });
+    expect(recovered.personCloseCausalSequence).toBeTypeOf("number");
     expect(() => restarted.reserveDispatch(operation.operationId)).toThrow();
     restarted.close();
+
+    const reopened = new ProviderEffectBroker({ path });
+    expect(reopened.get(operation.operationId).personCloseCausalSequence)
+      .toBe(recovered.personCloseCausalSequence);
+    reopened.close();
   });
 
   it("blocks an overlapping target across clients, permits another course, and releases only after a safe result", () => {
@@ -484,10 +491,21 @@ describe("ProviderEffectBroker", () => {
     // closed it. Morrow still does not claim it verified the change.
     const uncertainWrite = sent("5", "person");
     broker.settleFailure(uncertainWrite, { gatewayUnreachable: true }, true);
-    expect(broker.get(uncertainWrite).state).toBe("applied_or_unknown");
+    const uncertain = broker.get(uncertainWrite);
+    expect(uncertain).toMatchObject({ state: "applied_or_unknown" });
+    expect(uncertain.personCloseCausalSequence).toBeTypeOf("number");
     const afterPersonClose = queued("5", "person");
     expect(() => broker.reserveDispatch(afterPersonClose)).toThrow(ProviderEffectTargetConflictError);
-    const closed = broker.closeAfterPersonCheck(uncertainWrite, "9".repeat(64));
+    expect(() => broker.closeAfterPersonCheck(
+      uncertainWrite,
+      "9".repeat(64),
+      uncertain.personCloseCausalSequence!,
+    )).toThrow(/read prepared after the effect became unresolved/);
+    const closed = broker.closeAfterPersonCheck(
+      uncertainWrite,
+      "9".repeat(64),
+      uncertain.personCloseCausalSequence! + 1,
+    );
     expect(closed).toMatchObject({
       state: "closed_by_person",
       verificationStatus: "unconfirmed",
@@ -512,9 +530,9 @@ describe("ProviderEffectBroker", () => {
 
     // A settled record is never reopened, and a close-out without a real digest
     // is refused before anything is written.
-    expect(() => broker.closeAfterPersonCheck(verifiedWrite, "9".repeat(64))).toThrow(/cannot be closed by a person/);
-    expect(() => broker.closeAfterPersonCheck(uncertainWrite, "9".repeat(64))).toThrow(/cannot be closed by a person/);
-    expect(() => broker.closeAfterPersonCheck(unresolvedWrite, "not-a-digest")).toThrow(/SHA-256/);
+    expect(() => broker.closeAfterPersonCheck(verifiedWrite, "9".repeat(64), 1)).toThrow(/cannot be closed by a person/);
+    expect(() => broker.closeAfterPersonCheck(uncertainWrite, "9".repeat(64), 1)).toThrow(/cannot be closed by a person/);
+    expect(() => broker.closeAfterPersonCheck(unresolvedWrite, "not-a-digest", 1)).toThrow(/SHA-256/);
     expect(broker.get(unresolvedWrite).state).toBe("awaiting_verification");
     broker.close();
   });
@@ -569,7 +587,13 @@ describe("ProviderEffectBroker", () => {
       attention: ["provider_effect_may_have_landed"],
       personObservedStateDigest: null,
     });
-    expect(broker.closeAfterPersonCheck("op:legacy-uncertain", "a".repeat(64))).toMatchObject({
+    const migrated = broker.get("op:legacy-uncertain");
+    expect(migrated.personCloseCausalSequence).toBeTypeOf("number");
+    expect(broker.closeAfterPersonCheck(
+      "op:legacy-uncertain",
+      "a".repeat(64),
+      migrated.personCloseCausalSequence! + 1,
+    )).toMatchObject({
       state: "closed_by_person",
       personObservedStateDigest: "a".repeat(64),
       attention: ["closed_after_person_checked_saved_state"],

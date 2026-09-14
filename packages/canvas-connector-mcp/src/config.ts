@@ -68,6 +68,17 @@ function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+function sameStableFile(left: Stats, right: Stats): boolean {
+  // ctime can gain precision after a fresh write without any file mutation.
+  return sameFile(left, right)
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid;
+}
+
 function exactOwner(metadata: Stats): boolean {
   return typeof process.getuid !== "function" || metadata.uid === process.getuid();
 }
@@ -153,8 +164,8 @@ async function readPrivateBytes(path: string, maximum: number, label: string): P
     if (offset > maximum) throw new Error(`${label} is too large`);
     const after = await handle.stat();
     const current = await lstat(path);
-    if (!sameFile(opened, after) || !sameFile(opened, current)
-      || opened.size !== after.size || opened.mtimeMs !== after.mtimeMs || opened.ctimeMs !== after.ctimeMs) {
+    if (!sameStableFile(opened, after) || !sameStableFile(after, current)
+      || !privateFileAccessAccepted(path, current.mode, { trustedRoot: dirname(path) })) {
       throw changedDuringAdmission(label);
     }
     return { bytes: bytes.subarray(0, offset), identity: after };

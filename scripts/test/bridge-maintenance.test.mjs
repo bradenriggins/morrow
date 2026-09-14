@@ -46,18 +46,15 @@ function fixture(options = {}) {
   const bytes = options.markerBytes || marker();
   const defaultFetch = async (url, init) => {
     calls.push({ url, init });
-    return {
-      ok: options.markerOk !== false,
-      arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength),
-    };
+    return new Response(bytes, { status: options.markerOk === false ? 500 : 200 });
   };
   const fetchImpl = options.fetchImpl || defaultFetch;
   return {
     chromeApi,
     values,
     calls,
-    create: () => createBridgeMaintenance({ chromeApi, fetchImpl, randomUUID: () => "12345678-1234-1234-1234-123456789abc" }),
-    createWithNativeUuid: () => createBridgeMaintenance({ chromeApi, fetchImpl }),
+    create: () => createBridgeMaintenance({ chromeApi, fetchImpl, randomUUID: () => "12345678-1234-1234-1234-123456789abc", ...(options.activeFolderTimeoutMs ? { activeFolderTimeoutMs: options.activeFolderTimeoutMs } : {}) }),
+    createWithNativeUuid: () => createBridgeMaintenance({ chromeApi, fetchImpl, ...(options.activeFolderTimeoutMs ? { activeFolderTimeoutMs: options.activeFolderTimeoutMs } : {}) }),
   };
 }
 
@@ -83,10 +80,11 @@ test("paired Bridge status returns an exact active-folder nonce proof without a 
       challengeSha256: createHash("sha256").update(marker()).digest("hex"),
     },
   });
-  assert.deepEqual(testFixture.calls, [{
-    url: `chrome-extension://${EXTENSION_ID}/morrow-bridge-active-folder.json`,
-    init: { cache: "no-store" },
-  }]);
+  assert.equal(testFixture.calls.length, 1);
+  assert.equal(testFixture.calls[0].url, `chrome-extension://${EXTENSION_ID}/morrow-bridge-active-folder.json`);
+  assert.equal(testFixture.calls[0].init.cache, "no-store");
+  assert.equal(testFixture.calls[0].init.redirect, "error");
+  assert.equal(testFixture.calls[0].init.signal instanceof AbortSignal, true);
   assert.equal(JSON.stringify(result).includes("folder"), true);
   assert.equal(JSON.stringify(result).includes("/Users/"), false);
 });
@@ -100,6 +98,41 @@ test("wrong active-folder identity or malformed nonce proof is refused before qu
     () => fixture({ markerBytes: marker({ nonce: "short" }) }).create().control({ action: "quiesce" }),
     "bridge_active_folder_unconfirmed",
   );
+});
+
+test("active-folder proof rejects a declared oversized marker before reading its body", async () => {
+  let cancelled = false;
+  const body = new ReadableStream({ cancel() { cancelled = true; } });
+  const testFixture = fixture({
+    fetchImpl: async () => new Response(body, { headers: { "content-length": String(16 * 1024 + 1) } }),
+  });
+  await rejectsCode(() => testFixture.create().control({ action: "status" }), "bridge_active_folder_unconfirmed");
+  assert.equal(cancelled, true);
+});
+
+test("active-folder proof cancels a streamed marker at the first byte over its limit", async () => {
+  let cancelled = false;
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new Uint8Array(16 * 1024));
+      controller.enqueue(new Uint8Array([0]));
+    },
+    cancel() { cancelled = true; },
+  });
+  const testFixture = fixture({ fetchImpl: async () => new Response(body) });
+  await rejectsCode(() => testFixture.create().control({ action: "status" }), "bridge_active_folder_unconfirmed");
+  assert.equal(cancelled, true);
+});
+
+test("active-folder proof aborts and cancels a marker body that misses its deadline", async () => {
+  let cancelled = false;
+  const body = new ReadableStream({ cancel() { cancelled = true; } });
+  const testFixture = fixture({
+    activeFolderTimeoutMs: 20,
+    fetchImpl: async () => new Response(body),
+  });
+  await rejectsCode(() => testFixture.create().control({ action: "status" }), "bridge_active_folder_unconfirmed");
+  assert.equal(cancelled, true);
 });
 
 test("Store-installed Bridge reports signed status without reading an unpacked-folder marker", async () => {
@@ -141,8 +174,22 @@ test("quiesce installs its in-memory admission fence before waiting for the acti
     "bridge_update_quiesced",
   );
   const bytes = marker();
-  resolveFetch({ ok: true, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
+  resolveFetch(new Response(bytes));
   await quiescing;
+});
+
+test("a stale maintenance command cannot persist its quiesce fence", async () => {
+  const testFixture = fixture();
+  const maintenance = testFixture.create();
+  await rejectsCode(
+    () => maintenance.control({ action: "quiesce" }, {
+      beforeMutation: async () => { throw new BridgeMaintenanceError("bridge_maintenance_request_stale"); },
+    }),
+    "bridge_maintenance_request_stale",
+  );
+  assert.equal(testFixture.values.has("morrowBridgeQuiesceFence"), false);
+  await maintenance.beginWrite({ operationId: "operation:after-stale-control", effectReceiptId: "effect:after-stale-control" });
+  await maintenance.finishWrite("operation:after-stale-control", "known");
 });
 
 test("the production UUID default preserves the browser receiver", async () => {
@@ -201,7 +248,7 @@ test("a proven newer Bridge commits the exact old epoch once and admits its firs
   let version = VERSION;
   const fetchImpl = async () => {
     const bytes = marker({ manifestVersion: version });
-    return { ok: true, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+    return new Response(bytes);
   };
   const testFixture = fixture({ fetchImpl });
   const quiesced = await testFixture.create().control({ action: "quiesce" });
@@ -248,7 +295,7 @@ test("new-layer commit refuses the old version, wrong epoch, and unproved active
   let version = VERSION;
   const wrongEpoch = fixture({ fetchImpl: async () => {
     const bytes = marker({ manifestVersion: version });
-    return { ok: true, arrayBuffer: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) };
+    return new Response(bytes);
   } });
   const exact = await wrongEpoch.create().control({ action: "quiesce" });
   version = "1.0.3";

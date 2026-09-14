@@ -7,6 +7,7 @@ const statePrefix = process.env.FAKE_STATE_PREFIX || "";
 const crashTool = process.env.FAKE_CRASH_TOOL || "";
 const failStartupMarker = process.env.FAKE_FAIL_STARTUP_MARKER || "";
 const toolCount = Number(process.env.FAKE_TOOL_COUNT || "2");
+const toolDelayMs = Number(process.env.FAKE_TOOL_DELAY_MS || "0");
 
 if (failStartupMarker) {
   if (!existsSync(failStartupMarker)) {
@@ -35,6 +36,7 @@ for (let index = 1; index <= toolCount; index += 1) {
     annotations: { readOnlyHint: true, destructiveHint: false },
   }, async ({ value }) => {
     recordCall(name);
+    if (toolDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, toolDelayMs));
     return { content: [{ type: "text", text: `${name}:${value ?? ""}` }], structuredContent: { name, value: value ?? null } };
   });
 }

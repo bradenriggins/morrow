@@ -58,11 +58,11 @@ function result(command: BridgeCommand): JsonObject {
   if (command.toolName !== "canvas_get_classic_quiz_submission_summary" || command.operationKey !== "canvas.api.v1.course.quiz.submissions.aggregate.read.v1") {
     throw new Error(`unexpected source tool ${command.toolName}`);
   }
-  expect(command.arguments).toEqual({ course_id: 2, quiz_id: 8 });
+  expect(command.arguments).toEqual({ course_id: "2", quiz_id: "8" });
   return {
     schema: "morrow.canvas-browser-result.v1", ok: true, sent: false, provider: "canvas", complete: true,
     data: {
-      schema: "morrow.canvas-classic-quiz-submission-summary.v1", provider: "canvas", course_id: 2, quiz_id: 8,
+      schema: "morrow.canvas-classic-quiz-submission-summary.v1", provider: "canvas", course_id: "2", quiz_id: "8",
       attempt_count: 4, complete_count: 1, pending_review_count: 1,
       workflow_state_counts: { untaken: 1, pending_review: 1, complete: 1, settings_only: 1, preview: 0 },
       proof: {
@@ -102,7 +102,7 @@ describe("Canvas Classic Quiz submission-summary Full MCP exposure", () => {
       expect(roster.isError, rosterText).not.toBe(true);
       expect(rosterText).toMatch(/Student A[1-9][0-9]*/);
       for (const privateValue of ["Jane Canvas", "jane@example.edu", '"id":7']) expect(rosterText).not.toContain(privateValue);
-      const allowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_classic_quiz_submission_summary", arguments: { course_id: 2, quiz_id: 8, _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
+      const allowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_classic_quiz_submission_summary", arguments: { course_id: "2", quiz_id: "8", _morrow: { source_binding_id: SOURCE_BINDING_ID } } } });
       const allowedText = JSON.stringify(allowed);
       expect(allowed.isError, allowedText).not.toBe(true);
       for (const privateValue of ["Jane Canvas", "jane@example.edu", "private answer", "private feedback", "private-token", '"user_id":7', '"id":71', '"score":100']) expect(allowedText).not.toContain(privateValue);
@@ -112,7 +112,7 @@ describe("Canvas Classic Quiz submission-summary Full MCP exposure", () => {
         "canvas_list_users_in_course_users",
         "canvas_list_users_in_course_users", "canvas_get_classic_quiz_submission_summary",
       ]);
-      const disallowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_classic_quiz_submission_summary", arguments: { course_id: 2, quiz_id: 8, _morrow: { source_binding_id: "canvas:wrong-course" } } } });
+      const disallowed = await client.callTool({ name: "morrow_capability_read", arguments: { name: "canvas_get_classic_quiz_submission_summary", arguments: { course_id: "2", quiz_id: "8", _morrow: { source_binding_id: "canvas:wrong-course" } } } });
       expect(disallowed.isError).toBe(true);
       expect(commands).toHaveLength(5);
     } finally {

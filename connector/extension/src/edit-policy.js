@@ -1,4 +1,4 @@
-import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "../generated/canvas-operation-admission.js";
+import { canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "../generated/canvas-operation-admission.js";
 
 export const EDIT_PERMISSION_SCHEMA = "morrow.bridge.edit-permission.v1";
 export const EDIT_POLICY_SELECTION_LIMIT = 500;
@@ -165,19 +165,6 @@ const NEW_QUIZ_DELETE_TOOL = "canvas_delete_new_quiz";
 // standing Edit grants.
 const ITEM_BANK_DESTRUCTIVE_REASON = "This Item Bank change cannot be undone, and it can reach every quiz, in every course, that draws from the bank - Canvas provides no complete list of everything that uses one. Morrow shows you the courses it did find and asks you to confirm them for each change, so this one is approved change by change rather than switched on in advance.";
 const ITEM_BANK_DESTRUCTIVE_TOOLS = new Set(["canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry"]);
-const VERIFICATION_CLAUSES = Object.freeze({
-  student_grade_or_submission_state: "reading it back would open a student grade or submission",
-  discussion_or_conversation_content: "reading it back would open student discussion or message content",
-  favorite_list_is_effective_not_explicit_state: "Canvas reports an effective favorites list, not the saved setting",
-  summary_state_has_no_narrow_reader: "Canvas has no narrow read for this summary setting",
-  external_tool_update_has_no_cataloged_fields: "this external tool update has no cataloged fields to compare",
-  content_migration_update_has_no_cataloged_fields: "this content migration update has no cataloged fields to compare",
-  module_item_reader_mutates_progress: "the only Canvas read for it would change module progress",
-  module_progression_state_has_no_current_user_reader: "Canvas has no read of module progression for this person",
-  no_safe_readback_route: "Canvas has no read that shows this exact change",
-  no_exact_postcondition: "Canvas has no read that proves the exact saved result",
-});
-const DEFAULT_VERIFICATION_CLAUSE = "Morrow has no read that proves the exact saved result";
 const CHECKED = Object.freeze({ verification: "checked" });
 
 const CURATED_CATEGORY_SPECS = Object.freeze([
@@ -360,20 +347,8 @@ function moodleCourseScoped(operation) {
   return Object.hasOwn(operationProperties(operation), "course_id");
 }
 
-function canvasWriteAdmission(operation) {
-  if (typeof operation?.path !== "string") return { state: "held" };
-  return canvasOperationAdmission(operation).write;
-}
-
 function canvasReadOperations(operations) {
   return (Array.isArray(operations) ? operations : []).filter((entry) => operationProvider(entry) === "canvas" && typeof entry.path === "string");
-}
-
-function unchecked(reason) {
-  return {
-    verification: "unchecked",
-    verificationReason: `Morrow cannot check this change after it is saved: ${VERIFICATION_CLAUSES[reason] || DEFAULT_VERIFICATION_CLAUSE}. Morrow reports the saved result as unconfirmed.`,
-  };
 }
 
 // Morrow checks a saved change through the route that applies it. Guarded Canvas content, Page
@@ -381,23 +356,24 @@ function unchecked(reason) {
 // so only the generic Canvas API route depends on the shared readback assessment. The admitted
 // Item Bank quiz draw uses its frame-owned operation-specific readback.
 function operationVerification(operation, canvasReads, rule) {
-  if (!operation) return unchecked();
+  if (!operation) return null;
   if (operationProvider(operation) !== "canvas") return CHECKED;
   if (rule?.requiresCanvasContentGuard || rule?.requiresPageGuard || rule?.requiresItemBankGuard || operation.morrowPrivate === true) return CHECKED;
   const assessment = canvasReadbackAssessment(canvasReads, operation);
-  return assessment.state === "structurally_exact" ? CHECKED : unchecked(assessment.reason);
+  return assessment.state === "structurally_exact" ? CHECKED : null;
 }
 
-function operationAvailability(operation) {
+function operationAvailability(operation, canvasReads) {
   const provider = operationProvider(operation);
   if (!provider || operation?.readOnly !== false) return { availability: "review", reviewReason: "This catalog entry is not a course Edit action." };
   if (provider === "canvas") {
+    if (typeof operation.path !== "string") return null;
+    const admission = canvasOperationAdmission(operation);
+    if (!canvasCourseTargetIsScoped(admission.courseTarget) || admission.write.state !== "admitted") return null;
+    if (canvasReadbackAssessment(canvasReads, operation, admission).state !== "structurally_exact") return null;
     if (NEW_QUIZ_DELETE_TOOL === operation.toolName) return { availability: "review", reviewReason: NEW_QUIZ_DELETE_REVIEW_REASON };
     if (ITEM_BANK_DESTRUCTIVE_TOOLS.has(operation.toolName || "")) return { availability: "review", reviewReason: ITEM_BANK_DESTRUCTIVE_REASON };
-    const admission = canvasWriteAdmission(operation);
-    return admission.state === "admitted"
-      ? { availability: "edit" }
-      : { availability: "review", reviewReason: canvasAdmissionReason(admission) || COURSE_SCOPE_REVIEW_REASON };
+    return { availability: "edit" };
   }
   if (MOODLE_ACTIVITY_DELETE_TOOLS.has(operation.toolName || "")) {
     return { availability: "review", reviewReason: MOODLE_ACTIVITY_DELETE_REVIEW_REASON };
@@ -496,7 +472,8 @@ function operationGroup(operation) {
 
 function operationSpec(operation, canvasReads) {
   const provider = operationProvider(operation);
-  const availability = operationAvailability(operation);
+  const availability = operationAvailability(operation, canvasReads);
+  if (!availability) return null;
   const fields = changedFieldsForOperation(operation);
   const requiresFieldSelection = availability.availability === "edit" && fields.length > EDIT_FIELD_GRANT_LIMIT;
   const note = [
@@ -522,7 +499,7 @@ function operationSpec(operation, canvasReads) {
     destructive: destructiveOperation(operation),
     ...(requiresFieldSelection ? { requiresFieldSelection: true } : {}),
     ...availability,
-    ...(availability.availability === "edit" ? operationVerification(operation, canvasReads) : {}),
+    ...(availability.availability === "edit" ? CHECKED : {}),
     rules: availability.availability === "edit" ? [{
       provider,
       operationKey: operation.key,
@@ -535,9 +512,19 @@ function operationSpec(operation, canvasReads) {
 // A curated repair can name the reads it needs as well as the write it sends. When the connected
 // catalog is missing one of them the repair cannot run, so it is published for review instead of
 // being offered and then refused at the moment a person tries to save it.
-function curatedAvailability(spec, operations) {
+function curatedAvailability(spec, operations, canvasReads) {
   const present = (toolName) => (Array.isArray(operations) ? operations : []).some((entry) => entry?.toolName === toolName);
-  return (spec.requiresOperations || []).every(present) ? { availability: "edit" } : { availability: "review", reviewReason: CURATED_ROUTE_MISSING_REASON };
+  if (!(spec.requiresOperations || []).every(present)) return { availability: "review", reviewReason: CURATED_ROUTE_MISSING_REASON };
+  if (spec.provider !== "canvas") return { availability: "edit" };
+  const supported = spec.rules.every((rule) => {
+    const operation = ruleOperation(operations, rule);
+    if (!operation || typeof operation.path !== "string" || operation.readOnly !== false) return false;
+    const admission = canvasOperationAdmission(operation);
+    return canvasCourseTargetIsScoped(admission.courseTarget)
+      && admission.write.state === "admitted"
+      && operationVerification(operation, canvasReads, rule)?.verification === "checked";
+  });
+  return supported ? { availability: "edit" } : null;
 }
 
 function categorySpecsForBinding(binding, operations) {
@@ -545,17 +532,19 @@ function categorySpecsForBinding(binding, operations) {
   if (provider !== "canvas" && provider !== "moodle") return [];
   const canvasReads = canvasReadOperations(operations);
   const curated = CURATED_CATEGORY_SPECS.filter((spec) => spec.provider === provider).map((spec) => {
-    const availability = curatedAvailability(spec, operations);
+    const availability = curatedAvailability(spec, operations, canvasReads);
+    if (!availability) return null;
     return {
       ...spec,
       ...availability,
       destructive: ruleSetDestructive(spec.rules, operations),
-      ...(availability.availability === "edit" ? ruleSetVerification(spec.rules, operations, canvasReads) : {}),
+      ...(availability.availability === "edit" ? CHECKED : {}),
     };
-  });
+  }).filter(Boolean);
   const catalogActions = (Array.isArray(operations) ? operations : [])
     .filter((operation) => operationProvider(operation) === provider && operation?.readOnly === false && operation?.morrowPrivate !== true)
-    .map((operation) => operationSpec(operation, canvasReads));
+    .map((operation) => operationSpec(operation, canvasReads))
+    .filter(Boolean);
   const byId = new Map();
   for (const spec of [...curated, ...catalogActions]) {
     if (!byId.has(spec.id)) byId.set(spec.id, spec);
@@ -599,11 +588,6 @@ function ruleOperation(operations, rule) {
 
 function ruleSetDestructive(rules, operations) {
   return rules.some((rule) => destructiveOperation(ruleOperation(operations, rule)));
-}
-
-function ruleSetVerification(rules, operations, canvasReads) {
-  return rules.map((rule) => operationVerification(ruleOperation(operations, rule), canvasReads, rule))
-    .find((entry) => entry.verification === "unchecked") || CHECKED;
 }
 
 function exactRule(rule, operations) {

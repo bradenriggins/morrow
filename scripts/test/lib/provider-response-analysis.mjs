@@ -151,6 +151,7 @@ class Scope {
     this.sourceFile = sourceFile;
     this.bindings = new Map();
     this.productions = new Map();
+    this.assignments = new Map();
     const root = isFunctionWithBody(fn) ? fn.body : fn;
     forEachOwnNode(root, (node) => {
       let name = null;
@@ -163,6 +164,9 @@ class Scope {
         value = node.right;
       }
       if (!name) return;
+      const assignments = this.assignments.get(name) || [];
+      assignments.push({ node, value });
+      this.assignments.set(name, assignments);
       const known = this.bindings.get(name);
       if (!known || node.pos < known.pos) this.bindings.set(name, value);
       let statement = node;
@@ -471,6 +475,78 @@ function cancelsUnconditionally(statement, analysis, entire) {
   return found;
 }
 
+function responseDispositionCall(node, name, scope, analysis) {
+  if (!ts.isCallExpression(node) || (!analysis.isReadingCall(node) && !analysis.isCancellationCall(node))) return false;
+  const object = calleeObject(node);
+  if (object) {
+    const root = chainRoot(object, scope);
+    if (root?.name === name) return true;
+  }
+  return node.arguments.some((argument) => {
+    const value = unwrap(argument);
+    if (ts.isIdentifier(value) && value.text === name) return true;
+    return chainRoot(argument, scope)?.name === name;
+  });
+}
+
+function disposesResponseUnconditionally(statement, name, scope, analysis) {
+  if (BRANCHING.has(statement.kind)) return false;
+  let found = false;
+  forEachOwnNode(statement, (node) => {
+    if (found) return false;
+    if (responseDispositionCall(node, name, scope, analysis)) { found = true; return false; }
+    if (node !== statement && BRANCHING.has(node.kind)) return false;
+    return true;
+  });
+  return found;
+}
+
+function repeatingLoop(node, fn) {
+  let current = node;
+  while (current && current !== fn.body) {
+    if (ts.isForStatement(current) || ts.isForInStatement(current) || ts.isForOfStatement(current)
+      || ts.isWhileStatement(current) || ts.isDoStatement(current)) return current;
+    current = current.parent;
+  }
+  return null;
+}
+
+/** Fetch assignments that can replace a response before its prior body is disposed. */
+function overwrittenResponses(analysis) {
+  const findings = [];
+  forEachNode(analysis.sourceFile, (fn) => {
+    if (!isFunctionWithBody(fn) || !ts.isBlock(fn.body)) return;
+    const scope = analysis.scope(fn);
+    for (const [name, assignments] of scope.assignments) {
+      const fetches = assignments.filter(({ value }) => !ts.isIdentifier(unwrap(value)) && analysis.isFetchDerived(value));
+      for (let index = 0; index < fetches.length; index += 1) {
+        const current = fetches[index];
+        let statement = current.node;
+        while (statement && !ts.isStatement(statement)) statement = statement.parent;
+        if (!statement) continue;
+        const list = statementList(statement);
+        const next = fetches.slice(index + 1).find(({ node }) => node.getStart(analysis.sourceFile) > current.node.getStart(analysis.sourceFile));
+        if (next) {
+          let nextStatement = next.node;
+          while (nextStatement && !ts.isStatement(nextStatement)) nextStatement = nextStatement.parent;
+          if (nextStatement?.parent === list.statement.parent) {
+            const nextIndex = list.statements.indexOf(nextStatement);
+            const disposed = list.statements.slice(list.index + 1, nextIndex)
+              .some((candidate) => disposesResponseUnconditionally(candidate, name, scope, analysis));
+            if (!disposed) findings.push({ line: analysis.line(next.node), reason: `overwrites live ${name} without cancelling its body` });
+          }
+        }
+        const loop = repeatingLoop(statement, fn);
+        if (!loop || !ts.isBlock(loop.statement) || statement.parent !== loop.statement) continue;
+        const disposed = list.statements.slice(list.index + 1)
+          .some((candidate) => disposesResponseUnconditionally(candidate, name, scope, analysis));
+        if (!disposed) findings.push({ line: analysis.line(current.node), reason: `can overwrite live ${name} on the next iteration` });
+      }
+    }
+  });
+  return findings;
+}
+
 /**
  * Exits that abandon a live fetch response before its body is consumed and do
  * not cancel it on that path. A response is one produced by `fetch` (directly
@@ -557,6 +633,6 @@ export function analyseProviderSource(name, source) {
     .sort((left, right) => Number(left.split(":")[0]) - Number(right.split(":")[0]));
   return {
     awaitedCancellations: describe(awaitedCancellations(analysis)),
-    unconsumedExits: describe(unconsumedExits(analysis)),
+    unconsumedExits: describe([...unconsumedExits(analysis), ...overwrittenResponses(analysis)]),
   };
 }

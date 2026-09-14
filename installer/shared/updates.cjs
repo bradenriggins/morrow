@@ -23,6 +23,8 @@ const UPDATE_EVENTS = Object.freeze([
 const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const MIN_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const UPDATE_CHECK_TIMEOUT_MS = 2 * 60 * 1000;
+const UPDATE_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1000;
 // electron-updater downloads the artifact into its cache and stages the install
 // from the same volume, so the volume needs room for more than one copy of it.
 // This is a bounded headroom check before the download starts, not a
@@ -35,6 +37,7 @@ const MAX_UPDATE_ATTEMPT_BYTES = 4 * 1024;
 function plainSnapshot(state) {
   return {
     schema: "morrow.desktop-update.v1",
+    revision: state.revision,
     status: state.status,
     currentVersion: state.currentVersion,
     availableVersion: state.availableVersion,
@@ -116,6 +119,8 @@ function normalizeIdentity(adapter) {
 function updaterErrorReason(error, phase) {
   const code = typeof error?.code === "string" ? error.code.toLowerCase() : "";
   const message = typeof error?.message === "string" ? error.message.toLowerCase() : "";
+  if (code === "err_update_check_timeout") return "update_check_timeout";
+  if (code === "err_update_download_timeout") return "update_download_timeout";
   if (code.includes("cancel") || message.includes("cancel")) return "download_cancelled";
   if (code.includes("generation") || message.includes("generation changed")) return "update_generation_mismatch";
   if (code.includes("signature") || code.includes("checksum") || code.includes("integrity")
@@ -380,6 +385,7 @@ function createUpdateController({
   }
   const timers = clock && typeof clock === "object" ? clock : globalThis;
   const state = {
+    revision: 0,
     status: "unavailable",
     currentVersion: identity.currentVersion,
     availableVersion: null,
@@ -392,6 +398,8 @@ function createUpdateController({
   let interval = null;
   let checkPromise = null;
   let downloadPromise = null;
+  let checkBoundary = null;
+  let downloadBoundary = null;
   let installPromise = null;
   let lifecycleGeneration = 0;
   let checkGeneration = null;
@@ -410,6 +418,7 @@ function createUpdateController({
   let unresolvedAttemptBlocked = false;
 
   function publish() {
+    state.revision = Math.min(Number.MAX_SAFE_INTEGER, state.revision + 1);
     const snapshot = plainSnapshot(state);
     for (const listener of subscribers) {
       try { listener(snapshot); } catch { /* UI listeners are not trusted update control flow. */ }
@@ -425,6 +434,40 @@ function createUpdateController({
     state.availableVersion = availableVersion;
     state.reason = reason;
     return publish();
+  }
+
+  function operationError(code, message) {
+    return Object.assign(new Error(message), { code });
+  }
+
+  function beginBoundedOperation(run, timeoutMs, timeoutError) {
+    let settled = false;
+    let rejectInterruption;
+    const interruption = new Promise((_resolve, reject) => { rejectInterruption = reject; });
+    const boundary = {
+      adapterCancelled: false,
+      interrupt(error, cancelAdapter = false) {
+        if (settled) return false;
+        if (cancelAdapter && !boundary.adapterCancelled) {
+          boundary.adapterCancelled = true;
+          try { adapter.cancelUpdate?.(); } catch { /* The owned deadline still settles. */ }
+        }
+        settled = true;
+        rejectInterruption(error);
+        return true;
+      }
+    };
+    const timer = typeof timers.setTimeout === "function"
+      ? timers.setTimeout(() => boundary.interrupt(timeoutError, true), timeoutMs)
+      : globalThis.setTimeout(() => boundary.interrupt(timeoutError, true), timeoutMs);
+    if (timer && typeof timer.unref === "function") timer.unref();
+    boundary.promise = Promise.race([Promise.resolve().then(run), interruption])
+      .finally(() => {
+        settled = true;
+        if (typeof timers.clearTimeout === "function") timers.clearTimeout(timer);
+        else globalThis.clearTimeout(timer);
+      });
+    return boundary;
   }
 
   function admissionReason() {
@@ -561,8 +604,13 @@ function createUpdateController({
     const generation = lifecycleGeneration;
     checkGeneration = generation;
     transition("checking", null, null);
-    const pending = Promise.resolve()
-      .then(() => adapter.checkForUpdates())
+    const boundary = beginBoundedOperation(
+      () => adapter.checkForUpdates(),
+      UPDATE_CHECK_TIMEOUT_MS,
+      operationError("ERR_UPDATE_CHECK_TIMEOUT", "desktop update check timed out")
+    );
+    checkBoundary = boundary;
+    const pending = boundary.promise
       .then((result) => {
         if (generation !== lifecycleGeneration) return plainSnapshot(state);
         const candidate = candidateFrom(result);
@@ -586,6 +634,7 @@ function createUpdateController({
       })
       .finally(() => {
         if (checkPromise === pending) checkPromise = null;
+        if (checkBoundary === boundary) checkBoundary = null;
         if (checkGeneration === generation) checkGeneration = null;
       });
     checkPromise = pending;
@@ -601,25 +650,39 @@ function createUpdateController({
     const generation = lifecycleGeneration;
     downloadGeneration = generation;
     downloadStarted = false;
-    const pending = Promise.resolve()
-      .then(() => freeSpaceAdmits())
-      .then((admitted) => {
+    const boundary = beginBoundedOperation(
+      async () => {
+        const admitted = await freeSpaceAdmits();
         if (generation !== lifecycleGeneration) return plainSnapshot(state);
         if (!admitted) return transition("error", null, "disk_space_unavailable");
         transition("downloading", version, null);
         downloadStarted = true;
-        return Promise.resolve().then(() => adapter.downloadUpdate()).then(() => {
-          if (generation !== lifecycleGeneration) return plainSnapshot(state);
-          if (state.status === "downloading") transition("ready", version, null);
-          return plainSnapshot(state);
-        });
-      })
+        await adapter.downloadUpdate();
+        if (generation !== lifecycleGeneration) return plainSnapshot(state);
+        if (state.status === "downloading") transition("ready", version, null);
+        return plainSnapshot(state);
+      },
+      UPDATE_DOWNLOAD_TIMEOUT_MS,
+      operationError("ERR_UPDATE_DOWNLOAD_TIMEOUT", "desktop update download timed out")
+    );
+    downloadBoundary = boundary;
+    const pending = boundary.promise
       .catch((error) => {
-        if (generation === lifecycleGeneration) handleError(error, "downloading");
+        if (generation === lifecycleGeneration) {
+          const reason = updaterErrorReason(error, "downloading");
+          if (reason === "update_download_timeout") {
+            if (state.status === "downloading" || (state.status === "available" && state.reason === null)) {
+              transition("available", version, reason);
+            }
+          } else {
+            handleError(error, "downloading");
+          }
+        }
         return plainSnapshot(state);
       })
       .finally(() => {
         if (downloadPromise === pending) downloadPromise = null;
+        if (downloadBoundary === boundary) downloadBoundary = null;
         if (downloadGeneration === generation) {
           downloadGeneration = null;
           downloadStarted = false;
@@ -842,7 +905,14 @@ function createUpdateController({
       try { unlisteners.pop()(); } catch { /* Adapter cleanup cannot change app state. */ }
     }
     started = false;
-    try { adapter.cancelUpdate?.(); } catch { /* Stopping never reopens updater work. */ }
+    const boundaries = [checkBoundary, downloadBoundary].filter((boundary) => boundary !== null);
+    const cancelAdapter = boundaries.length === 0 || boundaries.some((boundary) => !boundary.adapterCancelled);
+    if (cancelAdapter) {
+      for (const boundary of boundaries) boundary.adapterCancelled = true;
+      try { adapter.cancelUpdate?.(); } catch { /* Stopping never reopens updater work. */ }
+    }
+    const stopped = operationError("ERR_UPDATE_STOPPED", "desktop update controller stopped");
+    for (const boundary of boundaries) boundary.interrupt(stopped);
   }
 
   setUnavailableIfNeeded();
@@ -851,6 +921,8 @@ function createUpdateController({
 
 module.exports = {
   DEFAULT_CHECK_INTERVAL_MS,
+  UPDATE_CHECK_TIMEOUT_MS,
+  UPDATE_DOWNLOAD_TIMEOUT_MS,
   UPDATE_ATTEMPT_FILE,
   UPDATE_EVENTS,
   compareVersions,

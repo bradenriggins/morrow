@@ -1,35 +1,98 @@
+export function absoluteItemBankTabUrls(tabs, canvasOrigin) {
+  if (!Array.isArray(tabs)) return [];
+  let expectedOrigin;
+  try { expectedOrigin = new URL(canvasOrigin).origin; } catch { return tabs; }
+  return tabs.map((tab) => {
+    if (!tab || typeof tab !== "object" || Array.isArray(tab) || typeof tab.html_url !== "string") return tab;
+    try {
+      const resolved = new URL(tab.html_url, expectedOrigin);
+      return resolved.origin === expectedOrigin ? { ...tab, html_url: resolved.href } : tab;
+    } catch {
+      return tab;
+    }
+  });
+}
+
 export async function executeItemBankInPage(input) {
+  const requestExpired = () => Number.isSafeInteger(input?.expiresAt) && input.expiresAt <= Date.now();
   const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
     Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
   const MAX_BYTES = 2 * 1024 * 1024;
   const hostPattern = /^[^.]+\.quiz-(?:lti|api)(?:-[^.]+)*\.instructure\.com$/i;
+  const ltiHostPattern = /^[^.]+\.quiz-lti(?:-[^.]+)*\.instructure\.com$/i;
   const apiHostPattern = /^[^.]+\.quiz-api(?:-[^.]+)*\.instructure\.com$/i;
   const id = (value) => /^[1-9][0-9]{0,18}$/.test(String(value || "")) ? String(value) : "";
   const json = (storage, key) => {
     try { return JSON.parse(storage.getItem(key) || "null"); } catch { return null; }
   };
-  const currentUser = json(sessionStorage, "current_user") || json(localStorage, "current_user");
-  const principalId = id(currentUser?.current_user?.id ?? currentUser?.id ?? globalThis.ENV?.current_user_id);
-  if (!principalId || principalId !== input.principalId) return { matched: false };
-  const currentHost = location.hostname.toLowerCase();
-  const apiHost = hostPattern.test(currentHost) ? currentHost.replace(".quiz-lti", ".quiz-api") : "";
-  if (!apiHostPattern.test(apiHost)) return { matched: false };
   let canvasUrl;
-  let referrerUrl;
   try {
     canvasUrl = new URL(input.canvasOrigin);
-    referrerUrl = new URL(document.referrer || "");
   } catch {
     return { matched: false };
   }
-  if (canvasUrl.protocol !== "https:" || canvasUrl.origin !== input.canvasOrigin || referrerUrl.origin !== canvasUrl.origin) return { matched: false };
+  if (canvasUrl.protocol !== "https:" || canvasUrl.origin !== input.canvasOrigin) return { matched: false };
   const canvasHost = canvasUrl.hostname.toLowerCase();
   const standardTenant = canvasHost.match(/^([^.]+)(?:\.(?:beta|test))?\.instructure\.com$/i)?.[1]?.toLowerCase();
-  if (standardTenant && apiHost.split(".")[0] !== standardTenant) return { matched: false };
-  const referrer = referrerUrl.pathname.match(/^\/courses\/([1-9][0-9]*)\/external_tools\/([1-9][0-9]*)\/?$/);
-  const referrerCourse = referrer?.[1];
-  const externalToolId = id(referrer?.[2]);
-  if (!input.courseId || referrerCourse !== input.courseId || !externalToolId) return { matched: false };
+  const currentUser = json(sessionStorage, "current_user") || json(localStorage, "current_user");
+  const principalId = id(currentUser?.current_user?.id ?? currentUser?.id ?? globalThis.ENV?.current_user_id);
+  let apiHost = "";
+  let token = "";
+  let contextUuid = "";
+  let externalToolId = "";
+  let native = false;
+  let referrerUrl;
+  let currentUrl;
+  try { currentUrl = new URL(location.href || ""); } catch { currentUrl = null; }
+  const nativePath = `/courses/${input.courseId}/banks`;
+  if (currentUrl?.origin === canvasUrl.origin && currentUrl.pathname === nativePath
+    && currentUrl.search === "" && currentUrl.hash === "") {
+    native = true;
+    if (!id(input.courseId) || !standardTenant) return { matched: false };
+    if (!principalId) return { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" };
+    if (principalId !== input.principalId) return { matched: false };
+    const canvasHostValue = localStorage.getItem("canvas_host");
+    const backendValue = localStorage.getItem("backend_url");
+    if (!canvasHostValue || !backendValue) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" };
+    }
+    let storedCanvas;
+    let backend;
+    try {
+      storedCanvas = new URL(canvasHostValue);
+      backend = new URL(backendValue);
+    } catch {
+      return { matched: false };
+    }
+    if (storedCanvas.href !== `${storedCanvas.origin}/` || storedCanvas.origin !== canvasUrl.origin
+      || backend.protocol !== "https:" || backend.href !== `${backend.origin}/`
+      || !ltiHostPattern.test(backend.hostname) || backend.hostname.split(".")[0].toLowerCase() !== standardTenant) {
+      return { matched: false };
+    }
+    apiHost = backend.hostname.toLowerCase().replace(".quiz-lti", ".quiz-api");
+    if (!apiHostPattern.test(apiHost) || apiHost.split(".")[0] !== standardTenant) return { matched: false };
+    const localContext = id(sessionStorage.getItem("canvas_local_context_id"));
+    const storedContext = sessionStorage.getItem("canvas_context_id") || "";
+    const storedToken = sessionStorage.getItem("banks.build_token") || "";
+    if (!localContext || localContext !== input.courseId
+      || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(storedContext)
+      || storedToken.length < 51 || storedToken.length > 8192) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" };
+    }
+    contextUuid = storedContext;
+    token = storedToken;
+  } else {
+    const currentHost = location.hostname.toLowerCase();
+    apiHost = hostPattern.test(currentHost) ? currentHost.replace(".quiz-lti", ".quiz-api") : "";
+    if (!apiHostPattern.test(apiHost) || !principalId || principalId !== input.principalId) return { matched: false };
+    try { referrerUrl = new URL(document.referrer || ""); } catch { return { matched: false }; }
+    if (referrerUrl.origin !== canvasUrl.origin) return { matched: false };
+    if (standardTenant && apiHost.split(".")[0] !== standardTenant) return { matched: false };
+    const referrer = referrerUrl.pathname.match(/^\/courses\/([1-9][0-9]*)\/external_tools\/([1-9][0-9]*)\/?$/);
+    const referrerCourse = referrer?.[1];
+    externalToolId = id(referrer?.[2]);
+    if (!input.courseId || referrerCourse !== input.courseId || !externalToolId) return { matched: false };
+  }
   const operation = input.operation;
   if (!operation || operation.service !== "item_bank" || !["GET", "POST", "PATCH", "DELETE"].includes(operation.method)) return { matched: false };
   const operationContracts = {
@@ -56,24 +119,27 @@ export async function executeItemBankInPage(input) {
   // arguments, so nothing above this line may read input.arguments. A probe
   // that needed the payload would disclose it to every candidate frame before
   // one frame was chosen.
+  if (requestExpired()) return { matched: true, ok: false, sent: false, error: "item_bank_operation_timeout" };
   if (input.contextOnly === true) return { matched: true, ok: true, sent: false };
   const itemBankGuard = input.arguments?.morrow_item_bank_guard;
   const guardedUpdate = itemBankGuard !== undefined && operation.nickname === "update_item";
   if (itemBankGuard !== undefined && !guardedUpdate) return { matched: true, ok: false, sent: false, error: "item_bank_guard_refused" };
-  const credential = input.credential;
-  const token = typeof credential?.token === "string" ? credential.token : "";
-  const contextUuid = typeof credential?.contextUuid === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(credential.contextUuid)
-    ? credential.contextUuid : "";
-  const launchedAt = Number(credential?.launchedAt);
-  const capturedAt = Number(credential?.capturedAt);
-  if (!credential || credential.apiOrigin !== `https://${apiHost}` || credential.authType !== "Signature"
-    || credential.canvasLocalContextId !== input.courseId || credential.externalToolId !== externalToolId
-    || credential.launchUrl !== referrerUrl.href
-    || typeof credential.launchNonce !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(credential.launchNonce)
-    || token.length < 51 || token.length > 8192 || !contextUuid
-    || !Number.isFinite(launchedAt) || !Number.isFinite(capturedAt) || capturedAt < launchedAt
-    || capturedAt - launchedAt > 45_000 || capturedAt > Date.now() || Date.now() - capturedAt > 10 * 60 * 1_000) {
-    return { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" };
+  if (!native) {
+    const credential = input.credential;
+    token = typeof credential?.token === "string" ? credential.token : "";
+    contextUuid = typeof credential?.contextUuid === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(credential.contextUuid)
+      ? credential.contextUuid : "";
+    const launchedAt = Number(credential?.launchedAt);
+    const capturedAt = Number(credential?.capturedAt);
+    if (!credential || credential.apiOrigin !== `https://${apiHost}` || credential.authType !== "Signature"
+      || credential.canvasLocalContextId !== input.courseId || credential.externalToolId !== externalToolId
+      || credential.launchUrl !== referrerUrl.href
+      || typeof credential.launchNonce !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(credential.launchNonce)
+      || token.length < 51 || token.length > 8192 || !contextUuid
+      || !Number.isFinite(launchedAt) || !Number.isFinite(capturedAt) || capturedAt < launchedAt
+      || capturedAt - launchedAt > 45_000 || capturedAt > Date.now() || Date.now() - capturedAt > 10 * 60 * 1_000) {
+      return { matched: true, ok: false, sent: false, error: "item_bank_credential_unavailable" };
+    }
   }
   const requestedCourse = id(input.arguments?.course_id ?? itemBankGuard?.course_id);
   if (!requestedCourse) return { matched: true, ok: false, sent: false, error: "course_id is required" };
@@ -604,6 +670,7 @@ export async function executeItemBankInPage(input) {
     let associated = false;
     let exhausted = false;
     for (let page = 1; page <= 25; page += 1) {
+      if (requestExpired()) return { matched: true, ok: false, sent: false, error: "item_bank_operation_timeout" };
       let response;
       try {
         const associationQuery = new URLSearchParams({ course_id: contextUuid, page: String(page), per_page: "100" });
@@ -648,6 +715,7 @@ export async function executeItemBankInPage(input) {
       if (fanOutReason) return { matched: true, ok: false, sent: false, error: `item_bank_fan_out_${fanOutReason}` };
     }
     const request = async (method, requestPath, requestBody) => {
+      if (requestExpired()) return { timeout: true };
       let response;
       try {
         response = await fetch(`https://${apiHost}${requestPath}`, {
@@ -1151,6 +1219,7 @@ export async function executeItemBankInPage(input) {
     if (!/^\/api\/banks(?:[/?#]|$)/.test(entryPath) || entryPath.includes("://") || entryPath.split("/").includes("..")) return refuse("item_bank_path_refused");
 
     const request = async (method, requestPath, requestBody) => {
+      if (requestExpired()) return { timeout: true };
       let response;
       try {
         response = await fetch(`https://${apiHost}${requestPath}`, {
@@ -1289,6 +1358,7 @@ export async function executeItemBankInPage(input) {
   let truncated = false;
   let status = 0;
   for (let offset = 0; offset < maxPages; offset += 1) {
+    if (requestExpired()) return { matched: true, ok: false, sent: false, error: "item_bank_operation_timeout" };
     const requestQuery = new URLSearchParams(query);
     if (pageParameter) requestQuery.set(pageParameter.wireName, String(startPage + offset));
     const requestPath = requestQuery.size ? `${path}${path.includes("?") ? "&" : "?"}${requestQuery}` : path;

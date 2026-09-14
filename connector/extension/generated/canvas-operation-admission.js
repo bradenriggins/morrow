@@ -1,5 +1,10 @@
 import { canvasReadbackBlocker, hasNamedCanvasReadback, planBrowserReadback } from "./canvas-readback-plan.js";
 import { canvasLearnerScopeObjectRoute, canvasSemanticCourseTarget } from "./canvas-semantic-target.js";
+export function canvasCourseTargetIsScoped(target) {
+    return target.kind === "course_path"
+        || target.kind === "semantic_course_object"
+        || (target.kind === "self_path" && target.argument !== undefined);
+}
 /**
  * Routes whose authority is a Canvas account or the whole Canvas instance: every account route, the
  * global outcome routes, and the developer key routes. The LTI registration routes live under an
@@ -29,6 +34,58 @@ const LEARNER_RECORD_ROUTE = Object.freeze([
     // the import applies a roster file as the difference between the saved groups and the file.
     /^\/v1\/group_categories\/\{[^}]+\}\/(?:assign_unassigned_members|import)$/,
     /^\/v1\/calendar_events\/\{[^}]+\}\/reservations(?:\/|$)/,
+]);
+/**
+ * Course paths prove which course Canvas will change, but they do not grant authority over a
+ * learner's work or participation. These are the course-nested forms of the learner records above:
+ * submissions and grades, quiz attempts, enrollments, assignment overrides, group membership, and
+ * learner progress.
+ *
+ * Some routes can act on either course content or a learner depending on request fields. A standing
+ * capability cannot inspect those future fields when it is granted, so the raw operation stays held
+ * until Morrow has a separate learner authority that can bind the affected people.
+ */
+const COURSE_LEARNER_RECORD_ROUTE = Object.freeze([
+    // Assignment overrides and module overrides can name students, groups, or sections.
+    /^\/v1\/courses\/\{course_id\}\/assignments\/(?:overrides(?:\/|$)|\{[^}]+\}\/overrides(?:\/|$))/,
+    /^\/v1\/courses\/\{course_id\}\/modules\/\{[^}]+\}\/assignment_overrides$/,
+    // Assignment submissions include grades, comments, peer reviews, moderation, and extensions.
+    /^\/v1\/courses\/\{course_id\}\/assignments\/\{[^}]+\}\/(?:allocate|anonymous_submissions|extensions|moderated_students|provisional_grades|submissions)(?:\/|$)/,
+    /^\/v1\/courses\/\{course_id\}\/submissions(?:\/|$)/,
+    // A quiz extension or submission changes one or more learner attempts.
+    /^\/v1\/courses\/\{course_id\}\/quizzes\/\{[^}]+\}\/(?:extensions|submissions)(?:\/|$)/,
+    /^\/v1\/courses\/\{course_id\}\/quiz_extensions(?:\/|$)/,
+    // Enrollment and direct gradebook or assessment data belong to learners, not course content.
+    /^\/v1\/courses\/\{course_id\}\/enrollments(?:\/|$)/,
+    /^\/v1\/courses\/\{course_id\}\/users\/\{[^}]+\}\/last_attended$/,
+    /^\/v1\/courses\/\{course_id\}\/custom_gradebook_column_data(?:\/|$)/,
+    /^\/v1\/courses\/\{course_id\}\/custom_gradebook_columns\/\{[^}]+\}\/data\/\{[^}]+\}$/,
+    /^\/v1\/courses\/\{course_id\}\/live_assessments\/\{[^}]+\}\/results$/,
+    /^\/v1\/courses\/\{course_id\}\/rubric_associations\/\{[^}]+\}\/rubric_assessments(?:\/|$)/,
+    /^\/v1\/courses\/\{course_id\}\/what_if_grades(?:\/|$)/,
+    // These routes directly change a learner's progress or group membership.
+    /^\/v1\/courses\/\{course_id\}\/modules\/\{[^}]+\}\/(?:relock|items\/\{[^}]+\}\/(?:done|mark_read|select_mastery_path))$/,
+    /^\/v1\/courses\/\{course_id\}\/group_categories(?:\/|$)/,
+    // These operations carry the learner target in request data or in the saved object's meaning.
+    /^\/quiz\/v1\/courses\/\{course_id\}(?:\/quizzes\/\{[^}]+\})?\/accommodations$/,
+    /^\/v1\/courses\/\{course_id\}\/course_pacing(?:\/|$)/,
+    /^\/v1\/courses\/\{course_id\}\/ai_experiences\/\{[^}]+\}\/conversations(?:\/|$)/,
+    /^\/v1\/courses\/\{course_id\}\/enqueue_outcome_rollup_calculation$/,
+    /^\/v1\/courses\/\{course_id\}\/quizzes\/\{[^}]+\}\/submission_users\/message$/,
+    /^\/v1\/courses\/\{course_id\}\/discussion_topics\/read_all$/,
+    /^\/v1\/courses\/\{course_id\}\/discussion_topics(?:\/|$).*(?:\/entries(?:\/|$)|\/read(?:\/|$)|\/read_all$|\/subscribed$|\/rating$|\/summaries\/\{[^}]+\}\/feedback$)/,
+]);
+/**
+ * Writes whose course path names only one part of their effect. Each operation can read from, move,
+ * associate, or write another course or account named in its request data. A selected-course grant
+ * cannot authorize that second scope.
+ */
+const MULTI_COURSE_ROUTE = Object.freeze([
+    /^\/v1\/courses\/\{course_id\}\/blueprint_templates\/\{[^}]+\}\/(?:migrations|update_associations)$/,
+    /^\/v1\/courses\/\{course_id\}\/course_copy$/,
+    /^\/v1\/courses\/\{course_id\}\/content_migrations$/,
+    /^\/v1\/courses\/\{course_id\}\/outcome_groups\/\{[^}]+\}\/import$/,
+    /^\/v1\/courses\/\{course_id\}\/outcome_groups\/\{[^}]+\}\/outcomes(?:\/\{[^}]+\})?$/,
 ]);
 /**
  * Object families Canvas keeps outside a course. Canvas can attach any of these objects to any
@@ -66,13 +123,14 @@ const NO_READABLE_PROVIDER_EFFECT_ROUTE = Object.freeze([
  * transfer, which freezes the exact file and compares the bytes Canvas saved.
  */
 const COURSE_FILE_UPLOAD_PREFLIGHT_ROUTE = /^\/v1\/courses\/\{course_id\}\/(?:[^/]+\/)*files$/;
+const COURSE_RUBRIC_CSV_UPLOAD_ROUTE = "/v1/courses/{course_id}/rubrics/upload";
 /**
- * True when the route is a course-scoped upload pre-flight. The same first step outside a course, on
- * a section, folder, group or person, keeps its own hold: what those routes lack first is proof of
- * the course, not the rest of the upload.
+ * True when the route needs file bytes the generic operation cannot safely carry. This covers the
+ * course upload pre-flights and the CSV Rubric import whose generated schema exposes no file input.
  */
-function fileUploadPreflightRoute(operation) {
-    return operation.method === "POST" && COURSE_FILE_UPLOAD_PREFLIGHT_ROUTE.test(operation.path);
+function reviewedFileTransferRoute(operation) {
+    return operation.method === "POST" && (COURSE_FILE_UPLOAD_PREFLIGHT_ROUTE.test(operation.path)
+        || operation.path === COURSE_RUBRIC_CSV_UPLOAD_ROUTE);
 }
 function learnerRecordRoute(operation) {
     // Deleting an appointment group cancels every time slot students have already booked in it, so it
@@ -80,7 +138,26 @@ function learnerRecordRoute(operation) {
     // itself is admitted above, through the reading that proves the selected course owns it.
     if (operation.method === "DELETE" && /^\/v1\/appointment_groups\/\{[^}]+\}$/.test(operation.path))
         return true;
-    return canvasLearnerScopeObjectRoute(operation) || LEARNER_RECORD_ROUTE.some((route) => route.test(operation.path));
+    if (operation.method === "DELETE" && /^\/v1\/(?:courses\/\{course_id\}\/)?discussion_topics\/\{[^}]+\}$/.test(operation.path))
+        return true;
+    if (operation.method === "DELETE" && /^\/v1\/groups\/\{group_id\}\/discussion_topics\/\{topic_id\}$/.test(operation.path))
+        return true;
+    if (operation.method === "DELETE" && operation.path === "/v1/courses/{course_id}/custom_gradebook_columns/{id}")
+        return true;
+    if (operation.method === "DELETE" && operation.path === "/v1/courses/{id}")
+        return true;
+    return canvasLearnerScopeObjectRoute(operation)
+        || LEARNER_RECORD_ROUTE.some((route) => route.test(operation.path))
+        || COURSE_LEARNER_RECORD_ROUTE.some((route) => route.test(operation.path));
+}
+function multiCourseRoute(operation) {
+    if (operation.method === "PUT" && operation.path === "/v1/courses/{id}")
+        return true;
+    if (operation.method === "POST" && operation.path === "/v1/courses/{course_id}/reset_content")
+        return true;
+    if (operation.method === "DELETE" && operation.path === "/v1/courses/{course_id}/outcome_groups/{id}")
+        return true;
+    return MULTI_COURSE_ROUTE.some((route) => route.test(operation.path));
 }
 function crossCourseObjectRoute(operation) {
     // The enabled account calendars are the signed-in person's own list of calendars to display. It
@@ -122,15 +199,20 @@ export function canvasOperationAdmission(operation) {
     if (canvasAccountAuthorityRoute(operation)) {
         return { courseTarget: target, write: { state: "held", reason: "account_authority_required" } };
     }
-    // The course is named, so scope is not what is missing. What is missing is the rest of the upload:
-    // this route only asks Canvas where to send the bytes, and the two steps that store and confirm
-    // them exist only in Morrow's reviewed file transfer. Sending this step alone would leave an
-    // unfinished upload behind, so it is held before the course path admits it.
-    if (fileUploadPreflightRoute(operation)) {
+    // The course is named, so scope is not what is missing. These routes need file bytes that only a
+    // reviewed transfer may carry. A generic call would either start an unfinished upload or send an
+    // empty CSV import, so the transfer hold runs before the course path can admit it.
+    if (reviewedFileTransferRoute(operation)) {
         return { courseTarget: target, write: { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" } };
     }
     if (operation.path === "/v1/courses/{course_id}/assignments/{assignment_id}/duplicate") {
         return { courseTarget: target, write: { state: "held", reason: "duplicate_assignment_exact_readback_unavailable" } };
+    }
+    if (learnerRecordRoute(operation)) {
+        return { courseTarget: target, write: { state: "held", reason: "learner_scope_requires_separate_authority" } };
+    }
+    if (multiCourseRoute(operation)) {
+        return { courseTarget: target, write: { state: "held", reason: "multi_course_authority_required" } };
     }
     if (target.kind === "course_path")
         return { courseTarget: target, write: { state: "admitted" } };
@@ -143,9 +225,6 @@ export function canvasOperationAdmission(operation) {
     // The remaining classes are ordered from the most specific fact about the route to the least: a
     // person's own record, then an object Canvas can place in any course, then a request with no
     // readable effect, and last the plain absence of a course.
-    if (learnerRecordRoute(operation)) {
-        return { courseTarget: target, write: { state: "held", reason: "learner_scope_requires_separate_authority" } };
-    }
     if (crossCourseObjectRoute(operation)) {
         return { courseTarget: target, write: { state: "held", reason: "cross_course_object_requires_resolution" } };
     }
@@ -233,6 +312,9 @@ export function canvasAdmissionReason(admission) {
     }
     if (admission.reason === "learner_scope_requires_separate_authority") {
         return "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas.";
+    }
+    if (admission.reason === "multi_course_authority_required") {
+        return "This change can read from or change another Canvas course or account. Morrow only has permission for the course you selected, so it will not send it.";
     }
     if (admission.reason === "provider_contract_incomplete") {
         return "This asks Canvas for a sign-in token, a session or a one-time action, and Canvas keeps nothing afterwards that Morrow can read back to show you what happened. Morrow does not send a change it cannot check, so make this one in Canvas.";

@@ -7,6 +7,7 @@ import { sha256Json } from "@morrow/contracts";
 import {
   GatewayOperationConflictError,
   GatewayOperationJournal,
+  ProviderEffectBroker,
   classifySourceResult,
 } from "../src/index.js";
 
@@ -60,7 +61,11 @@ describe("GatewayOperationJournal", () => {
   });
 
   it("retains complete read authority and successful-response evidence", () => {
-    const journal = new GatewayOperationJournal({ path: ":memory:" });
+    let causalSequence = 40;
+    const journal = new GatewayOperationJournal({
+      path: ":memory:",
+      nextCausalSequence: () => ++causalSequence,
+    });
     const authority = {
       sourceBindingId: "canvas:course-42",
       targetIdentityDigest: "d".repeat(64),
@@ -89,7 +94,11 @@ describe("GatewayOperationJournal", () => {
       state: "response_received",
     });
     const delivered = journal.recordPublicReadDelivered(prepared.record.operationId);
-    expect(delivered).toMatchObject({ publicResultDelivered: true, responseSucceeded: true });
+    expect(delivered).toMatchObject({
+      publicResultDelivered: true,
+      preparedCausalSequence: 41,
+      responseSucceeded: true,
+    });
     for (let index = 0; index < 201; index += 1) {
       const decoy = journal.prepare({
         ...input(),
@@ -112,14 +121,20 @@ describe("GatewayOperationJournal", () => {
       sourceId: "morrow-legacy",
       ...authority,
       upstreamResultDigest: "b".repeat(64),
-      notBefore: complete.createdAt,
+      afterCausalSequence: 40,
     })?.operationId).toBe(prepared.record.operationId);
+    expect(journal.findSuccessfulReadEvidence({
+      sourceId: "morrow-legacy",
+      ...authority,
+      upstreamResultDigest: "b".repeat(64),
+      afterCausalSequence: delivered.preparedCausalSequence!,
+    })).toBeNull();
     expect(journal.findSuccessfulReadEvidence({
       sourceId: "morrow-legacy",
       ...authority,
       actorDigest: "f".repeat(64),
       upstreamResultDigest: "b".repeat(64),
-      notBefore: complete.createdAt,
+      afterCausalSequence: 40,
     })).toBeNull();
     expect(() => journal.prepare({
       ...input(),
@@ -187,7 +202,131 @@ describe("GatewayOperationJournal", () => {
       actorDigest: null,
       responseSucceeded: null,
       publicResultDelivered: false,
+      preparedCausalSequence: 1,
     });
+    journal.close();
+  });
+
+  it("keeps read-delivery causal order across journal restarts", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-journal-causal-order-"));
+    roots.push(root);
+    const path = join(root, "operations.sqlite3");
+    const authority = {
+      sourceBindingId: "canvas:course-42",
+      targetIdentityDigest: "d".repeat(64),
+      actorDigest: "e".repeat(64),
+    };
+    const deliver = (journal: GatewayOperationJournal, digest: string) => {
+      const prepared = journal.prepare({
+        ...input(),
+        publicToolName: "read_page",
+        sourceToolName: "read_page",
+        sourceOperationId: undefined,
+        idempotencyKey: undefined,
+        readOnly: true,
+        ...authority,
+      });
+      journal.markDispatched(prepared.record.operationId);
+      journal.recordResponse(prepared.record.operationId, {
+        upstreamResultDigest: digest,
+        normalizedResultDigest: digest,
+        responseSucceeded: true,
+      });
+      return journal.recordPublicReadDelivered(prepared.record.operationId);
+    };
+
+    const first = new GatewayOperationJournal({ path });
+    const firstRead = deliver(first, "1".repeat(64));
+    first.close();
+    const restarted = new GatewayOperationJournal({ path });
+    const laterRead = deliver(restarted, "2".repeat(64));
+    expect(laterRead.preparedCausalSequence)
+      .toBeGreaterThan(firstRead.preparedCausalSequence!);
+    restarted.close();
+  });
+
+  it("orders person-close evidence across effect and read journals even when every timestamp is equal", () => {
+    const root = mkdtempSync(join(tmpdir(), "morrow-journal-effect-causal-order-"));
+    roots.push(root);
+    const path = join(root, "operations.sqlite3");
+    const now = () => new Date("2026-09-14T12:00:00.000Z");
+    const authority = {
+      sourceBindingId: "canvas:course-42",
+      targetIdentityDigest: "d".repeat(64),
+      actorDigest: "e".repeat(64),
+    };
+    const journal = new GatewayOperationJournal({ path, now });
+    const effects = new ProviderEffectBroker({ path, now });
+    const operation = effects.create({
+      publicToolName: "edit_page",
+      sourceId: "morrow-legacy",
+      sourceToolName: "edit_page",
+      catalogDigest: "a".repeat(64),
+      request: { course_id: "42", page_id: "7" },
+      forwardedRequest: { course_id: "42", page_id: "7" },
+      sourceBindingId: authority.sourceBindingId,
+      authority: {
+        profileDigest: "1".repeat(64),
+        actorDigest: authority.actorDigest,
+        providerPrincipalDigest: "3".repeat(64),
+        connectionGeneration: 1,
+        catalogDigest: "a".repeat(64),
+        approvalClass: "content",
+        targetSetDigest: authority.targetIdentityDigest,
+      },
+    });
+    effects.approve(operation.operationId);
+    effects.reserveDispatch(operation.operationId);
+
+    const startRead = () => {
+      const prepared = journal.prepare({
+        ...input(),
+        publicToolName: "read_page",
+        sourceToolName: "read_page",
+        sourceOperationId: undefined,
+        idempotencyKey: undefined,
+        readOnly: true,
+        ...authority,
+      });
+      journal.markDispatched(prepared.record.operationId);
+      return prepared.record.operationId;
+    };
+    const deliverRead = (operationId: string) => {
+      journal.recordResponse(operationId, {
+        upstreamResultDigest: "b".repeat(64),
+        normalizedResultDigest: "c".repeat(64),
+        responseSucceeded: true,
+      });
+      return journal.recordPublicReadDelivered(operationId);
+    };
+
+    const duringDispatchId = startRead();
+    const unresolved = effects.settleFailure(operation.operationId, { timeout: true }, true);
+    const duringDispatch = deliverRead(duringDispatchId);
+    expect(duringDispatch.createdAt).toBe(unresolved.updatedAt);
+    expect(duringDispatch.preparedCausalSequence)
+      .toBeLessThan(unresolved.personCloseCausalSequence!);
+    expect(journal.findSuccessfulReadEvidence({
+      sourceId: "morrow-legacy",
+      ...authority,
+      upstreamResultDigest: "b".repeat(64),
+      afterCausalSequence: unresolved.personCloseCausalSequence!,
+    })).toBeNull();
+
+    const afterUnknown = deliverRead(startRead());
+    expect(afterUnknown.createdAt).toBe(unresolved.updatedAt);
+    expect(journal.findSuccessfulReadEvidence({
+      sourceId: "morrow-legacy",
+      ...authority,
+      upstreamResultDigest: "b".repeat(64),
+      afterCausalSequence: unresolved.personCloseCausalSequence!,
+    })?.operationId).toBe(afterUnknown.operationId);
+    expect(effects.closeAfterPersonCheck(
+      operation.operationId,
+      "b".repeat(64),
+      afterUnknown.preparedCausalSequence!,
+    ).state).toBe("closed_by_person");
+    effects.close();
     journal.close();
   });
 

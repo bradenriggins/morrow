@@ -546,7 +546,7 @@ async function collectCourseInventory(
         source_binding_id: selected.source_binding_id,
         ...(listResume ? { list_resume: listResume } : {}),
       },
-    }, { signal }), candidate.upstreamId, upstreamTool);
+    }, { signal, upstreamTimeoutMs: 120_000 }), candidate.upstreamId, upstreamTool);
   };
 
   const refusal = (reason: string): CourseInventory => ({
@@ -748,7 +748,9 @@ async function collectCourseInventory(
 
   // Keep catalog-source selection serial. A concurrent first read could otherwise
   // let two equally named catalog entries establish different upstream sources.
-  const modules = await list("modules", "canvas_list_modules", { course_id: selected.course_id, include: ["items", "content_details"] });
+  // Module items have their own bounded list below. Embedding them here repeats
+  // the largest part of the module inventory before those bounds can apply.
+  const modules = await list("modules", "canvas_list_modules", { course_id: selected.course_id });
   const pages = await list("pages", "canvas_list_pages_courses", { course_id: selected.course_id });
   const assignments = await list("assignments", "canvas_list_assignments_assignments", { course_id: selected.course_id });
   const discussions = await list("discussions", "canvas_list_discussion_topics_courses", { course_id: selected.course_id });
@@ -795,9 +797,10 @@ async function collectCourseInventory(
 
   for (const page of pages.records) {
     const url = objectText(page, "url", 1_000);
-    if (!url) recordMissing(pages, "page_url_missing", page, "Canvas listed a Page without the URL required for an exact Page audit.");
-    else addTarget(pages, { kind: "page", page_url: url }, {
-      listed_id: objectId(page, "page_id") ?? null,
+    const pageId = objectId(page, "page_id");
+    if (!url && !pageId) recordMissing(pages, "page_identifier_missing", page, "Canvas listed a Page without the URL or numeric ID required for an exact Page audit.");
+    else addTarget(pages, { kind: "page", page_url: pageId ?? url! }, {
+      listed_id: pageId ?? null,
       title: objectText(page, "title", 500) ?? null,
       front_page: frontPageUrl === undefined ? null : url === frontPageUrl,
     });
@@ -1585,8 +1588,8 @@ export async function collectCourseInventoryTool(
 ): Promise<CallToolResult> {
   try {
     const boundedSignal = signal
-      ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
-      : AbortSignal.timeout(120_000);
+      ? AbortSignal.any([signal, AbortSignal.timeout(600_000)])
+      : AbortSignal.timeout(600_000);
     const report = await collectCanvasProgramInventory(runtime, value, { signal: boundedSignal });
     const coverage = isJsonObject(report.coverage) ? report.coverage : {};
     const complete = coverage.complete === true;

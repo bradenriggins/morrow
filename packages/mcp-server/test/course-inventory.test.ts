@@ -79,7 +79,7 @@ function fixture(options: {
   readonly shares?: readonly JsonObject[];
   readonly paginated?: PaginatedList;
 } = {}) {
-  const calls: { name: string; arguments: JsonObject }[] = [];
+  const calls: { name: string; arguments: JsonObject; options: { readonly signal?: AbortSignal; readonly upstreamTimeoutMs?: number } }[] = [];
   const snapshots: SnapshotMap = {
     canvas_get_single_course_courses: options.course ?? { id: "42", name: "Biology", syllabus_body: "<h1>Syllabus</h1>" },
     canvas_list_modules: [{ id: "7", name: "Orientation" }],
@@ -110,8 +110,8 @@ function fixture(options: {
       route: { backend: "canvas-connector" },
       sourceImplementations: [{ toolName: name }],
     } }),
-    callSourceOwned: async (name: string, argumentsValue: JsonObject) => {
-      calls.push({ name, arguments: argumentsValue });
+    callSourceOwned: async (name: string, argumentsValue: JsonObject, callOptions: { readonly signal?: AbortSignal; readonly upstreamTimeoutMs?: number }) => {
+      calls.push({ name, arguments: argumentsValue, options: callOptions });
       const announcements = name === "canvas_list_discussion_topics_courses" && argumentsValue.only_announcements === true;
       const key = announcements ? "canvas_list_discussion_topics_courses_announcements" : name;
       if (!Object.hasOwn(snapshots, key)) throw new Error(`unexpected inventory read ${name}`);
@@ -234,8 +234,8 @@ describe("Canvas course inventory", () => {
       discovery: { upstream_read_tool: "canvas_list_discussion_topics_courses", title: "Week one notes", is_announcement: true },
     });
     expect(targets.filter((item) => object(item.target).kind === "page")).toEqual([
-      expect.objectContaining({ target: { kind: "page", page_url: "welcome" }, discovery: expect.objectContaining({ front_page: true }) }),
-      expect.objectContaining({ target: { kind: "page", page_url: "lab-safety" }, discovery: expect.objectContaining({ front_page: false }) }),
+      expect.objectContaining({ target: { kind: "page", page_url: "11" }, discovery: expect.objectContaining({ front_page: true }) }),
+      expect.objectContaining({ target: { kind: "page", page_url: "22" }, discovery: expect.objectContaining({ front_page: false }) }),
     ]);
     const lists = object(courses[0]!).lists as JsonObject[];
     expect(lists).toEqual(expect.arrayContaining([
@@ -272,6 +272,59 @@ describe("Canvas course inventory", () => {
     expect(discussionCalls[0]!.arguments).not.toHaveProperty("only_announcements");
     expect(discussionCalls[1]!.arguments).toMatchObject({ course_id: "42", only_announcements: true });
     expect(calls.every((call) => object(call.arguments._morrow).source_binding_id === "canvas-course-42")).toBe(true);
+    expect(calls.every((call) => call.options.upstreamTimeoutMs === 120_000)).toBe(true);
+  });
+
+  it("lists modules without embedded items and completes separate bounded module-item discovery", async () => {
+    const { runtime, calls } = fixture({
+      paginated: {
+        tool: "canvas_list_module_items",
+        pages: [
+          [{ id: "71", type: "Page", title: "Welcome" }],
+          [{ id: "72", type: "Assignment", title: "Reflection" }],
+          [{ id: "73", type: "ExternalUrl", title: "Publisher simulation" }],
+        ],
+      },
+    });
+
+    const report = object(await collectCanvasProgramInventory(runtime, selection));
+    expect(report).toMatchObject({
+      coverage: { status: "supported_inventory_complete", complete: true, pagination_complete: true },
+    });
+    const course = (report.courses as JsonObject[])[0]!;
+    expect(course).toMatchObject({ status: "inventory_complete" });
+    expect(course.lists).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        list: "module_items:7",
+        upstream_read_tool: "canvas_list_module_items",
+        status: "observed",
+        returned_record_count: 3,
+        page_count: 3,
+        list_calls: 3,
+        unread_pages: 0,
+        resume_available: false,
+        truncated: false,
+      }),
+    ]));
+
+    const moduleCalls = calls.filter((call) => call.name === "canvas_list_modules");
+    expect(moduleCalls).toHaveLength(1);
+    expect(moduleCalls[0]!.arguments).toMatchObject({ course_id: "42", morrow_max_pages: 25 });
+    expect(moduleCalls[0]!.arguments).not.toHaveProperty("include");
+
+    const moduleItemCalls = calls.filter((call) => call.name === "canvas_list_module_items");
+    expect(moduleItemCalls).toHaveLength(3);
+    for (const call of moduleItemCalls) {
+      expect(call.arguments).toMatchObject({
+        course_id: "42",
+        module_id: "7",
+        include: ["content_details"],
+        morrow_max_pages: 25,
+      });
+    }
+    expect(object(moduleItemCalls[0]!.arguments._morrow).list_resume).toEqual({});
+    expect(object(moduleItemCalls[1]!.arguments._morrow).list_resume).toEqual({ next_page: "morrowpage-1" });
+    expect(object(moduleItemCalls[2]!.arguments._morrow).list_resume).toEqual({ next_page: "morrowpage-2" });
   });
 
   it("audits what a capped list returned when the connector offers no resume token", async () => {
@@ -333,7 +386,7 @@ describe("Canvas course inventory", () => {
       expect.objectContaining({ list: "pages", status: "observed", truncated: false, list_calls: 3, page_count: 3, unread_pages: 0, resume_available: false }),
     ]));
     const pageTargets = (course.targets as JsonObject[]).filter((target) => object(target.target).kind === "page");
-    expect(pageTargets.map((target) => object(target.target).page_url)).toEqual(["welcome", "lab-safety", "field-work"]);
+    expect(pageTargets.map((target) => object(target.target).page_url)).toEqual(["11", "22", "33"]);
     expect(pageTargets.every((target) => target.batch_eligibility === "eligible" && target.inventory_state === "discovered")).toBe(true);
     expect((report.audit_children as JsonObject[]).filter((child) => object(object(child).arguments.target).kind === "page")).toHaveLength(3);
 
@@ -379,7 +432,7 @@ describe("Canvas course inventory", () => {
       expect.objectContaining({ code: "list_resume_bound_reached", list: "pages", blocking: true }),
     ]));
     const pageTargets = (course.targets as JsonObject[]).filter((target) => object(target.target).kind === "page");
-    expect(pageTargets.map((target) => object(target.target).page_url)).toEqual(["welcome", "lab-safety"]);
+    expect(pageTargets.map((target) => object(target.target).page_url)).toEqual(["11", "22"]);
     expect(pageTargets.every((target) => target.batch_eligibility === "eligible" && target.inventory_state === "discovered_from_incomplete_list")).toBe(true);
     expect((report.audit_children as JsonObject[]).filter((child) => object(object(child).arguments.target).kind === "page")).toHaveLength(2);
     expect(JSON.stringify(report)).not.toContain("morrowpage-");
@@ -407,7 +460,7 @@ describe("Canvas course inventory", () => {
       expect.objectContaining({ list: "pages", status: "truncated", truncated: true, list_calls: 2, resume_available: false }),
     ]));
     const pageTargets = (course.targets as JsonObject[]).filter((target) => object(target.target).kind === "page");
-    expect(pageTargets.map((target) => object(target.target).page_url)).toEqual(["welcome"]);
+    expect(pageTargets.map((target) => object(target.target).page_url)).toEqual(["11"]);
     expect(pageTargets.every((target) => target.batch_eligibility === "eligible")).toBe(true);
     expect((report.audit_children as JsonObject[]).filter((child) => object(object(child).arguments.target).kind === "page")).toHaveLength(1);
   });

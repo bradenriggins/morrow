@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { resolve } from "node:path";
 import { Client } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
@@ -341,9 +341,71 @@ function parseExpectedConfigSha256(args: readonly string[]): {
   return { ...(expectedConfigSha256 ? { expectedConfigSha256 } : {}), rest };
 }
 
-function commandAvailable(command: string): boolean {
-  const result = spawnSync(command, ["--version"], { stdio: "ignore" });
-  return !result.error;
+const COMMAND_VERSION_TIMEOUT_MS = 2_000;
+const COMMAND_RECLAIM_GRACE_MS = 500;
+
+function terminateCommandTree(child: ChildProcess): void {
+  if (!Number.isSafeInteger(child.pid) || Number(child.pid) <= 0) return;
+  if (process.platform === "win32") {
+    try {
+      const killer = spawn("taskkill.exe", ["/PID", String(child.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+      killer.once("error", () => { try { child.kill("SIGKILL"); } catch {} });
+      killer.unref();
+      return;
+    } catch {
+      try { child.kill("SIGKILL"); } catch {}
+      return;
+    }
+  }
+  try {
+    process.kill(-Number(child.pid), "SIGKILL");
+  } catch {
+    try { child.kill("SIGKILL"); } catch {}
+  }
+}
+
+/** A PATH version check cannot hold doctor open or leave anything it started alive. */
+function commandAvailable(command: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let child: ChildProcess;
+    try {
+      child = spawn(command, ["--version"], {
+        stdio: "ignore",
+        windowsHide: true,
+        detached: process.platform !== "win32",
+      });
+    } catch {
+      resolve(false);
+      return;
+    }
+
+    let settled = false;
+    let timedOut = false;
+    let reclaimTimer: NodeJS.Timeout | null = null;
+    const finish = (available: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutTimer);
+      if (reclaimTimer) clearTimeout(reclaimTimer);
+      child.removeListener("error", onError);
+      child.removeListener("close", onClose);
+      child.unref();
+      resolve(available);
+    };
+    const onError = (): void => { if (!timedOut) finish(false); };
+    const onClose = (): void => { if (!timedOut) finish(true); };
+    const timeoutTimer = setTimeout(() => {
+      if (settled) return;
+      timedOut = true;
+      terminateCommandTree(child);
+      reclaimTimer = setTimeout(() => finish(false), COMMAND_RECLAIM_GRACE_MS);
+    }, COMMAND_VERSION_TIMEOUT_MS);
+    child.once("error", onError);
+    child.once("close", onClose);
+  });
 }
 
 async function doctor(options: SharedOptions): Promise<Record<string, unknown>> {
@@ -378,6 +440,11 @@ async function doctor(options: SharedOptions): Promise<Record<string, unknown>> 
       };
     }
   }
+  const [codexAvailable, claudeAvailable, geminiAvailable] = await Promise.all([
+    commandAvailable("codex"),
+    commandAvailable("claude"),
+    commandAvailable("gemini"),
+  ]);
   return {
     schema: "morrow.doctor.v1",
     repositoryRoot,
@@ -387,9 +454,9 @@ async function doctor(options: SharedOptions): Promise<Record<string, unknown>> 
     upstreamConfigExists,
     projectScopeDefault: true,
     clients: {
-      codex: commandAvailable("codex"),
-      claude: commandAvailable("claude"),
-      gemini: commandAvailable("gemini"),
+      codex: codexAvailable,
+      claude: claudeAvailable,
+      gemini: geminiAvailable,
     },
     runtime,
   };

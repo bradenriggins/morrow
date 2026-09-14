@@ -267,7 +267,7 @@ async function fixtureLedger(): Promise<{ readonly report: JsonObject; readonly 
   const manualChecks: ProgramLedgerManualCheck[] = [{
     course_id: "42",
     source_binding_id: "canvas-course-42",
-    target: { kind: "page", page_url: "welcome" },
+    target: { kind: "page", page_url: "11" },
     checked_at: "2026-09-06T09:00:00.000Z",
     note: "Reviewed the Page in the course with a keyboard and a screen reader.",
   }];
@@ -288,7 +288,7 @@ describe("program accessibility ledger", () => {
 
     // A target Morrow read from a capped source list stays auditable. With no
     // audit result supplied for it, it is unread here, and never a pass.
-    expect(entryFor(ledger, { kind: "page", page_url: "syllabus" })).toMatchObject({
+    expect(entryFor(ledger, { kind: "page", page_url: "24" })).toMatchObject({
       course_id: "42",
       source_list: "pages",
       final_state: "unread",
@@ -298,7 +298,7 @@ describe("program accessibility ledger", () => {
     });
 
     // A recorded manual check is the person's own statement, never a Morrow pass.
-    expect(entryFor(ledger, { kind: "page", page_url: "welcome" })).toMatchObject({
+    expect(entryFor(ledger, { kind: "page", page_url: "11" })).toMatchObject({
       final_state: "manually_checked",
       reason: "manual_review_recorded",
       detail: expect.stringContaining("screen reader"),

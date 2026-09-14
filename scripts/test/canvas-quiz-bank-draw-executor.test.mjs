@@ -306,3 +306,16 @@ test("a pick count that is not a positive whole number is refused before dispatc
     assert.equal(p.requests.filter((request) => request.method === "POST").length, 0);
   }, p.fetch);
 });
+
+test("an expired quiz-bank command starts no provider request", async () => {
+  const p = provider();
+  await withBuilder(async () => {
+    const result = await executeQuizBankDrawInPage(input(
+      "list_quiz_draws",
+      { course_id: "42", assignment_id: "188" },
+      { expiresAt: Date.now() - 1 },
+    ));
+    assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "quiz_bank_operation_timeout" });
+    assert.equal(p.requests.length, 0);
+  }, p.fetch);
+});

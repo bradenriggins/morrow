@@ -3461,6 +3461,120 @@ test("Moodle executor rejects expired work before it calls Moodle", async () => 
   });
 });
 
+test("Moodle starts no course-name request after a delayed state read crosses the deadline", async () => {
+  await withMoodlePage(async () => {
+    const calls = [];
+    const expiresAt = Date.now() + 25;
+    globalThis.fetch = async (input) => {
+      const url = new URL(String(input));
+      calls.push({ pathname: url.pathname, at: Date.now() });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return new Response(JSON.stringify([{ data: JSON.stringify({ course: { id: 2 }, section: [], cm: [] }) }]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    };
+    const result = await executeMoodleInPage(JSON.stringify({ mode: "check_course", courseId: "2", expiresAt }));
+    assert.equal(result.ok, false);
+    assert.deepEqual(calls.map(({ pathname }) => pathname), ["/lib/ajax/service.php"]);
+  });
+});
+
+test("Moodle refuses a form mutation when revalidation completes after the command deadline", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "morrow-moodle-deadline-"));
+  const key = join(directory, "key.pem");
+  const certificate = join(directory, "certificate.pem");
+  execFileSync("openssl", ["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "1", "-subj", "/CN=127.0.0.1", "-addext", "subjectAltName=IP:127.0.0.1", "-keyout", key, "-out", certificate], { stdio: "ignore" });
+  const state = {
+    name: "Deadline page",
+    content: "<p>Original</p>",
+    revision: 1,
+    visible: true,
+    completion: { year: 2026, month: 9, day: 14, hour: 9, minute: 30 },
+  };
+  let posts = 0;
+  let origin = "";
+  const form = () => pageForm(state, 6, 4000)
+    .replace('<input name="page[itemid]" value="4000">', "")
+    .replace("</form>", '<input type="hidden" name="sesskey" value="synthetic-session"></form>');
+  const server = createServer({ key: readFileSync(key), cert: readFileSync(certificate) }, (request, response) => {
+    const url = new URL(request.url || "/", origin || "https://127.0.0.1");
+    if (url.pathname === "/course/view.php") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end("<!doctype html><body class=\"path-course course-2\"><h1>Deadline course</h1></body>");
+      return;
+    }
+    if (url.pathname === "/course/modedit.php" && request.method === "GET") {
+      response.writeHead(200, { "content-type": "text/html" });
+      response.end(form());
+      return;
+    }
+    if (url.pathname === "/course/modedit.php" && request.method === "POST") {
+      posts += 1;
+      request.resume();
+      response.writeHead(303, { location: "/course/view.php?id=2" }).end();
+      return;
+    }
+    response.writeHead(404).end();
+  });
+  let browser;
+  let context;
+  try {
+    await new Promise((resolve, reject) => server.listen(0, "127.0.0.1", (error) => error ? reject(error) : resolve()));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Moodle deadline server did not bind a port");
+    origin = `https://127.0.0.1:${address.port}`;
+    browser = await chromium.launch({ headless: true, executablePath: chromium.executablePath() });
+    context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    await page.goto(`${origin}/course/view.php?id=2`);
+    await page.evaluate((wwwroot) => { globalThis.M = { cfg: { wwwroot, sesskey: "synthetic-session", userId: 3, courseId: 2 } }; }, origin);
+    const binding = { origin, siteUrl: `${origin}/`, principalId: "3", courseId: "2" };
+    const read = await executeInBrowser(page, {
+      mode: "execute", operation: pageReadOperation, arguments: { course_id: 2, module_id: 6 }, binding, expiresAt: Date.now() + 60_000,
+    });
+    assert.equal(read.ok, true, JSON.stringify(read));
+    await page.evaluate(() => {
+      const nativeFetch = globalThis.fetch.bind(globalThis);
+      let formReads = 0;
+      globalThis.fetch = async (input, options) => {
+        const target = new URL(String(input), location.href);
+        const response = await nativeFetch(input, options);
+        if (target.pathname !== "/course/modedit.php" || options?.method === "POST" || ++formReads !== 2) return response;
+        const bytes = await response.arrayBuffer();
+        const status = response.status;
+        const statusText = response.statusText;
+        const headers = new Headers(response.headers);
+        const url = response.url;
+        const redirected = response.redirected;
+        await new Promise((resolve) => setTimeout(resolve, 250));
+        const delayed = new Response(bytes, { status, statusText, headers });
+        Object.defineProperties(delayed, {
+          url: { value: url },
+          redirected: { value: redirected },
+        });
+        return delayed;
+      };
+      globalThis.__morrowDeadlineFormReads = () => formReads;
+    });
+    const result = await executeInBrowser(page, {
+      mode: "execute",
+      operation: pageWriteOperation,
+      arguments: { course_id: 2, module_id: 6, content: "<p>Must not save</p>", expected_digest: read.snapshot_digest },
+      binding,
+      expiresAt: Date.now() + 150,
+    });
+    assert.deepEqual(result, { ok: false, sent: false, error: "moodle_execution_expired" });
+    assert.equal(posts, 0);
+    assert.equal(await page.evaluate(() => globalThis.__morrowDeadlineFormReads()), 2);
+  } finally {
+    await context?.close();
+    await browser?.close();
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("Moodle Resource file creation verifies native bytes and refuses a mismatched draft", async () => {
   const directory = mkdtempSync(join(tmpdir(), "morrow-resource-browser-"));
   const key = join(directory, "key.pem");

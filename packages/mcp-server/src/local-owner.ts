@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import {
   closeSync,
@@ -11,7 +11,7 @@ import {
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { basename, dirname, isAbsolute, resolve } from "node:path";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import {
   StreamableHTTPClientTransport,
@@ -47,7 +47,7 @@ import {
   localOwnerMaintenanceMarkerPresent,
   localOwnerMaintenanceMatches,
   normalizeLocalOwnerBridgeMaintenanceControl,
-  processMatchesRecordedLifetime,
+  processMatchesRecordedLifetimeAsync,
   requestPathProcessMatches,
   readLocalOwnerMaintenanceLease,
   recoverExactLocalOwnerMaintenanceLease,
@@ -64,6 +64,9 @@ const OWNER_PATH = "/mcp";
 const PROXY_PID_HEADER = "x-morrow-proxy-pid";
 const PROXY_WORKSPACE_HEADER = "x-morrow-workspace";
 const OWNER_START_TIMEOUT_MS = 30_000;
+const OWNER_STARTUP_CLOSE_TIMEOUT_MS = 5_000;
+const OWNER_TERMINATE_GRACE_MS = 1_500;
+const OWNER_KILL_WAIT_MS = 1_500;
 const OWNER_START_GRACE_MS = 30_000;
 const OWNER_IDLE_MS = 1_000;
 const OWNER_PENDING_IDLE_CHECK_MS = 1_000;
@@ -176,6 +179,87 @@ function testOwnerStderrDescriptor(): number | null {
     );
   } catch {
     return null;
+  }
+}
+
+function ownerStartTimeoutMs(): number {
+  if (process.env.MORROW_INSTALLER_TEST_MODE !== "1") return OWNER_START_TIMEOUT_MS;
+  const configured = Number(process.env.MORROW_LOCAL_OWNER_TEST_START_TIMEOUT_MS);
+  return Number.isSafeInteger(configured) && configured >= 25 && configured <= OWNER_START_TIMEOUT_MS
+    ? configured
+    : OWNER_START_TIMEOUT_MS;
+}
+
+async function settlesWithin(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      promise.then(() => true, () => true),
+      new Promise<false>((resolveTimeout) => {
+        timer = setTimeout(() => resolveTimeout(false), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function waitForLaunchedOwnerExit(child: ChildProcess, timeoutMs: number): Promise<boolean> {
+  if (child.exitCode !== null || child.signalCode !== null) return true;
+  return new Promise<boolean>((resolveExit) => {
+    let settled = false;
+    const finish = (exited: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.off("exit", onExit);
+      resolveExit(exited);
+    };
+    const onExit = () => finish(true);
+    const timer = setTimeout(() => finish(child.exitCode !== null || child.signalCode !== null), timeoutMs);
+    child.once("exit", onExit);
+  });
+}
+
+async function runTaskkill(pid: number, force: boolean): Promise<void> {
+  const killer = spawn("taskkill.exe", ["/PID", String(pid), "/T", ...(force ? ["/F"] : [])], {
+    stdio: "ignore",
+    windowsHide: true,
+  });
+  const settled = await settlesWithin(new Promise<void>((resolveKill) => {
+    killer.once("error", () => resolveKill());
+    killer.once("exit", () => resolveKill());
+  }), OWNER_TERMINATE_GRACE_MS);
+  killer.removeAllListeners();
+  if (!settled && killer.exitCode === null && killer.signalCode === null) {
+    try { killer.kill("SIGKILL"); } catch {}
+    await waitForLaunchedOwnerExit(killer, OWNER_KILL_WAIT_MS);
+  }
+  killer.removeAllListeners();
+  killer.unref();
+}
+
+async function terminateLaunchedOwner(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null || !Number.isSafeInteger(child.pid)) return;
+  const pid = child.pid!;
+  child.ref();
+  try {
+    if (process.platform === "win32") await runTaskkill(pid, false);
+    else {
+      try { child.kill("SIGTERM"); } catch {}
+    }
+    if (await waitForLaunchedOwnerExit(child, OWNER_TERMINATE_GRACE_MS)) return;
+    if (process.platform === "win32") await runTaskkill(pid, true);
+    else {
+      try { child.kill("SIGKILL"); } catch {}
+    }
+    if (!await waitForLaunchedOwnerExit(child, OWNER_KILL_WAIT_MS)) {
+      throw new Error(`Morrow local owner process ${pid} did not exit after forced shutdown.`);
+    }
+  } finally {
+    child.removeAllListeners("error");
+    child.removeAllListeners("exit");
+    child.unref();
   }
 }
 
@@ -522,16 +606,28 @@ function terminalWorkAbsent(runtime: MorrowRuntime): boolean {
 
 async function runDedicatedStdio(config: GatewayConfig): Promise<void> {
   const workspace = currentWorkspaceAdmission();
+  const startupInput = new PassThrough({ highWaterMark: MAX_HTTP_BODY_BYTES });
+  process.stdin.pipe(startupInput);
   let lease: RuntimeStateLease | null = null;
   let runtime: MorrowRuntime | null = null;
+  let runtimeConnection: Promise<MorrowRuntime | null> | null = null;
   let serverHandle: StdioServerHandle | null = null;
   let closePromise: Promise<void> | null = null;
+  let closing = false;
+  const startupController = new AbortController();
   const close = (): Promise<void> => {
+    closing = true;
+    startupController.abort(new Error("Morrow dedicated runtime closed during startup."));
     closePromise ??= (async () => {
       try {
         if (serverHandle) await serverHandle.close();
         if (runtime) await runtime.close();
+        else if (runtimeConnection) {
+          await settlesWithin(runtimeConnection, OWNER_STARTUP_CLOSE_TIMEOUT_MS);
+        }
       } finally {
+        process.stdin.unpipe(startupInput);
+        startupInput.destroy();
         lease?.release();
       }
     })();
@@ -546,9 +642,21 @@ async function runDedicatedStdio(config: GatewayConfig): Promise<void> {
   process.once("SIGINT", () => void close().finally(() => process.exit(0)));
   process.once("SIGTERM", () => void close().finally(() => process.exit(0)));
   process.once("exit", () => lease?.release());
-  process.stdin.once("end", () => void close());
+  startupInput.once("finish", () => void close());
   try {
-    runtime = await MorrowRuntime.connect(config, { statePath: lease.statePath });
+    const connecting = (async (): Promise<MorrowRuntime | null> => {
+      const connected = await MorrowRuntime.connect(config, {
+        statePath: lease!.statePath,
+        signal: startupController.signal,
+      });
+      if (!closing) return connected;
+      await connected.close();
+      return null;
+    })();
+    runtimeConnection = connecting;
+    runtime = await connecting;
+    if (runtimeConnection === connecting) runtimeConnection = null;
+    if (!runtime) return;
     hardenMorrowStateFiles(lease.statePath);
     console.error(
       `[morrow] connected ${runtime.gateway.catalog.tools.length} upstream tools; `
@@ -559,15 +667,27 @@ async function runDedicatedStdio(config: GatewayConfig): Promise<void> {
       proxyPid: process.pid,
     }), {
       onerror: (error) => console.error(`[morrow] protocol error ${error.message}`),
-      transport: new StrictStdioServerTransport(),
+      transport: new StrictStdioServerTransport({ input: startupInput }),
     });
   } catch (error) {
+    const interrupted = closing && startupController.signal.aborted;
     await close();
+    if (interrupted) return;
     throw error;
   }
 }
 
 export async function runLocalOwner(config: GatewayConfig): Promise<void> {
+  if (
+    process.env.MORROW_INSTALLER_TEST_MODE === "1"
+    && process.env.MORROW_LOCAL_OWNER_TEST_STUBBORN_STARTUP === "1"
+  ) {
+    console.error(`[morrow-test] stubborn local owner pid=${process.pid}`);
+    process.on("SIGINT", () => undefined);
+    process.on("SIGTERM", () => undefined);
+    setInterval(() => undefined, 1_000);
+    await new Promise<void>(() => undefined);
+  }
   const requestedJournalPath = durableJournalPath(config);
   if (!requestedJournalPath) throw new Error("Morrow local owner requires a durable operation journal path.");
   let leaseLossHandler: (error: Error) => void | Promise<void> = (error) => {
@@ -585,11 +705,14 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
   const configDigest = ownerConfigDigest(config);
   const nonce = randomUUID();
   let runtime: MorrowRuntime | null = null;
+  let runtimeConnection: Promise<MorrowRuntime | null> | null = null;
   let httpServer: Server | null = null;
   let httpLifecycle: BoundedHttpServerLifecycle | null = null;
   let modernHandler: McpHttpHandler | null = null;
   let descriptor: OwnerDescriptor | null = null;
   let closing = false;
+  let closePromise: Promise<void> | null = null;
+  const startupController = new AbortController();
   let activeMcpRequests = 0;
   let maintenanceState: "open" | "acquiring" | "held" = "open";
   let idleTimer: NodeJS.Timeout | null = null;
@@ -627,23 +750,30 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     await session.server.close();
   };
 
-  const close = async (): Promise<void> => {
-    if (closing) return;
+  const close = (): Promise<void> => {
+    if (closePromise) return closePromise;
     closing = true;
-    clearIdle();
-    clearSessionReap();
-    try {
-      const httpClosing = httpLifecycle?.close();
-      if (modernHandler) await modernHandler.close();
-      if (httpClosing) await httpClosing;
-      await Promise.all([...sessions.values()].map((session) => closeSession(session).catch(() => undefined)));
-      sessions.clear();
-      for (const presence of [...modernProxies.values()]) removeModernProxy(presence);
-      if (runtime) await runtime.close();
-    } finally {
-      if (descriptor) removeOwnerDescriptor(journalPath, descriptor.nonce);
-      lease.release();
-    }
+    startupController.abort(new Error("Morrow local owner closed during startup."));
+    closePromise = (async () => {
+      clearIdle();
+      clearSessionReap();
+      try {
+        const httpClosing = httpLifecycle?.close();
+        if (modernHandler) await modernHandler.close();
+        if (httpClosing) await httpClosing;
+        await Promise.all([...sessions.values()].map((session) => closeSession(session).catch(() => undefined)));
+        sessions.clear();
+        for (const presence of [...modernProxies.values()]) removeModernProxy(presence);
+        if (runtime) await runtime.close();
+        else if (runtimeConnection) {
+          await settlesWithin(runtimeConnection, OWNER_STARTUP_CLOSE_TIMEOUT_MS);
+        }
+      } finally {
+        if (descriptor) removeOwnerDescriptor(journalPath, descriptor.nonce);
+        lease.release();
+      }
+    })();
+    return closePromise;
   };
   leaseLossHandler = (error) => {
     console.error(`[morrow] runtime state lease lost: ${error.message}`);
@@ -867,9 +997,11 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
       const monitorSessions = clientPresences();
       const monitorOnly = monitorSessions.every((session) => session.proxyPid === monitorProxyPid);
       const monitorPresent = monitorSessions.some((session) => session.proxyPid === monitorProxyPid);
-      const monitorAlive = monitorSessions
+      const monitorLifetimes = await Promise.all(monitorSessions
         .filter((session) => session.proxyPid === monitorProxyPid)
-        .every((session) => requestPathProcessMatches(session.proxyPid, session.observedAt) === true);
+        .map((session) => processMatchesRecordedLifetimeAsync(session.proxyPid, session.observedAt)));
+      const monitorAlive = monitorLifetimes.length > 0
+        && monitorLifetimes.every((lifetime) => lifetime === true);
       if (activeMcpRequests !== 0 || !monitorPresent || !monitorOnly || !monitorAlive || !runtime.maintenanceQuiescent()) {
         reopenAfterFailedMaintenance();
         maintenanceError(response, "local_owner_maintenance_work_active");
@@ -1061,7 +1193,19 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
   });
 
   try {
-    runtime = await MorrowRuntime.connect(config, { statePath: journalPath });
+    const connecting = (async (): Promise<MorrowRuntime | null> => {
+      const connected = await MorrowRuntime.connect(config, {
+        statePath: journalPath,
+        signal: startupController.signal,
+      });
+      if (!closing) return connected;
+      await connected.close();
+      return null;
+    })();
+    runtimeConnection = connecting;
+    runtime = await connecting;
+    if (runtimeConnection === connecting) runtimeConnection = null;
+    if (!runtime) return;
     hardenMorrowStateFiles(journalPath);
     modernHandler = createMcpHandler((context) => {
       if (!runtime || !context.requestInfo) throw new Error("Morrow local owner modern request context is unavailable.");
@@ -1118,7 +1262,9 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     );
     scheduleIdle();
   } catch (error) {
+    const interrupted = closing && startupController.signal.aborted;
     await close();
+    if (interrupted) return;
     throw error;
   }
 }
@@ -1129,41 +1275,52 @@ async function waitForOwner(journalPath: string, configDigest: string): Promise<
   if (localOwnerMaintenanceMarkerPresent(journalPath)) {
     throw new Error("Morrow local owner is held for authenticated desktop maintenance.");
   }
-  let launched = false;
-  const deadline = Date.now() + OWNER_START_TIMEOUT_MS;
-  for (;;) {
-    const descriptor = readOwnerDescriptor(journalPath);
-    const descriptorLifetime = descriptor
-      ? processMatchesRecordedLifetime(descriptor.pid, descriptor.startedAt)
-      : false;
-    if (descriptor && descriptorLifetime === true) {
-      if (descriptor.configDigest !== configDigest) {
-        throw new Error(
-          "Morrow local owner configuration does not match this client. "
-          + "Use the same Morrow upstream configuration for this operation journal.",
-        );
+  let launchedChild: ChildProcess | null = null;
+  let launchError: Error | null = null;
+  let ready = false;
+  const deadline = Date.now() + ownerStartTimeoutMs();
+  try {
+    for (;;) {
+      if (launchError) throw launchError;
+      const descriptor = readOwnerDescriptor(journalPath);
+      const descriptorLifetime = descriptor
+        ? await processMatchesRecordedLifetimeAsync(descriptor.pid, descriptor.startedAt)
+        : false;
+      if (descriptor && descriptorLifetime === true) {
+        if (descriptor.configDigest !== configDigest) {
+          throw new Error(
+            "Morrow local owner configuration does not match this client. "
+            + "Use the same Morrow upstream configuration for this operation journal.",
+          );
+        }
+        if (launchedChild?.pid !== undefined && descriptor.pid !== launchedChild.pid) {
+          await terminateLaunchedOwner(launchedChild);
+          launchedChild = null;
+        }
+        ready = true;
+        return descriptor;
       }
-      return descriptor;
-    }
-    if (descriptor && descriptorLifetime === false) removeOwnerDescriptor(journalPath, descriptor.nonce);
-    if (!launched) {
-      const stderr = testOwnerStderrDescriptor();
-      let child;
-      try {
-        child = spawn(process.execPath, [entryPath, "--morrow-local-owner"], {
-          detached: true,
-          stdio: stderr === null ? "ignore" : ["ignore", "ignore", stderr],
-          env: process.env,
-          windowsHide: true,
-        });
-      } finally {
-        if (stderr !== null) closeSync(stderr);
+      if (descriptor && descriptorLifetime === false) removeOwnerDescriptor(journalPath, descriptor.nonce);
+      if (!launchedChild) {
+        const stderr = testOwnerStderrDescriptor();
+        try {
+          launchedChild = spawn(process.execPath, [entryPath, "--morrow-local-owner"], {
+            detached: true,
+            stdio: stderr === null ? "ignore" : ["ignore", "ignore", stderr],
+            env: process.env,
+            windowsHide: true,
+          });
+          launchedChild.once("error", (error) => { launchError = error; });
+        } finally {
+          if (stderr !== null) closeSync(stderr);
+        }
+        launchedChild.unref();
       }
-      child.unref();
-      launched = true;
+      if (Date.now() >= deadline) throw new Error("Morrow local owner did not become ready.");
+      await new Promise((resolveWait) => setTimeout(resolveWait, 25));
     }
-    if (Date.now() >= deadline) throw new Error("Morrow local owner did not become ready.");
-    await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+  } finally {
+    if (!ready && launchedChild) await terminateLaunchedOwner(launchedChild);
   }
 }
 

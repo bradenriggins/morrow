@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { executeItemBankInPage } from "../../connector/extension/src/item-bank-executor.js";
+import { absoluteItemBankTabUrls, executeItemBankInPage } from "../../connector/extension/src/item-bank-executor.js";
+import { itemBankLaunchFromCourseTabs } from "../../connector/extension/src/item-bank-credential.js";
 import { itemBankMediaFindings, itemBankNewMediaReason } from "../../connector/extension/src/item-bank-guard.js";
 
 const catalog = JSON.parse(readFileSync(new URL("../../artifacts/canvas-api/canvas-api-catalog.json", import.meta.url), "utf8"));
@@ -236,6 +237,88 @@ test("Item Bank catalog exposes seven reads and eleven course-bound writes", () 
   assert.deepEqual(WRITE_SHAPES.map((shape) => shape.nickname).sort(), [
     "archive_bank", "attach_item", "create_bank", "create_item", "delete_entry", "rename_bank", "share_bank", "update_item",
   ]);
+});
+
+test("the relative native Canvas Item Banks tab resolves to the exact course launch", () => {
+  const origin = "https://chcp.instructure.com";
+  const tabs = absoluteItemBankTabUrls([{
+    id: "context_external_tool_98188",
+    type: "internal",
+    label: "Item Banks",
+    html_url: "/courses/89585/banks",
+  }], origin);
+  assert.deepEqual(itemBankLaunchFromCourseTabs(tabs, origin, "89585"), {
+    externalToolId: "98188",
+    launchUrl: "https://chcp.instructure.com/courses/89585/banks",
+    native: true,
+  });
+  const foreign = absoluteItemBankTabUrls([{ ...tabs[0], html_url: "//evil.example/courses/89585/banks" }], origin);
+  assert.equal(itemBankLaunchFromCourseTabs(foreign, origin, "89585"), null);
+});
+
+test("the native Canvas Item Banks page keeps its token private and completes a bank read", async () => {
+  await withPageContext(async () => {
+    const p = provider({ banks: [] });
+    globalThis.fetch = p.fetch;
+    const request = input("list_banks", { course_id: "42" });
+    delete request.credential;
+    const result = await executeItemBankInPage(request);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.sent, true);
+    assert.equal(p.requests.length, 1);
+    assert.equal(p.requests[0].query.course_id, CONTEXT_UUID);
+    assert.equal(p.requests[0].options.headers.Authorization, TOKEN);
+    assert.equal(JSON.stringify(result).includes(TOKEN), false);
+    assert.equal(JSON.stringify(result).includes(CONTEXT_UUID), false);
+  }, {
+    location: { hostname: "school.instructure.com", href: "https://school.instructure.com/courses/42/banks" },
+    document: { referrer: "" },
+    sessionStorage: storage({
+      current_user: JSON.stringify({ id: "7" }),
+      canvas_local_context_id: "42",
+      canvas_context_id: CONTEXT_UUID,
+      "banks.build_token": TOKEN,
+    }),
+    localStorage: storage({
+      canvas_host: "https://school.instructure.com",
+      backend_url: "https://school.quiz-lti.instructure.com",
+    }),
+    ENV: { current_user_id: "7" },
+  });
+});
+
+test("the native Item Banks page refuses mismatched course, tenant, and context state before fetch", async () => {
+  const base = {
+    location: { hostname: "school.instructure.com", href: "https://school.instructure.com/courses/42/banks" },
+    document: { referrer: "" },
+    sessionStorage: storage({
+      current_user: JSON.stringify({ id: "7" }),
+      canvas_local_context_id: "42",
+      canvas_context_id: CONTEXT_UUID,
+      "banks.build_token": TOKEN,
+    }),
+    localStorage: storage({
+      canvas_host: "https://school.instructure.com",
+      backend_url: "https://school.quiz-lti.instructure.com",
+    }),
+    ENV: { current_user_id: "7" },
+  };
+  for (const [label, overrides] of [
+    ["wrong page course", { location: { hostname: "school.instructure.com", href: "https://school.instructure.com/courses/43/banks" } }],
+    ["wrong Canvas host", { localStorage: storage({ canvas_host: "https://other.instructure.com", backend_url: "https://school.quiz-lti.instructure.com" }) }],
+    ["wrong backend tenant", { localStorage: storage({ canvas_host: "https://school.instructure.com", backend_url: "https://other.quiz-lti.instructure.com" }) }],
+    ["wrong local course", { sessionStorage: storage({ current_user: JSON.stringify({ id: "7" }), canvas_local_context_id: "43", canvas_context_id: CONTEXT_UUID, "banks.build_token": TOKEN }) }],
+  ]) {
+    await withPageContext(async () => {
+      let calls = 0;
+      globalThis.fetch = async () => { calls += 1; return new Response("[]"); };
+      const request = input("list_banks", { course_id: "42" });
+      delete request.credential;
+      const result = await executeItemBankInPage(request);
+      assert.notEqual(result.ok, true, label);
+      assert.equal(calls, 0, label);
+    }, { ...base, ...overrides });
+  }
 });
 
 test("all private bank-surface reads bind the selected course and return a snapshot digest", async () => {
@@ -896,4 +979,17 @@ test("tenant, principal, course, credential and descriptor mismatches stop befor
     assert.equal(result.error, "item_bank_credential_unavailable");
     assert.equal(calls, 0);
   }, { document: { referrer: "https://school.instructure.com/courses/42/external_tools/9" } });
+});
+
+test("an expired Item Bank command starts no provider request", async () => {
+  await withPageContext(async () => {
+    let calls = 0;
+    globalThis.fetch = async () => { calls += 1; throw new Error("expired request reached fetch"); };
+    const result = await executeItemBankInPage({
+      ...input("list_banks", { course_id: "42" }),
+      expiresAt: Date.now() - 1,
+    });
+    assert.deepEqual(result, { matched: true, ok: false, sent: false, error: "item_bank_operation_timeout" });
+    assert.equal(calls, 0);
+  });
 });

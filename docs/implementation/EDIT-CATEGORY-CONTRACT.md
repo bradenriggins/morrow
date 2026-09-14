@@ -157,11 +157,11 @@ carry an exact content guard.
 
 | Set | Count |
 |---|---|
-| Canvas categories published for one course | 572 (10 curated, 562 derived) |
-| Canvas derived, `availability: "edit"` | 224 |
-| Canvas derived, `availability: "review"` | 338 |
-| Canvas categories with `tier: "destructive"` | 140, of which 48 are Edit-available |
-| Canvas categories with `requiresFieldSelection` | 33 |
+| Canvas categories published for one course | 125 (9 curated, 116 derived) |
+| Canvas derived, `availability: "edit"` | 112 |
+| Canvas derived, `availability: "review"` | 4 |
+| Canvas categories with `tier: "destructive"` | 28, of which 24 are Edit-available |
+| Canvas categories with `requiresFieldSelection` | 29 |
 | Moodle categories with `requiresFieldSelection` | 2 (`moodle_create_choice`, `moodle_update_choice`) |
 
 Reproduce them with `node --test scripts/test/bridge-settings-contract.test.mjs`

@@ -90,6 +90,7 @@ async function completePayload(root, options = {}) {
   }
   await fs.mkdir(path.join(app, "installer"), { recursive: true });
   await fs.writeFile(path.join(app, "installer", "runtime-monitor.mjs"), options.runtimeMonitor || "export function createRuntimeMonitor() { return {}; }\n");
+  await fs.writeFile(path.join(app, "installer", "process-lifetime.cjs"), "module.exports = {};\n");
   // Writing an assistant's configuration restricts the file to this account on
   // win32 before checking its digest, through the real client-config module.
   await fs.writeFile(path.join(app, "packages", "client-config", "dist", "index.js"), "export function restrictToCurrentAccount() {}\n");
@@ -119,6 +120,7 @@ async function completePayload(root, options = {}) {
     "packages/client-config/dist/index.js",
     "packages/canvas-connector-mcp/dist/index.js",
     "installer/runtime-monitor.mjs",
+    "installer/process-lifetime.cjs",
   ]) {
     const content = await fs.readFile(path.join(app, relative));
     directFiles.push({ path: relative, bytes: content.byteLength, sha256: sha256(content) });
@@ -165,6 +167,33 @@ test("the installer record round-trips and an incompatible record is refused", a
 
   await fs.writeFile(path.join(root, "UserData", "State", "installer.json"), `${JSON.stringify({ schema: "morrow.desktop-state.v0", version: 1 })}\n`);
   await assert.rejects(() => installer.record(), /migration_required/);
+});
+
+test("an immediate Desktop record readback survives ctime precision refinement", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  await installer.writeRecord(freshRecord());
+  const originalOpen = fs.open;
+  let statCalls = 0;
+  fs.open = async (...argumentsValue) => {
+    const handle = await originalOpen(...argumentsValue);
+    if (argumentsValue[0] !== installer.recordPath) return handle;
+    const originalStat = handle.stat.bind(handle);
+    handle.stat = async (...statArguments) => {
+      const info = await originalStat(...statArguments);
+      statCalls += 1;
+      return Object.assign(Object.create(Object.getPrototypeOf(info)), info, {
+        ctimeMs: info.ctimeMs + statCalls * 0.5,
+      });
+    };
+    return handle;
+  };
+  try {
+    assert.deepEqual(await installer.record(), freshRecord());
+  } finally {
+    fs.open = originalOpen;
+  }
+  assert.ok(statCalls >= 2, "the regression exercised admission and final descriptor stats");
 });
 
 test("the installer refuses malformed UTF-8 before it can change a saved path", async () => {
@@ -539,7 +568,15 @@ test("Blackboard health does not turn saved data into absence when private acces
 
 test("state() reports repair for an incomplete payload and never creates the Bridge folder", async () => {
   const root = await temporaryRoot();
-  const installer = controller(root);
+  const installer = controller(root, { updateSnapshot: () => ({
+    schema: "morrow.desktop-update.v1",
+    revision: 7,
+    status: "unavailable",
+    currentVersion: "1.0.0",
+    availableVersion: null,
+    automatic: false,
+    reason: "updates_disabled"
+  }) });
   const state = await installer.state();
   assert.equal(state.lifecycle, "repair_required");
   assert.equal(state.runtime.status, "repair_required");
@@ -547,6 +584,7 @@ test("state() reports repair for an incomplete payload and never creates the Bri
   assert.equal(state.bridge.manualChromeReloadRequired, false);
   assert.equal(state.blackboard.status, "not_configured");
   assert.equal(state.updates.status, "unavailable");
+  assert.equal(state.updates.revision, 7);
   await assert.rejects(() => fs.stat(path.join(root, "UserData", "Bridge")), { code: "ENOENT" });
 });
 
@@ -836,6 +874,40 @@ test("a state read answers with the runtime already observed and never waits for
   await installer.closeRuntimeMonitor();
 });
 
+test("concurrent runtime reads create and own exactly one monitor", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const runtimeMonitor = [
+    "globalThis.__morrowMonitorLifecycle = { created: 0, closed: 0 };",
+    "export function createRuntimeMonitor() {",
+    "  globalThis.__morrowMonitorLifecycle.created += 1;",
+    "  return { close: async () => { globalThis.__morrowMonitorLifecycle.closed += 1; } };",
+    "}",
+    "",
+  ].join("\n");
+  const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor });
+  const installer = controller(root, { trustedMcpRuntimeManifestSha256: () => manifestSha256 });
+  await installer.ensureRuntime();
+  await fs.writeFile(path.join(root, "UserData", "State", "morrow.upstreams.json"), "{}\n");
+  const materials = await installer.effectiveWorkspace();
+  const canonicalStateDirectory = installer.canonicalStateDirectory.bind(installer);
+  installer.canonicalStateDirectory = async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+    return canonicalStateDirectory();
+  };
+
+  const [first, second] = await Promise.all([
+    installer.runtimeMonitorFor(materials),
+    installer.runtimeMonitorFor(materials),
+  ]);
+
+  assert.strictEqual(first, second);
+  assert.deepEqual(globalThis.__morrowMonitorLifecycle, { created: 1, closed: 0 });
+  await installer.closeRuntimeMonitor();
+  assert.deepEqual(globalThis.__morrowMonitorLifecycle, { created: 1, closed: 1 });
+  delete globalThis.__morrowMonitorLifecycle;
+});
+
 test("concurrent desktop cleanup waits for one runtime close and clears its lease references", async () => {
   const root = await temporaryRoot();
   const installer = controller(root);
@@ -896,6 +968,27 @@ test("assistant detection is read once for each assistant until Check status or 
   clock += 2_000;
   await installer.state();
   assert.deepEqual(detections, [...first, ...first, ...first]);
+});
+
+test("Check status waits for the fresh runtime observation", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root, { detectAssistant: async () => false });
+  const waits = [];
+  installer.runtimeSnapshot = async (_materials, options) => {
+    waits.push(options);
+    return {
+      health: { attempted: true, gatewayReady: true, bridgeConnected: true, canRestart: "yes" },
+      bindings: { runtimeVerifiedCourseCount: 1, selectedCourseName: "BT2", firstPreviewCourseName: "BT2" },
+      firstPreview: { available: "yes", completed: true },
+    };
+  };
+  installer.bridgeInstallation = bridgeInstallation();
+  installer.readBridgeInstallation = async () => installer.bridgeInstallation;
+
+  await installer.state();
+  await installer.state({ recheckAssistants: true });
+
+  assert.deepEqual(waits, [{ wait: false }, { wait: true }]);
 });
 
 test("setting up an assistant reads this computer again instead of reusing an answer", async () => {

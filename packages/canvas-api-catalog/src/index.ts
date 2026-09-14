@@ -9,9 +9,9 @@ import {
 } from "node:fs";
 import { resolve } from "node:path";
 import { isJsonObject, sha256Json, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
-import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
+import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
 
-export { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
+export { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
 export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasReadbackAssessment, CanvasWriteAdmission } from "./operation-admission.js";
 export { evaluateBrowserReadback, matchesReadbackAssertions, planBrowserReadback, planCanvasRecoveryDescriptor, readbackFieldValue } from "./readback-plan.js";
 export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
@@ -155,10 +155,14 @@ function sameCatalogFile(left: BigIntStats, right: BigIntStats): boolean {
 }
 
 function sameCatalogSnapshot(left: BigIntStats, right: BigIntStats): boolean {
+  // ctime can gain precision after a fresh write without any file mutation.
   return sameCatalogFile(left, right)
     && left.size === right.size
     && left.mtimeNs === right.mtimeNs
-    && left.ctimeNs === right.ctimeNs;
+    && left.mode === right.mode
+    && left.nlink === right.nlink
+    && left.uid === right.uid
+    && left.gid === right.gid;
 }
 
 /** Reads one stable regular public catalog through a bounded, non-following descriptor. */
@@ -256,9 +260,38 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
   const destructive = operation.risk === "destructive";
   const admission = canvasOperationAdmission(operation);
   const readback = canvasReadbackAssessment(catalog.operations, operation, admission);
-  const profile = admission.write.state === "held"
-    ? { state: "profile_limited" as const, reason: canvasAdmissionReason(admission.write) }
-    : { state: "supported" as const };
+  const unscopedReadReason = operation.readOnly && !canvasCourseTargetIsScoped(admission.courseTarget)
+    ? "This Canvas read cannot be bound to the selected course."
+    : undefined;
+  const credentialReadReason = operation.toolName === "canvas_get_items_media_upload_url"
+    ? "This Canvas read returns a one-time media upload credential. Morrow keeps upload credentials inside its reviewed file transfer."
+    : undefined;
+  const incompatibleAuthenticationReason = operation.path.startsWith("/lti/")
+    ? "This Canvas LTI service requires separate LTI authorization that the signed-in browser session does not hold."
+    : undefined;
+  const redirectReadReason = operation.readOnly && operation.responseType === "void"
+    && /redirect/iu.test(`${operation.summary} ${operation.description}`)
+    ? "This Canvas route returns a navigation redirect instead of course data, which the Bridge does not follow across origins."
+    : undefined;
+  const readAdmissionReason = unscopedReadReason || credentialReadReason;
+  const profile = readAdmissionReason
+    ? { state: "profile_limited" as const, reason: readAdmissionReason }
+    : admission.write.state === "held"
+      ? { state: "profile_limited" as const, reason: canvasAdmissionReason(admission.write) }
+      : incompatibleAuthenticationReason
+        ? { state: "profile_limited" as const, reason: incompatibleAuthenticationReason }
+      : redirectReadReason
+        ? { state: "profile_limited" as const, reason: redirectReadReason }
+      : !operation.readOnly && readback.state !== "structurally_exact"
+        ? {
+            state: "profile_limited" as const,
+            reason: readback.state === "blocked"
+              ? `Morrow cannot send this Canvas change because its exact post-write read is unsafe: ${readback.reason}.`
+              : readback.state === "unavailable"
+                ? "Morrow cannot send this Canvas change because Canvas has no safe read that proves the exact saved result."
+                : "Morrow cannot send this Canvas change because its readback has no exact target or requested postcondition.",
+          }
+      : { state: "supported" as const };
   return {
     family: operation.family,
     provider: "canvas",
@@ -299,14 +332,20 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
       "public-canvas": profile,
       sandbox: { state: "profile_limited", reason: "The live connector is replaced by the synthetic Canvas estate." },
       "read-only": operation.readOnly
-        ? { state: "supported" }
+        ? profile
         : { state: "profile_limited", reason: "The read-only profile does not admit provider writes." },
     },
     evidence: {
       transport: { state: "known" },
       credentialBoundary: { state: "known" },
-      admission: admission.write.state === "held"
+      admission: readAdmissionReason
+        ? { state: "blocked", reason: readAdmissionReason }
+        : admission.write.state === "held"
         ? { state: "blocked", reason: canvasAdmissionReason(admission.write) }
+        : incompatibleAuthenticationReason
+          ? { state: "blocked", reason: incompatibleAuthenticationReason }
+        : redirectReadReason
+          ? { state: "blocked", reason: redirectReadReason }
         : { state: "known" },
       readback: readback.state === "structurally_exact"
         ? { state: "known", reason: "A structural readback plan can compare a target or requested postcondition; live provider readback remains required." }

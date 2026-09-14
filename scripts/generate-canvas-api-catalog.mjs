@@ -70,17 +70,29 @@ function pathSlug(path) {
 function schemaType(parameter) {
   const type = String(parameter.type || "").toLowerCase();
   const format = String(parameter.format || "").toLowerCase();
+  const name = String(parameter.name || "");
   if (parameter.name === "url_or_id") return { type: "string", minLength: 1, maxLength: 1000 };
-  if (format === "int64" || /(?:^|_)id$/.test(parameter.name) || /\[(?:\w+_)?id\]$/.test(parameter.name)) {
-    return { type: "string", pattern: "^[1-9][0-9]*$" };
-  }
-  if (["integer", "positive integer"].includes(type)) return { type: "integer" };
-  if (["number", "numeric"].includes(type)) return { type: "number" };
-  if (type === "boolean") return { type: "boolean" };
   if (["array", "string[]"].includes(type) || type.startsWith("multiple ") || /^\[.+\]$/.test(type)) {
     const itemType = String(parameter.items?.type || "string").toLowerCase();
-    return { type: "array", items: itemType === "integer" ? { type: "integer" } : { type: "string" } };
+    const ids = /(?:^|_)ids?$/.test(name) || /\[(?:\w+_)?ids?\]$/.test(name)
+      || ["members", "order"].includes(name)
+      || /\b(?:account|course|group|quiz|section|student|teacher|user) IDs?\b/i.test(String(parameter.description || ""));
+    return {
+      type: "array",
+      items: ids ? { type: "string", pattern: "^[1-9][0-9]*$" }
+        : itemType === "integer" ? { type: "integer" }
+        : itemType === "number" ? { type: "number" }
+        : itemType === "boolean" ? { type: "boolean" }
+        : { type: "string" },
+    };
   }
+  if (/(?:^|_)id$/.test(name) || /\[(?:\w+_)?id\]$/.test(name)
+    || (format === "int64" && /\b(?:the |an? )?ID of\b/i.test(String(parameter.description || "")))) {
+    return { type: "string", pattern: "^[1-9][0-9]*$" };
+  }
+  if (["integer", "positive integer"].includes(type) || format === "int64") return { type: "integer" };
+  if (["number", "numeric"].includes(type)) return { type: "number" };
+  if (type === "boolean") return { type: "boolean" };
   if (["hash", "object", "json", "serializedhash", "lticonfigurationoverlay", "blueprintrestriction"].includes(type)) {
     return { type: "object", additionalProperties: true };
   }
@@ -100,6 +112,145 @@ function schemaType(parameter) {
   return { type: "string" };
 }
 
+function schemaWithDescription(parameter, schema) {
+  return {
+    ...schema,
+    ...(parameter.schema.description ? { description: parameter.schema.description } : {}),
+  };
+}
+
+function officialParameterContract(method, path, nickname, parameter) {
+  const operationKey = `${method} ${path}#${nickname}`;
+  const wireName = parameter.wireName;
+  const replace = (schema) => ({ ...parameter, schema: schemaWithDescription(parameter, schema) });
+
+  if (wireName === "assignment[grade_group_students_individually]"
+    && ["create_assignment", "edit_assignment"].includes(nickname)) {
+    return replace({ type: "boolean" });
+  }
+  if (wireName === "include_context_name[Boolean]" && nickname.startsWith("list_lti_launch_definitions_")) {
+    return replace({ type: "boolean" });
+  }
+  if (wireName === "assignment[allowed_attempts]"
+    && ["create_assignment", "edit_assignment"].includes(nickname)) {
+    const attempts = { anyOf: [{ const: -1 }, { type: "integer", minimum: 1 }] };
+    return replace(nickname === "edit_assignment" ? { anyOf: [{ type: "null" }, ...attempts.anyOf] } : attempts);
+  }
+  if (wireName === "quiz[allowed_attempts]" && nickname === "create_quiz") {
+    return replace({ anyOf: [{ const: -1 }, { type: "integer", minimum: 1 }] });
+  }
+  if (nickname === "create_quiz" && ["quiz[access_code]", "quiz[ip_filter]"].includes(wireName)) {
+    return replace({ type: ["string", "null"] });
+  }
+  if (nickname === "create_quiz" && wireName === "quiz[hide_results]") {
+    return replace({ type: ["string", "null"], enum: ["always", "until_after_last_attempt", null] });
+  }
+  if (nickname === "create_quiz" && wireName === "quiz[time_limit]") {
+    return replace({ anyOf: [{ type: "null" }, { type: "integer", minimum: 1 }] });
+  }
+  if (wireName === "module_item[indent]" && ["create_module_item", "update_module_item"].includes(nickname)) {
+    return replace({ type: "integer", minimum: 0 });
+  }
+  if (wireName === "grading_scheme_entry[value]" && /grading_standard/u.test(nickname)) {
+    return replace({ type: "array", items: { type: "integer", minimum: 0, maximum: 100 } });
+  }
+  if (wireName === "ratings[points]") {
+    return replace({ type: "array", items: { type: "integer", minimum: 0 } });
+  }
+  if (wireName === "ratings[mastery]" && nickname.startsWith("create_update_proficiency_ratings_")) {
+    return replace({ type: "array", items: { type: "boolean" } });
+  }
+  if (wireName === "ratings[color]" && nickname.startsWith("create_update_proficiency_ratings_")) {
+    return replace({ type: "array", items: { type: "string", pattern: "^[0-9A-Fa-f]{6}$" } });
+  }
+  if (wireName === "timetables[course_section_id]" && nickname === "set_course_timetable") {
+    return replace({
+      type: "array",
+      items: { anyOf: [{ const: "all" }, { type: "string", pattern: "^[1-9][0-9]*$" }] },
+    });
+  }
+  if (wireName === "user_ids" && operationKey === "PUT /v1/accounts/{account_id}/users/bulk_update#update_multiple_users") {
+    return replace({ type: "array", items: { type: "string", pattern: "^[1-9][0-9]*$" } });
+  }
+  if (wireName === "user_ids" && nickname === "get_outcome_results") {
+    return replace({
+      type: "array",
+      items: {
+        anyOf: [
+          { type: "string", pattern: "^[1-9][0-9]*$" },
+          { type: "string", pattern: "^sis_user_id:.+$", maxLength: 512 },
+        ],
+      },
+    });
+  }
+  if (wireName === "course[course_format]" && nickname === "create_new_course") {
+    return replace({ type: "string", enum: ["on_campus", "online", "blended"] });
+  }
+  if (wireName === "course[course_format]" && nickname === "update_course") {
+    return replace({ type: "string", enum: ["on_campus", "online"] });
+  }
+  if (wireName === "course[grade_passback_setting]" && nickname === "create_new_course") {
+    return replace({ type: "string", enum: ["nightly_sync", "disabled", ""] });
+  }
+  if (wireName === "course[grade_passback_setting]" && nickname === "update_course") {
+    return replace({ type: "string", enum: ["nightly_sync", ""] });
+  }
+  if (wireName === "course[license]" && ["create_new_course", "update_course"].includes(nickname)) {
+    return replace({
+      type: "string",
+      enum: ["private", "cc_by_nc_nd", "cc_by_nc_sa", "cc_by_nc", "cc_by_nd", "cc_by_sa", "cc_by", "public_domain"],
+    });
+  }
+  if (wireName === "workflow_state" && ["create_ai_experience", "update_ai_experience"].includes(nickname)) {
+    return replace({ type: "string", enum: ["published", "unpublished"] });
+  }
+  if (wireName === "workflow_state" && nickname === "list_ai_experiences") {
+    return replace({ type: "string", enum: ["published", "unpublished", "deleted"] });
+  }
+  if (wireName === "type" && nickname === "list_enrollments_courses") {
+    return replace({
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["StudentEnrollment", "TeacherEnrollment", "TaEnrollment", "DesignerEnrollment", "ObserverEnrollment"],
+      },
+    });
+  }
+  if (wireName === "appointment_group[participants_per_appointment]"
+    && ["create_appointment_group", "update_appointment_group"].includes(nickname)) {
+    return replace({ anyOf: [{ type: "null" }, { type: "integer" }] });
+  }
+  if (["assignment_override[due_at]", "assignment_override[lock_at]", "assignment_override[unlock_at]"].includes(wireName)
+    && ["create_assignment_override", "update_assignment_override"].includes(nickname)) {
+    return replace({ type: ["string", "null"] });
+  }
+  if (wireName === "selected_days_to_skip" && ["create_course_pace", "update_course_pace"].includes(nickname)) {
+    return replace({ type: "array", items: { type: "string" } });
+  }
+  if (wireName === "include" && nickname.startsWith("retrieve_assignments_enabled_for_grade_export_to_sis_")) {
+    return replace({ type: "array", items: { type: "string", enum: ["student_overrides"] } });
+  }
+  if (wireName === "only_visible[Boolean]" && nickname.startsWith("list_lti_launch_definitions_")) {
+    return replace({ type: "boolean" });
+  }
+  if (wireName === "account[settings][suppress_notifications]" && nickname === "update_account") {
+    return replace({
+      anyOf: [
+        { type: "boolean" },
+        { type: "array", items: { type: "string", minLength: 1 } },
+      ],
+    });
+  }
+  if (["grading_period_set[display_totals_for_all_grading_periods]", "grading_period_set[weighted]"].includes(wireName)
+    && nickname === "update_grading_period_set") {
+    return replace({ type: "boolean" });
+  }
+  if (wireName === "blackout_dates:" && nickname === "update_list_of_blackout_dates") {
+    return replace({ type: "array", items: { type: "object", additionalProperties: true } });
+  }
+  return parameter;
+}
+
 function parameterRecords(parameters) {
   const used = new Set();
   return (parameters || []).map((parameter) => {
@@ -107,6 +258,17 @@ function parameterRecords(parameters) {
     let inputName = base;
     if (used.has(inputName)) inputName = `${base}_${sha256(`${parameter.paramType}\0${parameter.name}`).slice(0, 8)}`;
     used.add(inputName);
+    const schema = schemaType(parameter);
+    const declared = Array.isArray(parameter.enum)
+      ? parameter.enum.filter((value) => value === null || ["string", "number", "boolean"].includes(typeof value))
+      : [];
+    const nullable = declared.includes(null) && typeof schema.type === "string"
+      ? { ...schema, type: [schema.type, "null"] }
+      : schema;
+    const enumerated = declared.length === 0 ? nullable
+      : nullable.type === "array" && nullable.items && typeof nullable.items === "object"
+        ? { ...nullable, items: { ...nullable.items, enum: declared } }
+        : { ...nullable, enum: declared };
     return {
       inputName,
       wireName: String(parameter.name),
@@ -114,7 +276,7 @@ function parameterRecords(parameters) {
       required: parameter.required === true,
       deprecated: parameter.deprecated === true,
       schema: {
-        ...schemaType(parameter),
+        ...enumerated,
         ...(cleanText(parameter.description) && cleanText(parameter.description) !== "no description"
           ? { description: cleanText(parameter.description) }
           : {}),
@@ -449,11 +611,12 @@ function normalizeOfficialOperation(resource, api, rawOperation) {
   const bulkAssignmentDates = method === "PUT"
     && path === "/v1/courses/{course_id}/assignments/bulk_update"
     && nickname === "bulk_update_assignment_dates";
-  const parameters = parameterRecords(rawOperation.parameters).map((parameter) => (
-    createModuleItem && parameter.wireName === "module_item[content_id]"
+  const parameters = parameterRecords(rawOperation.parameters).map((parameter) => {
+    const normalized = createModuleItem && parameter.wireName === "module_item[content_id]"
       ? { ...parameter, required: false }
-      : path.startsWith("/quiz/v1/") ? newQuizSettingsParameter(parameter) : parameter
-  ));
+      : path.startsWith("/quiz/v1/") ? newQuizSettingsParameter(parameter) : parameter;
+    return officialParameterContract(method, path, nickname, normalized);
+  });
   const inputParameters = [
     ...parameters,
     ...(bulkAssignmentDates ? [bulkAssignmentDatesParameter()] : []),
@@ -481,17 +644,7 @@ function normalizeOfficialOperation(resource, api, rawOperation) {
 }
 
 function itemBankOperation({ name, method, path, summary, parameters, destructive = false, note = "" }) {
-  // Declared values stay here rather than in schemaType: the official Canvas
-  // specification carries its own enum lists, and honouring those in the shared
-  // mapper would change every official operation schema.
-  const allowedValues = new Map((parameters || [])
-    .filter((parameter) => Array.isArray(parameter.enum) && parameter.enum.length > 0)
-    .map((parameter) => [String(parameter.name), parameter.enum]));
-  const normalized = parameterRecords(parameters).map((parameter) => (
-    allowedValues.has(parameter.wireName)
-      ? { ...parameter, schema: { ...parameter.schema, enum: [...allowedValues.get(parameter.wireName)] } }
-      : parameter
-  ));
+  const normalized = parameterRecords(parameters);
   return {
     // Several verified Item Bank actions share one private route. The nickname
     // keeps every operation addressable in admission and recovery tables.
@@ -657,6 +810,42 @@ function applyClassicQuizAnswerParameters(operations) {
   }
 }
 
+function applyDocumentedReadInputContracts(operations) {
+  const requireFields = (toolName, fields) => {
+    const operation = operations.find((candidate) => candidate.toolName === toolName);
+    if (!operation) throw new Error(`Canvas read operation ${toolName} is required.`);
+    operation.inputSchema = {
+      ...operation.inputSchema,
+      required: [...new Set([...(operation.inputSchema.required || []), ...fields])].sort(ascii),
+    };
+  };
+  const requireOne = (toolName, fields) => {
+    const operation = operations.find((candidate) => candidate.toolName === toolName);
+    if (!operation) throw new Error(`Canvas read operation ${toolName} is required.`);
+    operation.inputSchema = {
+      ...operation.inputSchema,
+      anyOf: fields.map((field) => ({ required: [field] })),
+    };
+  };
+
+  requireFields("canvas_get_module_item_sequence", ["asset_id", "asset_type"]);
+  requireOne("canvas_get_outcome_alignments_for_student_or_assignment", ["assignment_id", "student_id"]);
+  requireOne("canvas_get_sessionless_launch_url_for_external_tool_courses", ["resource_link_lookup_uuid", "id", "url", "launch_type"]);
+  requireFields("canvas_show_provisional_grade_status_for_student_assignments_assignment_id_anonymous_provisional_grades_get", ["anonymous_id"]);
+  requireFields("canvas_show_provisional_grade_status_for_student_assignments_assignment_id_provisional_grades_status_get", ["student_id"]);
+
+  const batch = operations.find((candidate) => candidate.toolName === "canvas_batch_retrieve_overrides_in_course");
+  if (!batch) throw new Error("Canvas batch assignment override read is required.");
+  batch.inputSchema = {
+    ...batch.inputSchema,
+    properties: {
+      ...batch.inputSchema.properties,
+      assignment_overrides_assignment_id: { ...batch.inputSchema.properties.assignment_overrides_assignment_id, minItems: 1 },
+      assignment_overrides_id: { ...batch.inputSchema.properties.assignment_overrides_id, minItems: 1 },
+    },
+  };
+}
+
 async function buildCatalog() {
   const indexResult = await fetchJson(INDEX_URL);
   const resources = [...indexResult.value.apis].sort((left, right) => ascii(left.path, right.path));
@@ -677,6 +866,7 @@ async function buildCatalog() {
   applyCustomGradebookColumnUpdateParameters(official);
   applyClassicQuizUpdateParameters(official);
   applyClassicQuizAnswerParameters(official);
+  applyDocumentedReadInputContracts(official);
   const itemBank = itemBankOperations();
   const courseFileContent = [courseFileTextOperation()];
   const browser = [...itemBank, ...courseFileContent];

@@ -4,6 +4,7 @@ import test from "node:test";
 
 import {
   MAX_CANVAS_FILE_TRANSFER_BYTES,
+  canonicalCanvasCourseFolderIds,
   executeCanvasCourseFileTransferInPage,
 } from "../../connector/extension/src/canvas-file-transfer.js";
 
@@ -45,8 +46,21 @@ function input(overrides = {}) {
     binding: { origin: CANVAS, courseId: "42", principalId: "7" },
     folderId: "81",
     attachment: attachment(),
+    expiresAt: Date.now() + 60_000,
     ...overrides,
   };
+}
+
+function liveResponse({ status, url, headers = {} }) {
+  let cancelled = 0;
+  const response = {
+    status,
+    ok: status >= 200 && status < 300,
+    url,
+    headers: new Headers(headers),
+    body: { cancel() { cancelled += 1; return new Promise(() => {}); } },
+  };
+  return { response, cancellations: () => cancelled };
 }
 
 function fixtureResponses(overrides = {}) {
@@ -147,6 +161,64 @@ test("uploads only an existing private attachment and verifies saved Canvas byte
   assert.equal(requests[11].options.redirect, "follow");
 });
 
+test("an expired command starts no Canvas file-transfer request", async () => {
+  const { result, requests } = await run(input({ expiresAt: Date.now() - 1 }), []);
+  assert.equal(result.ok, false);
+  assert.equal(result.sent, false);
+  assert.equal(result.error, "canvas_file_transfer_timeout");
+  assert.deepEqual(requests, []);
+});
+
+test("expiry during profile preflight prevents the next Canvas request", async () => {
+  const priorFetch = globalThis.fetch;
+  const priorLocation = globalThis.location;
+  const requests = [];
+  globalThis.location = { origin: CANVAS };
+  globalThis.fetch = async (url) => {
+    requests.push(String(url));
+    await new Promise((resolve) => setTimeout(resolve, 15));
+    return response({ url: CANVAS + "/api/v1/users/self/profile", json: { id: "7" } });
+  };
+  try {
+    const result = await executeCanvasCourseFileTransferInPage(input({ expiresAt: Date.now() + 5 }));
+    assert.equal(result.ok, false);
+    assert.equal(result.sent, false);
+    assert.equal(result.error, "canvas_file_transfer_timeout");
+    assert.deepEqual(requests, [CANVAS + "/api/v1/users/self/profile"]);
+  } finally {
+    globalThis.fetch = priorFetch;
+    globalThis.location = priorLocation;
+  }
+});
+
+test("non-OK Canvas, upload, and download bodies are canceled without awaiting cancellation", async () => {
+  for (const scenario of ["canvas", "upload", "download"]) {
+    const responses = fixtureResponses();
+    const index = scenario === "canvas" ? 0 : scenario === "upload" ? 5 : 11;
+    const url = scenario === "canvas"
+      ? CANVAS + "/api/v1/users/self/profile"
+      : scenario === "upload" ? STORAGE + "/upload/signed" : STORAGE + "/download/material";
+    const live = liveResponse({ status: 503, url });
+    responses[index] = live.response;
+    const completed = await Promise.race([
+      run(input(), responses),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${scenario} cancellation was awaited`)), 250)),
+    ]);
+    assert.equal(completed.result.ok, false, scenario);
+    assert.equal(completed.result.sent, scenario !== "canvas", scenario);
+    assert.equal(live.cancellations(), 1, scenario);
+  }
+});
+
+test("a redirect response body is canceled before its confirmation read", async () => {
+  const responses = fixtureResponses();
+  const live = liveResponse({ status: 302, url: STORAGE + "/upload/signed", headers: { location: "/api/v1/files/501" } });
+  responses[5] = live.response;
+  const { result } = await run(input(), responses);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(live.cancellations(), 1);
+});
+
 test("preserves canonical course and folder IDs above Number.MAX_SAFE_INTEGER", async () => {
   const courseId = "9007199254740993";
   const folderId = "9007199254740995";
@@ -176,6 +248,7 @@ test("preserves canonical course and folder IDs above Number.MAX_SAFE_INTEGER", 
   assert.equal(result.data.folder_id, folderId);
   assert.equal(typeof result.data.course_id, "string");
   assert.equal(typeof result.data.folder_id, "string");
+  assert.deepEqual(canonicalCanvasCourseFolderIds(courseId, folderId), { course_id: courseId, folder_id: folderId });
 });
 
 test("refuses an existing exact Canvas filename before it initializes an upload", async () => {

@@ -389,6 +389,8 @@ const hotSpotWorkerRegion = (() => {
     "const COURSE_FILE_READ_TIMEOUT_MS = 30_000;",
     "async function courseFileStorageAccessEnabled() { return true; }",
     "function executeCanvasNewQuizHotSpotInPage() {}",
+    workerFunction("function boundedCommandDeadline(expiresAt, maximumMs) {"),
+    workerFunction("function commandDeadlineCurrent(deadline) {"),
     workerFunction("async function sha256Bytes(bytes) {"),
     workerFunction("function decimalId(value) {"),
     stableJson.toString(),
@@ -538,6 +540,13 @@ test("the worker preserves a complete verified Hot Spot result after one confirm
   assert.equal(result.data.payload_sha256, digest(TEMPLATE));
   assert.deepEqual(scriptModes, ["initialize", "complete"]);
   assert.equal(putRequests.length, 1);
+});
+
+test("an expired Hot Spot command starts no page or upload request", async () => {
+  const { result, scriptModes, putRequests } = await runHotSpotWorker({ expiresAt: Date.now() - 1 });
+  assert.deepEqual(result, { ok: false, sent: false, error: "canvas_hot_spot_transfer_timeout" });
+  assert.deepEqual(scriptModes, []);
+  assert.deepEqual(putRequests, []);
 });
 
 /** The refusal every unconfirmed watch owes, whatever the worker's own fetch read. */

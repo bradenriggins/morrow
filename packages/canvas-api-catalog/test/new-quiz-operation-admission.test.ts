@@ -34,21 +34,28 @@ describe("New Quiz write admission", () => {
     ]);
   });
 
-  it("admits response-bound accommodations and Progress-bound report creation", () => {
-    const names = [
+  it("holds learner-specific accommodations and admits Progress-bound report creation", () => {
+    const accommodations = [
       "canvas_set_course_level_accommodations",
       "canvas_set_quiz_level_accommodations",
-      "canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post",
     ];
-    for (const name of names) {
+    for (const name of accommodations) {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name);
       expect(operation, name).toBeTruthy();
       const admission = canvasOperationAdmission(operation!);
       expect(admission.courseTarget, name).toEqual({ kind: "course_path", argument: "course_id" });
-      expect(admission.write, name).toEqual({ state: "admitted" });
+      expect(admission.write, name).toEqual({ state: "held", reason: "learner_scope_requires_separate_authority" });
       expect(canvasReadbackAssessment(catalog.operations, operation!, admission), name)
-        .toEqual({ state: "structurally_exact" });
+        .toEqual({ state: "not_applicable", reason: "write_held" });
     }
+
+    const report = catalog.operations.find((candidate) => candidate.toolName
+      === "canvas_create_quiz_report_course_id_quizzes_assignment_id_reports_post")!;
+    const reportAdmission = canvasOperationAdmission(report);
+    expect(reportAdmission.courseTarget).toEqual({ kind: "course_path", argument: "course_id" });
+    expect(reportAdmission.write).toEqual({ state: "admitted" });
+    expect(canvasReadbackAssessment(catalog.operations, report, reportAdmission))
+      .toEqual({ state: "structurally_exact" });
   });
 
   it("admits New Quiz create and delete behind the lifecycle guard", () => {

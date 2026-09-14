@@ -53,12 +53,20 @@ export function itemBankLaunchFromCourseTabs(tabs, canvasOrigin, courseId) {
     || !Array.isArray(tabs) || tabs.length > 1_000) return null;
   const matches = [];
   for (const tab of tabs) {
-    if (!tab || typeof tab !== "object" || Array.isArray(tab) || tab.type !== "external"
+    if (!tab || typeof tab !== "object" || Array.isArray(tab)
       || String(tab.label || "").trim().toLowerCase() !== "item banks") continue;
     const externalToolId = String(tab.id || "").match(/^context_external_tool_([1-9][0-9]{0,18})$/)?.[1] || "";
-    const launchUrl = itemBankLaunchUrl(`${origin.origin}/courses/${course}`, origin.origin, course, externalToolId);
-    if (!launchUrl || tab.html_url !== launchUrl) continue;
-    matches.push({ externalToolId, launchUrl });
+    if (!externalToolId) continue;
+    if (tab.type === "external") {
+      const launchUrl = itemBankLaunchUrl(`${origin.origin}/courses/${course}`, origin.origin, course, externalToolId);
+      if (!launchUrl || tab.html_url !== launchUrl) continue;
+      matches.push({ externalToolId, launchUrl });
+      continue;
+    }
+    const launchUrl = `${origin.origin}/courses/${course}/banks`;
+    if (tab.type === "internal" && tab.html_url === launchUrl) {
+      matches.push({ externalToolId, launchUrl, native: true });
+    }
   }
   return matches.length === 1 ? Object.freeze(matches[0]) : null;
 }

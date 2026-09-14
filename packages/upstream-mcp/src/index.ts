@@ -65,6 +65,7 @@ export interface StdioUpstreamOptions {
 export interface UpstreamCallOptions {
   readonly safeToRetry?: boolean;
   readonly signal?: AbortSignal;
+  readonly timeoutMs?: number;
 }
 
 export type StdioUpstreamHealth = GatewaySourceHealth;
@@ -128,6 +129,12 @@ function exactSupervision(value: UpstreamSupervisionOptions | undefined): ExactS
 
 function closedError(id: string): Error {
   return new Error(`Upstream ${id} is closed`);
+}
+
+function abortedError(id: string, signal: AbortSignal): Error {
+  return signal.reason instanceof Error
+    ? signal.reason
+    : new Error(`Upstream ${id} connection cancelled`);
 }
 
 function wait(milliseconds: number, unref: boolean, signal: AbortSignal): Promise<void> {
@@ -397,10 +404,11 @@ export class StdioMcpUpstream {
     throw lastError;
   }
 
-  private startConnection(reconnect: boolean): Promise<readonly UpstreamTool[]> {
+  private startConnection(reconnect: boolean, signal?: AbortSignal): Promise<readonly UpstreamTool[]> {
     if (this.closed) return Promise.reject(closedError(this.id));
     if (this.client) return Promise.resolve(this.tools);
     if (this.connectionPromise) return this.connectionPromise;
+    if (signal?.aborted) return Promise.reject(abortedError(this.id, signal));
     const maximum = reconnect
       ? this.supervision.reconnectAttempts
       : this.supervision.startupAttempts;
@@ -410,12 +418,34 @@ export class StdioMcpUpstream {
       provisional: null,
     };
     this.connectionRun = run;
-    const pending = this.runConnectionAttempts(maximum, reconnect, run);
+    let rejectAborted: ((error: Error) => void) | null = null;
+    const onAbort = () => {
+      const error = abortedError(this.id, signal!);
+      run.controller.abort(error);
+      rejectAborted?.(error);
+    };
+    const attempt = this.runConnectionAttempts(maximum, reconnect, run);
+    const pending = signal
+      ? Promise.race([
+          attempt,
+          new Promise<never>((_resolve, reject) => {
+            rejectAborted = reject;
+            signal.addEventListener("abort", onAbort, { once: true });
+          }),
+        ])
+      : attempt;
+    if (signal?.aborted) onAbort();
     this.connectionPromise = pending;
-    void pending.catch(() => undefined).finally(() => {
-      if (this.connectionPromise === pending) this.connectionPromise = null;
+    const finishAttempt = () => {
+      signal?.removeEventListener("abort", onAbort);
+      rejectAborted = null;
       if (this.connectionRun === run) this.connectionRun = null;
-    });
+    };
+    void attempt.then(finishAttempt, finishAttempt);
+    const finishPending = () => {
+      if (this.connectionPromise === pending) this.connectionPromise = null;
+    };
+    void pending.then(finishPending, finishPending);
     return pending;
   }
 
@@ -440,9 +470,9 @@ export class StdioMcpUpstream {
     }
   }
 
-  async connect(): Promise<readonly UpstreamTool[]> {
+  async connect(options: { readonly signal?: AbortSignal } = {}): Promise<readonly UpstreamTool[]> {
     if (this.client) return this.tools;
-    return this.startConnection(false);
+    return this.startConnection(false, options.signal);
   }
 
   async callTool(
@@ -460,12 +490,19 @@ export class StdioMcpUpstream {
     }
     if (!client) throw new Error(`Upstream ${this.id} is not connected`);
 
+    const requestOptions = {
+      ...(options.signal ? { signal: options.signal } : {}),
+      ...(options.timeoutMs === undefined ? {} : {
+        timeout: options.timeoutMs,
+        maxTotalTimeout: options.timeoutMs,
+      }),
+    };
     try {
       return await client.callTool({
         name: normalizeToolName(name),
         arguments: { ...args },
         ...(this.options.internalSourceCapability ? { _meta: { "io.morrow/internal-source-capability": this.options.internalSourceCapability } } : {}),
-      }, options.signal ? { signal: options.signal } : {});
+      }, requestOptions);
     } catch (error) {
       if (this.client === client || options.signal?.aborted) throw error;
       await this.invalidateClient(client);
@@ -477,7 +514,7 @@ export class StdioMcpUpstream {
         name: normalizeToolName(name),
         arguments: { ...args },
         ...(this.options.internalSourceCapability ? { _meta: { "io.morrow/internal-source-capability": this.options.internalSourceCapability } } : {}),
-      }, options.signal ? { signal: options.signal } : {});
+      }, requestOptions);
     }
   }
 

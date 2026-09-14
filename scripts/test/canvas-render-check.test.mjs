@@ -334,7 +334,7 @@ test("the render-check page is declared as the one sandboxed page, with a policy
   assert.deepEqual(manifest.sandbox.pages, ["render-check/render-check.html"]);
   assert.equal(
     manifest.content_security_policy.sandbox,
-    "sandbox allow-scripts; default-src 'none'; script-src 'self'; base-uri 'none'; form-action 'none'",
+    "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
   );
   // The offscreen document only holds that frame. It is not itself sandboxed,
   // because a sandboxed page has no chrome.runtime to answer on.

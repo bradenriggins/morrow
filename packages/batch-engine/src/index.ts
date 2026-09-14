@@ -71,7 +71,7 @@ export type BatchChildState = typeof BATCH_CHILD_STATES[number];
 export const MAX_BATCH_CHILDREN = 10_000;
 export const MAX_BATCH_ARGUMENT_BYTES = 64 * 1024;
 export const MAX_BATCH_MANIFEST_BYTES = 8 * 1024 * 1024;
-export const MAX_BATCH_RESULT_BYTES = 1_000_000;
+export const MAX_BATCH_RESULT_BYTES = 2_000_000;
 export const MAX_READ_BATCH_CONCURRENCY = 8;
 export const MAX_WRITE_BATCH_CONCURRENCY = 4;
 

@@ -110,6 +110,7 @@ function loadBuildConfig(t) {
   const definitions = [
     ["connector/extension/manifest.json", ["app/connector/extension/manifest.json"], '{"name":"Morrow Bridge"}\n'],
     ["installer/runtime-monitor.mjs", ["app/installer/runtime-monitor.mjs"], "export const monitor = true;\n"],
+    ["installer/process-lifetime.cjs", ["app/installer/process-lifetime.cjs"], "module.exports = {};\n"],
     ["packages/canvas-connector-mcp/dist/index.js", ["app/packages/canvas-connector-mcp/dist/index.js"], "export const connector = true;\n"],
     ["packages/client-config/dist/cli.js", ["app/packages/client-config/dist/cli.js"], "export const cli = true;\n"],
     ["packages/mcp-server/dist/index.js", ["app/node_modules/@morrow-lms/gateway/dist/index.js", "app/packages/mcp-server/dist/index.js"], "export const gateway = true;\n"],
@@ -139,6 +140,7 @@ function loadBuildConfig(t) {
     }],
     directFiles: [
       "installer/runtime-monitor.mjs",
+      "installer/process-lifetime.cjs",
       "packages/canvas-connector-mcp/dist/index.js",
       "packages/client-config/dist/cli.js",
       "packages/mcp-server/dist/index.js",

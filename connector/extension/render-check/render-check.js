@@ -3,9 +3,10 @@
  *
  * This module runs inside connector/extension/render-check/render-check.html,
  * a sandboxed extension page whose content security policy is
- * `default-src 'none'`. The saved HTML arrives by postMessage; the page parses
- * it into a detached document, which loads no image, media, script, style or
- * font, and never reaches the network.
+ * `default-src 'none'`. Inline style parsing is permitted so the saved HTML can
+ * be inspected without Content Security Policy errors. The page parses it into
+ * a detached document, which loads no image, media, script, stylesheet or font,
+ * and never reaches the network.
  *
  * What it produces is a saved-source render signal, live-unverified. A detached
  * document is not the learner's Canvas page: it has no course theme CSS, no

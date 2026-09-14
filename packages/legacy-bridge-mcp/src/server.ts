@@ -87,7 +87,9 @@ export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime, option
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ task_id, source_binding_id }) => toolResult(await runtime.taskGet(task_id, source_binding_id)),
+    async ({ task_id, source_binding_id }, ctx) => toolResult(
+      await runtime.taskGet(task_id, source_binding_id, ctx.mcpReq.signal),
+    ),
   );
 
   for (const tool of runtime.catalog.tools) {
@@ -100,9 +102,9 @@ export function createLegacyBridgeMcpServer(runtime: LegacyBridgeRuntime, option
         ...(tool.annotations ? { annotations: tool.annotations } : {}),
         _meta: toolMeta(runtime, tool.name),
       },
-      async (argumentsValue) => {
+      async (argumentsValue, ctx) => {
         const args = isJsonObject(argumentsValue) ? argumentsValue : {};
-        return toolResult(await runtime.call(tool.name, args));
+        return toolResult(await runtime.call(tool.name, args, ctx.mcpReq.signal));
       },
     );
   }

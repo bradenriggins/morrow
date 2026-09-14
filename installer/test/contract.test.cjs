@@ -247,7 +247,18 @@ test("Check Bridge returns safe installer errors even when the runtime or state 
       stateFailure = unreadable;
       const result = await check();
       assert.equal(result.ok, false);
-      assert.deepEqual(result.state, state);
+      assert.deepEqual(result.state, unreadable ? {
+        ...state,
+        updates: {
+          schema: "morrow.desktop-update.v1",
+          revision: 1,
+          status: "unavailable",
+          currentVersion: "1.0.0-rc.0",
+          availableVersion: null,
+          automatic: false,
+          reason: "updates_disabled"
+        }
+      } : state);
       assert.deepEqual(result.error, errorDetails("bridge_check_failed"));
       assert.doesNotMatch(JSON.stringify(result), /private/);
     }
@@ -417,6 +428,7 @@ test("automatic update I/O starts only after the window and every IPC handler ar
   const blockedStart = new Promise((resolve) => { releaseStart = resolve; });
   const snapshot = {
     schema: "morrow.desktop-update.v1",
+    revision: 1,
     status: "checking",
     currentVersion: "1.0.0",
     availableVersion: null,
@@ -458,6 +470,7 @@ test("main and preload deliver background update snapshots through one removable
   const unsubscribe = preload.exposed.value.subscribeUpdates((snapshot) => received.push(snapshot));
   const snapshot = {
     schema: "morrow.desktop-update.v1",
+    revision: 2,
     status: "ready",
     currentVersion: "1.0.0",
     availableVersion: "1.0.1",

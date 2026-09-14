@@ -18,20 +18,21 @@ quotes it.
 | --- | --- | --- |
 | Admitted, course path | `/courses/{course_id}` or `/courses/{id}` anywhere in the route | Nothing: the write is available, and normal approval, Edit scope, binding, and readback rules apply. |
 | Admitted, proved section | `PUT` and `DELETE /v1/sections/{id}` | Nothing: the connector reads the section and proves the selected course owns it immediately before it sends the change. |
-| Admitted, proved group | The create, update, and delete routes for a group's own discussion topics and pages under `/v1/groups/{group_id}` | Nothing: the connector reads the group, requires Canvas to name a course as its owner, and requires the selected course's own complete list of groups to name that group, immediately before it sends the change. |
+| Admitted, proved group | The create and update routes for a group's own discussion topics, and the create, update, and delete routes for pages under `/v1/groups/{group_id}` | Nothing: the connector reads the group, requires Canvas to name a course as its owner, and requires the selected course's own complete list of groups to name that group, immediately before it sends the change. Deleting a discussion topic stays learner-held because it also deletes learner posts. |
 | Admitted, proved course file or folder | `PUT` and `DELETE /v1/files/{id}`, and `POST /v1/folders/{folder_id}/folders` | Nothing: the connector reads the file or folder, requires Canvas to name a course as its owner, requires the selected course's own complete list of files or folders to name it, freezes the saved version, and only then sends the change. A move is proved for the one destination folder it names. |
 | Admitted, proved course calendar | `POST /v1/calendar_events`, `PUT` and `DELETE /v1/calendar_events/{id}`, and `PUT /v1/appointment_groups/{id}` | Nothing for a new event: the request names the selected course's own calendar, and the event is read back from its own route afterwards. For an existing event or an appointment group, the connector reads the object first and requires Canvas to name that same calendar. A repeat rule, a duplicate count, a series choice and section-level times are refused before anything is sent, because each reaches events the readback cannot check. An appointment group that serves more than one course is refused outright with `multi_context_object_not_supported`: "This Canvas appointment group serves more than one course. Morrow changes one course at a time, so it changed nothing. Change it in Canvas, or use one that belongs to this course alone." |
 | `account_authority_required` | Any route that names an account, the whole Canvas instance, an LTI registration, or a developer key | "This change affects a whole Canvas account, not one course. Morrow does not yet have an account permission, so it will not send it." |
-| `learner_scope_requires_separate_authority` | A route that names one person's own record: submitted work and the originality reports attached to it, a quiz attempt, a what-if grade, an enrollment, an assignment override, who is in a group, a booked appointment slot, or the deletion of a sign-up sheet, which cancels every slot booked in it | "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas." |
-| `multi_step_upload_requires_reviewed_transfer` | A `POST` to a course-scoped upload route that ends in `/files`: the course files pre-flight, the assignment submission pre-flight, the quiz submission pre-flight, and the submission comment pre-flight | "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload." |
+| `learner_scope_requires_separate_authority` | A route that changes learner work or participation: submissions, grades, attempts, accommodations, enrollments, overrides, group membership, course pacing, learner conversations, messages, discussion posts and state, outcome rollups, or a deletion that removes learner records or access | "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas." |
+| `multi_course_authority_required` | A course-path route whose request or effect can name another course or account: Blueprint pushes, course copies and migrations, external outcome imports and links, outcome-group deletion, course reset, or a broad course update that can move or conclude the course | "This change can read from or change another Canvas course or account. Morrow only has permission for the course you selected, so it will not send it." |
+| `multi_step_upload_requires_reviewed_transfer` | A `POST` that needs file bytes unavailable to the generic operation: the four course-scoped upload pre-flights and the Rubric CSV import | "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload." |
 | `cross_course_object_requires_resolution` | A route that names a group, group set, file, folder, outcome, a new appointment group, or a section move, for which no course-ownership reading is declared yet | "Canvas can attach this group, file, folder, calendar item or outcome to any course, and Morrow cannot yet prove that this one belongs to the course you selected. Change it in Canvas, or ask for the same change from inside the course." |
 | `provider_contract_incomplete` | A route that asks Canvas for a sign-in token, a session, or a one-time action, and leaves no field behind to read | "This asks Canvas for a sign-in token, a session or a one-time action, and Canvas keeps nothing afterwards that Morrow can read back to show you what happened. Morrow does not send a change it cannot check, so make this one in Canvas." |
 | `self_scope_not_supported` | `/v1/users/self/bookmarks` and `/v1/users/self/course_nicknames` | "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course." |
 | `course_scope_required` | Everything else: a route with no course in it that names no object a course can own: a personal preference, an Inbox conversation, a poll, a planner item, an ePortfolio, a media object, a person's own account record, or an LTI tool deployment | "Morrow only changes things that live inside the one course you selected, and this change is not attached to any course. Make it in Canvas yourself, or ask for the same change on a page, assignment, file or other item inside the course." |
 
 `canvasOperationAdmission` reads these classes in order, from the most specific fact about the route
-to the least: account authority, then a course-scoped upload pre-flight,
-then a personal bookmark or nickname, then one person's own record, then an object Canvas can attach
+to the least: account authority, then a route that needs a reviewed file transfer,
+then one person's own record, then a multi-course effect, then a direct course path, then a personal bookmark or nickname, then an object Canvas can attach
 to any course, then a request with no readable effect, and last the plain absence of a course. The
 order matters where two facts are true of one route: a group membership route names both a person's
 record and a group, and the person's record is what the change actually touches. The upload class is
@@ -156,10 +157,14 @@ contract for future work and is live-unverified.
 - **`learner_scope_requires_separate_authority`.** Its own permission, granted separately from the
   course Edit permission, plus the affected-subject and privacy rules a learner record needs. A course
   binding does not carry it. Nothing in this class is planned for admission on the course permission.
+- **`multi_course_authority_required`.** Exact authority for every source, destination, associated
+  course, or account the request can reach. The plan must freeze the complete affected set before
+  approval, and each target needs its own post-write reading. A selected-course binding cannot grant
+  authority for a second course or for an account-wide outcome.
 - **`provider_contract_incomplete`.** A route stays held while Canvas leaves nothing behind to read.
   It can only be admitted if Canvas exposes a reading that names the effect, and Morrow can bind that
   reading to the change it sent.
-- **`multi_step_upload_requires_reviewed_transfer`.** A Canvas upload is three requests: the
+- **`multi_step_upload_requires_reviewed_transfer`.** A normal Canvas file upload is three requests: the
   catalogued route asks Canvas where to send the bytes, a second request stores them at the address
   Canvas named, and a third confirms the saved file. Morrow runs all three only in its reviewed
   course-file transfer (`packages/mcp-server/src/canvas-file-transfer.ts`,
@@ -169,6 +174,9 @@ contract for future work and is live-unverified.
   becomes admissible only with those remaining steps, their reviewed dispatch, and a readback of the
   saved file; the two submission routes and the submission-comment route would also need the learner
   authority above, because the file lands on a student's own record.
+  The Rubric CSV route stays in this class because its generated operation exposes only the course
+  identifier and cannot carry the required private file. It needs its own reviewed CSV transfer and
+  an exact readback of the imported rubric before it can be admitted.
 - **`course_scope_required`.** A route with no course and no course-owned object has nothing for a
   course binding to prove. These become admissible only through a different authority class, not
   through the course permission.
@@ -189,10 +197,9 @@ part of these three routes and are untested here.
 
 ## Status
 
-Nothing in the account authority class is admitted, and the hold-reason taxonomy admits nothing
-either: it names the hold each write already carried. The upload pre-flight class is the one change
-to the admitted set: four writes that a course path used to admit are now held, and nothing moved
-the other way. The MCP
+Nothing in the account authority class is admitted. Course-path admission is subordinate to the
+learner, multi-course, and upload checks, so a course identifier alone does not grant those broader
+effects. The MCP
 runtime refuses a held write with the sentence for its class, and so do the published tool capability
 and the extension Edit permission list. The service worker and the page executor refuse the same writes with
 their own short message.

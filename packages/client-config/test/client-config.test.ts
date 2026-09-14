@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -1445,6 +1445,78 @@ describe("project installation and hermetic parity", () => {
         publicToolCount: 3,
       },
     });
+  }, 20_000);
+
+  it.skipIf(process.platform === "win32")("bounds stalled PATH checks, checks the other clients, and reclaims the process tree", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-doctor-path-"));
+    const parentPidPath = join(directory, "parent.pid");
+    const descendantPidPath = join(directory, "descendant.pid");
+    const checkedPath = join(directory, "checked.txt");
+    const stalled = `#!/usr/bin/env node
+const fs = require("node:fs");
+const { spawn } = require("node:child_process");
+const descendant = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); setInterval(() => {}, 1000)"], { stdio: "ignore" });
+fs.writeFileSync(process.env.MORROW_DOCTOR_PARENT_PID, String(process.pid));
+fs.writeFileSync(process.env.MORROW_DOCTOR_DESCENDANT_PID, String(descendant.pid));
+process.on("SIGTERM", () => {});
+setInterval(() => {}, 1000);
+`;
+    const available = `#!/usr/bin/env node
+require("node:fs").appendFileSync(process.env.MORROW_DOCTOR_CHECKED, require("node:path").basename(process.argv[1]) + "\\n");
+`;
+    const alive = (pid: number): boolean => {
+      try { process.kill(pid, 0); return true; } catch { return false; }
+    };
+    const waitUntilDead = async (pid: number): Promise<boolean> => {
+      const deadline = Date.now() + 2_000;
+      while (Date.now() < deadline) {
+        if (!alive(pid)) return true;
+        await new Promise((resolveWait) => setTimeout(resolveWait, 25));
+      }
+      return !alive(pid);
+    };
+
+    let parentPid = 0;
+    let descendantPid = 0;
+    try {
+      await writeFile(join(directory, "codex"), stalled, { mode: 0o700 });
+      await writeFile(join(directory, "claude"), available, { mode: 0o700 });
+      await writeFile(join(directory, "gemini"), available, { mode: 0o700 });
+      const cliPath = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
+      const startedAt = Date.now();
+      const result = spawnSync(process.execPath, [
+        cliPath, "doctor", "--json", "--repository", directory,
+        "--upstreams", join(directory, "missing-upstreams.json"),
+        "--server-entry", join(directory, "missing-server.js"),
+      ], {
+        encoding: "utf8",
+        timeout: 10_000,
+        env: {
+          ...process.env,
+          PATH: `${directory}${delimiter}${process.env.PATH || ""}`,
+          MORROW_DOCTOR_PARENT_PID: parentPidPath,
+          MORROW_DOCTOR_DESCENDANT_PID: descendantPidPath,
+          MORROW_DOCTOR_CHECKED: checkedPath,
+        },
+      });
+      const elapsedMs = Date.now() - startedAt;
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(0);
+      expect(elapsedMs).toBeLessThan(8_000);
+      expect(JSON.parse(result.stdout).clients).toEqual({ codex: false, claude: true, gemini: true });
+      expect((await readFile(checkedPath, "utf8")).trim().split("\n").sort()).toEqual(["claude", "gemini"]);
+      parentPid = Number(await readFile(parentPidPath, "utf8"));
+      descendantPid = Number(await readFile(descendantPidPath, "utf8"));
+      expect(await waitUntilDead(parentPid)).toBe(true);
+      expect(await waitUntilDead(descendantPid)).toBe(true);
+    } finally {
+      for (const pid of [parentPid, descendantPid]) {
+        if (Number.isSafeInteger(pid) && pid > 0 && alive(pid)) {
+          try { process.kill(pid, "SIGKILL"); } catch {}
+        }
+      }
+      await rm(directory, { recursive: true, force: true });
+    }
   }, 20_000);
 });
 

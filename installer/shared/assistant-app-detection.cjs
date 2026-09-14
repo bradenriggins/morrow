@@ -1,8 +1,15 @@
 const fs = require("node:fs/promises");
 const os = require("node:os");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
+const { createBoundedCommandReader } = require("./process-lifetime.cjs");
 
 const CODEX_BUNDLE_IDENTIFIER = "com.openai.codex";
+const WINDOWS_COMMAND_SHIM_ENV = "MORROW_ASSISTANT_COMMAND_SHIM";
+const WINDOWS_COMMAND_SHIM_TIMEOUT_MS = 2_000;
+const WINDOWS_COMMAND_SHIM_MAX_BYTES = 4 * 1024;
+const WINDOWS_COMMAND_SHIM_KILL_GRACE_MS = 500;
+const WINDOWS_COMMAND_SHIM_FINAL_GRACE_MS = 500;
 
 function assistantApplicationNames(assistantId) {
   switch (assistantId) {
@@ -38,6 +45,47 @@ function commandDirectories({ platform, home, pathValue }) {
   return [...new Set([...fixed.filter((entry) => pathApi.isAbsolute(entry)), ...fromPath])];
 }
 
+/**
+ * `cmd.exe` receives one fixed command string. The absolute shim path stays in
+ * an environment value, so spaces and command metacharacters never become
+ * command syntax. Delayed expansion is disabled so exclamation marks stay in
+ * the path.
+ */
+function windowsCommandShimInvocation(candidate, {
+  environment = process.env,
+  comSpec = process.env.ComSpec || path.win32.join(process.env.SystemRoot || "C:\\Windows", "System32", "cmd.exe"),
+} = {}) {
+  if (typeof candidate !== "string" || !path.win32.isAbsolute(candidate) || candidate.includes("\0")
+    || typeof comSpec !== "string" || !path.win32.isAbsolute(comSpec)) {
+    throw new TypeError("Windows assistant command shim paths must be absolute.");
+  }
+  return Object.freeze({
+    executable: comSpec,
+    argumentsValue: Object.freeze(["/d", "/s", "/v:off", "/c", `""%${WINDOWS_COMMAND_SHIM_ENV}%" --version"`]),
+    environment: Object.freeze({ ...environment, [WINDOWS_COMMAND_SHIM_ENV]: candidate }),
+  });
+}
+
+async function probeWindowsCommandShim(candidate, options = {}) {
+  const invocation = windowsCommandShimInvocation(candidate, options);
+  const spawnProcess = options.spawnProcess || spawn;
+  const readCommand = createBoundedCommandReader({
+    platform: "win32",
+    spawnProcess: (executable, argumentsValue, spawnOptions) => spawnProcess(executable, argumentsValue, {
+      ...spawnOptions,
+      env: invocation.environment,
+    }),
+    ...(typeof options.terminateTree === "function" ? { terminateTree: options.terminateTree } : {}),
+  });
+  const output = await readCommand(invocation.executable, invocation.argumentsValue, {
+    timeoutMs: options.timeoutMs ?? WINDOWS_COMMAND_SHIM_TIMEOUT_MS,
+    maxBytes: options.maxBytes ?? WINDOWS_COMMAND_SHIM_MAX_BYTES,
+    killGraceMs: options.killGraceMs ?? WINDOWS_COMMAND_SHIM_KILL_GRACE_MS,
+    finalGraceMs: options.finalGraceMs ?? WINDOWS_COMMAND_SHIM_FINAL_GRACE_MS,
+  });
+  return output !== null;
+}
+
 async function detectAssistantCommand({
   command,
   platform = process.platform,
@@ -47,8 +95,10 @@ async function detectAssistantCommand({
   stat = fs.stat,
   access = fs.access,
   probe,
+  probeWindowsShim = probeWindowsCommandShim,
 }) {
-  if (typeof command !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(command) || typeof probe !== "function") {
+  if (typeof command !== "string" || !/^[A-Za-z0-9_-]{1,64}$/u.test(command)
+    || typeof probe !== "function" || typeof probeWindowsShim !== "function") {
     throw new TypeError("Assistant command detection requires a command and version probe.");
   }
   const pathApi = platform === "win32" ? path.win32 : path.posix;
@@ -61,7 +111,10 @@ async function detectAssistantCommand({
         const info = await stat(resolved);
         if (!info.isFile()) continue;
         if (platform !== "win32") await access(resolved, fs.constants.X_OK);
-        if (await probe(resolved) === true) return true;
+        const available = platform === "win32" && name.toLowerCase().endsWith(".cmd")
+          ? await probeWindowsShim(resolved)
+          : await probe(resolved);
+        if (available === true) return true;
       } catch {}
     }
   }
@@ -74,4 +127,7 @@ module.exports = {
   commandDirectories,
   detectAssistantApplication,
   detectAssistantCommand,
+  probeWindowsCommandShim,
+  WINDOWS_COMMAND_SHIM_ENV,
+  windowsCommandShimInvocation,
 };

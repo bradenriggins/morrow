@@ -226,7 +226,6 @@ test("every popup state cites the line its own detail is written on", () => {
 // The version answer and the recorded read the guide's five checks read, as
 // connector/extension/src/service-worker.js answers them.
 const healthy = { paired: true, connected: true, runtimeHealthy: true };
-const firstCourseRead = { provider: "canvas", origin: "https://canvas.example", courseId: "42", courseName: "Biology 101", at: 1 };
 
 const GUIDE_STATES = new Map([
   ["read-failed", null],
@@ -239,7 +238,7 @@ const GUIDE_STATES = new Map([
   ["site-saved-not-verified", { ...connection, ...healthy, siteAnchors: [anchor({ runtimeVerified: false })] }],
   ["site-ready-no-course", { ...connection, ...healthy, siteAnchors: [anchor()] }],
   ["course-ready", { ...connection, ...healthy, siteAnchors: [anchor()], bindings: [binding()] }],
-  ["ready", { ...connection, ...healthy, siteAnchors: [anchor()], bindings: [binding()], firstCourseRead }],
+  ["ready", { ...connection, ...healthy, siteAnchors: [anchor()], bindings: [binding({ firstReadCompleted: true })] }],
 ]);
 const GUIDE_SECTION = "5. Morrow Bridge setup guide";
 const GUIDE_SOURCE_NEEDLES = new Map([

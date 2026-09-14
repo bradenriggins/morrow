@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
-import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
 import { categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditPermission } from "../../connector/extension/src/edit-policy.js";
 import { PROBLEM_CODES, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
 import { courseValue, detailText, primaryLabel, statusValue } from "../../connector/extension/popup/popup-view.js";
@@ -317,9 +317,8 @@ function canvasOption(options, toolName) {
 // scripts/test/canvas-new-quiz-item-guard.test.mjs holds the general New
 // Quiz question update, which is destructive-free (its id-preserving guard
 // lives in new-quiz-item-guard.js, independent of what is grantable) and so
-// is an ordinary standing Edit grant like every other non-destructive
-// admitted write, including creating a New Quiz and the other eight Item
-// Bank writes.
+// is an ordinary standing Edit grant when its exact readback is available,
+// like creating a New Quiz and the other eight Item Bank writes.
 const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
   ["canvas_delete_new_quiz", /Canvas does not restore it/],
   ["canvas_item_bank_archive_bank", /approved change by change rather than switched on in advance/],
@@ -327,20 +326,26 @@ const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
   ["canvas_item_bank_delete_quiz_bank_entry", /approved change by change rather than switched on in advance/],
 ]);
 
-function admittedEditableCanvasWrites() {
+function supportedEditableCanvasWrites() {
   return canvasOperations.filter((operation) => operation.readOnly === false
+    && canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget)
     && canvasOperationAdmission(operation).write.state === "admitted"
+    && canvasReadbackAssessment(canvasOperations, operation).state === "structurally_exact"
     && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
 }
 
-test("Canvas Edit categories are exactly the admitted Canvas writes", () => {
+test("Canvas Edit categories are exactly the scoped admitted writes with exact readback", () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
   const editable = options.filter((option) => option.availability === "edit" && option.id.startsWith("action:canvas:")).map((option) => option.id).sort();
-  const admitted = admittedEditableCanvasWrites()
+  const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.ok(admitted.length > 0);
-  assert.deepEqual(editable, admitted);
+  assert.equal(supported.length, 112);
+  assert.deepEqual(editable, supported);
+  assert.deepEqual(
+    options.filter((option) => option.availability === "review").map((option) => option.id).sort(),
+    [...REVIEW_ONLY_ADMITTED_CANVAS_WRITES.keys()].map((toolName) => `action:canvas:${toolName}`).sort(),
+  );
   for (const [toolName, reviewReason] of REVIEW_ONLY_ADMITTED_CANVAS_WRITES) {
     const option = canvasOption(options, toolName);
     assert.equal(option.availability, "review", toolName);
@@ -348,16 +353,14 @@ test("Canvas Edit categories are exactly the admitted Canvas writes", () => {
     assert.equal(option.rules, undefined, toolName);
   }
   for (const operation of canvasOperations.filter((entry) => entry.readOnly === false && canvasOperationAdmission(entry).write.state === "held")) {
-    const option = canvasOption(options, operation.toolName);
-    assert.equal(option.availability, "review", operation.toolName);
-    assert.equal(option.reviewReason, canvasAdmissionReason(canvasOperationAdmission(operation).write), operation.toolName);
-    assert.equal(option.rules, undefined, operation.toolName);
+    assert.equal(canvasOption(options, operation.toolName), undefined, operation.toolName);
   }
 });
 
 test("Canvas actions that remove content carry their own tier and group", () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
-  const destructive = canvasOperations.filter((operation) => operation.readOnly === false && operation.risk === "destructive");
+  const destructive = canvasOperations.filter((operation) => operation.readOnly === false && operation.risk === "destructive"
+    && canvasOption(options, operation.toolName));
   assert.ok(destructive.length > 0);
   for (const operation of destructive) {
     const option = canvasOption(options, operation.toolName);
@@ -390,33 +393,35 @@ function checkableCanvasWrite(operation) {
   return canvasReadbackAssessment(canvasOperations, operation).state === "structurally_exact";
 }
 
-test("every offered Canvas Edit action says whether Morrow can check the saved result", () => {
+test("nonexact Canvas writes are absent and every offered Canvas Edit action is checked", async () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
-  const admittedWrites = admittedEditableCanvasWrites();
-  const uncheckable = admittedWrites.filter((operation) => !checkableCanvasWrite(operation));
-  assert.ok(admittedWrites.length > 0);
-  assert.ok(uncheckable.length > 0 && uncheckable.length < admittedWrites.length, "the Canvas catalog no longer separates checked from unchecked Edit actions");
-  for (const operation of admittedWrites) {
+  const supportedWrites = supportedEditableCanvasWrites();
+  const nonexact = canvasOperations.filter((operation) => operation.readOnly === false
+    && canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget)
+    && canvasOperationAdmission(operation).write.state === "admitted"
+    && !checkableCanvasWrite(operation)
+    && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
+  assert.equal(nonexact.length, 28);
+  for (const operation of supportedWrites) {
     const option = canvasOption(options, operation.toolName);
-    const checkable = checkableCanvasWrite(operation);
     assert.equal(option.availability, "edit", operation.toolName);
-    assert.equal(option.verification, checkable ? "checked" : "unchecked", operation.toolName);
-    assert.equal(typeof option.verificationReason === "string" && option.verificationReason.length > 0, !checkable, operation.toolName);
+    assert.equal(option.verification, "checked", operation.toolName);
+    assert.equal(option.verificationReason, undefined, operation.toolName);
   }
-  for (const toolName of ["canvas_delete_entry_courses", "canvas_delete_single_rubric_assessment", "canvas_bulk_select_provisional_grades",
-    "canvas_clear_unread_status_for_all_submissions_courses", "canvas_add_course_to_favorites"]) {
-    const option = canvasOption(options, toolName);
-    assert.equal(option.verification, "unchecked", toolName);
-    assert.match(option.verificationReason, /^Morrow cannot check this change after it is saved: .+\. Morrow reports the saved result as unconfirmed\.$/, toolName);
+  for (const operation of nonexact) {
+    assert.equal(canvasOption(options, operation.toolName), undefined, operation.toolName);
   }
-  assert.equal(canvasOption(options, "canvas_delete_assignment").verification, "checked");
-  assert.equal(canvasOption(options, "canvas_delete_assignment").verificationReason, undefined);
-  assert.equal(options.some((option) => option.availability === "review" && option.verification !== undefined), false);
+  assert.equal(options.some((option) => option.availability === "edit" && option.verification !== "checked"), false);
+  await assert.rejects(createEditPermission({
+    binding: canvasBinding, catalogDigest: "b".repeat(64), revision: 1,
+    enabledCategories: ["action:canvas:canvas_add_course_to_favorites"], operations: canvasOperations,
+  }), /edit_policy_category_unavailable/);
 });
 
 test("every Canvas DELETE route is marked as removing content", () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
-  const deletes = canvasOperations.filter((operation) => operation.readOnly === false && operation.method === "DELETE");
+  const deletes = canvasOperations.filter((operation) => operation.readOnly === false && operation.method === "DELETE"
+    && canvasOption(options, operation.toolName));
   assert.ok(deletes.length > 0);
   for (const operation of deletes) {
     const option = canvasOption(options, operation.toolName);
@@ -501,15 +506,29 @@ test("a broad Canvas action cannot be enabled as a blanket field grant", async (
   assert.ok(widest <= 8, `derived Canvas rules granted ${widest} fields`);
 });
 
+function widgetOperations(write) {
+  return [write, {
+    provider: "canvas",
+    key: "GET /v1/courses/{course_id}/widgets/{id}#show_widget",
+    toolName: "canvas_show_widget",
+    method: "GET",
+    path: "/v1/courses/{course_id}/widgets/{id}",
+    readOnly: true,
+    parameters: [{ inputName: "course_id" }, { inputName: "id" }],
+    inputSchema: { properties: { course_id: { type: "string" }, id: { type: "string" } } },
+  }];
+}
+
 test("the derived field grant stops at eight fields", () => {
   const properties = (count) => Object.fromEntries([["course_id", { type: "string" }], ["id", { type: "string" }],
     ...Array.from({ length: count }, (unused, index) => [`field_${index}`, { type: "string" }])]);
   const operation = (count) => ({
     provider: "canvas", key: "PUT /v1/courses/{course_id}/widgets/{id}#update_widget", toolName: "canvas_update_widget",
-    path: "/v1/courses/{course_id}/widgets/{id}", readOnly: false, summary: "Update a widget", description: "Update one widget.",
+    method: "PUT", path: "/v1/courses/{course_id}/widgets/{id}", readOnly: false, summary: "Update a widget", description: "Update one widget.",
+    parameters: [{ inputName: "course_id" }, { inputName: "id" }],
     inputSchema: { properties: properties(count) },
   });
-  const optionFor = (count) => canvasOption(categoriesForBinding({ provider: "canvas" }, [operation(count)]), "canvas_update_widget");
+  const optionFor = (count) => canvasOption(categoriesForBinding({ provider: "canvas" }, widgetOperations(operation(count))), "canvas_update_widget");
   assert.equal(optionFor(8).requiresFieldSelection, undefined);
   assert.equal(optionFor(9).requiresFieldSelection, true);
 });
@@ -517,25 +536,28 @@ test("the derived field grant stops at eight fields", () => {
 test("the scope digest follows the derived rule set", async () => {
   const operation = {
     provider: "canvas", key: "PUT /v1/courses/{course_id}/widgets/{id}#update_widget", toolName: "canvas_update_widget",
-    path: "/v1/courses/{course_id}/widgets/{id}", readOnly: false, summary: "Update a widget", description: "Update one widget.",
+    method: "PUT", path: "/v1/courses/{course_id}/widgets/{id}", readOnly: false, summary: "Update a widget", description: "Update one widget.",
+    parameters: [{ inputName: "course_id" }, { inputName: "id" }],
     inputSchema: { properties: { course_id: { type: "string" }, id: { type: "string" }, title: { type: "string" } } },
   };
   const widened = { ...operation, inputSchema: { properties: { ...operation.inputSchema.properties, points: { type: "number" } } } };
   const request = { binding: canvasBinding, catalogDigest: "b".repeat(64), revision: 1, enabledCategories: ["action:canvas:canvas_update_widget"] };
-  const permission = await createEditPermission({ ...request, operations: [operation] });
-  const widenedPermission = await createEditPermission({ ...request, operations: [widened] });
+  const permission = await createEditPermission({ ...request, operations: widgetOperations(operation) });
+  const widenedPermission = await createEditPermission({ ...request, operations: widgetOperations(widened) });
   assert.deepEqual(permission.rules[0].allowedChangedFields, ["title"]);
   assert.deepEqual(widenedPermission.rules[0].allowedChangedFields, ["points", "title"]);
   assert.notEqual(permission.scopeDigest, widenedPermission.scopeDigest);
-  assert.equal(await validEditPermission({ permission, binding: canvasBinding, catalogDigest: "b".repeat(64), operations: [widened] }), null);
+  assert.equal(await validEditPermission({ permission, binding: canvasBinding, catalogDigest: "b".repeat(64), operations: widgetOperations(widened) }), null);
 });
 
 test("one exact legacy catalog permission migrates to a new revision", async () => {
   const operation = {
     provider: "canvas", key: "PUT /v1/courses/{course_id}/widgets/{id}#update_widget", toolName: "canvas_update_widget",
-    path: "/v1/courses/{course_id}/widgets/{id}", readOnly: false, summary: "Update a widget", description: "Update one widget.",
+    method: "PUT", path: "/v1/courses/{course_id}/widgets/{id}", readOnly: false, summary: "Update a widget", description: "Update one widget.",
+    parameters: [{ inputName: "course_id" }, { inputName: "id" }],
     inputSchema: { properties: { course_id: { type: "string" }, id: { type: "string" }, title: { type: "string" } } },
   };
+  const operations = widgetOperations(operation);
   const legacyCatalogDigest = "a".repeat(64);
   const catalogDigest = "b".repeat(64);
   const legacy = await createEditPermission({
@@ -543,7 +565,7 @@ test("one exact legacy catalog permission migrates to a new revision", async () 
     catalogDigest: legacyCatalogDigest,
     revision: 2,
     enabledCategories: ["action:canvas:canvas_update_widget"],
-    operations: [operation],
+    operations,
   });
   const migrated = await migrateLegacyEditPermission({
     permission: legacy,
@@ -551,17 +573,17 @@ test("one exact legacy catalog permission migrates to a new revision", async () 
     legacyCatalogDigest,
     catalogDigest,
     policyRevision: 4,
-    operations: [operation],
+    operations,
   });
   assert.equal(migrated?.revision, 5);
   assert.equal(migrated?.catalogDigest, catalogDigest);
   assert.deepEqual(migrated?.enabledCategories, legacy.enabledCategories);
   assert.notEqual(migrated?.scopeDigest, legacy.scopeDigest);
-  assert.equal(await validEditPermission({ permission: legacy, binding: canvasBinding, catalogDigest, operations: [operation] }), null);
-  assert.deepEqual(await validEditPermission({ permission: migrated, binding: canvasBinding, catalogDigest, operations: [operation] }), migrated);
+  assert.equal(await validEditPermission({ permission: legacy, binding: canvasBinding, catalogDigest, operations }), null);
+  assert.deepEqual(await validEditPermission({ permission: migrated, binding: canvasBinding, catalogDigest, operations }), migrated);
   assert.equal(await migrateLegacyEditPermission({
     permission: { ...legacy, catalogDigest: "c".repeat(64) }, binding: canvasBinding, legacyCatalogDigest, catalogDigest,
-    policyRevision: 4, operations: [operation],
+    policyRevision: 4, operations,
   }), null);
 });
 

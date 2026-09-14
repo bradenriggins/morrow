@@ -60,13 +60,18 @@ const provenClaims = [
   },
   {
     label: "held for cross_course_object_requires_resolution",
-    pattern: /, (\d+) name a group, file, folder, calendar item, outcome, or section that Canvas can attach to any course,/,
+    pattern: /, (\d+) name a cross-course object that needs its own resolver,/,
     expected: [report.admission.heldByReason.cross_course_object_requires_resolution],
   },
   {
     label: "held for learner_scope_requires_separate_authority",
-    pattern: /, (\d+) name one person's own record,/,
+    pattern: /, (\d+) change one learner's enrollment, submission, grade, attempt, override, membership, or progress,/,
     expected: [report.admission.heldByReason.learner_scope_requires_separate_authority],
+  },
+  {
+    label: "held for multi_course_authority_required",
+    pattern: /, (\d+) can reach another course or account,/,
+    expected: [report.admission.heldByReason.multi_course_authority_required],
   },
   {
     label: "held for provider_contract_incomplete",
@@ -90,7 +95,7 @@ const provenClaims = [
   },
   {
     label: "admitted through a direct course target or proved course object",
-    pattern: /\| (\d+) use a direct course target:[^|]+The other (\d+) use declared course-ownership reads/,
+    pattern: /\| (\d+) use a direct course target,[^|]+The other (\d+) use declared course-ownership reads/,
     expected: [
       report.admission.admittedByCourseTargetKind.course_path,
       report.admission.admittedByCourseTargetKind.semantic_course_object,
@@ -103,7 +108,7 @@ const provenClaims = [
   },
   {
     label: "readback route tiers",
-    pattern: /: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, and (\d+) use named readbacks/,
+    pattern: /: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, and (\d+) uses the named bulk-assignment-date readback/,
     expected: [
       report.readback.routeTierCounts.exact,
       report.readback.routeTierCounts.created_child,
@@ -134,7 +139,7 @@ const provenClaims = [
   },
   {
     label: "readback work that remains, opening count",
-    pattern: /^(\d+) of the (\d+) admitted writes have no exact generic postcondition\./m,
+    pattern: /^(\d+) of the (\d+) scope-admitted writes have no exact generic postcondition\./m,
     expected: [report.readback.admittedWritesWithoutExactReadback.length, report.admission.admitted],
   },
   {
@@ -158,15 +163,11 @@ const provenClaims = [
   },
 ];
 
-/** Every readback blocker the code can return needs its own row in the gap table. */
+/** Every readback blocker in the generated report needs its own row in the gap table. */
 const BLOCKER_ROWS = Object.freeze({
   content_migration_update_has_no_cataloged_fields: "Content migration update has no cataloged fields",
-  discussion_or_conversation_content: "Discussion or conversation content",
   external_tool_update_has_no_cataloged_fields: "External tool update has no cataloged fields",
   favorite_list_is_effective_not_explicit_state: "Favorite list is effective, not explicit, state",
-  module_item_reader_mutates_progress: "Module item reader mutates progress",
-  module_progression_state_has_no_current_user_reader: "Module progression has no current-user reader",
-  student_grade_or_submission_state: "Student grade or submission state",
   summary_state_has_no_narrow_reader: "Summary state has no narrow reader",
 });
 
@@ -181,7 +182,7 @@ for (const [reason, label] of Object.entries(BLOCKER_ROWS)) {
 const remainingClaims = [
   {
     label: "remaining Canvas admission summary",
-    pattern: /The catalog has ([\d,]+) operations, with (\d+) writes held[^.]+\. Of the \d+ admitted writes, (\d+) lack exact generic readback\./,
+    pattern: /The catalog has ([\d,]+) operations, with (\d+) writes held[^.]+\. Of the \d+ scope-admitted writes, (\d+) lack exact generic readback and are profile-limited before provider I\/O\./,
     expected: [
       report.totals.operations,
       report.admission.held,
@@ -269,7 +270,7 @@ test("a document edit that changes a quoted number or breaks an anchor fails lou
   assert.throws(() => assertDocumentClaims(duplicatedAnchor, [heldClaim]), /expected exactly one match/);
 
   const remaining = read(REMAINING);
-  const rewordedSummary = remaining.replace("writes held for semantic scope, personal scope, transfer, provider-contract, or exact-readback reasons", "writes still need work");
+  const rewordedSummary = remaining.replace("writes held for semantic scope, learner scope, multi-course scope, personal scope, transfer, provider-contract, or exact-readback reasons", "writes still need work");
   assert.notEqual(rewordedSummary, remaining);
   assert.throws(() => assertDocumentClaims(rewordedSummary, remainingClaims), /expected exactly one match/);
 });

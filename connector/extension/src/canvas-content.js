@@ -1,6 +1,23 @@
 (() => {
+  const remainingRequestTime = (expiresAt) => {
+    const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000;
+    if (remaining <= 0) throw new Error("canvas_request_expired_before_send");
+    return remaining;
+  };
   const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
-    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
+    remainingRequestTime(expiresAt))));
+  const cancelResponseBody = (response) => {
+    try {
+      const cancellation = response?.body?.cancel?.();
+      if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {});
+    } catch {}
+  };
+  const waitForRetry = async (milliseconds, expiresAt) => {
+    const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 0;
+    if (remaining <= 0) throw new Error("canvas_request_expired_before_send");
+    await new Promise((resolve) => setTimeout(resolve, Math.min(milliseconds, remaining)));
+    if (Date.now() >= expiresAt) throw new Error("canvas_request_expired_before_send");
+  };
   if (globalThis.__morrowCanvasConnectorInstalled) return;
   globalThis.__morrowCanvasConnectorInstalled = true;
 
@@ -1132,9 +1149,9 @@
     return [...new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body)))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
   }
 
-  async function pageJson(url) {
-    const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
-    if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("page_check_unavailable"); }
+  async function pageJson(url, expiresAt) {
+    const response = await fetch(url, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal(expiresAt) });
+    if (!response.ok) { cancelResponseBody(response); throw new Error("page_check_unavailable"); }
     return JSON.parse(await readBounded(response));
   }
 
@@ -1148,7 +1165,7 @@
     return id && name ? { id, name } : null;
   }
 
-  async function courseJson(id) {
+  async function courseJson(id, expiresAt) {
     const exactId = courseId(id);
     if (!exactId) throw new Error("canvas_course_id_invalid");
     const response = await fetch(new URL(`/api/v1/courses/${exactId}`, location.origin), {
@@ -1156,9 +1173,9 @@
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
       redirect: "error",
-      signal: requestSignal(),
+      signal: requestSignal(expiresAt),
     });
-    if (!response.ok) throw new Error(`canvas_course_http_${response.status}`);
+    if (!response.ok) { cancelResponseBody(response); throw new Error(`canvas_course_http_${response.status}`); }
     const course = JSON.parse(await readBounded(response));
     if (courseId(course?.id) !== exactId) throw new Error("canvas_course_mismatch");
     return course;
@@ -1179,7 +1196,7 @@
     return url;
   }
 
-  async function listCourses(nextValue) {
+  async function listCourses(nextValue, expiresAt) {
     const url = nextValue === undefined
       ? new URL(`/api/v1/courses?enrollment_state=active&per_page=${MAX_DISCOVERED_COURSES}&page=1`, location.origin)
       : discoveryUrl(nextValue);
@@ -1189,9 +1206,9 @@
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
       redirect: "error",
-      signal: requestSignal(),
+      signal: requestSignal(expiresAt),
     });
-    if (!response.ok) throw new Error(`canvas_courses_http_${response.status}`);
+    if (!response.ok) { cancelResponseBody(response); throw new Error(`canvas_courses_http_${response.status}`); }
     const courses = JSON.parse(await readBounded(response));
     if (!Array.isArray(courses) || courses.length > MAX_DISCOVERED_COURSES) throw new Error("canvas_courses_invalid");
     const next = discoveryUrl(nextLink(response.headers.get("Link"), location.origin, url.pathname));
@@ -1199,27 +1216,27 @@
     return { courses: courses.map(courseSummary).filter(Boolean), complete: next === null, pageUrl: url.href, nextUrl: next?.href || null };
   }
 
-  async function checkedCourse(id) {
-    const [profile, course] = await Promise.all([canvasProfile(), courseJson(id)]);
+  async function checkedCourse(id, expiresAt) {
+    const [profile, course] = await Promise.all([canvasProfile(false, expiresAt), courseJson(id, expiresAt)]);
     const summary = courseSummary(course);
     if (!summary) throw new Error("canvas_course_invalid");
     return { profile, course: summary };
   }
 
-  async function itemBankCourseTabs(id) {
+  async function itemBankCourseTabs(id, expiresAt) {
     const exactId = courseId(id);
     if (!exactId) throw new Error("canvas_course_id_invalid");
     const [checked, response] = await Promise.all([
-      checkedCourse(exactId),
+      checkedCourse(exactId, expiresAt),
       fetch(new URL(`/api/v1/courses/${exactId}/tabs`, location.origin), {
         credentials: "include",
         headers: { Accept: "application/json+canvas-string-ids" },
         cache: "no-store",
         redirect: "error",
-        signal: requestSignal(),
+        signal: requestSignal(expiresAt),
       }),
     ]);
-    if (!response.ok) throw new Error(`canvas_item_bank_tabs_http_${response.status}`);
+    if (!response.ok) { cancelResponseBody(response); throw new Error(`canvas_item_bank_tabs_http_${response.status}`); }
     const tabs = JSON.parse(await readBounded(response));
     if (!Array.isArray(tabs) || tabs.length > 1_000) throw new Error("canvas_item_bank_tabs_invalid");
     return {
@@ -1335,11 +1352,11 @@
       && Object.keys(guard).every((key) => ["kind", "page_id", "revision_id", "body_sha256", "fields", "image_index", "image_start", "image_end", "image_tag_sha256", "image_src_sha256", "alt_text", "decorative"].includes(key));
   }
 
-  async function checkPageSource(operation, args, url, expectedCourseId) {
+  async function checkPageSource(operation, args, url, expectedCourseId, expiresAt) {
     const guard = args.morrow_page_guard;
     if (operation.toolName !== "canvas_update_create_page_courses" || String(args.course_id) !== expectedCourseId
       || !validPageGuard(guard) || Object.keys(args).some((key) => key.startsWith("wiki_page_"))) throw new Error("page_check_invalid");
-    const [page, revision] = await Promise.all([pageJson(url), pageJson(`${url.href}/revisions/latest`)]);
+    const [page, revision] = await Promise.all([pageJson(url, expiresAt), pageJson(`${url.href}/revisions/latest`, expiresAt)]);
     if (pageId(page.page_id) !== guard.page_id || typeof page.body !== "string"
       || page.editor === "block_editor" || page.block_editor_attributes != null
       || await bodyDigest(page.body) !== guard.body_sha256
@@ -1353,11 +1370,11 @@
       : await contentImageAltChange(page.body, guard);
   }
 
-  async function verifyPageChange(args, url) {
+  async function verifyPageChange(args, url, expiresAt) {
     const guard = args.morrow_page_guard;
     const base = { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: "lossless-page-revision", priorRevisionId: guard.revision_id };
     try {
-      const [page, revision, history] = await Promise.all([pageJson(url), pageJson(`${url.href}/revisions/latest`), pageJson(`${url.href}/revisions?per_page=2`)]);
+      const [page, revision, history] = await Promise.all([pageJson(url, expiresAt), pageJson(`${url.href}/revisions/latest`, expiresAt), pageJson(`${url.href}/revisions?per_page=2`, expiresAt)]);
       const latestId = pageId(revision.revision_id);
       const exactHistory = Array.isArray(history) && history.length === 2
         && history.every((row) => row && pageId(row.revision_id))
@@ -1918,7 +1935,7 @@
     return await bodyDigest(stable(protectedFields));
   }
 
-  async function checkCanvasContentSource(operation, args, url, expectedCourseId) {
+  async function checkCanvasContentSource(operation, args, url, expectedCourseId, expiresAt) {
     const guard = args.morrow_canvas_content_guard;
     if (!validCanvasContentGuard(guard) || guard.course_id !== expectedCourseId) throw new Error("canvas_content_guard_invalid");
     if (validCanvasContentPageGuard(guard)) {
@@ -1929,7 +1946,7 @@
       }
       return {
         target: { requestField: "wiki_page_body", pageGuard },
-        writeArguments: { wiki_page_body: await checkPageSource(operation, { ...args, morrow_page_guard: pageGuard }, url, expectedCourseId) },
+        writeArguments: { wiki_page_body: await checkPageSource(operation, { ...args, morrow_page_guard: pageGuard }, url, expectedCourseId, expiresAt) },
       };
     }
     const target = canvasContentTarget(guard);
@@ -1940,7 +1957,7 @@
       || !Object.keys(args).every((key) => ["course_id", ...idFields, "morrow_canvas_content_guard"].includes(key))) {
       throw new Error("canvas_content_check_invalid");
     }
-    const before = await pageJson(url);
+    const before = await pageJson(url, expiresAt);
     const itemId = guard[target.guardIdField];
     const body = contentBody(before, target, guard);
     if (typeof body !== "string" || await bodyDigest(body) !== guard.body_sha256
@@ -1951,17 +1968,17 @@
     return { target, writeArguments: contentWriteArguments(before, target, guard, nextBody) };
   }
 
-  async function verifyCanvasContentChange(args, url, expectedCourseId) {
+  async function verifyCanvasContentChange(args, url, expectedCourseId, expiresAt) {
     const guard = args.morrow_canvas_content_guard;
     if (validCanvasContentPageGuard(guard)) {
       const pageGuard = legacyPageGuardFromCanvasContent(guard);
-      return await verifyPageChange({ ...args, morrow_page_guard: pageGuard }, url);
+      return await verifyPageChange({ ...args, morrow_page_guard: pageGuard }, url, expiresAt);
     }
     const target = validCanvasContentGuard(guard) ? canvasContentTarget(guard) : null;
     const base = { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: "lossless-canvas-content" };
     if (!target) return { ...base, reason: "canvas_content_guard_missing" };
     try {
-      const after = await pageJson(url);
+      const after = await pageJson(url, expiresAt);
       const itemId = guard[target.guardIdField];
       const body = contentBody(after, target, guard);
       if (typeof body !== "string" || body !== requestedContentBody(args, target, guard)
@@ -2118,12 +2135,33 @@
     return value;
   }
 
+  function canvasArrayMemberName(name) {
+    const normalized = name === "blackout_dates:" ? "blackout_dates" : name;
+    const recordField = /^(grading_periods|grading_scheme_entry|ratings|events|quiz_groups|order)(\[[^\]]+\])$/.exec(normalized);
+    if (recordField) return `${recordField[1]}[]${recordField[2]}`;
+    const timetableField = /^timetables\[course_section_id\](\[[^\]]+\])$/.exec(normalized);
+    if (timetableField) return `timetables[course_section_id][]${timetableField[1]}`;
+    return `${normalized}[]`;
+  }
+
   function appendValue(target, name, value) {
+    const normalized = name === "blackout_dates:" ? "blackout_dates" : name;
     if (Array.isArray(value)) {
-      for (const entry of value) target.append(name, typeof entry === "object" ? JSON.stringify(entry) : String(entry));
+      const memberName = canvasArrayMemberName(normalized);
+      for (const entry of value) {
+        if (entry && typeof entry === "object" && !Array.isArray(entry)) {
+          for (const [key, child] of Object.entries(entry)) appendValue(target, `${memberName}[${key}]`, child);
+        } else {
+          target.append(memberName, entry === null ? "" : String(entry));
+        }
+      }
       return;
     }
-    target.append(name, typeof value === "object" ? JSON.stringify(value) : String(value));
+    if (value && typeof value === "object") {
+      for (const [key, child] of Object.entries(value)) appendValue(target, `${normalized}[${key}]`, child);
+      return;
+    }
+    target.append(normalized, value === null ? "" : String(value));
   }
 
   function wirePath(name) {
@@ -2217,7 +2255,7 @@
   // setting can delete every setting nobody asked about. The merge is the
   // safety property, not an advisory step: a quiz Morrow cannot read is a
   // refusal, never a warning, and the request is not sent.
-  async function checkNewQuizSettingsSource(operation, args, url) {
+  async function checkNewQuizSettingsSource(operation, args, url, expiresAt) {
     const guard = args.morrow_new_quiz_settings_guard;
     const settings = operation.key === NEW_QUIZ_SETTINGS_OPERATION_KEY ? requestedQuizSettings(operation, args) : null;
     if (!settings) {
@@ -2231,7 +2269,7 @@
     }
     let before;
     try {
-      before = await pageJson(url);
+      before = await pageJson(url, expiresAt);
     } catch {
       throw new Error("new_quiz_settings_read_failed: Morrow could not read this quiz before changing its settings. No change was sent.");
     }
@@ -2252,11 +2290,11 @@
     };
   }
 
-  async function verifyNewQuizSettingsChange(args, url, expectedSettings, previousSettings = null, requestedQuizFields = {}) {
+  async function verifyNewQuizSettingsChange(args, url, expectedSettings, previousSettings = null, requestedQuizFields = {}, expiresAt) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-settings" };
     let saved;
     try {
-      saved = await pageJson(url);
+      saved = await pageJson(url, expiresAt);
     } catch {
       return { ...base, status: "unconfirmed", reason: "new_quiz_settings_readback_unavailable" };
     }
@@ -2396,7 +2434,7 @@
       && pageId(guard.item_id) !== null && guard.entry_type === "Item";
   }
 
-  async function checkNewQuizItemLifecycleSource(operation, args, url) {
+  async function checkNewQuizItemLifecycleSource(operation, args, url, expiresAt) {
     const guard = args.morrow_new_quiz_item_lifecycle_guard;
     const kind = operation.key === NEW_QUIZ_ITEM_CREATE_KEY ? "create"
       : operation.key === NEW_QUIZ_ITEM_DELETE_KEY ? "delete" : "";
@@ -2407,7 +2445,7 @@
     if (!validNewQuizLifecycleGuard(guard, kind)) {
       throw new Error(`new_quiz_item_lifecycle_guard_required: A New Quiz item ${kind} needs one complete fresh item list from the lifecycle planner. No change was sent.`);
     }
-    const beforeItems = await newQuizItemMembership(url);
+    const beforeItems = await newQuizItemMembership(url, expiresAt);
     const before = beforeItems.map((item) => item.id);
     if (await bodyDigest(stable(beforeItems)) !== guard.before_items_sha256) {
       throw new Error("new_quiz_item_lifecycle_stale: The saved New Quiz item list changed after this operation was planned. No change was sent.");
@@ -2428,7 +2466,7 @@
     }
     let item;
     try {
-      item = await pageJson(url);
+      item = await pageJson(url, expiresAt);
     } catch {
       throw new Error("new_quiz_item_read_failed: Morrow could not read the item before deleting it. No change was sent.");
     }
@@ -2458,10 +2496,10 @@
     return actual === expected;
   }
 
-  async function verifyNewQuizItemLifecycleChange(change, writeData) {
+  async function verifyNewQuizItemLifecycleChange(change, writeData, expiresAt) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-item-lifecycle" };
     try {
-      const after = (await newQuizItemMembership(change.listUrl)).map((item) => item.id);
+      const after = (await newQuizItemMembership(change.listUrl, expiresAt)).map((item) => item.id);
       if (change.kind === "delete") {
         const expected = change.before.filter((id) => id !== change.itemId);
         return after.length === expected.length && after.every((id, index) => id === expected[index])
@@ -2479,7 +2517,7 @@
       const itemUrl = new URL(change.listUrl);
       itemUrl.pathname = `${itemUrl.pathname}/${itemId}`;
       itemUrl.search = "";
-      const saved = await pageJson(itemUrl);
+      const saved = await pageJson(itemUrl, expiresAt);
       if (!plainObject(saved) || pageId(saved.id) !== itemId || !requestedNewQuizItemShapeMatches(saved, change.payload)) {
         return { ...base, status: "mismatch", reason: "new_quiz_item_create_readback_mismatch" };
       }
@@ -2501,13 +2539,13 @@
     return listUrl;
   }
 
-  async function newQuizMembership(url) {
+  async function newQuizMembership(url, expiresAt) {
     const requested = newQuizListUrl(url);
     const ids = [];
     let next = requested.href;
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
-      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal(expiresAt) });
       if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_list_read_failed"); }
       const rows = JSON.parse(await readBounded(response));
       if (!Array.isArray(rows) || rows.length > NEW_QUIZ_ITEM_PAGE_LIMIT || ids.length + rows.length > NEW_QUIZ_ITEM_LIMIT) {
@@ -2555,7 +2593,7 @@
       && pageId(guard.quiz_id) !== null;
   }
 
-  async function checkNewQuizLifecycleSource(operation, args, url) {
+  async function checkNewQuizLifecycleSource(operation, args, url, expiresAt) {
     const guard = args.morrow_new_quiz_lifecycle_guard;
     const kind = operation.key === NEW_QUIZ_CREATE_KEY ? "create" : operation.key === NEW_QUIZ_DELETE_KEY ? "delete" : "";
     if (!kind) {
@@ -2563,7 +2601,7 @@
       return null;
     }
     if (!validNewQuizGuard(guard, kind)) throw new Error(`new_quiz_lifecycle_guard_required: A New Quiz ${kind} needs a reviewed complete course quiz list. No change was sent.`);
-    const before = await newQuizMembership(url);
+    const before = await newQuizMembership(url, expiresAt);
     if (await bodyDigest(stable(guard.before_quiz_ids.map(String))) !== guard.before_quiz_ids_sha256
       || before.length !== guard.before_quiz_ids.length || before.some((id, index) => id !== String(guard.before_quiz_ids[index]))) {
       throw new Error("new_quiz_lifecycle_stale: The course New Quiz list changed after review. No change was sent.");
@@ -2576,17 +2614,17 @@
     }
     const quizId = pageId(args.assignment_id);
     if (!quizId || quizId !== pageId(guard.quiz_id) || !before.includes(quizId)) throw new Error("new_quiz_lifecycle_target_changed: The reviewed New Quiz is not in the course list. No change was sent.");
-    const quiz = await pageJson(url);
+    const quiz = await pageJson(url, expiresAt);
     if (!plainObject(quiz) || pageId(quiz.id) !== quizId || await bodyDigest(stable(quiz)) !== guard.target_quiz_sha256) {
       throw new Error("new_quiz_lifecycle_stale: The New Quiz changed after review. No change was sent.");
     }
     const itemsUrl = new URL(`${url.pathname}/items`, url.origin);
-    const items = await completeNewQuizItemRecords(itemsUrl);
+    const items = await completeNewQuizItemRecords(itemsUrl, expiresAt);
     if (await bodyDigest(stable(items)) !== guard.target_items_sha256) {
       throw new Error("new_quiz_lifecycle_stale: The New Quiz item list changed after review. No change was sent.");
     }
     const assignmentUrl = new URL(`/api/v1/courses/${args.course_id}/assignments/${quizId}`, url.origin);
-    const assignment = await pageJson(assignmentUrl);
+    const assignment = await pageJson(assignmentUrl, expiresAt);
     if (!plainObject(assignment) || pageId(assignment.id) !== quizId
       || (assignment.course_id !== undefined && pageId(assignment.course_id) !== pageId(args.course_id))
       || assignment.has_submitted_submissions !== false || assignment.graded_submissions_exist !== false
@@ -2596,10 +2634,10 @@
     return { kind, before, listUrl, quizId };
   }
 
-  async function verifyNewQuizLifecycleChange(change, writeData) {
+  async function verifyNewQuizLifecycleChange(change, writeData, expiresAt) {
     const base = { schema: "morrow.browser-verification.v1", strategy: "new-quiz-lifecycle" };
     try {
-      const after = await newQuizMembership(change.listUrl);
+      const after = await newQuizMembership(change.listUrl, expiresAt);
       if (change.kind === "delete") {
         const expected = change.before.filter((id) => id !== change.quizId);
         return after.length === expected.length && after.every((id, index) => id === expected[index])
@@ -2617,7 +2655,7 @@
       const quizUrl = new URL(change.listUrl);
       quizUrl.pathname = `${quizUrl.pathname}/${quizId}`;
       quizUrl.search = "";
-      const saved = await pageJson(quizUrl);
+      const saved = await pageJson(quizUrl, expiresAt);
       if (!plainObject(saved) || pageId(saved.id) !== quizId || !requestedNewQuizItemShapeMatches(saved, change.payload)) {
         return { ...base, status: "mismatch", reason: "new_quiz_create_readback_mismatch" };
       }
@@ -2709,13 +2747,13 @@
     return { kind };
   }
 
-  async function readNewQuizItemMembership(itemUrl, requireItemOnly) {
+  async function readNewQuizItemMembership(itemUrl, requireItemOnly, expiresAt) {
     const requested = newQuizItemsListUrl(itemUrl);
     const rows = [];
     let next = requested.href;
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
-      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal(expiresAt) });
       if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_item_position_list_read_failed"); }
       const page = JSON.parse(await readBounded(response));
       if (!Array.isArray(page) || page.length > NEW_QUIZ_ITEM_PAGE_LIMIT || rows.length + page.length > NEW_QUIZ_ITEM_LIMIT) {
@@ -2745,17 +2783,17 @@
     return positioned.sort((left, right) => left.position - right.position);
   }
 
-  async function newQuizItemMembership(itemUrl) {
-    return readNewQuizItemMembership(itemUrl, false);
+  async function newQuizItemMembership(itemUrl, expiresAt) {
+    return readNewQuizItemMembership(itemUrl, false, expiresAt);
   }
 
-  async function completeNewQuizItemRecords(itemUrl) {
+  async function completeNewQuizItemRecords(itemUrl, expiresAt) {
     const requested = newQuizItemsListUrl(itemUrl);
     const rows = [];
     let next = requested.href;
     let pages = 0;
     while (next && pages < Math.ceil(NEW_QUIZ_ITEM_LIMIT / NEW_QUIZ_ITEM_PAGE_LIMIT)) {
-      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal() });
+      const response = await fetch(next, { credentials: "include", cache: "no-store", redirect: "error", headers: { Accept: "application/json+canvas-string-ids" }, signal: requestSignal(expiresAt) });
       if (!response.ok) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("new_quiz_item_list_read_failed"); }
       const page = JSON.parse(await readBounded(response));
       if (!Array.isArray(page) || page.length > NEW_QUIZ_ITEM_PAGE_LIMIT || rows.length + page.length > NEW_QUIZ_ITEM_LIMIT) {
@@ -2776,11 +2814,11 @@
     return rows.sort((left, right) => left.position - right.position);
   }
 
-  async function newQuizItemOrder(itemUrl) {
-    return (await readNewQuizItemMembership(itemUrl, true)).map((row) => row.id);
+  async function newQuizItemOrder(itemUrl, expiresAt) {
+    return (await readNewQuizItemMembership(itemUrl, true, expiresAt)).map((row) => row.id);
   }
 
-  async function checkNewQuizItemPositionSource(operation, args, url) {
+  async function checkNewQuizItemPositionSource(operation, args, url, expiresAt) {
     const guard = args.morrow_new_quiz_item_position_guard;
     const changesPosition = operation.key === NEW_QUIZ_ITEM_OPERATION_KEY && args.item_position !== undefined;
     if (!changesPosition) {
@@ -2788,7 +2826,7 @@
       return null;
     }
     if (!validNewQuizPositionGuard(guard)) throw new Error("new_quiz_item_position_guard_required: A New Quiz item move needs one complete current order and one exact expected order. No change was sent.");
-    const before = await newQuizItemOrder(url);
+    const before = await newQuizItemOrder(url, expiresAt);
     if (await bodyDigest(stable(before)) !== guard.before_item_ids_sha256) {
       throw new Error("new_quiz_item_position_stale: The saved New Quiz item order changed after this move was planned. No change was sent.");
     }
@@ -2803,20 +2841,20 @@
       || expected[requestedPosition - 1] !== itemId) {
       throw new Error("new_quiz_item_position_guard_invalid: The requested item position does not match the expected saved order. No change was sent.");
     }
-    const item = await readEditableStandaloneNewQuizItem(args, url);
+    const item = await readEditableStandaloneNewQuizItem(args, url, null, expiresAt);
     const requestedItemFields = newQuizItemPayloadFromArguments(operation, args) || {};
     delete requestedItemFields.position;
     return { expected, url, item, requestedItemFields };
   }
 
-  async function verifyNewQuizItemPositionChange(change) {
+  async function verifyNewQuizItemPositionChange(change, expiresAt) {
     try {
-      const saved = await newQuizItemOrder(change.url);
+      const saved = await newQuizItemOrder(change.url, expiresAt);
       if (saved.length !== change.expected.length || saved.some((id, index) => id !== change.expected[index])) {
         return { schema: "morrow.browser-verification.v1", status: "mismatch", reason: "new_quiz_item_position_readback_mismatch" };
       }
       if (Object.keys(change.requestedItemFields).length > 0) {
-        const savedItem = await pageJson(change.url);
+        const savedItem = await pageJson(change.url, expiresAt);
         if (!plainObject(savedItem) || pageId(savedItem.id) !== pageId(change.item.id)
           || !requestedNewQuizItemShapeMatches(savedItem, change.requestedItemFields)) {
           return { schema: "morrow.browser-verification.v1", status: "mismatch", reason: "new_quiz_item_requested_fields_readback_mismatch" };
@@ -2849,11 +2887,11 @@
     return merged;
   }
 
-  async function readEditableStandaloneNewQuizItem(args, url, current = null) {
+  async function readEditableStandaloneNewQuizItem(args, url, current = null, expiresAt) {
     let item = current;
     if (!item) {
       try {
-        item = await pageJson(url);
+        item = await pageJson(url, expiresAt);
       } catch {
         throw new Error("new_quiz_item_read_failed: Morrow could not read this quiz question before changing it. No change was sent.");
       }
@@ -2869,11 +2907,11 @@
     return item;
   }
 
-  async function checkNewQuizItemIds(operation, args, url, current = null) {
+  async function checkNewQuizItemIds(operation, args, url, current = null, expiresAt) {
     if (operation.key !== NEW_QUIZ_ITEM_OPERATION_KEY) return false;
     const patch = newQuizItemPayloadFromArguments(operation, args);
     if (!patch || Object.keys(patch).every((key) => key === "position")) return false;
-    const before = await readEditableStandaloneNewQuizItem(args, url, current);
+    const before = await readEditableStandaloneNewQuizItem(args, url, current, expiresAt);
     const itemId = pageId(args.item_id);
     if (!itemId || !plainObject(before.entry)) {
       throw new Error("new_quiz_item_target_changed: This quiz question does not report the answer structure Morrow has to preserve. No change was sent.");
@@ -2944,6 +2982,15 @@
   ]);
   const CLASSIC_QUIZ_ANSWER_FIELDS = ["id", "answer_text", "answer_weight", "answer_comments", "answer_comment_html", "answer_html", "text_after_answers"];
 
+  function schemaAllowsNull(schema) {
+    return Boolean(schema && typeof schema === "object" && (
+      schema.type === "null"
+      || (Array.isArray(schema.type) && schema.type.includes("null"))
+      || (Array.isArray(schema.enum) && schema.enum.includes(null))
+      || (Array.isArray(schema.anyOf) && schema.anyOf.some(schemaAllowsNull))
+    ));
+  }
+
   function classicQuizAnswerEntries(operation, parameter, value) {
     if (!CLASSIC_QUIZ_ANSWER_OPERATIONS.has(operation.key) || parameter.location !== "form"
       || parameter.wireName !== "question[answers]") return undefined;
@@ -3000,11 +3047,13 @@
         && Boolean(args.morrow_page_guard || args.morrow_canvas_content_guard) && parameter.inputName === "wiki_page_body";
       const preserveNewQuizValue = usesJsonBody(operation) && operation.path.startsWith("/quiz/v1/")
         && parameter.location === "form";
+      const preserveNullableFormValue = value === null && parameter.location === "form"
+        && schemaAllowsNull(parameter.schema);
       const guardedPageBody = operation.toolName === "canvas_update_create_page_courses"
         && parameter.inputName === "wiki_page_body";
       const preserveExplicitEmptyForm = parameter.location === "form"
         && (!guardedPageBody || preserveGuardedEmptyPageBody);
-      if (value === undefined || (value === null && !preserveNewQuizValue)
+      if (value === undefined || (value === null && !preserveNewQuizValue && !preserveNullableFormValue)
         || (value === "" && !preserveExplicitEmptyForm && !preserveNewQuizValue)) {
         if (parameter.required) throw new TypeError(`${parameter.inputName} is required`);
         continue;
@@ -3016,7 +3065,7 @@
       } else {
         const answers = classicQuizAnswerEntries(operation, parameter, value);
         if (answers) body.push(...answers);
-        else body.push([parameter, value]);
+        else body.push([parameter, preserveNullableFormValue && !preserveNewQuizValue ? "" : value]);
       }
     }
     if (/\{[^}]+\}/.test(path) || path.includes("://") || path.split("/").includes("..")) {
@@ -3027,8 +3076,9 @@
     return { url, body };
   }
 
-  function courseScope(operation, url) {
+  function courseScope(operation, url, args) {
     const target = operation?.morrowCourseTarget;
+    if (target?.kind === "self_path" && target.argument === "course_id") return courseId(args?.course_id);
     if (!target || target.kind !== "course_path" || !["course_id", "id"].includes(target.argument)) return null;
     const match = url.pathname.match(/\/courses\/([1-9][0-9]*)(?:\/|$)/);
     if (!match) throw new Error("canvas_course_target_invalid");
@@ -3115,10 +3165,13 @@
   function checkCourseScope(operation, url, args, expectedCourseId) {
     const exactId = courseId(expectedCourseId);
     if (!exactId) throw new Error("canvas_course_binding_missing");
-    const targetId = courseScope(operation, url);
+    const targetId = courseScope(operation, url, args);
     if (targetId && targetId !== exactId) throw new Error("canvas_course_target_mismatch");
     if (checkSemanticTargetScope(operation, url, args, exactId)) return exactId;
-    if (!targetId && operation.method !== "GET") throw new Error("canvas_course_scope_required");
+    const internal = operation?.morrowInternalCourseRead;
+    if (!targetId && operation?.readOnly === true && internal?.schema === "morrow.canvas-internal-course-read.v1"
+      && Object.keys(internal).length === 2 && courseId(internal.courseId) === exactId) return exactId;
+    if (!targetId) throw new Error("canvas_course_scope_required");
     return exactId;
   }
 
@@ -3169,17 +3222,17 @@
     return stable(protectedFields);
   }
 
-  async function checkAssignmentDueDateSource(operation, args, url, expectedCourseId) {
+  async function checkAssignmentDueDateSource(operation, args, url, expectedCourseId, expiresAt) {
     const change = assignmentDueDateChange(operation, args);
     if (!change) return null;
-    const before = await pageJson(url);
+    const before = await pageJson(url, expiresAt);
     return { ...change, protectedState: assignmentDueDateState(before, expectedCourseId, change.id) };
   }
 
-  async function verifyAssignmentDueDateChange(change, url, expectedCourseId) {
+  async function verifyAssignmentDueDateChange(change, url, expectedCourseId, expiresAt) {
     const base = { schema: "morrow.browser-verification.v1", status: "unconfirmed", strategy: "assignment-due-date" };
     try {
-      const after = await pageJson(url);
+      const after = await pageJson(url, expiresAt);
       if (assignmentDueDateState(after, expectedCourseId, change.id) !== change.protectedState) {
         return { ...base, status: "mismatch", reason: "assignment_fields_changed" };
       }
@@ -3190,33 +3243,33 @@
     }
   }
 
-  async function canvasProfile(includeCourseName = false) {
+  async function canvasProfile(includeCourseName = false, expiresAt) {
     const currentCourseId = currentCanvasCourseId();
     const response = await fetch(new URL("/api/v1/users/self/profile", location.origin), {
       credentials: "include",
       headers: { Accept: "application/json+canvas-string-ids" },
       cache: "no-store",
       redirect: "error",
-      signal: requestSignal(),
+      signal: requestSignal(expiresAt),
     });
-    if (!response.ok) throw new Error(`canvas_profile_http_${response.status}`);
+    if (!response.ok) { cancelResponseBody(response); throw new Error(`canvas_profile_http_${response.status}`); }
     const profile = JSON.parse(await readBounded(response));
     const id = String(profile?.id || "").trim();
     if (!/^[1-9][0-9]*$/.test(id)) throw new Error("canvas_profile_id_invalid");
     let courseName;
     if (includeCourseName) {
-      courseName = String((await courseJson(currentCourseId)).name || "").trim().slice(0, 300);
+      courseName = String((await courseJson(currentCourseId, expiresAt)).name || "").trim().slice(0, 300);
     }
     return { id, name: String(profile?.name || profile?.short_name || "Canvas user").slice(0, 200), origin: location.origin, courseId: currentCourseId, ...(courseName ? { courseName } : {}) };
   }
 
   async function executeCanvas(operation, args, expectedPrincipalId, expiresAt, expectedCourseId, listResumeState) {
-    const profile = await canvasProfile();
-    if (profile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
     let { url, body } = requestParts(operation, args);
     const exactCourseId = checkCourseScope(operation, url, args, expectedCourseId);
-    await courseJson(exactCourseId);
-    const assignmentDueDate = await checkAssignmentDueDateSource(operation, args, url, exactCourseId);
+    const profile = await canvasProfile(false, expiresAt);
+    if (profile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
+    await courseJson(exactCourseId, expiresAt);
+    const assignmentDueDate = await checkAssignmentDueDateSource(operation, args, url, exactCourseId, expiresAt);
     let canvasContentChange = null;
     let newQuizLifecycle = null;
     let newQuizItemLifecycle = null;
@@ -3225,55 +3278,55 @@
     const newQuizReport = operation.key === NEW_QUIZ_REPORT_KEY;
     const newQuizEffect = await checkNewQuizEffectGuard(operation, args, newQuizAccommodation);
     if (assignmentDueDate) {
-      const currentProfile = await canvasProfile();
+      const currentProfile = await canvasProfile(false, expiresAt);
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-      await courseJson(exactCourseId);
+      await courseJson(exactCourseId, expiresAt);
     }
     if (args.morrow_page_guard) {
-      args = { ...args, wiki_page_body: await checkPageSource(operation, args, url, exactCourseId) };
+      args = { ...args, wiki_page_body: await checkPageSource(operation, args, url, exactCourseId, expiresAt) };
       ({ url, body } = requestParts(operation, args));
       checkCourseScope(operation, url, args, exactCourseId);
-      const currentProfile = await canvasProfile();
+      const currentProfile = await canvasProfile(false, expiresAt);
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-      await courseJson(exactCourseId);
+      await courseJson(exactCourseId, expiresAt);
     }
     if (args.morrow_canvas_content_guard) {
-      canvasContentChange = await checkCanvasContentSource(operation, args, url, exactCourseId);
+      canvasContentChange = await checkCanvasContentSource(operation, args, url, exactCourseId, expiresAt);
       args = { ...args, ...canvasContentChange.writeArguments };
       ({ url, body } = requestParts(operation, args));
       checkCourseScope(operation, url, args, exactCourseId);
-      const currentProfile = await canvasProfile();
+      const currentProfile = await canvasProfile(false, expiresAt);
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-      await courseJson(exactCourseId);
+      await courseJson(exactCourseId, expiresAt);
     }
-    newQuizLifecycle = await checkNewQuizLifecycleSource(operation, args, url);
+    newQuizLifecycle = await checkNewQuizLifecycleSource(operation, args, url, expiresAt);
     if (newQuizLifecycle) {
-      const currentProfile = await canvasProfile();
+      const currentProfile = await canvasProfile(false, expiresAt);
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-      await courseJson(exactCourseId);
+      await courseJson(exactCourseId, expiresAt);
     }
-    newQuizItemLifecycle = await checkNewQuizItemLifecycleSource(operation, args, url);
+    newQuizItemLifecycle = await checkNewQuizItemLifecycleSource(operation, args, url, expiresAt);
     if (newQuizItemLifecycle) {
-      const currentProfile = await canvasProfile();
+      const currentProfile = await canvasProfile(false, expiresAt);
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-      await courseJson(exactCourseId);
+      await courseJson(exactCourseId, expiresAt);
     }
-    newQuizItemPosition = await checkNewQuizItemPositionSource(operation, args, url);
+    newQuizItemPosition = await checkNewQuizItemPositionSource(operation, args, url, expiresAt);
     if (newQuizItemPosition) {
-      const currentProfile = await canvasProfile();
+      const currentProfile = await canvasProfile(false, expiresAt);
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-      await courseJson(exactCourseId);
+      await courseJson(exactCourseId, expiresAt);
     }
-    if (await checkNewQuizItemIds(operation, args, url, newQuizItemPosition?.item || null)) {
-      const currentProfile = await canvasProfile();
+    if (await checkNewQuizItemIds(operation, args, url, newQuizItemPosition?.item || null, expiresAt)) {
+      const currentProfile = await canvasProfile(false, expiresAt);
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-      await courseJson(exactCourseId);
+      await courseJson(exactCourseId, expiresAt);
     }
-    const newQuizSettings = await checkNewQuizSettingsSource(operation, args, url);
+    const newQuizSettings = await checkNewQuizSettingsSource(operation, args, url, expiresAt);
     if (newQuizSettings) {
-      const currentProfile = await canvasProfile();
+      const currentProfile = await canvasProfile(false, expiresAt);
       if (currentProfile.id !== expectedPrincipalId) throw new Error("canvas_principal_changed");
-      await courseJson(exactCourseId);
+      await courseJson(exactCourseId, expiresAt);
     }
     const isRead = operation.method === "GET";
     const headers = new Headers({ Accept: "application/json+canvas-string-ids" });
@@ -3330,8 +3383,9 @@
         for (let attempt = 0; attempt < (isRead ? 3 : 1); attempt += 1) {
           response = await fetch(next, { ...options, signal: requestSignal(expiresAt) });
           if (response.status !== 429 || !isRead || attempt === 2) break;
+          cancelResponseBody(response);
           const seconds = Math.min(30, Math.max(1, Number(response.headers.get("Retry-After") || 1)));
-          await new Promise((resolve) => setTimeout(resolve, seconds * 1_000));
+          await waitForRetry(seconds * 1_000, expiresAt);
         }
         payload = parsePayload(await readBounded(response), response.headers.get("Content-Type"));
       } catch {
@@ -3342,21 +3396,21 @@
           };
         }
         if (!isRead && newQuizLifecycle) {
-          const verification = await verifyNewQuizLifecycleChange(newQuizLifecycle, null);
+          const verification = await verifyNewQuizLifecycleChange(newQuizLifecycle, null, expiresAt);
           if (verification.status === "verified") {
             return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: 0, data: null, verification };
           }
           return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_write_response_unknown", verification };
         }
         if (!isRead && newQuizItemLifecycle) {
-          const verification = await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, null);
+          const verification = await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, null, expiresAt);
           if (verification.status === "verified") {
             return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: 0, data: null, verification };
           }
           return { ok: false, sent: true, outcomeUnknown: true, error: "canvas_write_response_unknown", verification };
         }
         if (!isRead && newQuizItemPosition) {
-          const verification = await verifyNewQuizItemPositionChange(newQuizItemPosition);
+          const verification = await verifyNewQuizItemPositionChange(newQuizItemPosition, expiresAt);
           if (verification.status === "verified") {
             return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: 0, data: null, verification };
           }
@@ -3364,7 +3418,7 @@
         }
         if (!isRead && newQuizSettings) {
           const verification = await verifyNewQuizSettingsChange(
-            args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields,
+            args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields, expiresAt,
           );
           if (verification.status === "verified") {
             return {
@@ -3405,21 +3459,21 @@
           };
         }
         if (outcomeUnknown && newQuizLifecycle) {
-          const verification = await verifyNewQuizLifecycleChange(newQuizLifecycle, payload);
+          const verification = await verifyNewQuizLifecycleChange(newQuizLifecycle, payload, expiresAt);
           if (verification.status === "verified") {
             return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: response.status, data: payload, verification };
           }
           return { ok: false, sent: true, status: response.status, outcomeUnknown: true, error: payload, requestUrl: url.pathname, verification };
         }
         if (outcomeUnknown && newQuizItemLifecycle) {
-          const verification = await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, payload);
+          const verification = await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, payload, expiresAt);
           if (verification.status === "verified") {
             return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: response.status, data: payload, verification };
           }
           return { ok: false, sent: true, status: response.status, outcomeUnknown: true, error: payload, requestUrl: url.pathname, verification };
         }
         if (outcomeUnknown && newQuizItemPosition) {
-          const verification = await verifyNewQuizItemPositionChange(newQuizItemPosition);
+          const verification = await verifyNewQuizItemPositionChange(newQuizItemPosition, expiresAt);
           if (verification.status === "verified") {
             return { ok: true, sent: true, outcomeUnknown: false, recovered: true, status: response.status, data: payload, verification };
           }
@@ -3427,7 +3481,7 @@
         }
         if (outcomeUnknown && newQuizSettings) {
           const verification = await verifyNewQuizSettingsChange(
-            args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields,
+            args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields, expiresAt,
           );
           if (verification.status === "verified") {
             return {
@@ -3472,17 +3526,17 @@
       ...(newQuizSettings ? {
         newQuizSettingsPreserved: newQuizSettings.preserved,
         verification: await verifyNewQuizSettingsChange(
-          args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields,
+          args, url, newQuizSettings.merged, newQuizSettings.before, newQuizSettings.requestedQuizFields, expiresAt,
         ),
       } : {}),
-      ...(args.morrow_page_guard ? { verification: await verifyPageChange(args, url) } : {}),
-      ...(canvasContentChange ? { verification: await verifyCanvasContentChange(args, url, exactCourseId) } : {}),
-      ...(assignmentDueDate ? { verification: await verifyAssignmentDueDateChange(assignmentDueDate, url, exactCourseId) } : {}),
+      ...(args.morrow_page_guard ? { verification: await verifyPageChange(args, url, expiresAt) } : {}),
+      ...(canvasContentChange ? { verification: await verifyCanvasContentChange(args, url, exactCourseId, expiresAt) } : {}),
+      ...(assignmentDueDate ? { verification: await verifyAssignmentDueDateChange(assignmentDueDate, url, exactCourseId, expiresAt) } : {}),
       ...(newQuizAccommodation ? { verification: verifyNewQuizAccommodation(data, newQuizAccommodation) } : {}),
       ...(newQuizReport ? { verification: verifyNewQuizReport(data, args) } : {}),
-      ...(newQuizLifecycle ? { verification: await verifyNewQuizLifecycleChange(newQuizLifecycle, data) } : {}),
-      ...(newQuizItemLifecycle ? { verification: await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, data) } : {}),
-      ...(newQuizItemPosition ? { verification: await verifyNewQuizItemPositionChange(newQuizItemPosition) } : {}),
+      ...(newQuizLifecycle ? { verification: await verifyNewQuizLifecycleChange(newQuizLifecycle, data, expiresAt) } : {}),
+      ...(newQuizItemLifecycle ? { verification: await verifyNewQuizItemLifecycleChange(newQuizItemLifecycle, data, expiresAt) } : {}),
+      ...(newQuizItemPosition ? { verification: await verifyNewQuizItemPositionChange(newQuizItemPosition, expiresAt) } : {}),
       pageCount: pages.length,
       truncated: Boolean(next),
       // The resume envelope is returned only to a caller that asked to continue

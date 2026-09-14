@@ -87,11 +87,15 @@ async function openSetup(browser, platform, state) {
   page.on("pageerror", (error) => assert.fail(`the renderer failed: ${error.message}`));
   await page.addInitScript(([snapshot, reported]) => {
     window.__morrowTestClock = 100_000;
+    window.__morrowInvocations = [];
     Date.now = () => window.__morrowTestClock;
     let updateListener = null;
     window.morrowInstaller = {
       platform: reported,
-      invoke: async () => ({ schema: "morrow.installer-result.v1", ok: true, state: snapshot }),
+      invoke: async (...input) => {
+        window.__morrowInvocations.push(input);
+        return { schema: "morrow.installer-result.v1", ok: true, state: snapshot };
+      },
       subscribeUpdates(listener) {
         updateListener = listener;
         window.__morrowPublishUpdate = (value) => updateListener?.(value);
@@ -175,6 +179,7 @@ try {
   await updateAction.focus();
   await page.evaluate(() => window.__morrowPublishUpdate({
     schema: "morrow.desktop-update.v1",
+    revision: 1,
     status: "checking",
     currentVersion: "1.0.0",
     availableVersion: null,
@@ -202,6 +207,17 @@ try {
     assert.equal(await welcome.locator(shown).isVisible(), true, `${shown} must render on ${platform}`);
     assert.equal(await welcome.locator(hidden).isVisible(), false, `${hidden} must not render on ${platform}`);
   }
+
+  const actions = await openSetup(browser, "darwin", WELCOME);
+  await actions.getByRole("button", { name: /ChatGPT/ }).click();
+  await actions.getByRole("button", { name: "Set up ChatGPT" }).click();
+  await actions.waitForFunction(() => window.__morrowInvocations.some(([method]) => method === "installer:install-assistant"));
+  assert.deepEqual(
+    await actions.evaluate(() => window.__morrowInvocations.find(([method]) => method === "installer:install-assistant")),
+    ["installer:install-assistant", { assistantId: "codex" }]
+  );
+  console.log("actions delegated setup controls invoke their installer action");
+
   // The default Morrow window is 940px wide and can be dragged down to 320px.
   for (const width of [940, 320]) {
     const welcome = await openSetup(browser, "darwin", WELCOME);

@@ -12,6 +12,7 @@ const REQUIRED_DIRECT_RUNTIME_FILES = Object.freeze([
   "packages/mcp-server/dist/index.js",
   "packages/canvas-connector-mcp/dist/index.js",
   "installer/runtime-monitor.mjs",
+  "installer/process-lifetime.cjs",
 ]);
 
 function sha256(content) {
@@ -247,6 +248,7 @@ async function isComplete(payloadRoot) {
     path.join(root, "app", "packages", "mcp-server", "dist", "local-owner-sidecar-access.js"),
     path.join(root, "app", "packages", "canvas-connector-mcp", "dist", "index.js"),
     path.join(root, "app", "installer", "runtime-monitor.mjs"),
+    path.join(root, "app", "installer", "process-lifetime.cjs"),
     path.join(root, "app", "mcp-runtime-manifest.json"),
     path.join(root, "app", "package-input-manifest.json"),
     path.join(root, "app", "bridge-release", "manifest.json"),

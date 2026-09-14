@@ -189,6 +189,8 @@ export interface BridgeBinding {
   readonly editPolicyRevision?: number;
   /** Present when detailed options can be read for this one exact binding. */
   readonly editOptionsAvailable?: true;
+  /** The Bridge matched its durable first-read receipt to this exact current binding. */
+  readonly firstReadCompleted?: true;
   /** Compact binding proof. Full rules are read on demand for one binding. */
   readonly editPermission?: BridgeEditPermissionSummary;
   readonly runtimeVerified: boolean;
@@ -1100,6 +1102,9 @@ function parseBinding(value: unknown): BridgeBinding {
   const editOptionsAvailable = value.editOptionsAvailable === undefined
     ? undefined
     : value.editOptionsAvailable === true ? true : (() => { throw new TypeError("editOptionsAvailable must be true"); })();
+  const firstReadCompleted = value.firstReadCompleted === undefined
+    ? undefined
+    : value.firstReadCompleted === true ? true : (() => { throw new TypeError("firstReadCompleted must be true"); })();
   const editCategories = parseEditCategories(value.editCategories);
   const editPermission = value.editPermission === undefined ? undefined : parseEditPermissionSummary(value.editPermission, sourceBindingId);
   if (typeof value.runtimeVerified !== "boolean") {
@@ -1122,6 +1127,7 @@ function parseBinding(value: unknown): BridgeBinding {
     ...(catalogDigest ? { catalogDigest } : {}),
     ...(editPolicyRevision !== undefined ? { editPolicyRevision } : {}),
     ...(editOptionsAvailable ? { editOptionsAvailable } : {}),
+    ...(firstReadCompleted ? { firstReadCompleted } : {}),
     ...(editCategories ? { editCategories } : {}),
     ...(editPermission ? { editPermission } : {}),
     runtimeVerified: value.runtimeVerified,

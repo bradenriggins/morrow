@@ -75,6 +75,25 @@ test("Canvas course Tabs resolves one exact Item Banks deployment without a glob
   ]) assert.equal(itemBankLaunchFromCourseTabs(tabs, "https://school.instructure.com", "42"), null);
 });
 
+test("Canvas course Tabs resolves the exact native Item Banks route", () => {
+  assert.deepEqual(itemBankLaunchFromCourseTabs([{
+    id: `context_external_tool_${EXTERNAL_TOOL_ID}`,
+    type: "internal",
+    label: "Item Banks",
+    html_url: "https://school.instructure.com/courses/42/banks",
+  }], "https://school.instructure.com", "42"), {
+    externalToolId: EXTERNAL_TOOL_ID,
+    launchUrl: "https://school.instructure.com/courses/42/banks",
+    native: true,
+  });
+  for (const tab of [
+    { id: `context_external_tool_${EXTERNAL_TOOL_ID}`, type: "internal", label: "Item Banks", html_url: "https://school.instructure.com/courses/43/banks" },
+    { id: `context_external_tool_${EXTERNAL_TOOL_ID}`, type: "internal", label: "Item Banks", html_url: "https://other.instructure.com/courses/42/banks" },
+    { id: `context_external_tool_${EXTERNAL_TOOL_ID}`, type: "external", label: "Item Banks", html_url: "https://school.instructure.com/courses/42/banks" },
+    { id: "context_external_tool_bad", type: "internal", label: "Item Banks", html_url: "https://school.instructure.com/courses/42/banks" },
+  ]) assert.equal(itemBankLaunchFromCourseTabs([tab], "https://school.instructure.com", "42"), null);
+});
+
 test("origin discovery accepts one exact same-tenant quiz-lti frame", () => {
   const frames = [
     { frameId: 0, url: LAUNCH_URL },

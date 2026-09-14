@@ -101,6 +101,38 @@ test("the private regular-file reader bounds bytes and rejects non-files", async
   await assert.rejects(() => readPrivateRegularFile(root, { maxBytes: 32, platform: process.platform }), /private_file_not_admitted/);
 });
 
+test("the private regular-file reader accepts ctime precision drift but still rejects mtime drift", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-state-policy-ctime-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const file = path.join(root, "installer.json");
+  await fs.writeFile(file, "private record", { mode: 0o600 });
+  const originalOpen = fs.open;
+  const readWithDrift = async ({ ctimeMs = 0, mtimeMs = 0 }) => {
+    let calls = 0;
+    fs.open = async (...argumentsValue) => {
+      const handle = await originalOpen(...argumentsValue);
+      const originalStat = handle.stat.bind(handle);
+      handle.stat = async (...statArguments) => {
+        const info = await originalStat(...statArguments);
+        calls += 1;
+        return Object.assign(Object.create(Object.getPrototypeOf(info)), info, {
+          ctimeMs: info.ctimeMs + ctimeMs * calls,
+          mtimeMs: info.mtimeMs + mtimeMs * calls,
+        });
+      };
+      return handle;
+    };
+    try {
+      return await readPrivateRegularFile(file, { maxBytes: 32, platform: process.platform });
+    } finally {
+      fs.open = originalOpen;
+    }
+  };
+
+  assert.equal((await readWithDrift({ ctimeMs: 0.5 })).toString(), "private record");
+  await assert.rejects(() => readWithDrift({ mtimeMs: 0.5 }), /private_file_changed_during_/);
+});
+
 test("the private regular-file reader refuses links and nonprivate mode before reading", {
   skip: process.platform === "win32" ? "POSIX link and mode admission needs a POSIX host" : false,
 }, async (t) => {

@@ -2,6 +2,12 @@ import { randomBytes, randomUUID } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { normalizeRequestedBy, sha256Json, type JsonObject, type RequestedByIdentity } from "@morrow/contracts";
 import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
+import {
+  ensureCausalSequenceTable,
+  exactCausalSequence,
+  nextDurableCausalSequence,
+  type CausalSequenceAllocator,
+} from "./causal-sequence.js";
 
 export const EFFECT_OPERATION_STATES = Object.freeze([
   "awaiting_approval",
@@ -95,6 +101,7 @@ export interface EffectOperationRecord {
   readonly readbackDigest: string | null;
   readonly hasResultBindingArtifact: boolean;
   readonly personObservedStateDigest: string | null;
+  readonly personCloseCausalSequence: number | null;
   readonly verificationStatus: "not_requested" | "unconfirmed" | "verified" | null;
   readonly attention: readonly string[];
   readonly createdAt: string;
@@ -105,6 +112,7 @@ export interface EffectOperationRecord {
 export interface ProviderEffectBrokerOptions {
   readonly path: string;
   readonly now?: () => Date;
+  readonly nextCausalSequence?: CausalSequenceAllocator;
 }
 
 export interface EffectOperationListPage {
@@ -151,6 +159,7 @@ interface EffectRow {
   readback_digest: string | null;
   result_binding_artifact_json: string | null;
   person_observed_state_digest: string | null;
+  person_close_causal_sequence: number | null;
   verification_status: "not_requested" | "unconfirmed" | "verified" | null;
   attention_json: string;
   created_at: string;
@@ -384,6 +393,9 @@ function sourceIdempotencyPlanDigest(plan: JsonObject): string {
 
 function rowRecord(row: EffectRow): EffectOperationRecord {
   const attention = JSON.parse(row.attention_json) as unknown;
+  const personCloseCausalSequence = row.person_close_causal_sequence === null
+    ? null
+    : exactCausalSequence(row.person_close_causal_sequence, "person close causal sequence");
   return {
     schema: "morrow.operation.v1",
     operationId: row.operation_id,
@@ -417,6 +429,7 @@ function rowRecord(row: EffectRow): EffectOperationRecord {
     readbackDigest: row.readback_digest,
     hasResultBindingArtifact: row.result_binding_artifact_json !== null,
     personObservedStateDigest: row.person_observed_state_digest,
+    personCloseCausalSequence,
     verificationStatus: row.verification_status,
     attention: Array.isArray(attention) ? attention.filter((entry): entry is string => typeof entry === "string") : [],
     createdAt: row.created_at,
@@ -437,7 +450,7 @@ const EFFECT_OPERATION_COLUMNS = Object.freeze([
   "source_operation_id", "source_binding_id", "readback_json", "connector_read_descriptor_json",
   "correction_of", "state", "approval_grant_digest", "approval_expires_at", "approval_consumed_at",
   "effect_receipt_id", "dispatch_attempt", "upstream_result_digest", "source_result_state",
-  "source_task_id", "readback_digest", "result_binding_artifact_json", "person_observed_state_digest", "verification_status",
+  "source_task_id", "readback_digest", "result_binding_artifact_json", "person_observed_state_digest", "person_close_causal_sequence", "verification_status",
   "attention_json", "created_at", "updated_at", "terminal_at",
 ] as const);
 
@@ -485,6 +498,7 @@ function effectOperationsTableDdl(name: string, options: EffectOperationsTableOp
         readback_digest TEXT,
         result_binding_artifact_json TEXT,
         person_observed_state_digest TEXT,
+        person_close_causal_sequence INTEGER CHECK(person_close_causal_sequence >= 1),
         verification_status TEXT CHECK(verification_status IN ('not_requested','unconfirmed','verified')),
         attention_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
@@ -497,6 +511,7 @@ export class ProviderEffectBroker {
   readonly path: string;
   private readonly database: DatabaseSync;
   private readonly now: () => Date;
+  private readonly allocateCausalSequence: CausalSequenceAllocator | null;
   private closed = false;
 
   constructor(options: ProviderEffectBrokerOptions) {
@@ -506,6 +521,7 @@ export class ProviderEffectBroker {
     });
     this.path = opened.path;
     this.now = options.now ?? (() => new Date());
+    this.allocateCausalSequence = options.nextCausalSequence ?? null;
     this.database = opened.database;
     this.database.exec(`
       PRAGMA busy_timeout = 5000;
@@ -517,6 +533,7 @@ export class ProviderEffectBroker {
       CREATE INDEX IF NOT EXISTS provider_effect_operations_state
         ON provider_effect_operations(state, updated_at DESC);
     `);
+    ensureCausalSequenceTable(this.database);
     this.ensureTargetIdentityColumns();
     this.ensureOperationStateConstraint();
     this.database.exec(`
@@ -572,6 +589,9 @@ export class ProviderEffectBroker {
     if (!names.has("result_binding_artifact_json")) {
       this.database.exec("ALTER TABLE provider_effect_operations ADD COLUMN result_binding_artifact_json TEXT");
     }
+    if (!names.has("person_close_causal_sequence")) {
+      this.database.exec("ALTER TABLE provider_effect_operations ADD COLUMN person_close_causal_sequence INTEGER CHECK(person_close_causal_sequence >= 1)");
+    }
     const legacy = this.database.prepare(`
       SELECT operation_id, plan_json FROM provider_effect_operations
       WHERE provider_principal_digest IS NULL
@@ -622,6 +642,12 @@ export class ProviderEffectBroker {
     return this.now().toISOString();
   }
 
+  private nextCausalSequence(): number {
+    return this.allocateCausalSequence
+      ? exactCausalSequence(this.allocateCausalSequence(), "Morrow causal sequence")
+      : nextDurableCausalSequence(this.database);
+  }
+
   private assertOpen(): void {
     if (this.closed) throw new Error("provider effect broker is closed");
   }
@@ -642,11 +668,27 @@ export class ProviderEffectBroker {
   private recoverInterrupted(): void {
     const now = this.instant();
     this.transaction(() => {
+      const needsBarrier = this.database.prepare(`
+        SELECT 1 AS present FROM provider_effect_operations
+        WHERE state='dispatching'
+          OR (state IN (${TARGET_HOLDING_STATES}) AND person_close_causal_sequence IS NULL)
+        LIMIT 1
+      `).get() as { present: number } | undefined;
+      const causalSequence = needsBarrier ? this.nextCausalSequence() : null;
       this.database.prepare(`
         UPDATE provider_effect_operations
-        SET state='applied_or_unknown', attention_json=?, updated_at=?, terminal_at=?
+        SET state='applied_or_unknown', person_close_causal_sequence=?, attention_json=?, updated_at=?, terminal_at=?
         WHERE state='dispatching'
-      `).run(JSON.stringify(["process_restart_after_dispatch"]), now, now);
+      `).run(causalSequence, JSON.stringify(["process_restart_after_dispatch"]), now, now);
+      if (causalSequence !== null) {
+        // Older unresolved records have no comparable read marker. Give them a
+        // conservative restart barrier so only a later delivered read can close.
+        this.database.prepare(`
+          UPDATE provider_effect_operations
+          SET person_close_causal_sequence=?
+          WHERE state IN (${TARGET_HOLDING_STATES}) AND person_close_causal_sequence IS NULL
+        `).run(causalSequence);
+      }
       this.database.prepare(`
         UPDATE provider_effect_operations
         SET state='cancelled', attention_json=?, updated_at=?, terminal_at=?
@@ -1083,12 +1125,14 @@ export class ProviderEffectBroker {
       if (current.state !== "dispatching") throw new Error(`operation cannot settle from ${current.state}`);
       const innerApproval = input.innerApprovalRequired === true;
       const state: EffectOperationState = innerApproval ? "awaiting_inner_approval" : "awaiting_verification";
+      const causalSequence = innerApproval ? null : this.nextCausalSequence();
       this.database.prepare(`
         UPDATE provider_effect_operations
-        SET state=?, upstream_result_digest=?, source_result_state=?, source_task_id=?,
+        SET state=?, person_close_causal_sequence=?, upstream_result_digest=?, source_result_state=?, source_task_id=?,
             attention_json=?, updated_at=? WHERE operation_id=?
       `).run(
         state,
+        causalSequence,
         digest(input.upstreamResultDigest, "upstream result digest"),
         input.sourceResultState?.slice(0, 120) || null,
         input.sourceTaskId ? identifier(input.sourceTaskId, "source task id") : null,
@@ -1121,11 +1165,13 @@ export class ProviderEffectBroker {
         : outcome === "failed_no_effect"
           ? ["inner_operation_failed_without_effect"]
           : ["inner_operation_effect_unknown"];
+      const causalSequence = outcome === "failed_no_effect" ? null : this.nextCausalSequence();
       this.database.prepare(`
         UPDATE provider_effect_operations
-        SET state=?, attention_json=?, updated_at=?, terminal_at=? WHERE operation_id=?
+        SET state=?, person_close_causal_sequence=?, attention_json=?, updated_at=?, terminal_at=? WHERE operation_id=?
       `).run(
         state,
+        causalSequence,
         JSON.stringify(attention),
         now,
         state === "awaiting_verification" ? null : now,
@@ -1142,10 +1188,11 @@ export class ProviderEffectBroker {
       const current = this.get(operationId);
       if (current.state !== "dispatching") throw new Error(`operation cannot fail from ${current.state}`);
       const state: EffectOperationState = mayHaveApplied ? "applied_or_unknown" : "failed";
+      const causalSequence = mayHaveApplied ? this.nextCausalSequence() : null;
       this.database.prepare(`
         UPDATE provider_effect_operations
-        SET state=?, attention_json=?, updated_at=?, terminal_at=? WHERE operation_id=?
-      `).run(state, JSON.stringify([mayHaveApplied ? "provider_effect_may_have_landed" : "dispatch_failed_before_send", sha256Json(detail)]), now, now, operationId);
+        SET state=?, person_close_causal_sequence=?, attention_json=?, updated_at=?, terminal_at=? WHERE operation_id=?
+      `).run(state, causalSequence, JSON.stringify([mayHaveApplied ? "provider_effect_may_have_landed" : "dispatch_failed_before_send", sha256Json(detail)]), now, now, operationId);
       return this.get(operationId);
     });
   }
@@ -1197,14 +1244,22 @@ export class ProviderEffectBroker {
    * "Morrow confirmed this". It sends nothing, and it is the only exit from an
    * unresolved record that does not carry Morrow's own fresh evidence.
    */
-  closeAfterPersonCheck(operationIdValue: string, observedStateDigestValue: string): EffectOperationRecord {
+  closeAfterPersonCheck(
+    operationIdValue: string,
+    observedStateDigestValue: string,
+    readPreparedCausalSequenceValue: number,
+  ): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
     const observedStateDigest = digest(observedStateDigestValue, "observed state digest");
+    const readPreparedCausalSequence = exactCausalSequence(readPreparedCausalSequenceValue, "read prepare causal sequence");
     const now = this.instant();
     return this.transaction(() => {
       const current = this.get(operationId);
       if (!UNRESOLVED_STATES.includes(current.state)) {
         throw new Error(`operation cannot be closed by a person from ${current.state}`);
+      }
+      if (!current.personCloseCausalSequence || readPreparedCausalSequence <= current.personCloseCausalSequence) {
+        throw new Error("person close requires a read prepared after the effect became unresolved");
       }
       this.database.prepare(`
         UPDATE provider_effect_operations
@@ -1269,7 +1324,11 @@ export class ProviderEffectBroker {
 }
 
 export function effectOperationProjection(record: EffectOperationRecord): JsonObject {
-  const { forwardedRequest: _forwardedRequest, ...projection } = record;
+  const {
+    forwardedRequest: _forwardedRequest,
+    personCloseCausalSequence: _personCloseCausalSequence,
+    ...projection
+  } = record;
   const requestedBy = normalizeRequestedBy(record.plan.requestedBy);
   return structuredClone({
     ...projection,

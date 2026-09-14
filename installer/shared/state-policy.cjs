@@ -120,6 +120,18 @@ function acceptedPrivateFile(info, platform, ownerUid, maxBytes) {
       && (ownerUid === null || info.uid === ownerUid)));
 }
 
+function sameStablePrivateFile(left, right) {
+  // ctime is intentionally excluded. Some kernels refine its precision after
+  // a fresh write even though the inode, content, ownership, and mode did not change.
+  return left.dev === right.dev && left.ino === right.ino
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid;
+}
+
 async function trustedPrivateAncestorChain(file, trustedRoot, platform, ownerUid) {
   if (trustedRoot === undefined) return true;
   if (!canonicalAbsolutePath(trustedRoot)) return false;
@@ -169,8 +181,8 @@ async function readPrivateRegularFile(file, options = {}) {
     const openedPath = await fs.lstat(file);
     if (!acceptedPrivateFile(opened, platform, ownerUid, maxBytes)
       || !acceptedPrivateFile(openedPath, platform, ownerUid, maxBytes)
-      || opened.dev !== before.dev || opened.ino !== before.ino
-      || openedPath.dev !== opened.dev || openedPath.ino !== opened.ino) {
+      || !sameStablePrivateFile(before, opened)
+      || !sameStablePrivateFile(opened, openedPath)) {
       throw privateFileError("private_file_changed_during_admission");
     }
     const output = Buffer.alloc(maxBytes + 1);
@@ -183,10 +195,10 @@ async function readPrivateRegularFile(file, options = {}) {
     const after = await handle.stat();
     const afterPath = await fs.lstat(file);
     if (offset > maxBytes || offset !== opened.size
-      || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs
       || !acceptedPrivateFile(after, platform, ownerUid, maxBytes)
       || !acceptedPrivateFile(afterPath, platform, ownerUid, maxBytes)
-      || afterPath.dev !== after.dev || afterPath.ino !== after.ino) {
+      || !sameStablePrivateFile(opened, after)
+      || !sameStablePrivateFile(after, afterPath)) {
       throw privateFileError("private_file_changed_during_read");
     }
     return output.subarray(0, offset);

@@ -88,9 +88,14 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
   const runtimeStartup = event();
   const storageChanged = event();
   const permissionAdded = event();
+  const permissionRemoved = event();
   const granted = new Set(initialLocal.siteAnchors?.length ? [coursePermission] : []);
   const permissionRemovals = [];
   const createdTabs = [];
+  const removedTabs = [];
+  const alarmCreations = [];
+  const alarmClears = [];
+  const scriptExecutions = [];
   let releaseCatalog;
   let catalogHeld = false;
 
@@ -166,14 +171,18 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
         return true;
       },
       onAdded: permissionAdded,
-      onRemoved: noOpEvent(),
+      onRemoved: permissionRemoved,
     },
-    alarms: { create: async () => undefined, clear: async () => true, onAlarm: noOpEvent() },
+    alarms: {
+      create: async (name, options) => { alarmCreations.push({ name, options: structuredClone(options) }); },
+      clear: async (name) => { alarmClears.push(name); return true; },
+      onAlarm: noOpEvent(),
+    },
     tabs: {
       get: async (id) => id === 9 ? { id: 9, windowId: 4, url: `${courseOrigin}/courses/42` } : null,
       query: async () => [{ id: 9, windowId: 4, url: `${courseOrigin}/courses/42` }],
-      create: async (value) => { createdTabs.push(value); return {}; },
-      remove: async () => undefined,
+      create: async (value) => { createdTabs.push(value); return { id: 70 + createdTabs.length }; },
+      remove: async (tabId) => { removedTabs.push(tabId); },
       update: async () => null,
       sendMessage: async (tabId, message, options) => tabMessage
         ? await tabMessage({ tabId, message, options })
@@ -184,21 +193,30 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
       onUpdated: noOpEvent(),
     },
     scripting: {
-      executeScript: async (injection) => injection.func ? [{ result: { ok: false } }] : [{ result: null }],
+      executeScript: async (injection) => {
+        scriptExecutions.push(injection);
+        return injection.func ? [{ result: { ok: false } }] : [{ result: null }];
+      },
     },
     webNavigation: { getAllFrames: async () => [], onCommitted: noOpEvent() },
     webRequest: { onBeforeSendHeaders: noOpEvent(), onBeforeRequest: noOpEvent(), onHeadersReceived: noOpEvent() },
   };
   return {
     FakeWebSocket,
+    alarmClears,
+    alarmCreations,
     createdTabs,
     granted,
     local,
     permissionAdded,
+    permissionRemoved,
     permissionRemovals,
+    removedTabs,
     releaseCatalog: () => releaseCatalog?.(),
     runtimeMessages,
     runtimeStartup,
+    scriptExecutions,
+    session,
     storageChanged,
     catalogWasHeld: () => catalogHeld,
   };
@@ -275,11 +293,49 @@ function semanticWriteCommand() {
   };
 }
 
-async function sendRuntime(value, message) {
+function bridgeCommand(overrides = {}) {
+  return {
+    schema: "morrow.bridge.command.v1",
+    protocolVersion: 1,
+    requestId: "request-lifecycle-command",
+    operationId: "operation-lifecycle-command",
+    generation: 9,
+    kind: "invoke_read",
+    toolName: "canvas_get_single_course_courses",
+    operationKey: "GET /v1/courses/{id}#get_single_course_courses",
+    sourceBindingId: bindingId,
+    arguments: { id: "42" },
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+    ...overrides,
+  };
+}
+
+function cancelCommand(command) {
+  return {
+    schema: "morrow.bridge.cancel.v1",
+    protocolVersion: 1,
+    requestId: command.requestId,
+    operationId: command.operationId,
+    generation: command.generation,
+    cancelledAt: Date.now(),
+  };
+}
+
+function withdrawConsent(value) {
+  delete value.local.values[consentKey];
+  value.storageChanged.listeners[0]({ [consentKey]: { oldValue: consentValue, newValue: undefined } }, "local");
+}
+
+async function sendRuntime(value, message, sender = {}) {
   const handler = value.runtimeMessages.listeners[0];
   return await new Promise((resolve, reject) => {
-    if (handler(message, {}, resolve) !== true) reject(new Error(`message refused: ${message.type}`));
+    if (handler(message, sender, resolve) !== true) reject(new Error(`message refused: ${message.type}`));
   });
+}
+
+function settingsSender() {
+  return { id: extensionId, url: `${extensionPrefix}settings/settings.html` };
 }
 
 async function consentConnectScenario() {
@@ -427,6 +483,342 @@ async function latePermissionScenario() {
   assert.deepEqual(staleCompletion, { ok: true, result: { completed: false } });
 }
 
+async function commandAdmissionCancellationScenario() {
+  let providerExecutions = 0;
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type === "morrow_canvas_execute") providerExecutions += 1;
+      return null;
+    },
+  });
+  await importWorker("command-admission-cancel");
+  const socket = await authenticate(value);
+  const originalGet = value.local.get.bind(value.local);
+  let consentReads = 0;
+  let admissionHeld = false;
+  let releaseAdmission;
+  value.local.get = async (keys) => {
+    if (keys === consentKey) {
+      consentReads += 1;
+      if (consentReads === 2) {
+        admissionHeld = true;
+        await new Promise((resolve) => { releaseAdmission = resolve; });
+      }
+    }
+    return await originalGet(keys);
+  };
+  const command = bridgeCommand({ requestId: "request-admission-cancel", operationId: "operation-admission-cancel" });
+  socket.receive(command);
+  await eventually(() => admissionHeld);
+  socket.receive(cancelCommand(command));
+  const cancelled = await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId));
+  assert.equal(cancelled.ok, false);
+  assert.equal(cancelled.problem.code, "request_cancelled_before_dispatch");
+  releaseAdmission();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(providerExecutions, 0);
+}
+
+function policySetCommand(overrides = {}) {
+  return bridgeCommand({
+    requestId: "request-policy-lifecycle",
+    operationId: "operation-policy-lifecycle",
+    kind: "edit_policy_set",
+    toolName: undefined,
+    operationKey: undefined,
+    sourceBindingId: undefined,
+    arguments: undefined,
+    editPolicySet: {
+      mode: "plan",
+      selections: [{ sourceBindingId: bindingId, expectedPolicyRevision: 1 }],
+    },
+    ...overrides,
+  });
+}
+
+async function editPolicyCancellationScenario(mode) {
+  const initial = connectedState();
+  initial.editPolicies[bindingId] = { revision: 1 };
+  initial.editPolicyRevisions[bindingId] = 1;
+  const value = fixture({ initialLocal: initial });
+  await importWorker(`edit-policy-${mode}`);
+  const socket = await authenticate(value);
+  const originalGet = value.local.get.bind(value.local);
+  let mutationHeld = false;
+  let releaseMutation;
+  value.local.get = async (keys) => {
+    if (!mutationHeld && Array.isArray(keys) && keys.includes("editPolicies")) {
+      mutationHeld = true;
+      await new Promise((resolve) => { releaseMutation = resolve; });
+    }
+    return await originalGet(keys);
+  };
+  const command = policySetCommand({
+    requestId: `request-policy-${mode}`,
+    operationId: `operation-policy-${mode}`,
+    ...(mode === "expiry" ? { expiresAt: Date.now() + 20 } : {}),
+  });
+  socket.receive(command);
+  await eventually(() => mutationHeld);
+  if (mode === "cancel") socket.receive(cancelCommand(command));
+  else await new Promise((resolve) => setTimeout(resolve, 30));
+  releaseMutation();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.deepEqual(value.local.values.editPolicies[bindingId], { revision: 1 });
+  assert.equal(value.local.values.editPolicyRevisions[bindingId], 1);
+  assert.equal(socket.sent.some((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId && message.ok === true), false);
+}
+
+async function maintenanceMutationScenario(mode) {
+  const value = fixture();
+  await importWorker(`maintenance-${mode}`);
+  const socket = await authenticate(value);
+  let identityHeld = false;
+  let releaseIdentity;
+  chrome.management.getSelf = async () => {
+    identityHeld = true;
+    await new Promise((resolve) => { releaseIdentity = resolve; });
+    return { id: extensionId, version: "1.0.4", installType: "development" };
+  };
+  const command = bridgeCommand({
+    requestId: `request-maintenance-${mode}`,
+    operationId: `operation-maintenance-${mode}`,
+    kind: "bridge_maintenance",
+    toolName: undefined,
+    operationKey: undefined,
+    sourceBindingId: undefined,
+    arguments: undefined,
+    maintenance: { action: "quiesce" },
+    ...(mode === "expiry" ? { expiresAt: Date.now() + 20 } : {}),
+  });
+  socket.receive(command);
+  await eventually(() => identityHeld);
+  if (mode === "cancel") socket.receive(cancelCommand(command));
+  else await new Promise((resolve) => setTimeout(resolve, 30));
+  releaseIdentity();
+  await eventually(() => socket.sent.some((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId));
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(value.local.values.morrowBridgeQuiesceFence, undefined);
+}
+
+async function permissionRemovalPublicationScenario() {
+  const initial = connectedState();
+  initial.courseFileStorageAccessEnabled = true;
+  const value = fixture({ initialLocal: initial });
+  await importWorker("permission-removal-publication");
+  const socket = await authenticate(value);
+  value.granted.delete(coursePermission);
+  value.permissionRemoved.listeners[0]({ origins: [coursePermission] });
+  const update = await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.bindings.v1"));
+  assert.equal(update.bindings[0].runtimeVerified, false);
+  assert.equal(value.local.values.courseFileStorageAccessEnabled, false);
+}
+
+async function handshakeBackoffScenario() {
+  const value = fixture();
+  await importWorker("handshake-backoff");
+  const active = await authenticate(value);
+  const nativeSetTimeout = globalThis.setTimeout;
+  const reconnectDelays = [];
+  globalThis.setTimeout = (callback, delay, ...args) => {
+    if ([2_000, 4_000, 8_000, 16_000, 30_000].includes(delay)) reconnectDelays.push(delay);
+    const shortened = delay === 10_000 ? 5 : delay >= 2_000 ? 1 : delay;
+    return nativeSetTimeout(callback, shortened, ...args);
+  };
+  active.close(1006, "transport_lost");
+  await eventually(() => value.FakeWebSocket.instances.length >= 8);
+  assert.deepEqual(value.FakeWebSocket.instances[1].closeRecord, { code: 4408, reason: "bridge_handshake_timeout" });
+  assert.deepEqual(reconnectDelays.slice(0, 6), [2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
+  assert.equal(Math.max(...reconnectDelays), 30_000);
+}
+
+async function unscopedCanvasReadScenario() {
+  let providerExecutions = 0;
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type === "morrow_canvas_execute") providerExecutions += 1;
+      return null;
+    },
+  });
+  await importWorker("unscoped-canvas-read");
+  const socket = await authenticate(value);
+  const commands = [
+    bridgeCommand({
+      requestId: "request-unscoped-none",
+      operationId: "operation-unscoped-none",
+      toolName: "canvas_activity_stream_summary",
+      operationKey: "GET /v1/users/self/activity_stream/summary#activity_stream_summary",
+      arguments: {},
+    }),
+    bridgeCommand({
+      requestId: "request-unscoped-self",
+      operationId: "operation-unscoped-self",
+      toolName: "canvas_list_bookmarks",
+      operationKey: "GET /v1/users/self/bookmarks#list_bookmarks",
+      arguments: {},
+    }),
+  ];
+  for (const command of commands) {
+    socket.receive(command);
+    const result = await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId));
+    assert.equal(result.ok, false);
+    assert.equal(result.problem.code, "course_scope_required");
+  }
+  assert.equal(providerExecutions, 0);
+}
+
+async function courseFileDeadlineScenario() {
+  const initialLocal = { ...connectedState(), courseFileStorageAccessEnabled: true };
+  const value = fixture({ initialLocal });
+  const originalGet = value.local.get.bind(value.local);
+  let accessStarted = false;
+  let releaseAccess;
+  value.local.get = async (keys) => {
+    if (keys === "courseFileStorageAccessEnabled") {
+      accessStarted = true;
+      await new Promise((resolve) => { releaseAccess = resolve; });
+    }
+    return await originalGet(keys);
+  };
+  await importWorker("course-file-deadline");
+  const socket = await authenticate(value);
+  const command = bridgeCommand({
+    requestId: "request-course-file-deadline",
+    operationId: "operation-course-file-deadline",
+    toolName: "canvas_read_course_file_text",
+    operationKey: "CANVAS_COURSE_FILE_TEXT GET /v1/courses/{course_id}/files/{file_id}/text",
+    arguments: { course_id: "42", file_id: "81" },
+    expiresAt: Date.now() + 40,
+  });
+  socket.receive(command);
+  await eventually(() => accessStarted);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  releaseAccess();
+  const result = await eventually(() => socket.sent.find((message) => message.requestId === command.requestId));
+  assert.equal(result.ok, false);
+  assert.equal(value.scriptExecutions.some((injection) => injection.func?.name === "executeCanvasCourseFileTextInPage"), false);
+}
+
+async function settingsDiscoveryConsentScenario() {
+  let listStarted = false;
+  let releaseList;
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type === "morrow_canvas_list_courses") {
+        listStarted = true;
+        await new Promise((resolve) => { releaseList = resolve; });
+        return {
+          ok: true,
+          profile: { origin: courseOrigin, id: "7" },
+          courses: [{ id: "42", name: "Biology" }],
+          pageUrl: `${courseOrigin}/api/v1/courses?per_page=100`,
+          nextUrl: null,
+          complete: true,
+        };
+      }
+      return null;
+    },
+  });
+  await importWorker("settings-discovery-consent");
+  const pending = sendRuntime(value, { type: "morrow_course_discovery_start", siteAnchorId: anchorId }, settingsSender());
+  await eventually(() => listStarted);
+  withdrawConsent(value);
+  releaseList();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "course_data_consent_required");
+  assert.equal(value.session.values.courseDiscoveries, undefined);
+}
+
+async function settingsSelectionConsentScenario() {
+  let checkStarted = false;
+  let releaseCheck;
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type === "morrow_canvas_check_course") {
+        checkStarted = true;
+        await new Promise((resolve) => { releaseCheck = resolve; });
+        return { ok: true, profile: { origin: courseOrigin, id: "7" }, course: { id: "43", name: "Chemistry" } };
+      }
+      return null;
+    },
+  });
+  const receiptId = "discovery:settings-selection-consent";
+  const receipt = {
+    schema: "morrow.course-discovery.v1",
+    discoveryReceiptId: receiptId,
+    siteAnchorId: anchorId,
+    provider: "canvas",
+    origin: courseOrigin,
+    principalFingerprint: "f".repeat(64),
+    sessionGeneration: 1,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 60_000,
+    snapshotDigest: "d".repeat(64),
+    courses: [{ id: "43", name: "Chemistry" }],
+    pageNumber: 1,
+    visited: [`${courseOrigin}/api/v1/courses?per_page=100`],
+    complete: true,
+    next: null,
+  };
+  const initialBindings = structuredClone(value.local.values.bindings);
+  value.session.values.courseDiscoveries = { [receiptId]: receipt };
+  await importWorker("settings-selection-consent");
+  const pending = sendRuntime(value, {
+    type: "morrow_course_selection_save",
+    siteAnchorId: anchorId,
+    discoveryReceiptId: receiptId,
+    courseIds: ["43"],
+  }, settingsSender());
+  await eventually(() => checkStarted);
+  withdrawConsent(value);
+  releaseCheck();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "course_data_consent_required");
+  assert.deepEqual(value.local.values.bindings, initialBindings);
+}
+
+async function settingsPolicyConsentScenario() {
+  let holdProbe = false;
+  let probeStarted = false;
+  let releaseProbe;
+  const value = fixture({
+    tabMessage: async ({ message }) => {
+      if (message?.type !== "morrow_canvas_probe") return null;
+      if (holdProbe) {
+        probeStarted = true;
+        await new Promise((resolve) => { releaseProbe = resolve; });
+      }
+      return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+    },
+  });
+  await importWorker("settings-policy-consent");
+  const options = await sendRuntime(value, { type: "morrow_edit_policy_options", sourceBindingId: bindingId }, settingsSender());
+  assert.equal(options.ok, true);
+  const category = options.result.options.find((candidate) => candidate.availability === "edit");
+  assert.ok(category);
+  holdProbe = true;
+  const pending = sendRuntime(value, {
+    type: "morrow_edit_policy_save",
+    sourceBindingId: bindingId,
+    enabledCategories: [category.id],
+    expiresInMs: 60 * 60 * 1_000,
+  }, settingsSender());
+  await eventually(() => probeStarted);
+  withdrawConsent(value);
+  releaseProbe();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  assert.equal(result.code, "course_data_consent_required");
+  assert.deepEqual(value.local.values.editPolicies, {});
+  assert.deepEqual(value.local.values.editPolicyRevisions, {});
+}
+
 function pairingOffer(extra = {}) {
   return {
     schema: "morrow.bridge.pairing.v1",
@@ -444,6 +836,68 @@ function jsonResponse(value, init = {}) {
     status: init.status || 200,
     headers: { "content-type": "application/json", ...init.headers },
   });
+}
+
+async function pairingOfferConsentScenario() {
+  let fetchStarted = false;
+  let releaseFetch;
+  const value = fixture({
+    initialLocal: { [consentKey]: consentValue },
+    loopbackFetch: async () => {
+      fetchStarted = true;
+      await new Promise((resolve) => { releaseFetch = resolve; });
+      return jsonResponse(pairingOffer());
+    },
+  });
+  await importWorker("pairing-offer-consent");
+  const pending = sendRuntime(value, { type: "morrow_pair" });
+  await eventually(() => fetchStarted);
+  withdrawConsent(value);
+  releaseFetch();
+  const result = await pending;
+  assert.equal(result.ok, false);
+  await eventually(() => value.local.values.pairing === null);
+  assert.equal(value.local.values.token, undefined);
+  assert.deepEqual(value.createdTabs, []);
+  assert.deepEqual(value.alarmCreations, []);
+}
+
+async function pairingStatusConsentScenario() {
+  const generation = "22222222-2222-4222-8222-222222222222";
+  const expiresAt = Date.now() + 60_000;
+  let fetchStarted = false;
+  let releaseFetch;
+  const value = fixture({
+    initialLocal: {
+      [consentKey]: consentValue,
+      pairing: { ...pairingOffer({ expiresAt }), pairingGeneration: generation },
+      pairingAuthority: { schema: "morrow.bridge-pairing-authority.v1", generation, status: "pending", changedAt: Date.now() },
+    },
+    loopbackFetch: async () => {
+      fetchStarted = true;
+      await new Promise((resolve) => { releaseFetch = resolve; });
+      return jsonResponse({ schema: "morrow.bridge.pairing-status.v1", status: "approved", expiresAt, token });
+    },
+  });
+  await importWorker("pairing-status-consent");
+  await eventually(() => fetchStarted);
+  withdrawConsent(value);
+  releaseFetch();
+  await eventually(() => value.local.values.pairing === null);
+  assert.equal(value.local.values.token, undefined);
+  assert.equal(value.FakeWebSocket.instances.length, 0);
+}
+
+async function pairingAlarmPeriodScenario() {
+  const value = fixture({
+    initialLocal: { [consentKey]: consentValue },
+    loopbackFetch: async () => jsonResponse(pairingOffer()),
+  });
+  await importWorker("pairing-alarm-period");
+  const result = await sendRuntime(value, { type: "morrow_pair" });
+  assert.equal(result.ok, true);
+  assert.deepEqual(value.alarmCreations, [{ name: "morrow-pairing", options: { periodInMinutes: 1 } }]);
+  assert.equal(value.createdTabs.length, 1);
 }
 
 async function pairingDeclaredOverflowScenario() {
@@ -568,6 +1022,21 @@ const scenarios = {
   "started-write": startedWriteScenario,
   "socket-read": socketReadScenario,
   "late-permission": latePermissionScenario,
+  "command-admission-cancel": commandAdmissionCancellationScenario,
+  "edit-policy-cancel": () => editPolicyCancellationScenario("cancel"),
+  "edit-policy-expiry": () => editPolicyCancellationScenario("expiry"),
+  "maintenance-cancel": () => maintenanceMutationScenario("cancel"),
+  "maintenance-expiry": () => maintenanceMutationScenario("expiry"),
+  "permission-removal-publication": permissionRemovalPublicationScenario,
+  "handshake-backoff": handshakeBackoffScenario,
+  "unscoped-canvas-read": unscopedCanvasReadScenario,
+  "course-file-deadline": courseFileDeadlineScenario,
+  "settings-discovery-consent": settingsDiscoveryConsentScenario,
+  "settings-selection-consent": settingsSelectionConsentScenario,
+  "settings-policy-consent": settingsPolicyConsentScenario,
+  "pairing-offer-consent": pairingOfferConsentScenario,
+  "pairing-status-consent": pairingStatusConsentScenario,
+  "pairing-alarm-period": pairingAlarmPeriodScenario,
   "pairing-declared-overflow": pairingDeclaredOverflowScenario,
   "pairing-stream-overflow": pairingStreamOverflowScenario,
   "pairing-stalled-body": pairingStalledBodyScenario,
@@ -621,6 +1090,66 @@ test("socket closure fences a provider read still checking its course session", 
 
 test("Disconnect invalidates pending course access and compensates a late grant", async () => {
   await isolatedScenario("late-permission");
+});
+
+test("a cancellation reaches a command while its async admission check is pending", async () => {
+  await isolatedScenario("command-admission-cancel");
+});
+
+test("cancellation fences a queued Edit-policy mutation", async () => {
+  await isolatedScenario("edit-policy-cancel");
+});
+
+test("expiresAt fences a queued Edit-policy mutation", async () => {
+  await isolatedScenario("edit-policy-expiry");
+});
+
+test("expiresAt fences a Bridge maintenance mutation", async () => {
+  await isolatedScenario("maintenance-expiry");
+});
+
+test("cancellation fences a Bridge maintenance mutation", async () => {
+  await isolatedScenario("maintenance-cancel");
+});
+
+test("permission removal immediately publishes an unavailable binding", async () => {
+  await isolatedScenario("permission-removal-publication");
+});
+
+test("a silent socket hits its client handshake deadline and retries with capped backoff", async () => {
+  await isolatedScenario("handshake-backoff");
+});
+
+test("unscoped Canvas reads are refused without provider execution", async () => {
+  await isolatedScenario("unscoped-canvas-read");
+});
+
+test("an expired private file read starts no provider execution after its permission check", async () => {
+  await isolatedScenario("course-file-deadline");
+});
+
+test("consent withdrawal fences a late Settings course discovery", async () => {
+  await isolatedScenario("settings-discovery-consent");
+});
+
+test("consent withdrawal fences a late Settings course selection", async () => {
+  await isolatedScenario("settings-selection-consent");
+});
+
+test("consent withdrawal fences a late Settings Edit-policy save", async () => {
+  await isolatedScenario("settings-policy-consent");
+});
+
+test("consent withdrawal fences a late pairing offer", async () => {
+  await isolatedScenario("pairing-offer-consent");
+});
+
+test("consent withdrawal fences a late pairing approval", async () => {
+  await isolatedScenario("pairing-status-consent");
+});
+
+test("pairing uses the one-minute alarm floor supported by Chrome 116", async () => {
+  await isolatedScenario("pairing-alarm-period");
 });
 
 test("pairing refuses a declared response larger than four KiB", async () => {

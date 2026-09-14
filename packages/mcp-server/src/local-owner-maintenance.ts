@@ -13,7 +13,11 @@ import {
 } from "@morrow/gateway-core";
 import { RuntimeStateLease } from "./state-lease.js";
 
-export { processMatchesRecordedLifetime, requestPathProcessMatches } from "@morrow/gateway-core";
+export {
+  processMatchesRecordedLifetime,
+  processMatchesRecordedLifetimeAsync,
+  requestPathProcessMatches,
+} from "@morrow/gateway-core";
 
 export const LOCAL_OWNER_MAINTENANCE_SCHEMA = "morrow.local-owner-maintenance.v1";
 export const LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA = "morrow.local-owner-maintenance.request.v1";

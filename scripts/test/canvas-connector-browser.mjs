@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { launchManagedChromiumPersistentContext } from "../lib/playwright-managed-browser.mjs";
-import { canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
 import { CanvasConnectorRuntime } from "../../packages/canvas-connector-mcp/dist/runtime.js";
 import { LoopbackApprovalServer } from "../../packages/mcp-server/dist/approval-server.js";
 import { docxWithMixedAltText, encryptedPdf, taggedPdf } from "../../packages/mcp-server/test/fixtures/canvas-files/index.mjs";
@@ -480,7 +480,7 @@ function startCanvas(directory) {
     // selected course's own calendar and for the whole of it; a request that names neither gets the
     // signed-in person's calendars, which is not that course's own listing.
     if (url.pathname === "/api/v1/calendar_events" && request.method === "GET") {
-      const named = url.searchParams.getAll("context_codes");
+      const named = url.searchParams.getAll("context_codes[]");
       const wholeCalendar = url.searchParams.get("all_events") === "true";
       if (named.length === 1 && named[0] === "course_42" && wholeCalendar) {
         return json(200, [...courseCalendarEvents].map((id) => ({ ...calendarEvents.get(id) })));
@@ -559,7 +559,7 @@ function startCanvas(directory) {
         request.on("data", (chunk) => chunks.push(chunk));
         request.on("end", () => {
           const body = new URLSearchParams(Buffer.concat(chunks).toString("utf8"));
-          assert.deepEqual(body.getAll("appointment_group[context_codes]"), ["course_42"]);
+          assert.deepEqual(body.getAll("appointment_group[context_codes][]"), ["course_42"]);
           appointmentGroupWrites += 1;
           if (body.has("appointment_group[title]")) group.title = body.get("appointment_group[title]");
           if (body.has("appointment_group[location_name]")) group.location_name = body.get("appointment_group[location_name]");
@@ -639,10 +639,10 @@ function startCanvas(directory) {
     }
     if (url.pathname === "/api/v1/progress/981" && request.method === "GET") return json(200, { id: "981", workflow_state: "completed" });
     if (url.pathname === "/api/v1/courses/42/assignments" && request.method === "GET") {
-      const assignmentIds = url.searchParams.getAll("assignment_ids");
+      const assignmentIds = url.searchParams.getAll("assignment_ids[]");
       if (!assignmentIds.length) return json(200, [assignment]);
       assert.deepEqual(assignmentIds, ["188"]);
-      assert.deepEqual(url.searchParams.getAll("include"), ["all_dates"]);
+      assert.deepEqual(url.searchParams.getAll("include[]"), ["all_dates"]);
       return json(200, bulkAssignmentDates);
     }
     if (url.pathname === "/api/v1/courses/42/enrollments/51/reactivate" && request.method === "PUT") {
@@ -655,7 +655,7 @@ function startCanvas(directory) {
     }
     if (url.pathname === "/api/v1/courses/42/enrollments" && request.method === "GET") {
       assert.equal(url.searchParams.get("user_id"), "99");
-      assert.deepEqual(url.searchParams.getAll("state"), ["active"]);
+      assert.deepEqual(url.searchParams.getAll("state[]"), ["active"]);
       return json(200, [enrollment]);
     }
     // Three single-record pages of one Canvas list, with the Link header Canvas
@@ -1664,16 +1664,22 @@ try {
   // Quiz takes every item in it with it and Canvas does not restore it;
   // archiving an Item Bank and deleting one of its entries or a quiz's use of
   // one reach every quiz, in every course, that draws from the bank, which
-  // Canvas gives no complete list of. Every other admitted write, destructive
-  // or not, is an ordinary standing Edit grant, including the general New
-  // Quiz question update (its id-preserving guard lives in
+  // Canvas gives no complete list of. Every other scoped, admitted write with
+  // exact readback is an ordinary standing Edit grant, including the general
+  // New Quiz question update (its id-preserving guard lives in
   // new-quiz-item-guard.js, not in what is grantable) and creating a New Quiz
   // or any non-destructive Item Bank write.
   const reviewOnlyAdmittedCanvasWrites = new Set([
     "canvas_delete_new_quiz", "canvas_item_bank_archive_bank", "canvas_item_bank_delete_entry", "canvas_item_bank_delete_quiz_bank_entry",
   ]);
+  const supportedCanvasWrite = (operation) => {
+    const admission = canvasOperationAdmission(operation);
+    return canvasCourseTargetIsScoped(admission.courseTarget)
+      && admission.write.state === "admitted"
+      && canvasReadbackAssessment(canvasCatalog.operations, operation, admission).state === "structurally_exact";
+  };
   const expectedCanvasEditActions = canvasWriteOperations
-    .filter((operation) => canvasOperationAdmission(operation).write.state === "admitted"
+    .filter((operation) => supportedCanvasWrite(operation)
       && !reviewOnlyAdmittedCanvasWrites.has(operation.toolName))
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
@@ -1682,9 +1688,21 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.ok(fullEditOptions.options.length > 500, "all edit options must remain available through the on-demand response");
+  assert.equal(expectedCanvasEditActions.length, 112);
+  const expectedCanvasReviewActions = [...reviewOnlyAdmittedCanvasWrites]
+    .map((toolName) => `action:canvas:${toolName}`)
+    .sort();
+  const publishedCanvasReviewActions = fullEditOptions.options
+    .filter((option) => option.availability === "review" && option.id.startsWith("action:canvas:"))
+    .map((option) => option.id)
+    .sort();
+  assert.deepEqual(publishedCanvasReviewActions, expectedCanvasReviewActions);
+  assert.deepEqual(
+    fullEditOptions.options.filter((option) => option.id.startsWith("action:canvas:")).map((option) => option.id).sort(),
+    [...expectedCanvasEditActions, ...expectedCanvasReviewActions].sort(),
+  );
   const expectedDestructiveActions = canvasWriteOperations
-    .filter((operation) => operation.risk === "destructive")
+    .filter((operation) => operation.risk === "destructive" && supportedCanvasWrite(operation))
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
   const publishedDestructiveActions = fullEditOptions.options
@@ -1703,26 +1721,24 @@ try {
     fullEditOptions.options.filter((option) => option.destructive === true).map((option) => option.id).sort(),
     publishedDestructiveActions,
   );
-  const expectedUncheckedActions = canvasWriteOperations
-    .filter((operation) => canvasOperationAdmission(operation).write.state === "admitted"
-      && canvasReadbackAssessment(canvasCatalog.operations, operation).state !== "structurally_exact")
+  const nonexactCanvasActions = canvasWriteOperations
+    .filter((operation) => {
+      const admission = canvasOperationAdmission(operation);
+      return canvasCourseTargetIsScoped(admission.courseTarget)
+        && admission.write.state === "admitted"
+        && canvasReadbackAssessment(canvasCatalog.operations, operation, admission).state !== "structurally_exact";
+    })
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  const publishedUncheckedActions = fullEditOptions.options
-    .filter((option) => option.id.startsWith("action:canvas:") && option.verification === "unchecked")
-    .map((option) => option.id)
-    .sort();
-  assert.ok(expectedUncheckedActions.length > 0 && expectedUncheckedActions.length < publishedCanvasEditActions.length);
-  assert.deepEqual(publishedUncheckedActions, expectedUncheckedActions);
-  assert.equal(fullEditOptions.options.some((option) => option.availability === "edit" && option.verification === undefined), false);
-  assert.equal(fullEditOptions.options.some((option) => option.verification === "unchecked" && !option.verificationReason), false);
+  assert.equal(nonexactCanvasActions.length, 28);
+  assert.equal(nonexactCanvasActions.some((id) => fullEditOptions.options.some((option) => option.id === id)), false);
+  assert.equal(fullEditOptions.options.some((option) => option.availability === "edit" && option.verification !== "checked"), false);
+  assert.equal(fullEditOptions.options.some((option) => option.verification === "unchecked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.availability === "review" && option.verification !== undefined), false);
   const deleteEntryAction = fullEditOptions.options.find((option) => option.id === "action:canvas:canvas_delete_entry_courses");
-  assert.equal(deleteEntryAction.destructive, true);
-  assert.equal(deleteEntryAction.verification, "unchecked");
-  assert.match(deleteEntryAction.verificationReason, /Morrow reports the saved result as unconfirmed\.$/);
+  assert.equal(deleteEntryAction, undefined);
   assert.equal(fullEditOptions.options.find((option) => option.id === "canvas_page_content").verification, "checked");
-  process.stderr.write("[browser-test] published Edit actions equal the admitted Canvas writes, name every destructive action, mark every action Morrow cannot check, and refuse a blanket field grant\n");
+  process.stderr.write("[browser-test] published Edit actions equal the exact course-scoped Canvas writes, retain four destructive review cases, omit every nonexact action, and refuse a blanket field grant\n");
   process.stderr.write("[browser-test] one Canvas site anchor selected three exact courses, including course 501 after paged discovery\n");
 
   await popup.bringToFront();
@@ -2021,32 +2037,14 @@ try {
   assert.equal(await settings.locator("#edit-duration").inputValue(), String(60 * 60 * 1_000));
 
   await settings.locator("#action-filter").fill("Remove course from favorites");
-  const uncheckableRow = settings.locator('label[for="category-action:canvas:canvas_remove_course_from_favorites"]');
-  await uncheckableRow.waitFor();
-  assert.deepEqual(await uncheckableRow.locator(".action-flag").allInnerTexts(), ["Removes content", "Saved result not checked"]);
-  assert.match(await uncheckableRow.innerText(), /Morrow cannot check this change after it is saved: .+\. Morrow reports the saved result as unconfirmed\./);
-  const checkedOnlyFilter = settings.getByRole("checkbox", { name: "Only actions Morrow can check" });
-  await checkedOnlyFilter.check();
-  await waitFor(async () => await uncheckableRow.count() === 0, "the checked-only filter still listed an action Morrow cannot check");
-  await checkedOnlyFilter.uncheck();
-  await uncheckableRow.waitFor();
-  await uncheckableRow.locator("input[type=checkbox]").check();
-  await settings.locator("#save-edit").click();
-  const saveConfirmation = settings.locator("#save-confirmation");
-  await saveConfirmation.waitFor();
-  const saveConfirmationText = await saveConfirmation.innerText();
-  assert.match(saveConfirmationText, /1 selected action removes course content: Remove course from favorites\./);
-  assert.match(saveConfirmationText, /Morrow cannot check the saved result for 1 selected action: Remove course from favorites\. Morrow reports those results as unconfirmed\./);
-  assert.equal(await settings.locator("#save-edit").isDisabled(), true);
-  assert.equal(Boolean((await runtime.editOptions(binding.sourceBindingId)).editPermission), false, "Edit access was saved before the second confirmation");
-  await captureThemes(settings, "bridge-settings-unchecked-action", 900);
+  await settings.getByText("No individual action matches this search.", { exact: true }).waitFor();
+  assert.equal(await settings.locator('label[for="category-action:canvas:canvas_remove_course_from_favorites"]').count(), 0);
+  assert.equal(await settings.getByText("Saved result not checked", { exact: true }).count(), 0);
+  await captureThemes(settings, "bridge-settings-exact-actions", 900);
   await settings.setViewportSize({ width: 900, height: 760 });
-  await settings.getByRole("button", { name: "Keep reviewing" }).click();
-  await waitFor(async () => await saveConfirmation.isHidden(), "the second confirmation stayed open after Keep reviewing");
-  await uncheckableRow.locator("input[type=checkbox]").uncheck();
   await settings.locator("#action-filter").fill("");
-  await waitFor(async () => await settings.locator("#save-edit").isDisabled() === false, "Save Edit access stayed disabled after the flagged action was cleared");
-  process.stderr.write("[browser-test] Settings marks the actions Morrow cannot check, filters them out on request, and refuses to save one without a second confirmation\n");
+  await waitFor(async () => await settings.locator("#save-edit").isDisabled() === false, "Save Edit access stayed disabled after the search was cleared");
+  process.stderr.write("[browser-test] Settings omits every Canvas action whose saved result Morrow cannot check\n");
 
   await captureThemes(settings, "bridge-settings-edit", 900);
   await captureThemes(settings, "bridge-settings-edit-narrow", 320);
@@ -2125,6 +2123,10 @@ try {
   assert.equal(recordedRead.courseId, "42");
   assert.equal(recordedRead.courseName, "Introduction to Human Biology");
   assert.equal(recordedRead.provider, "canvas");
+  assert.equal(recordedRead.schema, "morrow.first-course-read.v1");
+  assert.equal(recordedRead.sourceBindingId, binding.sourceBindingId);
+  assert.equal(recordedRead.principalFingerprint, binding.principalFingerprint);
+  assert.equal(recordedRead.sessionGeneration, binding.sessionGeneration);
   assert.ok(Number.isInteger(recordedRead.at) && recordedRead.at > 0, JSON.stringify(recordedRead));
   await captureSetupGuide(readSetupGuide, "setup-guide-ready");
   await readSetupGuide.close();
@@ -2694,16 +2696,17 @@ try {
   assert.match(JSON.stringify(invalidBulkDateWrite), /canvas_bulk_assignment_dates_invalid/);
   assert.equal(canvas.bulkAssignmentDateWrites(), 1);
   assert.equal(canvas.requests().filter((entry) => entry === "PUT /api/v1/courses/42/assignments/bulk_update").length, bulkRequestsBeforeInvalid);
-  const reactivatedEnrollment = await runtime.call("canvas_re_activate_enrollment", {
+  const heldEnrollmentReactivation = await runtime.call("canvas_re_activate_enrollment", {
     course_id: "42",
     id: "51",
     _morrow: { source_binding_id: binding.sourceBindingId, outer_grant: { ...grant, effect_receipt_id: "effect:reactivate-enrollment-browser-test" } },
   });
-  assert.equal(reactivatedEnrollment.ok, true, JSON.stringify(reactivatedEnrollment));
-  assert.equal(reactivatedEnrollment.result.verification.status, "verified", JSON.stringify(reactivatedEnrollment));
-  assert.equal(canvas.enrollmentReactivationWrites(), 1);
-  assert.deepEqual(canvas.enrollment(), { id: "51", course_id: "42", user_id: "99", enrollment_state: "active" });
-  process.stderr.write("[browser-test] Canvas bulk AssignmentDate and enrollment reactivation changes verify exact Progress, course, subject, and postcondition evidence\n");
+  assert.equal(heldEnrollmentReactivation.ok, false, JSON.stringify(heldEnrollmentReactivation));
+  assert.equal(heldEnrollmentReactivation.resultState, "not_sent", JSON.stringify(heldEnrollmentReactivation));
+  assert.match(JSON.stringify(heldEnrollmentReactivation), /Morrow does not change a student's own record/);
+  assert.equal(canvas.enrollmentReactivationWrites(), 0);
+  assert.deepEqual(canvas.enrollment(), { id: "51", course_id: "42", user_id: "99", enrollment_state: "inactive" });
+  process.stderr.write("[browser-test] Canvas bulk AssignmentDate changes verify exact Progress evidence, while enrollment reactivation stays held before provider access\n");
   const wrongCourse = await runtime.call("canvas_show_page_courses", {
     course_id: "43",
     url_or_id: "lesson",

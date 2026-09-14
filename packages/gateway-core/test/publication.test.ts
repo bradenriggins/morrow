@@ -82,6 +82,11 @@ describe("applyPublicationPolicy", () => {
       publicName: "canvas_page_get",
       upstreamId: "morrow-legacy",
       upstreamName: "get_page",
+      capability: {
+        profiles: {
+          "public-canvas": { state: "supported" },
+        },
+      },
     });
     expect(applied.catalog.collisions).toEqual([]);
     expect(applied.catalog.excluded).toEqual(expect.arrayContaining([
@@ -105,6 +110,55 @@ describe("applyPublicationPolicy", () => {
     });
     expect(applied.receipt.manifestDigest).toMatch(/^[0-9a-f]{64}$/);
     expect(applied.catalog.digest).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it("does not promote a selected capability that is safety-limited", () => {
+    const { catalog } = manifestFor();
+    const selected = catalog.tools.find((candidate) => candidate.upstreamName === "get_page");
+    if (!selected?.capability) throw new Error("missing fixture capability");
+    const reason = "Morrow cannot send this Canvas change because its exact post-write read is unsafe.";
+    const limitedTool = {
+      ...selected,
+      capability: {
+        ...selected.capability,
+        behavior: { ...selected.capability.behavior, supportsReadback: false },
+        profiles: {
+          ...selected.capability.profiles,
+          "public-canvas": { state: "profile_limited" as const, reason },
+        },
+        evidence: {
+          ...selected.capability.evidence,
+          readback: { state: "blocked" as const, reason: "No safe exact post-write reader is available." },
+        },
+      },
+    };
+    const limitedCatalog = {
+      ...catalog,
+      tools: catalog.tools.map((tool) => tool === selected ? limitedTool : tool),
+    };
+    const manifest = {
+      schema: "morrow.publication-policy.v1" as const,
+      profile: "public-canvas" as const,
+      release: "1.0.0-rc.0",
+      sources: [{ sourceId: limitedTool.upstreamId, catalogDigest: sourceDigest, toolCount: 1 }],
+      tools: [publicationRuleForTool(limitedTool, "canvas_favorite_add")],
+    };
+
+    const applied = applyPublicationPolicy(limitedCatalog, manifest, [{
+      sourceId: limitedTool.upstreamId,
+      catalogDigest: sourceDigest,
+      toolCount: 1,
+    }]);
+
+    expect(applied.catalog.tools).toHaveLength(1);
+    expect(applied.catalog.tools[0]?.capability).toEqual({
+      ...limitedTool.capability,
+      canonicalName: "canvas_favorite_add",
+    });
+    expect(applied.catalog.tools[0]?.capability?.profiles["public-canvas"]).toEqual({
+      state: "profile_limited",
+      reason,
+    });
   });
 
   it("refuses source catalog and schema drift", () => {

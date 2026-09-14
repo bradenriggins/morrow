@@ -51,6 +51,8 @@ const DEFAULT_CALL_TIMEOUT_MS = 45_000;
 const DEFAULT_HEARTBEAT_MS = 20_000;
 const DEFAULT_SHUTDOWN_GRACE_MS = 250;
 const MAX_PAIRING_REQUESTS = 32;
+const MAX_PENDING_REQUESTS = 64;
+const MAX_PENDING_COMMAND_BYTES = 8 * 1024 * 1024;
 /**
  * How many sent effect receipts one bridge process remembers. The record never
  * drops a receipt, so this is also the point at which the bridge refuses a new
@@ -233,6 +235,15 @@ export class BridgeWriteRecordFullError extends BridgeUnavailableError {
   }
 }
 
+export class BridgeRequestCapacityError extends BridgeUnavailableError {
+  override readonly code = "bridge_request_capacity";
+
+  constructor() {
+    super("Morrow Bridge is busy with its current requests. It did not send this request. Try again after they finish.");
+    this.name = "BridgeRequestCapacityError";
+  }
+}
+
 export class BridgeOutcomeUnknownError extends Error {
   readonly code = "bridge_outcome_unknown";
   readonly requestId: string;
@@ -363,6 +374,7 @@ export class LoopbackBridgeServer {
   private readonly pairingEnabled: boolean;
   private readonly onPairApproved: ((extensionId: string) => void | Promise<void>) | undefined;
   private readonly pending = new Map<string, PendingRequest>();
+  private pendingCommandBytes = 0;
   private readonly pairingRequests = new Map<string, PairingRequest>();
   private readonly pairingDecisions = new Set<string>();
   /**
@@ -1076,8 +1088,11 @@ export class LoopbackBridgeServer {
     if (this.active !== active || active.socket.readyState !== WebSocket.OPEN) {
       throw new BridgeUnavailableError("The exact course connection changed before this command could be sent. Create a fresh plan from a current binding.");
     }
-    if (["invoke_write", "stage_write"].includes(invocation.kind) && invocation.outerGrant) {
-      if (this.usedOuterEffectReceipts.has(invocation.outerGrant.effectReceiptId)) {
+    const effectReceiptId = ["invoke_write", "stage_write"].includes(invocation.kind)
+      ? invocation.outerGrant?.effectReceiptId
+      : undefined;
+    if (effectReceiptId) {
+      if (this.usedOuterEffectReceipts.has(effectReceiptId)) {
         throw new BridgeOutcomeUnknownError({
           schema: BRIDGE_SCHEMAS.command,
           protocolVersion: BRIDGE_PROTOCOL_VERSION,
@@ -1092,7 +1107,6 @@ export class LoopbackBridgeServer {
       if (this.usedOuterEffectReceipts.size >= this.writeReceiptCapacity) {
         throw new BridgeWriteRecordFullError(this.writeReceiptCapacity);
       }
-      this.usedOuterEffectReceipts.add(invocation.outerGrant.effectReceiptId);
     }
     const command: BridgeCommand = {
       schema: BRIDGE_SCHEMAS.command,
@@ -1115,12 +1129,23 @@ export class LoopbackBridgeServer {
       createdAt: now,
       expiresAt: now + timeoutMs,
     };
+    const serializedCommand = serializeBridgeMessage(command);
+    const commandBytes = Buffer.byteLength(serializedCommand, "utf8");
+    if (this.pending.size >= MAX_PENDING_REQUESTS
+      || this.pendingCommandBytes + active.socket.bufferedAmount + commandBytes > MAX_PENDING_COMMAND_BYTES) {
+      throw new BridgeRequestCapacityError();
+    }
     return await new Promise<BridgeResult>((resolve, reject) => {
       let timer: NodeJS.Timeout;
       let commandSent = false;
+      let commandAdmitted = false;
       const cleanup = () => {
         clearTimeout(timer);
         invocation.signal?.removeEventListener("abort", onAbort);
+        if (commandAdmitted) {
+          commandAdmitted = false;
+          this.pendingCommandBytes -= commandBytes;
+        }
       };
       const resolvePending = (result: BridgeResult) => {
         cleanup();
@@ -1176,14 +1201,18 @@ export class LoopbackBridgeServer {
       }, timeoutMs);
       timer.unref?.();
       this.pending.set(requestId, { command, timer, resolve: resolvePending, reject: rejectPending });
+      this.pendingCommandBytes += commandBytes;
+      commandAdmitted = true;
       invocation.signal?.addEventListener("abort", onAbort, { once: true });
       if (invocation.signal?.aborted) {
         onAbort();
         return;
       }
       try {
-        send(active.socket, command);
+        if (active.socket.readyState !== WebSocket.OPEN) throw new BridgeUnavailableError();
+        active.socket.send(serializedCommand);
         commandSent = true;
+        if (effectReceiptId) this.usedOuterEffectReceipts.add(effectReceiptId);
       } catch (error) {
         this.pending.delete(requestId);
         rejectPending(error instanceof Error ? error : new BridgeUnavailableError());

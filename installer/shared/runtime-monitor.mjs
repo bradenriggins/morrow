@@ -3,6 +3,12 @@ import { readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 
 import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+const localRequire = createRequire(import.meta.url);
+const {
+  processMatchesExactStart,
+  readProcessStartedAt,
+} = localRequire("./process-lifetime.cjs");
+
 const SNAPSHOT_SCHEMA = "morrow.installer-runtime.v1";
 const FIRST_READ_SCHEMA = "morrow.installer-first-safe-read.v1";
 const MAINTENANCE_SCHEMA = "morrow.installer-maintenance.v1";
@@ -189,23 +195,36 @@ function processAlive(pid) {
   }
 }
 
-/** Ends the one stdio child of a generation within a fixed bound. Returns whether it is gone. */
-async function reclaimChildProcess(pid, timeoutMs) {
-  if (!validPid(pid) || !processAlive(pid)) return true;
-  const signalDeadline = Date.now() + Math.floor(timeoutMs / 2);
-  try { process.kill(pid, "SIGTERM"); } catch { return !processAlive(pid); }
-  while (Date.now() < signalDeadline) {
-    if (!processAlive(pid)) return true;
-    await pause(CHILD_RECLAIM_POLL_MS);
-  }
-  const finalDeadline = Date.now() + Math.floor(timeoutMs / 2);
-  try { process.kill(pid, "SIGKILL"); } catch { return !processAlive(pid); }
-  while (Date.now() < finalDeadline) {
-    if (!processAlive(pid)) return true;
-    await pause(CHILD_RECLAIM_POLL_MS);
-  }
-  return !processAlive(pid);
+/** Builds the identity-bound child reclaimer. Dependencies are injectable for the PID-reuse regression. */
+export function createChildProcessReclaimer(dependencies = {}) {
+  const alive = dependencies.processAlive || processAlive;
+  const matches = dependencies.processMatchesExactStart || processMatchesExactStart;
+  const signal = dependencies.signalProcess || ((pid, name) => process.kill(pid, name));
+  const wait = dependencies.pause || pause;
+  const now = dependencies.now || Date.now;
+  return async (pid, recordedStartedAt, timeoutMs) => {
+    if (!validPid(pid) || !alive(pid)) return true;
+    const initialIdentity = recordedStartedAt ? await matches(pid, recordedStartedAt) : null;
+    if (initialIdentity !== true) return initialIdentity === false;
+    const signalDeadline = now() + Math.floor(timeoutMs / 2);
+    try { signal(pid, "SIGTERM"); } catch { return !alive(pid); }
+    while (now() < signalDeadline) {
+      if (!alive(pid)) return true;
+      await wait(CHILD_RECLAIM_POLL_MS);
+    }
+    const finalIdentity = await matches(pid, recordedStartedAt);
+    if (finalIdentity !== true) return finalIdentity === false;
+    const finalDeadline = now() + Math.floor(timeoutMs / 2);
+    try { signal(pid, "SIGKILL"); } catch { return !alive(pid); }
+    while (now() < finalDeadline) {
+      if (!alive(pid)) return true;
+      await wait(CHILD_RECLAIM_POLL_MS);
+    }
+    return await matches(pid, recordedStartedAt) === false;
+  };
 }
+
+const reclaimChildProcess = createChildProcessReclaimer();
 
 function diagnosticDuration(startedAt) {
   return Math.min(Math.max(0, Date.now() - startedAt), TEST_DIAGNOSTIC_DURATION_LIMIT_MS);
@@ -434,6 +453,7 @@ function validBinding(value) {
     courseId,
     sourceBindingId: binding.sourceBindingId,
     sessionGeneration: binding.sessionGeneration,
+    firstReadCompleted: binding.firstReadCompleted === true,
     courseName: typeof binding.courseName === "string" && binding.courseName.trim().length > 0
       ? binding.courseName.slice(0, SAFE_COURSE_NAME_LENGTH)
       : null,
@@ -514,6 +534,7 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
   let generationCount = 0;
   let lastClosed = null;
   let starting = null;
+  let operationTail = Promise.resolve();
   let current = emptySnapshot();
   let previewBinding = null;
   let maintenanceLease = null;
@@ -572,7 +593,8 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
     const bindings = value.bindings;
     const readable = bindings.filter((binding) => binding.provider === "canvas" || binding.provider === "moodle");
     const held = previewBinding ? readable.find((binding) => sameBinding(previewBinding, binding)) || null : null;
-    const selected = held || readable[0] || null;
+    const completed = readable.find((binding) => binding.firstReadCompleted) || null;
+    const selected = completed || held || readable[0] || null;
     current.bindings = {
       runtimeVerifiedCourseCount: bindings.length,
       selectedCourseName: bindings.length === 1 ? bindings[0].courseName : null,
@@ -584,6 +606,7 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
       return null;
     }
     if (previewBinding && !sameBinding(previewBinding, selected)) previewBinding = null;
+    if (selected.firstReadCompleted) previewBinding = selected;
     current.firstPreview = { available: "yes", completed: previewBinding !== null };
     return selected;
   };
@@ -636,7 +659,7 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
       target.closing = (async () => {
         await settleWithin(target.client.close(), timeouts.closeMs);
         await settleWithin(target.transport.close(), timeouts.closeMs);
-        target.reclaimed = await reclaimChildProcess(pid, timeouts.reclaimMs);
+        target.reclaimed = await reclaimChildProcess(pid, target.processStartedAt, timeouts.reclaimMs);
         lastClosed = target;
       })();
     }
@@ -644,6 +667,13 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
   };
 
   const disconnect = () => closeGeneration(generation);
+
+  /** Serializes monitor work so close owns every reconnect and lease transition that started before it. */
+  const runMonitorOperation = (operation) => {
+    const running = operationTail.then(operation);
+    operationTail = running.then(() => undefined, () => undefined);
+    return running;
+  };
 
   /**
    * Runs one MCP operation against one generation under an owned deadline.
@@ -719,10 +749,20 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
         client: nextClient,
         transport: nextTransport,
         get pid() { return validPid(nextTransport.pid) ? nextTransport.pid : null; },
+        processStartedAt: null,
         closing: null,
         reclaimed: null,
       };
-      await operate(next, "initialize", timeouts.connectMs, (options) => nextClient.connect(nextTransport, options));
+      await operate(next, "initialize", timeouts.connectMs, async (options) => {
+        const connecting = Promise.resolve(nextClient.connect(nextTransport, options));
+        connecting.catch(() => {});
+        const pid = next.pid;
+        if (pid !== null) {
+          const startedAt = await readProcessStartedAt(pid);
+          if (Number.isFinite(startedAt)) next.processStartedAt = new Date(startedAt).toISOString();
+        }
+        return connecting;
+      });
       if (testTrace) {
         testTrace.value.child.spawned = validPid(nextTransport.pid);
         testTrace.value.upstream.initialize = diagnosticPhase(true, diagnosticDuration(initializedAt));
@@ -877,34 +917,32 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
 
   return Object.freeze({
     async start() {
-      if (maintenanceLease || maintenanceCommitted) return copied(current);
       if (starting) return starting;
-      starting = refreshInitialGatewayReadiness().finally(() => { starting = null; });
+      starting = runMonitorOperation(() => maintenanceLease || maintenanceCommitted
+        ? copied(current)
+        : refreshInitialGatewayReadiness()).finally(() => { starting = null; });
       return starting;
     },
     snapshot() {
       return copied(current);
     },
     async firstSafeRead() {
-      if (starting) await starting;
-      return runFirstSafeRead();
+      return runMonitorOperation(runFirstSafeRead);
     },
     async maintenance(input) {
-      if (starting) await starting;
-      return runMaintenance(input || {});
+      return runMonitorOperation(() => runMaintenance(input || {}));
     },
     async bridgeMaintenance(control) {
-      if (starting) await starting;
-      return runBridgeMaintenance(control);
+      return runMonitorOperation(() => runBridgeMaintenance(control));
     },
     async testDiagnostics() {
-      if (starting) await starting;
-      return runTestDiagnostics();
+      return runMonitorOperation(runTestDiagnostics);
     },
     async close() {
-      if (starting) await starting.catch(() => {});
-      await releaseHeldMaintenance();
-      await disconnect();
+      await runMonitorOperation(async () => {
+        await releaseHeldMaintenance();
+        await disconnect();
+      });
     },
     /** Whether the last closed generation's child process was reclaimed; null before any close. */
     lastGenerationReclaimed() {

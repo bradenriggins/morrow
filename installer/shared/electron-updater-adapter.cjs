@@ -34,10 +34,30 @@ function createElectronUpdaterAdapter({ updater, currentVersion, platform, arch,
   let cancellationToken = null;
   let checkedUpdateInfo = null;
   let operationGeneration = 0;
-  let downloadGeneration = null;
-  let pendingDownloadedEvent = null;
-  let downloadedEventInvalid = false;
+  let activeDownload = null;
+  let revokedInFlightOperations = 0;
+  const inFlightOperations = new Set();
   const downloadedListeners = new Set();
+
+  function beginOperation() {
+    const operation = { revoked: false };
+    inFlightOperations.add(operation);
+    return operation;
+  }
+
+  function finishOperation(operation) {
+    inFlightOperations.delete(operation);
+    if (operation.revoked) revokedInFlightOperations -= 1;
+  }
+
+  function revokeInFlightOperations() {
+    for (const operation of inFlightOperations) {
+      if (operation.revoked) continue;
+      operation.revoked = true;
+      revokedInFlightOperations += 1;
+    }
+    inFlightOperations.clear();
+  }
 
   function sameDownloadedCandidate(event, info) {
     if (!event || typeof event !== "object" || !info || typeof info !== "object") return false;
@@ -51,9 +71,9 @@ function createElectronUpdaterAdapter({ updater, currentVersion, platform, arch,
   // staging work. Capture it here and publish it only after that promise has
   // succeeded for the same controller-owned download generation.
   const captureDownloaded = (event) => {
-    if (downloadGeneration === null) return;
-    if (pendingDownloadedEvent !== null) downloadedEventInvalid = true;
-    else pendingDownloadedEvent = event;
+    if (revokedInFlightOperations > 0 || activeDownload === null) return;
+    if (activeDownload.pendingDownloadedEvent !== null) activeDownload.downloadedEventInvalid = true;
+    else activeDownload.pendingDownloadedEvent = event;
   };
   updater.on("update-downloaded", captureDownloaded);
 
@@ -78,42 +98,50 @@ function createElectronUpdaterAdapter({ updater, currentVersion, platform, arch,
     },
     async checkForUpdates() {
       const generation = ++operationGeneration;
+      const operation = beginOperation();
       cancellationToken = null;
       checkedUpdateInfo = null;
-      const result = await updater.checkForUpdates();
-      const token = result?.cancellationToken || null;
-      if (generation !== operationGeneration) {
-        if (typeof token?.cancel === "function") token.cancel();
+      try {
+        const result = await updater.checkForUpdates();
+        const token = result?.cancellationToken || null;
+        if (generation !== operationGeneration || operation.revoked) {
+          if (typeof token?.cancel === "function") token.cancel();
+          return result;
+        }
+        cancellationToken = token;
+        checkedUpdateInfo = result?.updateInfo && typeof result.updateInfo === "object" ? result.updateInfo : null;
         return result;
+      } finally {
+        finishOperation(operation);
       }
-      cancellationToken = token;
-      checkedUpdateInfo = result?.updateInfo && typeof result.updateInfo === "object" ? result.updateInfo : null;
-      return result;
     },
     async downloadUpdate() {
       const token = cancellationToken;
       const info = checkedUpdateInfo;
       const generation = operationGeneration;
-      downloadGeneration = generation;
-      pendingDownloadedEvent = null;
-      downloadedEventInvalid = false;
+      const operation = beginOperation();
+      const download = {
+        pendingDownloadedEvent: null,
+        downloadedEventInvalid: false
+      };
+      activeDownload = download;
       try {
         const downloaded = await updater.downloadUpdate(token || undefined);
-        if (generation !== operationGeneration) return downloaded;
-        if (downloadedEventInvalid || (pendingDownloadedEvent !== null && !sameDownloadedCandidate(pendingDownloadedEvent, info))) {
+        if (generation !== operationGeneration || operation.revoked || activeDownload !== download) return downloaded;
+        if (download.downloadedEventInvalid
+          || (download.pendingDownloadedEvent !== null && !sameDownloadedCandidate(download.pendingDownloadedEvent, info))) {
           const error = new Error("electron updater download generation changed");
           error.code = "ERR_UPDATER_GENERATION_MISMATCH";
           throw error;
         }
-        if (pendingDownloadedEvent !== null) {
-          for (const listener of downloadedListeners) listener(pendingDownloadedEvent);
+        if (download.pendingDownloadedEvent !== null) {
+          for (const listener of downloadedListeners) listener(download.pendingDownloadedEvent);
         }
         return downloaded;
       } finally {
-        if (downloadGeneration === generation) downloadGeneration = null;
+        if (activeDownload === download) activeDownload = null;
         if (cancellationToken === token) cancellationToken = null;
-        pendingDownloadedEvent = null;
-        downloadedEventInvalid = false;
+        finishOperation(operation);
       }
     },
     cancelUpdate() {
@@ -121,8 +149,8 @@ function createElectronUpdaterAdapter({ updater, currentVersion, platform, arch,
       const token = cancellationToken;
       cancellationToken = null;
       checkedUpdateInfo = null;
-      pendingDownloadedEvent = null;
-      downloadedEventInvalid = false;
+      revokeInFlightOperations();
+      activeDownload = null;
       if (typeof token?.cancel === "function") token.cancel();
     },
     quitAndInstall: () => updater.quitAndInstall(false, true),
@@ -131,8 +159,11 @@ function createElectronUpdaterAdapter({ updater, currentVersion, platform, arch,
         downloadedListeners.add(listener);
         return () => downloadedListeners.delete(listener);
       }
-      updater.on(event, listener);
-      return () => updater.removeListener(event, listener);
+      const guardedListener = (...argumentsValue) => {
+        if (revokedInFlightOperations === 0) listener(...argumentsValue);
+      };
+      updater.on(event, guardedListener);
+      return () => updater.removeListener(event, guardedListener);
     }
   });
 }

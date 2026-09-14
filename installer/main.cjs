@@ -472,7 +472,7 @@ function noInput(input) {
  * renderer.
  */
 async function failed(error) {
-  const state = await installer.state().catch(() => repairRequiredState());
+  const state = await installer.state().catch(() => repairRequiredState(updateController?.snapshot?.()));
   try {
     return envelope(state, error?.code ? error : errorDetails("setup_failed"));
   } catch {
@@ -853,7 +853,7 @@ async function startMorrow(lifecycle) {
       // never a separate claim that the repair succeeded.
       const repaired = await installer.repair();
       if (repaired?.runtime?.status === "ready") await updateController.reconcileAfterRepair();
-      return envelope(repaired, null);
+      return envelope({ ...repaired, updates: updateController.snapshot() }, null);
     } catch (error) {
       return failed(error);
     }

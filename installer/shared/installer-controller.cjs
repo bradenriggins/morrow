@@ -41,8 +41,7 @@ const {
   verifyMcpRuntime,
   runtimeStatus,
   payloadLayout,
-  mkdirPrivate,
-  restoreConfiguration
+  mkdirPrivate
 } = require("./runtime.cjs");
 
 const BRIDGE_EXTENSION_ID = "abeloclekioohahgedmjcdbpllfjfhko";
@@ -76,9 +75,19 @@ function bridgeDeliveryMode(value) {
 // PowerShell. Selecting Check status asks again straight away.
 const ASSISTANT_DETECTION_TTL_MS = 60_000;
 
+function withUpdateRevision(current, updates) {
+  return {
+    ...current,
+    updates: {
+      ...current.updates,
+      revision: Number.isSafeInteger(updates?.revision) && updates.revision >= 0 ? updates.revision : 0
+    }
+  };
+}
+
 /** The state Morrow reports when it cannot read its own installer record. */
-function repairRequiredState() {
-  return installerState({ lifecycle: "repair_required", assistants: [], selectedAssistantId: null, workspaceSelected: false, runtimeStatus: "repair_required", bridgeDelivery: DEFAULT_BRIDGE_DELIVERY, bridgeFolderReady: false, bridgeLoadedInChrome: false, bridgePaired: "unknown", courseSite: "unknown", runtimeVerifiedCourseCount: 0, selectedCourseName: null });
+function repairRequiredState(updates = null) {
+  return withUpdateRevision(installerState({ lifecycle: "repair_required", assistants: [], selectedAssistantId: null, workspaceSelected: false, runtimeStatus: "repair_required", bridgeDelivery: DEFAULT_BRIDGE_DELIVERY, bridgeFolderReady: false, bridgeLoadedInChrome: false, bridgePaired: "unknown", courseSite: "unknown", runtimeVerifiedCourseCount: 0, selectedCourseName: null, updates }), updates);
 }
 
 function unobservedRuntime() {
@@ -480,6 +489,7 @@ class InstallerController {
     this.runtimeMonitor = null;
     this.runtimeWorkspace = null;
     this.runtimeClosing = null;
+    this.runtimeLifecycle = Promise.resolve();
     this.restartLeases = new Map();
     this.bridgeInstallation = null;
     this.bridgeInitialization = null;
@@ -1446,12 +1456,29 @@ class InstallerController {
 
   /**
    * Writes the Morrow entry into one assistant configuration file. The file is
-   * copied first, and a failure puts the copy back only when the file on disk is
-   * still exactly what Morrow wrote, so an edit made by anything else survives.
+   * copied first. A first-time rollback removes only Morrow from the exact
+   * generation the client accepted; a rebind restores its copy only while the
+   * file on disk is still exactly what Morrow wrote.
    */
   async installClientConfiguration(assistant, target, project, materials, options = {}) {
     const backup = await captureConfiguration(target, path.join(this.paths.state, "Backups"));
     let installedConfigurationSha256 = null;
+    const rollback = async () => {
+      if (!installedConfigurationSha256) return false;
+      if (!options.expectedConfigSha256) {
+        const current = await readConfigurationFile(target);
+        if (current === null || fileHash(current) !== installedConfigurationSha256) return false;
+        const previous = await this.configurationWithoutMorrow(assistant, current.toString("utf8"));
+        if (previous === null) return false;
+        await this.writeAssistantConfiguration(target, previous, installedConfigurationSha256);
+        return true;
+      }
+      if (!backup.present || !backup.backup) return false;
+      const previous = await readConfigurationFile(backup.backup);
+      if (previous === null) return false;
+      await this.writeAssistantConfiguration(target, previous, installedConfigurationSha256);
+      return true;
+    };
     try {
       const argumentsValue = [
         "mcp", "install", assistant.id === "claude-code" ? "claude" : assistant.id === "gemini-cli" ? "gemini" : assistant.id,
@@ -1486,10 +1513,10 @@ class InstallerController {
           const currentSha256 = await fs.readFile(target).then(fileHash, () => null);
           if (currentSha256 !== installedConfigurationSha256) throw errorDetails("assistant_configuration_changed");
         },
-        rollback: async () => restoreConfiguration(backup, installedConfigurationSha256)
+        rollback
       };
     } catch (error) {
-      if (installedConfigurationSha256) await restoreConfiguration(backup, installedConfigurationSha256).catch(() => {});
+      if (installedConfigurationSha256) await rollback().catch(() => {});
       if (error.code) throw error;
       throw errorDetails("setup_failed");
     }
@@ -1560,28 +1587,95 @@ class InstallerController {
     return tombstone;
   }
 
+  async assistantConfigurationGeneration(target, expectedSha256) {
+    const before = await fs.lstat(target).catch(() => null);
+    if (!before?.isFile() || before.isSymbolicLink() || before.nlink !== 1
+      || before.size > ASSISTANT_CONFIG_READ_LIMIT) return null;
+    const content = await fs.readFile(target).catch(() => null);
+    if (content === null || fileHash(content) !== expectedSha256) return null;
+    const after = await fs.lstat(target).catch(() => null);
+    if (!after?.isFile() || after.isSymbolicLink() || after.nlink !== 1
+      || before.dev !== after.dev || before.ino !== after.ino
+      || before.size !== after.size || before.mtimeMs !== after.mtimeMs
+      || before.mode !== after.mode || before.uid !== after.uid || before.gid !== after.gid) return null;
+    return { identity: after, content };
+  }
+
+  async restoreDisplacedAssistantConfiguration(displaced, target, identity) {
+    try {
+      await fs.link(displaced, target);
+    } catch (error) {
+      if (error?.code === "EEXIST") return false;
+      throw error;
+    }
+    const restored = await fs.lstat(target).catch(() => null);
+    if (!restored || restored.dev !== identity.dev || restored.ino !== identity.ino) return false;
+    await fs.unlink(displaced);
+    return true;
+  }
+
   /**
-   * Replaces one assistant configuration file with the content Morrow prepared.
-   * The digest is checked again immediately before the replacement, so a file
-   * something else changed while Morrow was preparing this is never replaced.
+   * Replaces one exact assistant configuration generation without ever
+   * overwriting its pathname. The admitted generation is first displaced and
+   * reverified. Publication then uses an exclusive hard link, so a concurrent
+   * pathname replacement wins and remains untouched.
    */
   async writeAssistantConfiguration(target, content, expectedSha256) {
-    const temporary = `${target}.tmp-${crypto.randomUUID()}`;
+    const operationId = crypto.randomUUID();
+    const temporary = `${target}.tmp-${operationId}`;
+    const displaced = `${target}.morrow-displaced-${operationId}`;
+    let moved = null;
+    let published = false;
     try {
       await fs.writeFile(temporary, content, { encoding: "utf8", mode: 0o600, flag: "wx" });
       // The file this replaces was restricted to this Windows account when it
       // was written. The replacement carries the person's other configuration
-      // entries, so it is restricted the same way before the rename, by the
+      // entries, so it is restricted the same way before publication, by the
       // same module that restricts every other client configuration write. A
       // restriction that cannot be applied refuses the write, so the file is
-      // never replaced with a copy other accounts could read.
+      // never published with a copy other accounts could read.
       if (this.platform === "win32") await this.restrictFileToThisAccount(temporary);
-      const current = await readConfigurationFile(target).then((value) => value === null ? null : fileHash(value));
-      if (current !== expectedSha256) throw errorDetails("assistant_configuration_changed");
-      await fs.rename(temporary, target);
-      if (this.platform !== "win32") await fs.chmod(target, 0o600);
+      const preparedSha256 = fileHash(Buffer.isBuffer(content) ? content : Buffer.from(content, "utf8"));
+      const prepared = await this.assistantConfigurationGeneration(temporary, preparedSha256);
+      const admitted = await this.assistantConfigurationGeneration(target, expectedSha256);
+      if (!prepared || !admitted) throw errorDetails("assistant_configuration_changed");
+
+      await fs.rename(target, displaced);
+      const displacedIdentity = await fs.lstat(displaced).catch(() => null);
+      if (displacedIdentity?.isFile() && !displacedIdentity.isSymbolicLink() && displacedIdentity.nlink === 1) {
+        moved = { identity: displacedIdentity };
+      }
+      const movedGeneration = await this.assistantConfigurationGeneration(displaced, expectedSha256);
+      if (!moved || !movedGeneration
+        || moved.identity.dev !== admitted.identity.dev || moved.identity.ino !== admitted.identity.ino) {
+        if (moved && await this.restoreDisplacedAssistantConfiguration(displaced, target, moved.identity).catch(() => false)) {
+          moved = null;
+        }
+        throw errorDetails("assistant_configuration_changed");
+      }
+      moved = movedGeneration;
+
+      try {
+        await fs.link(temporary, target);
+      } catch (error) {
+        if (error?.code === "EEXIST") throw errorDetails("assistant_configuration_changed");
+        throw error;
+      }
+      published = true;
+      await fs.unlink(temporary);
+      const installed = await this.assistantConfigurationGeneration(target, preparedSha256);
+      const retained = await this.assistantConfigurationGeneration(displaced, expectedSha256);
+      if (!installed || installed.identity.dev !== prepared.identity.dev || installed.identity.ino !== prepared.identity.ino
+        || !retained || retained.identity.dev !== moved.identity.dev || retained.identity.ino !== moved.identity.ino) {
+        throw errorDetails("assistant_configuration_changed");
+      }
+      await fs.unlink(displaced);
+      moved = null;
     } finally {
       await fs.rm(temporary, { force: true }).catch(() => {});
+      if (moved && !published) {
+        await this.restoreDisplacedAssistantConfiguration(displaced, target, moved.identity).catch(() => false);
+      }
     }
   }
 
@@ -2360,13 +2454,20 @@ class InstallerController {
     return answer?.response === 1;
   }
 
-  async closeRuntimeMonitor() {
+  runRuntimeLifecycle(operation) {
+    const running = this.runtimeLifecycle.then(operation);
+    this.runtimeLifecycle = running.then(() => undefined, () => undefined);
+    return running;
+  }
+
+  async closeRuntimeMonitorNow() {
     if (this.runtimeClosing) return this.runtimeClosing;
     const active = this.runtimeMonitor;
     this.runtimeMonitor = null;
     this.runtimeWorkspace = null;
-    const closing = Promise.resolve()
-      .then(() => active?.close())
+    let requestedClose;
+    try { requestedClose = active?.close(); } catch { requestedClose = null; }
+    const closing = Promise.resolve(requestedClose)
       .catch(() => {})
       .finally(() => {
         this.restartLeases.clear();
@@ -2374,6 +2475,10 @@ class InstallerController {
       });
     this.runtimeClosing = closing;
     return closing;
+  }
+
+  closeRuntimeMonitor() {
+    return this.runRuntimeLifecycle(() => this.closeRuntimeMonitorNow());
   }
 
   async recoverDeadMaintenance(journalPath, workspaceRoot) {
@@ -2416,29 +2521,30 @@ class InstallerController {
   }
 
   /** The runtime monitor for this materials folder, or null when Morrow has none. */
-  async runtimeMonitorFor(materials) {
-    if (this.runtimeClosing) await this.runtimeClosing;
-    if (!materials || !await exists(this.paths.upstreams)) return null;
-    try { await this.ensureRuntime(); } catch { return null; }
-    const mcpRuntime = await this.mcpRuntimeVerification;
-    if (!this.runtimeMonitor || this.runtimeWorkspace !== materials) {
-      await this.closeRuntimeMonitor();
-      const stateDirectory = await this.canonicalStateDirectory();
-      const journalPath = path.join(stateDirectory, "morrow.sqlite3");
-      await this.recoverDeadMaintenance(journalPath, materials);
-      const module = await import(pathToFileURL(this.paths.monitorScript).href);
-      this.runtimeMonitor = module.createRuntimeMonitor({
-        nodePath: this.paths.node,
-        serverEntryPath: this.paths.server,
-        upstreamsPath: this.paths.upstreams,
-        workspaceRoot: materials,
-        journalPath,
-        mcpRuntime,
-        ...(this.isTestMode && this.testRoot ? { diagnosticTracePath: path.join(stateDirectory, "runtime-startup-trace.json") } : {})
-      });
-      this.runtimeWorkspace = materials;
-    }
-    return this.runtimeMonitor;
+  runtimeMonitorFor(materials) {
+    return this.runRuntimeLifecycle(async () => {
+      if (!materials || !await exists(this.paths.upstreams)) return null;
+      try { await this.ensureRuntime(); } catch { return null; }
+      const mcpRuntime = await this.mcpRuntimeVerification;
+      if (!this.runtimeMonitor || this.runtimeWorkspace !== materials) {
+        await this.closeRuntimeMonitorNow();
+        const stateDirectory = await this.canonicalStateDirectory();
+        const journalPath = path.join(stateDirectory, "morrow.sqlite3");
+        await this.recoverDeadMaintenance(journalPath, materials);
+        const module = await import(pathToFileURL(this.paths.monitorScript).href);
+        this.runtimeMonitor = module.createRuntimeMonitor({
+          nodePath: this.paths.node,
+          serverEntryPath: this.paths.server,
+          upstreamsPath: this.paths.upstreams,
+          workspaceRoot: materials,
+          journalPath,
+          mcpRuntime,
+          ...(this.isTestMode && this.testRoot ? { diagnosticTracePath: path.join(stateDirectory, "runtime-startup-trace.json") } : {})
+        });
+        this.runtimeWorkspace = materials;
+      }
+      return this.runtimeMonitor;
+    });
   }
 
   /**
@@ -2566,9 +2672,7 @@ class InstallerController {
     if (recheckAssistants) this.assistantDetection.clear();
     let record;
     try { record = await this.record(); }
-    catch {
-      return repairRequiredState();
-    }
+    catch { return repairRequiredState(this.updateSnapshot()); }
     const materials = await this.effectiveWorkspace(record);
     const complete = await this.ensureRuntime().then(() => true, () => false);
     const configured = record.configured && typeof record.configured === "object" ? record.configured : {};
@@ -2593,7 +2697,10 @@ class InstallerController {
         needsWorkspace: true
       };
     }));
-    const runtime = await this.runtimeSnapshot(materials, { wait: false }).catch(() => unobservedRuntime());
+    // An explicit Check status action must return the state that this check
+    // observed. Passive window reads stay non-blocking and may show the last
+    // completed observation while the next bounded refresh runs.
+    const runtime = await this.runtimeSnapshot(materials, { wait: recheckAssistants }).catch(() => unobservedRuntime());
     // The Bridge folder can change while Morrow is open. Read it from disk for
     // each displayed state so a removed or damaged folder cannot keep the
     // startup result and continue to look ready. An update owns the folder
@@ -2628,7 +2735,8 @@ class InstallerController {
       : bridge.paired === true && ready ? "course_not_connected"
       : ready ? "assistant_ready"
       : materials ? "ready_for_assistant" : "ready_for_workspace";
-    return installerState({
+    const updates = this.updateSnapshot();
+    const current = installerState({
       lifecycle,
       assistants,
       selectedAssistantId: requestedAssistant?.id || null,
@@ -2646,12 +2754,13 @@ class InstallerController {
       firstPreviewCourseName: bridge.firstReadCourseName,
       blackboard: await this.blackboardHealth(),
       retention: this.retention(record),
-      updates: this.updateSnapshot(),
+      updates,
       firstPreview: {
         available: runtime.firstPreview.available === "yes",
         completed: runtime.firstPreview.completed === true
       }
     });
+    return withUpdateRevision(current, updates);
   }
 
   /**

@@ -262,6 +262,14 @@ describe("Morrow public stdio protocol", () => {
       const advertisedControls = (capability.structuredContent as { descriptor: { inputSchema: { properties: { _morrow: { properties: Record<string, unknown> } } } } })
         .descriptor.inputSchema.properties._morrow.properties;
       expect(advertisedControls).not.toHaveProperty("readback");
+      const advertisedProperties = (capability.structuredContent as { descriptor: { inputSchema: { properties: Record<string, unknown> } } })
+        .descriptor.inputSchema.properties;
+      expect(advertisedProperties).toEqual(expect.objectContaining({
+        course_id: expect.any(Object),
+        user_id: expect.any(Object),
+        email: expect.any(Object),
+        _morrow: expect.any(Object),
+      }));
       const read = await client.callTool({
         name: "morrow_capability_read",
         arguments: { name: "canvas_page_get", arguments: { course_id: "101" } },

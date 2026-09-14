@@ -81,6 +81,17 @@ function sameFile(left: Stats, right: Stats): boolean {
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+function sameStableLeaseFile(left: Stats, right: Stats): boolean {
+  // ctime can gain precision after a fresh write without any file mutation.
+  return sameFile(left, right)
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid;
+}
+
 /**
  * Keeps every Morrow state file owner-private using path metadata and path
  * permission changes only. SQLite holds the database, WAL, and shared-memory
@@ -202,7 +213,8 @@ function readPinnedLease(
   const parent = lstatSync(dirname(path));
   const named = lstatSync(path);
   if (!parent.isDirectory() || parent.isSymbolicLink() || !sameFile(parentIdentity, parent)
-    || !before.isFile() || before.nlink !== 1 || !sameFile(identity, before) || !sameFile(identity, named)
+    || !before.isFile() || before.nlink !== 1
+    || !sameFile(identity, before) || !sameStableLeaseFile(before, named)
     || !privateFileAccessAccepted(path, named.mode, { trustedRoot: dirname(path) })) {
     throw new Error("Morrow lost ownership of its exact private runtime state lease");
   }
@@ -219,8 +231,9 @@ function readPinnedLease(
   const after = fstatSync(descriptor);
   const currentParent = lstatSync(dirname(path));
   const current = lstatSync(path);
-  if (!sameFile(parentIdentity, currentParent) || !sameFile(identity, after) || !sameFile(identity, current)
-    || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) {
+  if (!sameFile(parentIdentity, currentParent)
+    || !sameStableLeaseFile(before, after) || !sameStableLeaseFile(after, current)
+    || !privateFileAccessAccepted(path, current.mode, { trustedRoot: dirname(path) })) {
     throw new Error("Morrow runtime state lease changed while it was read");
   }
   try { return parseLease(decodeExactUtf8(buffer.subarray(0, length), "Morrow runtime state lease")); } catch { return null; }

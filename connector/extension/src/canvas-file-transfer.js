@@ -1,12 +1,24 @@
 export const MAX_CANVAS_FILE_TRANSFER_BYTES = 1024 * 1024;
 
+export function canonicalCanvasCourseFolderIds(courseId, folderId) {
+  const course = String(courseId || "");
+  const folder = String(folderId || "");
+  if (!/^[1-9][0-9]*$/.test(course) || !/^[1-9][0-9]*$/.test(folder)) {
+    throw new TypeError("Canvas course and folder IDs must be positive decimal strings");
+  }
+  return { course_id: course, folder_id: folder };
+}
+
 /**
  * This function is intentionally self-contained. Chrome serializes only the
  * supplied function body for a MAIN-world injection.
  */
 export async function executeCanvasCourseFileTransferInPage(input) {
-  const requestSignal = (expiresAt) => AbortSignal.timeout(Math.max(1, Math.min(2_147_483_647,
-    Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 30_000)));
+  const requestSignal = (expiresAt) => {
+    const remaining = Number.isSafeInteger(expiresAt) ? expiresAt - Date.now() : 0;
+    if (remaining <= 0) throw new Error("canvas_file_transfer_timeout");
+    return AbortSignal.timeout(Math.min(2_147_483_647, remaining));
+  };
   const limit = 1024 * 1024;
   const responseLimit = 2 * 1024 * 1024;
   const COUNT = /^(?:0|[1-9][0-9]*)$/;
@@ -67,7 +79,10 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       throw new Error("canvas_file_transfer_response_too_large");
     }
     const reader = response.body?.getReader?.();
-    if (!reader || typeof globalThis.TextDecoder !== "function") throw new Error("canvas_file_transfer_response_unavailable");
+    if (!reader || typeof globalThis.TextDecoder !== "function") {
+      cancelBody(response.body);
+      throw new Error("canvas_file_transfer_response_unavailable");
+    }
     const decoder = new TextDecoder("utf-8", { fatal: true });
     let size = 0;
     let text = "";
@@ -96,10 +111,13 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       headers: { Accept: "application/json+canvas-string-ids", ...(options.headers || {}) },
       signal: requestSignal(input?.expiresAt),
     });
-    if (!response.ok) throw new Error("canvas_file_transfer_http_" + response.status);
+    if (!response.ok) {
+      cancelBody(response.body);
+      throw new Error("canvas_file_transfer_http_" + response.status);
+    }
     let received;
-    try { received = new URL(response.url); } catch { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("canvas_file_transfer_origin_changed"); }
-    if (received.origin !== canvasOrigin) { try { const cancellation = response?.body?.cancel?.(); if (cancellation && typeof cancellation.catch === "function") void cancellation.catch(() => {}); } catch {} throw new Error("canvas_file_transfer_origin_changed"); }
+    try { received = new URL(response.url); } catch { cancelBody(response.body); throw new Error("canvas_file_transfer_origin_changed"); }
+    if (received.origin !== canvasOrigin) { cancelBody(response.body); throw new Error("canvas_file_transfer_origin_changed"); }
     const text = await boundedText(response);
     let value;
     try { value = JSON.parse(text); } catch { throw new Error("canvas_file_transfer_response_invalid"); }
@@ -130,11 +148,15 @@ export async function executeCanvasCourseFileTransferInPage(input) {
   };
   const uploadResponse = async (response, canvasOrigin) => {
     if (response.status >= 300 && response.status < 400 || response.status === 201 && response.headers.get("location")) {
+      cancelBody(response.body);
       const confirmation = canvasUrl(response.headers.get("location"), canvasOrigin, "canvas_file_upload_confirmation_refused");
       return (await canvasJson(confirmation.pathname + confirmation.search, canvasOrigin)).value;
     }
-    if (!response.ok) throw new Error("canvas_file_upload_http_" + response.status);
-    canvasUrl(response.url, canvasOrigin, "canvas_file_upload_confirmation_refused");
+    if (!response.ok) {
+      cancelBody(response.body);
+      throw new Error("canvas_file_upload_http_" + response.status);
+    }
+    try { canvasUrl(response.url, canvasOrigin, "canvas_file_upload_confirmation_refused"); } catch (error) { cancelBody(response.body); throw error; }
     const text = await boundedText(response);
     if (!text.trim()) throw new Error("canvas_file_upload_confirmation_missing");
     try { return JSON.parse(text); } catch { throw new Error("canvas_file_upload_confirmation_invalid"); }
@@ -300,6 +322,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     const form = new FormData();
     for (const [key, value] of started.entries) form.append(key, value);
     form.append("file", new Blob([attachment.bytes], { type: attachment.content_type }), attachment.filename);
+    const uploadSignal = requestSignal(input.expiresAt);
     uploadDispatched = true;
     const uploaded = await fetch(started.upload_url, {
       method: "POST",
@@ -308,7 +331,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       redirect: "manual",
       referrerPolicy: "no-referrer",
       body: form,
-      signal: requestSignal(input?.expiresAt),
+      signal: uploadSignal,
     });
     uploadStatus = uploaded.status;
     const finalized = await finalFile(await uploadResponse(uploaded, canvasOrigin));
@@ -319,9 +342,16 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       referrerPolicy: "no-referrer",
       signal: requestSignal(input?.expiresAt),
     });
-    if (!download.ok) throw new Error("canvas_file_download_http_" + download.status);
-    const finalUrl = new URL(download.url);
-    if (finalUrl.protocol !== "https:") throw new Error("canvas_file_download_origin_refused");
+    if (!download.ok) {
+      cancelBody(download.body);
+      throw new Error("canvas_file_download_http_" + download.status);
+    }
+    let finalUrl;
+    try { finalUrl = new URL(download.url); } catch { cancelBody(download.body); throw new Error("canvas_file_download_origin_refused"); }
+    if (finalUrl.protocol !== "https:") {
+      cancelBody(download.body);
+      throw new Error("canvas_file_download_origin_refused");
+    }
     const bytes = await boundedBytes(download);
     if (bytes.byteLength !== attachment.size_bytes || await sha256(bytes) !== attachment.sha256) throw new Error("canvas_file_download_digest_mismatch");
 

@@ -14,12 +14,33 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openExactPrivateSqliteDatabase } from "@morrow/gateway-core";
 import {
   RuntimeStateLease,
   hardenMorrowStateFiles,
 } from "../src/state-lease.js";
+
+const descriptorDrift = vi.hoisted(() => ({ ctimeMs: 0, mtimeMs: 0, calls: 0 }));
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  const fstatSync: typeof actual.fstatSync = ((descriptor: number, options?: unknown) => {
+    const info = actual.fstatSync(descriptor, options as never) as import("node:fs").Stats;
+    if (typeof info.ctimeMs !== "number") return info;
+    descriptorDrift.calls += 1;
+    return Object.assign(Object.create(Object.getPrototypeOf(info)) as import("node:fs").Stats, info, {
+      ctimeMs: info.ctimeMs + descriptorDrift.ctimeMs * descriptorDrift.calls,
+      mtimeMs: info.mtimeMs + descriptorDrift.mtimeMs * descriptorDrift.calls,
+    });
+  }) as typeof actual.fstatSync;
+  return { ...actual, fstatSync };
+});
+
+afterEach(() => {
+  descriptorDrift.ctimeMs = 0;
+  descriptorDrift.mtimeMs = 0;
+  descriptorDrift.calls = 0;
+});
 
 async function within<T>(promise: Promise<T>, milliseconds: number): Promise<T> {
   let timer: NodeJS.Timeout | undefined;
@@ -35,6 +56,33 @@ async function within<T>(promise: Promise<T>, milliseconds: number): Promise<T> 
 }
 
 describe("RuntimeStateLease", () => {
+  it("acquires and heartbeats when only ctime precision changes between stats", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-runtime-lease-ctime-"));
+    const statePath = join(directory, "morrow.sqlite3");
+    descriptorDrift.ctimeMs = 0.5;
+    const lease = RuntimeStateLease.acquire(statePath, { heartbeatMs: 60_000 });
+    try {
+      lease.heartbeat();
+      expect(lease.health().active).toBe(true);
+      expect(descriptorDrift.calls).toBeGreaterThanOrEqual(4);
+    } finally {
+      lease.release();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("still rejects a content timestamp change during lease acquisition", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-runtime-lease-mtime-"));
+    const statePath = join(directory, "morrow.sqlite3");
+    descriptorDrift.mtimeMs = 0.5;
+    try {
+      expect(() => RuntimeStateLease.acquire(statePath, { heartbeatMs: 60_000 }))
+        .toThrow(/changed|failed exact readback/u);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("permits one live owner and releases ownership cleanly", async () => {
     const directory = await mkdtemp(join(tmpdir(), "morrow-runtime-lease-"));
     const statePath = join(directory, "morrow.sqlite3");

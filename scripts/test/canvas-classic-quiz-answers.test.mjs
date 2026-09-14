@@ -24,7 +24,7 @@ function jsonResponse(value, status = 200) {
  * a classic script against these page globals, and the write goes through its
  * own message listener, so the recorded request is the one Canvas would receive.
  */
-async function sendQuizQuestionWrite(toolName, args) {
+async function sendCanvasWrite(toolName, args) {
   const keys = ["location", "document", "fetch", "chrome", "__morrowCanvasConnectorInstalled"];
   const descriptors = new Map(keys.map((key) => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
   const operation = catalogOperation(toolName);
@@ -82,7 +82,7 @@ const VALID_ANSWERS = [
 ];
 
 test("a Classic Quiz edit carries its documented title, time limit and shuffle fields", async () => {
-  const { result, requests } = await sendQuizQuestionWrite("canvas_edit_quiz", {
+  const { result, requests } = await sendCanvasWrite("canvas_edit_quiz", {
     course_id: "42", id: "77", quiz_title: "Cell structures", quiz_time_limit: 30, quiz_shuffle_answers: true,
   });
   assert.equal(result.ok, true);
@@ -94,8 +94,46 @@ test("a Classic Quiz edit carries its documented title, time limit and shuffle f
   ]);
 });
 
+test("a Classic Quiz edit clears every documented nullable restriction", async () => {
+  const { result, requests } = await sendCanvasWrite("canvas_edit_quiz", {
+    course_id: "42",
+    id: "77",
+    quiz_access_code: null,
+    quiz_ip_filter: null,
+    quiz_hide_results: null,
+    quiz_time_limit: null,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(requests.length, 1);
+  assert.deepEqual([...new URLSearchParams(requests[0].body).entries()], [
+    ["quiz[access_code]", ""],
+    ["quiz[hide_results]", ""],
+    ["quiz[ip_filter]", ""],
+    ["quiz[time_limit]", ""],
+  ]);
+});
+
+test("an Assignment Override edit sends explicit null dates as clearing form values", async () => {
+  const { requests } = await sendCanvasWrite("canvas_update_assignment_override", {
+    course_id: "42",
+    assignment_id: "77",
+    id: "512",
+    assignment_override_due_at: null,
+    assignment_override_lock_at: null,
+    assignment_override_unlock_at: null,
+  });
+  const write = requests.find((request) => request.method === "PUT"
+    && request.pathname === "/api/v1/courses/42/assignments/77/overrides/512");
+  assert.ok(write, JSON.stringify(requests));
+  assert.deepEqual([...new URLSearchParams(write.body).entries()], [
+    ["assignment_override[due_at]", ""],
+    ["assignment_override[lock_at]", ""],
+    ["assignment_override[unlock_at]", ""],
+  ]);
+});
+
 test("a Classic Quiz question write sends every answer as indexed form fields", async () => {
-  const { result, requests } = await sendQuizQuestionWrite("canvas_update_existing_quiz_question", {
+  const { result, requests } = await sendCanvasWrite("canvas_update_existing_quiz_question", {
     course_id: "42",
     quiz_id: "77",
     id: "512",
@@ -120,7 +158,7 @@ test("a Classic Quiz question write sends every answer as indexed form fields", 
 });
 
 test("a new Classic Quiz question sends the same indexed answer fields", async () => {
-  const { result, requests } = await sendQuizQuestionWrite("canvas_create_single_quiz_question", {
+  const { result, requests } = await sendCanvasWrite("canvas_create_single_quiz_question", {
     course_id: "42",
     quiz_id: "77",
     question_question_name: "Capital",
@@ -151,7 +189,7 @@ test("an answer array Canvas cannot accept is refused before anything is sent", 
     Array.from({ length: 101 }, () => ({ answer_text: "Constantinople", answer_weight: 0 })),
   ];
   for (const question_answers of refused) {
-    const { result, requests } = await sendQuizQuestionWrite("canvas_update_existing_quiz_question", {
+    const { result, requests } = await sendCanvasWrite("canvas_update_existing_quiz_question", {
       course_id: "42",
       quiz_id: "77",
       id: "512",

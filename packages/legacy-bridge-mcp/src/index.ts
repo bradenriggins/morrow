@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { serveStdio, StdioServerTransport, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
+import { serveStdio, type StdioServerHandle } from "@modelcontextprotocol/server/stdio";
 import { loadLegacyBridgeConfig } from "./config.js";
 import { LegacyBridgeRuntime } from "./runtime.js";
 import { createLegacyBridgeMcpServer } from "./server.js";
+import { StrictStdioServerTransport } from "./strict-stdio.js";
 
 const config = await loadLegacyBridgeConfig();
 const runtime = await LegacyBridgeRuntime.start(config);
@@ -26,7 +27,7 @@ async function close(): Promise<void> {
 function shutdown(): void {
   void close();
 }
-class LegacyBridgeStdioTransport extends StdioServerTransport {
+class LegacyBridgeStdioTransport extends StrictStdioServerTransport {
   override async close(): Promise<void> {
     await super.close();
     shutdown();

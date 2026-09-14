@@ -584,8 +584,9 @@ describe("CanvasConnectorRuntime", () => {
   it("refuses private file payloads on public Canvas routes before dispatch", async () => {
     const runtime = await start();
     const attachment = canvasPrivateAttachment();
-    expect(await runtime.call("canvas_update_course", {
-      id: "42",
+    expect(await runtime.call("canvas_create_assignment", {
+      course_id: "42",
+      assignment_name: "Connector outcome fixture",
       privateAttachment: {},
     })).toMatchObject({
       ok: false,
@@ -593,8 +594,9 @@ describe("CanvasConnectorRuntime", () => {
       resultState: "not_sent",
       problem: { code: "canvas_private_attachment_invalid" },
     });
-    expect(await runtime.call("canvas_update_course", {
-      id: "42",
+    expect(await runtime.call("canvas_create_assignment", {
+      course_id: "42",
+      assignment_name: "Connector outcome fixture",
       privateAttachment: attachment,
     })).toMatchObject({
       ok: false,
@@ -715,6 +717,50 @@ describe("CanvasConnectorRuntime", () => {
     expect(commands).toBe(1);
   });
 
+  it("retains only the bounded provider outcome for a failed Canvas read", async () => {
+    const runtime = await start();
+    const socket = sockets.at(-1)!;
+    socket.on("message", (raw) => {
+      const value = parseBridgeJson(raw.toString()) as { schema?: string };
+      if (value.schema !== BRIDGE_SCHEMAS.command) return;
+      const command = value as BridgeCommand;
+      socket.send(serializeBridgeMessage({
+        schema: BRIDGE_SCHEMAS.result,
+        protocolVersion: BRIDGE_PROTOCOL_VERSION,
+        requestId: command.requestId,
+        operationId: command.operationId,
+        generation: command.generation,
+        ok: false,
+        result: {
+          schema: "morrow.canvas-browser-failure.v1",
+          provider: "canvas",
+          sent: true,
+          status: 404,
+        },
+        problem: {
+          schema: "morrow.bridge.problem.v1",
+          code: "canvas_request_failed",
+          message: "Canvas returned HTTP 404",
+          recoverable: true,
+        },
+        completedAt: Date.now(),
+      }));
+    });
+    await expect(runtime.call("canvas_get_single_course_courses", {
+      id: "42",
+      _morrow: { source_binding_id: "canvas:test-account" },
+    })).resolves.toMatchObject({
+      ok: false,
+      providerFailure: {
+        schema: "morrow.canvas-browser-failure.v1",
+        provider: "canvas",
+        sent: true,
+        status: 404,
+      },
+      problem: { code: "canvas_request_failed" },
+    });
+  });
+
   it("classifies a cancellation during bridge preflight as not_sent before dispatch", async () => {
     const runtime = await start();
     const stub = runtime.bridge as unknown as { invoke: (invocation: unknown) => Promise<never> };
@@ -800,8 +846,9 @@ describe("CanvasConnectorRuntime", () => {
       authorization: { kind: "review" as const },
     });
 
-    expect(await runtime.call("canvas_update_course", {
-      id: "42",
+    expect(await runtime.call("canvas_create_assignment", {
+      course_id: "42",
+      assignment_name: "Connector outcome fixture",
       _morrow: {
         source_binding_id: "canvas:test-account",
         operation_id: "operation:outcome-before-send",
@@ -812,8 +859,9 @@ describe("CanvasConnectorRuntime", () => {
       resultState: "not_sent",
       problem: { code: "edit_policy_stale" },
     });
-    expect(await runtime.call("canvas_update_course", {
-      id: "42",
+    expect(await runtime.call("canvas_create_assignment", {
+      course_id: "42",
+      assignment_name: "Connector outcome fixture",
       _morrow: {
         source_binding_id: "canvas:test-account",
         operation_id: "operation:outcome-unknown",
@@ -834,8 +882,8 @@ describe("CanvasConnectorRuntime", () => {
     let commands = 0;
     respond(socket, (command) => {
       commands += 1;
-      expect(command.toolName).toBe("canvas_update_course");
-      expect(command.arguments).toEqual({ id: "42" });
+      expect(command.toolName).toBe("canvas_create_assignment");
+      expect(command.arguments).toEqual({ course_id: "42", assignment_name: "Connector admission fixture" });
     });
     const grant = {
       plan_digest: "a".repeat(64),
@@ -844,8 +892,9 @@ describe("CanvasConnectorRuntime", () => {
       dispatch_attempt: 1,
       gateway_process_id: "gateway:connector-test",
     };
-    expect(await runtime.call("canvas_update_course", {
-      id: "42",
+    expect(await runtime.call("canvas_create_assignment", {
+      course_id: "42",
+      assignment_name: "Connector admission fixture",
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: grant },
     })).toMatchObject({ ok: true });
     // The refusal carries the sentence for the class this write is held in, not one generic line
@@ -1136,6 +1185,26 @@ describe("CanvasConnectorRuntime", () => {
     expect(await runtime.call(attach.toolName, { bank_id: "91", entry_id: "501" }))
       .toMatchObject({ ok: false, problem: { code: "course_binding_required" } });
     expect(calls).toBe(1);
+  });
+
+  it("refuses unscoped Canvas reads before Bridge dispatch", async () => {
+    const runtime = await start();
+    const socket = sockets.at(-1)!;
+    let commands = 0;
+    respond(socket, () => { commands += 1; });
+    const unscopedRead = runtime.catalog.operations.find((operation) => operation.readOnly
+      && operation.path === "/v1/accounts/{account_id}/courses")!;
+    expect(unscopedRead.toolName).toBe("canvas_list_active_courses_in_account");
+
+    await expect(runtime.call(unscopedRead.toolName, {
+      account_id: "99",
+      _morrow: { source_binding_id: "canvas:test-account" },
+    })).resolves.toMatchObject({
+      ok: false,
+      resultState: "not_sent",
+      problem: { code: "course_scope_required" },
+    });
+    expect(commands).toBe(0);
   });
 
   it("carries a bounded list resume to the page as a routing control and refuses one on a write", async () => {

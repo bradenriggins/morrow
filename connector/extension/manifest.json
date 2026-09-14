@@ -26,6 +26,6 @@
     "pages": ["render-check/render-check.html"]
   },
   "content_security_policy": {
-    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'self'; base-uri 'none'; form-action 'none'"
+    "sandbox": "sandbox allow-scripts; default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'"
   }
 }

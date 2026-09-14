@@ -196,3 +196,91 @@ test("the adapter discards premature download evidence when staging fails or is 
     assert.deepEqual(events, []);
   });
 });
+
+test("the adapter cancels a token returned after cancellation and never gives it to a later download", async () => {
+  const source = updater();
+  const firstCheck = deferred();
+  let checks = 0;
+  let lateCancellations = 0;
+  const currentToken = { value: "current-check", cancel() {} };
+  source.checkForUpdates = async () => {
+    checks += 1;
+    return checks === 1
+      ? firstCheck.promise
+      : { isUpdateAvailable: true, updateInfo: { version: "1.0.2" }, cancellationToken: currentToken };
+  };
+  const adapter = createElectronUpdaterAdapter({
+    updater: source,
+    currentVersion: "1.0.0",
+    platform: "darwin",
+    arch: "arm64",
+    feedId: "morrow-github-stable",
+    cacheDirectory: CACHE_DIRECTORY
+  });
+
+  const late = adapter.checkForUpdates();
+  await new Promise((resolve) => setImmediate(resolve));
+  adapter.cancelUpdate();
+  adapter.cancelUpdate();
+  firstCheck.resolve({
+    isUpdateAvailable: true,
+    updateInfo: { version: "1.0.1" },
+    cancellationToken: { cancel() { lateCancellations += 1; } }
+  });
+  await late;
+  assert.equal(lateCancellations, 1);
+
+  await adapter.checkForUpdates();
+  await adapter.downloadUpdate();
+  assert.deepEqual(source.downloadTokens, [currentToken]);
+});
+
+test("the adapter quarantines updater events after abandoning an operation", async () => {
+  const source = updater();
+  const firstDownload = deferred();
+  const secondDownload = deferred();
+  let check = 0;
+  let firstTokenCancellations = 0;
+  source.checkForUpdates = async () => {
+    check += 1;
+    return {
+      isUpdateAvailable: true,
+      updateInfo: { version: check === 1 ? "1.0.1" : "1.0.2" },
+      cancellationToken: check === 1
+        ? { cancel() { firstTokenCancellations += 1; } }
+        : { cancel() {} }
+    };
+  };
+  source.downloadUpdate = async () => source.downloads++ === 0 ? firstDownload.promise : secondDownload.promise;
+  const adapter = createElectronUpdaterAdapter({
+    updater: source,
+    currentVersion: "1.0.0",
+    platform: "darwin",
+    arch: "arm64",
+    feedId: "morrow-github-stable",
+    cacheDirectory: CACHE_DIRECTORY
+  });
+  const downloaded = [];
+  const errors = [];
+  adapter.on("update-downloaded", (event) => downloaded.push(event));
+  adapter.on("error", (error) => errors.push(error));
+
+  await adapter.checkForUpdates();
+  const abandoned = adapter.downloadUpdate();
+  await new Promise((resolve) => setImmediate(resolve));
+  adapter.cancelUpdate();
+  adapter.cancelUpdate();
+  assert.equal(firstTokenCancellations, 1);
+
+  await adapter.checkForUpdates();
+  const current = adapter.downloadUpdate();
+  source.emit("update-downloaded", { version: "1.0.1" });
+  source.emit("error", new Error("late abandoned error"));
+  firstDownload.resolve(["late-private-updater-cache"]);
+  await abandoned;
+  source.emit("update-downloaded", { version: "1.0.2" });
+  secondDownload.resolve(["current-private-updater-cache"]);
+  await current;
+  assert.deepEqual(downloaded, [{ version: "1.0.2" }]);
+  assert.deepEqual(errors, []);
+});

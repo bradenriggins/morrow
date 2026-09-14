@@ -47,8 +47,6 @@ test("every generic Canvas readback reads the write target's own resource", () =
 // all three steps.
 test("Canvas writes with no same-resource read report an unavailable readback instead of a plan", () => {
   const withoutSafeRoute = [
-    "canvas_reset_course",
-    "canvas_grade_or_comment_on_multiple_submissions_courses_submissions",
     "canvas_create_score",
     "canvas_delete_rubricassociation",
   ];
@@ -58,6 +56,26 @@ test("Canvas writes with no same-resource read report an unavailable readback in
     assert.equal(planBrowserReadback(catalog.operations, write, structuralArguments(write), structuralResponse), null, name);
     assert.deepEqual(canvasReadbackAssessment(catalog.operations, write), { state: "unavailable", reason: "no_safe_readback_route" }, name);
   }
+
+  const reset = operation("canvas_reset_course");
+  assert.deepEqual(canvasOperationAdmission(reset).write, {
+    state: "held",
+    reason: "multi_course_authority_required",
+  });
+  assert.deepEqual(canvasReadbackAssessment(catalog.operations, reset), {
+    state: "not_applicable",
+    reason: "write_held",
+  });
+
+  const learnerWrite = operation("canvas_grade_or_comment_on_multiple_submissions_courses_submissions");
+  assert.deepEqual(canvasOperationAdmission(learnerWrite).write, {
+    state: "held",
+    reason: "learner_scope_requires_separate_authority",
+  });
+  assert.deepEqual(canvasReadbackAssessment(catalog.operations, learnerWrite), {
+    state: "not_applicable",
+    reason: "write_held",
+  });
 });
 
 test("a read route outside the written resource is refused even when a read exists", () => {

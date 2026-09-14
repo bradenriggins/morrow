@@ -32,6 +32,7 @@ import {
   ArtifactGenerationRegistry,
   LearnerRoster,
   LearnerVault,
+  projectOutput,
   redactLearnerEgress,
   normalizeUpstreamResult,
   redactKnownLearnerText,
@@ -571,6 +572,34 @@ describe("privacy output boundary", () => {
     expect(JSON.stringify(result)).not.toContain("ada@example.test");
   });
 
+  it("keeps identity-free enrollment details nested under a roster-bound learner", () => {
+    const context = learnerPrivacy();
+    const value = {
+      learners: [{
+        id: "17",
+        name: "Ada Lovelace",
+        email: "ada@example.test",
+        enrollments: [{ type: "StudentEnrollment", course_id: "42", enrollment_state: "active" }],
+      }],
+    };
+    const descriptor = { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" as const };
+
+    expect(normalize({ structuredContent: value }, { ...context, descriptor }).structuredContent).toMatchObject({
+      learners: [{
+        learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/),
+        enrollments: [{ type: "StudentEnrollment", course_id: "42", enrollment_state: "active" }],
+      }],
+    });
+    expect(redactLearnerEgress(value, {
+      learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+    })).toMatchObject({
+      learners: [{
+        learnerToken: expect.stringMatching(/^Student A[1-9][0-9]*/),
+        enrollments: [{ type: "StudentEnrollment", course_id: "42", enrollment_state: "active" }],
+      }],
+    });
+  });
+
   it("normalizes identity field spellings before tokenizing a generic learner record", () => {
     const result = normalize({
       structuredContent: {
@@ -598,6 +627,138 @@ describe("privacy output boundary", () => {
 
     expect(result.structuredContent).toMatchObject({ code: "privacy_identity_record_unresolved" });
     expect(JSON.stringify(result)).not.toContain("StudentEnrollment");
+  });
+
+  it("preserves empty identity containers while refusing any unresolved record content", () => {
+    const context = learnerPrivacy();
+    const learnerContext = {
+      learnerRoster: context.learnerRoster!,
+      learnerVault: context.learnerVault!,
+      learnerScope: context.learnerScope!,
+    };
+    const normalized = normalize({
+      structuredContent: { discussion_topic: { author: {} }, submission: {}, enrollments: [] },
+    }, {
+      ...context,
+      descriptor: { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" },
+    });
+    expect(normalized.structuredContent).toEqual({
+      discussion_topic: { author: {} }, submission: {}, enrollments: [],
+    });
+    expect(redactLearnerEgress({ discussion_topic: { author: {} }, submission: {}, enrollments: [] }, learnerContext)).toEqual({
+      discussion_topic: { author: {} }, submission: {}, enrollments: [],
+    });
+    expect(redactLearnerEgress({ discussion_topic: { author: { role: "teacher" } } }, learnerContext))
+      .toEqual({ discussion_topic: { author: { role: "teacher" } } });
+    expect(() => redactLearnerEgress({ discussion_topic: { author: { name: "Unknown Person" } } }, learnerContext))
+      .toThrow("privacy_identity_record_unresolved");
+  });
+
+  it("does not treat structural membership evidence as a person record", () => {
+    const context = learnerPrivacy();
+    const value = { membership: { read_at: "2026-09-14T22:00:00Z", item_count: 2, item_ids: ["11", "12"], authority: "canvas_list_quiz_items" } };
+    const expected = { membership: { read_at: "2026-09-14T22:00:00Z", item_count: 2, item_ids: ["11", "12"], authority: "canvas_list_quiz_items" } };
+    expect(normalize({ structuredContent: value }, {
+      ...context,
+      descriptor: { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive" },
+    }).structuredContent).toEqual(expected);
+    expect(redactLearnerEgress(value, {
+      learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+    })).toEqual(expected);
+  });
+
+  it("scrubs an unrostered course author without refusing ordinary course data", () => {
+    const context = learnerPrivacy();
+    const result = projectOutput({
+      structuredContent: {
+        assignment: {
+          id: "3918100",
+          name: "Course discussion",
+          discussion_topic: {
+            author: {
+              id: "teacher-9",
+              display_name: "Professor Example",
+              avatar_image_url: "https://canvas.example.test/images/teacher-9.png",
+              role: "teacher",
+            },
+          },
+        },
+      },
+    }, {
+      ...context,
+      allowUnrosteredCanvasIdentities: true,
+      descriptor: {
+        ...learnerDescriptor,
+        allowedFields: [],
+        fieldPolicy: "scrub-sensitive",
+        dataClass: "course",
+        learnerTokens: false,
+      },
+    });
+    expect(result).toMatchObject({
+      structuredContent: {
+        assignment: {
+          id: "3918100",
+          name: "Course discussion",
+          discussion_topic: { author: { role: "teacher" } },
+        },
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain("teacher-9");
+    expect(JSON.stringify(result)).not.toContain("Professor Example");
+  });
+
+  it("scrubs every unrostered Canvas editor identity while preserving resource records", () => {
+    const context = learnerPrivacy();
+    const canvasContext = {
+      ...context,
+      allowUnrosteredCanvasIdentities: true,
+      descriptor: {
+        ...learnerDescriptor,
+        allowedFields: [],
+        fieldPolicy: "scrub-sensitive" as const,
+        dataClass: "course" as const,
+        learnerTokens: false,
+      },
+    };
+    const input = {
+      structuredContent: {
+        page: {
+          id: "88",
+          title: "Welcome",
+          user_id: "teacher-9",
+          last_edited_by: { id: "teacher-9", display_name: "Professor Example", role: "teacher" },
+        },
+        audit: { editor: { id: "admin-2", name: "Admin Example", role: "admin" } },
+      },
+    };
+    const projected = projectOutput(input, canvasContext);
+    expect(projected).toMatchObject({
+      structuredContent: {
+        page: { id: "88", title: "Welcome", last_edited_by: { role: "teacher" } },
+        audit: { editor: { role: "admin" } },
+      },
+    });
+    expect(JSON.stringify(projected)).not.toMatch(/teacher-9|Professor Example|admin-2|Admin Example/u);
+
+    const redacted = redactLearnerEgress(input, {
+      learnerRoster: context.learnerRoster!, learnerVault: context.learnerVault!, learnerScope: context.learnerScope!,
+      allowUnrosteredCanvasIdentities: true,
+    });
+    expect(redacted).toMatchObject({ structuredContent: projected.structuredContent });
+  });
+
+  it("does not classify a resource as a person from user_id alone", () => {
+    const context = learnerPrivacy();
+    const result = projectOutput({
+      structuredContent: { export: { id: "72", user_id: "teacher-9", status: "completed", file_count: 3 } },
+    }, {
+      ...context,
+      allowUnrosteredCanvasIdentities: true,
+      descriptor: { ...learnerDescriptor, allowedFields: [], fieldPolicy: "scrub-sensitive", dataClass: "course" },
+    });
+    expect(result).toMatchObject({ structuredContent: { export: { id: "72", status: "completed", file_count: 3 } } });
+    expect(JSON.stringify(result)).not.toContain("teacher-9");
   });
 
   it("scrubs learner and credential fields while retaining complete course objects", () => {

@@ -344,6 +344,95 @@ Every row stays open until its evidence columns are added and its status becomes
 | 327 | P2 | R8 | Egress and projection tokenize every learner record and resolve every learner token through its own durable vault transaction, although the prepared snapshot already holds each label. | `packages/gateway-core/src/privacy.ts`; `packages/gateway-core/test/privacy.test.ts` | IMPLEMENTED |
 | 328 | P2 | R8 | Thirty provider refusal paths in 17 Bridge source files return or throw with a fetched body still live, because the response is handed to a reading helper rather than read where it is refused. | `connector/extension/src`; `scripts/test/provider-response-body-guard.test.mjs` | IMPLEMENTED |
 | 329 | P2 | R2 | The exact private file reader compares ctime across its own read, so a kernel that refines a freshly written inode's ctime after it is queried refuses every fresh readback, and the durable Blackboard session, effect, and learner vault records become unusable. | `packages/gateway-core/src/private-state-file.ts`; `packages/gateway-core/test/private-state-file.test.ts` | IMPLEMENTED |
+| 330 | P1 | R6 | Desktop maintenance requires a cold asynchronous request-path lifetime cache to answer synchronously, so a live runtime monitor is rejected on macOS and Windows; owner startup also runs blocking process queries inside its 25 ms poll. | `packages/gateway-core/src/process-lifetime.ts`; `packages/mcp-server/src/local-owner.ts`; `installer/test/runtime-monitor.test.mjs` | IMPLEMENTED |
+| 331 | P1 | R2 | Six sibling exact-file readers also compare ctime, so a harmless kernel timestamp refinement can reject a valid runtime lease, heartbeat, recovery record, connector state, or generated configuration immediately after Morrow writes it. | Desktop, MCP, connector, catalog, client-config, and legacy exact-file readers; injected-ctime regressions | IMPLEMENTED |
+| 332 | P2 | R6 | Concurrent Desktop state reads can construct more than one runtime monitor and local-owner proxy for the same controller. | `installer/shared/installer-controller.cjs`; `installer/test/installer-controller.test.cjs` | IMPLEMENTED |
+| 333 | P1 | R8 | Runtime-monitor start, refresh, reconnect, maintenance, and close operations can overlap, so close can lose ownership of a reconnect and leave a live MCP child behind. | `installer/shared/runtime-monitor.mjs`; `installer/test/runtime-monitor.test.mjs` | IMPLEMENTED |
+| 334 | P1 | R8 | Desktop child reclamation signals a saved PID without rechecking its recorded process start, so PID reuse can terminate an unrelated process. | `installer/shared/runtime-monitor.mjs`; `installer/test/runtime-monitor.test.mjs` | IMPLEMENTED |
+| 335 | P2 | R8 | Desktop update checks and downloads have no controller-owned deadline, and stop does not settle their promises, so the entire interface can remain disabled behind an uncooperative updater. | `installer/shared/electron-updater-adapter.cjs`; `installer/shared/updates.cjs`; updater regressions | IMPLEMENTED |
+| 336 | P3 | R8 | `morrow doctor` synchronously probes arbitrary client executables without a deadline or process-tree reclaim, so one broken shim freezes the diagnostic command. | `packages/client-config/src/cli.ts`; `packages/client-config/test/client-config.test.ts` | IMPLEMENTED |
+| 337 | P2 | R8 | Windows `.cmd` assistant shims are spawned as ordinary executables, so paths with shell metacharacters can fail or change command interpretation. | `installer/shared/assistant-app-detection.cjs`; `installer/test/assistant-app-detection.test.cjs` | IMPLEMENTED |
+| 338 | P1 | R2 | Assistant removal checks a configuration and later renames its path, so a concurrent replacement can be overwritten by the removal transaction. | `installer/shared/installer-controller.cjs`; `installer/test/assistant-management.test.cjs` | IMPLEMENTED |
+| 339 | P1 | R2 | First-time assistant setup rollback restores an obsolete backup over a newer concurrent configuration, losing the person's edit. | `installer/shared/installer-controller.cjs`; `installer/test/assistant-management.test.cjs` | IMPLEMENTED |
+| 340 | P2 | R6 | A late full-state IPC response or repair result can overwrite a newer pushed update state in the Desktop renderer. | `installer/shared/updates.cjs`; `installer/renderer/renderer.js`; `installer/main.cjs`; update-order regressions | IMPLEMENTED |
+| 341 | P1 | R5 | Canvas exposes 351 reads that cannot prove the selected course; an account, session, or self read can reach provider I/O for a different scope while capability profiles advertise it as supported. | Canvas catalog admission, connector runtime, service worker, content script, and zero-I/O regressions | IMPLEMENTED |
+| 342 | P1 | R8 | Generic Canvas and Moodle executors create fresh preflight and retry timeouts instead of carrying the original Bridge deadline, so expired work can start provider I/O and a Canvas 429 body can remain live. | `connector/extension/src/canvas-content.js`; `connector/extension/src/moodle-executor.js`; deadline and response regressions | IMPLEMENTED |
+| 343 | P1 | R8 | Item Bank, quiz-bank, private course-file, and Hot Spot routes renew or omit the original Bridge deadline across credential, permission, upload, and verification steps. | specialized service-worker and in-page executors; expiry regressions | IMPLEMENTED |
+| 344 | P2 | R8 | The provider response guard misses a response overwritten before disposition, and non-OK or retried responses can retain live bodies. | provider response analyser, Canvas and Moodle executors, body-ownership regressions | IMPLEMENTED |
+| 345 | P1 | R3 | The private Canvas file-transfer result converts canonical course and folder IDs to JavaScript numbers, corrupting valid IDs above `Number.MAX_SAFE_INTEGER`. | `connector/extension/src/canvas-file-transfer.js`; `connector/extension/src/service-worker.js`; large-ID regression | IMPLEMENTED |
+| 346 | P2 | R5 | Bridge and Desktop use different first-read authorities: a stale read from Course A can complete setup beside Course B, while a valid read disappears from Desktop after relaunch. | Bridge receipt, protocol projection, onboarding, runtime monitor, and cross-boundary regressions | IMPLEMENTED |
+| 347 | P1 | R2 | A matching read prepared before a write becomes unresolved can later close that unknown effect and release its target lock, although the read is not causally after the effect. | operation journal causal sequence; MCP recovery regression | IMPLEMENTED |
+| 348 | P1 | R8 | Closing a local-owner proxy while `MorrowRuntime.connect` is pending does not cancel construction, so a late runtime and its upstream children can survive shutdown. | MCP runtime connect lifecycle and local-owner regressions | IMPLEMENTED |
+| 349 | P2 | R8 | The legacy Bridge MCP path drops caller cancellation before provider dispatch. | legacy runtime and cancellation regressions | IMPLEMENTED |
+| 350 | P1 | R8 | A proxy that launches a local owner and times out before ownership publication can orphan the child, and stubborn children can defeat unbounded TERM or `taskkill` waits. | `packages/mcp-server/src/local-owner.ts`; owner startup lifecycle regression | IMPLEMENTED |
+| 351 | P1 | R8 | Upstream MCP stdout writes are not one bounded serialized queue, so concurrent or stalled output can reorder protocol frames or grow memory without limit. | `packages/upstream-mcp/src/strict-stdio.ts`; strict-stdio regressions | IMPLEMENTED |
+| 352 | P1 | R8 | The legacy stdio server has no strict bounded output and shutdown contract, so slow stdout or a stuck close can keep the process alive and retain output indefinitely. | `packages/legacy-bridge-mcp/src/strict-stdio.ts`; strict-stdio and shutdown regressions | IMPLEMENTED |
+| 353 | P1 | R2 | Bridge loopback consumes a single-use effect receipt before it proves that the command can be serialized and sent, so a local send failure destroys valid authority without dispatch. | `packages/bridge-loopback/src/index.ts`; `packages/bridge-loopback/test/server.test.ts` | IMPLEMENTED |
+| 354 | P2 | R8 | Bridge loopback bounds each frame but not aggregate queued commands or bytes, so a stalled extension can retain unbounded pending work. | `packages/bridge-loopback/src/index.ts`; aggregate-admission regressions | IMPLEMENTED |
+| 355 | P1 | R5 | An ordered cancellation can overtake asynchronous command admission before the command identity is reserved, then disappear while the command continues. | `connector/extension/src/service-worker.js`; lifecycle regression | IMPLEMENTED |
+| 356 | P1 | R5 | Cancellation or expiry can occur while Edit-policy and Bridge-maintenance commands await state, yet their mutations can still commit. | service worker, Bridge maintenance, and cancellation regressions | IMPLEMENTED |
+| 357 | P1 | R5 | Settings discovery, course selection, and Edit-policy work can publish after course-data consent is withdrawn because they are not fenced by the consent generation. | service worker Settings authority regressions | IMPLEMENTED |
+| 358 | P1 | R5 | Pairing offer and status fetches can save a token or pending approval after course-data consent is withdrawn. | service worker pairing authority regressions | IMPLEMENTED |
+| 359 | P2 | R8 | Bridge WebSocket opening, challenge, and ready states have no client deadline and reconnect backoff is uncapped, so a silent local peer can strand the extension. | service worker handshake and backoff regression | IMPLEMENTED |
+| 360 | P1 | R5 | Removing Chrome course permission does not immediately publish unavailable bindings or disable stale file access. | service worker permission-removal regression | IMPLEMENTED |
+| 361 | P2 | R8 | Active-folder marker validation allocates the full response before enforcing its 16 KiB limit and has no fetch deadline. | service worker bounded marker-reader regression | IMPLEMENTED |
+| 362 | P3 | R7 | Pairing schedules a 30-second Chrome alarm while the manifest supports Chrome 116, whose repeating-alarm floor is one minute. | service worker alarm regression and manifest contract | IMPLEMENTED |
+| 363 | P1 | R5 | The curated New Quiz report planner still requires and advertises Canvas's global Progress reader after course-scope admission correctly removes that reader, so the workflow refuses before planning and its advertised follow-up would cross the selected-course boundary. | `packages/mcp-server/src/new-quiz-effects.ts`; New Quiz unit and end-to-end conformance tests | IMPLEMENTED |
+| 364 | P2 | R6 | The end-to-end Item Bank worker harness extracts a service-worker lifecycle that now depends on the shared deadline helper without extracting that helper, so the broad gateway gate fails before exercising production behavior. | `packages/mcp-server/test/quiz-bank-e2e.conformance.test.ts` | IMPLEMENTED |
+| 365 | P3 | R6 | The course-data consent contract test requires pairing's older one-time consent check after pairing moved to the stronger generation-bound authority fence, so the authoritative repository gate rejects the repaired implementation. | `scripts/test/course-data-consent.test.mjs` | IMPLEMENTED |
+| 366 | P1 | R5 | Closing every public unscoped Canvas read also blocks the Bridge's private object-ownership and response-bound readbacks, breaking admitted section changes; those internal reads also omit the original command deadline. | service-worker internal read authority, Canvas content scope guard, semantic browser harness | IMPLEMENTED |
+| 367 | P2 | R6 | The Desktop layout harness publishes an update snapshot without the required monotonic revision, so the renderer correctly refuses it and the visual gate times out after its layout assertions pass. | `installer/test/renderer-layout.browser.mjs`; Desktop layout harness | IMPLEMENTED |
+| 368 | P1 | R7 | The unsigned Desktop configuration uses the removed `win.sign = false` schema, so Electron Builder 26.15.3 rejects every package, including macOS QA builds, before creating an app. | `installer/electron-builder.config.cjs`; real private-QA package build | IMPLEMENTED |
+| 369 | P1 | R7 | The packaged MCP runtime omits the runtime monitor and process-lifetime module that the Desktop launches, so source tests can pass while the installed app cannot start its owned runtime. | package admission; packaged-runtime monitor regression | IMPLEMENTED |
+| 370 | P1 | R5 | The Canvas-only binding tool is projected through the generic browser-binding schema, so a valid Canvas binding fails its public egress contract. | MCP Canvas connector integration regression | IMPLEMENTED |
+| 371 | P1 | R5 | A Canvas Course object is treated as learner data when Canvas includes the current teacher enrollment, so the exact selected-course read refuses instead of removing staff-only enrollment fields. | MCP exact Canvas Course projection regression | IMPLEMENTED |
+| 372 | P1 | R2 | Eighty-two Canvas writes are advertised as supported although the generic executor cannot prove an exact saved postcondition for them. | generated Canvas admission report; catalog profile regressions | IMPLEMENTED |
+| 373 | P1 | R8 | Course inventory asks the module-list route to embed all items and content details, then separately reads those items again, multiplying live work and making complete discovery time out on a normal course. | course-inventory request-shape and pagination regression | IMPLEMENTED |
+| 374 | P1 | R8 | Course inventory owns a 120-second deadline but does not override the MCP SDK's independent 60-second request timeout, so the upstream call aborts halfway through the stated contract. | upstream timeout propagation and delayed-upstream regressions | IMPLEMENTED |
+| 375 | P1 | R5 | Canvas returns the BT2 Item Banks course-tab launch as a same-origin relative URL, but the Bridge accepts only absolute URLs and refuses before any Item Banks provider request. | live BT2 Tabs response; Item Bank relative-URL and cross-origin regressions | IMPLEMENTED |
+| 376 | P1 | R2 | Public publication can replace a safety `profile_limited` state with `supported`, re-exposing a Canvas write that the final catalog held for missing exact readback. | publication-policy safety-state regression and real favorite-operation reproduction | IMPLEMENTED |
+| 377 | P1 | R2 | Course-path learner-record writes pass general course admission before the learner-authority check, allowing enrollment, grade, submission, attempt, override, membership, and progress changes to inherit ordinary course Edit authority. | exhaustive Canvas learner-route classification regression | IMPLEMENTED |
+| 378 | P1 | R2 | Bridge Settings offers every course-admitted write for Edit even when the MCP profile refuses it for missing exact readback, leaving stale and misleading grants for 82 unsafe actions. | Bridge edit-policy and stale-permission regressions | IMPLEMENTED |
+| 379 | P1 | R8 | The public course-inventory tool aborts its complete multi-list run after 120 seconds, so a normal BT2 course with 79 New Quizzes loses the final 76 list reads despite every individual read remaining within its own bound. | installed BT2 inventory receipt and focused inventory suite | IMPLEMENTED |
+| 380 | P2 | R5 | The sandbox render checker rejects ordinary saved inline styles under its Content Security Policy and records a Chrome extension error for each affected course field. | live Chrome extension error page and render-check policy regression | IMPLEMENTED |
+| 381 | P1 | R5 | The Bridge recognizes only the retired external-tool Item Banks iframe, so every BT2 Item Banks operation fails before provider I/O against Canvas's native `/courses/89585/banks` runtime. | live BT2 Tabs and native-runtime reads; Item Banks native-context regressions | IMPLEMENTED |
+| 382 | P1 | R7 | Desktop and Bridge packaging hard-code the retired render-check sandbox policy, so the repaired Bridge cannot be captured, packaged, installed, or shipped. | `scripts/package-mcp-bundle.mjs`; package-capture and Desktop provenance gates | IMPLEMENTED |
+| 383 | P1 | R5 | Connector health has no course target but generic Canvas privacy egress requires a course roster, so the installed health capability refuses a valid connected Bridge. | `packages/mcp-server/src/runtime.ts`; Canvas connector integration regression | IMPLEMENTED |
+| 384 | P1 | R4 | Canvas schema generation collapses arrays and ordinary integers into scalar IDs and discards declared value domains. | `scripts/generate-canvas-api-catalog.mjs`; catalog schema regressions | IMPLEMENTED |
+| 385 | P1 | R4 | Classic Quiz edits drop explicit `null` values, so a reviewed request cannot clear saved restrictions. | `connector/extension/src/canvas-content.js`; Classic Quiz request regression | IMPLEMENTED |
+| 386 | P1 | R3 | Course inventory exposes learner-named Page slugs even when Canvas supplies an immutable numeric Page ID. | `packages/mcp-server/src/course-inventory.ts`; inventory privacy regression | IMPLEMENTED |
+| 387 | P1 | R8 | A normal complete BT2 inventory exceeds the one-megabyte result ceiling and drops hundreds of discovered targets. | MCP result-artifact and batch result limits; installed BT2 inventory receipt | IMPLEMENTED |
+| 388 | P1 | R4 | Curated New Quiz ordering workflows stringify positions after the catalog restores the provider's integer contract. | New Quiz lifecycle and placement workflows; focused conformance regressions | IMPLEMENTED |
+| 389 | P1 | R4 | Canvas enum generation applies element values to the array container, so valid array inputs fail local validation. | `scripts/generate-canvas-api-catalog.mjs`; array-enum regression | IMPLEMENTED |
+| 390 | P1 | R5 | The complete 150-action Bridge Edit catalog becomes an artifact before final MCP privacy egress, which cannot recognize the handle and refuses the valid result. | `packages/mcp-server/src/runtime.ts`; oversized Edit-catalog integration regression | IMPLEMENTED |
+| 391 | P1 | R8 | Modern MCP requests rebuild and retain two complete 617-tool validator catalogs until the installed local owner reaches V8's heap limit and aborts. | installed macOS crash reports; `packages/mcp-server/src/server.ts`; full-catalog stress regression | IMPLEMENTED |
+| 392 | P1 | R3 | Canvas returns an empty `discussion_topic.author` object in ordinary assignments, but learner privacy treats absence of author data as an unresolved identity and refuses the complete list. | live private BT2 response-shape receipt; `packages/gateway-core/src/privacy.ts`; empty-container privacy regression | IMPLEMENTED |
+| 393 | P1 | R3 | Canvas assignment data can identify an instructor as a discussion author, but course egress requires every author to exist in the learner roster and refuses the complete assignment list. | live BT2 assignment read; `packages/gateway-core/src/privacy.ts`; unrostered course-author regression | IMPLEMENTED |
+| 394 | P1 | R3 | A resource with `user_id` is mistaken for a person record. | closure section 394 and focused privacy regressions | IMPLEMENTED |
+| 395 | P1 | R3 | Canvas editor identities outside the student roster block course reads. | closure section 395 and focused privacy regressions | IMPLEMENTED |
+| 396 | P1 | R2 | Course-scoped semantic reads lose their selected-course authority. | closure section 396 and focused scope regressions | IMPLEMENTED |
+| 397 | P1 | R3 | Capability schemas are rewritten as if they were Canvas responses. | closure section 397 and focused privacy regressions | IMPLEMENTED |
+| 398 | P1 | R3 | Hidden and active Canvas Page markup reaches public course data. | closure section 398 and focused privacy regressions | IMPLEMENTED |
+| 399 | P1 | R3 | Canvas course settings expose a signed image URL. | closure section 399 and focused privacy regressions | IMPLEMENTED |
+| 400 | P1 | R3 | A credential-minting GET is published as an ordinary read. | closure section 400 and catalog regressions | IMPLEMENTED |
+| 401 | P1 | R4 | Classic Quiz summaries narrow Canvas IDs to JavaScript numbers. | closure section 401 and summary regressions | IMPLEMENTED |
+| 402 | P1 | R7 | Repair Morrow ignores changed Bridge bytes at the same version. | closure section 402 and installer regressions | IMPLEMENTED |
+| 403 | P1 | R5 | Failed Canvas reads lose the provider outcome. | closure section 403 and connector regressions | IMPLEMENTED |
+| 404 | P1 | R8 | Desktop Check status returns the previous runtime observation. | closure section 404 and desktop monitor regressions | IMPLEMENTED |
+| 405 | P1 | R2 | Canvas LTI service routes are advertised under browser-cookie authorization. | closure section 405 and catalog regressions | IMPLEMENTED |
+| 406 | P1 | R2 | Redirect-only Canvas routes are advertised as data reads. | closure section 406 and catalog regressions | IMPLEMENTED |
+| 407 | P1 | R4 | Cross-field Canvas read requirements are absent from generated schemas. | closure section 407 and schema regressions | IMPLEMENTED |
+| 408 | P1 | R6 | Every delegated Desktop setup button throws before its action. | closure section 408 and Chromium renderer regression | IMPLEMENTED |
+| 409 | P1 | R4 | Canvas nested request values are sent as scalar strings. | closure section 409 and request-construction regressions | IMPLEMENTED |
+| 410 | P1 | R2 | Course-path admission ignores learner and multi-course effects carried in request fields or operation semantics, so ordinary course Edit can change learner participation or resources outside the selected course. | Canvas semantic admission classifier; exhaustive learner and multi-course regressions | IMPLEMENTED |
+| 411 | P1 | R4 | Canvas Rubric CSV import is published without a file input. | closure section 411 and admission regressions | IMPLEMENTED |
+| 412 | P1 | R2 | OutcomeLink creation readback targets the group instead of the outcome. | closure section 412 and readback regressions | IMPLEMENTED |
+| 413 | P1 | R2 | Delete and conclude course share an absence-only readback. | closure section 413 and readback regressions | IMPLEMENTED |
+| 414 | P1 | R5 | Canvas course-file transfer starts requests after its command expires. | closure section 414 and file-transfer regressions | IMPLEMENTED |
+| 415 | P1 | R2 | Group-content readback does not recheck the group owner. | closure section 415 and group-owner regressions | IMPLEMENTED |
+| 416 | P1 | R5 | The Bridge omits the fixed command deadline when it initializes a Canvas course-file upload, so the in-page executor refuses every valid transfer before upload dispatch. | `connector/extension/src/service-worker.js`; full native-browser file-transfer regression | IMPLEMENTED |
+| 417 | P1 | R3 | Learner privacy rejects ordinary identity-free enrollment details nested under a roster-bound learner as an unresolved second identity. | `packages/gateway-core/src/privacy.ts`; privacy unit and New Quiz end-to-end regressions | IMPLEMENTED |
+| 418 | P1 | R3 | Learner privacy treats a structural `membership` proof as a person record and blocks valid New Quiz planning. | `packages/gateway-core/src/privacy.ts`; privacy unit and New Quiz end-to-end regressions | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2243,8 +2332,506 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Root cause: ctime is not a content attribute. The admission decision depends on identity, link count, size, mtime, mode, and owner; the reader re-checked all of those and also ctime, which the kernel may refine without any change the reader can act on.
 - Repair: the after-read comparison re-checks exactly the attributes admission decided on (device and inode, link count, size, mtime, mode, and owner) on the open descriptor and by name, and no longer compares ctime.
 - Regression: with a stat layer whose ctime drifts on every query, a freshly created file reads back and reads again; with a drifting mtime the same read still refuses with `changed while it was read`. The first case failed on the reader as committed.
-- Remaining limit: six sibling readers keep a ctime comparison (`packages/legacy-bridge-mcp/src/config.ts`, `packages/mcp-server/src/moodle-resource-file.ts`, `packages/mcp-server/src/state-lease.ts`, `packages/canvas-connector-mcp/src/config.ts`, `installer/shared/claude-desktop.cjs`, `installer/shared/state-policy.cjs`). None failed on the affected host; they read files a person or installer wrote earlier rather than this process's own fresh write.
+- Follow-through: row 331 removes the same invalid ctime predicate from every sibling production reader and covers immediate lease, heartbeat, recovery, connector, catalog, and client-configuration readback.
 - Status: `IMPLEMENTED`.
+
+### 330: request-path lifetime cache breaks Desktop maintenance admission
+
+- Verified defect: `createRequestPathProcessMatcher` intentionally returns `null` while the first asynchronous process-start query warms its cache on macOS and Windows. Local-owner maintenance immediately required every runtime-monitor presence to return `true`, so the first acquire rejected a live monitor with `local_owner_maintenance_work_active`. The Desktop runtime monitor reported maintenance as unavailable and could not enter repair, update, or Bridge maintenance. The owner-start loop also called the synchronous lifetime matcher every 25 milliseconds, which contradicted the non-blocking lifecycle claim in defect 318.
+- Root cause: one cached, non-blocking matcher served both request paths, where an unknown result must preserve a possibly live session, and lifecycle gates, where the caller must wait for an authoritative answer. The two paths require different settlement contracts.
+- Repair: gateway-core now publishes one asynchronous recorded-lifetime matcher for lifecycle decisions. It checks liveness, awaits the bounded operating-system start-time query, checks liveness again, and then compares the process start against the durable observation. Maintenance admission awaits that matcher for every monitor presence, and owner startup uses it instead of spawning a synchronous query inside its poll. Request paths keep the shared non-blocking cache.
+- Regression: the lifetime unit suite covers true, reused, unavailable, malformed, and dead-process results from the asynchronous matcher. The existing Desktop runtime monitor fixture now acquires maintenance from a live monitor on a cold cache, and the local-owner lifecycle and integration suites prove acquire, recovery, Bridge maintenance, and owner reuse.
+- Focused verification: gateway-core passed 140 tests with three platform skips; the three local-owner suites passed 21 tests; the Desktop runtime-monitor suite passed all 11 tests.
+- Status: `IMPLEMENTED`.
+
+### 367: Desktop layout harness publishes an obsolete update contract
+
+- Verified defect: `installer/test/renderer-layout.browser.mjs` publishes a `morrow.desktop-update.v1` event without the required `revision`, then waits for the renderer to accept it and move focus. The production renderer correctly refuses this invalid snapshot, so `pnpm --dir installer --ignore-workspace test:layout` times out after its viewport and busy-state checks pass.
+- Root cause: the test fixture did not move with the monotonic update contract added to prevent stale full-state responses from rolling back newer pushed update state.
+- Repair: the harness now publishes revision `1`, the next revision after the initial revision `0` returned by `installerState`.
+- Regression: the complete layout harness must reach its focus, disclosure, managed-device, and welcome-window assertions and exit zero.
+- Status: `IMPLEMENTED`.
+
+### 368: removed Electron Builder signing option blocks every Desktop package
+
+- Verified defect: a private macOS QA package fails schema validation before packing because the shared configuration sets `win.sign = false`; Electron Builder 26.15.3 accepts `win.sign` only as a custom signer or module path, not as a boolean.
+- Root cause: the unsigned-build contract retained the old boolean option after the installed builder moved code-sign suppression to `win.signExecutable`.
+- Repair: unsigned builds set `win.signExecutable = false`, which disables Authenticode while preserving Windows resource metadata. Signed builds omit the override. The existing packager still inspects the final PE certificate table and refuses an unsigned artifact that contains an Authenticode signature.
+- Regression: the configuration test requires the valid unsigned option and forbids the obsolete key in both unsigned and signed configurations; the real private-QA package command must pass Electron Builder's schema and produce its sealed app artifacts.
+- Status: `IMPLEMENTED`.
+
+### 369: packaged Desktop runtime omits required monitor modules
+
+- Verified defect: the Desktop package can pass source tests while omitting `runtime-monitor.mjs` and its `process-lifetime.cjs` sibling from the packaged MCP payload. The installed app then has no executable runtime-monitor entry point.
+- Root cause: package assembly copied the gateway launcher and runtime packages without deriving the monitor's complete local dependency set or executing the packaged monitor during admission.
+- Repair: the packager includes both monitor modules, and package admission launches the monitor from the sealed payload so a missing sibling fails the build.
+- Regression: the package-focused suite checks both files in the payload and executes the packaged monitor. It passed 113 tests with two expected platform skips.
+- Status: `IMPLEMENTED`.
+
+### 370: Canvas-only binding uses the wrong public schema
+
+- Verified defect: `morrow_canvas_bindings` returned a valid Canvas row through the generic `morrow_browser_bindings` projector. The result then failed the Canvas-only schema at public egress.
+- Root cause: the runtime selected its binding projector by one tool name instead of recognizing both binding tools and enforcing their different provider sets.
+- Repair: the runtime selects the exact schema for each binding tool. The Canvas-only route accepts Canvas rows and refuses any non-Canvas row before egress.
+- Regression: the Canvas connector integration suite covers a valid Canvas binding and a mixed-provider refusal. All 19 focused integration tests passed.
+- Status: `IMPLEMENTED`.
+
+### 371: staff enrollment fields make a Course look like learner data
+
+- Verified defect: Canvas includes the current teacher in a Course object's `enrollments` field. Generic learner-data detection therefore refused `canvas_get_single_course_courses` with `learner_roster_identity_unavailable`, although the requested object was the selected Course.
+- Root cause: public egress classified the raw response before applying the operation-specific Course contract.
+- Repair: the exact Canvas Course projector validates the tool, provider, schema, successful complete read, and selected course id, then retains only the documented course-safe field allowlist. Staff enrollment and teacher fields never enter public output.
+- Regression: direct and compact-result tests preserve the expected Course fields, remove the enrollment object, and reject a teacher identity if it appears anywhere in the projected result. The 19-test Canvas connector suite passed.
+- Status: `IMPLEMENTED`.
+
+### 372: writes without an exact saved-result proof remain callable
+
+- Verified defect: 82 admitted Canvas writes had no structurally exact readback but were published as supported. A successful dispatch could therefore leave Morrow unable to prove what Canvas saved.
+- Root cause: write admission and capability publication treated course scope as sufficient; the generated readback assessment was informational rather than a publication gate.
+- Repair: every mutating operation now requires a `structurally_exact` readback assessment before either full profile marks it supported. The profile-limited reason identifies an unsafe read, no safe reader, or an incomplete target or postcondition.
+- Regression: the catalog test enumerates every admitted write without exact readback and requires all profiles to refuse it. The focused catalog suite passed all 44 tests, and the regenerated Canvas catalog digest is `8f418b469c913be611bc1398793a607c34fb23bec8c7e877ccc9207e32f68efd`.
+- Status: `IMPLEMENTED`.
+
+### 373: module inventory reads the same item graph twice
+
+- Verified defect: `canvas_list_modules` requested embedded `items` and `content_details`, then inventory also called `canvas_list_module_items` for each module. BT2 therefore transferred and parsed the module graph twice before target discovery completed.
+- Root cause: the inventory combined an old convenience expansion with the later exact per-module pagination path.
+- Repair: module listing reads module metadata only. The separate bounded module-item route remains the sole owner of item and content-detail discovery.
+- Regression: the course-inventory suite checks the exact request shapes and a three-page continuation sequence. All 26 tests passed.
+- Status: `IMPLEMENTED`.
+
+### 374: the MCP SDK silently shortens the inventory deadline
+
+- Verified defect: inventory passed its 120-second abort signal to the upstream client but not the SDK timeout option. The MCP client kept its independent 60,000 ms default and aborted the BT2 inventory before Morrow's stated deadline.
+- Root cause: the upstream wrapper treated an `AbortSignal` as the complete request-lifetime contract although the SDK enforces a separate timer.
+- Repair: upstream calls accept an explicit timeout and apply it as both `timeout` and `maxTotalTimeout` on the first attempt and retry. Inventory forwards 120,000 ms on every source read.
+- Regression: a delayed fixture fails under a 25 ms override and succeeds under a one-second override; every inventory fixture call records 120,000 ms. The upstream and inventory suites passed 16 and 26 tests.
+- Status: `IMPLEMENTED`.
+
+### 375: live Item Banks tab uses a same-origin relative launch URL
+
+- Verified defect: BT2's Canvas Tabs response names Item Banks with the same-origin relative `html_url: /courses/89585/banks`. The strict Bridge resolver expected an absolute URL, so the valid placement could not reach its exact path and origin checks.
+- Root cause: the resolver validated origin before resolving Canvas's documented same-origin relative link shape.
+- Repair: the Bridge resolves relative tab URLs against the exact connected Canvas origin, then applies the existing same-origin and exact-course checks. Protocol-relative and absolute cross-origin values still fail.
+- Regression: the Item Bank suite covers the exact BT2 relative value and a hostile cross-origin replacement. The related 74 tests passed.
+- Status: `IMPLEMENTED`.
+
+### 376: publication policy can override a safety profile limit
+
+- Verified defect: applying a public publication manifest to the real `canvas_add_course_to_favorites` capability changed its `public-canvas` state from `profile_limited` to `supported`, although the operation has no safe exact readback.
+- Root cause: publication selection unconditionally replaced the public profile state. The publication digest covered schema, description, and annotations, but did not distinguish a publication-rights hold from a safety limit.
+- Repair: publication may promote only the exact `rights_hold` state. It preserves `profile_limited`, `private_only`, `broken_at_baseline`, already supported state, reason, behavior, and evidence metadata.
+- Regression: the publication suite proves a rights-held capability is promoted while a favorite-operation-shaped safety-limited capability remains limited with `supportsReadback: false` and blocked readback evidence. The focused suite passed all four tests; a direct reproduction with the real operation also stayed limited.
+- Status: `IMPLEMENTED`.
+
+### 377: learner-record routes inherit ordinary course Edit authority
+
+- Verified defect: general `course_path` admission returned before the learner-record classifier. Sixty raw operations concerning submissions, grades, quiz attempts, enrollments, overrides, group membership, or learner progress could therefore ride the selected course's ordinary Edit permission. Enrollment and moderation examples were even labeled as standard changes.
+- Root cause: route identity was treated as complete authority. The code asked whether a learner was affected only after direct course routes had already returned admitted.
+- Repair: learner-record classification runs before general course admission and covers every named learner family. Those writes remain held until Morrow has a separate learner permission, subject identity, data policy, and exact readback contract. Three upload preflights keep their stronger reviewed-transfer hold.
+- Regression: the catalog suite enumerates all 60 raw learner operations and requires the correct hold and profile limit. Learner-authority holds increased from 36 to 93; total held writes increased from 321 to 378. All 44 catalog tests and the generated contract check passed.
+- Status: `IMPLEMENTED`.
+
+### 378: Bridge Edit options disagree with MCP safety availability
+
+- Verified defect: Bridge Settings used course admission alone to offer 82 writes that MCP now profile-limits because no exact saved-result proof exists. It labeled them unchecked Edit actions, so a stale permission record could mislead the person and could become live if another layer re-exposed the tool.
+- Root cause: the Bridge and MCP derived availability from different predicates. Exact readback changed only a Settings label instead of controlling whether Edit could be granted.
+- Repair: Bridge Edit availability now requires course scope, admitted write state, and structurally exact readback. No Edit action may be unchecked, and a stale request naming a removed action fails closed. Four intentional destructive actions remain Review-only.
+- Regression: against the final admission artifact, Bridge Settings publishes 121 Edit actions, 4 Review-only actions, and 0 unchecked Edit actions; the generic Canvas API contributes 112 Edit actions. The 68 Settings tests and 39 lifecycle/readback tests passed.
+- Status: `IMPLEMENTED`.
+
+### 379: complete inventory has a two-minute whole-run cutoff
+
+- Verified defect: the installed Desktop, MCP, and Bridge reached BT2 and began a complete course inventory, but the public tool's shared abort signal fired after 120 seconds. The first 55 lists completed; the remaining 76, mainly New Quiz item lists, were recorded as unavailable with `The operation was aborted due to timeout`.
+- Root cause: defect 374 correctly gave each upstream read its own 120-second SDK bound, but the outer inventory tool reused the same 120-second value for the entire sequence of 132 bounded list calls.
+- Repair: the complete inventory has a ten-minute whole-run bound. Every individual Canvas read keeps its independent 120-second bound, and caller cancellation still stops the run immediately.
+- Regression: the focused course-inventory suite must pass, then the installed build must repeat the full BT2 inventory and finish every reachable list without a whole-run timeout.
+- Status: `IMPLEMENTED`.
+
+### 380: saved inline styles violate the render-check sandbox policy
+
+- Verified defect: Chrome's live extension error page recorded one Content Security Policy error for each BT2 field whose saved HTML contained an inline style. The errors came from `render-check/render-check.js:615` while its detached `DOMParser` document was created.
+- Root cause: the sandbox allowed its own module script but rejected inline style parsing. The render checker intentionally reads inline style declarations to compute bounded contrast signals, so the runtime policy contradicted the feature contract.
+- Repair: the sandbox permits inline style parsing while `default-src 'none'` continues to block every image, font, media, stylesheet, form, and other network load. The parsed document remains detached and has no browsing context.
+- Regression: the manifest policy test pins the narrow inline-style exception and still requires the sandbox page to contain no fetch, image, stylesheet, inline style, or extension API path. The installed Bridge error page must remain clear when the live inventory parses saved BT2 HTML.
+- Status: `IMPLEMENTED`.
+
+### 381: Bridge recognizes only the retired Item Banks launch shape
+
+- Verified defect: the installed Desktop, MCP, and Bridge returned `item_bank_deployment_unavailable` for `canvas_item_bank_list_banks` before provider I/O. A fresh BT2 Tabs read showed the one Item Banks placement as `type: internal`, id `context_external_tool_54065`, and path `/courses/89585/banks`. The Bridge accepted only `type: external` with `/courses/{course}/external_tools/{tool}`.
+- User effect: every published Item Banks read and write was unusable on BT2, although Canvas's native Item Banks page was available to the signed-in user. The course inventory therefore recorded the whole Item Banks surface as unavailable.
+- Root cause: Canvas moved the placement from an external-tool iframe to a native course route. The Bridge coupled deployment discovery, execution context, and credential capture to the older iframe implementation instead of supporting both exact provider shapes.
+- Repair: deployment discovery now accepts exactly one legacy external-tool launch or one numeric internal placement at the exact selected-course `/banks` path. The native path opens that exact course page in a hidden tab, refuses mixed quiz frames, proves the Canvas principal, tenant, course, local context, backend origin, and API context, then performs the request inside the page. The temporary bank token and private context never cross the page boundary. The legacy frame and captured-credential path remains unchanged.
+- Regression: the Item Banks suites cover native placement admission, hostile path and tenant substitutions, context initialization, private-token containment, a complete native bank read, and every legacy read/write contract. The final installed build must return BT2's authoritative bank list through MCP and leave no Bridge runtime error.
+- Status: `IMPLEMENTED`.
+
+### 382: package admission rejects the repaired render-check policy
+
+- Verified defect: after row 380 changed the shipped sandbox policy, the authoritative repository gate failed seven cases. Every Bridge capture and Desktop payload build stopped with `Morrow Bridge sandbox content security policy is invalid.`
+- User effect: no release containing the live render-check repair or the native Item Banks repair could be packaged or installed, even though the source-level Bridge tests passed.
+- Root cause: package admission duplicated the full Content Security Policy string and retained the older value. The manifest and its release validator therefore described different accepted products.
+- Repair: package admission now pins the same exact policy as the manifest and render-check regression: local scripts, inline style parsing, no default resource source, no base URL, and no form action.
+- Regression: the Bridge capture, connector package, Desktop provenance, brand inventory, and full repository gates must all accept the repaired source and still reject any broader policy.
+- Status: `IMPLEMENTED`.
+
+### 383: connector health requires a learner roster for no course
+
+- Verified defect: the installed `morrow_canvas_connector_health` capability reached the live Bridge, then public MCP egress refused its result with `learner_roster_scope_unavailable`.
+- User effect: the compact MCP advertised a health read that could not report the connected Desktop and Bridge state, even while `morrow_health` proved both were ready.
+- Root cause: generic Canvas read egress requires an exact course and roster. Connector health has no course input and contains only fixed local control state, but it had no operation-specific projector like the binding and Edit-option controls.
+- Repair: public egress now recognizes only the exact read-only connector-health tool on the Canvas connector source, validates and rebuilds its closed health schema, and rejects unknown fields or invalid bridge identity, counts, timestamps, digests, ports, revisions, and problem values.
+- Regression: the full MCP compact boundary must return the connected Bridge health for the same live-style connector fixture without a learner scope, while all ordinary Canvas course reads retain the exact-roster boundary.
+- Status: `IMPLEMENTED`.
+
+### 384: generated Canvas schemas collapse arrays and ordinary integers into scalar IDs
+
+- Verified defect: the catalog generator treated every Swagger `int64` parameter as a Canvas identifier before it inspected the declared container type. Arrays such as `user_ids[]`, `quiz_ids[]`, rating points, grading percentages, proficiency mastery values, and timetable section IDs became one positive-decimal string. Ordinary counts, positions, attempts, and limits also became positive-decimal strings, so zero and the documented `-1` unlimited-attempts sentinel were impossible.
+- Root cause: `schemaType` used the wire format as an identity signal and returned before array or semantic-name analysis. The generator also discarded every official parameter enum, while a few Canvas Swagger records publish known incorrect primitive types.
+- Repair: array structure is resolved first; only semantically identified Canvas IDs retain precision as decimal strings; ordinary `int64` values are integers; official enums survive on scalar schemas or array item schemas; and a small reviewed override table corrects the documented Canvas exceptions for booleans, nullable Classic Quiz settings, sentinels, zero-based values, proficiency shapes, timetable `all`, SIS-prefixed user IDs, and named course enums.
+- Regression: the catalog suite asserts exact schemas for every repaired family and the regenerated artifact digest is `6f450ce3869f176c86b20198d1ecd56eec3030d9b7b2e21881a233b869712430`. All 47 catalog tests pass.
+- Status: `IMPLEMENTED`.
+
+### 385: Classic Quiz edits cannot clear nullable restrictions
+
+- Verified defect: a caller could request `null` for a Classic Quiz access code, IP filter, result visibility, or time limit, but the Bridge dropped that field before form encoding. Existing Canvas restrictions therefore remained saved even though the reviewed request asked to clear them.
+- Root cause: the Classic Quiz write adapter treated `null` as absence instead of the provider's explicit clear operation.
+- Repair: the four documented nullable fields preserve explicit `null` and encode it as an empty form value. Omitted fields remain omitted.
+- Regression: a connector request that clears all four fields now contains each exact empty Canvas form field, while the existing update and rejection cases continue to pass. All five focused Classic Quiz request tests pass.
+- Status: `IMPLEMENTED`.
+
+### 386: inventory exposes learner-named Page slugs at the privacy boundary
+
+- Verified defect: BT2 Page discovery returned ten slugs containing learner names. Inventory used each slug as the public audit target even though the same Canvas list row carried an immutable numeric `page_id`, so privacy projection removed those ten otherwise auditable Pages.
+- Root cause: Page target construction preferred the human-readable route component over the provider's exact numeric identity.
+- Repair: inventory uses `page_id` whenever Canvas returns it and falls back to the slug only when no numeric identifier exists. The audit route accepts the same `url_or_id` field and verifies the returned Page by URL or numeric id.
+- Regression: a learner-named Page slug never enters the stored inventory or audit child, while Page `101` remains discoverable and auditable. The focused privacy regression passes.
+- Status: `IMPLEMENTED`.
+
+### 387: ordinary BT2 inventory exceeds the result-artifact ceiling
+
+- Verified defect: the complete BT2 inventory reached every source list, but the public result retained only 1,244 of about 1,516 targets and reported 272 omissions because its encrypted batch result and public result artifact shared a one-megabyte ceiling. This was normal course data, not an adversarial oversize input.
+- Root cause: the result limit was sized below a real large-course inventory and the duplicated child descriptors needed to turn that inventory into an audit batch.
+- Repair: both owners use the same bounded two-megabyte ceiling. Existing pagination, record-count, field, source-call, and artifact-page limits remain unchanged.
+- Regression: the oversize fixture now exceeds two megabytes so truncation behavior stays covered, and the installed BT2 run must retain every discovered target before this row becomes verified.
+- Status: `IMPLEMENTED`.
+
+### 388: curated New Quiz ordering workflows send positions with the obsolete generated type
+
+- Verified defect: after row 384 restored Canvas positions to integers, New Quiz module placement, module movement, and assignment-group ordering still converted each position to a string. Their own schema gate refused the reviewed change before planning, and unresolved assignment-group creation lost its retained recovery comparator for the same stale fixture shape.
+- Root cause: curated workflow code had copied the old generated schema's wrong string representation instead of preserving its own integer input through to Canvas.
+- Repair: each curated workflow sends the validated integer unchanged, and the operation-recovery fixture uses the same correct type.
+- Regression: all 13 New Quiz module-placement cases, the unresolved-operation recovery case, and the full New Quiz and Item Bank conformance case pass.
+- Status: `IMPLEMENTED`.
+
+### 389: array enums are attached to the array instead of its elements
+
+- Verified defect: the first enum-preserving generator repair placed scalar Canvas enum values on an array schema itself. Valid roster requests such as `enrollment_type: ["student"]` then failed local validation, which cascaded into 50 MCP test failures before any provider request.
+- Root cause: enum preservation did not distinguish a scalar domain from an array element domain.
+- Repair: an array parameter puts the official enum on `items`; scalar parameters keep it on the scalar schema.
+- Regression: the exact Canvas course-user enrollment enum accepts each documented element, catalog generation passes, and the full MCP failure count returned to the independent defects recorded above.
+- Status: `IMPLEMENTED`.
+
+### 390: large Edit catalogs are stored before final privacy egress
+
+- Verified defect: the live BT2 Bridge returned all 150 current Edit actions, but the installed full MCP refused `morrow_browser_edit_options` with `learner_roster_binding_unavailable`.
+- User effect: a person could see the complete Edit catalog in Bridge Settings but an assistant using the same saved connection could not read it, so Edit setup could not be proven through the product boundary.
+- Root cause: the source-specific projector stored results larger than 64,000 characters as an artifact before the final MCP privacy pass. That final pass recognizes and revalidates only the complete inline Edit-options schema, so it treated the artifact handle as an ordinary unbound Canvas result.
+- Repair: the source-specific projector returns the complete canonical Edit-options object. The final MCP egress pass revalidates that object against the current binding and permission revision, then its normal bounded-result owner creates the artifact.
+- Regression: a 150-action, greater-than-64,000-character live-shape catalog crosses the full compact MCP boundary, pages through the audience-bound artifact, verifies its digest, and retains the first and last exact actions without a provider write.
+- Status: `IMPLEMENTED`.
+
+### 391: modern MCP requests rebuild and retain the complete schema catalog
+
+- Verified defect: two independent installed Desktop runs crashed their local-owner process with V8 fatal out-of-memory aborts while reading the live capability catalog. The second run failed after 90 sequential descriptors; the macOS crash report recorded about 4.8 GB of writable virtual memory and the fault in V8 allocation and garbage collection.
+- User effect: normal discovery across Morrow's supported Canvas tools could make the Desktop report that Morrow was getting ready, disconnect the Bridge-backed MCP, and abort the active user request.
+- Root cause: the modern HTTP endpoint creates a short-lived MCP server for every request. Each server independently rebuilt two validator sets for every public tool: one for compact capability invocation and one for the full direct surface. The SDK retained successful request servers, so equivalent compiled graphs accumulated until V8 aborted.
+- Repair: public input schemas and their immutable compiled validators are now cached once per connected runtime and shared by every per-request server. Capability descriptors, compact validation, and direct tool registration all consume the same contract object.
+- Regression: the MCP protocol, modern-ingress, and multi-client suites pass. The exact installed 368-descriptor workload must complete without an owner PID change or unbounded memory growth before this row is closed.
+- Status: `IMPLEMENTED`.
+
+### 392: empty Canvas identity containers are treated as unresolved people
+
+- Verified defect: the live BT2 assignment list succeeded through the Bridge, but compact MCP returned `privacy_identity_record_unresolved`. A private shape-only diagnostic found Canvas's `discussion_topic.author: {}` on ordinary assignment records; it retained only key paths and types, never course or learner content.
+- User effect: `canvas_list_assignments_assignments` was published as supported but failed on normal BT2 data, even though complete inventory could discover the same assignments through its typed projection.
+- Root cause: both generic privacy walkers required every object beneath an identity-named key to resolve to a roster identity. They did not distinguish an empty provider placeholder from a nonempty unresolved person record.
+- Repair: a truly empty identity container survives as `{}`. Any nonempty author, user, submission, enrollment, grade, recipient, or member record without a resolvable identity still fails closed.
+- Regression: both normalization and final learner-egress paths preserve empty author and submission objects and empty enrollment arrays, while a nonempty author containing only a role remains refused. All 44 privacy tests pass.
+- Status: `IMPLEMENTED`.
+
+### 393: course authors are assumed to be learners
+
+- Verified defect: after the empty-author repair, the exact installed BT2 assignment-list call reached Canvas and then failed with `learner_roster_identity_unavailable`. A shape-only private diagnostic found eight empty author placeholders and one identified discussion author outside the student roster; it retained no names or identifiers.
+- User effect: a normal course assignment list remained unusable whenever Canvas embedded a discussion author who was not in the selected course's learner roster, including an instructor author.
+- Root cause: the privacy classifier mapped `author` to the generic user identity kind. The configured source-wide privacy default is deliberately learner-strict, so it also hid the capability catalog's verified course-data classification and required that author to match the learner roster.
+- Repair: author is now an explicit identity kind. The runtime passes a narrow course-author projection authority only for Canvas capabilities classified as course data, without weakening the source-wide learner default. Such an author is projected with all identity fields removed while safe non-identifying fields and the enclosing course data remain available. The final privacy pass accepts that already-scrubbed author only when no identity signal remains, making the two-stage boundary idempotent. Learner, grade, submission, enrollment, member, recipient, and generic user records retain their strict roster requirement.
+- Regression: a course assignment with an unrostered author keeps its assignment identity and author role but removes the author id, name, and avatar URL through both privacy stages. An unresolved author name and every existing unknown-learner case remain refused. The repaired source runtime completed the exact live BT2 read with 94 assignments across 10 Canvas pages and reported no truncation.
+- Status: `IMPLEMENTED`.
+
+### 394: a resource with `user_id` is mistaken for a person record
+
+- Verified defect: a normal Canvas export or progress resource that carried its owner as `user_id` was classified as a learner identity record. Public egress then refused the complete resource although its own `id`, status, and counts were course data.
+- Root cause: identity detection treated one foreign-key field as proof that the enclosing object represented a person.
+- Repair: a direct person id now needs an identity profile or a roster match before the enclosing object becomes an identity record. Identity-named containers retain the strict rule.
+- Regression: a resource `{ id, user_id, status, file_count }` survives, while actual learner and unresolved identity objects remain roster-bound.
+- Status: `IMPLEMENTED`.
+
+### 395: Canvas editor identities outside the student roster block course reads
+
+- Verified defect: Canvas Pages and other content can embed `last_edited_by`, creator, updater, or editor records for instructors and administrators who are absent from the learner roster. The public boundary refused the whole course resource.
+- Root cause: editor roles were classified as generic users and required a learner roster match.
+- Repair: verified Canvas course-data reads may scrub unrostered author and editor identities. The resource survives with safe role metadata, while ids, names, email addresses, and avatar URLs are removed. Learner, grade, submission, enrollment, member, and recipient records keep the strict roster rule.
+- Regression: the privacy suite covers every editor key and both privacy stages, and still refuses unresolved learner identity data.
+- Status: `IMPLEMENTED`.
+
+### 396: course-scoped semantic reads lose their selected-course authority
+
+- Verified defect: reads such as Page and Page-revision lookup use `url_or_id` for the resource and carry the course through the operation's semantic target. The MCP runtime looked only for a literal `course_id` in selected paths, so a valid bound read could enter privacy handling without its course.
+- Root cause: course derivation and connector dispatch did not consume the catalog's course-target contract consistently.
+- Repair: the runtime derives the exact course from `course_path` and `semantic_course_object` targets, binds it to the current source binding, and refuses every unscoped Canvas read before Bridge dispatch.
+- Regression: Page and latest-revision reads retain course `42`; an account-level course list is refused before a Bridge command is sent.
+- Status: `IMPLEMENTED`.
+
+### 397: capability schemas are rewritten as if they were Canvas responses
+
+- Verified defect: `morrow_capability_get` could return an input schema whose property names, including identity-shaped names, were changed or refused by course-data privacy projection.
+- Root cause: the final result boundary applied provider response privacy rules to Morrow's own immutable capability metadata.
+- Repair: capability descriptors bypass provider-data projection only for the exact `morrow_capability_get` control tool. Its input schema and digest still come from the runtime's shared compiled public contract.
+- Regression: the protocol suite compares the advertised descriptor properties with the registered public tool schema.
+- Status: `IMPLEMENTED`.
+
+### 398: hidden and active Canvas Page markup reaches public course data
+
+- Verified defect: Page bodies could carry scripts, hidden elements, event handlers, credential-bearing URLs, and browser-only markup through an otherwise valid course read.
+- Root cause: the Bridge fetched trusted-origin JSON, but public egress treated embedded HTML as inert text and never applied an HTML content contract.
+- Repair: Page and Page-revision bodies pass through a strict server-side HTML sanitizer. It removes active and hidden markup, unsafe URLs, style, event attributes, and non-course presentation data while retaining the bounded instructional structure and allowed table semantics.
+- Regression: direct and compact-result tests cover active markup, hidden content, unsafe links, safe instructional HTML, and nested Page results.
+- Status: `IMPLEMENTED`.
+
+### 399: Canvas course settings expose a signed image URL
+
+- Verified defect: `canvas_get_course_settings` returned the course `image` value, which can be a signed download URL containing a private token.
+- Root cause: settings used the generic course-data projector although one field is a transient credential.
+- Repair: the exact successful course-settings projection deletes `image` before privacy egress. Other validated settings remain available.
+- Regression: the full Canvas connector integration path retains a normal setting and proves that neither the image host nor its token appears in the result.
+- Status: `IMPLEMENTED`.
+
+### 400: a credential-minting GET is published as an ordinary read
+
+- Verified defect: `canvas_get_items_media_upload_url` was public because it is HTTP GET and course-scoped, but its result is a one-time upload credential rather than course data.
+- Root cause: read publication classified operations by HTTP effect and scope without classifying credential output.
+- Repair: the operation is profile-limited in every profile with a fixed reason. Morrow keeps media upload credentials inside its reviewed file-transfer workflow.
+- Regression: the catalog suite requires the exact hold, and the installed v16 supported catalog reports `mediaUploadPublished: false`.
+- Status: `IMPLEMENTED`.
+
+### 401: Classic Quiz summaries narrow Canvas IDs to JavaScript numbers
+
+- Verified defect: the Classic Quiz submission summary accepted and emitted numeric course and quiz ids while the rest of the Canvas contract preserves 64-bit ids as decimal strings.
+- Root cause: the curated summary copied an older safe-integer helper instead of the catalog's identifier contract.
+- Repair: course and quiz ids are canonical positive decimal strings end to end. The summary refuses a changed or noncanonical target.
+- Regression: unit, connector, and full MCP tests use string ids; the installed BT2 summary succeeded for course `89585` and quiz `334001`.
+- Status: `IMPLEMENTED`.
+
+### 402: Repair Morrow ignores changed Bridge bytes at the same version
+
+- Verified defect: a repaired app could ship corrected Bridge files under the current extension version while Repair Morrow treated the installed folder as current and left the old bytes active.
+- Root cause: repair compared only parsed Chrome versions and did not compare the sealed release-manifest digest.
+- Repair: equal versions with different sealed release digests take the same exact app-owned replacement path as a newer release, with a new active-folder challenge and readback.
+- Regression: the installer suite replaces same-version changed bytes. The live v16 repair produced 98 exact file matches, the packaged release digest, a fresh active-folder challenge, and no pending update.
+- Status: `IMPLEMENTED`.
+
+### 403: failed Canvas reads lose the provider outcome
+
+- Verified defect: every failed live read collapsed to `canvas_request_failed`, so MCP could not distinguish an absent resource from denied authorization, an invalid request, a provider fault, or a request never sent.
+- Root cause: the connector discarded the Bridge's bounded provider status while correctly discarding the provider response body.
+- Repair: failed reads retain only the closed `morrow.canvas-browser-failure.v1` shape: provider, sent, and optional HTTP status. No headers, body, URL, identity, or course content survives.
+- Regression: all 65 connector runtime tests pass. A live diagnostic classified the prior failures into exact 400, 401, 403, 404, 500, status-null, and not-sent groups with zero sensitive paths and zero identity shapes.
+- Status: `IMPLEMENTED`.
+
+### 404: Desktop Check status returns the previous runtime observation
+
+- Verified defect: authoritative MCP health reported a connected Bridge and one binding while the Desktop still showed “Connect Morrow Bridge” after an explicit Check status action.
+- Root cause: `state()` always requested a non-waiting runtime snapshot, even when the caller explicitly requested a fresh assistant and runtime check.
+- Repair: Check status waits for the fresh bounded runtime observation. Passive state reads remain nonblocking.
+- Regression: the installer controller test proves the explicit path awaits the new observation. All 409 installer tests pass.
+- Status: `IMPLEMENTED`.
+
+### 405: Canvas LTI service routes are advertised under browser-cookie authorization
+
+- Verified defect: six supported `/lti/` operations reached live BT2 and returned 401 consistently. These services require separate LTI authorization that a signed-in Canvas browser session does not hold.
+- Root cause: the catalog treated every course-scoped Canvas GET as compatible with the Bridge's browser-session credential boundary.
+- Repair: every `/lti/` operation is profile-limited with the exact incompatible-authorization reason, without overriding stronger scope or write holds.
+- Regression: the catalog suite enumerates the complete route family. The installed v16 catalog dropped these impossible operations from supported reads.
+- Status: `IMPLEMENTED`.
+
+### 406: redirect-only Canvas routes are advertised as data reads
+
+- Verified defect: course brand variables and the root outcome-group convenience route returned navigation redirects rather than JSON course data. The Bridge refuses cross-origin redirects, so these operations could never produce their advertised result.
+- Root cause: publication treated HTTP GET as a data read even when the official operation returns `void` and documents a redirect.
+- Repair: read-only `void` operations whose official contract identifies a redirect are profile-limited with the fixed navigation-redirect reason.
+- Regression: the catalog suite enumerates all matching routes and requires the exact limitation. Installed v16 publishes 215 Canvas reads, down from the 223 pre-repair set.
+- Status: `IMPLEMENTED`.
+
+### 407: cross-field Canvas read requirements are absent from generated schemas
+
+- Verified defect: the public schema accepted empty or incomplete requests for module-item sequence, outcome alignment, sessionless tool launch, provisional-grade status, and batch override lookup. Live Canvas returned 400 although every request passed local validation.
+- Root cause: the official Swagger parameters describe fields individually but do not encode required combinations such as `asset_id` plus `asset_type` or one of several alternate selectors.
+- Repair: the generator applies reviewed cross-field `required`, `anyOf`, and nonempty-array contracts after normalizing the official operations.
+- Regression: catalog generation is deterministic at digest `9e6ad90c408ead3b6f781bdd3da89caa35e323b76ad249db757e65d84b0134a5`; all 47 catalog tests and the generated catalog check pass.
+- Status: `IMPLEMENTED`.
+
+### 408: every delegated Desktop setup button throws before its action
+
+- Verified defect: in the installed app, Check status worked, but Set up ChatGPT did nothing through mouse, keyboard, or accessibility activation. Every action handled through the shared action panel had the same failure.
+- Root cause: focus preservation called `.includes()` on a real DOM `NodeList`. The unit stand-in returned an Array and hid the invalid browser assumption.
+- Repair: focus preservation uses the container's native `contains()` contract. The action then reaches its exact installer IPC handler.
+- Regression: a real Chromium renderer test selects ChatGPT, clicks Set up ChatGPT, and observes `installer:install-assistant` with `{ assistantId: "codex" }`. The complete 409-test installer suite and the multi-width renderer test pass. The installed v16 action updated the ChatGPT record, and its fresh SHA-256 readback matches the actual configuration file.
+- Status: `IMPLEMENTED`.
+
+### 409: Canvas nested request values are sent as scalar strings
+
+- Verified defect: supported Canvas writes with array or hash fields sent repeated unbracketed keys or one JSON string inside an URL-encoded or multipart form. Array-valued post-write reads used the same wrong query encoding. Canvas documents these values as Rails-style bracket parameters, including `assignment[submission_types][]` and `assignment[allowed_extensions][]`.
+- User effect: Canvas could retain only one requested array member or reject a nested hash, and a multi-target readback could query only one target. The affected semantic classes were assignments and assignment groups; grading periods and standards; proficiency ratings; course timetables; Classic Quiz groups, ordering, questions, and reports; rubrics; modules; appointment contexts and time slots; usage rights; pinned topics and custom-column ordering; Blueprint restrictions; learning-object date and peer-review overrides; blackout dates; content exports and course reports; and LTI resource-link, line-item, and submission payloads. Held course-copy, migration, course-pace, and outcome operations used the same broken adapter and would have remained broken if later admitted.
+- Root cause: the shared Canvas wire encoder repeated the original name for arrays and applied `JSON.stringify` to objects instead of preserving the provider's bracket structure.
+- Repair: one recursive encoder expands hashes into bracket paths and arrays of hashes into one bracketed member per record. Plain arrays put `[]` at the leaf. Repeated-record families put `[]` at the provider's record axis, including `grading_periods[][id]`, `grading_scheme_entry[][name]`, `ratings[][points]`, `events[][start_at]`, `quiz_groups[][name]`, `order[][id]`, and `timetables[course_section_id][][weekdays]`. The malformed Swagger alias `blackout_dates:` is sent as `blackout_dates[]`. URL-encoded forms, multipart forms, and Canvas query arrays use this one encoder. New Quizzes and the named bulk-date operation keep their existing JSON bodies.
+- Regression: the real content-script harness checks a two-value Assignment array, a nested Rubric criterion hash, every repeated-record family above, a Blackout Date object array, a multipart Discussion attachment, and the `assignment_ids[]` plus `include[]` query used by exact Assignment readback. All focused request-contract tests pass.
+- Status: `IMPLEMENTED`.
+
+### 410: course paths hide learner and multi-course effects
+
+- Verified defect: selected-course Edit admitted learner-specific New Quiz accommodations, course pacing, AI conversations, discussion participation, learner messages and rollups, destructive course and gradebook changes, Blueprint pushes, course copies and migrations, course reset, and outcome imports or links that can reach another course or account.
+- Root cause: admission treated a course identifier in the route as sufficient authority. It did not classify learner targets or secondary scopes carried in the request body or operation semantics.
+- Repair: the shared admission contract now checks semantic learner effects and secondary course or account effects before direct course admission. It holds 125 learner-authority writes and 11 multi-course-authority writes. The generated browser admission contract and capability report use the same decision.
+- Regression: the catalog suite exhaustively classifies 91 course-path learner writes across 14 semantic categories, pins the 11 multi-course operations and the group-topic deletion cascade, and requires their public and private profiles to remain limited.
+- Status: `IMPLEMENTED`.
+
+### 411: Canvas Rubric CSV import is published without a file input
+
+- Verified defect: `canvas_creates_rubric_using_csv_file_courses` was published as a structurally exact course write even though its generated input contains only `course_id`. The Bridge therefore sent an empty `POST` to the Rubric CSV upload route.
+- User effect: a requested CSV Rubric import could never carry the reviewed file and could still reach Canvas as a bodyless write.
+- Root cause: course-path admission and structural readback classified the returned Rubric import object, but neither checked whether the generated request contract could represent the provider's required private attachment.
+- Repair: the exact Rubric CSV upload route now receives the reviewed-transfer hold before course-path admission. Its public and private profiles refuse it before provider I/O until a dedicated CSV transfer owns the file bytes and readback.
+- Regression: the catalog suite enumerates every reviewed-transfer hold, pins the Rubric route's one-field schema, and requires held admission, no readback claim, and the same refusal in both write profiles.
+- Status: `IMPLEMENTED`.
+
+### 412: OutcomeLink creation readback targets the group instead of the outcome
+
+- Verified defect: the generic create/link readback used the operation's `id`, which identifies the parent outcome group, as the target inside a collection of `OutcomeLink` records whose identity is `outcome.id`.
+- User effect: a pre-existing link could satisfy the wrong target, or the requested link could fail verification even when Canvas saved it.
+- Root cause: the generic collection planner assumed every route `id` names the created child and did not model the nested `OutcomeLink` identity.
+- Repair: all six account, global, and course OutcomeLink create operations are held before dispatch by their account or multi-course authority classes. Their public and private profiles expose no readback claim until an outcome-aware exact reader is implemented with the required broader authority.
+- Regression: the catalog suite exhaustively enumerates the six create operations and requires held admission, `write_held` assessment, profile limitation, and `supportsReadback: false` for each.
+- Status: `IMPLEMENTED`.
+
+### 413: delete and conclude course share an absence-only readback
+
+- Verified defect: `canvas_delete_conclude_course` accepted both `event=delete` and `event=conclude`, but the generic planner used the same deleted-resource absence result for both. An inaccessible or deleted course could therefore appear to verify conclusion without proving concluded state.
+- User effect: Morrow could report a concluded or deleted course from an ambiguous failed read instead of the requested terminal state.
+- Root cause: readback planning classified the HTTP method and ignored the operation's event-dependent effect.
+- Repair: the combined destructive course operation is held before dispatch by the learner-authority class because both effects remove learner access or records. Its public and private profiles expose no readback claim until separate event-aware terminal readers and destructive authority exist.
+- Regression: the catalog suite pins both allowed events and requires held admission, `write_held` assessment, profile limitation, and `supportsReadback: false`.
+- Status: `IMPLEMENTED`.
+
+### 414: Canvas course-file transfer starts requests after its command expires
+
+- Verified defect: the private course-file executor converted an already expired command deadline into a new one-millisecond abort timer. Canvas preflights, the signed storage upload, confirmation reads, and the final byte download could therefore begin after the original command had expired. Its non-OK and redirect branches also abandoned live provider bodies without cancellation.
+- Root cause: the in-page request helper clamped nonpositive remaining time instead of refusing new I/O, and each exceptional response branch owned its body independently.
+- Repair: every request derives its signal from the unchanged command deadline and refuses before `fetch` when no time remains. Upload dispatch is recorded only after that check. One best-effort body owner cancels every non-OK Canvas, storage, and download response and every redirect body without awaiting an untrusted cancellation promise.
+- Regression: the file-transfer harness proves zero requests for an expired command, no second request after a delayed profile preflight consumes the deadline, prompt settlement for live non-OK bodies at all three origins, and redirect-body cancellation before confirmation. All 16 focused file-transfer tests pass.
+- Status: `IMPLEMENTED`.
+
+### 415: group-content readback does not recheck the group owner
+
+- Verified defect: after a group page or discussion write, the Bridge returned `verified` as soon as the content route matched. It did not reread the group or the selected course's complete group listing after the mutation and readback awaits.
+- Root cause: semantic verification returned early for the `content` target class, although its authority belongs to the parent group rather than the page or topic response.
+- Repair: a verified group-content result now rereads the exact group and, where required, the bound course's complete group collection under the original deadline. A changed or absent owner is a mismatch. An incomplete owner read is unconfirmed. An expired deadline starts no new provider read.
+- Regression: the group-scope harness executes the production owner check against a bound group, another course, an absent course-list entry, an incomplete list, and an expired deadline. It also pins the post-content-readback call site.
+- Status: `IMPLEMENTED`.
+
+### 416: course-file initialization loses its command deadline
+
+- Verified defect: the full native-browser gate reached the reviewed course-file transfer, completed its binding checks, and then returned `canvas_request_not_sent` without contacting storage.
+- Root cause: the service worker calculated and enforced one fixed transfer deadline but omitted it from the object injected into the Canvas page. The repaired in-page executor correctly treats a missing deadline as expired.
+- Repair: every initialize and complete injection now carries the same bounded deadline that owns the service-worker transfer.
+- Regression: the full Canvas connector browser gate executes the production service-worker route and requires the storage upload, authenticated Canvas confirmation, exact file readback, and downloaded-byte digest verification.
+- Status: `IMPLEMENTED`.
+
+### 417: nested enrollment details lose their verified learner owner
+
+- Verified defect: the full New Quiz planner failed at privacy egress when a normal Canvas roster record contained an `enrollments` array whose child repeated course and state data without repeating the learner id.
+- Root cause: the recursive privacy walker used one flag for both text redaction and inherited identity. Course-scoped text redaction was active for every object, while a verified parent learner was not distinguished from unrelated course data.
+- Repair: nested identity containers may omit a duplicate id only when they descend from a learner record already resolved against the exact roster. Standalone nonempty enrollment, submission, user, and learner records without identity still fail closed.
+- Regression: the privacy unit suite exercises both projection paths with a roster-bound learner and an identity-free nested enrollment. The New Quiz end-to-end suite exercises the same real Canvas roster shape through planning.
+- Status: `IMPLEMENTED`.
+
+### 418: structural membership evidence is mistaken for a person
+
+- Verified defect: after the nested-enrollment repair, New Quiz creation still failed because its frozen membership proof uses the key `membership` for item ids, count, read time, and source authority.
+- Root cause: the privacy walker classified every `membership` key as a learner identity container without checking whether the value had any identity signal.
+- Repair: identity-free `member` and `membership` metadata receive ordinary course-data redaction. A member or membership object with an id, name, email, or other identity signal still requires exact roster resolution.
+- Regression: the privacy unit suite passes structural membership through both projection paths. The New Quiz end-to-end suite passes the same membership proof through the public planner.
+- Status: `IMPLEMENTED`.
+
+### Root-cause patterns for rows 331–418
+
+- **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
+- **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
+- **A local identifier treated as sufficient proof:** rows 334, 341, 345–347, 353, and 363. Each repair keeps the full identity needed by the boundary: process start, selected-course binding, decimal string, causal sequence, or effect receipt. The global Canvas Progress id is not accepted as course authority.
+- **Independent state writers without one monotonic owner:** rows 332–333, 340, 348, and 350–352. Each repair serializes lifecycle work, adds a monotonic revision or abort signal, and gives shutdown bounded ownership of every resource still being created.
+- **Per-message limits without aggregate ownership:** row 354. Admission now bounds both the pending count and total retained bytes until each command settles.
+- **Platform contract drift:** rows 337, 362, and 368. Windows command dispatch uses the platform command interpreter with expansion disabled, Chrome alarms use the documented one-minute floor, and Desktop packaging uses Electron Builder's current signing schema.
+- **Test contract drift:** rows 364–365 and 367. Extracted and visual harnesses carry the production deadline, authority, and revision contracts they exercise.
+- **Capability labels stronger than executable evidence:** rows 369–372, 376–378, and 410–413. Package admission now executes the shipped runtime, public schemas follow the exact tool, provider objects are projected before privacy classification, a write cannot be supported without an exact postcondition reader or executable request body, publication cannot override a safety limit, learner writes require separate authority, multi-course effects require every affected scope, and Bridge grants use the same final safety predicate as MCP.
+- **Provider shapes and nested timeouts hidden by an abstraction:** rows 373–375, 379, and 381. Inventory owns one pagination path, gives each provider read its own bound, gives the complete run a separate larger bound, resolves Canvas's same-origin relative launch URL, and treats the legacy and native Item Banks runtimes as two strict provider contracts.
+- **A sandbox policy contradicts the parser it contains:** row 380. The sandbox allows the one local data form the parser must inspect while every network-bearing resource type remains blocked.
+- **A duplicated release contract drifts from its source:** row 382. Package admission pins the exact shipped policy and is exercised by source capture and final Desktop payload construction.
+- **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
+- **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
+- **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.
+- **Human-readable routes used where immutable identity is available:** row 386. Inventory uses Canvas's numeric Page identity and keeps the route slug inside the private provider response.
+- **Synthetic capacity below an ordinary live course:** row 387. One bounded result ceiling now accommodates measured BT2 output while the existing pagination and count bounds remain active.
+- **Curated helpers copied a generated schema defect:** row 388. Workflows preserve validated primitive values and run against the regenerated catalog in conformance tests.
+- **A bounded transport representation escaped before semantic validation finished:** row 390. Final egress now validates the complete Edit catalog before it replaces that result with an audience-bound artifact handle.
+- **Per-request construction retained runtime-wide immutable state:** row 391. Public schema and validator contracts are compiled once for the runtime and shared by short-lived protocol servers.
+- **Absence represented as an identity-shaped provider placeholder:** row 392. Empty containers carry no person data and remain empty; any nonempty unresolved identity record still fails closed.
+- **A person-role label collapsed into a learner identity:** row 393. Course authors can be non-learners; their identity fields are removed when they are outside the learner roster while learner-bearing records remain roster-bound.
+- **A field name mistaken for the enclosing resource type:** rows 394–395 and 397. Identity requires an actual person shape; course editors are scrubbed under a narrow course-data authority; Morrow capability metadata never enters provider response projection.
+- **One course-authority representation used as if it were the only one:** row 396. Dispatch and privacy derive scope from the catalog's complete course-target contract.
+- **Trusted-origin content mistaken for safe public content:** rows 398–400. Embedded HTML, signed image URLs, and one-time upload credentials now have explicit output contracts before they can be published.
+- **Curated numeric types drifted from the provider identity contract:** row 401. Canvas identifiers remain decimal strings across generated and curated tools.
+- **Version equality mistaken for artifact equality:** row 402. Bridge maintenance compares the exact sealed release digest at equal versions.
+- **Error sanitization erased operational evidence:** row 403. Failure results retain a closed provider outcome without retaining provider content.
+- **A user-requested refresh reused a passive cached observation:** row 404. Explicit status checks await the bounded current runtime observation.
+- **HTTP method and path scope mistaken for executable credential and response semantics:** rows 405–407. Publication now accounts for authorization class, redirect behavior, and cross-field request requirements.
+- **A test double implemented more DOM behavior than the browser:** row 408. The renderer uses the standard container contract and the regression executes in Chromium.
+- **Provider container types flattened into scalar form fields:** row 409. Canvas arrays and hashes retain the documented bracket structure through write dispatch and post-write reads.
+
+The shared repair rule is now: bind the exact authority, identity, revision, and deadline at admission; recheck them immediately before an irreversible effect; serialize competing commits; and reclaim every resource within a fixed bound.
+
+### Desktop repair evidence for rows 331–340
+
+- Exact readers no longer use ctime as a mutation signal. Injected-ctime tests keep inode, link count, size, mtime, mode, and owner checks active.
+- The controller creates one monitor. The monitor serializes connect, refresh, maintenance, reconnect, and close. PID reclaim rechecks the recorded process start before TERM and KILL.
+- Update check and staging operations have owned deadlines, stop settles both paths, late events are quarantined, and every snapshot carries a monotonic revision that the renderer refuses to roll back.
+- Assistant configuration removal and rollback use exact-generation displacement and exclusive publication. Concurrent path replacement or in-place edits win unchanged.
+- `morrow doctor` uses bounded asynchronous probes with process-tree reclaim. Windows `.cmd` probes use `cmd.exe /d /s /v:off /c` with the shim path outside command text.
+
+### Provider and Bridge repair evidence for rows 341–346, 355–363
+
+- All 351 Canvas reads that cannot bind the selected course are profile-limited and refused before connector or provider I/O. The catalog, Canvas connector, service worker, and content script enforce the same rule.
+- Private semantic and response readbacks carry an internal service-worker authority bound to the selected course and original command deadline. That authority never appears on a model-callable operation, and the Bridge validates the returned object or response before using it.
+- The New Quiz report planner no longer requires or advertises the unscoped global Progress reader. It plans the exact course-and-quiz report request, requires an Assignment-bound Progress receipt, and directs the person back to that quiz in Canvas for the completed report.
+- Generic and specialized provider routes carry the original deadline through preflight, pagination, credentials, upload, mutation, and readback. Expired Item Bank, quiz-bank, file, and Hot Spot fixtures start no provider request.
+- Every rejected or retried provider response owns its body through cancellation or bounded consumption. The syntax-tree response analyser now follows response reassignment.
+- Canvas course and folder IDs remain canonical decimal strings through the private transfer result.
+- First-read completion is a durable versioned receipt bound to the exact current source binding, principal fingerprint, course, and session generation. Bridge status, protocol, MCP projection, onboarding, and Desktop all consume the same current-binding flag.
+- Command identity is reserved before asynchronous admission. Cancellation, expiry, consent withdrawal, permission removal, pairing, Settings writes, socket handshake, and folder-marker reads now use one fenced and bounded lifecycle.
+
+### MCP and loopback repair evidence for rows 347–354
+
+- Reads and unresolved effects share one durable causal sequence. Only a delivered matching read with a later sequence can close an unknown effect or release its target lock.
+- Runtime construction accepts cancellation through every provisional upstream and closes partial stores and clients on failure. Owner startup and shutdown use bounded child reclamation with escalation.
+- Legacy cancellation is forwarded end to end. Both modern and legacy stdio writers use one bounded serialized queue and a bounded close contract.
+- Loopback serializes and sends before it consumes the effect receipt. It admits at most 64 pending commands and eight MiB of retained payload plus socket-buffered bytes.
 
 ### 311 (reconfirmation, 2026-09-13)
 

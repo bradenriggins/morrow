@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasOperationAdmission, canvasReadbackAssessment, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
+import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
 import catalogJson from "../../../artifacts/canvas-api/canvas-api-catalog.json";
 
 const catalog = parseCanvasApiCatalog(catalogJson);
@@ -88,6 +88,166 @@ describe("Canvas API catalog", () => {
     expect(course?.schema).toMatchObject({ type: "string", pattern: "^[1-9][0-9]*$" });
     expect(operationArguments(operation!, { course_id: "9007199254740993", assignment_id: "9223372036854775807" }).path)
       .toBe("/quiz/v1/courses/9007199254740993/quizzes/9223372036854775807");
+  });
+
+  it("preserves official enums and distinguishes Canvas IDs from ordinary int64 values", () => {
+    const parameter = (toolName: string, wireName: string) => {
+      const operation = catalog.operations.find((candidate) => candidate.toolName === toolName);
+      expect(operation, toolName).toBeTruthy();
+      const found = operation!.parameters.find((candidate) => candidate.wireName === wireName);
+      expect(found, `${toolName}:${wireName}`).toBeTruthy();
+      return found!;
+    };
+
+    expect(parameter("canvas_switch_experience", "experience").schema.enum).toEqual(["academic", "career"]);
+    expect(parameter("canvas_update_courses", "event").schema.enum).toEqual(["offer", "conclude", "delete", "undelete"]);
+    expect(parameter("canvas_create_new_discussion_topic_courses", "discussion_type").schema.enum)
+      .toEqual(["side_comment", "threaded", "not_threaded"]);
+    for (const toolName of [
+      "canvas_create_new_discussion_topic_courses",
+      "canvas_update_topic_courses",
+      "canvas_create_new_discussion_topic_groups",
+      "canvas_update_topic_groups",
+    ]) {
+      expect(parameter(toolName, "discussion_type").schema.enum, toolName)
+        .toEqual(["side_comment", "threaded", "not_threaded"]);
+      expect(parameter(toolName, "sort_order").schema.enum, toolName).toEqual(["asc", "desc"]);
+    }
+    expect(parameter("canvas_create_ai_experience", "workflow_state").schema.enum)
+      .toEqual(["published", "unpublished"]);
+    expect(parameter("canvas_update_ai_experience", "workflow_state").schema.enum)
+      .toEqual(["published", "unpublished"]);
+    expect(parameter("canvas_list_ai_experiences", "workflow_state").schema.enum)
+      .toEqual(["published", "unpublished", "deleted"]);
+    expect(parameter("canvas_list_enrollments_courses", "type").schema).toMatchObject({
+      type: "array",
+      items: {
+        type: "string",
+        enum: ["StudentEnrollment", "TeacherEnrollment", "TaEnrollment", "DesignerEnrollment", "ObserverEnrollment"],
+      },
+    });
+    expect(parameter("canvas_list_users_in_course_users", "enrollment_type").schema).toMatchObject({
+      type: "array",
+      items: { type: "string", enum: ["teacher", "student", "student_view", "ta", "observer", "designer"] },
+    });
+    expect(parameter("canvas_bulk_fetch_user_tags_for_multiple_users_in_course", "user_ids").schema)
+      .toMatchObject({ type: "array", items: { type: "string", pattern: "^[1-9][0-9]*$" } });
+    for (const toolName of [
+      "canvas_retrieve_assignment_overridden_dates_for_classic_quizzes",
+      "canvas_retrieve_assignment_overridden_dates_for_new_quizzes",
+    ]) {
+      expect(parameter(toolName, "quiz_assignment_overrides[quiz_ids]").schema, toolName)
+        .toMatchObject({ type: "array", items: { type: "string", pattern: "^[1-9][0-9]*$" } });
+    }
+    for (const toolName of ["canvas_create_module_item", "canvas_update_module_item"]) {
+      expect(parameter(toolName, "module_item[indent]").schema, toolName)
+        .toMatchObject({ type: "integer", minimum: 0 });
+    }
+    for (const toolName of ["canvas_create_new_grading_standard_courses", "canvas_update_grading_standard_courses"]) {
+      expect(parameter(toolName, "grading_scheme_entry[value]").schema, toolName)
+        .toMatchObject({ type: "array", items: { type: "integer", minimum: 0, maximum: 100 } });
+    }
+  });
+
+  it("models documented Canvas booleans, sentinels, nullable settings, and exceptional identifiers", () => {
+    const schema = (toolName: string, wireName: string) => catalog.operations
+      .find((candidate) => candidate.toolName === toolName)!.parameters
+      .find((candidate) => candidate.wireName === wireName)!.schema;
+
+    for (const toolName of ["canvas_create_assignment", "canvas_edit_assignment"]) {
+      expect(schema(toolName, "assignment[grade_group_students_individually]"), toolName).toMatchObject({ type: "boolean" });
+    }
+    expect(schema("canvas_list_lti_launch_definitions_courses", "include_context_name[Boolean]")).toMatchObject({ type: "boolean" });
+    expect(schema("canvas_create_assignment", "assignment[allowed_attempts]").anyOf)
+      .toEqual([{ const: -1 }, { type: "integer", minimum: 1 }]);
+    expect(schema("canvas_edit_assignment", "assignment[allowed_attempts]").anyOf)
+      .toEqual([{ type: "null" }, { const: -1 }, { type: "integer", minimum: 1 }]);
+    for (const toolName of ["canvas_create_quiz", "canvas_edit_quiz"]) {
+      expect(schema(toolName, "quiz[allowed_attempts]").anyOf, toolName)
+        .toEqual([{ const: -1 }, { type: "integer", minimum: 1 }]);
+      expect(schema(toolName, "quiz[access_code]").type, toolName).toEqual(["string", "null"]);
+      expect(schema(toolName, "quiz[ip_filter]").type, toolName).toEqual(["string", "null"]);
+      expect(schema(toolName, "quiz[hide_results]"), toolName).toMatchObject({
+        type: ["string", "null"], enum: ["always", "until_after_last_attempt", null],
+      });
+      expect(schema(toolName, "quiz[time_limit]").anyOf, toolName)
+        .toEqual([{ type: "null" }, { type: "integer", minimum: 1 }]);
+    }
+    expect(schema("canvas_set_course_timetable", "timetables[course_section_id]")).toMatchObject({
+      type: "array",
+      items: { anyOf: [{ const: "all" }, { type: "string", pattern: "^[1-9][0-9]*$" }] },
+    });
+    expect(schema("canvas_get_outcome_results", "user_ids").items).toMatchObject({
+      anyOf: [{ pattern: "^[1-9][0-9]*$" }, { pattern: "^sis_user_id:.+$", maxLength: 512 }],
+    });
+  });
+
+  it("models proficiency arrays and course choices with their documented element contracts", () => {
+    const schema = (toolName: string, wireName: string) => catalog.operations
+      .find((candidate) => candidate.toolName === toolName)!.parameters
+      .find((candidate) => candidate.wireName === wireName)!.schema;
+
+    expect(schema("canvas_create_update_proficiency_ratings_courses", "ratings[points]")).toMatchObject({
+      type: "array", items: { type: "integer", minimum: 0 },
+    });
+    expect(schema("canvas_create_update_proficiency_ratings_courses", "ratings[mastery]")).toMatchObject({
+      type: "array", items: { type: "boolean" },
+    });
+    expect(schema("canvas_create_update_proficiency_ratings_courses", "ratings[color]")).toMatchObject({
+      type: "array", items: { type: "string", pattern: "^[0-9A-Fa-f]{6}$" },
+    });
+    expect(schema("canvas_create_new_course", "course[course_format]").enum).toEqual(["on_campus", "online", "blended"]);
+    expect(schema("canvas_update_course", "course[grade_passback_setting]").enum).toEqual(["nightly_sync", ""]);
+    expect(schema("canvas_update_course", "course[course_format]").enum).toEqual(["on_campus", "online"]);
+    expect(schema("canvas_update_course", "course[license]").enum).toEqual([
+      "private", "cc_by_nc_nd", "cc_by_nc_sa", "cc_by_nc", "cc_by_nd", "cc_by_sa", "cc_by", "public_domain",
+    ]);
+    expect(schema("canvas_update_course", "course[event]").enum)
+      .toEqual(["claim", "offer", "conclude", "delete", "undelete"]);
+  });
+
+  it("repairs official scalar metadata when the documented Canvas value is nullable, repeated, or boolean", () => {
+    const schema = (toolName: string, wireName: string) => catalog.operations
+      .find((candidate) => candidate.toolName === toolName)!.parameters
+      .find((candidate) => candidate.wireName === wireName)!.schema;
+
+    for (const toolName of ["canvas_create_appointment_group", "canvas_update_appointment_group"]) {
+      expect(schema(toolName, "appointment_group[participants_per_appointment]").anyOf, toolName)
+        .toEqual([{ type: "null" }, { type: "integer" }]);
+    }
+    for (const toolName of ["canvas_create_assignment_override", "canvas_update_assignment_override"]) {
+      for (const wireName of ["assignment_override[due_at]", "assignment_override[lock_at]", "assignment_override[unlock_at]"]) {
+        expect(schema(toolName, wireName).type, `${toolName}:${wireName}`).toEqual(["string", "null"]);
+      }
+    }
+    for (const toolName of ["canvas_create_course_pace", "canvas_update_course_pace"]) {
+      expect(schema(toolName, "selected_days_to_skip"), toolName)
+        .toMatchObject({ type: "array", items: { type: "string" } });
+    }
+    for (const toolName of [
+      "canvas_retrieve_assignments_enabled_for_grade_export_to_sis_accounts",
+      "canvas_retrieve_assignments_enabled_for_grade_export_to_sis_courses",
+    ]) {
+      expect(schema(toolName, "include"), toolName).toMatchObject({
+        type: "array", items: { type: "string", enum: ["student_overrides"] },
+      });
+    }
+    for (const toolName of ["canvas_list_lti_launch_definitions_accounts", "canvas_list_lti_launch_definitions_courses"]) {
+      expect(schema(toolName, "only_visible[Boolean]"), toolName).toMatchObject({ type: "boolean" });
+    }
+    expect(schema("canvas_update_account", "account[settings][suppress_notifications]").anyOf).toEqual([
+      { type: "boolean" },
+      { type: "array", items: { type: "string", minLength: 1 } },
+    ]);
+    for (const wireName of [
+      "grading_period_set[display_totals_for_all_grading_periods]",
+      "grading_period_set[weighted]",
+    ]) {
+      expect(schema("canvas_update_grading_period_set", wireName), wireName).toMatchObject({ type: "boolean" });
+    }
+    expect(schema("canvas_update_list_of_blackout_dates", "blackout_dates:")).toMatchObject({
+      type: "array", items: { type: "object", additionalProperties: true },
+    });
   });
 
   it("binds a collection readback to the exact updated discussion entry", () => {
@@ -210,7 +370,7 @@ describe("Canvas API catalog", () => {
     expect(operation!.inputSchema.required).toEqual(["course_id", "id"]);
     expect(operation!.parameters.filter((parameter) => parameter.location === "form")).toMatchObject([
       { inputName: "column_hidden", wireName: "column[hidden]", required: false, schema: { type: "boolean" } },
-      { inputName: "column_position", wireName: "column[position]", required: false, schema: { type: "string" } },
+      { inputName: "column_position", wireName: "column[position]", required: false, schema: { type: "integer" } },
       { inputName: "column_read_only", wireName: "column[read_only]", required: false, schema: { type: "boolean" } },
       { inputName: "column_teacher_notes", wireName: "column[teacher_notes]", required: false, schema: { type: "boolean" } },
       { inputName: "column_title", wireName: "column[title]", required: false, schema: { type: "string" } },
@@ -219,7 +379,7 @@ describe("Canvas API catalog", () => {
       course_id: "42",
       id: "7",
       column_title: "Participation",
-      column_position: "3",
+      column_position: 3,
       column_hidden: true,
       column_teacher_notes: true,
       column_read_only: false,
@@ -228,7 +388,7 @@ describe("Canvas API catalog", () => {
       query: [],
       body: [
         ["column[hidden]", true],
-        ["column[position]", "3"],
+        ["column[position]", 3],
         ["column[read_only]", false],
         ["column[teacher_notes]", true],
         ["column[title]", "Participation"],
@@ -348,25 +508,205 @@ describe("Canvas API catalog", () => {
     }
   });
 
-  it("derives public write availability from one admission contract", () => {
+  it("publishes only exact course-scoped reads and admitted writes", () => {
     const tools = canvasCatalogTools(catalog);
     expect(tools).toHaveLength(catalog.counts.totalOperations);
     const writes = catalog.operations.filter((operation) => !operation.readOnly);
     const held = writes.filter((operation) => canvasOperationAdmission(operation).write.state === "held");
-    expect(held).toHaveLength(321);
-    expect(tools.filter((tool) => tool.capability?.profiles["public-canvas"].state !== "supported")).toHaveLength(321);
+    const admittedWithoutExactReadback = writes.filter((operation) => (
+      canvasOperationAdmission(operation).write.state === "admitted"
+      && canvasReadbackAssessment(catalog.operations, operation).state !== "structurally_exact"
+    ));
+    const unscopedReads = catalog.operations.filter((operation) => operation.readOnly
+      && !canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget));
+    const credentialReads = catalog.operations.filter((operation) => operation.toolName === "canvas_get_items_media_upload_url");
+    const incompatibleAuthentication = catalog.operations.filter((operation) => (
+      operation.path.startsWith("/lti/")
+      && !(operation.readOnly && !canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget))
+      && canvasOperationAdmission(operation).write.state !== "held"
+    ));
+    const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
+      && /redirect/iu.test(`${operation.summary} ${operation.description}`));
+    expect(held).toHaveLength(422);
+    expect(admittedWithoutExactReadback).toHaveLength(28);
+    expect(unscopedReads).toHaveLength(351);
+    const expectedLimited = new Set([
+      ...held,
+      ...admittedWithoutExactReadback,
+      ...unscopedReads,
+      ...credentialReads,
+      ...catalog.operations.filter((operation) => operation.path.startsWith("/lti/")),
+      ...redirectReads,
+    ].map((operation) => operation.toolName));
+    expect(tools.filter((tool) => tool.capability?.profiles["public-canvas"].state !== "supported"))
+      .toHaveLength(expectedLimited.size);
+    for (const operation of unscopedReads) {
+      const tool = tools.find((candidate) => candidate.name === operation.toolName);
+      const reason = "This Canvas read cannot be bound to the selected course.";
+      expect(tool?.capability?.profiles["private-full"], operation.toolName).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.profiles["public-canvas"], operation.toolName).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.profiles["read-only"], operation.toolName).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.evidence?.admission, operation.toolName).toEqual({ state: "blocked", reason });
+    }
+    for (const operation of admittedWithoutExactReadback) {
+      const tool = tools.find((candidate) => candidate.name === operation.toolName);
+      expect(tool?.capability?.profiles["private-full"].state, operation.toolName).toBe("profile_limited");
+      expect(tool?.capability?.profiles["public-canvas"].state, operation.toolName).toBe("profile_limited");
+      expect(tool?.capability?.profiles["read-only"].state, operation.toolName).toBe("profile_limited");
+      expect(tool?.capability?.behavior.supportsReadback, operation.toolName).toBe(false);
+    }
+    for (const operation of credentialReads) {
+      const tool = tools.find((candidate) => candidate.name === operation.toolName);
+      const reason = "This Canvas read returns a one-time media upload credential. Morrow keeps upload credentials inside its reviewed file transfer.";
+      expect(tool?.capability?.profiles["private-full"]).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.profiles["public-canvas"]).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.profiles["read-only"]).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.evidence?.admission).toEqual({ state: "blocked", reason });
+    }
+    for (const operation of incompatibleAuthentication) {
+      const tool = tools.find((candidate) => candidate.name === operation.toolName);
+      const reason = "This Canvas LTI service requires separate LTI authorization that the signed-in browser session does not hold.";
+      expect(tool?.capability?.profiles["private-full"]).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.profiles["public-canvas"]).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.evidence?.admission).toEqual({ state: "blocked", reason });
+    }
+    for (const operation of redirectReads.filter((operation) => (
+      canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget)
+    ))) {
+      const tool = tools.find((candidate) => candidate.name === operation.toolName);
+      const reason = "This Canvas route returns a navigation redirect instead of course data, which the Bridge does not follow across origins.";
+      expect(tool?.capability?.profiles["private-full"]).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.profiles["public-canvas"]).toEqual({ state: "profile_limited", reason });
+      expect(tool?.capability?.evidence?.admission).toEqual({ state: "blocked", reason });
+    }
     expect(tools.filter((tool) => tool.capability?.family === "new-quizzes-item-banks")).toHaveLength(18);
   });
 
+  it("holds every course-path learner record outside ordinary course Edit", () => {
+    const tools = new Map(canvasCatalogTools(catalog).map((tool) => [tool.name, tool]));
+    const category = (operation: (typeof catalog.operations)[number]): string | undefined => {
+      const { method, path } = operation;
+      if (/^\/v1\/courses\/\{course_id\}\/assignments\/(?:overrides(?:\/|$)|\{[^}]+\}\/(?:allocate|anonymous_submissions|extensions|moderated_students|overrides|provisional_grades|submissions)(?:\/|$))/.test(path)) return "assignment records";
+      if (/^\/v1\/courses\/\{course_id\}\/submissions(?:\/|$)/.test(path)) return "course submissions";
+      if (/^\/v1\/courses\/\{course_id\}\/quizzes\/\{[^}]+\}\/(?:extensions|submissions)(?:\/|$)/.test(path)
+        || /^\/v1\/courses\/\{course_id\}\/quiz_extensions(?:\/|$)/.test(path)) return "quiz attempts";
+      if (/^\/v1\/courses\/\{course_id\}\/enrollments(?:\/|$)/.test(path)
+        || /^\/v1\/courses\/\{course_id\}\/users\/\{[^}]+\}\/last_attended$/.test(path)) return "enrollments";
+      if (/^\/v1\/courses\/\{course_id\}\/(?:custom_gradebook_column_data|what_if_grades)(?:\/|$)/.test(path)
+        || /^\/v1\/courses\/\{course_id\}\/custom_gradebook_columns\/\{[^}]+\}\/data\/\{[^}]+\}$/.test(path)
+        || /^\/v1\/courses\/\{course_id\}\/live_assessments\/\{[^}]+\}\/results$/.test(path)
+        || /^\/v1\/courses\/\{course_id\}\/rubric_associations\/\{[^}]+\}\/rubric_assessments(?:\/|$)/.test(path)) return "grades and assessments";
+      if (/^\/v1\/courses\/\{course_id\}\/modules\/\{[^}]+\}\/(?:assignment_overrides|relock|items\/\{[^}]+\}\/(?:done|mark_read|select_mastery_path))$/.test(path)) return "module learner state";
+      if (/^\/v1\/courses\/\{course_id\}\/group_categories(?:\/|$)/.test(path)) return "group membership";
+      if (/^\/quiz\/v1\/courses\/\{course_id\}(?:\/quizzes\/\{[^}]+\})?\/accommodations$/.test(path)) return "quiz accommodations";
+      if (/^\/v1\/courses\/\{course_id\}\/ai_experiences\/\{[^}]+\}\/conversations(?:\/|$)/.test(path)) return "learner conversations";
+      if (/^\/v1\/courses\/\{course_id\}\/course_pacing(?:\/|$)/.test(path)) return "learner pacing";
+      if (/^\/v1\/courses\/\{course_id\}\/discussion_topics\/(?:read_all|\{[^}]+\}(?:\/.*)?)$/.test(path)
+        && (path.endsWith("/read_all") || path.includes("/entries") || path.endsWith("/read")
+          || path.endsWith("/subscribed") || path.endsWith("/rating")
+          || /\/summaries\/\{[^}]+\}\/feedback$/.test(path)
+          || (method === "DELETE" && /^\/v1\/courses\/\{course_id\}\/discussion_topics\/\{[^}]+\}$/.test(path)))) return "discussion participation";
+      if (method === "DELETE" && path === "/v1/courses/{course_id}/custom_gradebook_columns/{id}") return "grades and assessments";
+      if (path === "/v1/courses/{course_id}/enqueue_outcome_rollup_calculation") return "learner rollup";
+      if (path === "/v1/courses/{course_id}/quizzes/{id}/submission_users/message") return "learner messaging";
+      if (method === "DELETE" && path === "/v1/courses/{id}") return "course lifecycle";
+      return undefined;
+    };
+    const learnerWrites = catalog.operations.filter((operation) => !operation.readOnly && category(operation));
+    const byCategory: Record<string, number> = {};
+    for (const operation of learnerWrites) {
+      const name = operation.toolName;
+      const group = category(operation)!;
+      byCategory[group] = (byCategory[group] || 0) + 1;
+      const admission = canvasOperationAdmission(operation);
+      expect(admission.courseTarget, name).toEqual({
+        kind: "course_path",
+        argument: operation.path === "/v1/courses/{id}" ? "id" : "course_id",
+      });
+      expect(admission.write.state, name).toBe("held");
+      const expectedReason = operation.path.endsWith("/files")
+        ? "multi_step_upload_requires_reviewed_transfer"
+        : "learner_scope_requires_separate_authority";
+      expect(admission.write, name).toEqual({ state: "held", reason: expectedReason });
+      const sentence = canvasAdmissionReason(admission.write);
+      expect(tools.get(name)?.capability?.profiles["private-full"], name).toEqual({ state: "profile_limited", reason: sentence });
+      expect(tools.get(name)?.capability?.profiles["public-canvas"], name).toEqual({ state: "profile_limited", reason: sentence });
+      expect(tools.get(name)?.capability?.evidence?.admission, name).toEqual({ state: "blocked", reason: sentence });
+    }
+    expect(byCategory).toEqual({
+      "assignment records": 29,
+      "course submissions": 3,
+      "course lifecycle": 1,
+      "discussion participation": 16,
+      enrollments: 6,
+      "grades and assessments": 8,
+      "group membership": 3,
+      "learner conversations": 6,
+      "learner messaging": 1,
+      "learner pacing": 3,
+      "learner rollup": 1,
+      "module learner state": 5,
+      "quiz attempts": 7,
+      "quiz accommodations": 2,
+    });
+    expect(learnerWrites).toHaveLength(91);
+    const courseLearnerHolds = catalog.operations.filter((operation) => {
+      const admission = canvasOperationAdmission(operation);
+      return admission.courseTarget.kind === "course_path"
+        && admission.write.state === "held"
+        && admission.write.reason === "learner_scope_requires_separate_authority";
+    });
+    expect(courseLearnerHolds.map((operation) => operation.toolName).sort()).toEqual(learnerWrites
+      .filter((operation) => !operation.path.endsWith("/files"))
+      .map((operation) => operation.toolName)
+      .sort());
+  });
+
+  it("holds every body-semantic multi-course write and the group-topic learner cascade", () => {
+    const tools = new Map(canvasCatalogTools(catalog).map((tool) => [tool.name, tool]));
+    const multiCourse = [
+      "canvas_begin_migration_to_push_to_associated_courses",
+      "canvas_copy_course_content",
+      "canvas_create_content_migration_courses",
+      "canvas_create_link_outcome_courses",
+      "canvas_create_link_outcome_courses_outcome_id",
+      "canvas_delete_outcome_group_courses",
+      "canvas_import_outcome_group_courses",
+      "canvas_reset_course",
+      "canvas_unlink_outcome_courses",
+      "canvas_update_associated_courses",
+      "canvas_update_course",
+    ];
+    const actual = catalog.operations.filter((operation) => {
+      const write = canvasOperationAdmission(operation).write;
+      return write.state === "held" && write.reason === "multi_course_authority_required";
+    });
+    expect(actual.map((operation) => operation.toolName).sort()).toEqual(multiCourse);
+    for (const operation of actual) {
+      const admission = canvasOperationAdmission(operation);
+      const sentence = canvasAdmissionReason(admission.write);
+      expect(admission.courseTarget.kind, operation.toolName).toBe("course_path");
+      expect(tools.get(operation.toolName)?.capability?.profiles["private-full"], operation.toolName)
+        .toEqual({ state: "profile_limited", reason: sentence });
+      expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"], operation.toolName)
+        .toEqual({ state: "profile_limited", reason: sentence });
+    }
+    const groupTopic = catalog.operations.find((operation) => operation.toolName === "canvas_delete_topic_groups")!;
+    expect(canvasOperationAdmission(groupTopic).write).toEqual({
+      state: "held",
+      reason: "learner_scope_requires_separate_authority",
+    });
+  });
+
   it("admits a direct course route and holds every other write target", () => {
-    const direct = catalog.operations.find((operation) => operation.toolName === "canvas_update_course");
+    const direct = catalog.operations.find((operation) => operation.toolName === "canvas_update_course_settings");
     const nickname = catalog.operations.find((operation) => operation.toolName === "canvas_set_course_nickname");
     const createBank = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_create_bank");
     const existingBank = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_update_item");
     const bankDraw = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_attach_bank_to_quiz");
     const bookmark = catalog.operations.find((operation) => operation.toolName === "canvas_update_bookmark");
     expect(canvasOperationAdmission(direct!)).toEqual({
-      courseTarget: { kind: "course_path", argument: "id" },
+      courseTarget: { kind: "course_path", argument: "course_id" },
       write: { state: "admitted" },
     });
     expect(canvasOperationAdmission(nickname!)).toEqual({
@@ -482,7 +822,7 @@ describe("Canvas API catalog", () => {
     // This class admits nothing. It only names the hold that 117 writes already carried.
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
-    expect(admitted).toHaveLength(245);
+    expect(admitted).toHaveLength(144);
     expect(admitted.filter((operation) => accountRoute(operation.path))).toEqual([]);
     const heldForCourseScope = catalog.operations.filter((operation) => {
       const write = canvasOperationAdmission(operation).write;
@@ -510,6 +850,7 @@ describe("Canvas API catalog", () => {
       "cross_course_object_requires_resolution",
       "duplicate_assignment_exact_readback_unavailable",
       "learner_scope_requires_separate_authority",
+      "multi_course_authority_required",
       "multi_step_upload_requires_reviewed_transfer",
       "provider_contract_incomplete",
       "self_scope_not_supported",
@@ -528,6 +869,7 @@ describe("Canvas API catalog", () => {
       "cross_course_object_requires_resolution",
       "duplicate_assignment_exact_readback_unavailable",
       "learner_scope_requires_separate_authority",
+      "multi_course_authority_required",
       "multi_step_upload_requires_reviewed_transfer",
       "provider_contract_incomplete",
       "self_scope_not_supported",
@@ -554,8 +896,9 @@ describe("Canvas API catalog", () => {
       course_scope_required: 100,
       cross_course_object_requires_resolution: 48,
       duplicate_assignment_exact_readback_unavailable: 1,
-      learner_scope_requires_separate_authority: 36,
-      multi_step_upload_requires_reviewed_transfer: 4,
+      learner_scope_requires_separate_authority: 125,
+      multi_course_authority_required: 11,
+      multi_step_upload_requires_reviewed_transfer: 5,
       provider_contract_incomplete: 9,
       self_scope_not_supported: 6,
     });
@@ -606,7 +949,8 @@ describe("Canvas API catalog", () => {
     // person's own record.
     expect(byReason.get("learner_scope_requires_separate_authority")!.filter((name) => {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
-      return !operation.path.startsWith("/v1/sections/");
+      return !operation.path.startsWith("/v1/sections/")
+        && canvasOperationAdmission(operation).courseTarget.kind !== "course_path";
     })).toEqual([
       "canvas_answering_questions",
       "canvas_assign_unassigned_members",
@@ -614,6 +958,7 @@ describe("Canvas API catalog", () => {
       "canvas_create_membership",
       "canvas_create_originality_report",
       "canvas_delete_appointment_group",
+      "canvas_delete_topic_groups",
       "canvas_edit_originality_report_files",
       "canvas_edit_originality_report_submissions",
       "canvas_flagging_question",
@@ -631,33 +976,36 @@ describe("Canvas API catalog", () => {
 
     // The admitted set is pinned here as well. Any change needs a reviewed admission reason.
     expect(catalog.operations.filter((operation) => !operation.readOnly
-      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(245);
+      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(144);
   });
 
-  // A Canvas file upload is three requests. The catalogued route is only the first one: it asks
-  // Canvas where to send the bytes and creates no file. The second request stores the bytes at the
-  // address Canvas named and the third confirms the saved file, and Morrow runs those two only
-  // inside its reviewed course-file transfer, which freezes the exact file and compares the bytes
-  // Canvas saved. Admitting the first step alone would let a caller start an upload Morrow cannot
-  // finish, so every course-scoped pre-flight is held and the person is sent to the reviewed
-  // transfer instead.
-  it("holds every course-scoped Canvas file upload pre-flight and names the reviewed transfer", () => {
+  // Generic Canvas upload pre-flights cannot carry the remaining transfer steps. The Rubric CSV
+  // operation cannot carry its required file at all. Every such route stays held, and this complete
+  // list prevents a later readback match from publishing an operation with no executable body.
+  it("holds every Canvas route that needs a reviewed file transfer", () => {
     const tools = canvasCatalogTools(catalog);
     const sentence = "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload.";
-    const preflights = catalog.operations.filter((operation) => {
+    const transfers = catalog.operations.filter((operation) => {
       const write = canvasOperationAdmission(operation).write;
       return write.state === "held" && write.reason === "multi_step_upload_requires_reviewed_transfer";
     });
-    expect(preflights.map((operation) => operation.toolName).sort()).toEqual([
+    expect(transfers.map((operation) => operation.toolName).sort()).toEqual([
+      "canvas_creates_rubric_using_csv_file_courses",
       "canvas_upload_file_courses",
       "canvas_upload_file_quiz_id_submissions_self_files_post",
       "canvas_upload_file_submissions_user_id_comments_files_post",
       "canvas_upload_file_v1_courses_course_id_files_post",
     ]);
-    for (const operation of preflights) {
+    for (const operation of transfers) {
       const name = operation.toolName;
       expect(operation.method, name).toBe("POST");
-      expect(operation.path, name).toMatch(/^\/v1\/courses\/\{course_id\}\/(?:[^/]+\/)*files$/);
+      if (name === "canvas_creates_rubric_using_csv_file_courses") {
+        expect(operation.path).toBe("/v1/courses/{course_id}/rubrics/upload");
+        expect(operation.parameters.map((parameter) => parameter.inputName)).toEqual(["course_id"]);
+        expect(operation.inputSchema.required).toEqual(["course_id"]);
+      } else {
+        expect(operation.path, name).toMatch(/^\/v1\/courses\/\{course_id\}\/(?:[^/]+\/)*files$/);
+      }
       // The course is in the route, so the hold is not about scope: the courseTarget stays the
       // direct course path, and the write is still held.
       expect(canvasOperationAdmission(operation).courseTarget, name).toEqual({ kind: "course_path", argument: "course_id" });
@@ -673,7 +1021,7 @@ describe("Canvas API catalog", () => {
     // The same first step outside a course keeps the hold it already had: what those routes lack
     // first is proof of the course, not the rest of the upload.
     expect(catalog.operations.filter((operation) => !operation.readOnly && /files$/.test(operation.path)
-      && !preflights.includes(operation))
+      && !transfers.includes(operation))
       .map((operation) => [operation.toolName, String(canvasOperationAdmission(operation).write.reason)])
       .sort((left, right) => left[0].localeCompare(right[0]))).toEqual([
       ["canvas_upload_file_sections", "learner_scope_requires_separate_authority"],
@@ -691,6 +1039,44 @@ describe("Canvas API catalog", () => {
     // The reviewed transfer is not one of these routes and cannot be held by this contract: it is
     // Morrow's own operation, outside the Canvas catalog.
     expect(catalog.operations.some((operation) => operation.toolName === "canvas_transfer_course_file")).toBe(false);
+  });
+
+  it("keeps ambiguous OutcomeLink and course deletion readbacks unreachable", () => {
+    const tools = new Map(canvasCatalogTools(catalog).map((tool) => [tool.name, tool]));
+    const outcomeLinks = catalog.operations.filter((operation) => operation.nickname.startsWith("create_link_outcome"));
+    expect(outcomeLinks.map((operation) => operation.toolName).sort()).toEqual([
+      "canvas_create_link_outcome_accounts",
+      "canvas_create_link_outcome_accounts_outcome_id",
+      "canvas_create_link_outcome_courses",
+      "canvas_create_link_outcome_courses_outcome_id",
+      "canvas_create_link_outcome_global",
+      "canvas_create_link_outcome_global_outcome_id",
+    ]);
+    for (const operation of outcomeLinks) {
+      const admission = canvasOperationAdmission(operation);
+      expect(admission.write.state, operation.toolName).toBe("held");
+      expect(canvasReadbackAssessment(catalog.operations, operation, admission), operation.toolName)
+        .toEqual({ state: "not_applicable", reason: "write_held" });
+      const reason = canvasAdmissionReason(admission.write)!;
+      expect(tools.get(operation.toolName)?.capability?.profiles["private-full"], operation.toolName)
+        .toEqual({ state: "profile_limited", reason });
+      expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"], operation.toolName)
+        .toEqual({ state: "profile_limited", reason });
+      expect(tools.get(operation.toolName)?.capability?.behavior.supportsReadback, operation.toolName).toBe(false);
+    }
+
+    const course = catalog.operations.find((operation) => operation.toolName === "canvas_delete_conclude_course")!;
+    expect(course.inputSchema.properties?.event).toMatchObject({ enum: ["delete", "conclude"] });
+    const admission = canvasOperationAdmission(course);
+    expect(admission.write).toEqual({ state: "held", reason: "learner_scope_requires_separate_authority" });
+    expect(canvasReadbackAssessment(catalog.operations, course, admission))
+      .toEqual({ state: "not_applicable", reason: "write_held" });
+    const reason = canvasAdmissionReason(admission.write)!;
+    expect(tools.get(course.toolName)?.capability?.profiles["private-full"])
+      .toEqual({ state: "profile_limited", reason });
+    expect(tools.get(course.toolName)?.capability?.profiles["public-canvas"])
+      .toEqual({ state: "profile_limited", reason });
+    expect(tools.get(course.toolName)?.capability?.behavior.supportsReadback).toBe(false);
   });
 
   it("admits a section only through its declared course-ownership reading, and holds every learner route", () => {
@@ -764,7 +1150,6 @@ describe("Canvas API catalog", () => {
       "canvas_create_new_discussion_topic_groups",
       "canvas_create_page_groups",
       "canvas_delete_page_groups",
-      "canvas_delete_topic_groups",
       "canvas_update_create_front_page_groups",
       "canvas_update_create_page_groups",
       "canvas_update_topic_groups",
@@ -808,6 +1193,7 @@ describe("Canvas API catalog", () => {
       "canvas_assign_unassigned_members",
       "canvas_bulk_delete_memberships_bulk_deletes_memberships_by_providing_array_of_user_ids_or_for_different",
       "canvas_create_membership",
+      "canvas_delete_topic_groups",
       "canvas_import_category_groups",
       "canvas_invite_others_to_group",
       "canvas_leave_group_memberships",
@@ -1084,40 +1470,38 @@ describe("Canvas API catalog", () => {
   it("derives structural readback metadata from the shared planner", () => {
     const admittedWrites = catalog.operations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "admitted");
     const assessments = admittedWrites.map((operation) => canvasReadbackAssessment(catalog.operations, operation));
-    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(59);
-    expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(23);
+    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(23);
+    expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(5);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(0);
-    expect(admittedWrites).toHaveLength(245);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(163);
+    expect(admittedWrites).toHaveLength(144);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(116);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
-    expect(tools.find((tool) => tool.name === "canvas_delete_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
-    expect(tools.find((tool) => tool.name === "canvas_mark_document_annotations_as_read_courses")?.capability?.behavior.supportsReadback).toBe(true);
+    expect(tools.find((tool) => tool.name === "canvas_delete_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(false);
+    expect(tools.find((tool) => tool.name === "canvas_mark_document_annotations_as_read_courses")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_mark_module_item_as_done_not_done")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_mark_module_item_as_done_not_done")?.capability?.evidence?.readback).toMatchObject({
       state: "blocked",
-      reason: "No safe exact post-write reader is available: module_item_reader_mutates_progress.",
+      reason: "This provider write remains held before dispatch.",
     });
-    expect(tools.find((tool) => tool.name === "canvas_mark_rubric_assessments_as_read_courses_rubric_assessments")?.capability?.behavior.supportsReadback).toBe(true);
-    expect(tools.find((tool) => tool.name === "canvas_mark_rubric_assessments_as_read_courses_rubric_comments")?.capability?.behavior.supportsReadback).toBe(true);
+    expect(tools.find((tool) => tool.name === "canvas_mark_rubric_assessments_as_read_courses_rubric_assessments")?.capability?.behavior.supportsReadback).toBe(false);
+    expect(tools.find((tool) => tool.name === "canvas_mark_rubric_assessments_as_read_courses_rubric_comments")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_delete_external_feed_courses")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_remove_course_from_favorites")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_remove_course_from_favorites")?.capability?.evidence?.readback).toMatchObject({
       state: "blocked",
       reason: "No safe exact post-write reader is available: favorite_list_is_effective_not_explicit_state.",
     });
-    expect(tools.find((tool) => tool.name === "canvas_unlink_outcome_courses")?.capability?.behavior.supportsReadback).toBe(true);
+    expect(tools.find((tool) => tool.name === "canvas_unlink_outcome_courses")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_bulk_update_assignment_dates")?.capability?.behavior.supportsReadback).toBe(true);
-    expect(tools.find((tool) => tool.name === "canvas_re_activate_enrollment")?.capability?.behavior.supportsReadback).toBe(true);
+    expect(tools.find((tool) => tool.name === "canvas_re_activate_enrollment")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis")?.capability?.behavior.supportsReadback).toBe(false);
-    expect(tools.find((tool) => tool.name === "canvas_set_course_level_accommodations")?.capability?.evidence?.readback).toMatchObject({ state: "known" });
+    expect(tools.find((tool) => tool.name === "canvas_set_course_level_accommodations")?.capability?.evidence?.admission).toMatchObject({ state: "blocked" });
   });
 
   it("refuses a readback whose read route is not the write target's own resource", () => {
     const tools = canvasCatalogTools(catalog);
     const withoutSafeRoute = [
-      "canvas_reset_course",
-      "canvas_grade_or_comment_on_multiple_submissions_courses_submissions",
       "canvas_create_score",
       "canvas_delete_rubricassociation",
     ];
@@ -1137,7 +1521,7 @@ describe("Canvas API catalog", () => {
   });
 
   it("changes the structural assessment when the planner has no matching read route", () => {
-    const update = catalog.operations.find((operation) => operation.toolName === "canvas_update_course");
+    const update = catalog.operations.find((operation) => operation.toolName === "canvas_update_course_settings");
     expect(update).toBeTruthy();
     const withoutCanvasReads = catalog.operations.filter((operation) => !operation.readOnly || operation.service !== "canvas");
     expect(canvasReadbackAssessment(withoutCanvasReads, update!)).toEqual({

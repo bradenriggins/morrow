@@ -9,7 +9,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { hardenPrivateDirectory } from "../../packages/gateway-core/dist/private-file-access.js";
-import { createRuntimeMonitor } from "../shared/runtime-monitor.mjs";
+import { createChildProcessReclaimer, createRuntimeMonitor } from "../shared/runtime-monitor.mjs";
 
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const gatewayEntry = path.join(repository, "packages/mcp-server/dist/index.js");
@@ -36,6 +36,35 @@ async function waitFor(predicate, detail) {
   }
   throw new Error(`Timed out waiting for ${detail}`);
 }
+
+test("child reclaim never signals a different process that reused the transport PID", async () => {
+  const signals = [];
+  let clock = 0;
+  const identities = [true, false];
+  const reclaim = createChildProcessReclaimer({
+    processAlive: () => true,
+    processMatchesExactStart: async () => identities.shift() ?? false,
+    signalProcess: (_pid, signal) => { signals.push(signal); },
+    pause: async (milliseconds) => { clock += milliseconds; },
+    now: () => clock,
+  });
+
+  assert.equal(await reclaim(1234, "2026-09-14T00:00:00.000Z", 100), true);
+  assert.deepEqual(signals, ["SIGTERM"], "a reused PID is never sent the final signal");
+
+  signals.length = 0;
+  clock = 0;
+  const matching = [true, true, false];
+  const reclaimMatching = createChildProcessReclaimer({
+    processAlive: () => true,
+    processMatchesExactStart: async () => matching.shift() ?? false,
+    signalProcess: (_pid, signal) => { signals.push(signal); },
+    pause: async (milliseconds) => { clock += milliseconds; },
+    now: () => clock,
+  });
+  assert.equal(await reclaimMatching(1234, "2026-09-14T00:00:00.000Z", 100), true);
+  assert.deepEqual(signals, ["SIGTERM", "SIGKILL"]);
+});
 
 function processIsAlive(pid) {
   // Every process these tests spawn runs as this user, so a live pid this
@@ -155,6 +184,7 @@ const connectedBindings = () => {
   if (mode === "changed") return [Object.assign({}, CANVAS, { sessionGeneration: 2, courseName: "Changed Course" })];
   if (mode === "multi") return [CANVAS, MOODLE];
   if (mode === "multi-reordered") return [MOODLE, CANVAS];
+  if (mode === "durable-second-read") return [CANVAS, Object.assign({}, MOODLE, { firstReadCompleted: true })];
   if (mode === "multi-moodle") return [BLACKBOARD, MOODLE];
   if (mode === "blackboard-only") return [BLACKBOARD, OTHER_BLACKBOARD];
   // The same course in a new browser session, from the third bindings read on:
@@ -737,6 +767,14 @@ test("names and reads exactly one connected course while several courses are con
     firstPreviewCourseName: null,
   });
   assert.deepEqual((await lines()).slice(beforeRead), ["morrow_health", "morrow_browser_bindings"], "no course read is dispatched with no course to read");
+
+  // A new status sequence has no readable in-memory choice. It still adopts the durable
+  // receipt from the exact current binding even when that binding is second.
+  await monitor.close();
+  process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "durable-second-read";
+  const durable = await monitor.start();
+  assert.equal(durable.bindings.firstPreviewCourseName, "Second Course");
+  assert.deepEqual(durable.firstPreview, { available: "yes", completed: true });
 });
 
 test("refuses the first read when the course binding changed between selection and dispatch", async (t) => {
@@ -990,6 +1028,48 @@ test("settles every stalled MCP operation within its bound, reclaims that genera
   await settled(monitor.close(), "close");
   const finalPids = await childPids();
   await waitFor(() => !processIsAlive(finalPids[finalPids.length - 1]), "closed child reclaim");
+});
+
+test("serializes reconnects and close owns a reconnect started outside start", async (t) => {
+  const directory = await privateTemporaryDirectory("morrow-runtime-monitor-lifecycle-");
+  const workspaceRoot = await realpath(directory);
+  const log = path.join(directory, "pids.log");
+  const entry = await writeMockGateway(directory);
+  const originalMode = process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
+  const originalLog = process.env.MORROW_RUNTIME_MONITOR_PID_LOG;
+  process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "good";
+  process.env.MORROW_RUNTIME_MONITOR_PID_LOG = log;
+  const monitor = createRuntimeMonitor({
+    nodePath: process.execPath,
+    serverEntryPath: entry,
+    upstreamsPath: path.join(workspaceRoot, "upstreams.json"),
+    workspaceRoot,
+    journalPath: path.join(workspaceRoot, "gateway.sqlite3"),
+    operationTimeouts: { connectMs: 1_000, operationMs: 500, closeMs: 300, reclaimMs: 1_000 },
+  });
+  t.after(async () => {
+    if (originalMode === undefined) delete process.env.MORROW_RUNTIME_MONITOR_FIXTURE;
+    else process.env.MORROW_RUNTIME_MONITOR_FIXTURE = originalMode;
+    if (originalLog === undefined) delete process.env.MORROW_RUNTIME_MONITOR_PID_LOG;
+    else process.env.MORROW_RUNTIME_MONITOR_PID_LOG = originalLog;
+    await monitor.close();
+    await rm(entry, { force: true });
+    await removeTemporaryDirectory(directory);
+  });
+  const childPids = async () => (await readFile(log, "utf8")).trim().split("\n")
+    .filter((line) => line.startsWith("pid:")).map((line) => Number(line.slice(4)));
+
+  await Promise.all([monitor.firstSafeRead(), monitor.firstSafeRead()]);
+  assert.equal((await childPids()).length, 1, "concurrent reconnecting operations share one generation");
+  await monitor.close();
+
+  process.env.MORROW_RUNTIME_MONITOR_FIXTURE = "stall-initialize";
+  const reconnecting = monitor.firstSafeRead();
+  await waitFor(async () => (await childPids()).length === 2, "reconnecting child spawn");
+  await monitor.close();
+  const finalPids = await childPids();
+  assert.equal(finalPids.every((pid) => !processIsAlive(pid)), true, "close reclaims every generation created before it");
+  await reconnecting;
 });
 
 test("every MCP SDK request in the runtime monitor runs under the owned operation boundary", async () => {

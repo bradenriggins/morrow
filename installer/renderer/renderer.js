@@ -142,7 +142,7 @@ function restoreFocus(key) {
 }
 
 function rememberUserActionFocus(target) {
-  if (!actionBody.querySelectorAll("[data-action]").includes(target)) return;
+  if (!actionBody.contains(target)) return;
   heldFocusKey = focusKey(target);
   userActionFocusPending = true;
 }
@@ -265,10 +265,12 @@ function renderUpdateActions(html) {
 }
 
 const UPDATE_STATUSES = new Set(["unavailable", "idle", "checking", "available", "downloading", "ready", "installing", "error"]);
+let latestUpdateRevision = -1;
 
 function isUpdateSnapshot(value) {
   return Boolean(value && typeof value === "object" && !Array.isArray(value)
     && value.schema === "morrow.desktop-update.v1"
+    && Number.isSafeInteger(value.revision) && value.revision >= 0
     && UPDATE_STATUSES.has(value.status)
     && typeof value.currentVersion === "string" && value.currentVersion.length <= 160
     && (value.availableVersion === null || (typeof value.availableVersion === "string" && value.availableVersion.length <= 160))
@@ -277,13 +279,25 @@ function isUpdateSnapshot(value) {
 }
 
 function receiveUpdateSnapshot(snapshot) {
-  if (!state || !isUpdateSnapshot(snapshot)) return;
+  if (!state || !isUpdateSnapshot(snapshot) || snapshot.revision < latestUpdateRevision) return;
+  latestUpdateRevision = snapshot.revision;
   const active = document.activeElement;
   const focus = [...updatesActions.querySelectorAll("[data-action]")].includes(active) ? focusKey(active) : null;
   state = { ...state, updates: snapshot };
   renderUpdates(state);
   applyBusy();
   if (focus && !restoreFocus(focus) && !updatesPanel.hidden) updatesTitle.focus();
+}
+
+function stateWithNewestUpdates(current) {
+  if (!current || typeof current !== "object" || Array.isArray(current)) return current;
+  if (isUpdateSnapshot(current.updates) && current.updates.revision >= latestUpdateRevision) {
+    latestUpdateRevision = current.updates.revision;
+    return current;
+  }
+  return latestUpdateRevision >= 0 && isUpdateSnapshot(state?.updates)
+    ? { ...current, updates: state.updates }
+    : current;
 }
 
 function blackboardHealth(current) {
@@ -439,6 +453,7 @@ function announceRemoval(current) {
 }
 
 function render(current) {
+  current = stateWithNewestUpdates(current);
   state = current;
   if (!chosenAssistantId && current?.selectedAssistantId) chosenAssistantId = current.selectedAssistantId;
   const view = current ? actionView(current, { chosenAssistantId }) : loadAttempted ? setupUnavailableView() : null;

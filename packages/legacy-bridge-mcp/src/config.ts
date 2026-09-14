@@ -36,6 +36,20 @@ function sameFile(
   return left.dev === right.dev && left.ino === right.ino;
 }
 
+function sameStableFile(
+  left: Awaited<ReturnType<typeof lstat>>,
+  right: Awaited<ReturnType<typeof lstat>>,
+): boolean {
+  // ctime can gain precision after a fresh write without any file mutation.
+  return sameFile(left, right)
+    && left.nlink === right.nlink
+    && left.size === right.size
+    && left.mtimeMs === right.mtimeMs
+    && left.mode === right.mode
+    && left.uid === right.uid
+    && left.gid === right.gid;
+}
+
 async function readCatalog(path: string): Promise<string> {
   const invalid = (): Error => new Error(
     "MORROW_LEGACY_CATALOG_PATH must name one stable regular file no larger than 16 MiB",
@@ -64,9 +78,8 @@ async function readCatalog(path: string): Promise<string> {
     }
     const openedAfter = await handle.stat();
     const namedAfter = await lstat(path);
-    if (!sameFile(openedBefore, openedAfter) || !sameFile(openedAfter, namedAfter)
-      || openedAfter.size !== openedBefore.size || openedAfter.mtimeMs !== openedBefore.mtimeMs
-      || openedAfter.ctimeMs !== openedBefore.ctimeMs || bytes !== openedAfter.size) {
+    if (!sameStableFile(openedBefore, openedAfter) || !sameStableFile(openedAfter, namedAfter)
+      || bytes !== openedAfter.size) {
       throw invalid();
     }
     return new TextDecoder("utf-8", { fatal: true }).decode(Buffer.concat(chunks, bytes));

@@ -7,12 +7,14 @@ import {
   CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS,
   canvasSemanticCourseCollectionState,
   canvasSemanticCourseTarget,
+  canvasSemanticObjectContext,
   canvasSemanticResolutionProblem,
   canvasSemanticResolvedCourseId,
 } from "../../connector/extension/generated/canvas-semantic-target.js";
 
 const ORIGIN = "https://school.instructure.com";
 const CONTENT_SOURCE = readFileSync(new URL("../../connector/extension/src/canvas-content.js", import.meta.url), "utf8");
+const WORKER_SOURCE = readFileSync(new URL("../../connector/extension/src/service-worker.js", import.meta.url), "utf8");
 const CATALOG = JSON.parse(readFileSync(new URL("../../connector/extension/generated/canvas-api-catalog.json", import.meta.url), "utf8"));
 
 // 88 is the selected course's own group, 91 belongs to another course, and 92 is a group a person
@@ -26,11 +28,11 @@ const GROUP_CONTENT_WRITES = [
   "canvas_create_new_discussion_topic_groups",
   "canvas_create_page_groups",
   "canvas_delete_page_groups",
-  "canvas_delete_topic_groups",
   "canvas_update_create_front_page_groups",
   "canvas_update_create_page_groups",
   "canvas_update_topic_groups",
 ];
+const GROUP_COURSE_OWNED_WRITES = [...GROUP_CONTENT_WRITES, "canvas_delete_topic_groups"].sort();
 
 function operation(toolName) {
   const value = CATALOG.operations.find((entry) => entry.toolName === toolName);
@@ -57,6 +59,22 @@ function freshResolution(overrides = {}) {
 
 function jsonResponse(value, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { "content-type": "application/json" } });
+}
+
+function sourceFunction(name) {
+  const marker = `async function ${name}(`;
+  const start = WORKER_SOURCE.indexOf(marker);
+  assert.ok(start >= 0, `missing ${name}`);
+  const body = WORKER_SOURCE.indexOf("{", start);
+  let depth = 0;
+  for (let index = body; index < WORKER_SOURCE.length; index += 1) {
+    const character = WORKER_SOURCE[index];
+    if (character === "{") depth += 1;
+    if (character === "}" && --depth === 0) {
+      return WORKER_SOURCE.slice(start, index + 1);
+    }
+  }
+  throw new Error(`unterminated ${name}`);
 }
 
 /**
@@ -127,15 +145,19 @@ test("only a group's own discussion topics and pages declare a course-ownership 
     contextValue: "Course",
     courseCollectionProof: true,
   };
-  for (const toolName of GROUP_CONTENT_WRITES) {
+  for (const toolName of GROUP_COURSE_OWNED_WRITES) {
     assert.deepEqual(target(toolName), groupTarget, toolName);
-    assert.equal(canvasOperationAdmission(operation(toolName)).write.state, "admitted", toolName);
+    assert.equal(
+      canvasOperationAdmission(operation(toolName)).write.state,
+      toolName === "canvas_delete_topic_groups" ? "held" : "admitted",
+      toolName,
+    );
   }
   const declared = CATALOG.operations
     .filter((entry) => canvasSemanticCourseTarget(entry)?.object === "group")
     .map((entry) => entry.toolName)
     .sort();
-  assert.deepEqual(declared, GROUP_CONTENT_WRITES);
+  assert.deepEqual(declared, GROUP_COURSE_OWNED_WRITES);
   // The two readings the connector needs are reads, so neither can be admitted by its own
   // declaration, and both stay addressable from the ids Morrow already holds.
   const resolver = operation(groupTarget.resolverRead);
@@ -163,6 +185,7 @@ test("every group route about who is in a group stays held with the learner reas
     "canvas_assign_unassigned_members",
     "canvas_bulk_delete_memberships_bulk_deletes_memberships_by_providing_array_of_user_ids_or_for_different",
     "canvas_create_membership",
+    "canvas_delete_topic_groups",
     "canvas_import_category_groups",
     "canvas_invite_others_to_group",
     "canvas_leave_group_memberships",
@@ -257,9 +280,6 @@ test("the page sends a group page change only with a current reading of that exa
   assert.deepEqual(otherGroupContent.result, { ok: false, sent: false, error: "canvas_semantic_target_course_mismatch" });
   assert.deepEqual(otherGroupContent.requests, []);
 
-  const topic = await executeInPage("canvas_delete_topic_groups", { resolution: freshResolution(), args: { group_id: "88", topic_id: "9" } });
-  assert.equal(topic.result.ok, true, JSON.stringify(topic.result));
-  assert.deepEqual(topic.requests, [{ pathname: "/api/v1/groups/88/discussion_topics/9", method: "DELETE" }]);
 });
 
 test("the page still refuses every held group route, proof or not", async () => {
@@ -271,4 +291,45 @@ test("the page still refuses every held group route, proof or not", async () => 
     assert.deepEqual(held.result, { ok: false, sent: false, error: "canvas_course_scope_required" }, toolName);
     assert.deepEqual(held.requests, [], toolName);
   }
+});
+
+test("a verified group-content readback rechecks the current owning course", async () => {
+  const ownerFunction = sourceFunction("canvasSemanticOwnerBindingState");
+  const readOperation = { provider: "canvas", readOnly: true, toolName: "canvas_get_single_group" };
+  let ownerRead = { ok: true, data: COURSE_GROUP };
+  let collectionState = "listed";
+  let reads = 0;
+  const factory = new Function(
+    "state",
+    "commandDeadlineCurrent",
+    "executeOperation",
+    "internalCanvasCourseRead",
+    "canvasSemanticObjectContext",
+    "canvasSemanticCourseCollection",
+    `${ownerFunction}; return canvasSemanticOwnerBindingState;`,
+  );
+  const checkOwner = factory(
+    { operations: new Map([["canvas_get_single_group", readOperation]]) },
+    (expiresAt) => expiresAt > Date.now(),
+    async () => { reads += 1; return ownerRead; },
+    (_binding, operationValue) => operationValue,
+    canvasSemanticObjectContext,
+    async () => ({ state: collectionState }),
+  );
+  const binding = { courseId: "42" };
+  const semantic = { target: target("canvas_update_create_page_groups"), objectId: "88" };
+
+  assert.equal(await checkOwner(binding, semantic, Date.now() + 60_000), "bound");
+  ownerRead = { ok: true, data: { ...COURSE_GROUP, course_id: "43" } };
+  assert.equal(await checkOwner(binding, semantic, Date.now() + 60_000), "mismatch");
+  ownerRead = { ok: true, data: COURSE_GROUP };
+  collectionState = "absent";
+  assert.equal(await checkOwner(binding, semantic, Date.now() + 60_000), "mismatch");
+  collectionState = "unreadable";
+  assert.equal(await checkOwner(binding, semantic, Date.now() + 60_000), "unconfirmed");
+  const beforeExpired = reads;
+  assert.equal(await checkOwner(binding, semantic, Date.now() - 1), "unconfirmed");
+  assert.equal(reads, beforeExpired, "an expired post-write check started another provider read");
+
+  assert.match(WORKER_SOURCE, /if \(target === "content"\) \{\s*const ownerState = await canvasSemanticOwnerBindingState/);
 });
