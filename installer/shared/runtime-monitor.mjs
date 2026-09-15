@@ -349,6 +349,10 @@ function bridgeControl(value) {
   if (exactKeys(value, ["action"]) && ["status", "quiesce", "readback"].includes(value.action)) {
     return { action: value.action };
   }
+  if (exactKeys(value, ["action", "quiesceEpoch"]) && value.action === "reload"
+    && typeof value.quiesceEpoch === "string" && BRIDGE_IDENTIFIER.test(value.quiesceEpoch)) {
+    return { action: "reload", quiesceEpoch: value.quiesceEpoch };
+  }
   if (exactKeys(value, ["action", "previousManifestVersion", "quiesceEpoch"])
     && value.action === "commit"
     && typeof value.previousManifestVersion === "string"
@@ -409,6 +413,11 @@ function bridgeRecord(control, value) {
       || record.quiesceEpoch !== control.quiesceEpoch
       || record.committed !== true
       || !activeFolderProof(record.activeFolderProof, extensionId, manifestVersion)) return null;
+  } else if (control.action === "reload") {
+    if (!exactKeys(record, ["schema", "extensionId", "manifestVersion", "nextManifestVersion", "quiesceEpoch"])
+      || record.schema !== "morrow.bridge.reload-scheduled.v1"
+      || typeof record.nextManifestVersion !== "string" || !BRIDGE_VERSION.test(record.nextManifestVersion)
+      || record.quiesceEpoch !== control.quiesceEpoch) return null;
   } else if (!exactKeys(record, ["schema", "extensionId", "manifestVersion", "quiesceEpoch", "resumed"])
     || record.schema !== "morrow.bridge.update-resumed.v1"
     || record.quiesceEpoch !== control.quiesceEpoch

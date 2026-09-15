@@ -327,6 +327,10 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
         quiesceEpoch: z.string().min(16).max(256).regex(/^[A-Za-z0-9._-]+$/),
         fileLayerRestored: z.literal(true),
       }),
+      z.strictObject({
+        action: z.literal("reload"),
+        quiesceEpoch: z.string().min(16).max(256).regex(/^[A-Za-z0-9._-]+$/),
+      }),
     ]),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
   }, async (input) => toolResult(await runtime.bridgeMaintenance(input)));

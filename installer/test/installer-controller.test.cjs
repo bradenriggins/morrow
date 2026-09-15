@@ -777,6 +777,82 @@ test("Bridge reconciliation requires a newer Chrome version even when sealed byt
   assert.equal(stages, 0);
 });
 
+test("a staged Bridge update completes in the same session while it holds its own lease", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const monitor = {};
+  const pendingRecord = bridgeInstallation({ manualChromeReloadRequired: true });
+  const completed = bridgeInstallation();
+  installer.restartLeases.set("bridge-lease", monitor);
+  installer.bridgeLeaseId = "bridge-lease";
+  installer.verifiedBridgeInstallation = async () => pendingRecord;
+  installer.packagedBridgeRelease = async () => ({ version: pendingRecord.version });
+  installer.bridgeMonitor = async () => monitor;
+  let completions = 0;
+  installer.completePendingBridgeUpdate = async (record, used) => {
+    completions += 1;
+    assert.equal(record, pendingRecord);
+    assert.equal(used, monitor);
+    return completed;
+  };
+  assert.equal(await installer.reconcileBridgeRelease(), completed);
+  assert.equal(completions, 1);
+
+  // The same lease still refuses every other maintenance step, and a second lease is other work.
+  assert.equal(installer.maintenanceAdmission(), "active_or_uncertain_operations");
+  installer.restartLeases.set("other-lease", {});
+  await assert.rejects(() => installer.reconcileBridgeRelease(), (error) => error.code === "active_or_uncertain_operations");
+  installer.restartLeases.delete("other-lease");
+
+  // A held Bridge lease without a pending update is an update still being staged.
+  installer.verifiedBridgeInstallation = async () => completed;
+  await assert.rejects(() => installer.reconcileBridgeRelease(), (error) => error.code === "active_or_uncertain_operations");
+});
+
+test("a staged Bridge reloads itself and finishes the update without the person", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const staged = bridgeInstallation({ manualChromeReloadRequired: true });
+  const completed = bridgeInstallation();
+  const calls = [];
+  let running = "1.0.0";
+  const monitor = {
+    bridgeMaintenance: async (control) => {
+      calls.push(control.action);
+      if (control.action === "reload") {
+        assert.equal(control.quiesceEpoch, "quiesce-epoch-for-reload-test");
+        setTimeout(() => { running = "1.0.1"; }, 5);
+        return { schema: "morrow.bridge.reload-scheduled.v1", extensionId: "a".repeat(32), manifestVersion: "1.0.0", nextManifestVersion: "1.0.1", quiesceEpoch: control.quiesceEpoch };
+      }
+      if (running === "1.0.0" && calls.filter((entry) => entry === "status").length === 1) throw new Error("Bridge restarting");
+      return { manifestVersion: running };
+    }
+  };
+  let completions = 0;
+  installer.completePendingBridgeUpdate = async (record, used) => {
+    completions += 1;
+    assert.equal(record, staged);
+    assert.equal(used, monitor);
+    return completed;
+  };
+  assert.equal(await installer.reloadStagedBridge(staged, monitor, "quiesce-epoch-for-reload-test", "1.0.1", { waitMs: 2_000, pollMs: 10 }), completed);
+  assert.equal(completions, 1);
+  assert.equal(calls[0], "reload");
+});
+
+test("a Bridge that cannot reload itself leaves the staged update for a manual reload", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const staged = bridgeInstallation({ manualChromeReloadRequired: true });
+  installer.completePendingBridgeUpdate = async () => { throw new Error("must not complete"); };
+  const older = { bridgeMaintenance: async () => { throw new Error("bridge_maintenance_control_invalid"); } };
+  assert.equal(await installer.reloadStagedBridge(staged, older, "quiesce-epoch-for-reload-test", "1.0.1", { waitMs: 50, pollMs: 5 }), staged);
+  const neverRestarts = { bridgeMaintenance: async (control) => control.action === "reload"
+    ? { nextManifestVersion: "1.0.1" }
+    : { manifestVersion: "1.0.0" } };
+  assert.equal(await installer.reloadStagedBridge(staged, neverRestarts, "quiesce-epoch-for-reload-test", "1.0.1", { waitMs: 50, pollMs: 5 }), staged);
+});
+
 test("Bridge state advertises only a strictly newer extension version", async () => {
   const root = await temporaryRoot();
   const installer = controller(root, { bridgeDelivery: "developer_temporary" });

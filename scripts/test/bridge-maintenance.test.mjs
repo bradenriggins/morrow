@@ -413,3 +413,59 @@ test("status refuses a control Morrow did not send, whatever the install source 
     await rejectsCode(() => maintenance.control(null), "bridge_maintenance_control_invalid");
   }
 });
+
+test("a fenced Bridge reloads itself only into a newer staged copy of its own folder", async () => {
+  const nextVersion = "1.0.3";
+  const nextMarker = marker({ manifestVersion: nextVersion });
+  let folderVersion = nextVersion;
+  let markerBytes = marker();
+  const reloads = [];
+  const testFixture = fixture({
+    fetchImpl: async (url) => url.endsWith("/manifest.json")
+      ? new Response(JSON.stringify({ manifest_version: 3, version: folderVersion }), { status: 200 })
+      : new Response(markerBytes, { status: 200 }),
+  });
+  const scheduled = [];
+  const maintenance = createBridgeMaintenance({
+    chromeApi: { ...testFixture.chromeApi, runtime: { ...testFixture.chromeApi.runtime, reload: () => reloads.push("reload") } },
+    fetchImpl: async (url, init) => (url.endsWith("/manifest.json")
+      ? new Response(JSON.stringify({ manifest_version: 3, version: folderVersion }), { status: 200 })
+      : new Response(markerBytes, { status: 200 })),
+    randomUUID: () => "12345678-1234-1234-1234-123456789abc",
+    scheduleReload: (reload) => scheduled.push(reload),
+  });
+
+  // No fence: nothing was staged, so there is nothing to reload into.
+  await rejectsCode(() => maintenance.control({ action: "reload", quiesceEpoch: "quiesce-12345678-1234-1234-1234-123456789abc" }), "bridge_reload_epoch_stale");
+
+  const quiesced = await maintenance.control({ action: "quiesce" });
+  await rejectsCode(() => maintenance.control({ action: "reload", quiesceEpoch: "quiesce-00000000-0000-0000-0000-000000000000" }), "bridge_reload_epoch_stale");
+
+  // The folder still holds the running version: the swap has not happened.
+  folderVersion = VERSION;
+  await rejectsCode(() => maintenance.control({ action: "reload", quiesceEpoch: quiesced.quiesceEpoch }), "bridge_reload_not_newer");
+
+  // A newer folder whose marker does not name that version is not Morrow's staged folder.
+  folderVersion = nextVersion;
+  await rejectsCode(() => maintenance.control({ action: "reload", quiesceEpoch: quiesced.quiesceEpoch }), "bridge_active_folder_unconfirmed");
+  assert.equal(scheduled.length, 0);
+
+  markerBytes = nextMarker;
+  const result = await maintenance.control({ action: "reload", quiesceEpoch: quiesced.quiesceEpoch });
+  assert.deepEqual(result, {
+    schema: "morrow.bridge.reload-scheduled.v1",
+    extensionId: EXTENSION_ID,
+    manifestVersion: VERSION,
+    nextManifestVersion: nextVersion,
+    quiesceEpoch: quiesced.quiesceEpoch,
+  });
+  assert.equal(scheduled.length, 1, "the reload is scheduled after the answer, not run before it");
+  assert.deepEqual(reloads, []);
+  scheduled[0]();
+  assert.deepEqual(reloads, ["reload"]);
+});
+
+test("a Store-installed Bridge never reloads through maintenance", async () => {
+  const testFixture = fixture({ installType: "normal", values: { morrowBridgeQuiesceFence: { schema: "morrow.bridge.quiesce-fence.v1", extensionId: EXTENSION_ID, manifestVersion: VERSION, quiesceEpoch: "quiesce-12345678-1234-1234-1234-123456789abc" } } });
+  await rejectsCode(() => testFixture.create().control({ action: "reload", quiesceEpoch: "quiesce-12345678-1234-1234-1234-123456789abc" }), "bridge_store_install_refused");
+});

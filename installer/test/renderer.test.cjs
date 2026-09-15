@@ -317,6 +317,16 @@ async function load(name, invoke, platform) {
   return dom;
 }
 
+test("a setup problem is placed above the step body, where it is visible without scrolling", () => {
+  const html = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "renderer", "index.html"), "utf8");
+  const panel = html.slice(html.indexOf('<section class="action-panel"'), html.indexOf("</section>", html.indexOf('<section class="action-panel"')));
+  assert.ok(panel.includes('id="problem"'), "the problem region belongs to the step panel");
+  assert.ok(panel.indexOf('id="problem"') < panel.indexOf('id="action-content"'), "the problem region comes before the step body");
+  const renderer = require("node:fs").readFileSync(require("node:path").join(__dirname, "..", "renderer", "renderer.js"), "utf8");
+  const setProblem = renderer.slice(renderer.indexOf("function setProblem("), renderer.indexOf("\n}\n", renderer.indexOf("function setProblem(")));
+  assert.match(setProblem, /scrollIntoView/, "a newly shown problem is brought into view");
+});
+
 test("a first load that returns no state stops claiming progress and offers a retry", async () => {
   let answer = () => ({ nothing: true });
   const dom = await load("unreadable", async (method) => answer(method));
@@ -433,20 +443,48 @@ test("a step that leaves the runtime uncertain settles without the person asking
   assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.");
 });
 
-test("setup stops asking again after a limited number of tries", async (t) => {
+test("setup keeps asking through a slow runtime start, then stops at its window", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   t.after(() => t.mock.timers.reset());
   const calls = [];
-  const dom = await load("settling-limit", async (method) => {
+  let answer = () => ok(state({ runtimeStatus: "uncertain" }));
+  const dom = await load("settling-slow-start", async (method) => {
+    calls.push(method);
+    return answer();
+  });
+
+  // Delays back off 750, 1500, 3000, then 5000 ms. Forty seconds in, setup is still asking.
+  for (let elapsed = 0; elapsed < 40_000; elapsed += 250) {
+    t.mock.timers.tick(250);
+    await settle();
+  }
+  const askedDuringStart = calls.length;
+  assert.ok(askedDuringStart >= 9, `setup asked ${askedDuringStart} times during a 40 second start`);
+  answer = () => ok(state());
+  t.mock.timers.tick(5_000);
+  await settle();
+  assert.equal(dom.element("#action-title").textContent, "Connect Morrow Bridge.", "a runtime ready after 40 seconds appears without the person asking");
+});
+
+test("setup stops asking once the runtime start window has passed", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+  t.after(() => t.mock.timers.reset());
+  const calls = [];
+  const dom = await load("settling-window", async (method) => {
     calls.push(method);
     return ok(state({ runtimeStatus: "uncertain" }));
   });
-
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    t.mock.timers.tick(750);
+  for (let elapsed = 0; elapsed < 180_000; elapsed += 1_000) {
+    t.mock.timers.tick(1_000);
     await settle();
   }
-  assert.equal(calls.length, 5, "the first read plus four tries, then it waits for the person");
+  const settled = calls.length;
+  for (let elapsed = 0; elapsed < 60_000; elapsed += 1_000) {
+    t.mock.timers.tick(1_000);
+    await settle();
+  }
+  assert.equal(calls.length, settled, "no further asking after the start window");
+  assert.ok(settled <= 30, `bounded asking: ${settled}`);
   assert.equal(dom.element("#action-title").textContent, "Morrow is getting ready.");
 });
 

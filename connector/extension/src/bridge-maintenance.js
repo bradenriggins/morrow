@@ -6,6 +6,9 @@ const QUIESCED_SCHEMA = "morrow.bridge.update-quiesced.v1";
 const RESUMED_SCHEMA = "morrow.bridge.update-resumed.v1";
 const READBACK_SCHEMA = "morrow.bridge.update-readback.v1";
 const COMMITTED_SCHEMA = "morrow.bridge.update-committed.v1";
+const RELOAD_SCHEDULED_SCHEMA = "morrow.bridge.reload-scheduled.v1";
+const RELOAD_DELAY_MS = 750;
+const MAX_MANIFEST_BYTES = 64 * 1024;
 const FENCE_SCHEMA = "morrow.bridge.quiesce-fence.v1";
 const COMMIT_SCHEMA = "morrow.bridge.update-commit.v1";
 const FENCE_KEY = "morrowBridgeQuiesceFence";
@@ -88,13 +91,15 @@ function maintenanceControl(value) {
     && value.fileLayerRestored === true && typeof value.quiesceEpoch === "string" && EPOCH.test(value.quiesceEpoch)) {
     return value;
   }
+  if (value.action === "reload" && exactKeys(value, ["action", "quiesceEpoch"])
+    && typeof value.quiesceEpoch === "string" && EPOCH.test(value.quiesceEpoch)) return value;
   if (value.action === "commit" && exactKeys(value, ["action", "previousManifestVersion", "quiesceEpoch"])
     && validVersion(value.previousManifestVersion)
     && typeof value.quiesceEpoch === "string" && EPOCH.test(value.quiesceEpoch)) return value;
   fail("bridge_maintenance_control_invalid");
 }
 
-export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch, randomUUID = () => crypto.randomUUID(), activeFolderTimeoutMs = ACTIVE_FOLDER_TIMEOUT_MS } = {}) {
+export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch, randomUUID = () => crypto.randomUUID(), activeFolderTimeoutMs = ACTIVE_FOLDER_TIMEOUT_MS, scheduleReload = (reload) => setTimeout(reload, RELOAD_DELAY_MS) } = {}) {
   if (!chromeApi?.runtime?.getManifest || !chromeApi?.runtime?.getURL || !chromeApi?.storage?.local
     || !chromeApi?.management?.getSelf || typeof fetchImpl !== "function" || typeof randomUUID !== "function"
     || !Number.isSafeInteger(activeFolderTimeoutMs) || activeFolderTimeoutMs < 1) {
@@ -393,6 +398,78 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     };
   }
 
+  /** The version of the manifest now in the extension folder, which a staged update has replaced. */
+  async function folderManifestVersion() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), activeFolderTimeoutMs);
+    let reader = null;
+    try {
+      const response = await fetchImpl(chromeApi.runtime.getURL("manifest.json"), { cache: "no-store", redirect: "error", signal: controller.signal });
+      if (!response?.ok || !response.body?.getReader) fail("bridge_reload_folder_unconfirmed");
+      reader = response.body.getReader();
+      const chunks = [];
+      let length = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array)) fail("bridge_reload_folder_unconfirmed");
+        length += value.byteLength;
+        if (length > MAX_MANIFEST_BYTES) {
+          try { const cancellation = reader.cancel("bridge_reload_folder_unconfirmed"); if (cancellation?.catch) void cancellation.catch(() => {}); } catch {}
+          fail("bridge_reload_folder_unconfirmed");
+        }
+        chunks.push(value);
+      }
+      const bytes = new Uint8Array(length);
+      let offset = 0;
+      for (const chunk of chunks) {
+        bytes.set(chunk, offset);
+        offset += chunk.byteLength;
+      }
+      let manifest;
+      try { manifest = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); } catch { fail("bridge_reload_folder_unconfirmed"); }
+      if (!validVersion(manifest?.version)) fail("bridge_reload_folder_unconfirmed");
+      return manifest.version;
+    } catch (error) {
+      if (error instanceof BridgeMaintenanceError) throw error;
+      fail("bridge_reload_folder_unconfirmed");
+    } finally {
+      clearTimeout(timeout);
+      try { reader?.releaseLock(); } catch {}
+    }
+  }
+
+  /**
+   * A staged update has replaced the files in this unpacked Bridge folder while the running Bridge
+   * stays fenced. Chrome only loads the new files when the extension reloads, and asking a person to
+   * find the extensions page is the step this removes. The reload is admitted only for the exact
+   * quiesce epoch, only when the folder now holds a newer version of this same extension, and only
+   * after the folder marker proves that newer version belongs to Morrow's own Bridge folder.
+   */
+  async function reload(control, beforeMutation) {
+    const request = maintenanceControl(control);
+    if (request.action !== "reload") fail("bridge_maintenance_control_invalid");
+    const persistedFence = await loadFence();
+    if (!persistedFence || persistedFence.quiesceEpoch !== request.quiesceEpoch) fail("bridge_reload_epoch_stale");
+    const current = await identity();
+    if (current.installType !== "development") fail("bridge_store_install_refused");
+    if (current.extensionId !== persistedFence.extensionId || current.manifestVersion !== persistedFence.manifestVersion) {
+      fail("bridge_reload_epoch_stale");
+    }
+    const nextManifestVersion = await folderManifestVersion();
+    if (compareVersions(nextManifestVersion, current.manifestVersion) <= 0) fail("bridge_reload_not_newer");
+    await activeFolderProof({ extensionId: current.extensionId, manifestVersion: nextManifestVersion });
+    await beforeMutation?.();
+    scheduleReload(() => chromeApi.runtime.reload());
+    return {
+      schema: RELOAD_SCHEDULED_SCHEMA,
+      extensionId: current.extensionId,
+      manifestVersion: current.manifestVersion,
+      nextManifestVersion,
+      quiesceEpoch: persistedFence.quiesceEpoch,
+    };
+  }
+
   async function readback() {
     const current = await identity();
     if (current.installType !== "development") fail("bridge_store_install_refused");
@@ -412,6 +489,7 @@ export function createBridgeMaintenance({ chromeApi = chrome, fetchImpl = fetch,
     if (request.action === "quiesce") return await quiesce(beforeMutation);
     if (request.action === "resume") return await resume(request, beforeMutation);
     if (request.action === "commit") return await commit(request, beforeMutation);
+    if (request.action === "reload") return await reload(request, beforeMutation);
     return await readback();
   }
 

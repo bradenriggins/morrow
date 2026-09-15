@@ -792,7 +792,10 @@ async function startMorrow(lifecycle) {
       await installer.reconcileBridgeRelease();
       return respond();
     } catch (error) {
-      return failed(error?.code === "runtime_repair_required" ? error : errorDetails("bridge_check_failed"));
+      // A known refusal keeps its own fixed public text; anything else stays generic.
+      return failed(["runtime_repair_required", "active_or_uncertain_operations"].includes(error?.code)
+        ? errorDetails(error.code)
+        : errorDetails("bridge_check_failed"));
     }
   });
   ipcMain.handle("installer:check-for-updates", async (event, ...input) => {

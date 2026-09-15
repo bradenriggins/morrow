@@ -135,6 +135,7 @@ export type BridgeMaintenanceControl =
   | { readonly action: "quiesce" }
   | { readonly action: "commit"; readonly previousManifestVersion: string; readonly quiesceEpoch: string }
   | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true }
+  | { readonly action: "reload"; readonly quiesceEpoch: string }
   | { readonly action: "readback" };
 
 export interface BridgePrivateFileManifest {
@@ -734,6 +735,12 @@ export function normalizeBridgeMaintenanceControl(value: unknown): BridgeMainten
   if (value.action === "status" || value.action === "quiesce" || value.action === "readback") {
     if (Object.keys(value).length !== 1) throw new TypeError("bridge maintenance control has unsupported fields");
     return { action: value.action };
+  }
+  if (value.action === "reload") {
+    if (Object.keys(value).length !== 2) throw new TypeError("bridge maintenance control has unsupported fields");
+    const quiesceEpoch = requiredString(value.quiesceEpoch, "bridge maintenance quiesceEpoch", 256);
+    if (!/^[A-Za-z0-9._-]{16,256}$/.test(quiesceEpoch)) throw new TypeError("bridge maintenance reload is invalid");
+    return { action: "reload", quiesceEpoch };
   }
   if (value.action === "commit") {
     if (Object.keys(value).length !== 3) throw new TypeError("bridge maintenance control has unsupported fields");

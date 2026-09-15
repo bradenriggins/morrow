@@ -66,7 +66,10 @@ const FOCUS_REFRESH_INTERVAL_MS = 5_000;
 // can still be starting when setup draws. While the runtime stays uncertain,
 // setup asks again a few times and then waits for the person.
 const SETTLING_REFRESH_MS = 750;
-const SETTLING_REFRESH_LIMIT = 4;
+const SETTLING_REFRESH_MAX_MS = 5_000;
+// A local runtime start includes every upstream connector, which can take well over a minute on a
+// cold start. Setup keeps asking for that whole window instead of stopping after a few seconds.
+const SETTLING_REFRESH_WINDOW_MS = 120_000;
 
 let state = null;
 let chosenAssistantId = null;
@@ -80,6 +83,7 @@ let blackboardDisclosureTouched = false;
 let blackboardProblemsShown = false;
 let lastRefreshAt = 0;
 let settlingRefreshes = 0;
+let settlingStartedAt = null;
 let settlingTimer = null;
 
 // Each managed-device note is only true on the platform it names, so Morrow
@@ -193,6 +197,8 @@ function setProblem(value) {
   }
   problem.hidden = false;
   problem.innerHTML = `<strong>${escapeHtml(next.message)}</strong><p>${escapeHtml(next.recovery)}</p>`;
+  // The step body can be taller than the window, so a new problem is brought into view.
+  problem.scrollIntoView?.({ block: "nearest" });
 }
 
 function renderUpdates(current) {
@@ -531,6 +537,7 @@ async function refresh({ recheckAssistants = false } = {}) {
  */
 function checkNow() {
   settlingRefreshes = 0;
+  settlingStartedAt = null;
   return refresh({ recheckAssistants: true });
 }
 
@@ -547,14 +554,17 @@ function scheduleSettlingRefresh(next) {
   if (!next) return;
   if (next.runtime?.status !== "uncertain") {
     settlingRefreshes = 0;
+    settlingStartedAt = null;
     return;
   }
-  if (settlingRefreshes >= SETTLING_REFRESH_LIMIT) return;
+  settlingStartedAt ??= Date.now();
+  const delay = Math.min(SETTLING_REFRESH_MS * (2 ** settlingRefreshes), SETTLING_REFRESH_MAX_MS);
+  if (Date.now() + delay - settlingStartedAt > SETTLING_REFRESH_WINDOW_MS) return;
   settlingRefreshes += 1;
   settlingTimer = setTimeout(() => {
     settlingTimer = null;
     if (!busy) void refresh();
-  }, SETTLING_REFRESH_MS);
+  }, delay);
   settlingTimer?.unref?.();
 }
 

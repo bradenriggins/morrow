@@ -233,6 +233,10 @@ test("Check Bridge returns safe installer errors even when the runtime or state 
   const check = () => started.handlers.get("installer:reconcile-bridge")(event);
   assert.deepEqual((await check()).error, errorDetails("runtime_repair_required"));
 
+  failure = Object.assign(new Error("private lease detail"), { code: "active_or_uncertain_operations", recovery: "private internal path" });
+  assert.deepEqual((await check()).error, errorDetails("active_or_uncertain_operations"));
+  assert.doesNotMatch(JSON.stringify(await check()), /private/);
+
   failure = new Error("private Bridge mismatch detail");
   assert.deepEqual((await check()).error, errorDetails("bridge_check_failed"));
 

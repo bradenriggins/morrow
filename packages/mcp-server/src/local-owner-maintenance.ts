@@ -74,7 +74,8 @@ export type LocalOwnerBridgeMaintenanceControl =
   | { readonly action: "quiesce" }
   | { readonly action: "readback" }
   | { readonly action: "commit"; readonly previousManifestVersion: string; readonly quiesceEpoch: string }
-  | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true };
+  | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true }
+  | { readonly action: "reload"; readonly quiesceEpoch: string };
 
 export interface LocalOwnerIdentity {
   readonly nonce: string;
@@ -272,6 +273,11 @@ export function normalizeLocalOwnerBridgeMaintenanceControl(value: unknown): Loc
   const keys = Object.keys(source);
   if ((source.action === "status" || source.action === "quiesce" || source.action === "readback")
     && keys.length === 1 && keys[0] === "action") return { action: source.action };
+  if (source.action === "reload" && keys.length === 2
+    && keys.includes("action") && keys.includes("quiesceEpoch")
+    && typeof source.quiesceEpoch === "string" && /^[A-Za-z0-9._-]{16,256}$/.test(source.quiesceEpoch)) {
+    return { action: "reload", quiesceEpoch: source.quiesceEpoch };
+  }
   if (source.action === "commit" && keys.length === 3
     && ["action", "previousManifestVersion", "quiesceEpoch"].every((key) => keys.includes(key))
     && typeof source.previousManifestVersion === "string"

@@ -23,6 +23,8 @@ const {
   rollbackPendingBridgeUpdate
 } = require("./bridge-updates.cjs");
 const { completeBridgeUpdate, stageBridgeSwap } = require("./bridge-coordination.cjs");
+const BRIDGE_RELOAD_WAIT_MS = 30_000;
+const BRIDGE_RELOAD_POLL_MS = 1_000;
 const {
   inspectClaudeDesktopConnection,
   isCurrentClaudeDesktopSetup,
@@ -1326,7 +1328,8 @@ class InstallerController {
   }
 
   async stageBridgeUpdate(record, release, monitor) {
-    return stageBridgeSwap({
+    let quiesceEpoch = null;
+    const staged = await stageBridgeSwap({
       acquire: async () => this.acquireBridgeLease(monitor),
       prepare: async ({ requestQuiescence, resumeQuiescence }) => prepareBridgeUpdate({
         ...this.bridgeReleaseOptions(),
@@ -1339,20 +1342,47 @@ class InstallerController {
         if (result.extensionId !== extensionId || result.manifestVersion !== manifestVersion) {
           throw new Error("Morrow Bridge quiescence is unconfirmed");
         }
+        quiesceEpoch = result.quiesceEpoch;
         return result;
       },
-      resumeQuiescence: async ({ quiesceEpoch }) => monitor.bridgeMaintenance({ action: "resume", quiesceEpoch, fileLayerRestored: true }),
+      resumeQuiescence: async ({ quiesceEpoch: epoch }) => monitor.bridgeMaintenance({ action: "resume", quiesceEpoch: epoch, fileLayerRestored: true }),
       refresh: async () => this.readBridgeInstallation(),
       release: async () => this.releaseBridgeLease()
     });
+    return quiesceEpoch ? this.reloadStagedBridge(staged, monitor, quiesceEpoch, release.version) : staged;
+  }
+
+  /**
+   * Asks the fenced Bridge to reload itself into the staged folder, waits for Chrome to start the
+   * new version, and finishes the update. A Bridge from before this control cannot reload itself,
+   * and a reload Chrome does not finish in time leaves the staged update for the person to reload.
+   * Either way the staged update, its lease, and its rollback stay exactly as staging left them.
+   */
+  async reloadStagedBridge(staged, monitor, quiesceEpoch, version, { waitMs = BRIDGE_RELOAD_WAIT_MS, pollMs = BRIDGE_RELOAD_POLL_MS } = {}) {
+    try {
+      const scheduled = await monitor.bridgeMaintenance({ action: "reload", quiesceEpoch });
+      if (scheduled?.nextManifestVersion !== version) return staged;
+    } catch {
+      return staged;
+    }
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, pollMs));
+      const status = await monitor.bridgeMaintenance({ action: "status" }).catch(() => null);
+      if (status?.manifestVersion === version) return this.completePendingBridgeUpdate(staged, monitor);
+    }
+    return staged;
   }
 
   async reconcileBridgeRelease() {
     if (this.bridgeReconciliation) return this.bridgeReconciliation;
-    const refused = this.maintenanceAdmission();
+    const refused = this.maintenanceAdmission({ pendingBridgeUpdate: true });
     if (refused) throw errorDetails(refused);
     const pending = (async () => {
       const record = await this.verifiedBridgeInstallation();
+      if (!record.manualChromeReloadRequired && this.bridgeLeaseId !== null) {
+        throw errorDetails("active_or_uncertain_operations");
+      }
       const release = await this.packagedBridgeRelease();
       const installedVersion = parseChromeVersion(record.version);
       const releaseVersion = parseChromeVersion(release.version);
@@ -2049,8 +2079,12 @@ class InstallerController {
    * may begin while another operation holds a restart lease, and neither may
    * interrupt work in flight that Morrow cannot confirm is safe to stop.
    */
-  maintenanceAdmission() {
-    if (this.restartLeases.size !== 0 || this.bridgeLeaseId !== null
+  maintenanceAdmission({ pendingBridgeUpdate = false } = {}) {
+    // A staged Bridge update keeps its own lease until Chrome reloads the Bridge. Finishing that
+    // update is the one step that lease exists for, so it does not count as other work here.
+    const ownBridgeLease = pendingBridgeUpdate && this.bridgeLeaseId !== null
+      && this.restartLeases.size === 1 && this.restartLeases.has(this.bridgeLeaseId);
+    if ((this.restartLeases.size !== 0 && !ownBridgeLease) || (this.bridgeLeaseId !== null && !ownBridgeLease)
       || this.dataRemovalInProgress !== null || this.dataRemovalGuard !== null
       || this.desktopMutationInProgress !== null || this.desktopMutationGuard !== null
       || this.bridgeReconciliation !== null) return "active_or_uncertain_operations";

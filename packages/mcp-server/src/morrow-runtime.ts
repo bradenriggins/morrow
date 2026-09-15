@@ -44,7 +44,8 @@ export type BridgeMaintenanceControl =
   | { readonly action: "quiesce" }
   | { readonly action: "readback" }
   | { readonly action: "commit"; readonly previousManifestVersion: string; readonly quiesceEpoch: string }
-  | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true };
+  | { readonly action: "resume"; readonly quiesceEpoch: string; readonly fileLayerRestored: true }
+  | { readonly action: "reload"; readonly quiesceEpoch: string };
 
 const BRIDGE_EXTENSION_ID = /^[a-p]{32}$/;
 const BRIDGE_VERSION = /^(0|[1-9][0-9]*)(?:\.(0|[1-9][0-9]*)){0,3}$/;
@@ -70,6 +71,10 @@ function normalizeBridgeMaintenanceControl(value: unknown): BridgeMaintenanceCon
     && typeof value.previousManifestVersion === "string" && BRIDGE_VERSION.test(value.previousManifestVersion)
     && typeof value.quiesceEpoch === "string" && BRIDGE_IDENTIFIER.test(value.quiesceEpoch)) {
     return { action: "commit", previousManifestVersion: value.previousManifestVersion, quiesceEpoch: value.quiesceEpoch };
+  }
+  if (value.action === "reload" && exactKeys(value, ["action", "quiesceEpoch"])
+    && typeof value.quiesceEpoch === "string" && BRIDGE_IDENTIFIER.test(value.quiesceEpoch)) {
+    return { action: "reload", quiesceEpoch: value.quiesceEpoch };
   }
   if (value.action !== "resume" || !exactKeys(value, ["action", "quiesceEpoch", "fileLayerRestored"])
     || typeof value.quiesceEpoch !== "string" || !BRIDGE_IDENTIFIER.test(value.quiesceEpoch)
@@ -127,6 +132,13 @@ function privateBridgeMaintenanceResult(control: BridgeMaintenanceControl, value
       || source.quiesceEpoch !== control.quiesceEpoch || source.committed !== true
       || !activeFolderProof(source.activeFolderProof, extensionId, manifestVersion)) {
       throw new Error("The private Bridge commit result is invalid.");
+    }
+  } else if (control.action === "reload") {
+    if (!exactKeys(source, ["schema", "extensionId", "manifestVersion", "nextManifestVersion", "quiesceEpoch"])
+      || source.schema !== "morrow.bridge.reload-scheduled.v1"
+      || typeof source.nextManifestVersion !== "string" || !BRIDGE_VERSION.test(source.nextManifestVersion)
+      || source.quiesceEpoch !== control.quiesceEpoch) {
+      throw new Error("The private Bridge reload result is invalid.");
     }
   } else if (!exactKeys(source, ["schema", "extensionId", "manifestVersion", "quiesceEpoch", "resumed"])
     || source.schema !== "morrow.bridge.update-resumed.v1" || source.quiesceEpoch !== control.quiesceEpoch || source.resumed !== true) {

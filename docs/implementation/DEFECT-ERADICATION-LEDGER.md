@@ -458,10 +458,12 @@ Every row stays open until its evidence columns are added and its status becomes
 | 441 | P2 | R3 | A held capability is reported as an unknown name with the text "input is invalid", and capability lookup says "Here is the tool" for a name it cannot return. | closure section 441; Canvas connector regression | VERIFIED |
 | 442 | P0 | R7 | A paired Bridge has no persistent wake to reconnect, so after Morrow's gateway restarts it can stay disconnected until Chrome restarts. | closure section 442; extension lifecycle regression; live BT2 disconnect on 2026-09-15 | VERIFIED |
 | 443 | P1 | R3 | A course read on a connection whose signed-in Canvas tab no longer proves it reports `learner_roster_binding_unavailable` instead of telling the person to reconnect the course. | closure section 443; Canvas connector regression; live BT2 read after Chrome restart | IMPLEMENTED |
-| 444 | P1 | R7 | After a staged Bridge update and a Chrome reload, Check Bridge in the Desktop app returned no result and no error and left the update pending until the app restarted. | closure section 444; live Desktop observation on 2026-09-15 | OPEN |
+| 444 | P0 | R7 | After a staged Bridge update and a Chrome reload, Check Bridge refused to finish because the update's own maintenance lease counted as other work, and the refusal rendered below the fold as a misleading repair instruction. | closure section 444; installer controller, contract, and renderer regressions; live Desktop inspection on 2026-09-15 | IMPLEMENTED |
 | 445 | P2 | R3 | Repeating a change request that already verified returns the saved verified operation under the text "Morrow planned." | closure section 445; gateway result regression; live BT2 replay receipt | IMPLEMENTED |
 | 446 | P1 | R7 | Deleting a course discussion topic was held outside course Edit, so a person could not remove a course discussion or announcement through Morrow, including Morrow's own test fixtures. | closure section 446; catalog contract, admission report, and Bridge settings regressions | IMPLEMENTED |
 | 447 | P0 | R7 | A course connection stays unverified after Chrome restarts or its tab closes, even when the same course is open and signed in as the same account, so every course needs a manual reconnect. | closure section 447; extension lifecycle regressions; live BT2 after Chrome restart | IMPLEMENTED |
+| 448 | P1 | R7 | Setup stays on "Morrow is getting ready" after the runtime is ready, because it re-reads state only four times in three seconds and then waits for the person. | closure section 448; renderer regressions; live Desktop observation on 2026-09-15 | IMPLEMENTED |
+| 449 | P1 | R7 | Every Bridge update requires a person to open Chrome's extensions page and reload Morrow Bridge, and restarting Chrome instead signs Canvas out and closes course tabs. | closure section 449; Bridge maintenance, installer controller, and relay regressions; live Bridge updates on 2026-09-15 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3016,11 +3018,13 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Not live-proved: rows 436, 438, and 443 rest on their regressions.
 - Cleanup: 62 disposable Morrow Pages were deleted with verified readback. Discussion topic `1208433` and announcement `1196885` (`MORROW_ANN_1783294620574`, published) remain. Morrow correctly holds topic deletion, so they need removal in Canvas.
 
-### 444: Check Bridge returned nothing while an update was pending
+### 444: a pending Bridge update could not finish in the session that staged it
 
-- Verified condition: Morrow staged Bridge 1.0.9 at 11:04 and held the maintenance lease. Chrome was restarted and the Bridge answered `manifestVersion: 1.0.9`, `quiescent: true`, and a matching active-folder proof through the owner. Repeated Check Bridge selections showed no success, no problem, and no state change, and the installation record kept `pendingUpdate`. After the Morrow app restarted, the lease was released and the first Check Bridge completed the update.
-- Not yet established: which await in the reconciliation did not settle, or whether a refusal was produced but not shown. The next action is to reproduce it under the Desktop controller with a deadline on every Bridge maintenance call and to render any refusal.
-- Status: `OPEN`.
+- Verified defect: Bridge 1.0.10 was staged, Chrome loaded it, and the Bridge answered `manifestVersion: 1.0.10`, `quiescent: true`, and a matching folder proof through the owner. Check Bridge changed nothing. Through the Desktop main-process inspector, `reconcileBridgeRelease()` threw `active_or_uncertain_operations` with `bridgeLeaseId` held and one restart lease. The page showed "Morrow could not confirm Morrow Bridge. Select Repair Morrow, then load or reload the Bridge folder in Chrome and select Check Bridge." below the settings list, out of view. Restarting the app dropped the in-memory lease, which is why the next Check Bridge worked.
+- Root cause: staging keeps its Bridge lease until Chrome reloads the Bridge, and `maintenanceAdmission()` refused any held lease. Finishing the update, the one step that lease exists for, was refused by it. The Check Bridge handler also replaced every refusal code with `bridge_check_failed`, and the problem region sat after the step body.
+- Repair: reconciliation admits exactly one held lease when it is the Bridge lease of a pending update; any other lease, or a Bridge lease without a pending update, is still other work. The handler returns the fixed public details for `active_or_uncertain_operations` and `runtime_repair_required` and the generic text for anything else. The problem region is placed above the step body and scrolled into view when shown.
+- Regression: the controller suite completes a staged update while it holds its own lease and refuses with a second lease or with no pending update; the contract suite requires the fixed refusal and no private text; the renderer suite requires the problem region before the step body.
+- Status: `IMPLEMENTED`; packaged live verification pending.
 
 ### 445: a repeated verified request reads as planned
 
@@ -3046,7 +3050,24 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Regression: the extension lifecycle suite restarts with the anchored tab gone and the course open as a new tab, and requires a verified binding with the saved anchor moved to that tab and no probe of another site. A second case with a different signed-in account requires the connection to stay unverified and the saved anchor to stay unchanged.
 - Status: `IMPLEMENTED`; packaged live verification pending.
 
-### Root-cause patterns for rows 331–447
+### 448: setup stops waiting for the runtime after three seconds
+
+- Verified defect: after installing v34, setup showed "Morrow is getting ready" for more than 60 seconds with the local owner running. It advanced only after Check status.
+- Root cause: while the runtime status was `uncertain`, the renderer re-read state four times at 750 ms and then stopped. A cold runtime start includes every upstream connector and takes longer than three seconds.
+- Repair: setup keeps re-reading while the runtime is uncertain, backing off from 750 ms to 5 seconds, for a 120-second start window. Check status starts the window again.
+- Regression: the renderer suite requires a runtime that becomes ready 40 seconds into its start to appear without the person asking, and requires the asking to stop and stay bounded after the window.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### 449: every Bridge update needs a manual extension reload
+
+- Verified condition: Bridge updates to 1.0.9 and 1.0.10 each stopped at "Reload Morrow Bridge" with instructions to open Chrome's extensions page. Restarting Chrome instead also cleared the Canvas session and did not restore the BT2 tab.
+- Root cause: the Desktop app stages new files into the unpacked Bridge folder, but only a reload of the extension loads them, and no Morrow control could ask the Bridge to reload itself.
+- Repair: the fenced Bridge accepts a `reload` maintenance control for its exact quiesce epoch. It reloads only when the folder's manifest is a newer version of the same extension and the folder marker proves that version belongs to Morrow's Bridge folder, and it answers before it reloads. After staging, the Desktop app sends the control, waits up to 30 seconds for Chrome to report the new version, and finishes the update. A Bridge from before this control, or a reload that does not finish in time, leaves the staged update and its manual instructions unchanged. The control is carried by the protocol, connector, owner, and monitor validators. Bridge 1.0.11 is sealed.
+- Structural finding: the same Bridge maintenance contract is validated separately in six places: the extension, the protocol package, the connector tool schema, the owner runtime, the local-owner maintenance module, and the runtime monitor. Each new control has to change all six.
+- Regression: the Bridge maintenance suite refuses a reload without a fence, with a stale epoch, into a folder that is not newer, or into a folder whose marker does not name that version, refuses a Store install, and schedules the reload after the answer. The controller suite finishes an update after a self-reload and leaves the staged update for an older or stalled Bridge.
+- Status: `IMPLEMENTED`; live self-reload pending the next Bridge update after 1.0.11 is loaded.
+
+### Root-cause patterns for rows 331–449
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -3073,6 +3094,9 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - **A long-lived process keeps serving after the files it was built from are replaced:** row 438. Evidence for a build is valid only when the process that produced it started after that build was installed.
 - **A recovery path depends on a timer the platform may discard:** row 442. A connection that must recover after its peer restarts is woken by a platform event that survives suspension.
 - **A proof is tied to an identifier the platform reissues:** row 447. A connection is proved by the signed-in account a page names, and any tab that names it again restores the proof.
+- **A guard refuses the step it was created to protect:** row 444. A lease admits the completion it exists for and still refuses everything else.
+- **A wait stops long before the thing it waits for can finish:** row 448. Polling windows are sized to the real operation, with backoff and a bound.
+- **A manual step stands in for a missing control:** row 449. The component that must act gets an exact, fenced control instead of an instruction to a person.
 - **One component decides for another it cannot see:** row 440. Write support is one shared decision, and the side that invokes an action decides whether it can be granted.
 - **A sentence names the wrong state or cause:** rows 439, 441, 443, and 445. Each code has its own sentence, and a validated provider outcome is described as that outcome.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.

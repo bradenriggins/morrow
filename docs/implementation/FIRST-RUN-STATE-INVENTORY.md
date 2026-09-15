@@ -150,12 +150,12 @@ their `<summary>`.
 | `updates-checking` | "Morrow is checking for an update." | None. It answers itself | `installer/renderer/renderer.js:214-217` |
 | `updates-downloading` | "Morrow found version N and will download it in the background." or "Morrow is downloading … You can keep working while it finishes." | None. It answers itself | `installer/renderer/renderer.js:219-224` |
 | `updates-held` | "Morrow will restart after course work finishes or its current state is clear." | None. Morrow restarts when the work is settled | `installer/renderer/renderer.js:226-230` |
-| `updates-install-failed` | "Morrow could not install the update. Try again when course work is idle." | **Try restart again** | `installer/renderer/renderer.js:232-235` |
-| `updates-ready` | "Version N is ready." and "Restart Morrow when course work is idle to finish the update." | **Restart to update** | `installer/renderer/renderer.js:237-239` |
-| `updates-installing` | "Morrow is installing its update. It will reopen when the update is complete." | None. Morrow reopens | `installer/renderer/renderer.js:241-244` |
-| `updates-rolled-back` | "The update did not start; Morrow is running version N." | **Retry the update** | `installer/renderer/renderer.js:246-251` |
-| `updates-no-space` | "Morrow could not download the update: this computer does not have enough free space for it." | Free space, then **Try again** | `installer/renderer/renderer.js:253-256` |
-| `updates-check-failed` | "Morrow could not check for an update." | **Try again** | `installer/renderer/renderer.js:258-259` |
+| `updates-install-failed` | "Morrow could not install the update. Try again when course work is idle." | **Try restart again** | `installer/renderer/renderer.js:238-241` |
+| `updates-ready` | "Version N is ready." and "Restart Morrow when course work is idle to finish the update." | **Restart to update** | `installer/renderer/renderer.js:243-245` |
+| `updates-installing` | "Morrow is installing its update. It will reopen when the update is complete." | None. Morrow reopens | `installer/renderer/renderer.js:247-250` |
+| `updates-rolled-back` | "The update did not start; Morrow is running version N." | **Retry the update** | `installer/renderer/renderer.js:252-257` |
+| `updates-no-space` | "Morrow could not download the update: this computer does not have enough free space for it." | Free space, then **Try again** | `installer/renderer/renderer.js:259-262` |
+| `updates-check-failed` | "Morrow could not check for an update." | **Try again** | `installer/renderer/renderer.js:264-265` |
 | `blackboard-hidden` | Nothing | None. The panel appears only after an assistant is configured and the local runtime is ready, so the first screen never asks for credentials | `installer/shared/setup-view.mjs:47-49`, `installer/renderer/renderer.js:285` |
 | `blackboard-empty` | "Connect a Blackboard Learn site (optional)", "Most people do not need this…" and four fields | Ask a Blackboard administrator for the key and secret, then **Save Blackboard connection** | `installer/renderer/index.html:48-85`, `installer/renderer/renderer.js:288` |
 | `blackboard-invalid` | One message under each field that is not ready, and focus moves to the first of them | Correct the named field. Messages clear as the value becomes right | `installer/renderer/renderer.js:570-610`, `installer/renderer/renderer.js:614-623` |
@@ -498,16 +498,16 @@ stale name here.
 | `Choose an assistant` | Morrow app | `installer/shared/setup-view.mjs:164` |
 | `Choose folder` | Morrow app | `installer/shared/setup-view.mjs:185`, `installer/shared/setup-view.mjs:185` |
 | `Change folder` | Morrow app | `installer/shared/setup-view.mjs:193` |
-| `Remove` | Morrow app | `installer/shared/setup-view.mjs:214`, `installer/renderer/renderer.js:351` |
+| `Remove` | Morrow app | `installer/shared/setup-view.mjs:214`, `installer/renderer/renderer.js:357` |
 | `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:322` |
 | `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:301` |
 | `Update Bridge` | Morrow app | `installer/shared/setup-view.mjs:308` |
 | `Check connection` | Morrow app | `installer/shared/setup-view.mjs:359` |
-| `Check for updates` | Morrow app | `installer/renderer/renderer.js:211` |
-| `Restart to update` | Morrow app | `installer/renderer/renderer.js:238` |
-| `Try restart again` | Morrow app | `installer/renderer/renderer.js:234` |
-| `Retry the update` | Morrow app | `installer/renderer/renderer.js:250` |
-| `Try again` | Morrow app | `installer/renderer/renderer.js:255` |
+| `Check for updates` | Morrow app | `installer/renderer/renderer.js:217` |
+| `Restart to update` | Morrow app | `installer/renderer/renderer.js:244` |
+| `Try restart again` | Morrow app | `installer/renderer/renderer.js:240` |
+| `Retry the update` | Morrow app | `installer/renderer/renderer.js:256` |
+| `Try again` | Morrow app | `installer/renderer/renderer.js:261` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:78` |
 | `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:429` |
 | `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
