@@ -543,7 +543,7 @@ describe("Canvas API catalog", () => {
     ));
     const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
       && /redirect/iu.test(`${operation.summary} ${operation.description}`));
-    expect(held).toHaveLength(26);
+    expect(held).toHaveLength(25);
     expect(admittedWithoutExactReadback).toHaveLength(225);
     expect(siteReads).toHaveLength(355);
     // Every read is bound: to the selected course, or to the connected Canvas site as the signed-in person.
@@ -838,7 +838,7 @@ describe("Canvas API catalog", () => {
 
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
-    expect(admitted).toHaveLength(540);
+    expect(admitted).toHaveLength(541);
     expect(admitted.filter((operation) => accountRoute(operation.path))).toHaveLength(116);
   });
 
@@ -857,7 +857,6 @@ describe("Canvas API catalog", () => {
       .filter((write) => write.state === "held")
       .map((write) => write.reason));
     expect([...heldReasons].sort()).toEqual([
-      "duplicate_assignment_exact_readback_unavailable",
       "lti_authorization_required",
       "multi_step_upload_requires_reviewed_transfer",
     ]);
@@ -868,7 +867,6 @@ describe("Canvas API catalog", () => {
   it("gives every held write one reason and every site request one class, each with its own plain sentence", () => {
     const tools = canvasCatalogTools(catalog);
     const closedSet = [
-      "duplicate_assignment_exact_readback_unavailable",
       "lti_authorization_required",
       "multi_step_upload_requires_reviewed_transfer",
     ] as const;
@@ -897,7 +895,6 @@ describe("Canvas API catalog", () => {
     }
 
     expect(Object.fromEntries([...byReason].map(([reason, names]) => [reason, names.length]))).toEqual({
-      duplicate_assignment_exact_readback_unavailable: 1,
       lti_authorization_required: 16,
       multi_step_upload_requires_reviewed_transfer: 9,
     });
@@ -981,7 +978,7 @@ describe("Canvas API catalog", () => {
 
     // The admitted set is pinned here as well. Any change needs a reviewed admission reason.
     expect(catalog.operations.filter((operation) => !operation.readOnly
-      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(540);
+      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(541);
   });
 
   // Generic Canvas upload pre-flights cannot carry the remaining transfer steps. The Rubric CSV
@@ -1472,8 +1469,8 @@ describe("Canvas API catalog", () => {
     expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(184);
     expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(30);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(11);
-    expect(admittedWrites).toHaveLength(540);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(315);
+    expect(admittedWrites).toHaveLength(541);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(316);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     // Deleting a gradebook column is course work admitted through its course, and its absence reads back exactly.

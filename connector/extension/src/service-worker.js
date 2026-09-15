@@ -17,7 +17,7 @@ import { bridgeWriteFailureCode, canvasWriteOutcomeUncertain } from "./canvas-wr
 import { canvasOperationAdmission } from "../generated/canvas-operation-admission.js";
 import { CANVAS_MULTI_CONTEXT_REFUSAL, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "../generated/canvas-semantic-target.js";
 import { evaluateBrowserReadback, planBrowserReadback, planCanvasRecoveryDescriptor } from "./verification.js";
-import { evaluateCanvasOperationProgress, evaluateCanvasOperationReadback, isCanvasOperationReadback, planCanvasOperationReadback } from "./canvas-operation-readback.js";
+import { canvasOperationReadbackInputProblem, evaluateCanvasOperationProgress, evaluateCanvasOperationReadback, isCanvasOperationReadback, planCanvasOperationReadback } from "./canvas-operation-readback.js";
 import { executeMoodleInPage } from "./moodle-executor.js";
 import { executeMoodleForumActivitySummaryInPage } from "./moodle-forum-activity-summary-read.js";
 import { executeMoodleForumPostInPage } from "./moodle-forum-post-executor.js";
@@ -4363,7 +4363,7 @@ function courseScopeProblem(command, binding, operation, canvasConversation) {
   // does not narrow it. The binding already proved that site, that person and that session.
   if (admission.authority === "site") {
     return command.kind === "invoke_write" && admission.write.state === "held"
-      ? problem("course_scope_required", "This change needs one selected course target.", true)
+      ? problem("course_scope_required", "This change needs an LTI tool's own authorization or Morrow's reviewed file transfer.", true)
       : null;
   }
   // The Item Bank routes name a bank, never a course, so the guarded repair proves the course
@@ -4376,7 +4376,7 @@ function courseScopeProblem(command, binding, operation, canvasConversation) {
       : problem("course_binding_mismatch", "This request does not match the selected course.", true);
   }
   if (command.kind === "invoke_write" && admission.write.state === "held") {
-    return problem("course_scope_required", "This change needs one selected course target.", true);
+    return problem("course_scope_required", "This change needs an LTI tool's own authorization or Morrow's reviewed file transfer.", true);
   }
   if (target && target !== binding.courseId) return problem("course_binding_mismatch", "This request does not match the selected course.", true);
   // The route names one object, not a course. Only the object id can be checked here; the course
@@ -4443,6 +4443,8 @@ async function commandContext(command) {
     && canvasConversationOperationMatches(operation, privateConversation);
   const courseFailure = courseScopeProblem(command, binding, operation, canvasConversation);
   if (courseFailure) return { failure: courseFailure };
+  const readbackInput = command.kind === "invoke_write" ? canvasOperationReadbackInputProblem(operation, command.arguments || {}) : "";
+  if (readbackInput) return { failure: problem("canvas_readback_input_refused", readbackInput, true) };
   const policyFailure = await editScopeProblem(command, binding, operation);
   if (policyFailure) return { failure: policyFailure };
   const privateMoodleFile = privateMoodleStagedFileOperation(operation);
@@ -4512,7 +4514,9 @@ function internalCanvasCourseRead(binding, operation) {
 
 async function executeNamedCanvasReadback(binding, plan, expiresAt) {
   if (plan.progressReadOperation) {
-    for (let attempt = 0; attempt < 6; attempt += 1) {
+    const attempts = Number.isSafeInteger(plan.progressAttempts) && plan.progressAttempts > 0 ? plan.progressAttempts : 6;
+    const pollMs = Number.isSafeInteger(plan.progressPollMs) && plan.progressPollMs > 0 ? plan.progressPollMs : 250;
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
       const progress = await executeOperation(
         binding,
         internalCanvasCourseRead(binding, plan.progressReadOperation),
@@ -4521,12 +4525,12 @@ async function executeNamedCanvasReadback(binding, plan, expiresAt) {
       );
       const assessed = evaluateCanvasOperationProgress(plan, progress);
       if (assessed?.settled) break;
-      if (!assessed || assessed.terminal || attempt === 5) return assessed?.verification
+      if (!assessed || assessed.terminal || attempt === attempts - 1) return assessed?.verification
         || { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_operation_progress_unavailable" };
       if (!commandDeadlineCurrent(expiresAt)) {
         return { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_operation_deadline_expired" };
       }
-      await new Promise((resolve) => setTimeout(resolve, Math.min(250, Math.max(1, expiresAt - Date.now()))));
+      await new Promise((resolve) => setTimeout(resolve, Math.min(pollMs, Math.max(1, expiresAt - Date.now()))));
     }
   }
   const readback = await executeOperation(

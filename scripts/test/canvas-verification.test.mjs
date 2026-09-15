@@ -304,34 +304,17 @@ test("every executor-owned readback is a reread the owning executor really perfo
 });
 
 /**
- * The duplicate stays held, and the sentence it shows names the provider fact
- * that actually blocks it. Checked against the Canvas Assignment resource on
- * 8 September 2026:
- * https://developerdocs.instructure.com/services/canvas/resources/assignments
- *
- * The response shape is NOT the problem, and the reason must never say it is.
- * `result_type` has one allowed value, `Quiz`; with the argument omitted "the
- * response will be serialized into an assignment format" and the route
- * "Returns an Assignment object". Two things do block it. Canvas documents no
- * field on the copy that names it a New Quiz: the Assignment object documents
- * `is_quiz_assignment`, whose name and description disagree with each other,
- * and documents no `is_quiz_lti_assignment` at all. And Canvas documents no
- * signal that the copy has finished: `workflow_state` is documented only as
- * "String indicating what state this assignment is in", with `unpublished` as
- * its one example value. A reread taken straight after the request could
- * therefore describe a half-made copy, and Morrow would call it verified.
+ * The duplicate is admitted with a named readback. Checked against the Canvas Assignment resource on
+ * 15 September 2026 (https://developerdocs.instructure.com/services/canvas/resources/assignments): the
+ * route returns an Assignment object when `result_type` is omitted, and a copy documents
+ * `original_assignment_id`. Canvas documents `unpublished` as a saved state and no in-progress state,
+ * so the readback waits for a documented saved state and never verifies any other one.
  */
-test("the assignment duplicate stays held for the provider fact that blocks it", () => {
+test("the assignment duplicate is admitted with a named readback that waits for the finished copy", () => {
   const duplicate = catalog.operations.find((operation) => operation.path === "/v1/courses/{course_id}/assignments/{assignment_id}/duplicate");
   assert.ok(duplicate);
-  const admission = canvasOperationAdmission(duplicate).write;
-  assert.deepEqual(admission, { state: "held", reason: "duplicate_assignment_exact_readback_unavailable" });
-  const reason = canvasAdmissionReason(admission);
-  assert.match(reason, /does not say when a duplicated assignment has finished copying/);
-  assert.match(reason, /no documented field that names it as a New Quiz/);
-  // The retired belief. Canvas does document one response shape for the request
-  // Morrow would send, so this must not come back as the stated reason.
-  assert.doesNotMatch(reason, /different record types/);
+  assert.deepEqual(canvasOperationAdmission(duplicate).write, { state: "admitted" });
+  assert.deepEqual(canvasReadbackAssessment(catalog.operations, duplicate), { state: "structurally_exact" });
 });
 
 test("readback proof binds to the exact declared target record", () => {

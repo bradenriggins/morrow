@@ -147,6 +147,8 @@ function startCanvas(directory) {
   const assignment = { id: "88", course_id: "42", name: "Cell transport reflection", description: '<p>Explain active transport.</p><img src="/courses/42/files/10">', due_at: "2026-09-08T17:00:00Z", unlock_at: null, lock_at: null, points_possible: 10, published: true, submission_types: ["online_text_entry"] };
   let assignmentWrites = 0;
   let bulkAssignmentDateWrites = 0;
+  let assignmentDuplicateWrites = 0;
+  let assignmentCopyReads = 0;
   let bulkAssignmentDates = [{ id: "188", course_id: "42", all_dates: [{ base: true, due_at: "2026-10-01T17:00:00Z", unlock_at: null, lock_at: null }] }];
   let enrollmentReactivationWrites = 0;
   const enrollment = { id: "51", course_id: "42", user_id: "99", enrollment_state: "inactive" };
@@ -619,6 +621,16 @@ function startCanvas(directory) {
         Link: `<${nextUrl}>; rel="next"`,
       });
     }
+    // A New Quiz copy is saved as `duplicating` and finished in the background: the first two reads
+    // of the copy still show it copying, and the third shows it saved.
+    if (url.pathname === "/api/v1/courses/42/assignments/188/duplicate" && request.method === "POST") {
+      assignmentDuplicateWrites += 1;
+      return json(200, { id: "195", course_id: "42", name: "Lab report Copy", original_assignment_id: "188", original_course_id: "42", workflow_state: "duplicating" });
+    }
+    if (url.pathname === "/api/v1/courses/42/assignments/195" && request.method === "GET") {
+      assignmentCopyReads += 1;
+      return json(200, { id: "195", course_id: "42", name: "Lab report Copy", original_assignment_id: "188", original_course_id: "42", workflow_state: assignmentCopyReads < 3 ? "duplicating" : "unpublished" });
+    }
     const courseMatch = url.pathname.match(/^\/api\/v1\/courses\/([1-9][0-9]*)$/);
     if (courseMatch) {
       const course = courses.find((entry) => entry.id === courseMatch[1]);
@@ -895,6 +907,8 @@ function startCanvas(directory) {
     assignment: () => ({ ...assignment, submission_types: [...assignment.submission_types] }),
     assignmentWrites: () => assignmentWrites,
     bulkAssignmentDateWrites: () => bulkAssignmentDateWrites,
+    assignmentDuplicateWrites: () => assignmentDuplicateWrites,
+    assignmentCopyReads: () => assignmentCopyReads,
     bulkAssignmentDates: () => structuredClone(bulkAssignmentDates),
     enrollmentReactivationWrites: () => enrollmentReactivationWrites,
     enrollment: () => ({ ...enrollment }),
@@ -1688,7 +1702,7 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 311);
+  assert.equal(expectedCanvasEditActions.length, 312);
   const expectedCanvasReviewActions = [...reviewOnlyAdmittedCanvasWrites]
     .map((toolName) => `action:canvas:${toolName}`)
     .sort();
@@ -2697,7 +2711,26 @@ try {
   assert.equal(enrollmentReactivation.result.verification.status, "verified", JSON.stringify(enrollmentReactivation));
   assert.equal(canvas.enrollmentReactivationWrites(), 1);
   assert.deepEqual(canvas.enrollment(), { id: "51", course_id: "42", user_id: "99", enrollment_state: "active" });
-  process.stderr.write("[browser-test] Canvas bulk AssignmentDate changes and a course enrollment reactivation both verify exact provider evidence\n");
+  const duplicate = await runtime.call("canvas_duplicate_assignment", {
+    course_id: "42",
+    assignment_id: "188",
+    _morrow: { source_binding_id: binding.sourceBindingId, outer_grant: { ...grant, effect_receipt_id: "effect:duplicate-assignment-browser-test" } },
+  });
+  assert.equal(duplicate.ok, true, JSON.stringify(duplicate));
+  assert.equal(duplicate.result.verification.status, "verified", JSON.stringify(duplicate));
+  assert.equal(duplicate.result.verification.strategy, "canvas-assignment-duplicate");
+  assert.equal(canvas.assignmentDuplicateWrites(), 1);
+  assert.ok(canvas.assignmentCopyReads() >= 3, String(canvas.assignmentCopyReads()));
+  const quizShapedDuplicate = await runtime.call("canvas_duplicate_assignment", {
+    course_id: "42",
+    assignment_id: "188",
+    result_type: "Quiz",
+    _morrow: { source_binding_id: binding.sourceBindingId, outer_grant: { ...grant, effect_receipt_id: "effect:duplicate-assignment-quiz-browser-test" } },
+  });
+  assert.equal(quizShapedDuplicate.ok, false, JSON.stringify(quizShapedDuplicate));
+  assert.match(JSON.stringify(quizShapedDuplicate), /canvas_readback_input_refused/);
+  assert.equal(canvas.assignmentDuplicateWrites(), 1);
+  process.stderr.write("[browser-test] Canvas bulk AssignmentDate changes, a course enrollment reactivation, and an assignment duplicate that finishes in the background all verify exact provider evidence\n");
   const wrongCourse = await runtime.call("canvas_show_page_courses", {
     course_id: "43",
     url_or_id: "lesson",

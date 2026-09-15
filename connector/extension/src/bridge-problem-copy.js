@@ -231,9 +231,9 @@ const COPY = {
     action: "Select that course in Plan and Edit settings, or ask your assistant to work in a selected course.",
   },
   course_scope_required: {
-    title: "That change does not name one selected course",
-    detail: "Morrow sent nothing. A change is made only inside one course you selected, and this one named none.",
-    action: "Ask your assistant to name one selected course, then review the change again.",
+    title: "That change needs a step Morrow cannot take here",
+    detail: "Morrow sent nothing. This change needs an LTI tool's own authorization, or the bytes of a file that only Morrow's reviewed file transfer carries.",
+    action: "Make an LTI service change from the LTI tool. To add a file, ask your assistant to use Morrow's file transfer.",
   },
   edit_policy_stale: {
     title: "Edit access changed before this change was sent",

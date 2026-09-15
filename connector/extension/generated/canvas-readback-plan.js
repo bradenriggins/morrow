@@ -46,6 +46,10 @@ const NAMED_CANVAS_READBACKS = Object.freeze([
         toolName: "canvas_re_activate_enrollment",
         key: "PUT /v1/courses/{course_id}/enrollments/{id}/reactivate#re_activate_enrollment",
     },
+    {
+        toolName: "canvas_duplicate_assignment",
+        key: "POST /v1/courses/{course_id}/assignments/{assignment_id}/duplicate#duplicate_assignment",
+    },
 ]);
 export function hasNamedCanvasReadback(operation) {
     return NAMED_CANVAS_READBACKS.some((candidate) => candidate.toolName === operation?.toolName && candidate.key === operation?.key);

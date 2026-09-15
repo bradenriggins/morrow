@@ -10,6 +10,22 @@ const REACTIVATE_ENROLLMENT = Object.freeze({
   toolName: "canvas_re_activate_enrollment",
   key: "PUT /v1/courses/{course_id}/enrollments/{id}/reactivate#re_activate_enrollment",
 });
+const DUPLICATE_ASSIGNMENT = Object.freeze({
+  toolName: "canvas_duplicate_assignment",
+  key: "POST /v1/courses/{course_id}/assignments/{assignment_id}/duplicate#duplicate_assignment",
+});
+const GET_ASSIGNMENT = Object.freeze({
+  toolName: "canvas_get_single_assignment",
+  key: "GET /v1/courses/{course_id}/assignments/{id}#get_single_assignment",
+});
+// Canvas documents `original_assignment_id` on a copy and `unpublished` as a saved assignment state.
+// Its source keeps a New Quiz copy in `duplicating` while the quiz service finishes it, and marks a copy
+// that could not finish `failed_to_duplicate`. Only a documented saved state counts as finished, so any
+// other state keeps the readback waiting and never verifies.
+const DUPLICATE_FAILED_STATE = "failed_to_duplicate";
+const DUPLICATE_FINISHED_STATES = Object.freeze(["published", "unpublished"]);
+const DUPLICATE_POLL_MS = 1_000;
+const DUPLICATE_POLL_ATTEMPTS = 60;
 const LIST_ASSIGNMENTS = Object.freeze({
   toolName: "canvas_list_assignments_assignments",
   key: "GET /v1/courses/{course_id}/assignments#list_assignments_assignments",
@@ -137,9 +153,50 @@ function reactivationPlan(operations, operation, args, writeData) {
   };
 }
 
+function duplicatePlan(operations, operation, args, writeData) {
+  if (operation?.toolName !== DUPLICATE_ASSIGNMENT.toolName || operation?.key !== DUPLICATE_ASSIGNMENT.key) return null;
+  const courseId = identifier(args?.course_id);
+  const originalId = identifier(args?.assignment_id);
+  const copyId = identifier(writeData?.id);
+  const read = exactOperation(operations, GET_ASSIGNMENT);
+  // The copy names its original and its course. A response that does not is not the new assignment.
+  if (!courseId || !originalId || !copyId || copyId === originalId || !read
+    || identifier(writeData?.course_id) !== courseId || identifier(writeData?.original_assignment_id) !== originalId) return null;
+  const readArguments = { course_id: courseId, id: copyId };
+  return {
+    schema: "morrow.browser-readback-plan.v1",
+    strategy: "canvas-assignment-duplicate",
+    readOperation: read,
+    arguments: readArguments,
+    assertions: [],
+    targetId: copyId,
+    targetField: "id",
+    progressReadOperation: read,
+    progressArguments: readArguments,
+    progressPollMs: DUPLICATE_POLL_MS,
+    progressAttempts: DUPLICATE_POLL_ATTEMPTS,
+    courseId,
+    originalId,
+    copyId,
+  };
+}
+
 export function planCanvasOperationReadback(operations, operation, args, writeData) {
   return bulkPlan(operations, operation, args, writeData)
-    || reactivationPlan(operations, operation, args, writeData);
+    || reactivationPlan(operations, operation, args, writeData)
+    || duplicatePlan(operations, operation, args, writeData);
+}
+
+/**
+ * An input that would change what the write answers with, so that the named readback could not find
+ * the object it reads back. Nothing has been sent when this refuses.
+ */
+export function canvasOperationReadbackInputProblem(operation, args) {
+  if (operation?.toolName === DUPLICATE_ASSIGNMENT.toolName && operation?.key === DUPLICATE_ASSIGNMENT.key
+    && args?.result_type !== undefined && args?.result_type !== null && args?.result_type !== "") {
+    return "Morrow duplicates an assignment and reads the copy back as an assignment, so it does not send a request that asks Canvas to answer with a quiz instead. It changed nothing.";
+  }
+  return "";
 }
 
 function verification(status, strategy, readTool, evidence) {
@@ -230,14 +287,52 @@ function evaluateEnrollmentReactivation(plan, readResult) {
   return verification("verified", plan.strategy, plan.readOperation.toolName, "fresh_enrollment_readback_matches_active_subject");
 }
 
+function evaluateAssignmentDuplicate(plan, readResult) {
+  const failed = readFailure(plan, readResult);
+  if (failed) return failed;
+  const copy = readResult.data;
+  if (!copy || typeof copy !== "object" || Array.isArray(copy)) {
+    return verification("unconfirmed", plan.strategy, plan.readOperation.toolName, "assignment_readback_shape_invalid");
+  }
+  if (recordId(copy) !== plan.copyId || identifier(copy.course_id) !== plan.courseId) {
+    return verification("mismatch", plan.strategy, plan.readOperation.toolName, "duplicate_subject_or_course_mismatch");
+  }
+  if (identifier(copy.original_assignment_id) !== plan.originalId) {
+    return verification("mismatch", plan.strategy, plan.readOperation.toolName, "duplicate_original_mismatch");
+  }
+  if (copy.workflow_state === DUPLICATE_FAILED_STATE) {
+    return verification("mismatch", plan.strategy, plan.readOperation.toolName, "duplicate_failed_to_finish");
+  }
+  if (!DUPLICATE_FINISHED_STATES.includes(copy.workflow_state)) {
+    return verification("unconfirmed", plan.strategy, plan.readOperation.toolName, "duplicate_not_finished");
+  }
+  return verification("verified", plan.strategy, plan.readOperation.toolName, "fresh_finished_copy_names_its_original");
+}
+
 export function evaluateCanvasOperationReadback(plan, readResult) {
   if (!plan || typeof plan !== "object") return null;
+  if (plan.strategy === "canvas-assignment-duplicate") return evaluateAssignmentDuplicate(plan, readResult);
   if (plan.strategy === "canvas-bulk-assignment-dates") return evaluateBulkAssignmentDates(plan, readResult);
   if (plan.strategy === "canvas-enrollment-reactivation") return evaluateEnrollmentReactivation(plan, readResult);
   return null;
 }
 
+function evaluateDuplicateProgress(plan, progressResult) {
+  if (!progressResult || progressResult.ok !== true) {
+    return { settled: false, verification: verification("unconfirmed", plan.strategy, plan.progressReadOperation?.toolName, `progress_readback_http_${Number(progressResult?.status || 0)}`) };
+  }
+  const state = progressResult.data?.workflow_state;
+  if (state === DUPLICATE_FAILED_STATE) {
+    return { settled: false, terminal: true, verification: verification("mismatch", plan.strategy, plan.progressReadOperation?.toolName, "duplicate_failed_to_finish") };
+  }
+  if (!DUPLICATE_FINISHED_STATES.includes(state)) {
+    return { settled: false, verification: verification("unconfirmed", plan.strategy, plan.progressReadOperation?.toolName, "duplicate_not_finished") };
+  }
+  return { settled: true };
+}
+
 export function evaluateCanvasOperationProgress(plan, progressResult) {
+  if (plan?.strategy === "canvas-assignment-duplicate") return evaluateDuplicateProgress(plan, progressResult);
   if (plan?.strategy !== "canvas-bulk-assignment-dates") return null;
   if (!progressResult || progressResult.ok !== true) {
     return { settled: false, verification: verification("unconfirmed", plan.strategy, plan.progressReadOperation?.toolName, `progress_readback_http_${Number(progressResult?.status || 0)}`) };

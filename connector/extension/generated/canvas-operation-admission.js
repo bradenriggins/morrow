@@ -228,9 +228,6 @@ export function canvasOperationAdmission(operation) {
     if (reviewedFileTransferRoute(operation)) {
         return { ...scope, write: { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" } };
     }
-    if (operation.path === "/v1/courses/{course_id}/assignments/{assignment_id}/duplicate") {
-        return { ...scope, write: { state: "held", reason: "duplicate_assignment_exact_readback_unavailable" } };
-    }
     // An LTI service, including the account and developer key routes under it, accepts only the tool's
     // own LTI authorization. The signed-in browser session cannot present it.
     if (operation.path.startsWith("/lti/")) {
@@ -308,9 +305,6 @@ export function canvasAdmissionReason(admission) {
         return undefined;
     if (admission.reason === "multi_step_upload_requires_reviewed_transfer") {
         return "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload.";
-    }
-    if (admission.reason === "duplicate_assignment_exact_readback_unavailable") {
-        return "Canvas does not say when a duplicated assignment has finished copying, and the copy carries no documented field that names it as a New Quiz, so Morrow cannot prove it read back the finished copy rather than a half-made one. Duplicate this assignment in Canvas.";
     }
     return "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool.";
 }

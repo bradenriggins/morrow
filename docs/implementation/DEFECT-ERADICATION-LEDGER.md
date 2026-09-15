@@ -468,6 +468,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 451 | P2 | R7 | The Canvas connector browser harness is not part of the repository gate, so its pinned Edit option counts went stale across rows 440 and 446 without any gate failing. | closure section 451; browser harness run on 2026-09-15 | OPEN |
 | 452 | P1 | R1 | The gateway could not plan any admitted Canvas object write whose route names no course, such as a section edit, a group page, a file rename, or a calendar event update, because its effect lock and binding checks required a course id; every such request answered "Morrow could not freeze this operation plan." | closure section 452; connector gateway integration regression | IMPLEMENTED |
 | 453 | P1 | R7 | 312 Canvas writes that name an account, a person, a shared object, a learner record without its course, more than one course, or a session credential were held because Morrow had only a course authority, and 355 reads without a course were refused, although Canvas itself decides each one with the signed-in person's roles. | closure section 453; catalog, connector runtime, gateway integration, Bridge settings, scope, admission report, and Bridge lifecycle regressions | IMPLEMENTED |
+| 454 | P2 | R1 | Duplicating an assignment was held because no readback could tell a finished copy from a half-made one. | closure section 454; named readback, verification, New Quiz admission, and catalog regressions | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3100,10 +3101,18 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Condition: 117 account, 92 no-course, 48 cross-course object, 37 learner-without-course, 11 multi-course, 9 session-credential, and 6 personal writes were held, and 351 reads without a course were refused, although Canvas applies the signed-in person's own roles to every one of them.
 - Repair: admission gives every request an authority. A site request acts on the connected Canvas site as the signed-in person, carries one of six site classes with its own sentence shown before it is granted, is published with `scopeClass: "site"`, and is enforced the same way in the catalog profile, connector runtime, service worker, page executor, Bridge Edit list, and gateway. It needs the verified connection's origin, person and session, is sent only to the bound tab's origin, and removes the identity of anyone outside the selected course's roster from results. Course-object requests that are also site requests skip the course ownership proof. The six OutcomeLink creates gained the readback blocker `outcome_link_identity_is_nested` (row 412) now that no hold covers them. Every upload first step outside a course joins the reviewed-transfer hold, and the LTI hold covers every `/lti/` route. The raw Inbox routes are ordinary site requests beside the private Inbox action. Bridge 1.0.13 is sealed.
 - Split: 26 held and 540 admitted writes (228 course, 312 site), with 315 exact, 184 unavailable, 30 blocked, and 11 unconfirmed readbacks; 311 Canvas Edit actions.
-- Remaining: 16 LTI service writes, 9 upload first steps, 1 Assignment duplicate, and 225 admitted writes without an exact readback.
+- Remaining: 16 LTI service writes, 9 upload first steps, and 225 admitted writes without an exact readback. Row 454 admits the Assignment duplicate.
 - Status: `IMPLEMENTED`; live site writes pending BT2.
 
-### Root-cause patterns for rows 331–453
+### 454: the Assignment duplicate had no finished-copy readback
+
+- Condition: `canvas_duplicate_assignment` was held as `duplicate_assignment_exact_readback_unavailable`: a reread straight after the request could describe a New Quiz copy Canvas was still finishing.
+- Evidence: the Canvas Assignment resource, read on 2026-09-15, documents that the route returns an Assignment object when `result_type` is omitted, documents `original_assignment_id` on a copy, and shows `unpublished` as a saved `workflow_state`. Canvas source keeps a New Quiz copy in `duplicating` until the quiz service finishes it and marks a failed copy `failed_to_duplicate`; that source behavior is not in the public document.
+- Repair: a named readback (`connector/extension/src/canvas-operation-readback.js`) requires the response to name the new id, the course and the original, then rereads the copy every second, up to 60 times inside the command deadline. It verifies only a documented saved state (`published` or `unpublished`) whose id, course and `original_assignment_id` match; `failed_to_duplicate` is a mismatch, and any other state stays unconfirmed. A duplicate that sets `result_type` is refused before it is sent with `canvas_readback_input_refused`, because Canvas would answer with a quiz instead of the copy.
+- Split: 25 held and 541 admitted writes, with 316 exact readbacks; 312 Canvas Edit actions. Bridge 1.0.14 is sealed.
+- Status: `IMPLEMENTED`; live duplicate pending BT2.
+
+### Root-cause patterns for rows 331–454
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

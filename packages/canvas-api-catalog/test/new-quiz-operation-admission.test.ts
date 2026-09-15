@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import catalogJson from "../../../artifacts/canvas-api/canvas-api-catalog.json";
 import {
-  canvasAdmissionReason,
   canvasOperationAdmission,
   canvasReadbackAssessment,
   parseCanvasApiCatalog,
@@ -86,33 +85,14 @@ describe("New Quiz write admission", () => {
   });
 
   /*
-   * Checked against the Canvas Assignment resource on 8 September 2026:
-   * https://developerdocs.instructure.com/services/canvas/resources/assignments
-   *
-   * The response shape is not what blocks this. `result_type` has one allowed
-   * value, `Quiz`; with the argument omitted "the response will be serialized
-   * into an assignment format" and the route "Returns an Assignment object".
-   * Two documented facts do block it. Canvas documents no field on the copy
-   * that names it a New Quiz: the Assignment object documents
-   * `is_quiz_assignment`, whose name and description disagree with each other,
-   * and documents no `is_quiz_lti_assignment`. And Canvas documents no signal
-   * that the copy has finished: `workflow_state` is documented only as "String
-   * indicating what state this assignment is in", with `unpublished` as its one
-   * example value, so a reread taken straight after the request could describe
-   * a half-made copy.
+   * Checked against the Canvas Assignment resource on 15 September 2026: a copy documents
+   * `original_assignment_id`, so the named readback compares it and waits for a documented saved state.
    */
-  it("holds assignment duplication because no documented state says the copy is finished", () => {
+  it("admits assignment duplication with a named readback of the finished copy", () => {
     const operation = catalog.operations.find((candidate) => candidate.toolName === "canvas_duplicate_assignment");
     expect(operation).toBeTruthy();
     const admission = canvasOperationAdmission(operation!);
-    expect(admission.write).toEqual({ state: "held", reason: "duplicate_assignment_exact_readback_unavailable" });
-    expect(canvasReadbackAssessment(catalog.operations, operation!, admission))
-      .toEqual({ state: "not_applicable", reason: "write_held" });
-    const reason = canvasAdmissionReason(admission.write)!;
-    expect(reason).toContain("does not say when a duplicated assignment has finished copying");
-    expect(reason).toContain("no documented field that names it as a New Quiz");
-    // The retired belief: Canvas does document one response shape for the
-    // request Morrow would send, so this must not come back as the reason.
-    expect(reason).not.toContain("different record types");
+    expect(admission.write).toEqual({ state: "admitted" });
+    expect(canvasReadbackAssessment(catalog.operations, operation!, admission)).toEqual({ state: "structurally_exact" });
   });
 });

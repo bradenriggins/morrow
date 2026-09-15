@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   canvasBulkAssignmentDatesBody,
+  canvasOperationReadbackInputProblem,
   evaluateCanvasOperationProgress,
   evaluateCanvasOperationReadback,
   isCanvasOperationReadback,
@@ -27,7 +28,13 @@ const reactivateWrite = {
   key: "PUT /v1/courses/{course_id}/enrollments/{id}/reactivate#re_activate_enrollment",
   readOnly: false,
 };
+const duplicateWrite = {
+  toolName: "canvas_duplicate_assignment",
+  key: "POST /v1/courses/{course_id}/assignments/{assignment_id}/duplicate#duplicate_assignment",
+  readOnly: false,
+};
 const operations = [
+  { toolName: "canvas_get_single_assignment", key: "GET /v1/courses/{course_id}/assignments/{id}#get_single_assignment", readOnly: true },
   { toolName: "canvas_list_assignments_assignments", key: "GET /v1/courses/{course_id}/assignments#list_assignments_assignments", readOnly: true },
   { toolName: "canvas_query_progress_v1_progress_id_get", key: "GET /v1/progress/{id}#query_progress", readOnly: true },
   { toolName: "canvas_list_enrollments_courses", key: "GET /v1/courses/{course_id}/enrollments#list_enrollments_courses", readOnly: true },
@@ -157,4 +164,43 @@ test("no Item Bank change takes a Canvas readback route outside its own frame", 
   const selection = worker.slice(worker.indexOf("const plan = guardedCanvasContent"), worker.indexOf("planBrowserReadback(", worker.indexOf("const plan = guardedCanvasContent")));
   assert.match(selection, /guardedItemBank/, "the readback selection no longer excludes Item Bank operations");
   assert.match(selection, /\?\s*null\s*:\s*$/, "the excluded branch no longer resolves to no plan");
+});
+
+test("a duplicated assignment verifies only once the finished copy names its original and course", () => {
+  const response = { id: "91", course_id: "42", original_assignment_id: "88", workflow_state: "duplicating" };
+  const plan = planCanvasOperationReadback(operations, duplicateWrite, { course_id: "42", assignment_id: "88" }, response);
+  assert.equal(plan?.strategy, "canvas-assignment-duplicate");
+  assert.deepEqual(plan?.arguments, { course_id: "42", id: "91" });
+  assert.deepEqual(plan?.progressArguments, { course_id: "42", id: "91" });
+  assert.equal(isCanvasOperationReadback(catalogOperation("canvas_duplicate_assignment")), true);
+  // A response that is not the copy of this original in this course plans nothing to verify.
+  for (const wrong of [
+    { ...response, original_assignment_id: "87" },
+    { ...response, course_id: "43" },
+    { ...response, id: "88" },
+    { id: "91", course_id: "42" },
+  ]) {
+    assert.equal(planCanvasOperationReadback(operations, duplicateWrite, { course_id: "42", assignment_id: "88" }, wrong), null, JSON.stringify(wrong));
+  }
+  // Copying keeps the readback waiting; a failed copy stops it; a documented saved state settles it.
+  assert.equal(evaluateCanvasOperationProgress(plan, { ok: true, data: { ...response } }).settled, false);
+  assert.equal(evaluateCanvasOperationProgress(plan, { ok: true, data: { ...response, workflow_state: "importing" } }).settled, false);
+  assert.deepEqual(evaluateCanvasOperationProgress(plan, { ok: true, data: { ...response, workflow_state: "failed_to_duplicate" } }), {
+    settled: false,
+    terminal: true,
+    verification: { schema: "morrow.browser-verification.v1", status: "mismatch", strategy: "canvas-assignment-duplicate", readTool: "canvas_get_single_assignment", evidence: "duplicate_failed_to_finish" },
+  });
+  assert.deepEqual(evaluateCanvasOperationProgress(plan, { ok: true, data: { ...response, workflow_state: "unpublished" } }), { settled: true });
+  const status = (data) => evaluateCanvasOperationReadback(plan, { ok: true, status: 200, data }).status;
+  assert.equal(status({ ...response, workflow_state: "unpublished" }), "verified");
+  assert.equal(status({ ...response, workflow_state: "published" }), "verified");
+  assert.equal(status({ ...response }), "unconfirmed");
+  assert.equal(status({ ...response, workflow_state: "unpublished", original_assignment_id: "87" }), "mismatch");
+  assert.equal(status({ ...response, workflow_state: "unpublished", course_id: "43" }), "mismatch");
+  assert.equal(evaluateCanvasOperationReadback(plan, { ok: false, status: 404 }).status, "unconfirmed");
+});
+
+test("a duplicate that asks Canvas to answer with a quiz is refused before it is sent", () => {
+  assert.match(canvasOperationReadbackInputProblem(duplicateWrite, { course_id: "42", assignment_id: "88", result_type: "Quiz" }), /does not send a request that asks Canvas to answer with a quiz/);
+  assert.equal(canvasOperationReadbackInputProblem(duplicateWrite, { course_id: "42", assignment_id: "88" }), "");
 });

@@ -340,7 +340,7 @@ test("Canvas Edit categories are exactly the bound admitted writes with exact re
   const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(supported.length, 311);
+  assert.equal(supported.length, 312);
   assert.deepEqual(editable, supported);
   assert.deepEqual(
     options.filter((option) => option.availability === "review").map((option) => option.id).sort(),

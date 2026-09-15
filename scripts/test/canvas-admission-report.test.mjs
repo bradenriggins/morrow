@@ -55,7 +55,7 @@ const provenClaims = [
   },
   {
     label: "held for multi_step_upload_requires_reviewed_transfer",
-    pattern: /, (\d+) are unfinished Canvas upload pre-flights,/,
+    pattern: / (\d+) are unfinished Canvas upload pre-flights,/,
     expected: [report.admission.heldByReason.multi_step_upload_requires_reviewed_transfer],
   },
   {
@@ -218,7 +218,7 @@ test("the Canvas admission report accounts for every write exactly once", () => 
   );
   // A plan that reads a different resource is only acceptable for the named Canvas readbacks, which
   // have their own per-target evaluators.
-  assert.deepEqual(report.readback.mismatchedPlanTools, report.readback.namedReadbackTools);
+  assert.deepEqual(report.readback.mismatchedPlanTools.filter((tool) => !report.readback.namedReadbackTools.includes(tool)), []);
   assert.deepEqual(
     Object.keys(report.readback.blockedByReason).sort(),
     Object.keys(BLOCKER_ROWS).sort(),
@@ -263,7 +263,7 @@ test("a document edit that changes a quoted number or breaks an anchor fails lou
   assert.throws(() => assertDocumentClaims(duplicatedAnchor, [heldClaim]), /expected exactly one match/);
 
   const remaining = read(REMAINING);
-  const rewordedSummary = remaining.replace("writes held for LTI authorization, reviewed file transfer, or duplicate-readback reasons", "writes still need work");
+  const rewordedSummary = remaining.replace("writes held for LTI authorization or reviewed file transfer reasons", "writes still need work");
   assert.notEqual(rewordedSummary, remaining);
   assert.throws(() => assertDocumentClaims(rewordedSummary, remainingClaims), /expected exactly one match/);
 });

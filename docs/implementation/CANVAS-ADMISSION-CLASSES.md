@@ -68,7 +68,10 @@ and last everything else.
 | --- | --- | --- |
 | `lti_authorization_required` | Any route on Canvas's LTI service under `/lti/`, including its account and developer key routes: line items, scores, originality and asset reports, EULA records, webhook subscriptions, notice handlers, and the public JWK update | "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool." |
 | `multi_step_upload_requires_reviewed_transfer` | Every upload first step, for a course, a folder, a group, a section submission, or a person, and the Rubric CSV import | "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload." |
-| `duplicate_assignment_exact_readback_unavailable` | `POST /v1/courses/{course_id}/assignments/{assignment_id}/duplicate` | "Canvas does not say when a duplicated assignment has finished copying, and the copy carries no documented field that names it as a New Quiz, so Morrow cannot prove it read back the finished copy rather than a half-made one. Duplicate this assignment in Canvas." |
+
+The Assignment duplicate is a course request with a named readback: it waits for the copy to reach a
+documented saved state and compares its `original_assignment_id` and course, and a request that asks
+Canvas to answer with a quiz is refused before it is sent.
 
 The upload hold runs before the course path, because the course in the route is not what is missing.
 The sentence for a held write is published in the tool capability (`profiles["public-canvas"].reason`
@@ -126,8 +129,6 @@ part of these three routes and are untested here.
   file and its bytes for each upload context, as the course-file transfer already does
   (`packages/mcp-server/src/canvas-file-transfer.ts`, `connector/extension/src/canvas-file-transfer.js`).
   The Rubric CSV route needs its own reviewed CSV transfer and an exact readback of the imported rubric.
-- **Assignment duplicate.** A readback that waits for Canvas to finish the copy and then compares the
-  finished assignment.
 
 ## Status
 
