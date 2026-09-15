@@ -314,7 +314,9 @@ describe("Canvas connector gateway path", () => {
                       teachers: [{ id: "8000", display_name: "Course Teacher", avatar_image_url: "https://school.instructure.com/avatar/8000" }],
                     }
                   : { id: "42", name: "Biology" },
-          ...(command.kind === "invoke_write" ? {
+          ...(command.kind === "invoke_write" && command.toolName === "canvas_mark_all_as_read" ? {
+            verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "no_safe_readback_route" },
+          } : command.kind === "invoke_write" ? {
             verification: {
               schema: "morrow.browser-verification.v1",
               status: "verified",
@@ -1326,6 +1328,22 @@ describe("Canvas connector gateway path", () => {
       expect(sent[0]!.arguments).not.toHaveProperty("course_id");
       expect(sent[0]!.sourceBindingId).toBe(sourceBindingId);
       expect(writeCommands).toBe(5);
+
+      // Canvas has no read that shows every conversation marked read. The change is still sent after
+      // its own approval, is never reported verified, and tells the person how to confirm it.
+      const unchecked = await runtime.call("canvas_mark_all_as_read", { _morrow: { source_binding_id: sourceBindingId } });
+      const uncheckedId = operationId(unchecked);
+      expect(unchecked.structuredContent).toMatchObject({ status: "awaiting_approval" });
+      runtime.approveOperation(uncheckedId);
+      const uncheckedResult = await runtime.dispatchOperation(uncheckedId);
+      expect(uncheckedResult.structuredContent).toMatchObject({
+        effectState: "awaiting_verification",
+        verification: { status: "unconfirmed" },
+        limitations: expect.arrayContaining([
+          "Canvas has no read that shows the saved result of this change, so Morrow did not check it. Open it in Canvas to confirm the change, then close this request on its review page. Do not send the change again.",
+        ]),
+      });
+      expect(writeCommands).toBe(6);
     }, CASE_TIMEOUT_MS);
 
     it("refuses a plan with no course connection, and one whose course connection changed", async () => {
@@ -1360,7 +1378,7 @@ describe("Canvas connector gateway path", () => {
         structuredContent: { data: { code: "operation_dispatch_refused" } },
       });
       expect(runtime.effects.get(staleId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
-      expect(writeCommands).toBe(5);
+      expect(writeCommands).toBe(6);
     }, CASE_TIMEOUT_MS);
 
     it("recovers an unresolved historical record after a restart", async () => {
@@ -1415,7 +1433,7 @@ describe("Canvas connector gateway path", () => {
         state: "applied_or_unknown",
         dispatchAttempt: 1,
       });
-      expect(writeCommands).toBe(5);
+      expect(writeCommands).toBe(6);
     }, CASE_TIMEOUT_MS);
   });
 

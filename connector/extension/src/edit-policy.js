@@ -134,6 +134,9 @@ const MOODLE_ENROLMENT_NOTES = new Map([
 ]);
 const MOODLE_UNENROL_TOOLS = new Set(["moodle_unenrol_participant"]);
 const MOODLE_UNENROL_REVIEW_REASON = "Unenrolling one person from a course can remove their grades, their submissions and their participation history in it, and Morrow cannot undo it. Morrow prepares each unenrolment on its own, with the exact person and everything the removal takes with them, so you approve them one at a time.";
+// Canvas has no read that shows this saved change, so a standing grant would let changes through that
+// nobody checks. Each one is approved on its own, and its result says Morrow did not check it.
+const CANVAS_UNCHECKED_REVIEW_REASON = "Canvas has no read that shows the saved result of this change, so Morrow cannot check it for you. Morrow prepares each one on its own for your approval, and after it is sent you confirm it in Canvas.";
 const COURSE_SCOPE_REVIEW_REASON = "Morrow cannot prove from this operation that the change targets only the selected course.";
 const CURATED_ROUTE_MISSING_REASON = "This repair needs Canvas routes the connected catalog does not carry, so Morrow cannot read the exact saved result back.";
 // New Quizzes matches the parts of a question by the ids the question already
@@ -370,7 +373,9 @@ function operationAvailability(operation, canvasReads) {
     if (typeof operation.path !== "string") return null;
     const admission = canvasOperationAdmission(operation);
     if (!canvasAdmissionIsBound(admission) || admission.write.state !== "admitted") return null;
-    if (canvasReadbackAssessment(canvasReads, operation, admission).state !== "structurally_exact") return null;
+    if (canvasReadbackAssessment(canvasReads, operation, admission).state !== "structurally_exact") {
+      return { availability: "review", reviewReason: CANVAS_UNCHECKED_REVIEW_REASON };
+    }
     if (NEW_QUIZ_DELETE_TOOL === operation.toolName) return { availability: "review", reviewReason: NEW_QUIZ_DELETE_REVIEW_REASON };
     if (ITEM_BANK_DESTRUCTIVE_TOOLS.has(operation.toolName || "")) return { availability: "review", reviewReason: ITEM_BANK_DESTRUCTIVE_REASON };
     return { availability: "edit" };

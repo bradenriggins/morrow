@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { canvasExecutorOwnedReadback, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
-import { hasNamedCanvasReadback, planBrowserReadback } from "../../connector/extension/generated/canvas-readback-plan.js";
+import { hasDeclaredCanvasReadback, hasNamedCanvasReadback, planBrowserReadback } from "../../connector/extension/generated/canvas-readback-plan.js";
 
 const catalog = JSON.parse(readFileSync(new URL("../../artifacts/canvas-api/canvas-api-catalog.json", import.meta.url), "utf8"));
 const operation = (name) => {
@@ -33,7 +33,10 @@ test("every generic Canvas readback reads the write target's own resource", () =
   for (const write of catalog.operations) {
     if (write.readOnly) continue;
     if (canvasOperationAdmission(write).write.state !== "admitted") continue;
-    if (hasNamedCanvasReadback(write)) continue;
+    // A named readback or a reviewed entry in the exact readback table reads the one route that shows
+    // its change, such as the topic that holds a read state; scripts/test/canvas-verification.test.mjs
+    // and the catalog suite hold those comparators.
+    if (hasNamedCanvasReadback(write) || hasDeclaredCanvasReadback(write)) continue;
     const plan = planBrowserReadback(catalog.operations, write, structuralArguments(write), structuralResponse);
     if (!plan) continue;
     const tier = routeTier(write, plan.readOperation);

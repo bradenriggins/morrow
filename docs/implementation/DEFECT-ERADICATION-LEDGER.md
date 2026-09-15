@@ -471,6 +471,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 454 | P2 | R1 | Duplicating an assignment was held because no readback could tell a finished copy from a half-made one. | closure section 454; named readback, verification, New Quiz admission, and catalog regressions | IMPLEMENTED |
 | 455 | P1 | R4 | The reviewed Canvas course-file transfer sent its upload first step without the page's CSRF token, which a signed-in Canvas session requires for a change, and its fixture never required the token. | closure section 455; page transfer and browser harness regressions | IMPLEMENTED |
 | 456 | P1 | R7 | A file could reach Canvas only in one course folder: every other upload target and both rubric CSV imports had no way in, because their raw routes cannot carry the bytes and the reviewed transfer named only a course folder. | closure section 456; page transfer, connector, gateway transfer, catalog, and browser harness regressions | IMPLEMENTED |
+| 457 | P1 | R7 | 225 admitted Canvas writes with no exact readback were unpublished and could not be sent at all, and 20 of them (discussion read state, subscriptions, entry deletion, copies and reorders) had a safe read Morrow never used. | closure section 457; catalog comparator, readback scope, verification, Bridge settings, admission report, and browser harness regressions | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3127,7 +3128,15 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Split: 26 held and 540 admitted writes, with 315 exact readbacks; 311 Canvas Edit actions.
 - Status: `IMPLEMENTED`; live uploads pending BT2.
 
-### Root-cause patterns for rows 331–456
+### 457: writes without an exact readback could not be sent
+
+- Product decision: the owner requires that nothing in Morrow be blocked.
+- Condition: every admitted Canvas write without a structurally exact readback was `profile_limited`, so 225 writes were absent from both full profiles. Seven discussion routes carried the blocker `discussion_or_conversation_content`, although Canvas source shows `DiscussionTopicsApiController#show` and `#entry_list` change no read state.
+- Repair: the exact readback table gains inputs filled from the write (`argumentsFromWrite`), a check that every record of a complete listing carries the requested state (`collection-every-record`), and a reorder check (`collection-order`). Topic read state, subscriptions, all-entries read state, entry read state and entry deletion for courses and groups, both topic copies, the Page copy, and the three reorders now read back exactly. A write that still has no exact readback is published, offered in Settings only as Review only, sent after its own approval, and settles awaiting verification with the limitation that Canvas has no read that shows the saved result and the person should confirm it in Canvas and close the request. A blocked reader, such as the submission read with `read_state`, which Canvas source shows marks the submission read, never runs.
+- Split: 540 admitted writes, with 340 exact, 165 unavailable, 24 blocked, and 11 unconfirmed readbacks; 336 Canvas Edit actions and 200 Review only actions. Bridge 1.0.16 is sealed.
+- Status: `IMPLEMENTED`; live readbacks pending BT2.
+
+### Root-cause patterns for rows 331–457
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

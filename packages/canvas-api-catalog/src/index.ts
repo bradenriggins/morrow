@@ -13,7 +13,7 @@ import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessme
 
 export { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, CANVAS_REVIEWED_UPLOAD_ROUTES, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasSiteAuthorityNote } from "./operation-admission.js";
 export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasOperationAuthority, CanvasReadbackAssessment, CanvasReviewedUploadKind, CanvasSiteAuthorityClass, CanvasWriteAdmission } from "./operation-admission.js";
-export { evaluateBrowserReadback, matchesReadbackAssertions, planBrowserReadback, planCanvasRecoveryDescriptor, readbackFieldValue } from "./readback-plan.js";
+export { evaluateBrowserReadback, hasDeclaredCanvasReadback, matchesReadbackAssertions, planBrowserReadback, planCanvasRecoveryDescriptor, readbackFieldValue } from "./readback-plan.js";
 export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
 export { CANVAS_MULTI_CONTEXT_REFUSAL, CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS, canvasContextCodeCourseId, canvasCourseContextCode, canvasLearnerScopeObjectRoute, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "./semantic-target.js";
 export type { CanvasSemanticContextInputState, CanvasSemanticCourseCollectionState, CanvasSemanticCourseTarget, CanvasSemanticObjectContext, CanvasSemanticOperation, CanvasSemanticResolutionExpectation, CanvasSemanticResolutionProof, CanvasSemanticResolutionRefusal, CanvasSemanticVersionState } from "./semantic-target.js";
@@ -279,15 +279,8 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
         ? { state: "profile_limited" as const, reason: incompatibleAuthenticationReason }
       : redirectReadReason
         ? { state: "profile_limited" as const, reason: redirectReadReason }
-      : !operation.readOnly && readback.state !== "structurally_exact"
-        ? {
-            state: "profile_limited" as const,
-            reason: readback.state === "blocked"
-              ? `Morrow cannot send this Canvas change because its exact post-write read is unsafe: ${readback.reason}.`
-              : readback.state === "unavailable"
-                ? "Morrow cannot send this Canvas change because Canvas has no safe read that proves the exact saved result."
-                : "Morrow cannot send this Canvas change because its readback has no exact target or requested postcondition.",
-          }
+      // A change with no exact readback is still sent. It is approved one change at a time, never
+      // granted ahead, and its result says Morrow did not check the saved result.
       : { state: "supported" as const };
   return {
     family: operation.family,

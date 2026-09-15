@@ -340,11 +340,17 @@ test("Canvas Edit categories are exactly the bound admitted writes with exact re
   const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(supported.length, 311);
+  assert.equal(supported.length, 336);
   assert.deepEqual(editable, supported);
+  // A bound write with no exact readback is offered for review too, one change at a time.
+  const uncheckable = canvasOperations.filter((operation) => operation.readOnly === false
+    && canvasAdmissionIsBound(canvasOperationAdmission(operation))
+    && canvasOperationAdmission(operation).write.state === "admitted"
+    && canvasReadbackAssessment(canvasOperations, operation).state !== "structurally_exact");
   assert.deepEqual(
     options.filter((option) => option.availability === "review").map((option) => option.id).sort(),
-    [...REVIEW_ONLY_ADMITTED_CANVAS_WRITES.keys()].map((toolName) => `action:canvas:${toolName}`).sort(),
+    [...new Set([...REVIEW_ONLY_ADMITTED_CANVAS_WRITES.keys(), ...uncheckable.map((operation) => operation.toolName)])]
+      .map((toolName) => `action:canvas:${toolName}`).sort(),
   );
   for (const [toolName, reviewReason] of REVIEW_ONLY_ADMITTED_CANVAS_WRITES) {
     const option = canvasOption(options, toolName);
@@ -393,7 +399,7 @@ function checkableCanvasWrite(operation) {
   return canvasReadbackAssessment(canvasOperations, operation).state === "structurally_exact";
 }
 
-test("nonexact Canvas writes are absent and every offered Canvas Edit action is checked", async () => {
+test("nonexact Canvas writes are offered for review only, and every granted Canvas Edit action is checked", async () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
   const supportedWrites = supportedEditableCanvasWrites();
   const nonexact = canvasOperations.filter((operation) => operation.readOnly === false
@@ -401,7 +407,7 @@ test("nonexact Canvas writes are absent and every offered Canvas Edit action is 
     && canvasOperationAdmission(operation).write.state === "admitted"
     && !checkableCanvasWrite(operation)
     && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
-  assert.equal(nonexact.length, 225);
+  assert.equal(nonexact.length, 200);
   for (const operation of supportedWrites) {
     const option = canvasOption(options, operation.toolName);
     assert.equal(option.availability, "edit", operation.toolName);
@@ -409,7 +415,11 @@ test("nonexact Canvas writes are absent and every offered Canvas Edit action is 
     assert.equal(option.verificationReason, undefined, operation.toolName);
   }
   for (const operation of nonexact) {
-    assert.equal(canvasOption(options, operation.toolName), undefined, operation.toolName);
+    const option = canvasOption(options, operation.toolName);
+    assert.equal(option?.availability, "review", operation.toolName);
+    assert.match(option.reviewReason, /Canvas has no read that shows the saved result of this change/, operation.toolName);
+    assert.equal(option.verification, undefined, operation.toolName);
+    assert.equal(option.rules, undefined, operation.toolName);
   }
   assert.equal(options.some((option) => option.availability === "edit" && option.verification !== "checked"), false);
   await assert.rejects(createEditPermission({

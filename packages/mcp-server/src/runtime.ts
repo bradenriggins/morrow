@@ -791,6 +791,12 @@ function isCanvasConnector(mapping: CatalogTool): boolean {
  * as the signed-in person, and a course object names an object whose course the Bridge proves before
  * the change is sent. Neither carries a course to compare with the selected connection here.
  */
+/**
+ * Canvas accepted a change whose saved result it offers no read for. Morrow says so instead of
+ * implying it checked anything, and names the one next step.
+ */
+const CANVAS_UNCHECKABLE_CHANGE_LIMITATION = "Canvas has no read that shows the saved result of this change, so Morrow did not check it. Open it in Canvas to confirm the change, then close this request on its review page. Do not send the change again.";
+
 function canvasCourseFreeScope(mapping: CatalogTool): boolean {
   const scopeClass = mapping.capability?.authority?.scopeClass;
   return isCanvasConnector(mapping) && (scopeClass === "site" || scopeClass === "course-object");
@@ -8333,6 +8339,7 @@ export class GatewayRuntime {
           readbackSettled,
           verified ? "verified_readback" : "readback_unconfirmed",
           result,
+          !verified && verification.reason === "no_safe_readback_route" ? [CANVAS_UNCHECKABLE_CHANGE_LIMITATION] : [],
         );
       }
       return this.verifyOperation(settled.operationId);

@@ -544,14 +544,13 @@ describe("Canvas API catalog", () => {
     const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
       && /redirect/iu.test(`${operation.summary} ${operation.description}`));
     expect(held).toHaveLength(26);
-    expect(admittedWithoutExactReadback).toHaveLength(225);
+    expect(admittedWithoutExactReadback).toHaveLength(200);
     expect(siteReads).toHaveLength(355);
     // Every read is bound: to the selected course, or to the connected Canvas site as the signed-in person.
     expect(catalog.operations.filter((operation) => operation.readOnly
       && !canvasAdmissionIsBound(canvasOperationAdmission(operation)))).toEqual([]);
     const expectedLimited = new Set([
       ...held,
-      ...admittedWithoutExactReadback,
       ...credentialReads,
       ...catalog.operations.filter((operation) => operation.path.startsWith("/lti/")),
       ...redirectReads,
@@ -563,10 +562,12 @@ describe("Canvas API catalog", () => {
       expect(tool?.capability?.profiles["public-canvas"], operation.toolName).toEqual({ state: "supported" });
       expect(tool?.capability?.authority.scopeClass, operation.toolName).toBe("site");
     }
-    for (const operation of admittedWithoutExactReadback) {
+    // A write with no exact readback is still published. It never claims a readback, the read-only
+    // profile still refuses it, and the Bridge offers it only for approval one change at a time.
+    for (const operation of admittedWithoutExactReadback.filter((operation) => !expectedLimited.has(operation.toolName))) {
       const tool = tools.find((candidate) => candidate.name === operation.toolName);
-      expect(tool?.capability?.profiles["private-full"].state, operation.toolName).toBe("profile_limited");
-      expect(tool?.capability?.profiles["public-canvas"].state, operation.toolName).toBe("profile_limited");
+      expect(tool?.capability?.profiles["private-full"].state, operation.toolName).toBe("supported");
+      expect(tool?.capability?.profiles["public-canvas"].state, operation.toolName).toBe("supported");
       expect(tool?.capability?.profiles["read-only"].state, operation.toolName).toBe("profile_limited");
       expect(tool?.capability?.behavior.supportsReadback, operation.toolName).toBe(false);
     }
@@ -643,7 +644,8 @@ describe("Canvas API catalog", () => {
         // Admission is no longer the gate for a course learner record; exact readback still is.
         const readback = canvasReadbackAssessment(catalog.operations, operation);
         const profile = tools.get(name)?.capability?.profiles["private-full"];
-        expect(profile?.state, name).toBe(readback.state === "structurally_exact" ? "supported" : "profile_limited");
+        expect(profile?.state, name).toBe("supported");
+        expect(tools.get(name)?.capability?.behavior.supportsReadback, name).toBe(readback.state === "structurally_exact");
         expect(tools.get(name)?.capability?.evidence?.admission, name).toEqual({ state: "known" });
       }
     }
@@ -696,7 +698,8 @@ describe("Canvas API catalog", () => {
       expect(tools.get(operation.toolName)?.capability?.authority.scopeClass, operation.toolName).toBe("site");
       const readback = canvasReadbackAssessment(catalog.operations, operation);
       expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"].state, operation.toolName)
-        .toBe(readback.state === "structurally_exact" ? "supported" : "profile_limited");
+        .toBe("supported");
+      expect(tools.get(operation.toolName)?.capability?.behavior.supportsReadback, operation.toolName).toBe(readback.state === "structurally_exact");
     }
     expect(canvasSiteAuthorityNote("multi_course")).toBe("It can read from or change a Canvas course or account besides the selected one. Canvas decides it with your own roles in each of them.");
     // Deleting a group's discussion topic removes the posts under it too, so it is a person's record
@@ -810,7 +813,7 @@ describe("Canvas API catalog", () => {
       expect(admission.write, name).toEqual({ state: "admitted" });
       const readback = canvasReadbackAssessment(catalog.operations, operation);
       expect(tool?.capability?.behavior.supportsReadback, name).toBe(readback.state === "structurally_exact");
-      expect(tool?.capability?.profiles["public-canvas"].state, name).toBe(readback.state === "structurally_exact" ? "supported" : "profile_limited");
+      expect(tool?.capability?.profiles["public-canvas"].state, name).toBe("supported");
     }
 
     // One named route from each part of the class. `canvas_update_courses` changes every course in
@@ -1076,12 +1079,12 @@ describe("Canvas API catalog", () => {
     for (const operation of outcomeLinks) {
       const admission = canvasOperationAdmission(operation);
       // Admission is a site request now, so the readback itself refuses the nested link identity
-      // (ledger row 412) instead of relying on a hold.
+      // (ledger row 412). The change is sent without a readback claim and reports that it was not checked.
       expect(admission, operation.toolName).toMatchObject({ authority: "site", write: { state: "admitted" } });
       expect(canvasReadbackAssessment(catalog.operations, operation, admission), operation.toolName)
         .toEqual({ state: "blocked", reason: "outcome_link_identity_is_nested" });
-      expect(tools.get(operation.toolName)?.capability?.profiles["private-full"].state, operation.toolName).toBe("profile_limited");
-      expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"].state, operation.toolName).toBe("profile_limited");
+      expect(tools.get(operation.toolName)?.capability?.profiles["private-full"].state, operation.toolName).toBe("supported");
+      expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"].state, operation.toolName).toBe("supported");
       expect(tools.get(operation.toolName)?.capability?.behavior.supportsReadback, operation.toolName).toBe(false);
     }
 
@@ -1092,8 +1095,8 @@ describe("Canvas API catalog", () => {
     expect(admission.write).toEqual({ state: "admitted" });
     expect(canvasReadbackAssessment(catalog.operations, course, admission))
       .toEqual({ state: "blocked", reason: "course_delete_or_conclude_is_ambiguous" });
-    expect(tools.get(course.toolName)?.capability?.profiles["private-full"]?.state).toBe("profile_limited");
-    expect(tools.get(course.toolName)?.capability?.profiles["public-canvas"]?.state).toBe("profile_limited");
+    expect(tools.get(course.toolName)?.capability?.profiles["private-full"]?.state).toBe("supported");
+    expect(tools.get(course.toolName)?.capability?.profiles["public-canvas"]?.state).toBe("supported");
     expect(tools.get(course.toolName)?.capability?.behavior.supportsReadback).toBe(false);
   });
 
@@ -1484,11 +1487,11 @@ describe("Canvas API catalog", () => {
   it("derives structural readback metadata from the shared planner", () => {
     const admittedWrites = catalog.operations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "admitted");
     const assessments = admittedWrites.map((operation) => canvasReadbackAssessment(catalog.operations, operation));
-    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(184);
-    expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(30);
+    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(165);
+    expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(24);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(11);
     expect(admittedWrites).toHaveLength(540);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(315);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(340);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     // Deleting a gradebook column is course work admitted through its course, and its absence reads back exactly.
@@ -1513,6 +1516,46 @@ describe("Canvas API catalog", () => {
     expect(tools.find((tool) => tool.name === "canvas_re_activate_enrollment")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_set_course_level_accommodations")?.capability?.evidence?.admission).toMatchObject({ state: "known" });
+  });
+
+  it("reads back discussion state, copies and reorders through their declared reads", () => {
+    const write = (nickname: string) => catalog.operations.find((operation) => operation.nickname === nickname)!;
+    const plan = (nickname: string, args: Record<string, unknown>, response: unknown = {}) => planBrowserReadback(catalog.operations, write(nickname), args, response)!;
+    const status = (value: ReturnType<typeof plan>, data: unknown, extra: Record<string, unknown> = {}) => evaluateBrowserReadback(value, { ok: true, status: 200, data, ...extra }).status;
+
+    for (const context of ["courses", "groups"]) {
+      const scope = context === "courses" ? { course_id: "4" } : { group_id: "9" };
+      const read = plan(`mark_topic_as_read_${context}`, { ...scope, topic_id: "8" });
+      expect(read.readOperation.nickname).toBe(`get_single_topic_${context}`);
+      expect(status(read, { id: 8, read_state: "read" })).toBe("verified");
+      expect(status(read, { id: 8, read_state: "unread" })).toBe("mismatch");
+      expect(status(plan(`unsubscribe_from_topic_${context}`, { ...scope, topic_id: "8" }), { id: 8, subscribed: false })).toBe("verified");
+      expect(status(plan(`mark_all_entries_as_read_${context}`, { ...scope, topic_id: "8", forced_read_state: true }), { id: 8, read_state: "read", unread_count: 2 })).toBe("mismatch");
+
+      const entry = plan(`mark_entry_as_unread_${context}`, { ...scope, topic_id: "8", entry_id: "12" });
+      expect(entry.arguments).toMatchObject({ ids: ["12"], topic_id: "8" });
+      expect(status(entry, [{ id: 12, read_state: "unread" }])).toBe("verified");
+      expect(status(entry, [{ id: 13, read_state: "unread" }])).toBe("mismatch");
+      expect(status(plan(`delete_entry_${context}`, { ...scope, topic_id: "8", id: "12" }), [{ id: 12, deleted: true }])).toBe("verified");
+
+      const every = plan(`mark_all_topic_as_read_${context}`, scope);
+      expect(status(every, [{ id: 1, read_state: "read" }, { id: 2, read_state: "read" }])).toBe("verified");
+      expect(status(every, [{ id: 1, read_state: "read" }, { id: 2, read_state: "unread" }])).toBe("mismatch");
+      expect(status(every, [{ id: 1, read_state: "read" }], { truncated: true })).toBe("unconfirmed");
+    }
+
+    const copy = plan("duplicate_discussion_topic_courses", { course_id: "4", topic_id: "8" }, { id: 31, title: "Week one Copy" });
+    expect(copy.arguments).toEqual({ course_id: "4", topic_id: "31" });
+    expect(status(copy, { id: 31 })).toBe("verified");
+    const pageCopy = plan("duplicate_page", { course_id: "4", url_or_id: "week-one" }, { page_id: 77, url: "week-one-copy" });
+    expect(pageCopy.arguments).toEqual({ course_id: "4", url_or_id: "week-one-copy" });
+
+    const reorder = plan("reorder_pinned_topics_courses", { course_id: "4", order: ["9", "3", "7"] });
+    expect(reorder.orderedTargets).toEqual(["9", "3", "7"]);
+    expect(status(reorder, [{ id: 9 }, { id: 11 }, { id: 3 }, { id: 7 }])).toBe("verified");
+    expect(status(reorder, [{ id: 3 }, { id: 9 }, { id: 7 }])).toBe("mismatch");
+    expect(status(reorder, [{ id: 9 }, { id: 3 }])).toBe("mismatch");
+    expect(planBrowserReadback(catalog.operations, write("reorder_custom_columns"), { course_id: "4", order: ["x"] }, {})).toBeNull();
   });
 
   it("refuses a readback whose read route is not the write target's own resource", () => {

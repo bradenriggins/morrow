@@ -30,26 +30,20 @@ export type CanvasReadbackBlocker =
 const BLOCKED_READBACKS: Readonly<Record<string, CanvasReadbackBlocker>> = Object.freeze({
   bulk_select_provisional_grades: "student_grade_or_submission_state",
   clear_unread_status_for_all_submissions_courses: "student_grade_or_submission_state",
-  delete_entry_courses: "discussion_or_conversation_content",
   delete_feedback_on_conversation_message: "discussion_or_conversation_content",
   delete_single_rubric_assessment: "student_grade_or_submission_state",
   delete_submission_comment: "student_grade_or_submission_state",
   disable_summary_courses: "summary_state_has_no_narrow_reader",
   edit_external_tool_courses: "external_tool_update_has_no_cataloged_fields",
   add_course_to_favorites: "favorite_list_is_effective_not_explicit_state",
-  mark_all_topic_as_read_courses: "discussion_or_conversation_content",
   mark_module_item_as_done_not_done: "module_item_reader_mutates_progress",
   mark_submission_as_read_courses: "student_grade_or_submission_state",
   mark_submission_as_unread_courses: "student_grade_or_submission_state",
   mark_submission_item_as_read_courses: "student_grade_or_submission_state",
-  mark_topic_as_read_courses: "discussion_or_conversation_content",
-  mark_topic_as_unread_courses: "discussion_or_conversation_content",
   re_lock_module_progressions: "module_progression_state_has_no_current_user_reader",
   remove_course_from_favorites: "favorite_list_is_effective_not_explicit_state",
   reset_what_if_scores_for_current_user_for_entire_course_and_recalculate_grades: "student_grade_or_submission_state",
   select_provisional_grade: "student_grade_or_submission_state",
-  subscribe_to_topic_courses: "discussion_or_conversation_content",
-  unsubscribe_from_topic_courses: "discussion_or_conversation_content",
   update_content_migration_courses: "content_migration_update_has_no_cataloged_fields",
   // One route deletes or concludes the whole course by its event field, and the course read cannot
   // tell a concluded course from the saved state a deleted one leaves.
@@ -83,6 +77,11 @@ const NAMED_CANVAS_READBACKS = Object.freeze([
   },
 ]);
 
+/** True when a reviewed entry in the exact readback table names this write's read and comparator. */
+export function hasDeclaredCanvasReadback(operation: Pick<CanvasReadbackOperation, "nickname"> | null | undefined): boolean {
+  return Boolean(operation?.nickname && Object.hasOwn(EXACT_READBACKS, operation.nickname));
+}
+
 export function hasNamedCanvasReadback(operation: Pick<CanvasReadbackOperation, "toolName" | "key"> | null | undefined): boolean {
   return NAMED_CANVAS_READBACKS.some((candidate) => candidate.toolName === operation?.toolName && candidate.key === operation?.key);
 }
@@ -102,12 +101,20 @@ export interface BrowserReadbackPlan {
   readonly targetId?: string;
   readonly targetField?: string;
   readonly targetPath?: readonly string[];
+  /** For a reorder: the requested ids, in the order the listing must return them. */
+  readonly orderedTargets?: readonly string[];
 }
 
 interface ExactReadback {
   readonly read: string;
   readonly dynamic?: Readonly<Record<string, string>>;
   readonly fixedArguments?: Readonly<Record<string, string | readonly string[]>>;
+  // Read inputs filled from the write's own inputs: a string names one write input, and a one-element
+  // list names one write input sent as a one-element list, such as `ids[]` naming the written entry.
+  readonly argumentsFromWrite?: Readonly<Record<string, string | readonly [string]>>;
+  // A reorder names every id it moves in one write input. The listing must return exactly those ids
+  // in that order, whatever other records it holds between them.
+  readonly orderArgument?: string;
   readonly targetArgument?: string;
   readonly targetResponse?: string;
   readonly targetField?: string;
@@ -182,6 +189,47 @@ const EXACT_READBACKS: Readonly<Record<string, ExactReadback>> = Object.freeze({
     targetField: "outcome.id",
     strategy: "collection-omits-target",
   },
+  // A copy is a new object Canvas answers with, read back through its own route.
+  duplicate_page: { read: "show_page_courses", dynamic: { url_or_id: "url" }, targetResponse: "page_id", targetField: "page_id", strategy: "created-resource" },
+  duplicate_discussion_topic_courses: { read: "get_single_topic_courses", dynamic: { topic_id: "id" }, targetField: "id", strategy: "created-resource" },
+  duplicate_discussion_topic_groups: { read: "get_single_topic_groups", dynamic: { topic_id: "id" }, targetField: "id", strategy: "created-resource" },
+  // A reorder is proved by the complete listing returning the requested ids in the requested order.
+  reorder_custom_columns: { read: "list_custom_gradebook_columns", fixedArguments: { include_hidden: "true" }, orderArgument: "order", targetField: "id", strategy: "collection-order" },
+  reorder_pinned_topics_courses: { read: "list_discussion_topics_courses", fixedArguments: { order_by: "position" }, orderArgument: "order", targetField: "id", strategy: "collection-order" },
+  reorder_pinned_topics_groups: { read: "list_discussion_topics_groups", fixedArguments: { order_by: "position" }, orderArgument: "order", targetField: "id", strategy: "collection-order" },
+  // Discussion state that belongs to the signed-in person: a topic's read state and subscription, and
+  // one entry's read state. Each is read back from the same topic or entry for the same person.
+  ...Object.fromEntries((["courses", "groups"] as const).flatMap((context) => [
+    [`mark_topic_as_read_${context}`, { read: `get_single_topic_${context}`, fixedAssertions: { read_state: "read" }, strategy: "updated-resource" }],
+    [`mark_topic_as_unread_${context}`, { read: `get_single_topic_${context}`, fixedAssertions: { read_state: "unread" }, strategy: "updated-resource" }],
+    [`subscribe_to_topic_${context}`, { read: `get_single_topic_${context}`, fixedAssertions: { subscribed: true }, strategy: "updated-resource" }],
+    [`unsubscribe_from_topic_${context}`, { read: `get_single_topic_${context}`, fixedAssertions: { subscribed: false }, strategy: "updated-resource" }],
+    [`mark_all_entries_as_read_${context}`, {
+      read: `get_single_topic_${context}`, fixedAssertions: { read_state: "read", unread_count: 0 },
+      ignoredAssertions: ["forced_read_state"], strategy: "updated-resource",
+    }],
+    [`mark_all_entries_as_unread_${context}`, {
+      read: `get_single_topic_${context}`, fixedAssertions: { read_state: "unread" },
+      ignoredAssertions: ["forced_read_state"], strategy: "updated-resource",
+    }],
+    [`mark_entry_as_read_${context}`, {
+      read: `list_entries_${context}`, argumentsFromWrite: { ids: ["entry_id"] }, targetArgument: "entry_id", targetField: "id",
+      fixedAssertions: { read_state: "read" }, ignoredAssertions: ["forced_read_state"], strategy: "collection-contains-target",
+    }],
+    [`mark_entry_as_unread_${context}`, {
+      read: `list_entries_${context}`, argumentsFromWrite: { ids: ["entry_id"] }, targetArgument: "entry_id", targetField: "id",
+      fixedAssertions: { read_state: "unread" }, ignoredAssertions: ["forced_read_state"], strategy: "collection-contains-target",
+    }],
+    // Canvas keeps a deleted entry in the entry list and marks it deleted.
+    [`delete_entry_${context}`, {
+      read: `list_entries_${context}`, argumentsFromWrite: { ids: ["id"] }, targetArgument: "id", targetField: "id",
+      fixedAssertions: { deleted: true }, strategy: "collection-contains-target",
+    }],
+    // Every topic in the context is read once all of them are marked read.
+    [`mark_all_topic_as_read_${context}`, {
+      read: `list_discussion_topics_${context}`, fixedAssertions: { read_state: "read" }, strategy: "collection-every-record",
+    }],
+  ])) as Record<string, ExactReadback>,
 });
 
 function normalizedPath(value: unknown): string {
@@ -223,10 +271,18 @@ function readArguments(
   dynamic: Readonly<Record<string, string>> = {},
   fixedArguments: Readonly<Record<string, string | readonly string[]>> = {},
   writeData: unknown,
+  argumentsFromWrite: Readonly<Record<string, string | readonly [string]>> = {},
 ): Readonly<Record<string, string | readonly string[]>> | null {
   const output: Record<string, string | readonly string[]> = {};
+  for (const [inputName, source] of Object.entries(argumentsFromWrite)) {
+    if (!(read.parameters || []).some((parameter) => parameter.inputName === inputName)) return null;
+    const writeName = typeof source === "string" ? source : source[0];
+    const value = writeArguments?.[writeName];
+    if (value === undefined || value === null || value === "" || typeof value === "object") return null;
+    output[inputName] = typeof source === "string" ? String(value) : [String(value)];
+  }
   for (const parameter of read.parameters || []) {
-    if (parameter.location !== "path") continue;
+    if (parameter.location !== "path" || Object.hasOwn(output, parameter.inputName)) continue;
     const responseKey = dynamic[parameter.inputName];
     const wireResponseKey = dynamic[parameter.wireName];
     const dynamicResponseKey = responseKey ?? wireResponseKey;
@@ -359,7 +415,7 @@ export function planBrowserReadback(
   // the state of a different object. Hand-written EXACT_READBACKS entries and the named Canvas
   // readbacks carry their own reviewed route and evaluator.
   if (!override && !hasNamedCanvasReadback(write) && !readsWriteTargetResource(write, read)) return null;
-  const argumentsValue = readArguments(read, args, override?.dynamic, override?.fixedArguments, writeData);
+  const argumentsValue = readArguments(read, args, override?.dynamic, override?.fixedArguments, writeData, override?.argumentsFromWrite);
   if (!argumentsValue) return null;
   const collectionArgument = !override && !hasNamedCanvasReadback(write) ? collectionTargetArgument(write, read) : undefined;
   if (collectionArgument && write.method !== "POST") {
@@ -375,19 +431,27 @@ export function planBrowserReadback(
           ? args?.[collectionArgument]
           : undefined;
   const targetField = targetId === undefined || targetId === null ? undefined : override?.targetField || "id";
+  const orderValue = override?.orderArgument ? args?.[override.orderArgument] : undefined;
+  const orderList = typeof orderValue === "string" ? orderValue.split(",").map((entry) => entry.trim()) : orderValue;
+  const orderedTargets = Array.isArray(orderList) && orderList.length > 0
+    && orderList.every((entry) => /^[1-9][0-9]{0,18}$/.test(String(entry)))
+    ? orderList.map((entry) => String(entry))
+    : undefined;
+  if (override?.orderArgument && !orderedTargets) return null;
   return {
     schema: "morrow.browser-readback-plan.v1",
     strategy: strategy || "updated-resource",
     readOperation: read,
     arguments: argumentsValue,
     assertions: [
-      ...requestedAssertions(write, args, override?.ignoredAssertions, override?.bodyAssertions),
+      ...requestedAssertions(write, args, [...(override?.ignoredAssertions || []), ...(override?.orderArgument ? [override.orderArgument] : [])], override?.bodyAssertions),
       ...responseAssertions(override?.responseAssertions, writeData),
       ...fixedAssertions(override?.fixedAssertions),
     ],
     ...(targetId === undefined || targetId === null ? {} : { targetId: String(targetId) }),
     ...(targetField ? { targetField } : {}),
     ...(override?.targetPath?.length ? { targetPath: override.targetPath } : {}),
+    ...(orderedTargets ? { orderedTargets } : {}),
   };
 }
 
@@ -533,8 +597,34 @@ export function evaluateBrowserReadback(
       ? verification("verified", plan, "fresh_readback_archived")
       : verification("mismatch", plan, "resource_remains_active");
   }
+  if (plan.strategy === "collection-order") {
+    if (readResult.truncated === true) return verification("unconfirmed", plan, "collection_readback_incomplete");
+    if (!Array.isArray(readResult.data) || !plan.orderedTargets?.length) return verification("unconfirmed", plan, "collection_readback_shape_invalid");
+    const wanted = new Set(plan.orderedTargets);
+    const listed = readResult.data.map((record) => String(fieldValue(record, plan.targetField || "id") ?? "")).filter((id) => wanted.has(id));
+    return listed.length === plan.orderedTargets.length && listed.every((id, index) => id === plan.orderedTargets![index])
+      ? verification("verified", plan, "fresh_listing_matches_requested_order")
+      : verification("mismatch", plan, "listing_order_differs");
+  }
   if (!plan.targetId && (plan.assertions || []).length === 0) {
     return verification("unconfirmed", plan, "no_exact_postcondition");
+  }
+  // A change that applies to every record in a listing is proved only by the complete listing, with
+  // every record carrying the requested state.
+  if (plan.strategy === "collection-every-record") {
+    if (readResult.truncated === true) return verification("unconfirmed", plan, "collection_readback_incomplete");
+    const records = targetScope(readResult.data, plan.targetPath);
+    if (!Array.isArray(readResult.data) && !plan.targetPath?.length) return verification("unconfirmed", plan, "collection_readback_shape_invalid");
+    for (const record of records) {
+      for (const assertion of plan.assertions || []) {
+        const values = assertedValues(record, assertion.paths);
+        if (values.length === 0) return verification("unconfirmed", plan, "requested_fields_not_returned");
+        if (!values.some((value) => equivalent(value, assertion.expected))) {
+          return verification("mismatch", plan, `requested_field_mismatch:${assertion.inputName}`);
+        }
+      }
+    }
+    return verification("verified", plan, "fresh_every_record_matches_requested_postcondition");
   }
   if (["collection-contains-target", "collection-omits-target"].includes(plan.strategy) && readResult.truncated === true) {
     return verification("unconfirmed", plan, "collection_readback_incomplete");

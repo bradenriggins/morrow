@@ -92,11 +92,12 @@ const provenClaims = [
   },
   {
     label: "readback route tiers",
-    pattern: /returns a plan for \d+ writes: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, and (\d+) use the named bulk-assignment-date and enrollment-reactivation readbacks/,
+    pattern: /returns a plan for \d+ writes: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, (\d+) read the one route a reviewed table entry declares, such as the topic that holds a read state, and (\d+) use the named bulk-assignment-date and enrollment-reactivation readbacks/,
     expected: [
       report.readback.routeTierCounts.exact,
       report.readback.routeTierCounts.created_child,
       report.readback.routeTierCounts.parent_collection,
+      report.readback.routeTierCounts.declared,
       report.readback.routeTierCounts.mismatched,
     ],
   },
@@ -172,7 +173,7 @@ for (const [reason, label] of Object.entries(BLOCKER_ROWS)) {
 const remainingClaims = [
   {
     label: "remaining Canvas admission summary",
-    pattern: /The catalog has ([\d,]+) operations, with (\d+) writes held[^.]+\. Of the \d+ admitted writes, (\d+) lack exact generic readback and are profile-limited before provider I\/O\./,
+    pattern: /The catalog has ([\d,]+) operations, with (\d+) writes held[^.]+\. Of the \d+ admitted writes, (\d+) lack exact generic readback and are sent only after their own approval, with a result that says Morrow did not check them\./,
     expected: [
       report.totals.operations,
       report.admission.held,

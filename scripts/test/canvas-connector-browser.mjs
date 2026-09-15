@@ -1754,10 +1754,22 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 311);
-  const expectedCanvasReviewActions = [...reviewOnlyAdmittedCanvasWrites]
-    .map((toolName) => `action:canvas:${toolName}`)
+  assert.equal(expectedCanvasEditActions.length, 336);
+  // A bound write with no exact readback is offered for approval one change at a time.
+  const nonexactCanvasActions = canvasWriteOperations
+    .filter((operation) => {
+      const admission = canvasOperationAdmission(operation);
+      return canvasAdmissionIsBound(admission)
+        && admission.write.state === "admitted"
+        && canvasReadbackAssessment(canvasCatalog.operations, operation, admission).state !== "structurally_exact";
+    })
+    .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
+  assert.equal(nonexactCanvasActions.length, 200);
+  const expectedCanvasReviewActions = [...new Set([
+    ...[...reviewOnlyAdmittedCanvasWrites].map((toolName) => `action:canvas:${toolName}`),
+    ...nonexactCanvasActions,
+  ])].sort();
   const publishedCanvasReviewActions = fullEditOptions.options
     .filter((option) => option.availability === "review" && option.id.startsWith("action:canvas:"))
     .map((option) => option.id)
@@ -1767,8 +1779,9 @@ try {
     fullEditOptions.options.filter((option) => option.id.startsWith("action:canvas:")).map((option) => option.id).sort(),
     [...expectedCanvasEditActions, ...expectedCanvasReviewActions].sort(),
   );
+  const offeredCanvasActions = new Set([...expectedCanvasEditActions, ...expectedCanvasReviewActions]);
   const expectedDestructiveActions = canvasWriteOperations
-    .filter((operation) => operation.risk === "destructive" && supportedCanvasWrite(operation))
+    .filter((operation) => (operation.risk === "destructive" || operation.method === "DELETE") && offeredCanvasActions.has(`action:canvas:${operation.toolName}`))
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
   const publishedDestructiveActions = fullEditOptions.options
@@ -1787,22 +1800,14 @@ try {
     fullEditOptions.options.filter((option) => option.destructive === true).map((option) => option.id).sort(),
     publishedDestructiveActions,
   );
-  const nonexactCanvasActions = canvasWriteOperations
-    .filter((operation) => {
-      const admission = canvasOperationAdmission(operation);
-      return canvasAdmissionIsBound(admission)
-        && admission.write.state === "admitted"
-        && canvasReadbackAssessment(canvasCatalog.operations, operation, admission).state !== "structurally_exact";
-    })
-    .map((operation) => `action:canvas:${operation.toolName}`)
-    .sort();
-  assert.equal(nonexactCanvasActions.length, 225);
-  assert.equal(nonexactCanvasActions.some((id) => fullEditOptions.options.some((option) => option.id === id)), false);
+  assert.equal(nonexactCanvasActions.every((id) => fullEditOptions.options.find((option) => option.id === id)?.availability === "review"), true);
   assert.equal(fullEditOptions.options.some((option) => option.availability === "edit" && option.verification !== "checked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.verification === "unchecked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.availability === "review" && option.verification !== undefined), false);
+  // Deleting a discussion entry now reads back through the entry list, so it is a checked Edit action.
   const deleteEntryAction = fullEditOptions.options.find((option) => option.id === "action:canvas:canvas_delete_entry_courses");
-  assert.equal(deleteEntryAction, undefined);
+  assert.equal(deleteEntryAction?.availability, "edit");
+  assert.equal(deleteEntryAction?.verification, "checked");
   assert.equal(fullEditOptions.options.find((option) => option.id === "canvas_page_content").verification, "checked");
   process.stderr.write("[browser-test] published Edit actions equal the exact course-scoped Canvas writes, retain four destructive review cases, omit every nonexact action, and refuse a blanket field grant\n");
   process.stderr.write("[browser-test] one Canvas site anchor selected three exact courses, including course 501 after paged discovery\n");
@@ -2155,15 +2160,19 @@ try {
   await settings.getByRole("checkbox", { name: "Correct Canvas Page text" }).check();
   assert.equal(await settings.locator("#edit-duration").inputValue(), String(60 * 60 * 1_000));
 
+  // An action whose saved result Canvas offers no read for is listed as Review only, with its reason,
+  // and has no checkbox that could grant it ahead.
   await settings.locator("#action-filter").fill("Remove course from favorites");
-  await settings.getByText("No individual action matches this search.", { exact: true }).waitFor();
+  await settings.getByText("Review only: Remove course from favorites", { exact: false }).first().waitFor();
   assert.equal(await settings.locator('label[for="category-action:canvas:canvas_remove_course_from_favorites"]').count(), 0);
+  assert.equal(await settings.locator('input[value="action:canvas:canvas_remove_course_from_favorites"]').count(), 0);
+  assert.ok(await settings.getByText(/Canvas has no read that shows the saved result of this change/).count() >= 1);
   assert.equal(await settings.getByText("Saved result not checked", { exact: true }).count(), 0);
   await captureThemes(settings, "bridge-settings-exact-actions", 900);
   await settings.setViewportSize({ width: 900, height: 760 });
   await settings.locator("#action-filter").fill("");
   await waitFor(async () => await settings.locator("#save-edit").isDisabled() === false, "Save Edit access stayed disabled after the search was cleared");
-  process.stderr.write("[browser-test] Settings omits every Canvas action whose saved result Morrow cannot check\n");
+  process.stderr.write("[browser-test] Settings lists every Canvas action whose saved result Morrow cannot check as Review only, with no way to grant it ahead\n");
 
   await captureThemes(settings, "bridge-settings-edit", 900);
   await captureThemes(settings, "bridge-settings-edit-narrow", 320);
