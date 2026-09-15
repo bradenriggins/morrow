@@ -933,7 +933,7 @@ describe("CanvasConnectorRuntime", () => {
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: { ...grant, effect_receipt_id: "effect:course-nickname" } },
     })).toMatchObject({ ok: true });
     // A held write carries the sentence for its own class, not one generic line for every held route.
-    expect(await runtime.call("canvas_create_line_item", {
+    expect(await runtime.call("canvas_upload_file_v1_courses_course_id_files_post", {
       course_id: "42",
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: grant },
     })).toMatchObject({
@@ -941,7 +941,7 @@ describe("CanvasConnectorRuntime", () => {
       resultState: "not_sent",
       problem: {
         code: "course_scope_required",
-        message: "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool.",
+        message: "Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends every file through its reviewed file transfer, which checks the saved file and its bytes. Ask Morrow to prepare the file upload for this same target.",
       },
     });
     // The single-nickname read stays bound to the selected course.

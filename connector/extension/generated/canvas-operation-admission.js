@@ -285,11 +285,6 @@ export function canvasOperationAdmission(operation) {
     if (reviewedFileTransferRoute(operation)) {
         return { ...scope, write: { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" } };
     }
-    // An LTI service, including the account and developer key routes under it, accepts only the tool's
-    // own LTI authorization. The signed-in browser session cannot present it.
-    if (operation.path.startsWith("/lti/")) {
-        return { ...scope, write: { state: "held", reason: "lti_authorization_required" } };
-    }
     return { ...scope, write: { state: "admitted" } };
 }
 function structuralArguments(operation) {
@@ -353,17 +348,15 @@ export function canvasReadbackAssessment(operations, operation, admission = canv
     return { state: "structurally_exact" };
 }
 /**
- * One plain sentence for each held class, shown to the person who asked for the change: what the
- * change would do, why Morrow holds it, and what they can do instead. Every class has its own
- * sentence; no two classes share one.
+ * The plain sentence for a held write, shown to the person who asked for the change: what the change
+ * would do, why Morrow holds it, and what they can do instead. The catalog carries no Canvas LTI
+ * service write (scripts/generate-canvas-api-catalog.mjs), so the reviewed file transfer is the one
+ * held class.
  */
 export function canvasAdmissionReason(admission) {
     if (admission.state !== "held")
         return undefined;
-    if (admission.reason === "multi_step_upload_requires_reviewed_transfer") {
-        return "Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends every file through its reviewed file transfer, which checks the saved file and its bytes. Ask Morrow to prepare the file upload for this same target.";
-    }
-    return "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool.";
+    return "Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends every file through its reviewed file transfer, which checks the saved file and its bytes. Ask Morrow to prepare the file upload for this same target.";
 }
 /**
  * One plain sentence for each site class, shown before a site action is granted and at approval: what

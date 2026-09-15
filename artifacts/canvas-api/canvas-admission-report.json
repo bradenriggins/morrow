@@ -1,10 +1,10 @@
 {
   "schema": "morrow.canvas-admission-report.v1",
-  "catalogDigest": "b1d6c999c27c5415b6fc9dab6a44a5a65dbd3bbd1ef2859c44faf95973e76298",
+  "catalogDigest": "abf879766c198833febc8ae24b2426998bcf152dfa9a080cf62f6b8ec4323224",
   "totals": {
-    "operations": 1137,
+    "operations": 1121,
     "reads": 571,
-    "writes": 566
+    "writes": 550
   },
   "admission": {
     "admitted": 540,
@@ -30,23 +30,15 @@
       "multi_course": 11,
       "session_credential": 9
     },
-    "held": 26,
+    "held": 10,
     "heldByReason": {
-      "lti_authorization_required": 16,
       "multi_step_upload_requires_reviewed_transfer": 10
     },
     "heldByRouteFamily": {
       "courses": 5,
-      "lti/courses": 4,
-      "lti/asset_processor_eulas": 3,
-      "lti/assignments": 3,
-      "lti/subscriptions": 3,
       "accounts": 1,
       "folders": 1,
       "groups": 1,
-      "lti/asset_processors": 1,
-      "lti/developer_key": 1,
-      "lti/notice-handlers": 1,
       "sections": 1,
       "users": 1
     }

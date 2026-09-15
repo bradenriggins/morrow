@@ -74,11 +74,11 @@ test("Canvas writes with no same-resource read report an unavailable readback in
     reason: "no_safe_readback_route",
   });
 
-  // A score posted through the LTI service needs the tool's own LTI authorization, so it is held
-  // before any readback question arises.
-  const ltiScore = operation("canvas_create_score");
-  assert.deepEqual(canvasOperationAdmission(ltiScore).write, { state: "held", reason: "lti_authorization_required" });
-  assert.deepEqual(canvasReadbackAssessment(catalog.operations, ltiScore), { state: "not_applicable", reason: "write_held" });
+  // An upload first step needs the reviewed file transfer, so it is held before any readback question
+  // arises.
+  const upload = operation("canvas_upload_file_v1_courses_course_id_files_post");
+  assert.deepEqual(canvasOperationAdmission(upload).write, { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" });
+  assert.deepEqual(canvasReadbackAssessment(catalog.operations, upload), { state: "not_applicable", reason: "write_held" });
 
   // A course learner record is admitted through its course; a bulk grade change still has no
   // same-resource read for every changed child, so it reports an unavailable readback.

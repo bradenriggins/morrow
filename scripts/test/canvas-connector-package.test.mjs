@@ -113,7 +113,7 @@ test("Canvas connector package has a stable least-privilege identity and exact g
   assert.match(extensionSemanticTarget, /export function canvasSemanticCourseTarget/);
   assert.doesNotMatch(extensionSemanticTarget, /\bnode:|\brequire\s*\(/);
   const parsed = JSON.parse(catalog);
-  assert.equal(parsed.counts.totalOperations, 1137);
+  assert.equal(parsed.counts.totalOperations, 1121);
   assert.equal(parsed.counts.newQuizzesOperations, 32);
   assert.equal(parsed.counts.itemBankOperations, 18);
   assert.equal(parsed.counts.courseFileContentOperations, 1);

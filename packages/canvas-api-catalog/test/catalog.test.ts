@@ -543,7 +543,7 @@ describe("Canvas API catalog", () => {
     ));
     const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
       && /redirect/iu.test(`${operation.summary} ${operation.description}`));
-    expect(held).toHaveLength(26);
+    expect(held).toHaveLength(10);
     expect(admittedWithoutExactReadback).toHaveLength(200);
     expect(siteReads).toHaveLength(355);
     // Every read is bound: to the selected course, or to the connected Canvas site as the signed-in person.
@@ -778,7 +778,7 @@ describe("Canvas API catalog", () => {
       && canvasOperationAdmission(operation).siteClass === "account");
     expect(accountClass.map((operation) => operation.toolName).sort())
       .toEqual(accountWrites.map((operation) => operation.toolName).sort());
-    expect(accountWrites).toHaveLength(117);
+    expect(accountWrites).toHaveLength(116);
 
     const byFamily: Record<string, number> = {};
     for (const operation of accountWrites) {
@@ -786,7 +786,6 @@ describe("Canvas API catalog", () => {
       byFamily[family] = (byFamily[family] || 0) + 1;
     }
     expect(byFamily).toEqual({
-      "lti/developer_key": 1,
       "v1/account_calendars": 1,
       "v1/accounts": 105,
       "v1/developer_keys": 3,
@@ -802,10 +801,6 @@ describe("Canvas API catalog", () => {
       expect(admission.authority, name).toBe("site");
       const tool = tools.find((candidate) => candidate.name === name);
       expect(tool?.capability?.authority.scopeClass, name).toBe("site");
-      if (operation.path.startsWith("/lti/")) {
-        expect(admission.write, name).toEqual({ state: "held", reason: "lti_authorization_required" });
-        continue;
-      }
       if (operation.path.endsWith("/rubrics/upload")) {
         expect(admission.write, name).toEqual({ state: "held", reason: "multi_step_upload_requires_reviewed_transfer" });
         continue;
@@ -824,24 +819,24 @@ describe("Canvas API catalog", () => {
       "canvas_create_lti_registration_lti_registrations",
       "canvas_create_developer_key",
       "canvas_update_developer_key",
-      "canvas_update_public_jwk",
       "canvas_create_link_outcome_global",
       "canvas_update_calendar",
     ]));
 
     // The class is about account authority, not about the letters "lti" in a route. A course write
-    // that manages an LTI link through the ordinary API stays an admitted course write. A route on
-    // the LTI service itself is still a course route, but it needs the LTI tool's own authorization.
+    // that manages an LTI link through the ordinary API stays an admitted course write. The LTI
+    // service's own writes accept only an installed tool's token, so the catalog carries none of them.
     const resourceLink = catalog.operations.find((candidate) => candidate.toolName === "canvas_update_lti_resource_link")!;
     expect(canvasAccountAuthorityRoute(resourceLink)).toBe(false);
     expect(canvasOperationAdmission(resourceLink)).toMatchObject({ authority: "course", write: { state: "admitted" } });
     expect(tools.find((candidate) => candidate.name === "canvas_update_lti_resource_link")?.capability?.authority.scopeClass).toBe("course");
-    for (const name of ["canvas_create_line_item", "canvas_create_score"]) {
-      const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
-      expect(canvasAccountAuthorityRoute(operation), name).toBe(false);
-      expect(canvasOperationAdmission(operation).write, name).toEqual({ state: "held", reason: "lti_authorization_required" });
-      expect(tools.find((candidate) => candidate.name === name)?.capability?.authority.scopeClass, name).toBe("course");
+    expect(catalog.operations.filter((operation) => !operation.readOnly && operation.path.startsWith("/lti/"))).toEqual([]);
+    for (const name of ["canvas_create_line_item", "canvas_create_score", "canvas_update_public_jwk", "canvas_create_originality_report"]) {
+      expect(catalog.operations.some((candidate) => candidate.toolName === name), name).toBe(false);
     }
+    // The LTI reads stay listed with the reason they are unavailable.
+    const ltiRead = catalog.operations.find((candidate) => candidate.readOnly && candidate.path === "/lti/courses/{course_id}/line_items")!;
+    expect(tools.find((candidate) => candidate.name === ltiRead.toolName)?.capability?.profiles["public-canvas"].state).toBe("profile_limited");
 
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
@@ -863,20 +858,14 @@ describe("Canvas API catalog", () => {
       .map((operation) => canvasOperationAdmission(operation).write)
       .filter((write) => write.state === "held")
       .map((write) => write.reason));
-    expect([...heldReasons].sort()).toEqual([
-      "lti_authorization_required",
-      "multi_step_upload_requires_reviewed_transfer",
-    ]);
+    expect([...heldReasons].sort()).toEqual(["multi_step_upload_requires_reviewed_transfer"]);
   });
 
   // Every held write carries one reason from the closed set with its own sentence, and every site
   // request carries one site class with its own sentence. This case walks the whole catalog.
   it("gives every held write one reason and every site request one class, each with its own plain sentence", () => {
     const tools = canvasCatalogTools(catalog);
-    const closedSet = [
-      "lti_authorization_required",
-      "multi_step_upload_requires_reviewed_transfer",
-    ] as const;
+    const closedSet = ["multi_step_upload_requires_reviewed_transfer"] as const;
     const byReason = new Map<string, string[]>();
     const bySiteClass = new Map<string, string[]>();
     for (const operation of catalog.operations) {
@@ -902,15 +891,14 @@ describe("Canvas API catalog", () => {
     }
 
     expect(Object.fromEntries([...byReason].map(([reason, names]) => [reason, names.length]))).toEqual({
-      lti_authorization_required: 16,
       multi_step_upload_requires_reviewed_transfer: 10,
     });
     expect([...byReason.keys()].sort()).toEqual([...closedSet]);
     expect(Object.fromEntries([...bySiteClass].map(([siteClass, names]) => [siteClass, names.length]))).toEqual({
-      account: 117,
-      learner_record: 37,
+      account: 116,
+      learner_record: 34,
       multi_course: 11,
-      person: 106,
+      person: 98,
       session_credential: 9,
       shared_object: 48,
     });
@@ -965,11 +953,8 @@ describe("Canvas API catalog", () => {
       "canvas_assign_unassigned_members",
       "canvas_bulk_delete_memberships_bulk_deletes_memberships_by_providing_array_of_user_ids_or_for_different",
       "canvas_create_membership",
-      "canvas_create_originality_report",
       "canvas_delete_appointment_group",
       "canvas_delete_topic_groups",
-      "canvas_edit_originality_report_files",
-      "canvas_edit_originality_report_submissions",
       "canvas_flagging_question",
       "canvas_import_category_groups",
       "canvas_invite_others_to_group",

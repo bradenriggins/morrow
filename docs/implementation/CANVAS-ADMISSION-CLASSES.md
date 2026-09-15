@@ -66,7 +66,6 @@ and last everything else.
 
 | Reason | Route shape | What the person is told |
 | --- | --- | --- |
-| `lti_authorization_required` | Any route on Canvas's LTI service under `/lti/`, including its account and developer key routes: line items, scores, originality and asset reports, EULA records, webhook subscriptions, notice handlers, and the public JWK update | "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool." |
 | `multi_step_upload_requires_reviewed_transfer` | Every upload first step, for a course, a folder, a group, an assignment, section or quiz submission, a submission comment, or a person, and both Rubric CSV imports. The raw route cannot carry the file's bytes; each of these targets is available through Morrow's reviewed file transfer | "Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends every file through its reviewed file transfer, which checks the saved file and its bytes. Ask Morrow to prepare the file upload for this same target." |
 
 Morrow's reviewed file transfer (`morrow_plan_canvas_file_upload`, `packages/mcp-server/src/canvas-file-transfer.ts`,
@@ -130,10 +129,14 @@ proved only in the synthetic estate in `scripts/test/canvas-connector-browser.mj
 live-unverified. Canvas usage rights, which a tenant can require before a file is visible, are not
 part of these three routes and are untested here.
 
-## What the held writes need
+## Canvas LTI service writes
 
-- **LTI services.** An LTI access token for a registered developer key, obtained through Canvas's
-  client-credentials grant and presented only to the LTI service routes.
+The catalog carries no write on Canvas's LTI service under `/lti/` (line items, scores, originality
+and asset reports, EULA records, webhook subscriptions, notice handlers, and the tool's public key).
+Canvas accepts those only with an installed LTI tool's own access token, and each acts on that tool's
+own records. Morrow is not an LTI tool, so `scripts/generate-canvas-api-catalog.mjs` leaves them out.
+The equivalent ordinary routes stay available: an assignment for a line item, and a submission grade
+for a score. The LTI reads stay listed with the reason they are unavailable.
 
 ## Status
 

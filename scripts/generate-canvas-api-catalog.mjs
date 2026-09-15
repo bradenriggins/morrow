@@ -852,6 +852,40 @@ function applyDocumentedReadInputContracts(operations) {
   };
 }
 
+/**
+ * Canvas's LTI service routes under `/lti/` accept a change only with an installed LTI tool's own
+ * access token, and each acts on that tool's own line items, reports, subscriptions or key. Morrow is
+ * not an LTI tool, so those writes are not part of its catalog. The LTI reads stay listed with the
+ * reason they are unavailable.
+ */
+export function withoutLtiServiceWrites(operations) {
+  return operations.filter((operation) => operation.readOnly || !String(operation.path).startsWith("/lti/"));
+}
+
+/** The catalog envelope and digest for one operation list, the same way every catalog is written. */
+export function catalogFromOperations(source, operations, browserCount, itemBankCount, courseFileContentCount) {
+  const catalogBase = {
+    schema: "morrow.canvas-api-catalog.v1",
+    source,
+    counts: {
+      officialOperations: operations.length - browserCount,
+      browserSessionOperations: browserCount,
+      totalOperations: operations.length,
+      newQuizzesOperations: operations.filter((operation) => operation.family.startsWith("new-quizzes")).length,
+      itemBankOperations: itemBankCount,
+      courseFileContentOperations: courseFileContentCount,
+      reads: operations.filter((operation) => operation.readOnly).length,
+      writes: operations.filter((operation) => !operation.readOnly).length,
+    },
+    operations,
+  };
+  return { ...catalogBase, catalogDigest: sha256(canonicalJson(catalogBase)) };
+}
+
+export function serializeCanvasApiCatalog(catalog) {
+  return `${canonicalJson(catalog)}\n`;
+}
+
 async function buildCatalog() {
   const indexResult = await fetchJson(INDEX_URL);
   const resources = [...indexResult.value.apis].sort((left, right) => ascii(left.path, right.path));
@@ -876,34 +910,19 @@ async function buildCatalog() {
   const itemBank = itemBankOperations();
   const courseFileContent = [courseFileTextOperation()];
   const browser = [...itemBank, ...courseFileContent];
-  const operations = [...official, ...browser].sort((left, right) => ascii(left.toolName, right.toolName));
+  const operations = withoutLtiServiceWrites([...official, ...browser]).sort((left, right) => ascii(left.toolName, right.toolName));
   const sourceDigest = sha256(canonicalJson({
     index: indexResult.value,
     resources: documents.map((document) => ({ path: document.resource.path, value: document.value })),
   }));
-  const catalogBase = {
-    schema: "morrow.canvas-api-catalog.v1",
-    source: {
-      indexUrl: INDEX_URL,
-      swaggerVersion: String(indexResult.value.swaggerVersion || "1.2"),
-      apiVersion: String(indexResult.value.apiVersion || ""),
-      resourceCount: resources.length,
-      sourceDigest,
-      lastModified: indexResult.lastModified,
-    },
-    counts: {
-      officialOperations: official.length,
-      browserSessionOperations: browser.length,
-      totalOperations: operations.length,
-      newQuizzesOperations: operations.filter((operation) => operation.family.startsWith("new-quizzes")).length,
-      itemBankOperations: itemBank.length,
-      courseFileContentOperations: courseFileContent.length,
-      reads: operations.filter((operation) => operation.readOnly).length,
-      writes: operations.filter((operation) => !operation.readOnly).length,
-    },
-    operations,
-  };
-  return { ...catalogBase, catalogDigest: sha256(canonicalJson(catalogBase)) };
+  return catalogFromOperations({
+    indexUrl: INDEX_URL,
+    swaggerVersion: String(indexResult.value.swaggerVersion || "1.2"),
+    apiVersion: String(indexResult.value.apiVersion || ""),
+    resourceCount: resources.length,
+    sourceDigest,
+    lastModified: indexResult.lastModified,
+  }, operations, browser.length, itemBank.length, courseFileContent.length);
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -911,7 +930,7 @@ export async function main(argv = process.argv.slice(2)) {
   const outputArgument = argv.find((value) => value.startsWith("--output="));
   const outputPath = outputArgument ? resolve(outputArgument.slice("--output=".length)) : DEFAULT_OUTPUT;
   const catalog = await buildCatalog();
-  const bytes = `${canonicalJson(catalog)}\n`;
+  const bytes = serializeCanvasApiCatalog(catalog);
   if (args.has("--check")) {
     const current = await readFile(outputPath, "utf8").catch(() => "");
     if (current !== bytes) {

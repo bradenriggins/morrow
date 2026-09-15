@@ -2337,8 +2337,8 @@ try {
   assert.equal(semanticCourseMismatch.ok, false);
   assert.equal(semanticCourseMismatch.resultState, "not_sent");
   assert.match(JSON.stringify(semanticCourseMismatch), /course_binding(?:_course)?_mismatch/);
-  // A write Canvas accepts only with an LTI tool's own authorization is held before anything is sent.
-  const syntheticCourseScope = await runtime.call("canvas_create_line_item", {
+  // An upload first step that only the reviewed file transfer can carry is held before anything is sent.
+  const syntheticCourseScope = await runtime.call("canvas_upload_file_v1_courses_course_id_files_post", {
     course_id: "42",
     _morrow: {
       source_binding_id: binding.sourceBindingId,

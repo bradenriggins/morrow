@@ -49,13 +49,8 @@ const provenClaims = [
     expected: [report.admission.held],
   },
   {
-    label: "held for lti_authorization_required",
-    pattern: /\| (\d+) call an LTI service that accepts only the LTI tool's own authorization,/,
-    expected: [report.admission.heldByReason.lti_authorization_required],
-  },
-  {
     label: "held for multi_step_upload_requires_reviewed_transfer",
-    pattern: / (\d+) are unfinished Canvas upload pre-flights or rubric CSV imports /,
+    pattern: /All (\d+) are unfinished Canvas upload pre-flights or rubric CSV imports /,
     expected: [report.admission.heldByReason.multi_step_upload_requires_reviewed_transfer],
   },
   {
@@ -264,7 +259,7 @@ test("a document edit that changes a quoted number or breaks an anchor fails lou
   assert.throws(() => assertDocumentClaims(duplicatedAnchor, [heldClaim]), /expected exactly one match/);
 
   const remaining = read(REMAINING);
-  const rewordedSummary = remaining.replace("writes held for LTI authorization or reviewed file transfer reasons", "writes still need work");
+  const rewordedSummary = remaining.replace("writes held for reviewed file transfer reasons", "writes still need work");
   assert.notEqual(rewordedSummary, remaining);
   assert.throws(() => assertDocumentClaims(rewordedSummary, remainingClaims), /expected exactly one match/);
 });

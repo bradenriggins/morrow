@@ -472,6 +472,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 455 | P1 | R4 | The reviewed Canvas course-file transfer sent its upload first step without the page's CSRF token, which a signed-in Canvas session requires for a change, and its fixture never required the token. | closure section 455; page transfer and browser harness regressions | IMPLEMENTED |
 | 456 | P1 | R7 | A file could reach Canvas only in one course folder: every other upload target and both rubric CSV imports had no way in, because their raw routes cannot carry the bytes and the reviewed transfer named only a course folder. | closure section 456; page transfer, connector, gateway transfer, catalog, and browser harness regressions | IMPLEMENTED |
 | 457 | P1 | R7 | 225 admitted Canvas writes with no exact readback were unpublished and could not be sent at all, and 20 of them (discussion read state, subscriptions, entry deletion, copies and reorders) had a safe read Morrow never used. | closure section 457; catalog comparator, readback scope, verification, Bridge settings, admission report, and browser harness regressions | IMPLEMENTED |
+| 458 | P3 | R4 | The catalog published 16 Canvas LTI service writes that only an installed LTI tool can send with its own token, so Morrow listed changes it can never make. | closure section 458; catalog, connector runtime, gateway, readback scope, package, admission report, and browser harness regressions | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3136,7 +3137,15 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Split: 540 admitted writes, with 340 exact, 165 unavailable, 24 blocked, and 11 unconfirmed readbacks; 336 Canvas Edit actions and 200 Review only actions. Bridge 1.0.16 is sealed.
 - Status: `IMPLEMENTED`; live readbacks pending BT2.
 
-### Root-cause patterns for rows 331–457
+### 458: LTI service writes were listed although Morrow cannot send them
+
+- Product decision: the owner removed the 16 Canvas LTI service writes.
+- Condition: `/lti/` line item, score, originality report, asset report, EULA, webhook subscription, notice handler and public key writes accept only an installed LTI tool's access token and act on that tool's own records. They were held as `lti_authorization_required`.
+- Repair: `withoutLtiServiceWrites` in `scripts/generate-canvas-api-catalog.mjs` leaves every `/lti/` write out of the catalog. The committed catalog was first rebuilt byte-identically from its own operations, then filtered, so the filter is its only change. The `lti_authorization_required` hold is removed. The LTI reads stay listed as unavailable.
+- Split: 1,121 operations, 550 writes, 10 held and 540 admitted. Bridge 1.0.17 is sealed.
+- Status: `IMPLEMENTED`.
+
+### Root-cause patterns for rows 331–458
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
