@@ -448,6 +448,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 431 | P1 | R7 | The first exposed Bridge rollback reused full setup repair, so an unrelated assistant configuration edit could reject the action and keep the Bridge update fenced. | closure section 431; dedicated Desktop IPC and live installed-app regressions | IMPLEMENTED |
 | 432 | P1 | R7 | Dedicated Bridge rollback stops the local owner before asking that owner for the Bridge maintenance lease, so the control plane needed to resume the fenced worker is unavailable. | closure section 432; controller and live installed-app regressions | IMPLEMENTED |
 | 433 | P2 | R7 | The generic Desktop setup failure tells the user that a newer assistant setting was preserved even when the failure came from an unrelated Bridge or runtime boundary. | closure section 433; public error contract and live installed-app regression | IMPLEMENTED |
+| 434 | P1 | R7 | With exactly one connected course, loopback adds that course as a top-level field to the multi-binding Edit-policy command, so the strict Bridge rejects every native Edit confirmation before any access is saved. | closure section 434; loopback regression and live BT2 retry | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2906,7 +2907,15 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: the public error contract and every rendered failure continue to expose only fixed safe text.
 - Status: `IMPLEMENTED`.
 
-### Root-cause patterns for rows 331–433
+### 434: one connected course corrupts the Edit-policy command
+
+- Verified defect: live BT2 accepted Morrow's native Edit confirmation, but the Bridge returned `edit_policy_set_invalid` and kept the course in Plan. The same failure occurred for one action and for 23 actions.
+- Root cause: loopback automatically copied the sole connected course's `sourceBindingId` onto every command. `edit_policy_set` already carries its exact course set in `editPolicySet.selections`, and its strict Bridge contract rejects the extra top-level field.
+- Repair: implicit sole-binding selection now applies only to commands whose contract requires one known binding. Multi-binding Edit policy and binding-free maintenance commands carry no invented top-level course field.
+- Regression: the loopback suite authenticates with exactly one course, sends an Edit-policy set for that course, requires no top-level `sourceBindingId`, and verifies the exact nested selection.
+- Status: `IMPLEMENTED`; packaged live retry pending.
+
+### Root-cause patterns for rows 331–434
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -2926,6 +2935,7 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **A narrow recovery routed through a broader mutation:** row 431. Bridge rollback has its own closed IPC action and does not depend on unrelated assistant configuration state.
 - **A guard removes the service needed by its protected transaction:** row 432. Bridge rollback keeps the authenticated owner alive and uses the exact Bridge lease as its guard.
 - **Fallback recovery text names one unrelated cause:** row 433. Generic setup failure now gives only generic recovery; typed failures retain their own fixed guidance.
+- **Convenience inference crosses a stricter command boundary:** row 434. Implicit sole-course selection is limited to commands that require one course; commands with their own multi-course scope retain only that exact scope representation.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.

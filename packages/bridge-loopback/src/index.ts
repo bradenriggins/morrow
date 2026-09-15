@@ -926,7 +926,7 @@ export class LoopbackBridgeServer {
     const requiresCurrentBinding = ["invoke_read", "invoke_write"].includes(invocation.kind);
     const selectedBinding = invocation.sourceBindingId
       ? active.bindings.find((binding) => binding.sourceBindingId === invocation.sourceBindingId)
-      : active.bindings.length === 1 ? active.bindings[0] : undefined;
+      : requiresKnownBinding && active.bindings.length === 1 ? active.bindings[0] : undefined;
     if (requiresKnownBinding && !selectedBinding) {
       throw new BridgeUnavailableError("The exact course connection is unavailable or changed. Create a fresh plan from a current binding.");
     }

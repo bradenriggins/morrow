@@ -431,6 +431,43 @@ describe("LoopbackBridgeServer", () => {
       .rejects.toThrow("maintenance control");
   });
 
+  it("does not add the sole course binding to a multi-binding Edit policy command", async () => {
+    const server = new LoopbackBridgeServer({
+      token,
+      expectedRuntimeRevision: revision,
+      expectedCatalogDigest: digest,
+      allowedExtensionIds: [extensionId],
+      port: 0,
+    });
+    servers.push(server);
+    const socket = await connect(server);
+    commandHandler(socket, (command) => {
+      expect(command.kind).toBe("edit_policy_set");
+      expect(command.sourceBindingId).toBeUndefined();
+      expect(command.editPolicySet).toEqual({
+        mode: "edit",
+        selections: [{
+          sourceBindingId: "canvas-course-42",
+          expectedPolicyRevision: 0,
+          enabledCategories: ["canvas_page_content"],
+        }],
+      });
+      return { schema: "morrow.bridge.edit-policy-set.v1", mode: "edit", entries: [] };
+    });
+    await expect(server.invoke({
+      kind: "edit_policy_set",
+      editPolicySet: {
+        mode: "edit",
+        selections: [{
+          sourceBindingId: "canvas-course-42",
+          expectedPolicyRevision: 0,
+          enabledCategories: ["canvas_page_content"],
+        }],
+      },
+      operationId: "edit-policy:course-42",
+    })).resolves.toMatchObject({ ok: true, result: { schema: "morrow.bridge.edit-policy-set.v1" } });
+  });
+
   it("sends a private file attachment only with exact Moodle staged-file commands", async () => {
     const server = new LoopbackBridgeServer({
       token,
