@@ -1761,12 +1761,9 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
       const hidden = relevantOperations.filter((operation) => held.includes(operation)
         || operation.toolName === "canvas_get_items_media_upload_url");
       expect(relevantOperations).toHaveLength(32);
-      expect(admitted).toHaveLength(30);
-      expect(held).toHaveLength(2);
-      expect(held.map((operation) => operation.toolName).sort()).toEqual([
-        "canvas_set_course_level_accommodations",
-        "canvas_set_quiz_level_accommodations",
-      ]);
+      // Learner accommodations are course work reached through their course, so nothing here is held.
+      expect(admitted).toHaveLength(32);
+      expect(held).toHaveLength(0);
       expect(relevantOperations.filter((operation) => operation.service === "item_bank" && !operation.readOnly
         && canvasOperationAdmission(operation).write.state === "admitted").map((operation) => operation.toolName))
         .toHaveLength(11);

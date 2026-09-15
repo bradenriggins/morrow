@@ -22,6 +22,9 @@ const BLOCKED_READBACKS = Object.freeze({
     subscribe_to_topic_courses: "discussion_or_conversation_content",
     unsubscribe_from_topic_courses: "discussion_or_conversation_content",
     update_content_migration_courses: "content_migration_update_has_no_cataloged_fields",
+    // One route deletes or concludes the whole course by its event field, and the course read cannot
+    // tell a concluded course from the saved state a deleted one leaves.
+    delete_conclude_course: "course_delete_or_conclude_is_ambiguous",
 });
 export function canvasReadbackBlocker(operation) {
     return operation?.nickname ? BLOCKED_READBACKS[operation.nickname] : undefined;

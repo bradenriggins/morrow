@@ -464,6 +464,8 @@ Every row stays open until its evidence columns are added and its status becomes
 | 447 | P0 | R7 | A course connection stays unverified after Chrome restarts or its tab closes, even when the same course is open and signed in as the same account, so every course needs a manual reconnect. | closure section 447; extension lifecycle regressions; live BT2 after Chrome restart | IMPLEMENTED |
 | 448 | P1 | R7 | Setup stays on "Morrow is getting ready" after the runtime is ready, because it re-reads state only four times in three seconds and then waits for the person. | closure section 448; renderer regressions; live Desktop observation on 2026-09-15 | IMPLEMENTED |
 | 449 | P1 | R7 | Every Bridge update requires a person to open Chrome's extensions page and reload Morrow Bridge, and restarting Chrome instead signs Canvas out and closes course tabs. | closure section 449; Bridge maintenance, installer controller, and relay regressions; live Bridge updates on 2026-09-15 | IMPLEMENTED |
+| 450 | P1 | R7 | Every course learner record write, including grades, overrides, enrollments, peer reviews, pacing, and accommodations, was held outside course Edit, so an instructor could not make those course changes through Morrow at all. | closure section 450; catalog, admission report, semantic target, group scope, readback scope, Bridge settings, and browser harness regressions | IMPLEMENTED |
+| 451 | P2 | R7 | The Canvas connector browser harness is not part of the repository gate, so its pinned Edit option counts went stale across rows 440 and 446 without any gate failing. | closure section 451; browser harness run on 2026-09-15 | OPEN |
 
 ## Identifier accounting
 
@@ -3067,7 +3069,22 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Regression: the Bridge maintenance suite refuses a reload without a fence, with a stale epoch, into a folder that is not newer, or into a folder whose marker does not name that version, refuses a Store install, and schedules the reload after the answer. The controller suite finishes an update after a self-reload and leaves the staged update for an older or stalled Bridge.
 - Status: `IMPLEMENTED`; live self-reload pending the next Bridge update after 1.0.11 is loaded.
 
-### Root-cause patterns for rows 331–449
+### 450: course learner records were held outside course Edit
+
+- Product decision: the owner requires that Morrow block nothing a person can do in their course.
+- Condition: `learnerRecordRoute` held 124 writes as `learner_scope_requires_separate_authority`, 87 of them on `/courses/{course_id}` routes: grading and commenting on submissions, assignment and module overrides, enrollment changes, peer reviews, course pacing, New Quiz accommodations, gradebook column data, and discussion entries.
+- Repair: a learner record route that names its course is admitted as course work under the course Edit permission. Learner identifiers resolve from Morrow's learner tokens at dispatch, results stay tokenized at egress, and exact readback is still required, so 36 of the 87 are callable now and the rest wait on readback comparators listed in `PROVEN-WORKFLOW-REUSE.md`. A learner route that does not name its course, through a section, group, quiz submission, or appointment group, stays held with a sentence that says so. Deleting or concluding the whole course is admitted with a named readback blocker, `course_delete_or_conclude_is_ambiguous`, because the course read cannot tell the two events apart. Bridge 1.0.12 is sealed.
+- Split: 338 held and 228 admitted writes, with 149 exact, 55 unavailable, and 24 blocked readbacks.
+- Regression: the catalog contract admits every course-path learner record and requires its capability profile to follow its readback; section, group, readback-scope, admission report, and Bridge settings suites pin the new split and sentences; the browser harness verifies an enrollment reactivation end to end.
+- Status: `IMPLEMENTED`; live learner writes pending a BT2 course with a test student.
+
+### 451: the browser harness runs outside the gate
+
+- Verified condition: `scripts/test/canvas-connector-browser.mjs` still pinned 112 editable Canvas actions and 28 nonexact writes after rows 440 and 446 changed both numbers, and it failed on its first run on 2026-09-15. `pnpm test` runs the package, script, and Desktop suites but not `test:connector:browser`, so no commit gate caught it.
+- Next action: run the Chromium harness in the gate when a browser is available, or make the harness derive its expected counts from the admission report it already reads.
+- Status: `OPEN`.
+
+### Root-cause patterns for rows 331–451
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

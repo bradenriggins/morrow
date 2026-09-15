@@ -544,8 +544,8 @@ describe("Canvas API catalog", () => {
     ));
     const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
       && /redirect/iu.test(`${operation.summary} ${operation.description}`));
-    expect(held).toHaveLength(425);
-    expect(admittedWithoutExactReadback).toHaveLength(27);
+    expect(held).toHaveLength(338);
+    expect(admittedWithoutExactReadback).toHaveLength(79);
     expect(unscopedReads).toHaveLength(351);
     const expectedLimited = new Set([
       ...held,
@@ -599,7 +599,7 @@ describe("Canvas API catalog", () => {
     expect(tools.filter((tool) => tool.capability?.family === "new-quizzes-item-banks")).toHaveLength(18);
   });
 
-  it("holds every course-path learner record outside ordinary course Edit", () => {
+  it("admits every course-path learner record under ordinary course Edit and exact readback", () => {
     const tools = new Map(canvasCatalogTools(catalog).map((tool) => [tool.name, tool]));
     const category = (operation: (typeof catalog.operations)[number]): string | undefined => {
       const { method, path } = operation;
@@ -639,15 +639,17 @@ describe("Canvas API catalog", () => {
         kind: "course_path",
         argument: operation.path === "/v1/courses/{id}" ? "id" : "course_id",
       });
-      expect(admission.write.state, name).toBe("held");
-      const expectedReason = operation.path.endsWith("/files")
-        ? "multi_step_upload_requires_reviewed_transfer"
-        : "learner_scope_requires_separate_authority";
-      expect(admission.write, name).toEqual({ state: "held", reason: expectedReason });
-      const sentence = canvasAdmissionReason(admission.write);
-      expect(tools.get(name)?.capability?.profiles["private-full"], name).toEqual({ state: "profile_limited", reason: sentence });
-      expect(tools.get(name)?.capability?.profiles["public-canvas"], name).toEqual({ state: "profile_limited", reason: sentence });
-      expect(tools.get(name)?.capability?.evidence?.admission, name).toEqual({ state: "blocked", reason: sentence });
+      const expectedWrite = operation.path.endsWith("/files")
+        ? { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" }
+        : { state: "admitted" };
+      expect(admission.write, name).toEqual(expectedWrite);
+      if (expectedWrite.state === "admitted") {
+        // Admission is no longer the gate for a course learner record; exact readback still is.
+        const readback = canvasReadbackAssessment(catalog.operations, operation);
+        const profile = tools.get(name)?.capability?.profiles["private-full"];
+        expect(profile?.state, name).toBe(readback.state === "structurally_exact" ? "supported" : "profile_limited");
+        expect(tools.get(name)?.capability?.evidence?.admission, name).toEqual({ state: "known" });
+      }
     }
     expect(byCategory).toEqual({
       "assignment records": 29,
@@ -672,10 +674,7 @@ describe("Canvas API catalog", () => {
         && admission.write.state === "held"
         && admission.write.reason === "learner_scope_requires_separate_authority";
     });
-    expect(courseLearnerHolds.map((operation) => operation.toolName).sort()).toEqual(learnerWrites
-      .filter((operation) => !operation.path.endsWith("/files"))
-      .map((operation) => operation.toolName)
-      .sort());
+    expect(courseLearnerHolds).toEqual([]);
   });
 
   it("holds every body-semantic multi-course write and the group-topic learner cascade", () => {
@@ -844,7 +843,7 @@ describe("Canvas API catalog", () => {
     // This class admits nothing. It only names the hold that 117 writes already carried.
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
-    expect(admitted).toHaveLength(141);
+    expect(admitted).toHaveLength(228);
     expect(admitted.filter((operation) => accountRoute(operation.path))).toEqual([]);
     const heldForCourseScope = catalog.operations.filter((operation) => {
       const write = canvasOperationAdmission(operation).write;
@@ -920,7 +919,7 @@ describe("Canvas API catalog", () => {
       course_scope_required: 92,
       cross_course_object_requires_resolution: 48,
       duplicate_assignment_exact_readback_unavailable: 1,
-      learner_scope_requires_separate_authority: 124,
+      learner_scope_requires_separate_authority: 37,
       lti_authorization_required: 12,
       multi_course_authority_required: 11,
       multi_step_upload_requires_reviewed_transfer: 5,
@@ -1001,7 +1000,7 @@ describe("Canvas API catalog", () => {
 
     // The admitted set is pinned here as well. Any change needs a reviewed admission reason.
     expect(catalog.operations.filter((operation) => !operation.readOnly
-      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(141);
+      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(228);
   });
 
   // Generic Canvas upload pre-flights cannot carry the remaining transfer steps. The Rubric CSV
@@ -1093,14 +1092,12 @@ describe("Canvas API catalog", () => {
     const course = catalog.operations.find((operation) => operation.toolName === "canvas_delete_conclude_course")!;
     expect(course.inputSchema.properties?.event).toMatchObject({ enum: ["delete", "conclude"] });
     const admission = canvasOperationAdmission(course);
-    expect(admission.write).toEqual({ state: "held", reason: "learner_scope_requires_separate_authority" });
+    // The course delete is admitted as course work; its readback still cannot tell delete from conclude.
+    expect(admission.write).toEqual({ state: "admitted" });
     expect(canvasReadbackAssessment(catalog.operations, course, admission))
-      .toEqual({ state: "not_applicable", reason: "write_held" });
-    const reason = canvasAdmissionReason(admission.write)!;
-    expect(tools.get(course.toolName)?.capability?.profiles["private-full"])
-      .toEqual({ state: "profile_limited", reason });
-    expect(tools.get(course.toolName)?.capability?.profiles["public-canvas"])
-      .toEqual({ state: "profile_limited", reason });
+      .toEqual({ state: "blocked", reason: "course_delete_or_conclude_is_ambiguous" });
+    expect(tools.get(course.toolName)?.capability?.profiles["private-full"]?.state).toBe("profile_limited");
+    expect(tools.get(course.toolName)?.capability?.profiles["public-canvas"]?.state).toBe("profile_limited");
     expect(tools.get(course.toolName)?.capability?.behavior.supportsReadback).toBe(false);
   });
 
@@ -1151,7 +1148,7 @@ describe("Canvas API catalog", () => {
     expect(byReason.get("cross_course_object_requires_resolution")).toEqual(["canvas_cross_list_section", "canvas_de_cross_list_section"]);
     expect(byReason.get("learner_scope_requires_separate_authority")).toHaveLength(17);
     expect([...byReason.keys()].sort()).toEqual(["admitted", "cross_course_object_requires_resolution", "learner_scope_requires_separate_authority"]);
-    const learnerReason = "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas.";
+    const learnerReason = "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course.";
     for (const name of byReason.get("learner_scope_requires_separate_authority")!) {
       const tool = tools.find((candidate) => candidate.name === name);
       expect(tool?.capability?.profiles["public-canvas"], name).toEqual({ state: "profile_limited", reason: learnerReason });
@@ -1495,22 +1492,23 @@ describe("Canvas API catalog", () => {
   it("derives structural readback metadata from the shared planner", () => {
     const admittedWrites = catalog.operations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "admitted");
     const assessments = admittedWrites.map((operation) => canvasReadbackAssessment(catalog.operations, operation));
-    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(22);
-    expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(5);
+    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(55);
+    expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(24);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(0);
-    expect(admittedWrites).toHaveLength(141);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(114);
+    expect(admittedWrites).toHaveLength(228);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(149);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
-    expect(tools.find((tool) => tool.name === "canvas_delete_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(false);
-    expect(tools.find((tool) => tool.name === "canvas_mark_document_annotations_as_read_courses")?.capability?.behavior.supportsReadback).toBe(false);
+    // Deleting a gradebook column is course work admitted through its course, and its absence reads back exactly.
+    expect(tools.find((tool) => tool.name === "canvas_delete_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
+    expect(tools.find((tool) => tool.name === "canvas_mark_document_annotations_as_read_courses")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_mark_module_item_as_done_not_done")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_mark_module_item_as_done_not_done")?.capability?.evidence?.readback).toMatchObject({
       state: "blocked",
-      reason: "This provider write remains held before dispatch.",
+      reason: "No safe exact post-write reader is available: module_item_reader_mutates_progress.",
     });
-    expect(tools.find((tool) => tool.name === "canvas_mark_rubric_assessments_as_read_courses_rubric_assessments")?.capability?.behavior.supportsReadback).toBe(false);
-    expect(tools.find((tool) => tool.name === "canvas_mark_rubric_assessments_as_read_courses_rubric_comments")?.capability?.behavior.supportsReadback).toBe(false);
+    expect(tools.find((tool) => tool.name === "canvas_mark_rubric_assessments_as_read_courses_rubric_assessments")?.capability?.behavior.supportsReadback).toBe(true);
+    expect(tools.find((tool) => tool.name === "canvas_mark_rubric_assessments_as_read_courses_rubric_comments")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_delete_external_feed_courses")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_remove_course_from_favorites")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_remove_course_from_favorites")?.capability?.evidence?.readback).toMatchObject({
@@ -1519,9 +1517,9 @@ describe("Canvas API catalog", () => {
     });
     expect(tools.find((tool) => tool.name === "canvas_unlink_outcome_courses")?.capability?.behavior.supportsReadback).toBe(false);
     expect(tools.find((tool) => tool.name === "canvas_bulk_update_assignment_dates")?.capability?.behavior.supportsReadback).toBe(true);
-    expect(tools.find((tool) => tool.name === "canvas_re_activate_enrollment")?.capability?.behavior.supportsReadback).toBe(false);
+    expect(tools.find((tool) => tool.name === "canvas_re_activate_enrollment")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis")?.capability?.behavior.supportsReadback).toBe(false);
-    expect(tools.find((tool) => tool.name === "canvas_set_course_level_accommodations")?.capability?.evidence?.admission).toMatchObject({ state: "blocked" });
+    expect(tools.find((tool) => tool.name === "canvas_set_course_level_accommodations")?.capability?.evidence?.admission).toMatchObject({ state: "known" });
   });
 
   it("refuses a readback whose read route is not the write target's own resource", () => {

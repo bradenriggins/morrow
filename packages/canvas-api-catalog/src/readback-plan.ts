@@ -23,7 +23,8 @@ export type CanvasReadbackBlocker =
   | "module_item_reader_mutates_progress"
   | "module_progression_state_has_no_current_user_reader"
   | "content_migration_update_has_no_cataloged_fields"
-  | "favorite_list_is_effective_not_explicit_state";
+  | "favorite_list_is_effective_not_explicit_state"
+  | "course_delete_or_conclude_is_ambiguous";
 
 const BLOCKED_READBACKS: Readonly<Record<string, CanvasReadbackBlocker>> = Object.freeze({
   bulk_select_provisional_grades: "student_grade_or_submission_state",
@@ -49,6 +50,9 @@ const BLOCKED_READBACKS: Readonly<Record<string, CanvasReadbackBlocker>> = Objec
   subscribe_to_topic_courses: "discussion_or_conversation_content",
   unsubscribe_from_topic_courses: "discussion_or_conversation_content",
   update_content_migration_courses: "content_migration_update_has_no_cataloged_fields",
+  // One route deletes or concludes the whole course by its event field, and the course read cannot
+  // tell a concluded course from the saved state a deleted one leaves.
+  delete_conclude_course: "course_delete_or_conclude_is_ambiguous",
 });
 
 export function canvasReadbackBlocker(operation: Pick<CanvasReadbackOperation, "nickname"> | null | undefined): CanvasReadbackBlocker | undefined {

@@ -340,7 +340,7 @@ test("Canvas Edit categories are exactly the scoped admitted writes with exact r
   const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(supported.length, 110);
+  assert.equal(supported.length, 145);
   assert.deepEqual(editable, supported);
   assert.deepEqual(
     options.filter((option) => option.availability === "review").map((option) => option.id).sort(),
@@ -401,7 +401,7 @@ test("nonexact Canvas writes are absent and every offered Canvas Edit action is 
     && canvasOperationAdmission(operation).write.state === "admitted"
     && !checkableCanvasWrite(operation)
     && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
-  assert.equal(nonexact.length, 27);
+  assert.equal(nonexact.length, 79);
   for (const operation of supportedWrites) {
     const option = canvasOption(options, operation.toolName);
     assert.equal(option.availability, "edit", operation.toolName);

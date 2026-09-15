@@ -140,7 +140,7 @@ test("the section routes that change the section itself declare a course-ownersh
   assert.equal(canvasSemanticCourseTarget(operation("canvas_get_section_information_sections")), undefined);
 });
 
-test("every section route that carries a learner's own record stays held with its own reason", () => {
+test("every section route that carries a learner's own record without its course stays held with its own reason", () => {
   const sectionWrites = CATALOG.operations.filter((entry) => entry.readOnly === false && entry.path.startsWith("/v1/sections/"));
   assert.equal(sectionWrites.length, 21);
   const grouped = new Map();
@@ -175,16 +175,15 @@ test("every section route that carries a learner's own record stays held with it
   ]);
   assert.equal(
     canvasAdmissionReason({ state: "held", reason: "learner_scope_requires_separate_authority" }),
-    "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas.",
+    "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course.",
   );
-  // The learner-object helper recognizes object routes. The full admission rule also holds the
-  // course-nested forms before the normal course-path admission branch.
+  // The learner-object helper recognizes object routes. A section route does not name its course
+  // and stays held; the same record reached through its course is admitted as course work.
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_grade_or_comment_on_submission_sections")), true);
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_edit_section")), false);
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_grade_or_comment_on_submission_courses")), false);
   assert.deepEqual(canvasOperationAdmission(operation("canvas_grade_or_comment_on_submission_courses")).write, {
-    state: "held",
-    reason: "learner_scope_requires_separate_authority",
+    state: "admitted",
   });
 });
 

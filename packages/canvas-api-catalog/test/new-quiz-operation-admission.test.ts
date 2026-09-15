@@ -34,7 +34,7 @@ describe("New Quiz write admission", () => {
     ]);
   });
 
-  it("holds learner-specific accommodations and admits Progress-bound report creation", () => {
+  it("admits learner-specific accommodations through their course and Progress-bound report creation", () => {
     const accommodations = [
       "canvas_set_course_level_accommodations",
       "canvas_set_quiz_level_accommodations",
@@ -44,9 +44,9 @@ describe("New Quiz write admission", () => {
       expect(operation, name).toBeTruthy();
       const admission = canvasOperationAdmission(operation!);
       expect(admission.courseTarget, name).toEqual({ kind: "course_path", argument: "course_id" });
-      expect(admission.write, name).toEqual({ state: "held", reason: "learner_scope_requires_separate_authority" });
+      expect(admission.write, name).toEqual({ state: "admitted" });
       expect(canvasReadbackAssessment(catalog.operations, operation!, admission), name)
-        .toEqual({ state: "not_applicable", reason: "write_held" });
+        .toEqual({ state: "structurally_exact" });
     }
 
     const report = catalog.operations.find((candidate) => candidate.toolName

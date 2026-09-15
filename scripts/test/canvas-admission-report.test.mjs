@@ -113,7 +113,7 @@ const provenClaims = [
   },
   {
     label: "readback route tiers",
-    pattern: /: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, and (\d+) uses the named bulk-assignment-date readback/,
+    pattern: /: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, and (\d+) use the named bulk-assignment-date and enrollment-reactivation readbacks/,
     expected: [
       report.readback.routeTierCounts.exact,
       report.readback.routeTierCounts.created_child,
@@ -171,8 +171,13 @@ const provenClaims = [
 /** Every readback blocker in the generated report needs its own row in the gap table. */
 const BLOCKER_ROWS = Object.freeze({
   content_migration_update_has_no_cataloged_fields: "Content migration update has no cataloged fields",
+  course_delete_or_conclude_is_ambiguous: "Course delete or conclude is ambiguous",
+  discussion_or_conversation_content: "Discussion or conversation content",
   external_tool_update_has_no_cataloged_fields: "External tool update has no cataloged fields",
   favorite_list_is_effective_not_explicit_state: "Favorite list is effective, not explicit, state",
+  module_item_reader_mutates_progress: "Module item reader mutates progress",
+  module_progression_state_has_no_current_user_reader: "Module progression state has no current user reader",
+  student_grade_or_submission_state: "Student grade or submission state",
   summary_state_has_no_narrow_reader: "Summary state has no narrow reader",
 });
 

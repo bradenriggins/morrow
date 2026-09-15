@@ -73,15 +73,11 @@ test("Canvas writes with no same-resource read report an unavailable readback in
   assert.deepEqual(canvasOperationAdmission(ltiScore).write, { state: "held", reason: "lti_authorization_required" });
   assert.deepEqual(canvasReadbackAssessment(catalog.operations, ltiScore), { state: "not_applicable", reason: "write_held" });
 
+  // A course learner record is admitted through its course; a bulk grade change still has no
+  // same-resource read for every changed child, so it reports an unavailable readback.
   const learnerWrite = operation("canvas_grade_or_comment_on_multiple_submissions_courses_submissions");
-  assert.deepEqual(canvasOperationAdmission(learnerWrite).write, {
-    state: "held",
-    reason: "learner_scope_requires_separate_authority",
-  });
-  assert.deepEqual(canvasReadbackAssessment(catalog.operations, learnerWrite), {
-    state: "not_applicable",
-    reason: "write_held",
-  });
+  assert.deepEqual(canvasOperationAdmission(learnerWrite).write, { state: "admitted" });
+  assert.notEqual(canvasReadbackAssessment(catalog.operations, learnerWrite).state, "structurally_exact");
 });
 
 test("a read route outside the written resource is refused even when a read exists", () => {

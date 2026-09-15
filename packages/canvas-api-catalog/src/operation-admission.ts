@@ -274,7 +274,10 @@ export function canvasOperationAdmission(operation: CanvasApiOperation): CanvasO
   if (operation.path === "/v1/courses/{course_id}/assignments/{assignment_id}/duplicate") {
     return { courseTarget: target, write: { state: "held", reason: "duplicate_assignment_exact_readback_unavailable" } };
   }
-  if (learnerRecordRoute(operation)) {
+  // A learner record reached through its course is course work the course Edit permission governs.
+  // Learner identifiers resolve from Morrow's learner tokens, results stay tokenized, and the write
+  // still needs an exact readback. Only a learner route that does not name its course stays held.
+  if (learnerRecordRoute(operation) && target.kind !== "course_path") {
     return { courseTarget: target, write: { state: "held", reason: "learner_scope_requires_separate_authority" } };
   }
   if (multiCourseRoute(operation)) {
@@ -381,7 +384,7 @@ export function canvasAdmissionReason(admission: CanvasWriteAdmission): string |
     return "Canvas can attach this group, file, folder, calendar item or outcome to any course, and Morrow cannot yet prove that this one belongs to the course you selected. Change it in Canvas, or ask for the same change from inside the course.";
   }
   if (admission.reason === "learner_scope_requires_separate_authority") {
-    return "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas.";
+    return "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course.";
   }
   if (admission.reason === "multi_course_authority_required") {
     return "This change can read from or change another Canvas course or account. Morrow only has permission for the course you selected, so it will not send it.";

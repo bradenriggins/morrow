@@ -22,7 +22,7 @@ quotes it.
 | Admitted, proved course file or folder | `PUT` and `DELETE /v1/files/{id}`, and `POST /v1/folders/{folder_id}/folders` | Nothing: the connector reads the file or folder, requires Canvas to name a course as its owner, requires the selected course's own complete list of files or folders to name it, freezes the saved version, and only then sends the change. A move is proved for the one destination folder it names. |
 | Admitted, proved course calendar | `POST /v1/calendar_events`, `PUT` and `DELETE /v1/calendar_events/{id}`, and `PUT /v1/appointment_groups/{id}` | Nothing for a new event: the request names the selected course's own calendar, and the event is read back from its own route afterwards. For an existing event or an appointment group, the connector reads the object first and requires Canvas to name that same calendar. A repeat rule, a duplicate count, a series choice and section-level times are refused before anything is sent, because each reaches events the readback cannot check. An appointment group that serves more than one course is refused outright with `multi_context_object_not_supported`: "This Canvas appointment group serves more than one course. Morrow changes one course at a time, so it changed nothing. Change it in Canvas, or use one that belongs to this course alone." |
 | `account_authority_required` | Any route that names an account, the whole Canvas instance, an LTI registration, or a developer key | "This change affects a whole Canvas account, not one course. Morrow does not yet have an account permission, so it will not send it." |
-| `learner_scope_requires_separate_authority` | A route that changes learner work or participation: submissions, grades, attempts, accommodations, enrollments, overrides, group membership, course pacing, learner conversations, messages, discussion posts and state, outcome rollups, or a deletion that removes learner records or access | "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas." |
+| `learner_scope_requires_separate_authority` | A route that changes learner work or participation without naming its course: section submissions and grades, quiz submission questions, group memberships, and appointment bookings. The same records reached through `/courses/{course_id}` are admitted as course work, with learner identifiers resolved from Morrow's learner tokens and exact readback still required | "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course." |
 | `multi_course_authority_required` | A course-path route whose request or effect can name another course or account: Blueprint pushes, course copies and migrations, external outcome imports and links, outcome-group deletion, course reset, or a broad course update that can move or conclude the course | "This change can read from or change another Canvas course or account. Morrow only has permission for the course you selected, so it will not send it." |
 | `lti_authorization_required` | Any route on Canvas's LTI service itself, under `/lti/`, that no earlier class holds: line items, scores, asset reports, EULA records, webhook subscriptions, and notice handlers | "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool." |
 | `multi_step_upload_requires_reviewed_transfer` | A `POST` that needs file bytes unavailable to the generic operation: the four course-scoped upload pre-flights and the Rubric CSV import | "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload." |
@@ -33,7 +33,7 @@ quotes it.
 
 `canvasOperationAdmission` reads these classes in order, from the most specific fact about the route
 to the least: account authority, then a route that needs a reviewed file transfer,
-then one person's own record, then a multi-course effect, then an LTI service route, then a direct course path, then a personal bookmark or nickname, then an object Canvas can attach
+then one person's own record reached without its course, then a multi-course effect, then an LTI service route, then a direct course path, then a personal bookmark or nickname, then an object Canvas can attach
 to any course, then a request with no readable effect, and last the plain absence of a course. The
 order matters where two facts are true of one route: a group membership route names both a person's
 record and a group, and the person's record is what the change actually touches. The upload class is
@@ -155,9 +155,10 @@ contract for future work and is live-unverified.
   readback through the same reading. A route whose effect reaches a second course, such as a section
   cross-list or a file copy into another folder, needs proof for both objects and stays held until
   that exists.
-- **`learner_scope_requires_separate_authority`.** Its own permission, granted separately from the
-  course Edit permission, plus the affected-subject and privacy rules a learner record needs. A course
-  binding does not carry it. Nothing in this class is planned for admission on the course permission.
+- **`learner_scope_requires_separate_authority`.** A course-ownership reading for the section, group,
+  quiz submission, or appointment group the route names, exactly as the section and group content
+  routes already work. Course learner records are already admitted through their course under the
+  course Edit permission, with learner tokens resolved at dispatch and results tokenized at egress.
 - **`multi_course_authority_required`.** Exact authority for every source, destination, associated
   course, or account the request can reach. The plan must freeze the complete affected set before
   approval, and each target needs its own post-write reading. A selected-course binding cannot grant

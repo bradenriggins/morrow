@@ -195,7 +195,7 @@ test("every group route about who is in a group stays held with the learner reas
   ]);
   assert.equal(
     canvasAdmissionReason({ state: "held", reason: "learner_scope_requires_separate_authority" }),
-    "Morrow does not change a student's own record: their submitted work, a quiz attempt, a grade, an enrollment, who is in a group, or a booked time slot. Those need their own permission, so make that change in Canvas.",
+    "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course.",
   );
   // A group set can create groups and place students in them, so no group-set write is admitted,
   // and the group object itself has no declared reading yet.

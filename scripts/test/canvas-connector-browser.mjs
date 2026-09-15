@@ -1688,7 +1688,7 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 112);
+  assert.equal(expectedCanvasEditActions.length, 145);
   const expectedCanvasReviewActions = [...reviewOnlyAdmittedCanvasWrites]
     .map((toolName) => `action:canvas:${toolName}`)
     .sort();
@@ -1730,7 +1730,7 @@ try {
     })
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(nonexactCanvasActions.length, 28);
+  assert.equal(nonexactCanvasActions.length, 79);
   assert.equal(nonexactCanvasActions.some((id) => fullEditOptions.options.some((option) => option.id === id)), false);
   assert.equal(fullEditOptions.options.some((option) => option.availability === "edit" && option.verification !== "checked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.verification === "unchecked"), false);
@@ -2439,7 +2439,7 @@ try {
   // carries the same sentence Morrow shows anywhere the hold appears.
   const groupMembership = await groupCall("canvas_create_membership", { group_id: "88", user_id: "99" }, "group-membership");
   assert.equal(groupMembership.ok, false, JSON.stringify(groupMembership));
-  assert.match(JSON.stringify(groupMembership), /Morrow does not change a student's own record/);
+  assert.match(JSON.stringify(groupMembership), /Morrow changes a student's record through the course that record belongs to/);
   assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/groups/88/memberships"), false);
   process.stderr.write("[browser-test] a group's own page is changed only after one current reading and the course's own list of groups prove the selected course owns that group\n");
 
@@ -2671,7 +2671,7 @@ try {
   ]) {
     const held = await calendarCall(toolName, argumentsValue, `${toolName}-held`);
     assert.equal(held.ok, false, JSON.stringify(held));
-    assert.match(JSON.stringify(held), /Morrow does not change a student's own record/);
+    assert.match(JSON.stringify(held), /Morrow changes a student's record through the course that record belongs to/);
   }
   assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/calendar_events/501/reservations"), false);
   assert.equal(canvas.requests().some((entry) => entry === "DELETE /api/v1/appointment_groups/701"), false);
@@ -2696,17 +2696,16 @@ try {
   assert.match(JSON.stringify(invalidBulkDateWrite), /canvas_bulk_assignment_dates_invalid/);
   assert.equal(canvas.bulkAssignmentDateWrites(), 1);
   assert.equal(canvas.requests().filter((entry) => entry === "PUT /api/v1/courses/42/assignments/bulk_update").length, bulkRequestsBeforeInvalid);
-  const heldEnrollmentReactivation = await runtime.call("canvas_re_activate_enrollment", {
+  const enrollmentReactivation = await runtime.call("canvas_re_activate_enrollment", {
     course_id: "42",
     id: "51",
     _morrow: { source_binding_id: binding.sourceBindingId, outer_grant: { ...grant, effect_receipt_id: "effect:reactivate-enrollment-browser-test" } },
   });
-  assert.equal(heldEnrollmentReactivation.ok, false, JSON.stringify(heldEnrollmentReactivation));
-  assert.equal(heldEnrollmentReactivation.resultState, "not_sent", JSON.stringify(heldEnrollmentReactivation));
-  assert.match(JSON.stringify(heldEnrollmentReactivation), /Morrow does not change a student's own record/);
-  assert.equal(canvas.enrollmentReactivationWrites(), 0);
-  assert.deepEqual(canvas.enrollment(), { id: "51", course_id: "42", user_id: "99", enrollment_state: "inactive" });
-  process.stderr.write("[browser-test] Canvas bulk AssignmentDate changes verify exact Progress evidence, while enrollment reactivation stays held before provider access\n");
+  assert.equal(enrollmentReactivation.ok, true, JSON.stringify(enrollmentReactivation));
+  assert.equal(enrollmentReactivation.result.verification.status, "verified", JSON.stringify(enrollmentReactivation));
+  assert.equal(canvas.enrollmentReactivationWrites(), 1);
+  assert.deepEqual(canvas.enrollment(), { id: "51", course_id: "42", user_id: "99", enrollment_state: "active" });
+  process.stderr.write("[browser-test] Canvas bulk AssignmentDate changes and a course enrollment reactivation both verify exact provider evidence\n");
   const wrongCourse = await runtime.call("canvas_show_page_courses", {
     course_id: "43",
     url_or_id: "lesson",
