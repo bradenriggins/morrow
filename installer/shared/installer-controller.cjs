@@ -19,7 +19,8 @@ const {
   parseChromeVersion,
   prepareBridgeUpdate,
   pruneBridgeRollbackCopies,
-  readReleaseManifest
+  readReleaseManifest,
+  rollbackPendingBridgeUpdate
 } = require("./bridge-updates.cjs");
 const { completeBridgeUpdate, stageBridgeSwap } = require("./bridge-coordination.cjs");
 const {
@@ -1244,7 +1245,7 @@ class InstallerController {
       const releaseVersion = parseChromeVersion(release.version);
       if (!installedVersion || !releaseVersion) return false;
       const comparison = compareChromeVersions(releaseVersion, installedVersion);
-      return comparison > 0 || (comparison === 0 && release.releaseManifestSha256 !== record.releaseManifestSha256);
+      return comparison > 0;
     } catch {
       return false;
     }
@@ -1276,7 +1277,7 @@ class InstallerController {
     }
     const lease = await this.acquireRestartLease();
     if (lease?.status !== "granted" || typeof lease.leaseId !== "string" || this.restartLeases.get(lease.leaseId) !== monitor) {
-      throw new Error("Morrow Bridge update is not safe to start");
+      throw errorDetails("active_or_uncertain_operations");
     }
     this.bridgeLeaseId = lease.leaseId;
     return lease.leaseId;
@@ -1359,9 +1360,8 @@ class InstallerController {
       const comparison = compareChromeVersions(releaseVersion, installedVersion);
       const monitor = await this.bridgeMonitor();
       if (record.manualChromeReloadRequired) return this.completePendingBridgeUpdate(record, monitor);
-      if (comparison < 0) return record;
+      if (comparison <= 0) return record;
       const status = await this.currentBridgeStatus(record, monitor);
-      if (comparison === 0 && record.releaseManifestSha256 === release.releaseManifestSha256) return record;
       if (status.installType !== "development") return record;
       return this.stageBridgeUpdate(record, release, monitor);
     })();
@@ -2137,10 +2137,32 @@ class InstallerController {
     const packagedVersion = parseChromeVersion(packaged.version);
     const packagedIsNewer = Boolean(installedVersion && packagedVersion
       && compareChromeVersions(packagedVersion, installedVersion) > 0);
-    const sameVersionChanged = Boolean(installedVersion && packagedVersion
-      && compareChromeVersions(packagedVersion, installedVersion) === 0
-      && installed.releaseManifestSha256 !== packaged.releaseManifestSha256);
-    if (installed?.installed !== true || packagedIsNewer || sameVersionChanged) {
+    if (installed?.manualChromeReloadRequired === true) {
+      const monitor = await this.bridgeMonitor();
+      await this.acquireBridgeLease(monitor);
+      try {
+        const restored = await rollbackPendingBridgeUpdate({
+          stateDirectory: this.paths.state,
+          bridgeDirectory: this.paths.bridgeDirectory,
+          expectedExtensionId: BRIDGE_EXTENSION_ID
+        });
+        const resumed = await monitor.bridgeMaintenance({
+          action: "resume",
+          quiesceEpoch: restored.quiesceEpoch,
+          fileLayerRestored: true
+        });
+        if (resumed?.resumed !== true || resumed.extensionId !== restored.extensionId
+          || resumed.manifestVersion !== restored.version || resumed.quiesceEpoch !== restored.quiesceEpoch) {
+          throw new Error("Morrow Bridge rollback resume is unconfirmed");
+        }
+      } finally {
+        await this.releaseBridgeLease();
+      }
+      this.bridgeInitialization = null;
+      this.bridgeInstallation = null;
+      return this.initializeBridgeAtStartup();
+    }
+    if (installed?.installed !== true || packagedIsNewer) {
       await this.discardUnusableBridgeInstallation();
       return this.initializeBridgeAtStartup();
     }
@@ -2685,6 +2707,33 @@ class InstallerController {
     }
   }
 
+  async assistantConfigurationPresent(assistant, entry, materials) {
+    if (!entry || typeof entry.target !== "string" || typeof entry.sha256 !== "string") return false;
+    const content = await readConfigurationFile(entry.target);
+    if (content === null) return false;
+    if (fileHash(content) === entry.sha256) return true;
+    const located = configuredProject(assistant, this.home, entry.target);
+    if (!located || !materials) return false;
+    try {
+      const module = await this.clientConfigModule();
+      if (typeof module.morrowClientConfigurationStatus !== "function") return false;
+      const status = module.morrowClientConfigurationStatus({
+        client: assistant.id,
+        scope: assistant.needsProject ? "project" : "user",
+        ...(located.project ? { projectRoot: located.project } : {}),
+        repositoryRoot: this.paths.appRoot,
+        upstreamConfigPath: this.paths.upstreams,
+        nodeCommand: this.paths.node,
+        serverEntryPath: this.paths.server,
+        workspaceRoot: materials,
+        serverName: MORROW_SERVER_NAME
+      });
+      return status?.path === entry.target && status.configured === true;
+    } catch {
+      return false;
+    }
+  }
+
   /**
    * Everything setup shows. `recheckAssistants` is the person selecting Check
    * status: it drops the cached detection answers so this read looks at the
@@ -2708,9 +2757,7 @@ class InstallerController {
       const claude = assistant.id === "claude-desktop" && entry
         ? await inspectClaudeDesktopConnection(entry, { platform: this.platform, homeDirectory: this.home })
         : null;
-      const present = claude ? claude.installed === true : entry && typeof entry.target === "string" && typeof entry.sha256 === "string"
-        ? await readConfigurationFile(entry.target).then((value) => value !== null && fileHash(value) === entry.sha256)
-        : false;
+      const present = claude ? claude.installed === true : await this.assistantConfigurationPresent(assistant, entry, materials);
       return {
         ...assistant,
         detected: assistant.id === "claude-desktop" ? true : await this.detectedAssistant(assistant),

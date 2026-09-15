@@ -25,6 +25,8 @@ const LOCK_SCHEMA = "morrow.bridge.update-lock.v1";
 const LOCK_DATABASE_FILE = "bridge-update-lock.sqlite3";
 const UPDATE_TRANSACTION_SCHEMA = "morrow.bridge-update-transaction.v1";
 const UPDATE_TRANSACTION_FILE = "bridge-update-transaction.json";
+const ROLLBACK_TRANSACTION_SCHEMA = "morrow.bridge-rollback-transaction.v1";
+const ROLLBACK_TRANSACTION_FILE = "bridge-rollback-transaction.json";
 const LOCK_STALE_MS = 10 * 60 * 1000;
 const INSTALLATION_RECORD_VERSION = 1;
 const ACTIVE_FOLDER_MARKER = "morrow-bridge-active-folder.json";
@@ -475,6 +477,7 @@ async function lock(stateDirectory, callback) {
   const ownership = await acquireDatabaseLock(stateDirectory);
   try {
     await recoverBridgeUpdateTransaction(stateDirectory);
+    await recoverBridgeRollbackTransaction(stateDirectory);
     return await callback();
   }
   finally {
@@ -508,14 +511,20 @@ function recordFromRelease(bridgeDirectory, release, activeFolderChallenge = nul
   };
 }
 
-function inspectPendingUpdate(value, extension, version, stateDirectory) {
+function inspectPendingUpdate(value, extension, version, bridgeDirectory, stateDirectory) {
   if (value === null || value === undefined) return null;
-  if (!objectKeys(value, ["backupDirectory", "fromVersion", "quiesceEpoch"])
+  const legacy = objectKeys(value, ["backupDirectory", "fromVersion", "quiesceEpoch"]);
+  const current = objectKeys(value, ["backupDirectory", "fromVersion", "previousRecord", "quiesceEpoch"]);
+  if ((!legacy && !current)
     || !parseChromeVersion(value.fromVersion) || !identifier(value.quiesceEpoch, 16, 256)
     || typeof value.backupDirectory !== "string" || !path.isAbsolute(value.backupDirectory)) fail("bridge_installation_record_invalid");
   const backup = path.resolve(value.backupDirectory);
   if (!under(path.join(stateDirectory, "bridge-backups"), backup)) fail("bridge_installation_record_invalid");
-  return Object.freeze({ backupDirectory: backup, fromVersion: value.fromVersion, quiesceEpoch: value.quiesceEpoch, extensionId: extension, extensionVersion: version });
+  const previousRecord = current ? inspectInstallationRecord(value.previousRecord, stateDirectory) : null;
+  if (previousRecord && (previousRecord.pendingUpdate !== null
+    || previousRecord.extensionId !== extension || previousRecord.extensionVersion !== value.fromVersion
+    || previousRecord.bridgeDirectory !== bridgeDirectory)) fail("bridge_installation_record_invalid");
+  return Object.freeze({ backupDirectory: backup, fromVersion: value.fromVersion, quiesceEpoch: value.quiesceEpoch, previousRecord, extensionId: extension, extensionVersion: version });
 }
 
 function inspectInstallationRecord(value, stateDirectory) {
@@ -529,7 +538,7 @@ function inspectInstallationRecord(value, stateDirectory) {
   }
   const files = inspectFiles(value.files, "bridge_installation_record_invalid");
   const challenge = inspectChallenge(value.activeFolderChallenge, value.extensionVersion, value.extensionId);
-  const pendingUpdate = inspectPendingUpdate(value.pendingUpdate, value.extensionId, value.extensionVersion, stateDirectory);
+  const pendingUpdate = inspectPendingUpdate(value.pendingUpdate, value.extensionId, value.extensionVersion, path.resolve(value.bridgeDirectory), stateDirectory);
   return Object.freeze({
     ...value,
     bridgeDirectory: path.resolve(value.bridgeDirectory),
@@ -600,7 +609,10 @@ function installationRecordDocument(record) {
     pendingUpdate: record.pendingUpdate ? {
       backupDirectory: record.pendingUpdate.backupDirectory,
       fromVersion: record.pendingUpdate.fromVersion,
-      quiesceEpoch: record.pendingUpdate.quiesceEpoch
+      quiesceEpoch: record.pendingUpdate.quiesceEpoch,
+      ...(record.pendingUpdate.previousRecord
+        ? { previousRecord: installationRecordDocument(record.pendingUpdate.previousRecord) }
+        : {})
     } : null
   };
 }
@@ -636,7 +648,7 @@ function inspectBridgeUpdateTransaction(value, stateDirectory) {
     || nextRecord.pendingUpdate.fromVersion !== previousRecord.extensionVersion
     || nextRecord.pendingUpdate.quiesceEpoch.length < 16
     || nextRecord.releaseManifestSha256 === previousRecord.releaseManifestSha256
-    || compareChromeVersions(nextVersion, previousVersion) < 0
+    || compareChromeVersions(nextVersion, previousVersion) <= 0
     || !sameStrings(nextRecord.permissions, previousRecord.permissions)
     || !sameStrings(nextRecord.hostPermissions, previousRecord.hostPermissions)
     || !sameStrings(nextRecord.optionalHostPermissions, previousRecord.optionalHostPermissions)
@@ -697,6 +709,80 @@ async function removeBridgeUpdateTransaction(stateDirectory) {
   await fs.rm(file, { force: true });
   await syncDirectory(stateDirectory);
   if (await exists(file)) fail("bridge_update_transaction_invalid");
+}
+
+function rollbackTransactionPath(stateDirectory) {
+  return path.join(stateDirectory, ROLLBACK_TRANSACTION_FILE);
+}
+
+function inspectBridgeRollbackTransaction(value, stateDirectory) {
+  if (!objectKeys(value, ["createdAt", "currentBackupDirectory", "currentRecord", "previousBackupDirectory", "previousRecord", "schema", "transactionId"])
+    || value.schema !== ROLLBACK_TRANSACTION_SCHEMA || !identifier(value.transactionId, 36, 36)
+    || typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))
+    || typeof value.currentBackupDirectory !== "string" || !path.isAbsolute(value.currentBackupDirectory)
+    || typeof value.previousBackupDirectory !== "string" || !path.isAbsolute(value.previousBackupDirectory)) {
+    fail("bridge_rollback_transaction_invalid");
+  }
+  const currentRecord = inspectInstallationRecord(value.currentRecord, stateDirectory);
+  const previousRecord = inspectInstallationRecord(value.previousRecord, stateDirectory);
+  const currentBackupDirectory = path.resolve(value.currentBackupDirectory);
+  const previousBackupDirectory = path.resolve(value.previousBackupDirectory);
+  const backupRoot = path.join(stateDirectory, "bridge-backups");
+  if (!currentRecord.pendingUpdate || previousRecord.pendingUpdate !== null
+    || !currentRecord.pendingUpdate.previousRecord
+    || !sameInstallationRecord(currentRecord.pendingUpdate.previousRecord, previousRecord)
+    || currentRecord.pendingUpdate.backupDirectory !== previousBackupDirectory
+    || currentRecord.bridgeDirectory !== previousRecord.bridgeDirectory
+    || currentRecord.extensionId !== previousRecord.extensionId
+    || !under(backupRoot, currentBackupDirectory) || currentBackupDirectory === backupRoot
+    || !under(backupRoot, previousBackupDirectory) || previousBackupDirectory === backupRoot
+    || currentBackupDirectory === previousBackupDirectory) fail("bridge_rollback_transaction_invalid");
+  return Object.freeze({
+    schema: ROLLBACK_TRANSACTION_SCHEMA,
+    transactionId: value.transactionId,
+    createdAt: value.createdAt,
+    currentBackupDirectory,
+    previousBackupDirectory,
+    currentRecord,
+    previousRecord
+  });
+}
+
+async function loadBridgeRollbackTransaction(stateDirectory) {
+  const file = rollbackTransactionPath(stateDirectory);
+  if (!await exists(file)) return null;
+  await regularFile(file, "bridge_rollback_transaction_invalid");
+  let value;
+  try { value = parseStrictJson(await fs.readFile(file), "Bridge rollback transaction"); } catch { fail("bridge_rollback_transaction_invalid"); }
+  return inspectBridgeRollbackTransaction(value, stateDirectory);
+}
+
+async function writeBridgeRollbackTransaction(stateDirectory, transaction) {
+  const destination = rollbackTransactionPath(stateDirectory);
+  if (await exists(destination) || await exists(updateTransactionPath(stateDirectory))) fail("bridge_update_confirmation_pending");
+  const temporary = `${destination}.tmp-${crypto.randomUUID()}`;
+  let handle = null;
+  try {
+    handle = await fs.open(temporary, "wx", 0o600);
+    await handle.writeFile(`${JSON.stringify(transaction)}\n`);
+    await handle.sync();
+    await handle.close();
+    handle = null;
+    await fs.rename(temporary, destination);
+    if (process.platform !== "win32") await fs.chmod(destination, 0o600);
+    await syncDirectory(stateDirectory);
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await fs.rm(temporary, { force: true }).catch(() => undefined);
+    throw error;
+  }
+}
+
+async function removeBridgeRollbackTransaction(stateDirectory) {
+  const file = rollbackTransactionPath(stateDirectory);
+  await fs.rm(file, { force: true });
+  await syncDirectory(stateDirectory);
+  if (await exists(file)) fail("bridge_rollback_transaction_invalid");
 }
 
 function releaseFromRecord(record) {
@@ -798,6 +884,65 @@ async function recoverBridgeUpdateTransaction(stateDirectory) {
   }
   await removeBridgeUpdateTransaction(stateDirectory);
   return transaction.nextRecord;
+}
+
+/** Restores a pending update's exact prior bytes and record after any crash cut point. */
+async function recoverBridgeRollbackTransaction(stateDirectory) {
+  const transaction = await loadBridgeRollbackTransaction(stateDirectory);
+  if (!transaction) return null;
+  const destination = transaction.currentRecord.bridgeDirectory;
+  let current = await loadRecord(stateDirectory);
+  if (!current) fail("bridge_rollback_transaction_invalid");
+
+  let destinationExists = await exists(destination);
+  let previousBackupExists = await exists(transaction.previousBackupDirectory);
+  let currentBackupExists = await exists(transaction.currentBackupDirectory);
+  let destinationIsCurrent = destinationExists && await recordMatchesDirectory(transaction.currentRecord, destination);
+  let destinationIsPrevious = destinationExists && await recordMatchesDirectory(transaction.previousRecord, destination);
+  let previousBackupIsPrevious = previousBackupExists
+    && await recordMatchesDirectory(transaction.previousRecord, transaction.previousBackupDirectory);
+  let currentBackupIsCurrent = currentBackupExists
+    && await recordMatchesDirectory(transaction.currentRecord, transaction.currentBackupDirectory);
+
+  if (sameInstallationRecord(current, transaction.currentRecord)
+    && destinationIsCurrent && previousBackupIsPrevious && !currentBackupExists) {
+    await fs.rename(destination, transaction.currentBackupDirectory);
+    await syncDirectory(path.dirname(destination));
+  }
+
+  destinationExists = await exists(destination);
+  previousBackupExists = await exists(transaction.previousBackupDirectory);
+  currentBackupExists = await exists(transaction.currentBackupDirectory);
+  previousBackupIsPrevious = previousBackupExists
+    && await recordMatchesDirectory(transaction.previousRecord, transaction.previousBackupDirectory);
+  currentBackupIsCurrent = currentBackupExists
+    && await recordMatchesDirectory(transaction.currentRecord, transaction.currentBackupDirectory);
+  if (sameInstallationRecord(current, transaction.currentRecord)
+    && !destinationExists && previousBackupIsPrevious && currentBackupIsCurrent) {
+    await fs.rename(transaction.previousBackupDirectory, destination);
+    await syncDirectory(path.dirname(destination));
+  }
+
+  destinationExists = await exists(destination);
+  previousBackupExists = await exists(transaction.previousBackupDirectory);
+  currentBackupExists = await exists(transaction.currentBackupDirectory);
+  destinationIsPrevious = destinationExists && await recordMatchesDirectory(transaction.previousRecord, destination);
+  currentBackupIsCurrent = currentBackupExists
+    && await recordMatchesDirectory(transaction.currentRecord, transaction.currentBackupDirectory);
+  if (sameInstallationRecord(current, transaction.currentRecord)
+    && destinationIsPrevious && !previousBackupExists && currentBackupIsCurrent) {
+    await writeRecord(stateDirectory, installationRecordDocument(transaction.previousRecord));
+    current = await loadRecord(stateDirectory);
+  }
+
+  if (!sameInstallationRecord(current, transaction.previousRecord)
+    || !await recordMatchesDirectory(transaction.previousRecord, destination)
+    || await exists(transaction.previousBackupDirectory)
+    || !await recordMatchesDirectory(transaction.currentRecord, transaction.currentBackupDirectory)) {
+    fail("bridge_rollback_transaction_invalid");
+  }
+  await removeBridgeRollbackTransaction(stateDirectory);
+  return Object.freeze({ record: transaction.previousRecord, discardedDirectory: transaction.currentBackupDirectory });
 }
 
 function challengeDocument(release, challenge) {
@@ -979,8 +1124,7 @@ async function prepareBridgeUpdate(options = {}) {
     await verifyInstalled(record, destination, stateDirectory);
     if (record.pendingUpdate) fail("bridge_update_confirmation_pending");
     const versionComparison = compareChromeVersions(parseChromeVersion(release.version), parseChromeVersion(record.extensionVersion));
-    if (release.extensionId !== record.extensionId || versionComparison < 0
-      || (versionComparison === 0 && release.releaseManifestSha256 === record.releaseManifestSha256)) fail("bridge_update_not_newer");
+    if (release.extensionId !== record.extensionId || versionComparison <= 0) fail("bridge_update_not_newer");
     if (!sameStrings(release.permissions, record.permissions) || !sameStrings(release.hostPermissions, record.hostPermissions)
       || !sameStrings(release.optionalHostPermissions, record.optionalHostPermissions)) fail("bridge_update_permission_changed");
     if (!record.activeFolderChallenge) fail("bridge_active_folder_unconfirmed");
@@ -1002,7 +1146,8 @@ async function prepareBridgeUpdate(options = {}) {
         const nextRecord = recordFromRelease(destination.path, release, nextChallenge, {
           backupDirectory: backup,
           fromVersion: record.extensionVersion,
-          quiesceEpoch: quiesced.quiesceEpoch
+          quiesceEpoch: quiesced.quiesceEpoch,
+          previousRecord: installationRecordDocument(record)
         });
         const transaction = {
           schema: UPDATE_TRANSACTION_SCHEMA,
@@ -1091,6 +1236,48 @@ async function confirmBridgeUpdate(options = {}) {
   });
 }
 
+async function rollbackPendingBridgeUpdate(options = {}) {
+  const stateDirectory = await ensurePrivateDirectory(options.stateDirectory, "bridge_state_directory_invalid");
+  const destination = await stableDestination(options.bridgeDirectory);
+  return lock(stateDirectory, async () => {
+    const record = await loadRecord(stateDirectory);
+    if (!record?.pendingUpdate) fail("bridge_update_confirmation_missing");
+    if (!record.pendingUpdate.previousRecord) fail("bridge_rollback_record_missing");
+    if (options.expectedExtensionId !== undefined && record.extensionId !== options.expectedExtensionId) fail("bridge_extension_identity_changed");
+    await verifyInstalled(record, destination, stateDirectory);
+    const previous = record.pendingUpdate.previousRecord;
+    const previousBackup = await lstatDirectory(record.pendingUpdate.backupDirectory, "bridge_rollback_missing");
+    if (previousBackup !== record.pendingUpdate.backupDirectory
+      || !await recordMatchesDirectory(previous, previousBackup)) fail("bridge_rollback_missing");
+    const transactionId = crypto.randomUUID();
+    const currentBackup = path.join(stateDirectory, "bridge-backups", `${record.extensionVersion}-failed-${transactionId}`);
+    const transaction = {
+      schema: ROLLBACK_TRANSACTION_SCHEMA,
+      transactionId,
+      createdAt: new Date().toISOString(),
+      currentBackupDirectory: currentBackup,
+      previousBackupDirectory: previousBackup,
+      currentRecord: installationRecordDocument(record),
+      previousRecord: installationRecordDocument(previous)
+    };
+    await writeBridgeRollbackTransaction(stateDirectory, transaction);
+    let restored;
+    try {
+      restored = await recoverBridgeRollbackTransaction(stateDirectory);
+    } catch {
+      fail("bridge_rollback_recovery_required");
+    }
+    const removed = await removeRollbackCopy(restored.discardedDirectory);
+    return Object.freeze({
+      rolledBack: true,
+      extensionId: previous.extensionId,
+      version: previous.extensionVersion,
+      quiesceEpoch: record.pendingUpdate.quiesceEpoch,
+      failedReleaseCopy: removed ? "removed" : "rollback_copy_retained"
+    });
+  });
+}
+
 // Startup cleanup for rollback copies an interrupted update left behind. The
 // copy the current record still references is never removed.
 async function pruneBridgeRollbackCopies(options = {}) {
@@ -1135,5 +1322,6 @@ module.exports = {
   parseChromeVersion,
   prepareBridgeUpdate,
   pruneBridgeRollbackCopies,
-  readReleaseManifest
+  readReleaseManifest,
+  rollbackPendingBridgeUpdate
 };

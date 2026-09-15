@@ -5,12 +5,13 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "n
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deterministicZip, stableJson } from "./lib/deterministic-archive.mjs";
-import { captureBridgeRelease } from "./package-mcp-bundle.mjs";
+import { bridgeReleaseManifest, captureBridgeRelease } from "./package-mcp-bundle.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const extensionRoot = resolve(root, "connector/extension");
 const outputRoot = resolve(root, "artifacts/connector");
 const receiptPath = resolve(outputRoot, "receipt.json");
+const releaseLedgerPath = resolve(root, "connector/release-ledger.json");
 
 function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
@@ -23,6 +24,15 @@ function extensionId(publicKey) {
 
 const bridge = captureBridgeRelease(extensionRoot);
 const manifest = bridge.extensionManifest;
+const sealedRelease = bridgeReleaseManifest(extensionRoot);
+const sealedReleaseSha256 = sha256(`${JSON.stringify(sealedRelease, null, 2)}\n`);
+const releaseLedger = JSON.parse(readFileSync(releaseLedgerPath, "utf8"));
+if (releaseLedger?.schema !== "morrow.bridge-release-ledger.v1" || !Array.isArray(releaseLedger.releases)
+  || releaseLedger.releases.length === 0) throw new Error("Morrow Bridge release ledger is invalid");
+const currentRelease = releaseLedger.releases.at(-1);
+if (currentRelease?.version !== manifest.version || currentRelease?.releaseManifestSha256 !== sealedReleaseSha256) {
+  throw new Error("Morrow Bridge source changed without a new sealed release ledger entry");
+}
 const archivePath = resolve(outputRoot, `morrow-canvas-connector-v${manifest.version}.zip`);
 const plannerPath = resolve(extensionRoot, "generated/canvas-readback-plan.js");
 const builtPlannerPath = resolve(root, "packages/canvas-api-catalog/dist/readback-plan.js");

@@ -19,7 +19,8 @@ const {
   issueBridgeActiveFolderChallenge,
   prepareBridgeUpdate,
   pruneBridgeRollbackCopies,
-  readReleaseManifest
+  readReleaseManifest,
+  rollbackPendingBridgeUpdate
 } = require("../shared/bridge-updates.cjs");
 
 const extensionKey = JSON.parse(require("node:fs").readFileSync(path.join(__dirname, "../../connector/extension/manifest.json"), "utf8")).key;
@@ -322,42 +323,46 @@ test("a newer unpacked Bridge is staged before quiescence, swaps once, and keeps
   await assertBridgeError(() => confirmBridgeUpdate({ stateDirectory, bridgeDirectory, expectedExtensionId: extensionId, extensionReadback }), "bridge_update_confirmation_missing");
 });
 
-test("changed sealed Bridge bytes at the same Chrome version use the full quiesced swap", async (t) => {
+test("a pending Bridge update rolls back to its exact retained record and bytes", async (t) => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-rollback-"));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const stateDirectory = path.join(root, "State");
+  const bridgeDirectory = path.join(root, "Bridge");
+  const original = await fixture(root, "1.0.2");
+  const initial = await initializeBridgeDirectory({ ...original, stateDirectory, bridgeDirectory, initialChallenge: challenge("rollback-original") });
+  const originalRecord = await record(stateDirectory);
+  const updated = await stageUpdate(root, stateDirectory, bridgeDirectory, initial.activeFolderChallenge, "1.0.2", "1.0.3");
+
+  const restored = await rollbackPendingBridgeUpdate({ stateDirectory, bridgeDirectory, expectedExtensionId: extensionId });
+  assert.equal(restored.rolledBack, true);
+  assert.equal(restored.version, "1.0.2");
+  assert.equal(restored.quiesceEpoch, "epoch-for-the-1.0.2-worker");
+  assert.equal(restored.failedReleaseCopy, "removed");
+  assert.deepEqual(await record(stateDirectory), originalRecord);
+  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\n');
+  assert.equal(await present(updated.backupDirectory), false);
+});
+
+test("changed sealed Bridge bytes at the same Chrome version are refused before quiescence", async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "morrow-bridge-same-version-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
   const stateDirectory = path.join(root, "State");
   const bridgeDirectory = path.join(root, "Bridge");
   const original = await fixture(root, "1.0.2");
   const initial = await initializeBridgeDirectory({ ...original, stateDirectory, bridgeDirectory, initialChallenge: challenge("same-original") });
-  const originalRecord = await record(stateDirectory);
-
-  const updated = await stageUpdate(
-    root,
+  let quiescenceRequests = 0;
+  const changed = await fixture(root, "1.0.2", { workerSource: 'export const version = "1.0.2";\nexport const releaseRevision = 2;\n' });
+  await assertBridgeError(() => prepareBridgeUpdate({
+    ...changed,
     stateDirectory,
     bridgeDirectory,
-    initial.activeFolderChallenge,
-    "1.0.2",
-    "1.0.2",
-    { workerSource: 'export const version = "1.0.2";\nexport const releaseRevision = 2;\n' }
-  );
-  assert.equal(updated.previousVersion, "1.0.2");
-  assert.equal(updated.version, "1.0.2");
-  assert.equal(updated.manualChromeReloadRequired, true);
-  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\nexport const releaseRevision = 2;\n');
-  assert.equal(await fs.readFile(path.join(updated.backupDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\n');
-  const pending = await record(stateDirectory);
-  assert.notEqual(pending.releaseManifestSha256, originalRecord.releaseManifestSha256);
-
-  const confirmed = await confirmBridgeUpdate({
-    stateDirectory,
-    bridgeDirectory,
-    expectedExtensionId: extensionId,
-    extensionReadback: readback(pending.activeFolderChallenge)
-  });
-  assert.equal(confirmed.version, "1.0.2");
-  assert.equal(confirmed.confirmed, true);
+    nextChallenge: challenge("same-next"),
+    requestQuiescence: async () => { quiescenceRequests += 1; },
+    resumeQuiescence: async () => null
+  }), "bridge_update_not_newer");
+  assert.equal(quiescenceRequests, 0);
+  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.2";\n');
   assert.equal((await bridgeInstallationStatus({ stateDirectory, bridgeDirectory })).manualChromeReloadRequired, false);
-  assert.equal(await present(updated.backupDirectory), false);
 });
 
 test("startup converges every durable Bridge swap cut point and retains the rollback", async (t) => {

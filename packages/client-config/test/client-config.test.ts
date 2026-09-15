@@ -12,6 +12,7 @@ import {
   buildLocalCanvasConfig,
   installMorrowClient,
   MorrowClientConfigRefusal,
+  morrowClientConfigurationStatus,
   morrowClientConfigNotes,
   morrowClientConfigPath,
   restrictToCurrentAccount,
@@ -495,6 +496,18 @@ describe("project installation and hermetic parity", () => {
       await writeFile(codexPath, equivalentQuoted, "utf8");
       expect(installMorrowClient(options)).toMatchObject({ changed: false });
       expect(await readFile(codexPath, "utf8")).toBe(equivalentQuoted);
+      const withLaterUnrelatedEdit = `model_reasoning_effort = "high"\n${equivalentQuoted}`;
+      await writeFile(codexPath, withLaterUnrelatedEdit, "utf8");
+      expect(morrowClientConfigurationStatus(options)).toEqual({
+        path: join(canonicalRepositoryRoot, ".codex", "config.toml"),
+        configured: true,
+        sha256: sha256(withLaterUnrelatedEdit),
+      });
+      await writeFile(codexPath, withLaterUnrelatedEdit.replace(canonicalOptions.nodeCommand, "/tmp/not-morrow"), "utf8");
+      expect(morrowClientConfigurationStatus(options)).toMatchObject({
+        path: join(canonicalRepositoryRoot, ".codex", "config.toml"),
+        configured: false,
+      });
 
       const unrelated = "model = \"gpt-6\"\n";
       await writeFile(codexPath, unrelated, "utf8");

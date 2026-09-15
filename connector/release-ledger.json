@@ -1,0 +1,13 @@
+{
+  "schema": "morrow.bridge-release-ledger.v1",
+  "releases": [
+    {
+      "version": "1.0.6",
+      "releaseManifestSha256": "a15cd72b5ffba220b5bc9bc9ce194897846ee1ac38bc9ce88bd1888e9c6e7d6a"
+    },
+    {
+      "version": "1.0.7",
+      "releaseManifestSha256": "7af28deed94c57c0ffefab52996fea9733d868b2096e406b94c31f05d9bb3f9c"
+    }
+  ]
+}

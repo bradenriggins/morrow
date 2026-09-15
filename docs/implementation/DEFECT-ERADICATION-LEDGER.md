@@ -440,6 +440,10 @@ Every row stays open until its evidence columns are added and its status becomes
 | 423 | P1 | R5 | Bridge reinjection failure blocks a working Canvas listener. | closure section 423 and extension lifecycle regression | IMPLEMENTED |
 | 424 | P1 | R6 | A ready Desktop hides a sealed Bridge update. | closure section 424 and installed v25 UI proof | IMPLEMENTED |
 | 425 | P1 | R6 | A connected unpacked Bridge hides loss or damage of its app-owned folder. | closure section 425 and Desktop lifecycle regression | IMPLEMENTED |
+| 426 | P1 | R7 | Changed Bridge bytes at the same Chrome version can stage but can never commit, leaving the Bridge quiesced. | closure section 426; Bridge lifecycle and package regressions | IMPLEMENTED |
+| 427 | P1 | R6 | A staged Bridge update retains old bytes but discards the exact prior installation receipt, so Repair cannot restore it safely. | closure section 427; transactional rollback regression | IMPLEMENTED |
+| 428 | P2 | R6 | An unrelated assistant configuration edit makes Desktop report Morrow as unconfigured. | closure section 428; client configuration and Desktop regressions | IMPLEMENTED |
+| 429 | P2 | R6 | A safe Bridge maintenance lease refusal is flattened into a repair instruction. | closure section 429; Desktop controller regression | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -1507,11 +1511,11 @@ Fresh discovery remains active after each repair wave. Every validated defect re
 - Focused verification: Bridge update source syntax passed. All 9 Bridge update and adversarial maintenance tests passed.
 - Remaining gate: the complete desktop and integrated repository checks must pass before this row becomes `VERIFIED`.
 
-### 114: release-bound same-version Bridge replacement
+### 114: release-bound same-version Bridge replacement (superseded by 426)
 
 - Root cause: every Bridge decision reduced release identity to Chrome's manifest version. Reconciliation returned early when the versions were equal, low-level update preparation rejected equality, and repair replaced only an older version. A desktop release could therefore carry verified changed extension bytes that no existing installation could receive.
-- Repair: installation status now carries the sealed release-manifest digest. Reconciliation treats equal version plus equal digest as unchanged, but sends equal version plus changed digest through the same quiesce, staged swap, rollback, new active-folder challenge, manual Chrome reload, exact readback, and confirmation transaction used by a newer version. Repair also compares the digest and rebuilds changed same-version bytes from the sealed payload.
-- Regression: a same-version service worker with a second release revision stages only after exact quiescence, keeps the original bytes as rollback, requires the new active-folder proof, confirms, and deletes the rollback. An identical same-version receipt remains refused. Controller reconciliation stages once only after its digest changes. Full repair replaces same-version bytes and records the new exact release digest and challenge.
+- Repair at the time: installation status gained the sealed release-manifest digest and accepted changed bytes at an equal version. Live testing later proved that Chrome's running worker cannot commit that transition because its maintenance protocol correctly requires a strictly newer manifest version. Row 426 replaces this invalid repair with one monotonic release contract.
+- Superseded regression: the original same-version test encoded the invalid behavior and has been replaced by row 426's refusal-before-quiescence and monotonic-release tests.
 - Focused verification: Bridge update and installer-controller syntax passed. All 10 Bridge update tests and all 41 installer-controller tests passed.
 - Remaining gate: the complete Chrome Bridge campaign, desktop suite, and integrated repository check must pass before this row becomes `VERIFIED`.
 
@@ -2638,12 +2642,12 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: unit, connector, and full MCP tests use string ids; the installed BT2 summary succeeded for course `89585` and quiz `334001`.
 - Status: `IMPLEMENTED`.
 
-### 402: Repair Morrow ignores changed Bridge bytes at the same version
+### 402: Repair Morrow ignores changed Bridge bytes at the same version (superseded by 426)
 
 - Verified defect: a repaired app could ship corrected Bridge files under the current extension version while Repair Morrow treated the installed folder as current and left the old bytes active.
 - Root cause: repair compared only parsed Chrome versions and did not compare the sealed release-manifest digest.
-- Repair: equal versions with different sealed release digests take the same exact app-owned replacement path as a newer release, with a new active-folder challenge and readback.
-- Regression: the installer suite replaces same-version changed bytes. The live v16 repair produced 98 exact file matches, the packaged release digest, a fresh active-folder challenge, and no pending update.
+- Repair at the time: equal versions with different sealed release digests took the replacement path. Live testing later proved that the running worker cannot establish a new-code commit at equal version. Row 426 replaces this behavior with strict monotonic versioning and a sealed release ledger.
+- Superseded regression: the live v16 replacement established file-layer equality but could not prove new worker code at the same Chrome version. Row 426 now requires a version increment before replacement.
 - Status: `IMPLEMENTED`.
 
 ### 403: failed Canvas reads lose the provider outcome
@@ -2834,7 +2838,39 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: the Desktop controller removes the verified folder while a paired runtime remains live and requires `repair_required`. A fresh process also records failed startup verification and refuses to treat the surviving extension connection as ready. First-run and confirmed-removal states retain their existing lifecycle.
 - Status: `IMPLEMENTED`.
 
-### Root-cause patterns for rows 331–425
+### 426: same-version Bridge update cannot commit
+
+- Verified defect: installed v26 staged changed `1.0.6` bytes, quiesced the running `1.0.6` worker, and asked for reload. The Bridge commit contract requires the loaded version to be strictly newer than the fenced version, so this transition could never complete.
+- Root cause: Desktop and file-layer maintenance defined release identity as version plus digest, while the loaded-worker protocol defines takeover authority by Chrome manifest version. The two contracts disagreed at their commit boundary.
+- Repair: Bridge updates, state, reconciliation, and repair accept only a strictly newer Chrome version. Bridge `1.0.7` carries the current changed bytes. A committed release ledger binds every source version to its exact sealed release-manifest digest, and both connector and Desktop packaging reject changed bytes without a matching new ledger entry.
+- Regression: equal-version changed bytes are refused before quiescence and before any folder mutation. Reconciliation and repair leave them untouched. A newer version still completes the staged transaction.
+- Status: `IMPLEMENTED`.
+
+### 427: pending Bridge update cannot restore its exact predecessor
+
+- Verified defect: the staged installation record retained the rollback directory, old version, and fence epoch, but discarded the complete prior installation record after the swap transaction converged. The bytes existed, but Repair had no exact record with which to verify or restore them.
+- Root cause: rollback was treated as retained cleanup material instead of a first-class recovery state.
+- Repair: each new pending update embeds the exact prior installation record. Repair uses a separate durable rollback transaction to verify the retained bytes, move both directory generations atomically, restore the exact prior record, resume the fenced worker with its exact epoch, and remove the failed generation only after readback. Startup converges every recorded rollback cut point before ordinary work.
+- Regression: a staged `1.0.2` to `1.0.3` update rolls back to byte-identical `1.0.2` content and record, clears pending state, returns the exact fence epoch, and proves removal of the failed release copy.
+- Status: `IMPLEMENTED`.
+
+### 428: unrelated client settings invalidate Desktop configuration state
+
+- Verified defect: changing any unrelated setting in `~/.codex/config.toml` changed the whole-file digest and made Desktop show “Choose your assistant” even though the exact Morrow MCP entry remained correct.
+- Root cause: the installation receipt's complete-file digest was used as both a guarded-write generation and the read-only presence test.
+- Repair: the digest remains the authority for later replacement or removal. Read-only Desktop state now parses the current supported client configuration and compares only the exact expected Morrow entry, including its command, arguments, environment, and scope.
+- Regression: an unrelated Codex setting keeps ChatGPT configured; changing Morrow's own command makes it unconfigured.
+- Status: `IMPLEMENTED`.
+
+### 429: maintenance contention reports the wrong recovery
+
+- Verified defect: when another MCP proxy made local-owner maintenance unsafe, Update Bridge returned a generic error. The renderer told the user to Repair Morrow even though the files and configuration were valid.
+- Root cause: `acquireBridgeLease()` threw an untyped error that the controller sanitized as setup failure.
+- Repair: the lease refusal now returns the existing `active_or_uncertain_operations` contract, which names work in progress and gives the correct retry action.
+- Regression: a refused restart lease carries the exact typed code and never becomes a repair-required error.
+- Status: `IMPLEMENTED`.
+
+### Root-cause patterns for rows 331–429
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -2847,7 +2883,9 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **Provider shapes and nested timeouts hidden by an abstraction:** rows 373–375, 379, and 381. Inventory owns one pagination path, gives each provider read its own bound, gives the complete run a separate larger bound, resolves Canvas's same-origin relative launch URL, and treats the legacy and native Item Banks runtimes as two strict provider contracts.
 - **A sandbox policy contradicts the parser it contains:** row 380. The sandbox allows the one local data form the parser must inspect while every network-bearing resource type remains blocked.
 - **A duplicated release contract drifts from its source:** row 382. Package admission pins the exact shipped policy and is exercised by source capture and final Desktop payload construction.
-- **Version equality or setup completion mistaken for artifact equality:** rows 402, 424, and 425. Bridge maintenance and Desktop state require the exact sealed release digest and verified installed folder, including after course setup is complete and while an old unpacked extension remains alive.
+- **Release identity split across incompatible boundaries:** rows 402, 424–427. Desktop, packaging, disk maintenance, and the loaded worker now share a monotonic Chrome version plus an exact sealed digest. Pending updates retain both complete installation generations until commit or rollback finishes.
+- **A mutation guard reused as observational truth:** row 428. Whole-file digests guard later writes, while read-only state verifies the exact owned entry and tolerates unrelated settings.
+- **Typed operational refusal erased by sanitization:** rows 403 and 429. Closed error contracts retain enough evidence to name the failed boundary and the correct recovery without exposing provider or runtime details.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.

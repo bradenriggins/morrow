@@ -756,7 +756,7 @@ test("a paired Chrome Web Store Bridge is accepted without app-folder maintenanc
   );
 });
 
-test("Bridge reconciliation stages same-version bytes only when their sealed release digest changed", async () => {
+test("Bridge reconciliation requires a newer Chrome version even when sealed bytes changed", async () => {
   const root = await temporaryRoot();
   const installer = controller(root);
   const monitor = {};
@@ -773,19 +773,33 @@ test("Bridge reconciliation stages same-version bytes only when their sealed rel
   assert.equal(stages, 0);
 
   release = { ...release, releaseManifestSha256: "b".repeat(64) };
-  assert.deepEqual(await installer.reconcileBridgeRelease(), { updated: true });
-  assert.equal(stages, 1);
+  assert.equal(await installer.reconcileBridgeRelease(), installed);
+  assert.equal(stages, 0);
 });
 
-test("Bridge state detects a sealed app-owned update without changing the installed folder", async () => {
+test("Bridge state advertises only a strictly newer extension version", async () => {
   const root = await temporaryRoot();
   const installer = controller(root, { bridgeDelivery: "developer_temporary" });
   const installed = bridgeInstallation({ releaseManifestSha256: "a".repeat(64) });
   installer.packagedBridgeRelease = async () => ({ version: installed.version, releaseManifestSha256: "b".repeat(64) });
+  assert.equal(await installer.bridgeReleaseUpdateAvailable(installed), false);
+  installer.packagedBridgeRelease = async () => ({ version: "1.0.1", releaseManifestSha256: "b".repeat(64) });
   assert.equal(await installer.bridgeReleaseUpdateAvailable(installed), true);
   installer.packagedBridgeRelease = async () => ({ version: installed.version, releaseManifestSha256: installed.releaseManifestSha256 });
   assert.equal(await installer.bridgeReleaseUpdateAvailable(installed), false);
   assert.equal(await installer.bridgeReleaseUpdateAvailable({ ...installed, manualChromeReloadRequired: true }), false);
+});
+
+test("Bridge update names an active runtime instead of asking for repair", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const monitor = {};
+  installer.acquireRestartLease = async () => ({ status: "unavailable" });
+  await assert.rejects(() => installer.acquireBridgeLease(monitor), (error) => {
+    assert.equal(error.code, "active_or_uncertain_operations");
+    assert.match(error.message, /work in progress/);
+    return true;
+  });
 });
 
 test("state() reports the Chrome load state the Bridge itself answered", async () => {
@@ -1416,7 +1430,7 @@ test("repair replaces an older app-owned Bridge from the sealed release", async 
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(stateDirectory, "Backups", backups[0]), "utf8")), before);
 });
 
-test("repair replaces changed sealed Bridge bytes even when the Chrome version is unchanged", async () => {
+test("repair never replaces changed Bridge bytes under an unchanged Chrome version", async () => {
   const root = await temporaryRoot();
   const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor: RECORDING_MONITOR });
   let bridgeReleaseSha256 = await writeBridgeRelease(root, "1.0.0");
@@ -1446,9 +1460,8 @@ test("repair replaces changed sealed Bridge bytes even when the Chrome version i
   await installer.repair();
   const after = JSON.parse(await fs.readFile(path.join(stateDirectory, "bridge-installation.json"), "utf8"));
   assert.equal(after.extensionVersion, "1.0.0");
-  assert.notEqual(after.releaseManifestSha256, before.releaseManifestSha256);
-  assert.equal(after.releaseManifestSha256, bridgeReleaseSha256);
-  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.0";\nexport const releaseRevision = 2;\n');
+  assert.equal(after.releaseManifestSha256, before.releaseManifestSha256);
+  assert.equal(await fs.readFile(path.join(bridgeDirectory, "src/service-worker.js"), "utf8"), 'export const version = "1.0.0";\n');
   assert.notEqual(after.activeFolderChallenge.challengeId, before.activeFolderChallenge.challengeId);
 });
 
@@ -1643,6 +1656,43 @@ test("repair writes the assistant configuration again when the file Morrow wrote
   assert.equal(record.configured.codex.sha256, sha256(await fs.readFile(target)));
   assert.equal(state.assistants.find((assistant) => assistant.id === "codex").configured, true);
   assert.equal(state.lifecycle, "assistant_ready");
+});
+
+test("assistant status keeps an exact Morrow entry configured after unrelated client edits", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const target = path.join(root, "Home", ".codex", "config.toml");
+  const materials = path.join(root, "UserData", "Materials");
+  await fs.mkdir(path.dirname(target), { recursive: true });
+  await fs.mkdir(materials, { recursive: true });
+  await fs.writeFile(target, 'model = "gpt-6"\n\n[mcp_servers.morrow]\ncommand = "morrow"\n');
+  let inspected = null;
+  installer.clientConfigModule = async () => ({
+    morrowClientConfigurationStatus: (options) => {
+      inspected = options;
+      return { path: target, configured: true, sha256: sha256("current complete file") };
+    }
+  });
+
+  const present = await installer.assistantConfigurationPresent(
+    { id: "codex", needsProject: false },
+    { target, sha256: sha256("older complete file") },
+    materials
+  );
+
+  assert.equal(present, true);
+  assert.deepEqual(inspected, {
+    client: "codex",
+    scope: "user",
+    repositoryRoot: path.join(root, "Payload", "app"),
+    upstreamConfigPath: path.join(root, "UserData", "State", "morrow.upstreams.json"),
+    nodeCommand: process.platform === "win32"
+      ? path.join(root, "Payload", "runtime", "node", "node.exe")
+      : path.join(root, "Payload", "runtime", "node", "bin", "node"),
+    serverEntryPath: path.join(root, "Payload", "app", "packages", "mcp-server", "dist", "index.js"),
+    workspaceRoot: materials,
+    serverName: "morrow"
+  });
 });
 
 test("repair replaces an unchanged assistant configuration only through its recorded digest", async () => {

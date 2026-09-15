@@ -231,7 +231,7 @@ export function captureBridgeRelease(extensionRoot = resolve(ROOT, "connector", 
   };
 }
 
-function bridgeReleaseManifest(extensionRoot) {
+export function bridgeReleaseManifest(extensionRoot) {
   const bridge = captureBridgeRelease(extensionRoot);
   return {
     schema: "morrow.bridge-release.v1",
@@ -245,9 +245,24 @@ function bridgeReleaseManifest(extensionRoot) {
   };
 }
 
+function assertCurrentBridgeRelease(extensionRoot, manifest) {
+  if (resolve(extensionRoot) !== resolve(ROOT, "connector", "extension")) return;
+  const ledgerPath = resolve(ROOT, "connector", "release-ledger.json");
+  const ledger = JSON.parse(readFileSync(ledgerPath, "utf8"));
+  const releases = ledger?.schema === "morrow.bridge-release-ledger.v1" && Array.isArray(ledger.releases)
+    ? ledger.releases
+    : [];
+  const current = releases.at(-1);
+  const digest = digestBytes(Buffer.from(json(manifest)));
+  if (!current || current.version !== manifest.version || current.releaseManifestSha256 !== digest) {
+    throw new Error("Morrow Bridge source changed without a new sealed release ledger entry.");
+  }
+}
+
 function copyBridgeRelease(appRoot, extensionRoot) {
   const releaseRoot = resolve(appRoot, "bridge-release");
   const manifest = bridgeReleaseManifest(extensionRoot);
+  assertCurrentBridgeRelease(extensionRoot, manifest);
   copy(extensionRoot, resolve(releaseRoot, "extension"));
   writeFileSync(resolve(releaseRoot, "manifest.json"), json(manifest), { mode: 0o600, flag: "wx" });
   return { manifestSha256: digest(resolve(releaseRoot, "manifest.json")), version: manifest.version, extensionId: manifest.extensionId };

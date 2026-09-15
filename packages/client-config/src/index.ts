@@ -138,6 +138,13 @@ export interface InstalledMorrowClient {
   readonly sha256: string;
 }
 
+export interface MorrowClientConfigurationStatus {
+  readonly path: string;
+  readonly configured: boolean;
+  /** Digest of the complete current file when it could be read safely. */
+  readonly sha256: string | null;
+}
+
 export interface LocalCanvasConfiguration {
   readonly path: string;
   readonly extensionPath: string;
@@ -1809,6 +1816,69 @@ function installedClientDigest(
     throw new Error(`Morrow could not confirm its configuration in ${path}`);
   }
   return sha256Text(content);
+}
+
+/**
+ * Reads one supported client configuration without changing it and verifies
+ * the exact Morrow server entry. Unrelated client settings do not affect the
+ * result. The complete-file digest remains available for later guarded writes.
+ */
+export function morrowClientConfigurationStatus(
+  options: InstallMorrowClientOptions,
+): MorrowClientConfigurationStatus {
+  const client = exactClient(options.client);
+  const scope = exactScope(options.scope);
+  const repositoryRoot = exactAbsolutePath(options.repositoryRoot, "repositoryRoot");
+  const canonicalRepositoryRoot = canonicalDirectory(repositoryRoot, "repositoryRoot");
+  if (scope === "user" && options.projectRoot !== undefined) {
+    throw new TypeError("projectRoot is supported only for project-scoped client configuration");
+  }
+  const configurationRoot = scope === "project"
+    ? canonicalDirectory(options.projectRoot || repositoryRoot, "projectRoot")
+    : canonicalRepositoryRoot;
+  const workspaceRoot = options.workspaceRoot === undefined
+    ? configurationRoot
+    : canonicalDirectory(options.workspaceRoot, "workspaceRoot");
+  const command = exactExecutable(options.nodeCommand || process.execPath, "nodeCommand");
+  const serverEntryPath = exactAbsolutePath(
+    options.serverEntryPath || resolve(repositoryRoot, DEFAULT_SERVER_ENTRY),
+    "Morrow server entry",
+  );
+  const canonicalServerEntryPath = canonicalRegularFile(serverEntryPath, "Morrow server entry");
+  assertWithinRepository(canonicalRepositoryRoot, canonicalServerEntryPath);
+  const canonicalUpstreamConfigPath = canonicalRegularFile(options.upstreamConfigPath, "Upstream configuration");
+  const bundle = buildClientConfigBundle({
+    ...options,
+    repositoryRoot: canonicalRepositoryRoot,
+    workspaceRoot,
+    nodeCommand: command,
+    serverEntryPath: canonicalServerEntryPath,
+    upstreamConfigPath: canonicalUpstreamConfigPath,
+  });
+  const homeDirectory = exactAbsolutePath(homedir(), "homeDirectory");
+  const path = morrowClientConfigPath({ client, scope, projectRoot: configurationRoot, homeDirectory });
+  const clientConfigurationRoot = scope === "project"
+    ? configurationRoot
+    : client === "claude-desktop" && process.platform === "win32"
+      ? dirname(dirname(path))
+      : homeDirectory;
+  assertNoSymlinkPath(clientConfigurationRoot, path);
+  const current = currentFileText(path, true);
+  if (!current.exists) return { path, configured: false, sha256: null };
+  const expected = client === "codex"
+    ? tomlObject(
+      codexMcpServer(parseCodexToml(path, codexSection(bundle)), bundle.serverName, path),
+      `${path}.mcp_servers.${bundle.serverName}`,
+    )
+    : serverEntry(bundle, client, canonicalUpstreamConfigPath);
+  const actual = client === "codex"
+    ? codexMcpServer(parseCodexToml(path, current.content), bundle.serverName, path)
+    : jsonObject(parseClientJson(path, current.content)[CLIENT_JSON[client].container], `${path}.${CLIENT_JSON[client].container}`)[bundle.serverName];
+  return {
+    path,
+    configured: isDeepStrictEqual(actual, expected),
+    sha256: sha256Text(current.content),
+  };
 }
 
 export function installMorrowClient(options: InstallMorrowClientOptions): InstalledMorrowClient {
