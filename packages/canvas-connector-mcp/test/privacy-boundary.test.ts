@@ -61,14 +61,15 @@ describe("Canvas source MCP handler privacy", () => {
     const file = callbacks.get("canvas_transfer_course_file")!.config.inputSchema["~standard"].validate;
     const fileInput = {
       course_id: largeId,
-      folder_id: "9007199254740995",
+      upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post",
+      upload_arguments: { folder_id: "9007199254740995" },
       filename: "notes.txt",
       size_bytes: 5,
       sha256: "b".repeat(64),
       content_type: "text/plain",
     };
     expect((await file(fileInput)).issues).toBeUndefined();
-    expect((await file({ ...fileInput, folder_id: 9007199254740996 })).issues).toBeTruthy();
+    expect((await file({ ...fileInput, upload_arguments: { folder_id: 9007199254740996 } })).issues).toBeTruthy();
   });
 
   it("validates readable learner labels in scalar and recipient-array inputs", async () => {

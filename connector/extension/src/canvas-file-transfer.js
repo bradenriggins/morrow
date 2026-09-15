@@ -1,12 +1,10 @@
 export const MAX_CANVAS_FILE_TRANSFER_BYTES = 1024 * 1024;
 
-export function canonicalCanvasCourseFolderIds(courseId, folderId) {
-  const course = String(courseId || "");
-  const folder = String(folderId || "");
-  if (!/^[1-9][0-9]*$/.test(course) || !/^[1-9][0-9]*$/.test(folder)) {
-    throw new TypeError("Canvas course and folder IDs must be positive decimal strings");
-  }
-  return { course_id: course, folder_id: folder };
+export const CANVAS_UPLOAD_PATH = /^\/api\/v1(?:\/[a-z_]+(?:\/(?:[1-9][0-9]*|self))?)+$/;
+
+/** The Canvas folder a folder upload names, or "" for an upload to any other target. */
+export function canvasUploadFolderId(uploadPath) {
+  return /^\/api\/v1\/folders\/([1-9][0-9]*)\/files$/.exec(String(uploadPath || ""))?.[1] || "";
 }
 
 /**
@@ -43,16 +41,27 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     ...(sent ? { verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: error } } : {}),
     error,
   });
+  // Canvas keeps both files when a name is taken, and names the new one `name-1.ext`. A folder upload
+  // proves the name is free first, so only an upload to any other target accepts that renamed form.
+  const savedName = (value, requested, exact) => {
+    if (value === requested) return true;
+    if (exact) return false;
+    const dot = requested.lastIndexOf(".");
+    const stem = dot > 0 ? requested.slice(0, dot) : requested;
+    const extension = dot > 0 ? requested.slice(dot) : "";
+    return value.startsWith(stem + "-") && value.endsWith(extension)
+      && /^[1-9][0-9]{0,5}$/.test(value.slice(stem.length + 1, value.length - extension.length));
+  };
   const safeFile = (value, expectedId, expectedFolder, attachment) => {
-    if (!plainObject(value) || decimalId(value.id) !== expectedId || decimalId(value.folder_id) !== expectedFolder
-      || filename(value.display_name || value.filename) !== attachment.filename
+    if (!plainObject(value) || decimalId(value.id) !== expectedId || (expectedFolder && decimalId(value.folder_id) !== expectedFolder)
+      || !savedName(filename(value.display_name || value.filename), attachment.filename, Boolean(expectedFolder))
       || !Number.isSafeInteger(value.size) || value.size !== attachment.size_bytes
       || contentType(String(value["content-type"] || value.content_type || "").split(";", 1)[0].trim().toLowerCase()) !== attachment.content_type) {
       throw new Error("canvas_file_readback_mismatch");
     }
     return {
       id: expectedId,
-      folder_id: expectedFolder,
+      ...(expectedFolder ? { folder_id: expectedFolder } : {}),
       display_name: filename(value.display_name || value.filename),
       filename: filename(value.filename || value.display_name),
       size: value.size,
@@ -101,6 +110,13 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       cancelBody(reader);
       throw error;
     }
+  };
+  // Canvas refuses a signed-in change without the page's own request token.
+  const csrfHeaders = () => {
+    const cookie = document.cookie.split(";").map((entry) => entry.trim()).find((entry) => entry.startsWith("_csrf_token="));
+    const token = cookie ? decodeURIComponent(cookie.slice("_csrf_token=".length)) : "";
+    if (!token) throw new Error("canvas_csrf_context_missing");
+    return { "X-CSRF-Token": token };
   };
   const canvasJson = async (pathname, canvasOrigin, options = {}) => {
     const response = await fetch(new URL(pathname, canvasOrigin), {
@@ -204,12 +220,19 @@ export async function executeCanvasCourseFileTransferInPage(input) {
   let uploadDispatched = transferMode === "complete";
   let uploadStatus;
   try {
-    if (!plainObject(input) || !plainObject(input.binding) || !["direct", "initialize", "complete"].includes(transferMode)) throw new Error("canvas_file_binding_invalid");
+    const target = plainObject(input?.target) ? input.target : null;
+    const kind = target?.kind === "file" || target?.kind === "rubric_csv" ? target.kind : "";
+    const uploadPath = typeof target?.uploadPath === "string" && target.uploadPath.length <= 512
+      && /^\/api\/v1(?:\/[a-z_]+(?:\/(?:[1-9][0-9]*|self))?)+$/.test(target.uploadPath)
+      && (kind === "file" ? /\/files$/.test(target.uploadPath) : /\/rubrics\/upload$/.test(target.uploadPath))
+      ? target.uploadPath : "";
+    if (!plainObject(input) || !plainObject(input.binding) || !uploadPath
+      || !(kind === "file" ? ["direct", "initialize", "complete"] : ["rubric"]).includes(transferMode)) throw new Error("canvas_file_binding_invalid");
     const courseId = decimalId(input.binding.courseId);
     const principalId = decimalId(input.binding.principalId);
-    const folderId = decimalId(input.folderId);
+    const folderId = /^\/api\/v1\/folders\/([1-9][0-9]*)\/files$/.exec(uploadPath)?.[1] || "";
     const canvasOrigin = typeof input.binding.origin === "string" ? input.binding.origin : "";
-    if (!courseId || !principalId || !folderId || !canvasOrigin || location.origin !== canvasOrigin) throw new Error("canvas_file_binding_invalid");
+    if (!courseId || !principalId || !canvasOrigin || location.origin !== canvasOrigin) throw new Error("canvas_file_binding_invalid");
     const origin = canvasUrl(canvasOrigin, canvasOrigin, "canvas_file_binding_invalid");
     if (origin.href !== canvasOrigin + "/") throw new Error("canvas_file_binding_invalid");
     const attachment = await attachmentFrom(input.attachment);
@@ -218,13 +241,43 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       if (decimalId(profile.value?.id) !== principalId) throw new Error("canvas_principal_changed");
       const course = await canvasJson("/api/v1/courses/" + encodeURIComponent(courseId), canvasOrigin);
       if (decimalId(course.value?.id) !== courseId) throw new Error("canvas_file_course_changed");
-      const folder = await canvasJson("/api/v1/courses/" + encodeURIComponent(courseId) + "/folders/" + encodeURIComponent(folderId), canvasOrigin);
-      if (decimalId(folder.value?.id) !== folderId) throw new Error("canvas_file_folder_changed");
     };
+    const result = (fields) => ({ schema: "morrow.canvas-course-file-transfer.v1", ...fields });
+    if (kind === "rubric_csv") {
+      await currentBinding();
+      const form = new FormData();
+      form.append("attachment", new Blob([attachment.bytes], { type: attachment.content_type }), attachment.filename);
+      const headers = csrfHeaders();
+      uploadDispatched = true;
+      const started = await canvasJson(uploadPath, canvasOrigin, { method: "POST", headers, body: form });
+      uploadStatus = started.status;
+      const importId = decimalId(started.value?.id);
+      if (!importId) throw new Error("canvas_rubric_import_result_invalid");
+      const finished = ["succeeded", "succeeded_with_errors", "failed"];
+      let status = started.value;
+      while (!finished.includes(status?.workflow_state)) {
+        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        status = (await canvasJson(uploadPath + "/" + importId, canvasOrigin)).value;
+        if (decimalId(status?.id) !== importId) throw new Error("canvas_rubric_import_readback_mismatch");
+      }
+      const state = status.workflow_state;
+      const verified = state === "succeeded" && (status.error_count === undefined || status.error_count === null || status.error_count === 0);
+      return result({
+        ok: verified,
+        sent: true,
+        outcomeUnknown: false,
+        status: uploadStatus,
+        verification: verified
+          ? { schema: "morrow.browser-verification.v1", status: "verified", targets: [{ type: "canvas_course", id: courseId }, { type: "canvas_rubric_import", id: importId }] }
+          : { schema: "morrow.browser-verification.v1", status: "mismatch", reason: "canvas_rubric_import_" + state },
+        ...(verified ? {} : { error: "canvas_rubric_import_" + state }),
+        data: { course_id: courseId, upload_path: uploadPath, rubric_import: { id: importId, workflow_state: state } },
+      });
+    }
     const beginUpload = async () => {
-      const started = await canvasJson("/api/v1/folders/" + encodeURIComponent(folderId) + "/files", canvasOrigin, {
+      const started = await canvasJson(uploadPath, canvasOrigin, {
         method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8", ...csrfHeaders() },
         body: new URLSearchParams({
           name: attachment.filename,
           size: String(attachment.size_bytes),
@@ -282,14 +335,15 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       const fileId = decimalId(completed?.id);
       if (!fileId) throw new Error("canvas_file_upload_result_invalid");
       await currentBinding();
-      const readback = await canvasJson("/api/v1/courses/" + encodeURIComponent(courseId) + "/files/" + encodeURIComponent(fileId), canvasOrigin);
+      const readback = await canvasJson("/api/v1/files/" + encodeURIComponent(fileId), canvasOrigin);
       const file = safeFile(readback.value, fileId, folderId, attachment);
       const downloadUrl = exactDownloadUrl(readback.value?.url, canvasOrigin, fileId);
       return { fileId, file, downloadUrl };
     };
 
+    const targetFields = { course_id: courseId, upload_path: uploadPath, ...(folderId ? { folder_id: folderId } : {}) };
     await currentBinding();
-    if (transferMode !== "complete") await filenameAvailable();
+    if (transferMode !== "complete" && folderId) await filenameAvailable();
     if (transferMode === "initialize") {
       const started = await beginUpload();
       return {
@@ -297,7 +351,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
         ok: true,
         sent: false,
         outcomeUnknown: false,
-        data: { course_id: courseId, folder_id: folderId, upload_url: started.upload_url, upload_params: started.upload_params },
+        data: { ...targetFields, upload_url: started.upload_url, upload_params: started.upload_params },
       };
     }
     if (transferMode === "complete") {
@@ -312,7 +366,7 @@ export async function executeCanvasCourseFileTransferInPage(input) {
         ...(Number.isSafeInteger(input.upload_status) ? { status: input.upload_status } : {}),
         verification: { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "canvas_file_download_pending" },
         data: {
-          course_id: courseId, folder_id: folderId, file: finalized.file,
+          ...targetFields, file: finalized.file,
           sha256: attachment.sha256, download_url: finalized.downloadUrl.href,
         },
       };
@@ -363,10 +417,10 @@ export async function executeCanvasCourseFileTransferInPage(input) {
       status: uploadStatus,
       verification: { schema: "morrow.browser-verification.v1", status: "verified", targets: [
         { type: "canvas_course", id: courseId },
-        { type: "canvas_folder", id: folderId },
+        ...(folderId ? [{ type: "canvas_folder", id: folderId }] : []),
         { type: "canvas_file", id: finalized.fileId },
       ] },
-      data: { course_id: courseId, folder_id: folderId, file: finalized.file, sha256: attachment.sha256 },
+      data: { ...targetFields, file: finalized.file, sha256: attachment.sha256 },
     };
   } catch (error) {
     const message = String(error?.message || error);

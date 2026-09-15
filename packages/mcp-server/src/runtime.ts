@@ -64,6 +64,8 @@ import {
   type BrowserReadbackResult,
   type CanvasRecoveryDescriptor,
   type CanvasRecoveryRead,
+  canvasReviewedUploadPath,
+  canvasReviewedUploadRoute,
 } from "@morrow/canvas-api-catalog";
 import {
   GatewayOperationConflictError,
@@ -115,6 +117,7 @@ export function bindNewQuizAccommodationEffectGuard(
 }
 import {
   CANVAS_COURSE_FILE_TRANSFER_TOOL,
+  CANVAS_FOLDER_UPLOAD_TOOL,
   CANVAS_FILE_APPROVAL_TTL_MS,
   canvasCourseFileUploadInputSchema,
   canvasFileScope,
@@ -2219,6 +2222,28 @@ export class GatewayRuntime {
     return canvasFileScope(bindings[0]!, sourceBindingId, courseId, contentType);
   }
 
+  private async currentCanvasBindingCourseId(mapping: CatalogTool, sourceBindingId: string, signal?: AbortSignal): Promise<string> {
+    const source = this.browserBindingsTool(mapping);
+    if (!source) throw new Error("The Canvas browser connection is unavailable or ambiguous.");
+    const response = await this.callSourceOwned(source.publicName, {}, { signal });
+    const bindings = browserBindingContent(response).filter((entry) => entry.sourceBindingId === sourceBindingId);
+    const courseId = bindings.length === 1 ? exactDecimalId(bindings[0]!.courseId) : null;
+    if (!courseId) throw new Error("The selected Canvas course connection is unavailable or ambiguous.");
+    return courseId;
+  }
+
+  /**
+   * The upload route must be one Morrow's reviewed transfer carries, and the ids must name exactly
+   * its path. A learner label stands in for a person's id and
+   * is resolved at dispatch.
+   */
+  private assertCanvasReviewedUploadRoute(uploadTool: string, uploadArguments: Readonly<Record<string, string>>): void {
+    const structural = Object.fromEntries(Object.entries(uploadArguments).map(([name, value]) => [name, /^Student /.test(value) ? "1" : value]));
+    if (!canvasReviewedUploadPath(canvasReviewedUploadRoute(uploadTool), structural)) {
+      throw new Error("Name one Canvas upload route and the exact ids its path needs.");
+    }
+  }
+
   private async currentCanvasNewQuizHotSpotScope(
     mapping: CatalogTool,
     sourceBindingId: string,
@@ -2402,7 +2427,15 @@ export class GatewayRuntime {
       }
       const local = await readWorkspaceMaterial(input.material_path, options.workspaceRoot);
       const contentType = contentTypeForCanvasFile(local.filename);
-      const scope = await this.currentCanvasFileScope(mapping, input.source_binding_id, input.course_id, contentType, options.signal);
+      const uploadTool = input.upload_tool ?? CANVAS_FOLDER_UPLOAD_TOOL;
+      const uploadArguments: Record<string, string> = input.upload_arguments ?? { folder_id: input.folder_id! };
+      this.assertCanvasReviewedUploadRoute(uploadTool, uploadArguments);
+      // The transfer is made through one connection, and a course the route names must be its course.
+      const courseId = input.course_id ?? await this.currentCanvasBindingCourseId(mapping, input.source_binding_id, options.signal);
+      if (uploadArguments.course_id !== undefined && uploadArguments.course_id !== courseId) {
+        throw new Error("This Canvas upload names a course other than the selected course connection.");
+      }
+      const scope = await this.currentCanvasFileScope(mapping, input.source_binding_id, courseId, contentType, options.signal);
       let stage;
       try {
         options.signal?.throwIfAborted();
@@ -2415,11 +2448,12 @@ export class GatewayRuntime {
         local.bytes.fill(0);
       }
       stageHandle = stage.handle;
-      const freshScope = await this.currentCanvasFileScope(mapping, input.source_binding_id, input.course_id, contentType, options.signal);
+      const freshScope = await this.currentCanvasFileScope(mapping, input.source_binding_id, courseId, contentType, options.signal);
       if (sha256Json(scope) !== sha256Json(freshScope)) throw new Error("The Canvas course connection changed during preparation.");
       const request: JsonObject = {
-        course_id: input.course_id,
-        folder_id: input.folder_id,
+        course_id: courseId,
+        upload_tool: uploadTool,
+        upload_arguments: uploadArguments,
         filename: stage.manifest.filename,
         size_bytes: stage.manifest.sizeBytes,
         sha256: stage.manifest.sha256,
@@ -6888,9 +6922,11 @@ export class GatewayRuntime {
       options.toolName ? this.toolByPublicName.get(options.toolName) : undefined,
     ].find((candidate) => candidate && isCanvasConnector(candidate));
     const mapping = exactMapping || candidates.find((candidate) => candidate.upstreamId === sourceIds[0])!;
+    // A request made through one connection that names no course of its own is scoped to that
+    // connection's course roster.
     const derivedCourseId = this.requestCourseId(request)
       ?? courseIdFromCourseTarget(mapping, request as JsonObject)
-      ?? (canvasCourseFreeScope(mapping) ? await this.boundCourseId(mapping, request, options) : null);
+      ?? await this.boundCourseId(mapping, request, options);
     const bindingRequest = derivedCourseId ? { ...request, course_id: derivedCourseId } : request;
     const binding = await this.verifiedBrowserBinding(mapping, bindingRequest, options);
     const scopedMapping = this.browserProviderMapping(mapping, binding);
@@ -6902,7 +6938,7 @@ export class GatewayRuntime {
       if (!context) throw new Error("learner_roster_binding_unavailable");
       return redactLearnerEgress(value, context) as JsonObject;
     }
-    const context = await this.canvasLearnerContext(scopedMapping, request, options);
+    const context = await this.canvasLearnerContext(scopedMapping, bindingRequest, options);
     if (!context) throw new Error("learner_roster_binding_unavailable");
     return redactLearnerEgress(value, {
       ...context,
@@ -7930,7 +7966,7 @@ export class GatewayRuntime {
         const sourceBindingId = staged?.[0]?.scope.sourceBindingId;
         const canvasFile = isCanvasCourseFileTransfer(pendingMapping);
         const canvasCourseId = canvasFile ? exactDecimalId(request.course_id) : null;
-        const canvasFolderId = canvasFile ? exactDecimalId(request.folder_id) : null;
+        const canvasUploadTarget = canvasFile && typeof request.upload_tool === "string" && isJsonObject(request.upload_arguments);
         const moodleCourseId = !canvasFile && typeof request.course_id === "number"
           && Number.isSafeInteger(request.course_id) && request.course_id > 0
           ? request.course_id
@@ -7955,7 +7991,7 @@ export class GatewayRuntime {
             options.signal,
           )
           : await this.currentMoodleStagedFileScope(pendingMapping, sourceBindingId, moodleCourseId!, options.signal);
-        if (canvasFile && (!canvasFolderId || request.content_type !== staged[0]!.scope.contentType)) {
+        if (canvasFile && (!canvasUploadTarget || request.content_type !== staged[0]!.scope.contentType)) {
           throw new Error("The reviewed Canvas file target is unavailable. Prepare and approve a new file plan.");
         }
         fileStages = staged.map((entry) => ({ ...entry, scope }));

@@ -11,8 +11,8 @@ import { resolve } from "node:path";
 import { isJsonObject, sha256Json, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
 import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
 
-export { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, canvasSiteAuthorityNote } from "./operation-admission.js";
-export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasOperationAuthority, CanvasReadbackAssessment, CanvasSiteAuthorityClass, CanvasWriteAdmission } from "./operation-admission.js";
+export { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, CANVAS_REVIEWED_UPLOAD_ROUTES, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasSiteAuthorityNote } from "./operation-admission.js";
+export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasOperationAuthority, CanvasReadbackAssessment, CanvasReviewedUploadKind, CanvasSiteAuthorityClass, CanvasWriteAdmission } from "./operation-admission.js";
 export { evaluateBrowserReadback, matchesReadbackAssertions, planBrowserReadback, planCanvasRecoveryDescriptor, readbackFieldValue } from "./readback-plan.js";
 export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
 export { CANVAS_MULTI_CONTEXT_REFUSAL, CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS, canvasContextCodeCourseId, canvasCourseContextCode, canvasLearnerScopeObjectRoute, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "./semantic-target.js";

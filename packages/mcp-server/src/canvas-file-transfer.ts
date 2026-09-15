@@ -15,12 +15,31 @@ const canvasId = z.preprocess(
   z.string().regex(/^[1-9][0-9]{0,18}$/),
 );
 
+const uploadId = z.preprocess(
+  (value) => typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? String(value) : value,
+  z.string().regex(/^(?:[1-9][0-9]{0,18}|self|Student [A-Z]+[1-9][0-9]*)$/),
+);
+
+/**
+ * One material for one Canvas upload target. A course folder is named by `course_id` and `folder_id`.
+ * Any other target is named by the Canvas upload route and the ids its path needs: a course's files,
+ * any folder, a group, a person, an assignment or quiz submission, a submission comment, or a rubric
+ * CSV import.
+ */
 export const canvasCourseFileUploadInputSchema = z.strictObject({
   source_binding_id: z.string().regex(/^[A-Za-z0-9_.:@-]{1,160}$/),
-  course_id: canvasId,
-  folder_id: canvasId,
+  course_id: canvasId.optional(),
+  folder_id: canvasId.optional(),
+  upload_tool: z.string().regex(/^canvas_[a-z0-9_]{1,160}$/).optional(),
+  upload_arguments: z.record(z.string().regex(/^[a-z_]{1,40}$/), uploadId).optional(),
   material_path: z.string().min(11).max(4096),
+}).refine((input) => input.folder_id !== undefined
+  ? input.course_id !== undefined && input.upload_tool === undefined && input.upload_arguments === undefined
+  : input.upload_tool !== undefined && input.upload_arguments !== undefined, {
+  message: "Name a course folder with course_id and folder_id, or one Canvas upload route with upload_tool and upload_arguments.",
 });
+
+export const CANVAS_FOLDER_UPLOAD_TOOL = "canvas_upload_file_v1_folders_folder_id_files_post";
 
 export type CanvasCourseFileUploadInput = z.infer<typeof canvasCourseFileUploadInputSchema>;
 
@@ -93,8 +112,8 @@ export function registerCanvasCourseFileUploadTool(
   workspaceRoot?: string,
 ): void {
   server.registerTool("morrow_plan_canvas_file_upload", {
-    title: "Prepare a Canvas course file for review",
-    description: "Prepare one canonical material from this assistant's project materials folder for one selected Canvas course folder. Morrow freezes the file name, size, SHA-256, target course and folder, signed-in session, and content type for review. File bytes stay private until one person approves this exact operation. Files are limited to 1 MiB. This tool does not upload a file.",
+    title: "Prepare a Canvas file upload for review",
+    description: "Prepare one canonical material from this assistant's project materials folder for one Canvas upload target: a course folder (course_id and folder_id), or any Canvas upload route (upload_tool and upload_arguments), such as a course's files, a group's or a person's files, an assignment or quiz submission, a submission comment, or a rubric CSV import. Morrow freezes the file name, size, SHA-256, target, signed-in session, and content type for review. File bytes stay private until one person approves this exact operation. Files are limited to 1 MiB. This tool does not upload a file.",
     inputSchema: canvasCourseFileUploadInputSchema,
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
   }, async (input, context) => {

@@ -58,6 +58,23 @@ describe("Canvas reviewed file admission", () => {
       folder_id: 71,
       material_path: "materials/guide.txt",
     }).success).toBe(false);
+    // Any other target is named by its upload route and ids; the two forms do not mix.
+    expect(canvasCourseFileUploadInputSchema.parse({
+      source_binding_id: "canvas:course-42",
+      upload_tool: "canvas_upload_file_courses",
+      upload_arguments: { course_id: 42, assignment_id: "7", user_id: "Student A1" },
+      material_path: "materials/guide.txt",
+    })).toMatchObject({ upload_arguments: { course_id: "42", assignment_id: "7", user_id: "Student A1" } });
+    for (const mixed of [
+      { course_id: "42", folder_id: "71", upload_tool: "canvas_upload_file_v1_groups_group_id_files_post", upload_arguments: { group_id: "9" } },
+      { upload_tool: "canvas_upload_file_v1_groups_group_id_files_post" },
+      { folder_id: "71" },
+      { upload_tool: "canvas_upload_file_v1_groups_group_id_files_post", upload_arguments: { group_id: "../9" } },
+    ]) {
+      expect(canvasCourseFileUploadInputSchema.safeParse({
+        source_binding_id: "canvas:course-42", material_path: "materials/guide.txt", ...mixed,
+      }).success, JSON.stringify(mixed)).toBe(false);
+    }
   });
 
   it("admits only a real nonempty file below the project materials folder", async () => {

@@ -24,8 +24,8 @@ export const PRIVATE_BRIDGE_OPERATION_CONTRACTS = Object.freeze([
   { kind: "moodle_staged_file", toolName: "moodle_create_h5pactivity", key: "moodle.form.course.modedit.h5pactivity.create.write.v1", argumentNames: PRIVATE_MOODLE_STAGED_CREATE_ARGUMENTS, attachmentMode: "single" },
   {
     kind: "canvas_private_operation", toolName: "canvas_transfer_course_file", key: "canvas.private.course_file.transfer.v1",
-    provider: "canvas", readOnly: false, service: "canvas_file_transfer", path: "/v1/courses/{course_id}/folders/{folder_id}/files",
-    argumentNames: ["course_id", "folder_id", "filename", "size_bytes", "sha256", "content_type"], attachmentMode: "single",
+    provider: "canvas", readOnly: false, service: "canvas_file_transfer", path: "/v1/courses/{course_id}/uploads",
+    argumentNames: ["course_id", "upload_tool", "upload_arguments", "filename", "size_bytes", "sha256", "content_type"], attachmentMode: "single",
   },
   {
     kind: "canvas_private_operation", toolName: "canvas_create_new_quiz_hot_spot", key: "canvas.private.new_quiz.hot_spot.create.v1",

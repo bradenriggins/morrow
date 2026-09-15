@@ -520,7 +520,8 @@ describe("CanvasConnectorRuntime", () => {
       expect(command.privateAttachment).toEqual(attachment);
       expect(command.arguments).toEqual({
         course_id: 42,
-        folder_id: 81,
+        upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post",
+        upload_arguments: { folder_id: "81" },
         filename: attachment.manifest.filename,
         size_bytes: attachment.manifest.size_bytes,
         sha256: attachment.manifest.sha256,
@@ -530,7 +531,8 @@ describe("CanvasConnectorRuntime", () => {
     });
     const base = {
       course_id: 42,
-      folder_id: 81,
+      upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post",
+      upload_arguments: { folder_id: "81" },
       filename: attachment.manifest.filename,
       size_bytes: attachment.manifest.size_bytes,
       sha256: attachment.manifest.sha256,
@@ -578,6 +580,25 @@ describe("CanvasConnectorRuntime", () => {
       },
     });
     expect(dispatched).toMatchObject({ ok: true });
+    expect(commands).toBe(1);
+    // A route the reviewed transfer does not carry, ids that do not name its path, and a course the
+    // route names that is not the selected one are all refused before anything is sent.
+    const grant = (id: string) => ({
+      source_binding_id: "canvas:test-account",
+      operation_id: `operation:${id}`,
+      outer_grant: {
+        plan_digest: "a".repeat(64), approval_grant_digest: "b".repeat(64), effect_receipt_id: `effect:${id}`,
+        dispatch_attempt: 1, gateway_process_id: "gateway:connector-test", authorization: { kind: "review" },
+      },
+    });
+    for (const [id, target] of [
+      ["route", { upload_tool: "canvas_create_assignment", upload_arguments: { course_id: "42" } }],
+      ["ids", { upload_tool: "canvas_upload_file_v1_groups_group_id_files_post", upload_arguments: { folder_id: "81" } }],
+      ["course", { upload_tool: "canvas_upload_file_v1_courses_course_id_files_post", upload_arguments: { course_id: "43" } }],
+    ] as const) {
+      expect(await runtime.call("canvas_transfer_course_file", { ...base, ...target, _morrow: grant(`canvas-file-${id}`) }), id)
+        .toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "canvas_file_upload_target_invalid" } });
+    }
     expect(commands).toBe(1);
   });
 

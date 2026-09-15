@@ -22,6 +22,7 @@ const OUTPUT = resolve(ROOT, "output/playwright/canvas-connector");
 const LONG_COURSE_NAME = "Synthetic Course 501: Advanced Human Biology: Molecular Foundations, Clinical Connections, and Evidence-Based Practice";
 const FILE_TEXT = "\uFEFFbounded Canvas file bytes";
 const FILE_TRANSFER_BYTES = Buffer.from("reviewed Canvas course file bytes\n", "utf8");
+const RUBRIC_CSV_BYTES = Buffer.from("Rubric Name,Criteria Name,Criteria Description,Rating Name,Rating Points\nLab report,Method,Clear steps,Complete,5\n", "utf8");
 /**
  * Course documents for the structural signal route, served from the synthetic
  * storage host by path. Their bytes are the same hand-built fixtures that
@@ -141,6 +142,8 @@ function startCanvas(directory) {
   // Course documents the structural signal route reads, keyed by Canvas file id.
   const documentFiles = new Map();
   let externalFileUploadUrl = "";
+  let rubricImports = 0;
+  let rubricImportReads = 0;
   const transferredFiles = new Map();
   let transferConfirmationAuthenticated = false;
   const lesson = { page_id: "91", url: "lesson", title: "Cell structure", body: '<h2>Cell structure</h2><p>Cells have membranes.</p><img src="/courses/42/files/8" alt="Cell"><img src="/courses/42/files/9?value=a>b&part=opaque">', published: true, front_page: false, editing_roles: "teachers", publish_at: null };
@@ -286,9 +289,10 @@ function startCanvas(directory) {
       assert.deepEqual(url.searchParams.getAll("only[]"), ["names"]);
       return json(200, []);
     }
-    if (["/api/v1/folders/81/files", "/api/v1/folders/82/files"].includes(url.pathname) && request.method === "POST") {
-      if (!String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
-        return json(403, { error: "missing browser session" });
+    if (["/api/v1/folders/81/files", "/api/v1/folders/82/files", "/api/v1/groups/9/files"].includes(url.pathname) && request.method === "POST") {
+      // Canvas refuses a signed-in change without the page's own request token.
+      if (!String(request.headers.cookie || "").includes("canvas_session=synthetic") || request.headers["x-csrf-token"] !== "synthetic+csrf/=") {
+        return json(403, { error: "missing browser session or request token" });
       }
       const chunks = [];
       request.on("data", (chunk) => chunks.push(chunk));
@@ -302,12 +306,14 @@ function startCanvas(directory) {
         assert.ok(externalFileUploadUrl, "transfer upload URL was not configured");
         const courseFile = url.pathname === "/api/v1/folders/81/files"
           ? { key: "morrow-reviewed-file-42", courseId: "42", folderId: "81" }
-          : { key: "morrow-reviewed-file-43", courseId: "43", folderId: "82" };
+          : url.pathname === "/api/v1/groups/9/files"
+            ? { key: "morrow-reviewed-file-group", courseId: "42", folderId: "900" }
+            : { key: "morrow-reviewed-file-43", courseId: "43", folderId: "82" };
         json(200, { upload_url: externalFileUploadUrl, upload_params: { key: courseFile.key, policy: "synthetic-policy" } });
       });
       return;
     }
-    if (url.pathname === "/api/v1/files/502" && request.method === "GET") {
+    if (url.pathname === "/api/v1/files/502/create_success" && request.method === "GET") {
       if (!String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
         return json(403, { error: "missing browser session" });
       }
@@ -315,7 +321,49 @@ function startCanvas(directory) {
       transferredFiles.set("502", { id: "502", courseId: "42", folderId: "81" });
       return json(200, { id: "502" }, { "access-control-allow-origin": "*" });
     }
-    if (url.pathname === "/api/v1/files/503" && request.method === "GET") {
+    if (url.pathname === "/api/v1/files/524/create_success" && request.method === "GET") {
+      if (!String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
+        return json(403, { error: "missing browser session" });
+      }
+      transferredFiles.set("524", { id: "524", courseId: "42", folderId: "900" });
+      return json(200, { id: "524" }, { "access-control-allow-origin": "*" });
+    }
+    if (url.pathname === "/api/v1/files/524" && request.method === "GET") {
+      if (!transferredFiles.has("524")) return json(404, { error: "not_found" });
+      // Canvas kept both files, so the group's copy carries the renamed name.
+      return json(200, {
+        id: "524", folder_id: "900", display_name: "reviewed-material-1.txt", filename: "reviewed-material-1.txt",
+        "content-type": "text/plain", size: FILE_TRANSFER_BYTES.byteLength,
+        url: `https://${request.headers.host}/files/524/download?verifier=synthetic-transfer-verifier-group`,
+      });
+    }
+    if (url.pathname === "/files/524/download" && request.method === "GET") {
+      if (!externalFileDownloadUrl) return json(503, { error: "file_storage_not_configured" });
+      response.writeHead(302, { Location: externalFileDownloadUrl });
+      response.end();
+      return;
+    }
+    if (url.pathname === "/api/v1/courses/42/rubrics/upload" && request.method === "POST") {
+      if (!String(request.headers.cookie || "").includes("canvas_session=synthetic") || request.headers["x-csrf-token"] !== "synthetic+csrf/="
+        || !String(request.headers["content-type"] || "").startsWith("multipart/form-data")) {
+        return json(403, { error: "missing browser session, request token or file" });
+      }
+      const chunks = [];
+      request.on("data", (chunk) => chunks.push(chunk));
+      request.on("end", () => {
+        const body = Buffer.concat(chunks).toString("utf8");
+        assert.match(body, /name="attachment"; filename="rubrics.csv"/);
+        assert.ok(body.includes(RUBRIC_CSV_BYTES.toString("utf8")));
+        rubricImports += 1;
+        json(200, { id: "66", workflow_state: "importing" });
+      });
+      return;
+    }
+    if (url.pathname === "/api/v1/courses/42/rubrics/upload/66" && request.method === "GET") {
+      rubricImportReads += 1;
+      return json(200, { id: "66", workflow_state: rubricImportReads < 2 ? "importing" : "succeeded", error_count: 0 });
+    }
+    if (url.pathname === "/api/v1/files/503/create_success" && request.method === "GET") {
       if (!String(request.headers.cookie || "").includes("canvas_session=synthetic")) {
         return json(403, { error: "missing browser session" });
       }
@@ -323,7 +371,7 @@ function startCanvas(directory) {
       transferredFiles.set("503", { id: "503", courseId: "43", folderId: "82" });
       return json(200, { id: "503" }, { "access-control-allow-origin": "*" });
     }
-    if (url.pathname === "/api/v1/courses/42/files/502" && request.method === "GET") {
+    if (url.pathname === "/api/v1/files/502" && request.method === "GET") {
       if (!transferredFiles.has("502")) return json(404, { error: "not_found" });
       return json(200, {
         id: "502", folder_id: "81", display_name: "reviewed-material.txt", filename: "reviewed-material.txt",
@@ -331,7 +379,7 @@ function startCanvas(directory) {
         url: `https://${request.headers.host}/files/502/download?verifier=synthetic-transfer-verifier`,
       });
     }
-    if (url.pathname === "/api/v1/courses/43/files/503" && request.method === "GET") {
+    if (url.pathname === "/api/v1/files/503" && request.method === "GET") {
       if (!transferredFiles.has("503")) return json(404, { error: "not_found" });
       return json(200, {
         id: "503", folder_id: "82", display_name: "reviewed-material.txt", filename: "reviewed-material.txt",
@@ -938,6 +986,8 @@ function startCanvas(directory) {
     transferredFile: () => transferredFiles.has("502") ? { id: "502" } : null,
     transferredFiles: () => [...transferredFiles.values()].map(({ id, courseId, folderId }) => ({ id, courseId, folderId })),
     transferConfirmationAuthenticated: () => transferConfirmationAuthenticated,
+    rubricImports: () => rubricImports,
+    rubricImportReads: () => rubricImportReads,
     courseFileWrites: () => courseFileWrites,
     file: (id) => files.has(id) ? { ...files.get(id) } : null,
     courseFileIds: () => [...courseFiles],
@@ -982,7 +1032,8 @@ function startExternalFileStore(tls) {
       request.on("end", () => {
         const body = Buffer.concat(chunks);
         assert.ok(body.includes(FILE_TRANSFER_BYTES), "the staged material bytes did not reach the trusted upload URL");
-        const key = body.includes(Buffer.from("morrow-reviewed-file-43")) ? "morrow-reviewed-file-43" : "morrow-reviewed-file-42";
+        const key = ["morrow-reviewed-file-43", "morrow-reviewed-file-group"].find((candidate) => body.includes(Buffer.from(candidate)))
+          || "morrow-reviewed-file-42";
         const uploadConfirmationUrl = uploadConfirmationUrls.get(key);
         assert.ok(uploadConfirmationUrl, "transfer confirmation URL was not configured");
         const finish = () => {
@@ -1050,8 +1101,9 @@ for (const document of SIGNAL_DOCUMENTS) {
 // exact URL as its Chrome match pattern.
 const externalFileUploadUrl = `https://localhost:${externalFileAddress.port}/upload/signed?signature=opaque`;
 canvas.setExternalFileUploadUrl(externalFileUploadUrl);
-externalFileStore.setUploadConfirmationUrl(`https://127.0.0.1:${address.port}/api/v1/files/502`);
-externalFileStore.setUploadConfirmationUrl(`https://127.0.0.1:${address.port}/api/v1/files/503`, "morrow-reviewed-file-43");
+externalFileStore.setUploadConfirmationUrl(`https://127.0.0.1:${address.port}/api/v1/files/502/create_success?uuid=synthetic-42`);
+externalFileStore.setUploadConfirmationUrl(`https://127.0.0.1:${address.port}/api/v1/files/503/create_success?uuid=synthetic-43`, "morrow-reviewed-file-43");
+externalFileStore.setUploadConfirmationUrl(`https://127.0.0.1:${address.port}/api/v1/files/524/create_success?uuid=synthetic-group`, "morrow-reviewed-file-group");
 await new Promise((resolveRequest, rejectRequest) => {
   httpsGet(canvasUrl, { rejectUnauthorized: false }, (response) => {
     response.resume();
@@ -1702,7 +1754,7 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 312);
+  assert.equal(expectedCanvasEditActions.length, 311);
   const expectedCanvasReviewActions = [...reviewOnlyAdmittedCanvasWrites]
     .map((toolName) => `action:canvas:${toolName}`)
     .sort();
@@ -1877,7 +1929,8 @@ try {
   const externalRequestsBeforeTransfer = externalFileStore.requests().length;
   const transferred = await runtime.call("canvas_transfer_course_file", {
     course_id: 42,
-    folder_id: 81,
+    upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post",
+    upload_arguments: { folder_id: "81" },
     filename: transferAttachment.manifest.filename,
     size_bytes: transferAttachment.manifest.size_bytes,
     sha256: transferAttachment.manifest.sha256,
@@ -1914,6 +1967,58 @@ try {
   ]);
   process.stderr.write("[browser-test] reviewed Canvas file transfer uses the exact private route, saves one file, and verifies its bytes without exposing them\n");
 
+  // A group's files are a site target: no folder name check, the upload first step carries the page's
+  // request token, and the copy Canvas renamed is read back by its own id and its bytes compared.
+  const externalRequestsBeforeGroupTransfer = externalFileStore.requests().length;
+  const groupTransfer = await runtime.call("canvas_transfer_course_file", {
+    course_id: 42, upload_tool: "canvas_upload_file_v1_groups_group_id_files_post", upload_arguments: { group_id: "9" },
+    filename: transferAttachment.manifest.filename, size_bytes: transferAttachment.manifest.size_bytes,
+    sha256: transferAttachment.manifest.sha256, content_type: transferAttachment.content_type, privateAttachment: transferAttachment,
+    _morrow: {
+      source_binding_id: binding.sourceBindingId, operation_id: "operation:canvas-group-file-transfer-browser",
+      outer_grant: {
+        plan_digest: "7".repeat(64), approval_grant_digest: "8".repeat(64), effect_receipt_id: "effect:canvas-group-file-transfer-browser",
+        dispatch_attempt: 1, gateway_process_id: "gateway:browser-test", authorization: { kind: "review" },
+      },
+    },
+  });
+  assert.equal(groupTransfer.ok, true, JSON.stringify({ groupTransfer, canvasRequests: canvas.requests().slice(-12) }));
+  assert.equal(groupTransfer.result?.verification?.status, "verified", JSON.stringify(groupTransfer));
+  assert.equal(groupTransfer.result?.data?.file?.display_name, "reviewed-material-1.txt");
+  assert.equal(canvas.requests().some((entry) => entry === "GET /api/v1/groups/9/files"), false);
+  assert.deepEqual(externalFileStore.requests().slice(externalRequestsBeforeGroupTransfer), [
+    { method: "POST", path: "/upload/signed", cookie: "" },
+    { method: "GET", path: "/stored-file.txt", cookie: "" },
+  ]);
+
+  // A rubric CSV import goes to Canvas itself with the page's session and token, and verifies only
+  // once Canvas reports the import finished without errors.
+  const rubricAttachment = {
+    schema: "morrow.private-file-attachment.v1",
+    handle: "file:reviewed-rubric-csv",
+    manifest: { filename: "rubrics.csv", size_bytes: RUBRIC_CSV_BYTES.byteLength, sha256: createHash("sha256").update(RUBRIC_CSV_BYTES).digest("hex") },
+    bytes_base64: RUBRIC_CSV_BYTES.toString("base64"),
+    content_type: "text/csv",
+  };
+  const rubricImport = await runtime.call("canvas_transfer_course_file", {
+    course_id: 42, upload_tool: "canvas_creates_rubric_using_csv_file_courses", upload_arguments: { course_id: "42" },
+    filename: rubricAttachment.manifest.filename, size_bytes: rubricAttachment.manifest.size_bytes,
+    sha256: rubricAttachment.manifest.sha256, content_type: rubricAttachment.content_type, privateAttachment: rubricAttachment,
+    _morrow: {
+      source_binding_id: binding.sourceBindingId, operation_id: "operation:canvas-rubric-import-browser",
+      outer_grant: {
+        plan_digest: "9".repeat(64), approval_grant_digest: "0".repeat(64), effect_receipt_id: "effect:canvas-rubric-import-browser",
+        dispatch_attempt: 1, gateway_process_id: "gateway:browser-test", authorization: { kind: "review" },
+      },
+    },
+  });
+  assert.equal(rubricImport.ok, true, JSON.stringify({ rubricImport, canvasRequests: canvas.requests().slice(-8) }));
+  assert.equal(rubricImport.result?.verification?.status, "verified", JSON.stringify(rubricImport));
+  assert.deepEqual(rubricImport.result?.data?.rubric_import, { id: "66", workflow_state: "succeeded" });
+  assert.equal(canvas.rubricImports(), 1);
+  assert.ok(canvas.rubricImportReads() >= 2);
+  process.stderr.write("[browser-test] a group file upload and a rubric CSV import each go through the reviewed transfer and verify what Canvas saved\n");
+
   // The upload observer must be offered the one Canvas-issued upload request and
   // nothing else. This case records every request filter the observer registers,
   // mirrors each filter with a probe listener, and holds the upload open while a
@@ -1946,7 +2051,7 @@ try {
   }, foreignPostUrl);
   externalFileStore.holdOneUpload();
   const narrowedTransfer = runtime.call("canvas_transfer_course_file", {
-    course_id: 42, folder_id: 81, filename: transferAttachment.manifest.filename,
+    course_id: 42, upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post", upload_arguments: { folder_id: "81" }, filename: transferAttachment.manifest.filename,
     size_bytes: transferAttachment.manifest.size_bytes, sha256: transferAttachment.manifest.sha256,
     content_type: transferAttachment.content_type, privateAttachment: transferAttachment,
     _morrow: {
@@ -1993,7 +2098,7 @@ try {
   externalFileStore.holdOneUpload();
   const parallelCalls = [
     runtime.call("canvas_transfer_course_file", {
-      course_id: 42, folder_id: 81, filename: transferAttachment.manifest.filename,
+      course_id: 42, upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post", upload_arguments: { folder_id: "81" }, filename: transferAttachment.manifest.filename,
       size_bytes: transferAttachment.manifest.size_bytes, sha256: transferAttachment.manifest.sha256,
       content_type: transferAttachment.content_type, privateAttachment: transferAttachment,
       _morrow: {
@@ -2006,7 +2111,7 @@ try {
       },
     }),
     runtime.call("canvas_transfer_course_file", {
-      course_id: 43, folder_id: 82, filename: transferAttachment.manifest.filename,
+      course_id: 43, upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post", upload_arguments: { folder_id: "82" }, filename: transferAttachment.manifest.filename,
       size_bytes: transferAttachment.manifest.size_bytes, sha256: transferAttachment.manifest.sha256,
       content_type: transferAttachment.content_type, privateAttachment: transferAttachment,
       _morrow: {

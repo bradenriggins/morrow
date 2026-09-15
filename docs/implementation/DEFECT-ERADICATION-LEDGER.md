@@ -469,6 +469,8 @@ Every row stays open until its evidence columns are added and its status becomes
 | 452 | P1 | R1 | The gateway could not plan any admitted Canvas object write whose route names no course, such as a section edit, a group page, a file rename, or a calendar event update, because its effect lock and binding checks required a course id; every such request answered "Morrow could not freeze this operation plan." | closure section 452; connector gateway integration regression | IMPLEMENTED |
 | 453 | P1 | R7 | 312 Canvas writes that name an account, a person, a shared object, a learner record without its course, more than one course, or a session credential were held because Morrow had only a course authority, and 355 reads without a course were refused, although Canvas itself decides each one with the signed-in person's roles. | closure section 453; catalog, connector runtime, gateway integration, Bridge settings, scope, admission report, and Bridge lifecycle regressions | IMPLEMENTED |
 | 454 | P2 | R1 | Duplicating an assignment was held because no readback could tell a finished copy from a half-made one. | closure section 454; named readback, verification, New Quiz admission, and catalog regressions | IMPLEMENTED |
+| 455 | P1 | R4 | The reviewed Canvas course-file transfer sent its upload first step without the page's CSRF token, which a signed-in Canvas session requires for a change, and its fixture never required the token. | closure section 455; page transfer and browser harness regressions | IMPLEMENTED |
+| 456 | P1 | R7 | A file could reach Canvas only in one course folder: every other upload target and both rubric CSV imports had no way in, because their raw routes cannot carry the bytes and the reviewed transfer named only a course folder. | closure section 456; page transfer, connector, gateway transfer, catalog, and browser harness regressions | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3112,7 +3114,20 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Split: 25 held and 541 admitted writes, with 316 exact readbacks; 312 Canvas Edit actions. Bridge 1.0.14 is sealed.
 - Status: `IMPLEMENTED`; live duplicate pending BT2.
 
-### Root-cause patterns for rows 331–454
+### 455: the reviewed file transfer omitted the CSRF token
+
+- Verified condition: `executeCanvasCourseFileTransferInPage` sent `POST /api/v1/folders/{id}/files` with the session cookie and no `X-CSRF-Token`, while every other page executor (`canvas-content.js`, `canvas-new-quiz-hot-spot.js`) reads `_csrf_token` and sends it on a change. The browser fixture accepted the request without the token, so no test could see it.
+- Repair: the transfer reads the page's `_csrf_token` and sends it on the upload first step and on a rubric CSV import, and refuses with `canvas_csrf_context_missing` when the page has none. The browser fixture now refuses both requests without the exact token.
+- Status: `IMPLEMENTED`; live upload pending BT2.
+
+### 456: uploads reached only one course folder
+
+- Condition: the raw upload routes cannot carry a file's bytes, and `canvas_transfer_course_file` accepted only `course_id` and `folder_id`, so a group's or a person's files, assignment and quiz submissions, submission comments, a course's own files, and both rubric CSV imports had no path at all.
+- Repair: the transfer takes `upload_tool` and `upload_arguments`. `CANVAS_REVIEWED_UPLOAD_ROUTES` names the ten upload routes it carries, pinned equal to the catalog, and `canvasReviewedUploadPath` builds the exact address only from ids that name every path input. The gateway plan tool accepts either a course folder or any of those routes, resolves the connection's course, and refuses another course. The connector and the Bridge rebuild and check the same address. The page reads the saved file back through `/api/v1/files/{id}` and compares its bytes; a folder upload proves the name is free first, and any other target accepts Canvas's renamed copy. A rubric CSV import is posted once and verifies only `succeeded` with no errors. The account rubric CSV import, previously offered as an exact Edit action it could not carry, joins the reviewed-transfer hold. Courseless requests through a named connection scope MCP egress to that connection's course roster. Bridge 1.0.15 is sealed.
+- Split: 26 held and 540 admitted writes, with 315 exact readbacks; 311 Canvas Edit actions.
+- Status: `IMPLEMENTED`; live uploads pending BT2.
+
+### Root-cause patterns for rows 331–456
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

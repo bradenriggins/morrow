@@ -423,19 +423,24 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
     },
   }, async (argumentsValue, context) => toolResult(await runtime.call("canvas_send_private_conversation", isJsonObject(argumentsValue) ? argumentsValue : {}, context.mcpReq.signal)));
   registerTool("canvas_transfer_course_file", {
-    title: "Transfer reviewed Canvas course file",
-    description: "Internal Morrow route that transfers one staged, reviewed material to one current Canvas course folder. File bytes are private transport data and cannot be supplied in public tool arguments.",
+    title: "Transfer reviewed Canvas file",
+    description: "Internal Morrow route that transfers one staged, reviewed material through one Canvas upload route: a course, folder, group, person, assignment or quiz submission, submission comment, or a rubric CSV import. File bytes are private transport data and cannot be supplied in public tool arguments.",
     inputSchema: fromJsonSchema(augmentBridgeInputSchema({
       type: "object",
       properties: {
         course_id: canvasIdInputSchema(),
-        folder_id: canvasIdInputSchema(),
+        upload_tool: { type: "string", pattern: "^canvas_[a-z0-9_]{1,160}$" },
+        upload_arguments: {
+          type: "object",
+          additionalProperties: { type: "string", pattern: "^(?:[1-9][0-9]{0,18}|self)$" },
+          maxProperties: 4,
+        },
         filename: { type: "string", minLength: 1, maxLength: 255 },
         size_bytes: { type: "integer", minimum: 1, maximum: 1024 * 1024 },
         sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
         content_type: { type: "string", pattern: "^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$" },
       },
-      required: ["course_id", "folder_id", "filename", "size_bytes", "sha256", "content_type"],
+      required: ["course_id", "upload_tool", "upload_arguments", "filename", "size_bytes", "sha256", "content_type"],
       additionalProperties: false,
     }, false, true)),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },

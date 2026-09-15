@@ -67,7 +67,16 @@ and last everything else.
 | Reason | Route shape | What the person is told |
 | --- | --- | --- |
 | `lti_authorization_required` | Any route on Canvas's LTI service under `/lti/`, including its account and developer key routes: line items, scores, originality and asset reports, EULA records, webhook subscriptions, notice handlers, and the public JWK update | "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool." |
-| `multi_step_upload_requires_reviewed_transfer` | Every upload first step, for a course, a folder, a group, a section submission, or a person, and the Rubric CSV import | "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload." |
+| `multi_step_upload_requires_reviewed_transfer` | Every upload first step, for a course, a folder, a group, an assignment, section or quiz submission, a submission comment, or a person, and both Rubric CSV imports. The raw route cannot carry the file's bytes; each of these targets is available through Morrow's reviewed file transfer | "Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends every file through its reviewed file transfer, which checks the saved file and its bytes. Ask Morrow to prepare the file upload for this same target." |
+
+Morrow's reviewed file transfer (`morrow_plan_canvas_file_upload`, `packages/mcp-server/src/canvas-file-transfer.ts`,
+`connector/extension/src/canvas-file-transfer.js`) carries every upload route in
+`CANVAS_REVIEWED_UPLOAD_ROUTES`. It freezes one workspace file of at most 1 MiB and one target route
+with the exact ids its path needs, sends the upload first step with the page's request token, sends the
+reviewed bytes once, reads the saved file back by its own id and compares its bytes. A folder upload
+proves the name is free first; any other target accepts the copy Canvas renamed. A rubric CSV import
+is posted to Canvas once and verifies only when Canvas reports the import finished without errors. A
+course the route names must be the connection's course; every other target is a site request.
 
 The Assignment duplicate is a course request with a named readback: it waits for the copy to reach a
 documented saved state and compares its `original_assignment_id` and course, and a request that asks
@@ -125,10 +134,6 @@ part of these three routes and are untested here.
 
 - **LTI services.** An LTI access token for a registered developer key, obtained through Canvas's
   client-credentials grant and presented only to the LTI service routes.
-- **Uploads.** The remaining two upload steps, their reviewed dispatch, and a readback of the saved
-  file and its bytes for each upload context, as the course-file transfer already does
-  (`packages/mcp-server/src/canvas-file-transfer.ts`, `connector/extension/src/canvas-file-transfer.js`).
-  The Rubric CSV route needs its own reviewed CSV transfer and an exact readback of the imported rubric.
 
 ## Status
 

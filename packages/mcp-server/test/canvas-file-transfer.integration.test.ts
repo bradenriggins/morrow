@@ -106,7 +106,7 @@ describe("reviewed Canvas file dispatch", () => {
       expect(runtime.operationGet(id)).toMatchObject({
         state: "awaiting_approval",
         plan: { authorization: { kind: "review" }, arguments: {
-          course_id: "2", folder_id: "71", filename: "guide.txt", size_bytes: bytes.length, sha256: digest, content_type: "text/plain",
+          course_id: "2", upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post", upload_arguments: { folder_id: "71" }, filename: "guide.txt", size_bytes: bytes.length, sha256: digest, content_type: "text/plain",
         } },
       });
       expect(JSON.stringify(runtime.operationGet(id))).not.toContain(bytes.toString("base64"));
@@ -120,12 +120,43 @@ describe("reviewed Canvas file dispatch", () => {
         toolName: "canvas_transfer_course_file",
         operationKey: "canvas.private.course_file.transfer.v1",
         sourceBindingId,
-        arguments: { course_id: "2", folder_id: "71", filename: "guide.txt", size_bytes: bytes.length, sha256: digest, content_type: "text/plain" },
+        arguments: {
+          course_id: "2", upload_tool: "canvas_upload_file_v1_folders_folder_id_files_post", upload_arguments: { folder_id: "71" },
+          filename: "guide.txt", size_bytes: bytes.length, sha256: digest, content_type: "text/plain",
+        },
         privateAttachment: { manifest: { filename: "guide.txt", size_bytes: bytes.length, sha256: digest }, content_type: "text/plain" },
       });
       expect(JSON.stringify(writes[0]?.arguments)).not.toContain(bytes.toString("base64"));
       await runtime.dispatchOperation(id);
       expect(writes).toHaveLength(1);
+
+      // A group's files are a site target: the plan names no course, and the transfer is made through
+      // the connection's own course with the group upload route and its one id.
+      const groupPlan = await client.callTool({ name: "morrow_plan_canvas_file_upload", arguments: {
+        source_binding_id: sourceBindingId, upload_tool: "canvas_upload_file_v1_groups_group_id_files_post",
+        upload_arguments: { group_id: "9" }, material_path: input.material_path,
+      } });
+      expect(groupPlan.isError, JSON.stringify(groupPlan)).not.toBe(true);
+      const groupId = operationId(groupPlan as unknown as JsonObject);
+      runtime.approveOperation(groupId);
+      expect(await runtime.dispatchOperation(groupId)).toMatchObject({ structuredContent: { effectState: "verified" } });
+      expect(writes[1]).toMatchObject({
+        toolName: "canvas_transfer_course_file",
+        arguments: { course_id: "2", upload_tool: "canvas_upload_file_v1_groups_group_id_files_post", upload_arguments: { group_id: "9" } },
+      });
+      // A route the transfer does not carry, ids that do not name its path, and another course are
+      // refused before any plan exists.
+      for (const refused of [
+        { upload_tool: "canvas_create_assignment", upload_arguments: { course_id: "2" } },
+        { upload_tool: "canvas_upload_file_v1_groups_group_id_files_post", upload_arguments: { folder_id: "9" } },
+        { upload_tool: "canvas_upload_file_v1_courses_course_id_files_post", upload_arguments: { course_id: "3" } },
+      ]) {
+        const result = await client.callTool({ name: "morrow_plan_canvas_file_upload", arguments: {
+          source_binding_id: sourceBindingId, material_path: input.material_path, ...refused,
+        } });
+        expect(result.isError, JSON.stringify(refused)).toBe(true);
+      }
+      expect(writes).toHaveLength(2);
     } finally {
       await client?.close();
       await server?.close();

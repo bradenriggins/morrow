@@ -211,17 +211,79 @@ const NO_READABLE_PROVIDER_EFFECT_ROUTE: readonly string[] = Object.freeze([
  * freezes the exact file and compares the bytes Canvas saved.
  */
 const FILE_UPLOAD_PREFLIGHT_ROUTE = /^\/v1\/(?:courses|folders|groups|sections|users)\/\{[^}]+\}\/(?:[^/]+\/)*files$/;
-const COURSE_RUBRIC_CSV_UPLOAD_ROUTE = "/v1/courses/{course_id}/rubrics/upload";
+const RUBRIC_CSV_UPLOAD_ROUTE = /^\/v1\/(?:accounts|courses)\/\{(?:account_id|course_id)\}\/rubrics\/upload$/;
 
 /**
- * True when the route needs file bytes the generic operation cannot safely carry. This covers the
- * course upload pre-flights and the CSV Rubric import whose generated schema exposes no file input.
+ * True when the route needs file bytes the generic operation cannot safely carry. This covers every
+ * upload first step and the CSV Rubric imports whose generated schema exposes no file input.
  */
-function reviewedFileTransferRoute(operation: CanvasApiOperation): boolean {
+function reviewedFileTransferRoute(operation: Pick<CanvasApiOperation, "method" | "path">): boolean {
   return operation.method === "POST" && (
     FILE_UPLOAD_PREFLIGHT_ROUTE.test(operation.path)
-    || operation.path === COURSE_RUBRIC_CSV_UPLOAD_ROUTE
+    || RUBRIC_CSV_UPLOAD_ROUTE.test(operation.path)
   );
+}
+
+export type CanvasReviewedUploadKind = "file" | "rubric_csv";
+
+/**
+ * Every Canvas upload route Morrow's reviewed file transfer carries, by tool name, with its route.
+ * A side that holds no Canvas catalog, such as the gateway planning an upload, reads the route here.
+ * `packages/canvas-api-catalog/test/catalog.test.ts` holds this table equal to the catalog's own
+ * upload routes, so it cannot drift from them.
+ */
+export const CANVAS_REVIEWED_UPLOAD_ROUTES: Readonly<Record<string, string>> = Object.freeze({
+  canvas_creates_rubric_using_csv_file_accounts: "/v1/accounts/{account_id}/rubrics/upload",
+  canvas_creates_rubric_using_csv_file_courses: "/v1/courses/{course_id}/rubrics/upload",
+  canvas_upload_file_courses: "/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/files",
+  canvas_upload_file_quiz_id_submissions_self_files_post: "/v1/courses/{course_id}/quizzes/{quiz_id}/submissions/self/files",
+  canvas_upload_file_sections: "/v1/sections/{section_id}/assignments/{assignment_id}/submissions/{user_id}/files",
+  canvas_upload_file_submissions_user_id_comments_files_post: "/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}/comments/files",
+  canvas_upload_file_v1_courses_course_id_files_post: "/v1/courses/{course_id}/files",
+  canvas_upload_file_v1_folders_folder_id_files_post: "/v1/folders/{folder_id}/files",
+  canvas_upload_file_v1_groups_group_id_files_post: "/v1/groups/{group_id}/files",
+  canvas_upload_file_v1_users_user_id_files_post: "/v1/users/{user_id}/files",
+});
+
+/** The route one reviewed upload names by tool, as an operation shape the path builder reads. */
+export function canvasReviewedUploadRoute(toolName: string): { method: "POST"; path: string; readOnly: false; parameters: { inputName: string; wireName: string; location: string }[] } | undefined {
+  const path = Object.hasOwn(CANVAS_REVIEWED_UPLOAD_ROUTES, toolName) ? CANVAS_REVIEWED_UPLOAD_ROUTES[toolName]! : "";
+  if (!path) return undefined;
+  const names = [...path.matchAll(/\{([a-z_]+)\}/g)].map((entry) => entry[1]!);
+  return { method: "POST", path, readOnly: false, parameters: names.map((name) => ({ inputName: name, wireName: name, location: "path" })) };
+}
+
+/** What Morrow's reviewed file transfer does with one upload route: store a file, or import a rubric CSV. */
+export function canvasReviewedUploadKind(operation: Pick<CanvasApiOperation, "method" | "path" | "readOnly"> | null | undefined): CanvasReviewedUploadKind | undefined {
+  if (!operation || operation.readOnly || !reviewedFileTransferRoute(operation)) return undefined;
+  return RUBRIC_CSV_UPLOAD_ROUTE.test(operation.path) ? "rubric_csv" : "file";
+}
+
+/**
+ * The exact Canvas address one reviewed upload sends its first request to, built from the upload
+ * route and the ids that name its target, or "" when the ids do not name exactly that route's path
+ * inputs. Every id is a positive decimal; a person's own upload may name `self`.
+ */
+export function canvasReviewedUploadPath(
+  operation: (Pick<CanvasApiOperation, "method" | "path" | "readOnly"> & {
+    readonly parameters?: readonly { readonly inputName: string; readonly wireName: string; readonly location: string }[];
+  }) | null | undefined,
+  uploadArguments: unknown,
+): string {
+  if (!canvasReviewedUploadKind(operation) || !uploadArguments || typeof uploadArguments !== "object" || Array.isArray(uploadArguments)) return "";
+  const values = uploadArguments as Record<string, unknown>;
+  const pathParameters = (operation!.parameters || []).filter((parameter) => parameter.location === "path");
+  if (pathParameters.length === 0 || Object.keys(values).length !== pathParameters.length) return "";
+  let path = operation!.path;
+  for (const parameter of pathParameters) {
+    if (!Object.hasOwn(values, parameter.inputName)) return "";
+    const raw = values[parameter.inputName];
+    const text = typeof raw === "number" && Number.isSafeInteger(raw) && raw > 0 ? String(raw) : raw;
+    const valid = typeof text === "string" && (/^[1-9][0-9]{0,18}$/.test(text) || (text === "self" && parameter.inputName === "user_id"));
+    if (!valid || !path.includes(`{${parameter.wireName}}`)) return "";
+    path = path.replace(`{${parameter.wireName}}`, text);
+  }
+  return /\{[^}]+\}/.test(path) ? "" : path;
 }
 
 function learnerRecordRoute(operation: CanvasApiOperation): boolean {
@@ -377,7 +439,7 @@ export function canvasReadbackAssessment(
 export function canvasAdmissionReason(admission: CanvasWriteAdmission): string | undefined {
   if (admission.state !== "held") return undefined;
   if (admission.reason === "multi_step_upload_requires_reviewed_transfer") {
-    return "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload.";
+    return "Canvas takes a file's bytes in a later request that this route cannot carry, so Morrow sends every file through its reviewed file transfer, which checks the saved file and its bytes. Ask Morrow to prepare the file upload for this same target.";
   }
   return "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool.";
 }

@@ -55,7 +55,7 @@ const provenClaims = [
   },
   {
     label: "held for multi_step_upload_requires_reviewed_transfer",
-    pattern: / (\d+) are unfinished Canvas upload pre-flights,/,
+    pattern: / (\d+) are unfinished Canvas upload pre-flights or rubric CSV imports /,
     expected: [report.admission.heldByReason.multi_step_upload_requires_reviewed_transfer],
   },
   {

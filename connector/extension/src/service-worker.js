@@ -9,12 +9,12 @@ import { itemBankMediaFindings } from "./item-bank-guard.js";
 import { canClaimCourseConnectionIntent, canCompleteCourseConnectionIntent, normalizeCourseConnectionUrl, validCourseConnectionIntent } from "./course-connection-intent.js";
 import { MAX_FILE_TEXT_BYTES, canvasFileTextContentTypeSupported, executeCanvasCourseFileTextInPage } from "./canvas-file-content.js";
 import { CANVAS_FILE_SIGNALS_OPERATION_KEY, CANVAS_FILE_SIGNALS_SCHEMA, CANVAS_FILE_SIGNALS_TOOL_NAME, canvasCourseFileSignals, canvasFileSignalsContentTypeSupported } from "./canvas-file-signals.js";
-import { canonicalCanvasCourseFolderIds, executeCanvasCourseFileTransferInPage } from "./canvas-file-transfer.js";
+import { canvasUploadFolderId, executeCanvasCourseFileTransferInPage } from "./canvas-file-transfer.js";
 import { canvasNewQuizHotSpotVerification, executeCanvasNewQuizHotSpotInPage, unsignedHotSpotImageUrl } from "./canvas-new-quiz-hot-spot.js";
 import { CANVAS_CONVERSATION_PRIVATE_SCHEMA, PRIVATE_CANVAS_CONVERSATION_OPERATION, PRIVATE_CANVAS_CONVERSATION_TOOL, canvasConversationOperationMatches, executeCanvasConversationInPage, normalizeCanvasConversationPrivatePayload } from "./canvas-conversations.js";
 import { problemCopy, problemText } from "./bridge-problem-copy.js";
 import { bridgeWriteFailureCode, canvasWriteOutcomeUncertain } from "./canvas-write-outcome.js";
-import { canvasOperationAdmission } from "../generated/canvas-operation-admission.js";
+import { canvasOperationAdmission, canvasReviewedUploadKind, canvasReviewedUploadPath } from "../generated/canvas-operation-admission.js";
 import { CANVAS_MULTI_CONTEXT_REFUSAL, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "../generated/canvas-semantic-target.js";
 import { evaluateBrowserReadback, planBrowserReadback, planCanvasRecoveryDescriptor } from "./verification.js";
 import { canvasOperationReadbackInputProblem, evaluateCanvasOperationProgress, evaluateCanvasOperationReadback, isCanvasOperationReadback, planCanvasOperationReadback } from "./canvas-operation-readback.js";
@@ -149,14 +149,14 @@ const PRIVATE_MOODLE_STAGED_FILE_OPERATIONS = Object.freeze([
 ]);
 const PRIVATE_CANVAS_COURSE_FILE_TOOL = "canvas_transfer_course_file";
 const PRIVATE_CANVAS_COURSE_FILE_OPERATION_KEY = "canvas.private.course_file.transfer.v1";
-const PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS = ["course_id", "folder_id", "filename", "size_bytes", "sha256", "content_type"];
+const PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS = ["course_id", "upload_tool", "upload_arguments", "filename", "size_bytes", "sha256", "content_type"];
 const PRIVATE_CANVAS_COURSE_FILE_OPERATION = Object.freeze({
   key: PRIVATE_CANVAS_COURSE_FILE_OPERATION_KEY,
   toolName: PRIVATE_CANVAS_COURSE_FILE_TOOL,
   provider: "canvas",
   readOnly: false,
   service: "canvas_file_transfer",
-  path: "/v1/courses/{course_id}/folders/{folder_id}/files",
+  path: "/v1/courses/{course_id}/uploads",
 });
 const PRIVATE_CANVAS_HOT_SPOT_TOOL = "canvas_create_new_quiz_hot_spot";
 const PRIVATE_CANVAS_HOT_SPOT_OPERATION_KEY = "canvas.private.new_quiz.hot_spot.create.v1";
@@ -1368,7 +1368,7 @@ function privateCanvasAttachmentMatches(argumentsValue, attachment) {
   if (!argumentsValue || typeof argumentsValue !== "object" || Array.isArray(argumentsValue)
     || Object.keys(argumentsValue).length !== PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS.length
     || PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS.some((key) => !Object.hasOwn(argumentsValue, key))) return false;
-  return decimalId(argumentsValue.course_id) !== "" && decimalId(argumentsValue.folder_id) !== ""
+  return decimalId(argumentsValue.course_id) !== "" && typeof argumentsValue.upload_tool === "string"
     && argumentsValue.filename === attachment.manifest.filename
     && argumentsValue.size_bytes === attachment.manifest.size_bytes
     && argumentsValue.sha256 === attachment.manifest.sha256
@@ -3878,8 +3878,8 @@ async function executeOperation(binding, operation, args, expiresAt, privateAtta
 
 function privateCanvasUploadPlan(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)
-    || Object.keys(value).some((key) => !["course_id", "folder_id", "upload_url", "upload_params"].includes(key))
-    || !decimalId(value.course_id) || !decimalId(value.folder_id)
+    || Object.keys(value).some((key) => !["course_id", "folder_id", "upload_path", "upload_url", "upload_params"].includes(key))
+    || !decimalId(value.course_id) || typeof value.upload_path !== "string" || (value.folder_id !== undefined && !decimalId(value.folder_id))
     || typeof value.upload_url !== "string" || value.upload_url.length < 1 || value.upload_url.length > 8192
     || !value.upload_params || typeof value.upload_params !== "object" || Array.isArray(value.upload_params)) return null;
   let uploadUrl;
@@ -4154,8 +4154,25 @@ async function executeCanvasNewQuizHotSpotCreate(binding, args, expiresAt, priva
   }
 }
 
+/**
+ * The one Canvas upload this reviewed transfer sends, resolved from the catalog's own upload route
+ * and the ids that name its target. A course upload must name the selected course; an upload to a
+ * folder, group, section, or person is a site request Canvas decides with the person's own roles.
+ */
+function canvasReviewedUploadTarget(binding, args) {
+  const operation = state.operations.get(String(args?.upload_tool || ""));
+  const kind = operation?.provider === "canvas" ? canvasReviewedUploadKind(operation) : undefined;
+  const path = kind ? canvasReviewedUploadPath(operation, args.upload_arguments) : "";
+  if (!path || decimalId(args?.course_id) !== binding.courseId) return null;
+  const namedCourse = args.upload_arguments?.course_id;
+  if (namedCourse !== undefined && decimalId(namedCourse) !== binding.courseId) return null;
+  return { kind, uploadPath: `/api${path}` };
+}
+
 async function executeCanvasCourseFileTransfer(binding, args, expiresAt, privateAttachment) {
-  const deadline = boundedCommandDeadline(expiresAt, COURSE_FILE_READ_TIMEOUT_MS);
+  const target = canvasReviewedUploadTarget(binding, args);
+  if (!target) return { ok: false, sent: false, error: "canvas_file_upload_target_invalid" };
+  const deadline = boundedCommandDeadline(expiresAt, target.kind === "rubric_csv" ? COURSE_FILE_READ_TIMEOUT_MS * 4 : COURSE_FILE_READ_TIMEOUT_MS);
   if (!deadline) return { ok: false, sent: false, error: "canvas_file_transfer_timeout" };
   if (!await courseFileStorageAccessEnabled()) return { ok: false, sent: false, error: "canvas_file_storage_access_required" };
   if (!commandDeadlineCurrent(deadline)) return { ok: false, sent: false, error: "canvas_file_transfer_timeout" };
@@ -4175,13 +4192,21 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
     };
     const transferInput = {
       binding: { origin: binding.origin, courseId: binding.courseId, principalId: binding.principalId },
-      folderId: String(args.folder_id),
+      target,
       attachment: privateAttachment,
       expiresAt: deadline,
     };
+    const folderId = canvasUploadFolderId(target.uploadPath);
+    if (target.kind === "rubric_csv") {
+      // The import goes to Canvas itself with the signed-in session, so the page sends it and waits
+      // for Canvas to finish the import.
+      uploadDispatched = true;
+      const imported = await execute({ ...transferInput, mode: "rubric" });
+      return imported || { ok: false, sent: true, outcomeUnknown: true, error: "canvas_rubric_import_result_missing" };
+    }
     const prepared = await execute({ ...transferInput, mode: "initialize" });
     const plan = prepared?.ok === true && prepared?.sent === false && privateCanvasUploadPlan(prepared.data);
-    if (!plan || String(prepared.data.course_id) !== binding.courseId || String(prepared.data.folder_id) !== String(args.folder_id)) {
+    if (!plan || String(prepared.data.course_id) !== binding.courseId || prepared.data.upload_path !== target.uploadPath) {
       return { ok: false, sent: false, error: prepared?.error || "canvas_file_upload_init_invalid" };
     }
     const form = new FormData();
@@ -4219,7 +4244,7 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
     }
     const downloadUrl = privateCanvasConfirmationUrl(completed.data.download_url, binding.origin);
     if (!downloadUrl || !decimalId(completed.data.file?.id) || String(completed.data.course_id) !== binding.courseId
-      || String(completed.data.folder_id) !== String(args.folder_id) || completed.data.sha256 !== privateAttachment.manifest.sha256) {
+      || completed.data.upload_path !== target.uploadPath || completed.data.sha256 !== privateAttachment.manifest.sha256) {
       return { ok: false, sent: true, outcomeUnknown: true, status: uploadStatus, error: "canvas_file_readback_mismatch" };
     }
     if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_transfer_timeout");
@@ -4242,11 +4267,13 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       schema: "morrow.canvas-course-file-transfer.v1", ok: true, sent: true, outcomeUnknown: false, status: uploadStatus,
       verification: { schema: "morrow.browser-verification.v1", status: "verified", targets: [
         { type: "canvas_course", id: binding.courseId },
-        { type: "canvas_folder", id: String(args.folder_id) },
+        ...(folderId ? [{ type: "canvas_folder", id: folderId }] : []),
         { type: "canvas_file", id: String(completed.data.file.id) },
       ] },
       data: {
-        ...canonicalCanvasCourseFolderIds(binding.courseId, args.folder_id),
+        course_id: binding.courseId,
+        upload_tool: String(args.upload_tool),
+        ...(folderId ? { folder_id: folderId } : {}),
         file: completed.data.file, sha256: privateAttachment.manifest.sha256,
       },
     };

@@ -16,7 +16,7 @@ import {
   type BridgeProblem,
   type BridgeProvider,
 } from "@morrow/bridge-protocol";
-import { canvasAdmissionReason, canvasContextCodeCourseId, canvasOperationAdmission, canvasOperationMap, loadCanvasApiCatalog, type CanvasApiCatalog, type CanvasApiOperation, type CanvasSemanticCourseTarget } from "@morrow/canvas-api-catalog";
+import { canvasAdmissionReason, canvasContextCodeCourseId, canvasOperationAdmission, canvasOperationMap, canvasReviewedUploadPath, loadCanvasApiCatalog, type CanvasApiCatalog, type CanvasApiOperation, type CanvasSemanticCourseTarget } from "@morrow/canvas-api-catalog";
 import { isJsonObject, type JsonObject } from "@morrow/contracts";
 import {
   PRIVATE_BRIDGE_OPERATION_CONTRACTS,
@@ -179,7 +179,7 @@ function canvasFileAttachmentMatches(argumentsValue: JsonObject, attachment: Bri
   if (Object.keys(argumentsValue).length !== PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS.length
     || PRIVATE_CANVAS_COURSE_FILE_ARGUMENTS.some((field) => !Object.hasOwn(argumentsValue, field))) return false;
   return exactCourseId(argumentsValue.course_id) !== undefined
-    && exactCourseId(argumentsValue.folder_id) !== undefined
+    && typeof argumentsValue.upload_tool === "string" && isJsonObject(argumentsValue.upload_arguments)
     && typeof argumentsValue.filename === "string" && argumentsValue.filename === attachment.manifest.filename
     && argumentsValue.size_bytes === attachment.manifest.size_bytes
     && argumentsValue.sha256 === attachment.manifest.sha256
@@ -640,8 +640,23 @@ export class CanvasConnectorRuntime {
       return failedBeforeSend({
         schema: "morrow.bridge.problem.v1",
         code: "canvas_private_attachment_mismatch",
-        message: "The staged private file does not match this exact Canvas course and folder.",
+        message: "The staged private file does not match this exact Canvas upload.",
         recoverable: false,
+      });
+    }
+    // The upload route comes from the Canvas catalog and must be one Morrow's reviewed transfer
+    // carries, with ids that name exactly that route's path. A course it names must be the selected one.
+    const uploadOperation = this.operations.get(String(split.arguments.upload_tool));
+    const uploadPath = uploadOperation && isCanvasOperation(uploadOperation)
+      ? canvasReviewedUploadPath(uploadOperation, split.arguments.upload_arguments)
+      : "";
+    const namedCourse = isJsonObject(split.arguments.upload_arguments) ? split.arguments.upload_arguments.course_id : undefined;
+    if (!uploadPath || (namedCourse !== undefined && exactCourseId(namedCourse) !== exactCourseId(split.arguments.course_id))) {
+      return failedBeforeSend({
+        schema: "morrow.bridge.problem.v1",
+        code: "canvas_file_upload_target_invalid",
+        message: "Morrow needs one Canvas upload route and the exact ids that name its target before it can send this file.",
+        recoverable: true,
       });
     }
     const courseId = exactCourseId(split.arguments.course_id);

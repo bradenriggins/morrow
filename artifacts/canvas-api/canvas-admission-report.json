@@ -7,33 +7,33 @@
     "writes": 566
   },
   "admission": {
-    "admitted": 541,
+    "admitted": 540,
     "admittedByCourseTargetKind": {
-      "none": 294,
+      "none": 293,
       "course_path": 225,
       "semantic_course_object": 16,
       "self_path": 6
     },
     "admittedByAuthority": {
       "course": 229,
-      "site": 312
+      "site": 311
     },
     "admittedCourseByCourseTargetKind": {
       "course_path": 214,
       "semantic_course_object": 15
     },
     "admittedSiteByClass": {
-      "account": 116,
+      "account": 115,
       "person": 97,
       "shared_object": 46,
       "learner_record": 33,
       "multi_course": 11,
       "session_credential": 9
     },
-    "held": 25,
+    "held": 26,
     "heldByReason": {
       "lti_authorization_required": 16,
-      "multi_step_upload_requires_reviewed_transfer": 9
+      "multi_step_upload_requires_reviewed_transfer": 10
     },
     "heldByRouteFamily": {
       "courses": 5,
@@ -41,6 +41,7 @@
       "lti/asset_processor_eulas": 3,
       "lti/assignments": 3,
       "lti/subscriptions": 3,
+      "accounts": 1,
       "folders": 1,
       "groups": 1,
       "lti/asset_processors": 1,
@@ -52,7 +53,7 @@
   },
   "readback": {
     "stateCounts": {
-      "structurally_exact": 316,
+      "structurally_exact": 315,
       "unavailable": 184,
       "blocked": 30,
       "unconfirmed": 11
@@ -71,7 +72,7 @@
     },
     "routeTierCounts": {
       "exact": 216,
-      "created_child": 69,
+      "created_child": 68,
       "parent_collection": 26,
       "executor": 14,
       "mismatched": 2,
