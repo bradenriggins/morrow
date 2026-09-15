@@ -90,6 +90,23 @@ describe("Canvas API catalog", () => {
       .toBe("/quiz/v1/courses/9007199254740993/quizzes/9223372036854775807");
   });
 
+  it("keeps anonymous submission references as path-safe opaque strings", () => {
+    for (const name of [
+      "canvas_get_single_submission_by_anonymous_id_courses",
+      "canvas_get_single_submission_by_anonymous_id_sections",
+      "canvas_grade_or_comment_on_submission_by_anonymous_id_courses",
+      "canvas_grade_or_comment_on_submission_by_anonymous_id_sections",
+      "canvas_show_provisional_grade_status_for_student_assignments_assignment_id_anonymous_provisional_grades_get",
+    ]) {
+      const operation = catalog.operations.find((candidate) => candidate.toolName === name);
+      expect(operation, name).toBeTruthy();
+      expect(operation!.inputSchema.properties?.anonymous_id, name).toMatchObject({
+        type: "string",
+        pattern: "^[A-Za-z0-9_-]{1,255}$",
+      });
+    }
+  });
+
   it("preserves official enums and distinguishes Canvas IDs from ordinary int64 values", () => {
     const parameter = (toolName: string, wireName: string) => {
       const operation = catalog.operations.find((candidate) => candidate.toolName === toolName);

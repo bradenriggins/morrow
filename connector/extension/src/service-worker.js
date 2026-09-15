@@ -1485,6 +1485,8 @@ async function probeSiteAnchor(anchor, tab) {
   }
   if (anchor.provider !== "canvas" || url.origin !== anchor.origin) return false;
   try {
+    const existing = await chrome.tabs.sendMessage(anchor.tabId, { type: "morrow_canvas_probe" }, { frameId: 0 }).catch(() => null);
+    if (existing?.ok === true && existing.profile?.origin === anchor.origin && existing.profile?.id === anchor.principalId) return true;
     await chrome.scripting.executeScript({ target: { tabId: anchor.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
     const probe = await chrome.tabs.sendMessage(anchor.tabId, { type: "morrow_canvas_probe" }, { frameId: 0 });
     return probe?.ok === true && probe.profile?.origin === anchor.origin && probe.profile?.id === anchor.principalId;
@@ -2613,9 +2615,7 @@ async function executeCanvas(binding, operation, args, expiresAt) {
   let sent = false;
   try {
     const listResumeState = await claimCanvasListContinuation(binding, operation, args);
-    await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
-    sent = true;
-    const result = await chrome.tabs.sendMessage(binding.tabId, {
+    const message = {
       type: "morrow_canvas_execute",
       operation: { ...operation, morrowCourseTarget: canvasOperationAdmission(operation).courseTarget },
       arguments: args,
@@ -2623,7 +2623,21 @@ async function executeCanvas(binding, operation, args, expiresAt) {
       expiresAt,
       courseId: binding.courseId,
       ...(listResumeState ? { listResumeState } : {}),
-    }, { frameId: 0 });
+    };
+    // A bound Canvas page normally already has Morrow's listener. Reads may
+    // use it directly, which keeps a transient scripting-injection failure from
+    // turning an otherwise healthy course read into a false local refusal.
+    if (operation.readOnly) {
+      try {
+        const existing = await chrome.tabs.sendMessage(binding.tabId, message, { frameId: 0 });
+        if (existing !== undefined && existing !== null) {
+          return await issueCanvasListContinuation(binding, operation, args, existing);
+        }
+      } catch {}
+    }
+    await chrome.scripting.executeScript({ target: { tabId: binding.tabId, frameIds: [0] }, files: ["src/canvas-content.js"] });
+    sent = true;
+    const result = await chrome.tabs.sendMessage(binding.tabId, message, { frameId: 0 });
     return await issueCanvasListContinuation(binding, operation, args, result);
   } catch (error) {
     const code = String(error?.message || error) === "canvas_pagination_resume_refused"

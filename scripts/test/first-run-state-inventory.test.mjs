@@ -98,6 +98,7 @@ const INSTALLER_STATES = new Map([
   ["runtime-not-ready", installer({ ...ASSISTANT_READY, runtimeStatus: "starting" })],
   ["delivery-blocked", installer({ ...ASSISTANT_READY, bridgeDelivery: "unavailable" })],
   ["reload-required", installer({ ...ASSISTANT_READY, bridgeManualChromeReloadRequired: true })],
+  ["bridge-update-available", installer({ ...COURSE_READY, bridgeUpdateAvailable: true, firstPreview: { available: true, completed: true } })],
   ["folder-not-ready", installer({ ...ASSISTANT_READY, bridgeFolderReady: false })],
   ["dev-temporary", installer({ ...ASSISTANT_READY })],
   ["store-available", installer({ ...ASSISTANT_READY, bridgeDelivery: "available" })],

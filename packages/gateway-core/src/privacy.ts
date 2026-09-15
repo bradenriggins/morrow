@@ -1032,6 +1032,36 @@ function privacyError(code: string): JsonObject {
   };
 }
 
+function sanitizedUpstreamError(value: JsonObject): JsonObject {
+  const output = privacyError("upstream_error_sanitized");
+  const structured = isJsonObject(value.structuredContent) ? value.structuredContent : undefined;
+  if (structured?.schema !== "morrow.canvas-connector.result.v1" || structured.ok !== false) return output;
+  const providerFailure = structured.providerFailure;
+  if (!isJsonObject(providerFailure)
+    || providerFailure.schema !== "morrow.canvas-browser-failure.v1"
+    || !["canvas", "moodle"].includes(String(providerFailure.provider))
+    || typeof providerFailure.sent !== "boolean"
+    || (providerFailure.status !== undefined
+      && (!Number.isInteger(providerFailure.status) || Number(providerFailure.status) < 100 || Number(providerFailure.status) > 599))
+    || Object.keys(providerFailure).some((key) => !["schema", "provider", "sent", "status"].includes(key))) return output;
+  const resultState = ["not_sent", "unknown"].includes(String(structured.resultState))
+    ? structured.resultState
+    : undefined;
+  const sourceProblem = isJsonObject(structured.problem) ? structured.problem : undefined;
+  const sourceCode = sourceProblem?.schema === "morrow.bridge.problem.v1"
+    && typeof sourceProblem.code === "string"
+    && /^[a-z][a-z0-9_]{0,99}$/u.test(sourceProblem.code)
+    ? sourceProblem.code
+    : undefined;
+  output.structuredContent = {
+    ...(output.structuredContent as JsonObject),
+    providerFailure: structuredClone(providerFailure),
+    ...(resultState === undefined ? {} : { resultState }),
+    ...(sourceCode === undefined ? {} : { sourceCode }),
+  };
+  return output;
+}
+
 function exactDescriptor(value: OutputPrivacyDescriptor | undefined): OutputPrivacyDescriptor {
   const descriptor = value || DENY_ALL_OUTPUT;
   const aiClientAdmission = descriptor.aiClientAdmission ?? "allow";
@@ -1386,7 +1416,7 @@ export function projectOutput(
 ): ProjectedOutput | JsonObject {
   const descriptor = exactDescriptor(context.descriptor);
   if (!isJsonObject(value)) return privacyError("privacy_output_invalid");
-  if (value.isError === true) return privacyError("upstream_error_sanitized");
+  if (value.isError === true) return sanitizedUpstreamError(value);
   if (descriptor.aiClientAdmission !== "allow") return privacyError("privacy_ai_client_admission_denied");
   try {
     const textContext = context.learnerBoundary !== "source" && context.learnerRoster && context.learnerVault && context.learnerScope
@@ -1415,7 +1445,12 @@ export function resolveLearnerTokens(
   vault: LearnerVault,
   scope: LearnerScope,
   roster?: LearnerRoster,
+  additionalLearnerIdentifierFields: readonly string[] = [],
 ): Record<string, unknown> {
+  const learnerIdentifierFields = new Set(additionalLearnerIdentifierFields);
+  if ([...learnerIdentifierFields].some((field) => !/^[A-Za-z][A-Za-z0-9_]{0,79}$/u.test(field))) {
+    throw new TypeError("privacy learner identifier field is invalid");
+  }
   const resolveIdentity = (token: string): LearnerIdentity => {
     const saved = vault.resolve(scope, token);
     if (!roster) return saved;
@@ -1427,7 +1462,8 @@ export function resolveLearnerTokens(
   const resolveValue = (candidate: unknown, key = "", depth = 0): unknown => {
     if (depth > 12) throw new Error("privacy_output_depth_exceeded");
     if (typeof candidate === "string") {
-      const identifier = /^(?:user|student|learner|recipient|author|participant)(?:s|_?ids?)?$/iu.test(key);
+      const identifier = /^(?:user|student|learner|recipient|author|participant)(?:s|_?ids?)?$/iu.test(key)
+        || learnerIdentifierFields.has(key);
       return candidate.replace(/\b(?:Student A[1-9][0-9]*|learner_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\b/gu, (token) => {
         const identity = resolveIdentity(token);
         if (identifier && candidate === token) return identity.id;

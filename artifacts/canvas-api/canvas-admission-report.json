@@ -1,6 +1,6 @@
 {
   "schema": "morrow.canvas-admission-report.v1",
-  "catalogDigest": "07cab494dc4ba66ed9f8541275a6da6232c1bb9bb378c15b877369b709f41676",
+  "catalogDigest": "b1d6c999c27c5415b6fc9dab6a44a5a65dbd3bbd1ef2859c44faf95973e76298",
   "totals": {
     "operations": 1137,
     "reads": 571,

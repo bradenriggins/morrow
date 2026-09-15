@@ -3,14 +3,16 @@ import { augmentBridgeInputSchema } from "@morrow/bridge-protocol";
 import { canvasCatalogTools } from "@morrow/canvas-api-catalog";
 import { isJsonObject, type JsonObject, type JsonSchema } from "@morrow/contracts";
 import * as z from "zod/v4";
-import { SourceMcpPrivacyBoundary, sourcePrivacyInputSchema } from "@morrow/gateway-core";
+import { SourceMcpPrivacyBoundary, sourceLearnerIdentifierFields, sourcePrivacyInputSchema } from "@morrow/gateway-core";
 import { canvasBrowserCatalogTools, moodleCatalogTools } from "./browser-catalog.js";
 import {
   PRIVATE_MOODLE_ENROLMENT_CANDIDATE_OPERATION,
   PRIVATE_MOODLE_ENROLMENT_CANDIDATE_TOOL,
   type CanvasConnectorRuntime,
 } from "./runtime.js";
-const fromJsonSchema = (schema: JsonObject) => validateJsonSchema(sourcePrivacyInputSchema(schema));
+const fromJsonSchema = (schema: JsonObject, additionalLearnerIdentifierFields: readonly string[] = []) => (
+  validateJsonSchema(sourcePrivacyInputSchema(schema, additionalLearnerIdentifierFields))
+);
 
 
 export function canvasConnectorSummary(value: JsonObject): string {
@@ -513,7 +515,8 @@ export function createCanvasConnectorMcpServer(runtime: CanvasConnectorRuntime, 
           "canvas_update_create_page_courses",
           "canvas_edit_assignment",
           "canvas_update_topic_courses",
-        ].includes(tool.name), false, tool.name === "canvas_update_create_page_courses")),
+        ].includes(tool.name), false, tool.name === "canvas_update_create_page_courses"),
+      sourceLearnerIdentifierFields(tool.name)),
       ...(tool.annotations ? { annotations: tool.annotations } : {}),
       _meta: { "io.morrow/capability": tool.capability },
     }, async (argumentsValue, context) => toolResult(await runtime.call(tool.name, isJsonObject(argumentsValue) ? argumentsValue : {}, context.mcpReq.signal)));

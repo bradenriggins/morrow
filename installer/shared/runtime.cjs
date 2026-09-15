@@ -259,6 +259,7 @@ async function isComplete(payloadRoot) {
 
 function runtimeStatus(payloadComplete, runtime) {
   if (payloadComplete !== true) return "repair_required";
+  if (runtime?.health?.runtimeMismatch === true) return "repair_required";
   return runtime?.health?.gatewayReady === true ? "ready" : "uncertain";
 }
 

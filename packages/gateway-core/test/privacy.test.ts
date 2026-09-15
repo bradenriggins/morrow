@@ -91,6 +91,42 @@ describe("privacy output boundary", () => {
     expect(result.structuredContent).toMatchObject({ code: "upstream_error_sanitized" });
   });
 
+  it("retains only the closed provider outcome from a Canvas read failure", () => {
+    const result = normalize({
+      isError: true,
+      content: [{ type: "text", text: "Canvas said secret learner data" }],
+      structuredContent: {
+        schema: "morrow.canvas-connector.result.v1",
+        ok: false,
+        provider: "canvas",
+        resultState: "not_sent",
+        providerFailure: { schema: "morrow.canvas-browser-failure.v1", provider: "canvas", sent: true, status: 404 },
+        problem: { schema: "morrow.bridge.problem.v1", code: "canvas_request_failed", message: "secret learner data" },
+      },
+    }, { descriptor: learnerDescriptor });
+    expect(result.structuredContent).toEqual({
+      schema: "morrow.problem.v1",
+      code: "upstream_error_sanitized",
+      recoverable: false,
+      resultState: "not_sent",
+      providerFailure: { schema: "morrow.canvas-browser-failure.v1", provider: "canvas", sent: true, status: 404 },
+      sourceCode: "canvas_request_failed",
+    });
+    expect(JSON.stringify(result)).not.toContain("secret learner data");
+  });
+
+  it("does not retain malformed or extended provider failure records", () => {
+    const result = normalize({
+      isError: true,
+      structuredContent: {
+        schema: "morrow.canvas-connector.result.v1",
+        ok: false,
+        providerFailure: { schema: "morrow.canvas-browser-failure.v1", provider: "canvas", sent: true, status: 404, body: "secret" },
+      },
+    }, { descriptor: learnerDescriptor });
+    expect(result.structuredContent).toEqual({ schema: "morrow.problem.v1", code: "upstream_error_sanitized", recoverable: false });
+  });
+
   it("PRIV-02 tokenizes learner identity and only returns allowed fields", () => {
     const vault = new LearnerVault(":memory:");
     const result = normalize({

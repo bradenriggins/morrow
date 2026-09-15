@@ -124,6 +124,12 @@ function officialParameterContract(method, path, nickname, parameter) {
   const wireName = parameter.wireName;
   const replace = (schema) => ({ ...parameter, schema: schemaWithDescription(parameter, schema) });
 
+  // Canvas anonymous-submission identifiers are opaque short strings, not
+  // numeric Canvas object IDs. Keep them path-safe without inventing digits.
+  if (wireName === "anonymous_id") {
+    return replace({ type: "string", pattern: "^[A-Za-z0-9_-]{1,255}$" });
+  }
+
   if (wireName === "assignment[grade_group_students_individually]"
     && ["create_assignment", "edit_assignment"].includes(nickname)) {
     return replace({ type: "boolean" });

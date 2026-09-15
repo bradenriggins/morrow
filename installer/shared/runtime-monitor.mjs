@@ -428,6 +428,9 @@ function healthSnapshot(snapshot, result, expectedMcpRuntime) {
   const runtimeMatches = !expectedMcpRuntime || Boolean(mcpRuntime
     && mcpRuntime.packageVersion === expectedMcpRuntime.packageVersion
     && mcpRuntime.manifestSha256 === expectedMcpRuntime.manifestSha256);
+  const runtimeMismatch = Boolean(expectedMcpRuntime && health && !runtimeMatches);
+  if (runtimeMismatch) snapshot.health.runtimeMismatch = true;
+  else delete snapshot.health.runtimeMismatch;
   snapshot.health.gatewayReady = typeof gateway?.ready === "boolean"
     ? gateway.ready && runtimeMatches
     : "unknown";

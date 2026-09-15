@@ -50,6 +50,7 @@ import {
   redactLearnerEgressBatch,
   resolveLearnerTokens,
   safeUpstreamFailure,
+  sourceLearnerIdentifierFields,
   type LearnerIdentity,
   type LearnerScope,
   type LearnerTextRedactionContext,
@@ -8867,14 +8868,15 @@ export class GatewayRuntime {
           ? await this.moodleLearnerContext(mapping, routed.forwarded, { signal: options.signal })
           : await this.canvasLearnerContext(mapping, routed.forwarded, { signal: options.signal });
         const resolved = learner
-          ? resolveLearnerTokens(routed.forwarded, this.learnerVault, learner.learnerScope, learner.learnerRoster)
+          ? resolveLearnerTokens(routed.forwarded, this.learnerVault, learner.learnerScope, learner.learnerRoster,
+              sourceLearnerIdentifierFields(mapping.upstreamName))
           : resolveLearnerTokens(routed.forwarded, this.learnerVault, {
               canvasOrigin: this.config.privacy.canvasOrigin,
               account: this.config.privacy.account,
               course: this.requestCourseId(routed.forwarded) || "unbound",
               principal: this.config.privacy.principal,
               profile: this.config.profile,
-            });
+            }, undefined, sourceLearnerIdentifierFields(mapping.upstreamName));
         if (mapping.capability?.provider === "moodle"
           && MOODLE_ROSTER_LEARNER_INPUT_TOOLS.has(mapping.publicName as never)) {
           const learnerId = resolved.learner_id;

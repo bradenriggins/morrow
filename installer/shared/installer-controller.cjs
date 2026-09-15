@@ -493,6 +493,8 @@ class InstallerController {
     this.restartLeases = new Map();
     this.bridgeInstallation = null;
     this.bridgeInitialization = null;
+    this.bridgeStartupAttempted = false;
+    this.bridgeVerificationFailed = false;
     this.bridgeReconciliation = null;
     this.bridgeLeaseId = null;
     this.mcpRuntimeVerification = null;
@@ -1161,17 +1163,24 @@ class InstallerController {
   }
 
   async readBridgeInstallation() {
-    const status = await bridgeInstallationStatus({
-      stateDirectory: this.paths.state,
-      bridgeDirectory: this.paths.bridgeDirectory,
-      expectedExtensionId: BRIDGE_EXTENSION_ID
-    });
-    this.bridgeInstallation = status;
-    return status;
+    try {
+      const status = await bridgeInstallationStatus({
+        stateDirectory: this.paths.state,
+        bridgeDirectory: this.paths.bridgeDirectory,
+        expectedExtensionId: BRIDGE_EXTENSION_ID
+      });
+      this.bridgeInstallation = status;
+      this.bridgeVerificationFailed = false;
+      return status;
+    } catch (error) {
+      this.bridgeVerificationFailed = true;
+      throw error;
+    }
   }
 
   async initializeBridgeAtStartup() {
     if (this.bridgeInitialization) return this.bridgeInitialization;
+    this.bridgeStartupAttempted = true;
     const pending = this.runBridgeInitialization();
     this.bridgeInitialization = pending;
     try {
@@ -1225,6 +1234,20 @@ class InstallerController {
 
   async packagedBridgeRelease() {
     return readReleaseManifest(this.bridgeReleaseOptions());
+  }
+
+  async bridgeReleaseUpdateAvailable(record) {
+    if (this.bridgeDelivery !== "developer_temporary" || record?.installed !== true || record.manualChromeReloadRequired === true) return false;
+    try {
+      const release = await this.packagedBridgeRelease();
+      const installedVersion = parseChromeVersion(record.version);
+      const releaseVersion = parseChromeVersion(release.version);
+      if (!installedVersion || !releaseVersion) return false;
+      const comparison = compareChromeVersions(releaseVersion, installedVersion);
+      return comparison > 0 || (comparison === 0 && release.releaseManifestSha256 !== record.releaseManifestSha256);
+    } catch {
+      return false;
+    }
   }
 
   async bridgeMonitor() {
@@ -2729,7 +2752,16 @@ class InstallerController {
     // starts as pending, never takes the first one's steps away.
     const ready = assistants.some((assistant) => assistant.configured && assistant.detected);
     const requestedAssistant = assistants.find((assistant) => assistant.selected) || null;
-    const lifecycle = currentRuntimeStatus === "repair_required" ? "repair_required"
+    // A connected Chrome process can keep an already-loaded unpacked
+    // extension alive after its app-owned folder is removed or damaged. The
+    // runtime connection does not make those installed bytes trustworthy.
+    // Temporary delivery therefore remains ready only while the folder has
+    // passed its current sealed-record verification.
+    const bridgeRepairRequired = this.bridgeDelivery === "developer_temporary"
+      && bridgeInstallation?.installed !== true
+      && (this.bridgeStartupAttempted || this.bridgeVerificationFailed)
+      && (bridge.paired === true || bridge.count > 0 || runtime.firstPreview.completed === true);
+    const lifecycle = currentRuntimeStatus === "repair_required" || bridgeRepairRequired ? "repair_required"
       : requestedAssistant?.pending && !ready ? "assistant_pending"
       : bridge.count > 0 && ready ? "ready"
       : bridge.paired === true && ready ? "course_not_connected"
@@ -2746,6 +2778,7 @@ class InstallerController {
       bridgeDelivery: this.bridgeDelivery,
       bridgeFolderReady: bridgeInstallation?.installed === true,
       bridgeLoadedInChrome: await this.bridgeLoadedInChrome(bridgeInstallation, runtime),
+      bridgeUpdateAvailable: await this.bridgeReleaseUpdateAvailable(bridgeInstallation),
       bridgeManualChromeReloadRequired: bridgeInstallation?.manualChromeReloadRequired === true,
       bridgePaired: bridge.paired,
       courseSite: bridge.courseSite,

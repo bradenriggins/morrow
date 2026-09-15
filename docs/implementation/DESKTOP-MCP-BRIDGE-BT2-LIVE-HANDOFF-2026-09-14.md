@@ -1,171 +1,131 @@
 # Desktop, MCP, Bridge, and BT2 live handoff, 2026-09-14
 
-## Purpose
-
-This handoff records the exact package, installed runtime, Bridge, and CHCP Canvas BT2 evidence for the `codex/desktop-mcp-bridge-triple-check-20260914` repair branch. It separates source and simulated proof from live Canvas provider proof.
-
 ## Exact target
 
 - Machine: Braden's MacBook Air (`Bradens-MacBook-Air.local`, arm64).
-- Source checkout: `/Users/Braden/Projects/.morrow-worktrees/desktop-mcp-bridge-triple-check-20260914`.
+- Checkout: `/Users/Braden/Projects/.morrow-worktrees/desktop-mcp-bridge-triple-check-20260914`.
 - Branch: `codex/desktop-mcp-bridge-triple-check-20260914`.
-- Source base at package time: `18d81b97d16317d7407b373a69126b76f205fe60` plus the dirty source set sealed by the package input manifest.
+- Current committed base: `3c571e2cc4df76fba373148b845f1a43bfa387f4` plus the dirty repair set sealed into the package input manifest.
 - Canvas tenant: `https://chcp.instructure.com`.
-- Required live course: BT2, Canvas course ID `89585`.
-- Prohibited live proof without separate authority: grades and learner messages.
+- Live course: `BIOL 101: General Biology`, Canvas course ID `89585`.
+- Live exclusions without separate exact authority: grades and learner messages.
 
-## Package and installed application
+## Current private QA package
 
-The final private-QA package is in `output/live-bt2-final-package-v17`.
+The installed build comes from `output/live-bt2-final-package-v25`.
 
 | Artifact | SHA-256 |
 | --- | --- |
-| `Morrow-1.0.4-mac-arm64.dmg` | `2feb4e30d758d10d16d6fde57ae5bb74b04ed0c9726d128c37bbbbc879f5ff89` |
-| `Morrow-1.0.4-mac-arm64.zip` | `e7aa1acbe4fa6edbf196779f19c12261962e18751b595e57900834f34701ac75` |
-| Installed `/Applications/Morrow.app/Contents/Resources/app.asar` | `429c1c82175b5c87d7464f64995b429a95d6eed77b2ad253cd162dd05e582846` |
-| MCP runtime manifest | `22e36378758a5f55e1b6ca82cfc221be3494698f175c1579e35ae7120c559a9d` |
-| Package input manifest | `fb30690cc8fd1a871e95107531379ff41ac78f17e4470f7551de846ad8002b78` |
-| Release graph | `d0333c6ec7d8d501615b4cd9e81ec897713b83b0f6cd2677dd0b130269c5dabc` |
+| `Morrow-1.0.4-mac-arm64.dmg` | `eece931152a202f6628e43b1fefe234cae26a2d05409a294d54c16df893c6bf3` |
+| `Morrow-1.0.4-mac-arm64.zip` | `a035e3b7126d8ab2f5b5c2f76e5e1929ba0fc0305bd27ee3cef9e3ccaf57239b` |
+| installed `app.asar` | `a3594df959e9f3c8b116c1d8953a4c40473bd2d5f647236f8ba02a4b53d9c026` |
+| package input manifest | `44a2776e497235d7d2981a0c88cb240030c43c2bac4e79d7e9aadd377b9b444b` |
+| MCP runtime manifest | `642ab910b53000acfe1e3ffa6a96494f1a582766f80e6d06fb12dd1fbb087dc6` |
+| release graph | `cfa29a8a7347338d9e6cda41cdf4b9079dd5b4190301b8a944e67eaa024d7377` |
 
-`codesign --verify --deep --strict /Applications/Morrow.app` passed. This is an unsigned private-QA package for `darwin-arm64`; it is not a public signed or notarized release.
+`codesign --verify --deep --strict /Applications/Morrow.app` passed. This package is unsigned private QA. It is not a signed or notarized public release. The previous application remains at `/Applications/Morrow.app.before-bt2-v25-20260914-194413`.
 
-The previous installed app was preserved at `/Applications/Morrow.app.before-bt2-v17-20260914T223920Z`.
+## Current installed state
 
-## Exact installed Bridge
+- Canvas remains signed in. Do not log out.
+- Desktop reads one current BT2 binding and shows the preserved first-read receipt.
+- Desktop v25 now reports `Update Morrow Bridge` and `Morrow Bridge: Update available`.
+- The installed app-owned Bridge worker is the previous sealed build: `01a4c9e0d889b20ce90f122348dd61db83c2fd76f9892976b04cd6065ae5bfab`.
+- The v25 sealed Bridge worker is: `8f3cc12d17f6831252404c96d46290411c9e7ebabba151ca48cb207eadf3e09c`.
+- No Bridge update is staged yet. The installation record has no pending update.
+- Activating v25 requires selecting Update Bridge, reloading the unpacked extension in Chrome, and selecting Check Bridge. Computer Use requires action-time confirmation before the extension update and reload.
+- BT2 remains in Plan. Course selection and one-hour Edit access have not been saved. Computer Use requires action-time confirmation before that cloud permission change.
 
-The app-owned Bridge at `/Users/Braden/Library/Application Support/morrow-installer/Bridge` was repaired through the packaged v17 installer controller. The controller stopped the prior runtime under its maintenance protocol, replaced the stale same-version Bridge, verified the sealed release, restarted the runtime, and issued a new active-folder challenge.
+## Live Canvas read evidence
 
-| Fact | Verified value |
-| --- | --- |
-| Extension ID | `abeloclekioohahgedmjcdbpllfjfhko` |
-| Extension version | `1.0.6` |
-| Release manifest SHA-256 | `901ee38f8f2b8c9bf118ae772c37fd380fde379fc7f1e8ac5d1f1b295d670b20` |
-| Extension manifest SHA-256 | `e0202b8b238f9b87247cba9a15a7602aa8e15f94b1417a0ae392625c98c919b4` |
-| Sealed files | 98 |
-| Installed files | 98 sealed files plus the active-folder marker |
-| Pending update | none |
+The installed MCP and Bridge completed the full published-read attempt against signed-in BT2:
 
-A recursive comparison found only the expected app-issued `morrow-bridge-active-folder.json` marker in the installed folder. The installed extension manifest, generated Canvas catalog, and `canvas-file-transfer.js` matched the sealed package byte for byte. Chrome was restarted after the replacement. The Bridge popup then reported `Morrow: Connected`, and Desktop `Check Bridge` changed the visible status to `Morrow Bridge is connected`.
-
-## Installed MCP and Bridge health
-
-The installed runtime was invoked through its public MCP stdio entry point in `/Applications/Morrow.app/Contents/Resources/MorrowPayload`.
-
-At `2026-09-14T22:51:58.102Z`, the installed `morrow_health` response proved:
-
-- gateway ready;
-- Morrow kernel ready;
-- Canvas connector process connected, ready, and catalog-attested;
-- Bridge listening on loopback and connected as extension `abeloclekioohahgedmjcdbpllfjfhko`;
-- zero active or uncertain provider-effect operations;
-- zero active, inspection-required, or unsettled batches;
-- approval server ready on loopback;
-- public catalog digest `f2ab86ba04a8155300b2e826a5f85d1c30712e06a2111a0da5bb3ee066f4b9fa` with 581 public tools.
-
-The current installed public catalog was collected through `morrow_catalog_search` and `morrow_capability_get` at `2026-09-14T22:51:44.605Z`:
-
-| Surface | Count |
+| Result | Count |
 | --- | ---: |
-| Public tools | 581 |
-| Published Canvas capabilities | 328 |
-| Published Canvas reads | 215 |
-| Published Canvas writes | 113 |
-| Published media-upload credential minting route | 0 |
+| Published Canvas reads attempted | 215 |
+| Successful live reads | 133 |
+| Failed attempts | 82 |
 
-The provider session catalog contains 1,392 Canvas operations. The MCP publishes the governed subset above through the capability interface.
+Most failed attempts used placeholder object IDs where BT2 had no corresponding fixture. The private seed collector found real folders, assignments, files, modules, pages, and rubrics, then retried 22 operations with exact live identifiers.
 
-## BT2 state before login
+The exact-seed retry reached 17 of 22 successfully. Confirmed repairs include:
 
-The exact installed capability call `morrow_capability_read(name: morrow_canvas_bindings)` returned one BT2 binding:
+- `canvas_get_single_user` accepts a learner token in generic path field `id`, resolves it at both privacy boundaries, and succeeds live.
+- `canvas_get_single_submission_by_anonymous_id_courses` accepts Canvas opaque anonymous IDs and succeeds live.
+- Desktop classifies an exact MCP runtime revision mismatch as repair-required and returns to First read complete after repair.
+- Safe error egress distinguishes local `not_sent` failures from Canvas HTTP responses without exposing provider content.
 
-- course ID `89585`;
-- tenant origin `https://chcp.instructure.com`;
-- source binding ID `canvas:5381de17df52cb77eb87:g8:c89585`;
-- Bridge catalog digest `8c1fa4e3fcb7fdadbde9a48eb131c1f5b2c3c93b9431c2d4ae50bd50835106ff`;
-- Edit policy revision `0`;
-- Edit options available;
-- `runtimeVerified: false`.
+The five remaining exact retries split into two classes:
 
-The binding is not current provider proof while Canvas is logged out. Chrome is open at the CHCP Canvas login form. No BT2 provider read or write has been claimed from this state.
+| Operation class | Live result | Current interpretation |
+| --- | --- | --- |
+| rubric used locations | deterministic `canvas_request_not_sent` | Bridge reinjection defect; source repair complete, v25 live retry pending |
+| assignments for one user | deterministic `canvas_request_not_sent` | Bridge reinjection defect; source repair complete, v25 live retry pending |
+| user progress | Canvas HTTP 400 | fixture or feature contract requires exact investigation after v25 activation |
+| provisional-grade status by student | Canvas HTTP 400 | requires a moderated-assignment fixture |
+| provisional-grade status by anonymous ID | Canvas HTTP 400 | requires a moderated-assignment fixture |
 
-## Source verification already completed
+The Bridge repair uses the existing verified Canvas content listener before it attempts reinjection. All 28 lifecycle tests pass, including a forced injection failure with one successful read and zero injection attempts. This is source and simulated proof until the two exact live retries pass through the activated v25 Bridge.
 
-The final source state that produced v17 passed these checks before packaging:
+A direct signed-in browser read of `GET /api/v1/courses/89585/users/self/progress` returned Canvas's exact prerequisite failure: the course must use modules with module completion requirements and the target must be enrolled as a student. The current signed-in instructor does not satisfy that learner endpoint. This proves the observed HTTP 400 is a BT2 fixture or role limit, not a Bridge transport failure. A live learner-target retry still needs an enrolled student in a module-based course with completion requirements.
 
-- native Canvas Bridge browser gate, including pairing, restart, course discovery, permissions, private chat, text and document reads, file transfer, concurrent upload isolation, action filtering, pagination, section, group, file, calendar, bulk-date writes, cancellation, render checks, Classic Quiz repair, tab loss, and disconnect;
-- MCP server suite: 116 files and 693 tests;
-- script suite: 927 tests passed except one intentional skip;
-- Desktop suite: 408 tests passed and one Windows-only skip;
-- Desktop update suite: 7 tests;
-- gateway privacy suite: 49 tests;
-- New Quiz and Item Bank conformance: 2 tests;
-- Canvas connector runtime suite: 65 tests;
-- dependency audits with no known vulnerabilities;
-- generated artifact checks and `git diff --check`.
+Private receipts remain under ignored `output/live-bt2-final-package-v22/live-proof` and `output/live-bt2-final-package-v23/live-proof`. They can contain course or learner data. Do not stage or publish them.
 
-These checks prove local contracts and simulated browser behavior. They do not replace the live BT2 provider matrix below.
+## Live Canvas write evidence
 
-## Live BT2 read matrix
+No live write has been dispatched. BT2 is still Plan-only. The finite write matrix remains blocked on explicit permission to select course `89585` and save one-hour Edit access for non-grade, non-message actions.
 
-Status: **blocked on CHCP Canvas login**.
+Each admitted write must use a Morrow-created disposable fixture and prove:
 
-The installed v17 harness is `output/live-bt2-final-package-v17/live-proof/run-installed-canvas-read-matrix.mjs`. It requires one exact current BT2 binding with `runtimeVerified: true`, invokes every published Canvas read through `morrow_capability_read`, redeems paged result artifacts, records provider status and send state, and writes both partial and final receipts.
+1. exact plan and target;
+2. approval binding;
+3. provider dispatch;
+4. fresh authoritative Canvas readback;
+5. replay refusal;
+6. cleanup and cleanup readback.
 
-A pre-login run stopped before its first Canvas capability call with `BT2 has no exact current Canvas binding`. This is the required fail-closed result for the current `runtimeVerified: false` binding.
+The matrix must not include grades or learner messages without separate exact authorization.
 
-After login, run it only after the Bridge has selected BT2 and the installed bindings call proves exactly one current `runtimeVerified: true` binding for course `89585`.
+## Repairs in the current dirty source set
 
-Final result: **pending**.
+- route-aware generic learner-ID schema and dual-boundary token resolution;
+- opaque Canvas anonymous-ID schema;
+- repair-required Desktop state for exact MCP runtime mismatch;
+- closed safe provider-failure projection;
+- existing-listener-first Canvas probe and read execution;
+- read-only Desktop detection of a sealed app-owned Bridge update;
+- repair-required Desktop lifecycle when a live unpacked extension outlasts its missing or damaged app-owned folder;
+- generated catalog and focused regressions for every repair.
 
-## Live BT2 write matrix
+The defect ledger records these as rows 419 through 425.
 
-Status: **not started**.
+## Verification completed after the latest repairs
 
-Before any write, open the Bridge Plan and Edit settings for BT2 and inspect the current 125 Canvas choices. Saving one-hour Edit access changes the extension's permission state and needs explicit action-time confirmation. Current catalog policy has:
+- extension lifecycle: 28 passed;
+- focused Desktop controller, contract, lifecycle, and view suites: 120 passed;
+- earlier gateway privacy suite: 151 passed, 3 skipped;
+- earlier Canvas connector suite: 65 passed;
+- earlier Canvas connector gateway integration: 23 passed.
+- complete script gate after row 425: 927 passed, 1 skipped, 0 failed;
+- complete Desktop gate after row 425: 411 passed, 1 skipped, 0 failed;
+- Desktop updater gate after row 425: 7 passed, 0 failed;
+- row 425 focused Desktop assistant, controller, and view suites: 125 passed, 0 failed;
+- defect-ledger integrity after row 425: 3 passed, 0 failed;
+- `git diff --check` after row 425: passed.
 
-- 125 choices for one Canvas course;
-- 9 curated choices;
-- 116 derived choices;
-- 112 derived ordinary Edit choices;
-- 4 derived Review-only choices;
-- 28 destructive choices, of which 24 can be enabled for Edit;
-- 29 choices that require field selection.
+The complete `pnpm test` gate is green for the current source. It must run once more after the live repair loop if that loop changes source.
 
-Two learner accommodation writes remain held for separate learner authority:
+## Required next actions
 
-- `canvas_set_course_level_accommodations`;
-- `canvas_set_quiz_level_accommodations`.
+1. Obtain action-time confirmation for the Bridge update and Chrome extension reload.
+2. Select Update Bridge in installed v25.
+3. Reload Morrow Bridge in the existing signed-in Chrome profile. Do not log out.
+4. Select Check Bridge and verify exact active-folder readback, no pending update, and First read complete.
+5. Rerun the two exact `not_sent` reads. Require provider dispatch and classify the provider result.
+6. Retry user progress only with an enrolled student in a course that has module completion requirements. Exercise the two provisional-grade status routes only with a moderated assignment fixture; they remain outside the current no-grade live scope.
+7. Obtain action-time confirmation for selecting course `89585` and saving one-hour Edit access.
+8. Execute the finite non-grade, non-message write matrix with authoritative readback, replay refusal, and cleanup.
+9. Update this handoff and the defect ledger with final live receipts and any new root fixes.
+10. Run the complete repository gate, inspect the final diff, commit the repair set, push the branch, and verify the remote SHA.
 
-The live matrix must use Morrow-created disposable BT2 fixtures. Each admitted route must pass through `morrow_capability_change`, the approval surface, and `morrow_operation_dispatch`. Each write needs a fresh authoritative Canvas readback, a replay-refusal check, and verified cleanup. Do not use grades or learner messages.
-
-Final result: **pending**.
-
-## Live-proof artifacts
-
-Current v17 proof files are under `output/live-bt2-final-package-v17/live-proof`:
-
-- `supported-catalog.json`;
-- `canvas-capability-descriptors.json`;
-- `morrow-health-prelogin.json`;
-- `canvas-health-prelogin.json`;
-- `canvas-bindings-prelogin.json`;
-- `collect-installed-canvas-capabilities.mjs`;
-- `call-installed-full.mjs`;
-- `run-installed-canvas-read-matrix.mjs`.
-
-Add the post-login binding, complete read matrix, write plans, approval receipts, dispatch receipts, authoritative readbacks, replay refusals, and cleanup readbacks here. Every receipt must name course `89585` and the exact current source binding.
-
-## Required remaining work
-
-1. Complete CHCP Canvas login in the open Chrome tab.
-2. Open BT2 course `89585` and select it in Morrow Bridge.
-3. Prove one exact `runtimeVerified: true` BT2 binding through installed MCP.
-4. Run and classify all 215 published Canvas reads. Repair any product defect and rerun its regression before continuing.
-5. Inspect the current BT2 Plan and Edit choices. Obtain explicit action-time confirmation immediately before saving one-hour Edit access.
-6. Run the finite disposable-fixture write matrix across all admitted write families. Record plan, approval, dispatch, authoritative readback, replay refusal, and cleanup.
-7. Update this handoff and `DEFECT-ERADICATION-LEDGER.md` with every verified live defect and root fix.
-8. If live work changes source, rerun the focused regression and the required broad gates, inspect the result, and rebuild the final package.
-9. Commit the full authorized repair set.
-10. Push `codex/desktop-mcp-bridge-triple-check-20260914` to `origin` and verify the exact remote SHA with `git ls-remote`.
-
-The work is not complete until every row above has direct evidence.
+Completion is still open. Source tests do not replace live provider readback, and no write is proven until its exact Canvas postcondition and cleanup are read back.

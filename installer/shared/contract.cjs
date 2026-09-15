@@ -149,6 +149,7 @@ function installerState(input) {
       // Morrow runtime. Writing the folder proves only folderReady.
       folderReady: input.bridgeFolderReady === true,
       loadedInChrome: input.bridgeLoadedInChrome === true ? true : input.bridgeLoadedInChrome === false ? false : "unknown",
+      updateAvailable: input.bridgeUpdateAvailable === true,
       manualChromeReloadRequired: input.bridgeManualChromeReloadRequired === true,
       paired: input.bridgePaired,
       courseSite: input.courseSite,

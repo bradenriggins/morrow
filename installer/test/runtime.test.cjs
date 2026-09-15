@@ -178,6 +178,7 @@ test("a complete payload remains uncertain until the shared-owner gateway report
   assert.equal(runtimeStatus(false, { health: { gatewayReady: true } }), "repair_required");
   assert.equal(runtimeStatus(true, { health: { gatewayReady: "unknown" } }), "uncertain");
   assert.equal(runtimeStatus(true, { health: { gatewayReady: false } }), "uncertain");
+  assert.equal(runtimeStatus(true, { health: { gatewayReady: false, runtimeMismatch: true } }), "repair_required");
   assert.equal(runtimeStatus(true, { health: { gatewayReady: true } }), "ready");
 });
 

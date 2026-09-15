@@ -875,15 +875,21 @@ test("requires the MCP package version and digest the gateway reads from its own
   const substituted = await payload.writeManifest(mcpRuntimeManifestFixture("f".repeat(64)));
   assert.equal(substituted.packageVersion, payload.expected.packageVersion);
   assert.notEqual(substituted.manifestSha256, payload.expected.manifestSha256);
-  assert.equal((await monitor.start()).health.gatewayReady, false);
+  const mismatched = await monitor.start();
+  assert.equal(mismatched.health.gatewayReady, false);
+  assert.equal(mismatched.health.runtimeMismatch, true);
 
   await monitor.close();
   await payload.removeManifest();
-  assert.equal((await monitor.start()).health.gatewayReady, false);
+  const repeatedMismatch = await monitor.start();
+  assert.equal(repeatedMismatch.health.gatewayReady, false);
+  assert.equal(repeatedMismatch.health.runtimeMismatch, true);
 
   await monitor.close();
   await payload.writeManifest(mcpRuntimeManifestFixture("c".repeat(64)));
-  assert.equal((await monitor.start()).health.gatewayReady, true);
+  const restored = await monitor.start();
+  assert.equal(restored.health.gatewayReady, true);
+  assert.equal(Object.hasOwn(restored.health, "runtimeMismatch"), false);
 });
 
 test("emits a bounded test-only startup trace without private runtime details", async (t) => {

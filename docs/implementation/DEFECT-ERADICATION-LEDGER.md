@@ -433,6 +433,13 @@ Every row stays open until its evidence columns are added and its status becomes
 | 416 | P1 | R5 | The Bridge omits the fixed command deadline when it initializes a Canvas course-file upload, so the in-page executor refuses every valid transfer before upload dispatch. | `connector/extension/src/service-worker.js`; full native-browser file-transfer regression | IMPLEMENTED |
 | 417 | P1 | R3 | Learner privacy rejects ordinary identity-free enrollment details nested under a roster-bound learner as an unresolved second identity. | `packages/gateway-core/src/privacy.ts`; privacy unit and New Quiz end-to-end regressions | IMPLEMENTED |
 | 418 | P1 | R3 | Learner privacy treats a structural `membership` proof as a person record and blocks valid New Quiz planning. | `packages/gateway-core/src/privacy.ts`; privacy unit and New Quiz end-to-end regressions | IMPLEMENTED |
+| 419 | P1 | R3 | A generic Canvas learner path bypasses token validation and dual-boundary resolution. | closure section 419 and privacy integration regressions | IMPLEMENTED |
+| 420 | P1 | R4 | Canvas anonymous submission identifiers are forced to decimal IDs. | closure section 420 and catalog regression | IMPLEMENTED |
+| 421 | P1 | R6 | Desktop reports uncertainty for a known runtime version mismatch. | closure section 421 and installed repair proof | IMPLEMENTED |
+| 422 | P1 | R3 | Privacy projection erases safe provider-failure evidence. | closure section 422 and live failure classification | IMPLEMENTED |
+| 423 | P1 | R5 | Bridge reinjection failure blocks a working Canvas listener. | closure section 423 and extension lifecycle regression | IMPLEMENTED |
+| 424 | P1 | R6 | A ready Desktop hides a sealed Bridge update. | closure section 424 and installed v25 UI proof | IMPLEMENTED |
+| 425 | P1 | R6 | A connected unpacked Bridge hides loss or damage of its app-owned folder. | closure section 425 and Desktop lifecycle regression | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2771,7 +2778,63 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: the privacy unit suite passes structural membership through both projection paths. The New Quiz end-to-end suite passes the same membership proof through the public planner.
 - Status: `IMPLEMENTED`.
 
-### Root-cause patterns for rows 331–418
+### 419: a generic Canvas learner path bypasses token resolution
+
+- Verified defect: `canvas_get_single_user` publishes the generic path field `id`, but the learner-token boundary recognized only named learner fields. A valid `Student A1` request was rejected before Canvas. Resolving it only in the source connector failed again because the gateway had already projected the token into a name.
+- Root cause: learner-bearing fields were duplicated as a fixed list at two privacy boundaries, while route semantics were available only to the later boundary.
+- Repair: one route-aware learner-field map now augments the public schema and drives token resolution at both gateway and source boundaries.
+- Regression: gateway privacy and Canvas connector integration tests cover the generic `id` route. Installed v22 reached Canvas and returned the exact user successfully.
+- Status: `IMPLEMENTED`.
+
+### 420: Canvas anonymous submission identifiers are forced to decimal IDs
+
+- Verified defect: the generated schemas required `anonymous_id` to match Canvas numeric identifiers. Live anonymous submission identifiers contain letters, digits, underscores, or hyphens, so valid calls were rejected locally.
+- Root cause: the catalog generator applied the general Canvas ID rule to an opaque provider token.
+- Repair: every `anonymous_id` field now uses the bounded opaque-token contract `^[A-Za-z0-9_-]{1,255}$`.
+- Regression: the catalog suite pins the contract. Installed v19 and later reached Canvas with a live anonymous submission identifier.
+- Status: `IMPLEMENTED`.
+
+### 421: Desktop reports uncertainty for a known runtime version mismatch
+
+- Verified defect: a newly installed app could remain at “getting ready” while an older local MCP runtime was still running. The monitor knew both expected and observed revisions but did not classify the mismatch as repairable.
+- Root cause: runtime health preserved the two revisions as diagnostics without turning their inequality into the installer lifecycle state.
+- Repair: the runtime snapshot marks an exact revision mismatch and the controller returns `repair_required`.
+- Regression: monitor and controller tests pin the mismatch. Installed QA packages visibly offered Repair Morrow, completed repair, reconnected the Bridge, and returned to First read complete.
+- Status: `IMPLEMENTED`.
+
+### 422: privacy projection erases safe provider-failure evidence
+
+- Verified defect: every source error was collapsed to a generic failure, including the closed Bridge receipt that distinguishes `sent: false` from an HTTP response. Live failures could not be separated into local dispatch defects and Canvas feature or fixture responses.
+- Root cause: error egress discarded all structured source output instead of admitting a narrow operational receipt.
+- Repair: egress preserves only the exact closed `morrow.canvas-browser-failure.v1` provider outcome and the fixed source code from `morrow.bridge.problem.v1`. Extra or malformed fields still fail closed.
+- Regression: gateway privacy tests cover the admitted and rejected shapes. Installed v23 exposed `sent`, optional HTTP status, result state, and source code without provider content.
+- Status: `IMPLEMENTED`.
+
+### 423: Bridge reinjection failure blocks a working Canvas listener
+
+- Verified defect: two isolated live reads repeatedly returned `canvas_request_not_sent` while the same bound Canvas tab and content listener completed other reads. The failure occurred before the Bridge marked provider dispatch.
+- Root cause: Canvas session verification and read execution both required a fresh `chrome.scripting.executeScript` call before using the listener already installed in the bound page. A transient reinjection failure converted a healthy read path into a local refusal.
+- Repair: Canvas probing and read execution first use the existing listener. They inject the content script only when no listener answers. Writes retain their existing dispatch fence.
+- Regression: all 28 extension lifecycle tests pass, including a ready listener with forced injection failure and zero injection attempts. Live v25 activation and exact route retries remain pending.
+- Status: `IMPLEMENTED`; live confirmation pending.
+
+### 424: a ready Desktop hides a sealed Bridge update
+
+- Verified defect: installed v24 reported First read complete while its app-owned Bridge service worker had SHA-256 `01a4c9e0d889b20ce90f122348dd61db83c2fd76f9892976b04cd6065ae5bfab` and the sealed app payload had `8f3cc12d17f6831252404c96d46290411c9e7ebabba151ca48cb207eadf3e09c`. The connected-course view exposed no Bridge reconciliation action.
+- Root cause: same-version sealed updates were supported by the maintenance controller, but setup state did not compare the installed and packaged release digests after setup was complete.
+- Repair: Desktop reports a read-only `updateAvailable` fact for the app-owned developer Bridge. The header, progress step, and action panel show Update Morrow Bridge and expose the existing authenticated update choreography.
+- Regression: 120 focused Desktop tests pass. Installed v25 visibly reports Update available and offers Update Bridge while preserving the connected BT2 first-read receipt.
+- Status: `IMPLEMENTED`.
+
+### 425: a connected unpacked Bridge hides loss of its app-owned files
+
+- Verified defect: Desktop reread the app-owned Bridge folder on every state request, but a missing or damaged folder only cleared `folderReady` and `loadedInChrome`. A still-running unpacked extension could keep the runtime paired and preserve the old first-read receipt, allowing the lifecycle and header to remain ready.
+- Root cause: the controller treated the runtime connection as sufficient current Bridge health after disk verification failed. It did not feed that failed artifact boundary into the lifecycle.
+- Repair: developer-temporary delivery enters `repair_required` when its app-owned folder is not verified while the runtime still reports a paired Bridge, a connected course, or a completed first read. A fresh installation with no live Bridge evidence still follows ordinary setup, and Chrome Web Store delivery does not require the temporary folder.
+- Regression: the Desktop controller removes the verified folder while a paired runtime remains live and requires `repair_required`. A fresh process also records failed startup verification and refuses to treat the surviving extension connection as ready. First-run and confirmed-removal states retain their existing lifecycle.
+- Status: `IMPLEMENTED`.
+
+### Root-cause patterns for rows 331–425
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -2784,6 +2847,7 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **Provider shapes and nested timeouts hidden by an abstraction:** rows 373–375, 379, and 381. Inventory owns one pagination path, gives each provider read its own bound, gives the complete run a separate larger bound, resolves Canvas's same-origin relative launch URL, and treats the legacy and native Item Banks runtimes as two strict provider contracts.
 - **A sandbox policy contradicts the parser it contains:** row 380. The sandbox allows the one local data form the parser must inspect while every network-bearing resource type remains blocked.
 - **A duplicated release contract drifts from its source:** row 382. Package admission pins the exact shipped policy and is exercised by source capture and final Desktop payload construction.
+- **Version equality or setup completion mistaken for artifact equality:** rows 402, 424, and 425. Bridge maintenance and Desktop state require the exact sealed release digest and verified installed folder, including after course setup is complete and while an old unpacked extension remains alive.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.
@@ -2800,6 +2864,10 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **Curated numeric types drifted from the provider identity contract:** row 401. Canvas identifiers remain decimal strings across generated and curated tools.
 - **Version equality mistaken for artifact equality:** row 402. Bridge maintenance compares the exact sealed release digest at equal versions.
 - **Error sanitization erased operational evidence:** row 403. Failure results retain a closed provider outcome without retaining provider content.
+- **A valid route fell outside duplicated identity lists:** row 419. One semantic route map now owns public validation and both privacy resolutions.
+- **An opaque provider token inherited the numeric-ID contract:** row 420. Anonymous identifiers keep their documented bounded alphabet.
+- **Known incompatibility reported as uncertainty:** row 421. Exact runtime revision mismatch enters the repair lifecycle.
+- **Successful installation treated as a prerequisite for every request:** row 423. The Bridge uses the already verified page listener and installs it only when absent.
 - **A user-requested refresh reused a passive cached observation:** row 404. Explicit status checks await the bounded current runtime observation.
 - **HTTP method and path scope mistaken for executable credential and response semantics:** rows 405–407. Publication now accounts for authorization class, redirect behavior, and cross-field request requirements.
 - **A test double implemented more DOM behavior than the browser:** row 408. The renderer uses the standard container contract and the regression executes in Chromium.

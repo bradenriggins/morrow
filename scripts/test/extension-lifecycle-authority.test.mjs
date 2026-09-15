@@ -81,7 +81,7 @@ function connectedState() {
   };
 }
 
-function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbackFetch, tabMessage } = {}) {
+function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbackFetch, tabMessage, failScriptInjection = false } = {}) {
   const local = storageArea(initialLocal);
   const session = storageArea({});
   const runtimeMessages = event();
@@ -195,6 +195,7 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
     scripting: {
       executeScript: async (injection) => {
         scriptExecutions.push(injection);
+        if (failScriptInjection && injection.files?.includes("src/canvas-content.js")) throw new Error("transient injection failure");
         return injection.func ? [{ result: { ok: false } }] : [{ result: null }];
       },
     },
@@ -461,6 +462,30 @@ async function socketReadScenario() {
   releaseCommandProbe();
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(providerReads, 0);
+}
+
+async function existingCanvasListenerScenario() {
+  let providerReads = 0;
+  const value = fixture({
+    failScriptInjection: true,
+    tabMessage: async ({ message }) => {
+      if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
+      if (message?.type === "morrow_canvas_execute") {
+        providerReads += 1;
+        return { ok: true, sent: true, status: 200, truncated: false, data: { id: 42 } };
+      }
+      return null;
+    },
+  });
+  await importWorker("existing-canvas-listener");
+  const socket = await authenticate(value);
+  await new Promise((resolve) => setTimeout(resolve, 2_100));
+  const command = bridgeCommand({ requestId: "request-existing-listener", operationId: "operation-existing-listener" });
+  socket.receive(command);
+  const result = await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId));
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(providerReads, 1);
+  assert.equal(value.scriptExecutions.some((injection) => injection.files?.includes("src/canvas-content.js")), false);
 }
 
 async function latePermissionScenario() {
@@ -1021,6 +1046,7 @@ const scenarios = {
   "socket-pre-effect": () => preEffectScenario("socket"),
   "started-write": startedWriteScenario,
   "socket-read": socketReadScenario,
+  "existing-canvas-listener": existingCanvasListenerScenario,
   "late-permission": latePermissionScenario,
   "command-admission-cancel": commandAdmissionCancellationScenario,
   "edit-policy-cancel": () => editPolicyCancellationScenario("cancel"),
@@ -1086,6 +1112,10 @@ test("socket closure retains unknown state for a provider write that already sta
 
 test("socket closure fences a provider read still checking its course session", async () => {
   await isolatedScenario("socket-read");
+});
+
+test("a ready Canvas listener completes a read when script reinjection is unavailable", async () => {
+  await isolatedScenario("existing-canvas-listener");
 });
 
 test("Disconnect invalidates pending course access and compensates a late grant", async () => {

@@ -128,6 +128,24 @@ describe("source MCP privacy boundary", () => {
     expect(input.properties).toMatchObject({ user_id: { anyOf: expect.any(Array) }, course_id: { type: "integer" } });
     expect(text(input)).not.toContain(INTERNAL_SOURCE_CAPABILITY_META);
   });
+
+  it("extends a caller-identified generic learner field without widening other generic IDs", () => {
+    const input = sourcePrivacyInputSchema({
+      type: "object",
+      properties: { id: { type: "string", pattern: "^[1-9][0-9]*$" }, rubric_id: { type: "string", pattern: "^[1-9][0-9]*$" } },
+    }, ["id"]);
+    expect(input.properties).toMatchObject({ id: { anyOf: expect.any(Array) }, rubric_id: { type: "string", pattern: "^[1-9][0-9]*$" } });
+    expect(() => sourcePrivacyInputSchema({}, ["bad field"])).toThrow("privacy learner identifier field is invalid");
+  });
+
+  it("resolves a caller-identified generic learner field before provider dispatch", async () => {
+    const boundary = setup();
+    const labelRead = await boundary.invoke("canvas_read", request, undefined, async () => envelope("Mary Jackson"));
+    const token = text(labelRead).match(/Student A[1-9][0-9]*/u)![0];
+    const handler = vi.fn(async (args) => envelope(args));
+    await boundary.invoke("canvas_get_single_user", { ...request, id: token, rubric_id: token }, undefined, handler);
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ id: "912345", rubric_id: "Mary Jackson" }));
+  });
 });
 
 

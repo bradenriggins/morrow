@@ -88,6 +88,7 @@ export function statusSummary(current) {
   if (configuredAssistant(current) && current.runtime?.status !== "ready") return "Morrow is getting ready";
   if (deliveryBlocked(current)) return "Morrow Bridge is not available yet";
   if (current.bridge?.manualChromeReloadRequired === true) return "Reload Morrow Bridge in Chrome";
+  if (current.bridge?.updateAvailable === true) return "Update Morrow Bridge";
   if (configuredAssistant(current) && needsBridge(current)) return "Set up Morrow Bridge in Chrome";
   if (previewCompleted(current)) return "First read complete";
   if (previewReady(current)) return "First read is ready";
@@ -108,15 +109,18 @@ export function progress(current) {
   const courseReady = verifiedCourse(current);
   const blocked = deliveryBlocked(current);
   const reloadRequired = bridge.manualChromeReloadRequired === true;
+  const updateAvailable = bridge.updateAvailable === true;
   const loaded = bridge.loadedInChrome === true || bridge.paired === true;
   const paired = bridge.paired === true;
   const firstPreviewReady = previewReady(current);
   const firstPreviewCompleted = previewCompleted(current);
-  const active = repairRequired ? -1 : !assistant ? 0 : !paired ? 1 : firstPreviewCompleted ? -1 : 2;
+  const active = repairRequired ? -1 : !assistant ? 0 : reloadRequired || updateAvailable || !paired ? 1 : firstPreviewCompleted ? -1 : 2;
   const bridgeDetail = blocked
     ? "Not available yet"
     : reloadRequired
       ? "Reload in Chrome, then check"
+      : updateAvailable
+        ? "Update available"
       : paired
         ? "Connected to Morrow"
         : loaded
@@ -135,7 +139,7 @@ export function progress(current) {
         : "Open Canvas or Moodle in Chrome";
   return [
     { label: "Assistant", detail: repairRequired ? "Waiting for repair" : assistant ? configuredAssistants(current).map((entry) => entry.title).join(", ") : pending ? "Finish approval in Claude Desktop" : "Choose an installed assistant", status: repairRequired ? "pending" : assistant ? "done" : "current" },
-    { label: "Morrow Bridge", detail: bridgeDetail, status: blocked ? "blocked" : paired ? "done" : active === 1 ? "current" : "pending" },
+    { label: "Morrow Bridge", detail: bridgeDetail, status: blocked ? "blocked" : active === 1 ? "current" : paired ? "done" : "pending" },
     { label: "Course", detail: courseDetail, status: firstPreviewCompleted ? "done" : active === 2 ? "current" : "pending" },
   ].map((step, index) => ({ ...step, current: index === active && step.status !== "done" }));
 }
@@ -295,6 +299,13 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
       title: "Reload Morrow Bridge.",
       copy: "Morrow staged a verified Bridge update. Chrome must reload Morrow Bridge before Morrow can check the update.",
       body: '<ol class="instructions"><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>Find <strong>Morrow Bridge</strong> on that page and select <strong>Reload</strong>.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+    };
+  }
+  if (bridge.updateAvailable === true) {
+    return {
+      title: "Update Morrow Bridge.",
+      copy: "This Morrow app includes newer Bridge files. Update the app-owned Bridge folder, then reload the extension in Chrome. This does not change your course.",
+      body: '<div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Update Bridge</button></div>',
     };
   }
   if (needsBridge(current) && bridge.folderReady !== true) {

@@ -72,21 +72,22 @@ Two facts apply to every row, so they are stated once:
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
 | `first-paint` | "Checking Morrow setup…" alone; the action panel is hidden; the rail shows three stages, each "Not checked yet"; the header live region says "Checking setup"; **Check status** is disabled | None. The read answers and replaces this state. `respond()` catches its own failures and always answers, so this state ends unless the main process never settles `installer:get-state` | `installer/renderer/index.html:31`, `installer/renderer/renderer.js:299-302`, `installer/shared/setup-view.mjs:103` |
-| `setup-unavailable` | "Morrow could not read its setup state." / "Morrow could not read the setup record it keeps on this computer, so it cannot show which steps are complete. No setup step ran." and "No setup state was returned" | **Check again** in the panel | `installer/shared/setup-view.mjs:430` |
-| `repair` | "Repair Morrow before you connect a course." / "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state." The three-stage rail marks no ordinary setup stage as current and says the assistant is waiting for repair. | **Repair Morrow**, or **Check again** | `installer/shared/setup-view.mjs:254` |
-| `claude-pending` | "Finish setting up Claude Desktop." / "Morrow prepared its extension for Claude Desktop. Install it there, then return here to check the connection." | **Open Claude Desktop**, install **Morrow.mcpb** through **Settings > Extensions > Advanced settings > Install Extension**, then **Check setup**. **Show Morrow extension** opens its folder. | `installer/shared/setup-view.mjs:265` |
-| `no-assistant` | "Choose your assistant." / "Morrow configures only the assistant you choose. Your course sign-in remains separate in Chrome." with one card per assistant. The optional materials-folder choice is closed by default. | Select a card, then **Set up ChatGPT** (the button names the chosen assistant). With no supported assistant, install one and use the header **Check status**. | `installer/shared/setup-view.mjs:274` |
-| `runtime-not-ready` | "Morrow is getting ready." / "Morrow will show the next Bridge step when its local runtime is ready. It will not open Chrome setup before then." | Keep Morrow open, then use the header **Check status**. | `installer/shared/setup-view.mjs:281` |
-| `delivery-blocked` | "Morrow Bridge is not available yet." / "Your assistant can be ready while the Chrome connection is still unavailable. Morrow will not suggest an unverified installation route." | Use the header **Check status** after Bridge delivery is available. | `installer/shared/setup-view.mjs:288` |
-| `reload-required` | "Reload Morrow Bridge." and three exact Chrome actions | Reload it on **Manage Extensions**, then **Check Bridge**. | `installer/shared/setup-view.mjs:295` |
-| `folder-not-ready` | "Morrow Bridge is not ready to open." / "Morrow could not verify its Bridge folder." | **Repair Morrow**, or **Check again**. | `installer/shared/setup-view.mjs:302` |
-| `dev-temporary` | "Add Morrow Bridge." and the temporary Chrome method in five exact substeps | **Show Bridge folder**, use **Manage Extensions**, **Developer mode**, and **Load unpacked**, then select **Connect Morrow** and **Check Bridge**. | `installer/shared/setup-view.mjs:309` |
-| `store-available` | "Install Morrow Bridge." / "Morrow Bridge uses the learning platform where you are already signed in. It asks Chrome for access only to the exact learning platform you choose." | Add it from the Chrome Web Store, select **Connect Morrow**, then **Check Bridge**. | `installer/shared/setup-view.mjs:316` |
-| `not-paired` | "Connect Morrow Bridge." / "<assistant> is configured. Open Morrow Bridge in Chrome to complete the connection you start." | Select **Connect Morrow**, approve **Allow connection** only if you started it, then **Check Bridge**. | `installer/shared/setup-view.mjs:324` |
-| `no-course` | "Open your course in Chrome." / "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course." | Open and sign in to a course. In Morrow Bridge select **Connect Canvas** or **Connect Moodle**, allow the exact address, then in **Plan and Edit settings** select **Connect selected courses in Plan**. | `installer/shared/setup-view.mjs:331` |
-| `preview-ready` | "Check your course connection." / "Morrow will read <course> to confirm the connection. This check does not change the course." | **Check connection**. | `installer/shared/setup-view.mjs:346` |
-| `preview-preparing` | "Your selected course is connected." / "<course> is connected. Morrow will show when its first read is available." | Use the header **Check status** before asking Morrow to inspect the course. | `installer/shared/setup-view.mjs:352` |
-| `preview-completed` | "Your course is connected." / "Morrow read <course> successfully. Continue in <assistant> and ask what you want to do, for example:" | Continue in the assistant. Setup is complete. | `installer/shared/setup-view.mjs:339` |
+| `setup-unavailable` | "Morrow could not read its setup state." / "Morrow could not read the setup record it keeps on this computer, so it cannot show which steps are complete. No setup step ran." and "No setup state was returned" | **Check again** in the panel | `installer/shared/setup-view.mjs:441` |
+| `repair` | "Repair Morrow before you connect a course." / "Morrow did not confirm that its local runtime is ready. No course connection or course action will start from this state." The three-stage rail marks no ordinary setup stage as current and says the assistant is waiting for repair. | **Repair Morrow**, or **Check again** | `installer/shared/setup-view.mjs:258` |
+| `claude-pending` | "Finish setting up Claude Desktop." / "Morrow prepared its extension for Claude Desktop. Install it there, then return here to check the connection." | **Open Claude Desktop**, install **Morrow.mcpb** through **Settings > Extensions > Advanced settings > Install Extension**, then **Check setup**. **Show Morrow extension** opens its folder. | `installer/shared/setup-view.mjs:269` |
+| `no-assistant` | "Choose your assistant." / "Morrow configures only the assistant you choose. Your course sign-in remains separate in Chrome." with one card per assistant. The optional materials-folder choice is closed by default. | Select a card, then **Set up ChatGPT** (the button names the chosen assistant). With no supported assistant, install one and use the header **Check status**. | `installer/shared/setup-view.mjs:278` |
+| `runtime-not-ready` | "Morrow is getting ready." / "Morrow will show the next Bridge step when its local runtime is ready. It will not open Chrome setup before then." | Keep Morrow open, then use the header **Check status**. | `installer/shared/setup-view.mjs:285` |
+| `delivery-blocked` | "Morrow Bridge is not available yet." / "Your assistant can be ready while the Chrome connection is still unavailable. Morrow will not suggest an unverified installation route." | Use the header **Check status** after Bridge delivery is available. | `installer/shared/setup-view.mjs:292` |
+| `reload-required` | "Reload Morrow Bridge." and three exact Chrome actions | Reload it on **Manage Extensions**, then **Check Bridge**. | `installer/shared/setup-view.mjs:299` |
+| `bridge-update-available` | "Update Morrow Bridge." / "This Morrow app includes newer Bridge files. Update the app-owned Bridge folder, then reload the extension in Chrome. This does not change your course." | **Update Bridge**, then reload it on **Manage Extensions**. | `installer/shared/setup-view.mjs:306` |
+| `folder-not-ready` | "Morrow Bridge is not ready to open." / "Morrow could not verify its Bridge folder." | **Repair Morrow**, or **Check again**. | `installer/shared/setup-view.mjs:313` |
+| `dev-temporary` | "Add Morrow Bridge." and the temporary Chrome method in five exact substeps | **Show Bridge folder**, use **Manage Extensions**, **Developer mode**, and **Load unpacked**, then select **Connect Morrow** and **Check Bridge**. | `installer/shared/setup-view.mjs:320` |
+| `store-available` | "Install Morrow Bridge." / "Morrow Bridge uses the learning platform where you are already signed in. It asks Chrome for access only to the exact learning platform you choose." | Add it from the Chrome Web Store, select **Connect Morrow**, then **Check Bridge**. | `installer/shared/setup-view.mjs:327` |
+| `not-paired` | "Connect Morrow Bridge." / "<assistant> is configured. Open Morrow Bridge in Chrome to complete the connection you start." | Select **Connect Morrow**, approve **Allow connection** only if you started it, then **Check Bridge**. | `installer/shared/setup-view.mjs:335` |
+| `no-course` | "Open your course in Chrome." / "Morrow Bridge identifies Canvas or Moodle after you open a signed-in course." | Open and sign in to a course. In Morrow Bridge select **Connect Canvas** or **Connect Moodle**, allow the exact address, then in **Plan and Edit settings** select **Connect selected courses in Plan**. | `installer/shared/setup-view.mjs:342` |
+| `preview-ready` | "Check your course connection." / "Morrow will read <course> to confirm the connection. This check does not change the course." | **Check connection**. | `installer/shared/setup-view.mjs:357` |
+| `preview-preparing` | "Your selected course is connected." / "<course> is connected. Morrow will show when its first read is available." | Use the header **Check status** before asking Morrow to inspect the course. | `installer/shared/setup-view.mjs:363` |
+| `preview-completed` | "Your course is connected." / "Morrow read <course> successfully. Continue in <assistant> and ask what you want to do, for example:" | Continue in the assistant. Setup is complete. | `installer/shared/setup-view.mjs:350` |
 
 The exact title and explanatory sentence emitted for each branch are:
 
@@ -102,6 +103,8 @@ The exact title and explanatory sentence emitted for each branch are:
 - "Your assistant can be ready while the Chrome connection is still unavailable. Morrow will not suggest an unverified installation route."
 - "Reload Morrow Bridge."
 - "Morrow staged a verified Bridge update. Chrome must reload Morrow Bridge before Morrow can check the update."
+- "Update Morrow Bridge."
+- "This Morrow app includes newer Bridge files. Update the app-owned Bridge folder, then reload the extension in Chrome. This does not change your course."
 - "Morrow Bridge is not ready to open."
 - "Morrow could not verify its Bridge folder. Repair Morrow to restore the folder from the copy included with the app."
 - "Add Morrow Bridge."
@@ -487,25 +490,26 @@ stale name here.
 | Control name | Surface | Source |
 | --- | --- | --- |
 | `Check status` | Morrow app | `installer/renderer/index.html:15` |
-| `Repair Morrow` | Morrow app | `installer/shared/setup-view.mjs:254` |
-| `Check again` | Morrow app | `installer/shared/setup-view.mjs:256`, `installer/shared/setup-view.mjs:256` |
-| `Open Claude Desktop` | Morrow app | `installer/shared/setup-view.mjs:205`, `installer/shared/setup-view.mjs:205` |
-| `Show Morrow extension` | Morrow app | `installer/shared/setup-view.mjs:206`, `installer/shared/setup-view.mjs:206` |
-| `Check setup` | Morrow app | `installer/shared/setup-view.mjs:207`, `installer/shared/setup-view.mjs:207` |
-| `Choose an assistant` | Morrow app | `installer/shared/setup-view.mjs:160` |
-| `Choose folder` | Morrow app | `installer/shared/setup-view.mjs:181`, `installer/shared/setup-view.mjs:181` |
-| `Change folder` | Morrow app | `installer/shared/setup-view.mjs:189` |
-| `Remove` | Morrow app | `installer/shared/setup-view.mjs:210`, `installer/renderer/renderer.js:351` |
-| `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:311` |
-| `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:297` |
-| `Check connection` | Morrow app | `installer/shared/setup-view.mjs:348` |
+| `Repair Morrow` | Morrow app | `installer/shared/setup-view.mjs:258` |
+| `Check again` | Morrow app | `installer/shared/setup-view.mjs:260`, `installer/shared/setup-view.mjs:260` |
+| `Open Claude Desktop` | Morrow app | `installer/shared/setup-view.mjs:209`, `installer/shared/setup-view.mjs:209` |
+| `Show Morrow extension` | Morrow app | `installer/shared/setup-view.mjs:210`, `installer/shared/setup-view.mjs:210` |
+| `Check setup` | Morrow app | `installer/shared/setup-view.mjs:211`, `installer/shared/setup-view.mjs:211` |
+| `Choose an assistant` | Morrow app | `installer/shared/setup-view.mjs:164` |
+| `Choose folder` | Morrow app | `installer/shared/setup-view.mjs:185`, `installer/shared/setup-view.mjs:185` |
+| `Change folder` | Morrow app | `installer/shared/setup-view.mjs:193` |
+| `Remove` | Morrow app | `installer/shared/setup-view.mjs:214`, `installer/renderer/renderer.js:351` |
+| `Show Bridge folder` | Morrow app | `installer/shared/setup-view.mjs:322` |
+| `Check Bridge` | Morrow app | `installer/shared/setup-view.mjs:301` |
+| `Update Bridge` | Morrow app | `installer/shared/setup-view.mjs:308` |
+| `Check connection` | Morrow app | `installer/shared/setup-view.mjs:359` |
 | `Check for updates` | Morrow app | `installer/renderer/renderer.js:211` |
 | `Restart to update` | Morrow app | `installer/renderer/renderer.js:238` |
 | `Try restart again` | Morrow app | `installer/renderer/renderer.js:234` |
 | `Retry the update` | Morrow app | `installer/renderer/renderer.js:250` |
 | `Try again` | Morrow app | `installer/renderer/renderer.js:255` |
 | `Save Blackboard connection` | Morrow app | `installer/renderer/index.html:78` |
-| `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:418` |
+| `Remove Morrow&#39;s data` | Morrow app | `installer/shared/setup-view.mjs:429` |
 | `Allow connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
 | `Cancel connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
 | `About this connection` | Chrome connection page | `packages/bridge-loopback/src/index.ts:532` |
@@ -557,12 +561,12 @@ Names a person reads as landmarks rather than presses:
 | Name | Surface | Source |
 | --- | --- | --- |
 | `Set up Morrow on this computer` | Morrow app | `installer/renderer/index.html:20` |
-| `Setup you can change` | Morrow app | `installer/shared/setup-view.mjs:232` |
-| `Materials folder` | Morrow app | `installer/shared/setup-view.mjs:181` |
-| `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:468` |
-| `Assistant` | Morrow app progress rail | `installer/shared/setup-view.mjs:137` |
-| `Morrow Bridge` | Morrow app progress rail | `installer/shared/setup-view.mjs:138` |
-| `Course` | Morrow app progress rail | `installer/shared/setup-view.mjs:139` |
+| `Setup you can change` | Morrow app | `installer/shared/setup-view.mjs:236` |
+| `Materials folder` | Morrow app | `installer/shared/setup-view.mjs:185` |
+| `Where to get help` | Morrow app | `installer/shared/setup-view.mjs:479` |
+| `Assistant` | Morrow app progress rail | `installer/shared/setup-view.mjs:141` |
+| `Morrow Bridge` | Morrow app progress rail | `installer/shared/setup-view.mjs:142` |
+| `Course` | Morrow app progress rail | `installer/shared/setup-view.mjs:143` |
 | `Connect a Blackboard Learn site (optional)` | Morrow app | `installer/renderer/index.html:50` |
 | `Morrow setup` | Setup guide | `connector/extension/onboarding/onboarding.html:6` |
 | `Plan and Edit settings` | Plan and Edit settings | `connector/extension/settings/settings.html:6` |

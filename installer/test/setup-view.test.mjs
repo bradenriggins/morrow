@@ -135,6 +135,18 @@ test("Chrome must reload a staged Bridge update", () => {
   assert.equal(step(current, "Morrow Bridge").detail, "Reload in Chrome, then check");
 });
 
+test("a ready installation exposes its sealed Bridge update", () => {
+  const current = state({ ...CONNECTED_COURSE, firstPreview: { available: true, completed: true }, bridgeUpdateAvailable: true });
+  const view = actionView(current, { chosenAssistantId: "codex" });
+  assert.equal(view.title, "Update Morrow Bridge.");
+  assert.match(view.copy, /does not change your course/);
+  assert.deepEqual(actions(view.body), ["check-bridge", "choose-workspace", "remove-assistant"]);
+  assert.match(view.body, />Update Bridge<\/button>/);
+  assert.equal(statusSummary(current), "Update Morrow Bridge");
+  assert.equal(step(current, "Morrow Bridge").status, "current");
+  assert.equal(step(current, "Morrow Bridge").detail, "Update available");
+});
+
 test("Bridge delivery is unavailable", () => {
   const current = state({ ...READY_ASSISTANT, lifecycle: "bridge_delivery_unavailable", bridgeDelivery: "unavailable" });
   const view = actionView(current, { chosenAssistantId: "codex" });

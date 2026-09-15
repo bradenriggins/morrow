@@ -290,6 +290,8 @@ describe("Canvas connector gateway path", () => {
                 ? command.arguments.assignment_id === "77" ? quizItems : [{ ...quizItems[3], id: "8" }]
               : command.toolName === "canvas_list_users_in_course_users"
                 ? [{ id: "9001", name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }]
+              : command.toolName === "canvas_get_single_user"
+                ? { id: command.arguments.id, name: "Jane Doe", email: "jane.doe@example.edu", login_id: "jdoe" }
               : command.toolName === "canvas_update_course_settings"
                 ? {
                   id: "42",
@@ -868,6 +870,27 @@ describe("Canvas connector gateway path", () => {
       expect(JSON.stringify(operationEgress)).not.toContain("Jane Doe");
       expect(JSON.stringify(operationEgress)).not.toContain("jane.doe@example.edu");
       expect(JSON.stringify(operationEgress)).toMatch(/Student A[1-9][0-9]*/);
+    }, CASE_TIMEOUT_MS);
+
+    it("resolves a learner token in Canvas's generic single-user id before source dispatch", async () => {
+      const roster = await runtime.call("canvas_list_users_in_course_users", {
+        course_id: "42",
+        enrollment_type: ["student"],
+        enrollment_state: ["active", "invited", "completed", "inactive"],
+        morrow_max_pages: 50,
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      const learnerToken = /Student A[1-9][0-9]*/.exec(JSON.stringify(roster))?.[0];
+      expect(learnerToken).toBeTruthy();
+      const result = await runtime.call("canvas_get_single_user", {
+        course_id: "42",
+        id: learnerToken,
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(result.isError).not.toBe(true);
+      expect(JSON.stringify(result)).not.toContain("9001");
+      expect(JSON.stringify(result)).not.toContain("Jane Doe");
+      expect(JSON.stringify(result)).toContain(learnerToken);
     }, CASE_TIMEOUT_MS);
 
     it("plans a private Canvas Inbox message from a learner token and keeps it out of every public list", async () => {

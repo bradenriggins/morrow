@@ -777,6 +777,17 @@ test("Bridge reconciliation stages same-version bytes only when their sealed rel
   assert.equal(stages, 1);
 });
 
+test("Bridge state detects a sealed app-owned update without changing the installed folder", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root, { bridgeDelivery: "developer_temporary" });
+  const installed = bridgeInstallation({ releaseManifestSha256: "a".repeat(64) });
+  installer.packagedBridgeRelease = async () => ({ version: installed.version, releaseManifestSha256: "b".repeat(64) });
+  assert.equal(await installer.bridgeReleaseUpdateAvailable(installed), true);
+  installer.packagedBridgeRelease = async () => ({ version: installed.version, releaseManifestSha256: installed.releaseManifestSha256 });
+  assert.equal(await installer.bridgeReleaseUpdateAvailable(installed), false);
+  assert.equal(await installer.bridgeReleaseUpdateAvailable({ ...installed, manualChromeReloadRequired: true }), false);
+});
+
 test("state() reports the Chrome load state the Bridge itself answered", async () => {
   const root = await temporaryRoot();
   await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
@@ -1443,19 +1454,51 @@ test("repair replaces changed sealed Bridge bytes even when the Chrome version i
 
 test("state stops reporting a Bridge folder that was removed while Morrow stayed open", async () => {
   const root = await temporaryRoot();
-  const { installer } = await repairableController(root);
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const { installer } = await repairableController(root, {
+    runtimeMonitor: RECORDING_MONITOR.replace("bridgeConnected: false", "bridgeConnected: true")
+  });
   const stateDirectory = path.join(root, "UserData", "State");
   const bridgeDirectory = path.join(root, "UserData", "Bridge");
   await fs.mkdir(stateDirectory, { recursive: true });
   await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
   await installer.initializeBridgeAtStartup();
 
-  assert.equal((await installer.state()).bridge.folderReady, true);
+  assert.equal((await installer.state({ recheckAssistants: true })).bridge.folderReady, true);
   await fs.rm(bridgeDirectory, { recursive: true, force: true });
 
-  const afterRemoval = await installer.state();
+  const afterRemoval = await installer.state({ recheckAssistants: true });
   assert.equal(afterRemoval.bridge.folderReady, false, "state re-reads the app-owned Bridge folder from disk");
   assert.equal(afterRemoval.bridge.loadedInChrome, false);
+  assert.equal(afterRemoval.lifecycle, "repair_required",
+    "an already-running extension cannot hide a missing app-owned Bridge folder");
+  assert.equal((await installer.state({ recheckAssistants: true })).lifecycle, "repair_required",
+    "later refreshes retain the failed disk verification until a verified folder replaces it");
+});
+
+test("a fresh Desktop process reports repair when a live unpacked Bridge outlasts damaged installed files", async () => {
+  const root = await temporaryRoot();
+  await fs.mkdir(path.join(root, "UserData", "Materials"), { recursive: true });
+  const runtimeMonitor = RECORDING_MONITOR.replace("bridgeConnected: false", "bridgeConnected: true");
+  const first = await repairableController(root, { runtimeMonitor });
+  const stateDirectory = path.join(root, "UserData", "State");
+  const bridgeDirectory = path.join(root, "UserData", "Bridge");
+  await fs.mkdir(stateDirectory, { recursive: true });
+  await fs.writeFile(path.join(stateDirectory, "morrow.upstreams.json"), "{}\n");
+  await first.installer.initializeBridgeAtStartup();
+  await fs.writeFile(path.join(bridgeDirectory, "src", "service-worker.js"), "damaged\n");
+
+  const restarted = controller(root, {
+    trustedMcpRuntimeManifestSha256: first.installer.trustedMcpRuntimeManifestSha256,
+    trustedBridgeReleaseManifestSha256: first.installer.trustedBridgeReleaseManifestSha256,
+    runtimeMonitor,
+    detectAssistant: async () => true,
+  });
+  await assert.rejects(() => restarted.initializeBridgeAtStartup());
+  const current = await restarted.state({ recheckAssistants: true });
+  assert.equal(current.bridge.paired, true);
+  assert.equal(current.bridge.folderReady, false);
+  assert.equal(current.lifecycle, "repair_required");
 });
 
 test("repair refuses a payload that no longer verifies and changes nothing", async () => {

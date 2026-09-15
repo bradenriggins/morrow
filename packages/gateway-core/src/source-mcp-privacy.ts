@@ -29,6 +29,11 @@ export interface SourceMcpPrivacyOptions {
   readonly loadRoster: (binding: SourcePrivacyBinding) => Promise<readonly LearnerIdentity[]>;
 }
 
+/** Provider routes whose generic field name carries a learner identity. */
+export function sourceLearnerIdentifierFields(toolName: string): readonly string[] {
+  return toolName === "canvas_get_single_user" ? ["id"] : [];
+}
+
 export function sourcePrivacyRoster(value: unknown): readonly LearnerIdentity[] {
   if (!Array.isArray(value) || value.length > 50_000) throw new Error("privacy_roster_invalid");
   const seen = new Set<string>();
@@ -117,7 +122,14 @@ export function moodleSourceHistoryAvailable(toolName: string, dataClass?: strin
 }
 
 /** Extend only learner identifier positions; course and object identifiers retain their contract. */
-export function sourcePrivacyInputSchema(schema: JsonObject): JsonObject {
+export function sourcePrivacyInputSchema(
+  schema: JsonObject,
+  additionalLearnerIdentifierFields: readonly string[] = [],
+): JsonObject {
+  const learnerIdentifierFields = new Set(additionalLearnerIdentifierFields);
+  if ([...learnerIdentifierFields].some((field) => !/^[A-Za-z][A-Za-z0-9_]{0,79}$/u.test(field))) {
+    throw new TypeError("privacy learner identifier field is invalid");
+  }
   const walk = (value: unknown, key = ""): unknown => {
     if (Array.isArray(value)) return value.map((entry) => walk(entry, key));
     if (!isJsonObject(value)) return value;
@@ -125,7 +137,8 @@ export function sourcePrivacyInputSchema(schema: JsonObject): JsonObject {
       field === "properties" && isJsonObject(child)
         ? Object.fromEntries(Object.entries(child).map(([name, definition]) => [name, walk(definition, name)]))
         : walk(child, key)]));
-    if (/^(?:user|student|learner|recipient|author|participant)(?:s|_?ids?)?$/iu.test(key)
+    if ((/^(?:user|student|learner|recipient|author|participant)(?:s|_?ids?)?$/iu.test(key)
+      || learnerIdentifierFields.has(key))
       && value.type !== "array" && (value.type === "number" || value.type === "integer" || value.type === "string")) {
       return { anyOf: [output, { type: "string", pattern: "^Student A[1-9][0-9]*$" }],
         description: "Use the course learner pseudonym returned by Morrow." };
@@ -228,7 +241,8 @@ export class SourceMcpPrivacyBoundary {
       if (requestedCourse != null && String(requestedCourse) !== binding.courseId) return failure();
       if (this.options.acceptsCourseRequest && !this.options.acceptsCourseRequest(toolName, args, binding)) return failure();
       const context = await this.context(binding);
-      const resolved = resolveLearnerTokens(args, this.vault, context.learnerScope, context.learnerRoster);
+      const resolved = resolveLearnerTokens(args, this.vault, context.learnerScope, context.learnerRoster,
+        sourceLearnerIdentifierFields(toolName));
       const result = await handler(resolved);
       this.assertCurrent(binding);
       // Legacy donor tokens have no identity proof in this source vault.
