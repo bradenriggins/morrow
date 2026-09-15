@@ -1399,10 +1399,7 @@ test("restoring a staged Bridge does not enter assistant configuration repair", 
   const installer = controller(root);
   const calls = [];
   const finalState = { schema: "morrow.installer-state.v1", lifecycle: "assistant_ready" };
-  installer.withDesktopMutation = async (operation) => operation({
-    stopRuntime: async () => { calls.push("stop-runtime"); }
-  });
-  installer.ensureRuntime = async () => { calls.push("ensure-runtime"); };
+  installer.maintenanceAdmission = () => null;
   installer.readBridgeInstallation = async () => {
     calls.push("read-bridge");
     return bridgeInstallation({ manualChromeReloadRequired: true });
@@ -1414,7 +1411,7 @@ test("restoring a staged Bridge does not enter assistant configuration repair", 
   installer.repairAssistantConfiguration = async () => { calls.push("repair-assistant"); };
 
   assert.equal(await installer.restorePreviousBridge(), finalState);
-  assert.deepEqual(calls, ["stop-runtime", "ensure-runtime", "read-bridge", "rollback-bridge", "refresh-runtime"]);
+  assert.deepEqual(calls, ["read-bridge", "rollback-bridge", "refresh-runtime"]);
 });
 
 test("repair replaces an older app-owned Bridge from the sealed release", async () => {

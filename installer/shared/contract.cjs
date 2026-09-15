@@ -85,7 +85,7 @@ const PUBLIC_ERRORS = Object.freeze({
   },
   setup_failed: {
     message: "Morrow could not finish this step.",
-    recovery: "Morrow did not replace a newer assistant setting. Reopen Morrow and check its current setup before trying again."
+    recovery: "Check status, then try the step again. If it still fails, close Morrow and reopen it."
   },
   cancelled: {
     message: "No folder was selected.",

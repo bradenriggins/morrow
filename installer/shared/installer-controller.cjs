@@ -2070,6 +2070,8 @@ class InstallerController {
    */
   async repair() {
     try {
+      const bridge = await this.readBridgeInstallation().catch(() => null);
+      if (bridge?.manualChromeReloadRequired === true) return this.restorePreviousBridge();
       const record = await this.withDesktopMutation(async (transaction) => {
         await transaction.stopRuntime();
         return this.runRepair();
@@ -2083,14 +2085,14 @@ class InstallerController {
 
   async restorePreviousBridge() {
     try {
-      await this.withDesktopMutation(async (transaction) => {
-        await transaction.stopRuntime();
-        this.mcpRuntimeVerification = null;
-        await this.ensureRuntime();
-        const installed = await this.readBridgeInstallation();
-        if (installed?.manualChromeReloadRequired !== true) throw errorDetails("bridge_check_failed");
-        await this.rollbackPendingBridgeInstallation(installed);
-      });
+      const refused = this.maintenanceAdmission();
+      if (refused) throw errorDetails(refused);
+      const installed = await this.readBridgeInstallation();
+      if (installed?.manualChromeReloadRequired !== true) throw errorDetails("bridge_check_failed");
+      // The Bridge lease is the exact live-worker and file-layer guard for this
+      // transaction. Keep its local owner running so it can grant the lease,
+      // resume the fenced worker, and prove that result.
+      await this.rollbackPendingBridgeInstallation(installed);
       await this.runtimeSnapshot(await this.effectiveWorkspace()).catch(() => {});
       return await this.state();
     } catch (error) {
