@@ -95,6 +95,7 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
   const removedTabs = [];
   const alarmCreations = [];
   const alarmClears = [];
+  const alarmFired = event();
   const scriptExecutions = [];
   let releaseCatalog;
   let catalogHeld = false;
@@ -176,7 +177,7 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
     alarms: {
       create: async (name, options) => { alarmCreations.push({ name, options: structuredClone(options) }); },
       clear: async (name) => { alarmClears.push(name); return true; },
-      onAlarm: noOpEvent(),
+      onAlarm: alarmFired,
     },
     tabs: {
       get: async (id) => id === 9 ? { id: 9, windowId: 4, url: `${courseOrigin}/courses/42` } : null,
@@ -205,6 +206,7 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
   return {
     FakeWebSocket,
     alarmClears,
+    alarmFired,
     alarmCreations,
     createdTabs,
     granted,
@@ -658,6 +660,33 @@ async function handshakeBackoffScenario() {
   assert.equal(Math.max(...reconnectDelays), 30_000);
 }
 
+async function suspendedReconnectAlarmScenario() {
+  const value = fixture();
+  await importWorker("suspended-reconnect-alarm");
+  const active = await authenticate(value);
+  assert.ok(value.alarmCreations.some((entry) => entry.name === "morrow-bridge-reconnect" && entry.options?.periodInMinutes === 1));
+  // A suspended worker loses every pending timer, so the backoff retry never runs.
+  const nativeSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback, delay, ...args) => (delay >= 2_000 && delay <= 30_000 && delay !== 10_000
+    ? 0
+    : nativeSetTimeout(callback, delay, ...args));
+  try {
+    active.close(1006, "transport_lost");
+    await new Promise((resolve) => nativeSetTimeout(resolve, 30));
+    assert.equal(value.FakeWebSocket.instances.length, 1);
+    for (const listener of value.alarmFired.listeners) listener({ name: "morrow-bridge-reconnect" });
+    const reconnected = await eventually(() => value.FakeWebSocket.instances[1]);
+    assert.equal(reconnected.readyState, value.FakeWebSocket.CONNECTING);
+    // An open connection ignores a later alarm instead of opening a second socket.
+    await authenticate(value, 10, 1);
+    for (const listener of value.alarmFired.listeners) listener({ name: "morrow-bridge-reconnect" });
+    await new Promise((resolve) => nativeSetTimeout(resolve, 30));
+    assert.equal(value.FakeWebSocket.instances.length, 2);
+  } finally {
+    globalThis.setTimeout = nativeSetTimeout;
+  }
+}
+
 async function unscopedCanvasReadScenario() {
   let providerExecutions = 0;
   const value = fixture({
@@ -1063,6 +1092,7 @@ const scenarios = {
   "pairing-offer-consent": pairingOfferConsentScenario,
   "pairing-status-consent": pairingStatusConsentScenario,
   "pairing-alarm-period": pairingAlarmPeriodScenario,
+  "suspended-reconnect-alarm": suspendedReconnectAlarmScenario,
   "pairing-declared-overflow": pairingDeclaredOverflowScenario,
   "pairing-stream-overflow": pairingStreamOverflowScenario,
   "pairing-stalled-body": pairingStalledBodyScenario,
@@ -1148,6 +1178,10 @@ test("permission removal immediately publishes an unavailable binding", async ()
 
 test("a silent socket hits its client handshake deadline and retries with capped backoff", async () => {
   await isolatedScenario("handshake-backoff");
+});
+
+test("a paired Bridge reconnects from its alarm after a suspended worker lost its retry timer", async () => {
+  await isolatedScenario("suspended-reconnect-alarm");
 });
 
 test("unscoped Canvas reads are refused without provider execution", async () => {

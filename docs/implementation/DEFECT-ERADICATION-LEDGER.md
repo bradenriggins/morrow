@@ -456,6 +456,8 @@ Every row stays open until its evidence columns are added and its status becomes
 | 439 | P1 | R3 | A Canvas 404 read after a verified delete is reported as "Morrow refused unsafe upstream output", so the proof that a delete landed reads as a safety refusal. | closure section 439; gateway privacy regressions; live BT2 absence readback | IMPLEMENTED |
 | 440 | P0 | R7 | The Bridge offers and grants Edit actions the gateway cannot invoke, so a person enables an action that then fails with an unrelated error. | closure section 440; Canvas connector regression; shared admission and catalog contract tests; live BT2 Edit-options diff | IMPLEMENTED |
 | 441 | P2 | R3 | A held capability is reported as an unknown name with the text "input is invalid", and capability lookup says "Here is the tool" for a name it cannot return. | closure section 441; Canvas connector regression | IMPLEMENTED |
+| 442 | P0 | R7 | A paired Bridge has no persistent wake to reconnect, so after Morrow's gateway restarts it can stay disconnected until Chrome restarts. | closure section 442; extension lifecycle regression; live BT2 disconnect on 2026-09-15 | IMPLEMENTED |
+| 443 | P1 | R3 | A course read on a connection whose signed-in Canvas tab no longer proves it reports `learner_roster_binding_unavailable` instead of telling the person to reconnect the course. | closure section 443; Canvas connector regression; live BT2 read after Chrome restart | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2980,7 +2982,23 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: the Canvas connector harness requires the unavailable code, reason, and sentence for lookup and invocation, and the not-found sentence for an unknown name.
 - Status: `IMPLEMENTED`.
 
-### Root-cause patterns for rows 331–441
+### 442: a paired Bridge never wakes to reconnect
+
+- Verified defect: after the local gateway owner restarted on 2026-09-15, `morrow_health` reported the Bridge listener `listening: true` and `connected: false` for more than four minutes across repeated reads and a Morrow relaunch. Only a Chrome restart reconnected it.
+- Root cause: reconnection used a `setTimeout` backoff inside the MV3 service worker. Chrome suspends an idle extension service worker and discards its timers. The only alarm, `morrow-pairing`, returns at once when no pairing is pending and is cleared after pairing, so a paired Bridge had no event that could wake it to reconnect.
+- Repair: a Bridge that holds its token keeps a one-minute `morrow-bridge-reconnect` alarm, the shortest period Chrome 116 accepts. The alarm calls the same connection routine, which does nothing while a socket is open or opening. Disconnect and consent withdrawal clear it. The in-worker backoff remains the fast path while the worker is awake. Bridge 1.0.9 is sealed with this change.
+- Regression: the extension lifecycle suite closes an authenticated socket while discarding every backoff timer, requires no reconnect from timers, fires the alarm, requires one new socket, and requires a later alarm to open no second socket while connected.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### 443: an unverified course connection reads as a roster failure
+
+- Verified defect: after Chrome restarted, BT2 binding `canvas:5381de17df52cb77eb87:g9:c89585` was present with `runtimeVerified: false`, because its site anchor names a tab that no longer exists. `canvas_get_single_course_courses` returned `learner_roster_binding_unavailable` with the learner-privacy sentence.
+- Root cause: binding matching required a verified connection and reported every non-match with one roster code, whether the connection was missing, ambiguous, or present but no longer proved by its Canvas tab.
+- Repair: when exactly one connection has the requested binding and course but is not verified, the gateway reports `privacy_browser_binding_unverified` with the sentence "Reconnect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection." Other non-matches keep the roster code.
+- Regression: the Canvas connector harness publishes the binding unverified and requires the reconnect code and sentence, with no provider write.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### Root-cause patterns for rows 331–443
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -3005,8 +3023,9 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **A refusal carried inside its own envelope is treated as an unclassified payload:** row 436. Morrow's own refusal keeps its exact code in both its bare and enveloped forms, so a control read never borrows the course-roster contract to explain itself.
 - **A completeness field defaults to the reassuring value when evidence is discarded:** row 437. Public completeness is derived from the source result's own bound, so a partial read never presents itself as the whole set.
 - **A long-lived process keeps serving after the files it was built from are replaced:** row 438. Evidence for a build is valid only when the process that produced it started after that build was installed.
+- **A recovery path depends on a timer the platform may discard:** row 442. A connection that must recover after its peer restarts is woken by a platform event that survives suspension.
 - **One component decides for another it cannot see:** row 440. Write support is one shared decision, and the side that invokes an action decides whether it can be granted.
-- **A refusal sentence names the wrong cause:** rows 439 and 441. Each code has its own sentence, and a validated provider outcome is described as that outcome.
+- **A refusal sentence names the wrong cause:** rows 439, 441, and 443. Each code has its own sentence, and a validated provider outcome is described as that outcome.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.

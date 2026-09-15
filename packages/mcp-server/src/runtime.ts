@@ -388,6 +388,15 @@ export class EditCategoryUnavailableError extends Error {
   }
 }
 
+const LEARNER_PRIVACY_REFUSAL_TEXT = "Morrow did not return this result because its learner privacy boundary could not be established.";
+
+/** The fixed person-facing sentence for a privacy-boundary refusal. */
+export function privacyProblemText(code: string): string {
+  return code === "privacy_browser_binding_unverified"
+    ? "Reconnect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection."
+    : LEARNER_PRIVACY_REFUSAL_TEXT;
+}
+
 /** The fixed person-facing sentence for each capability refusal Morrow raises. */
 export function capabilityProblemText(code: string): string {
   switch (code) {
@@ -5914,7 +5923,14 @@ export class GatewayRuntime {
         && typeof binding.catalogDigest === "string"
         && /^[a-f0-9]{64}$/u.test(binding.catalogDigest);
     });
-    if (matches.length !== 1) throw new Error("learner_roster_binding_unavailable");
+    if (matches.length !== 1) {
+      // The named connection exists but its signed-in Canvas tab no longer proves it, which is the
+      // state after Chrome restarts or the tab closes. That is a reconnect step, not a roster fault.
+      const named = bindings.filter((binding) => binding.sourceBindingId === sourceBindingId && binding.courseId === courseId);
+      throw new Error(named.length === 1 && named[0]!.runtimeVerified !== true
+        ? "privacy_browser_binding_unverified"
+        : "learner_roster_binding_unavailable");
+    }
     return matches[0]!;
   }
 
@@ -6260,7 +6276,7 @@ export class GatewayRuntime {
       ? error.message
       : "privacy_output_refused";
     return {
-      content: [{ type: "text", text: "Morrow did not return this result because its learner privacy boundary could not be established." }],
+      content: [{ type: "text", text: privacyProblemText(code) }],
       isError: true,
       structuredContent: { schema: "morrow.problem.v1", code },
     };
@@ -7316,7 +7332,7 @@ export class GatewayRuntime {
           content: [{
             type: "text",
             text: problemCode.startsWith("privacy_")
-              ? "Morrow did not return this result because its learner privacy boundary could not be established."
+              ? privacyProblemText(problemCode)
               : problemCode === "capability_unavailable" && unavailableReason !== null
                 ? `${capabilityProblemText(problemCode)} ${unavailableReason}`
                 : capabilityProblemText(problemCode),

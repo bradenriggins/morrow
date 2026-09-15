@@ -87,6 +87,10 @@ const PAIRING_RESPONSE_TIMEOUT_MS = 10_000;
 const BRIDGE_HANDSHAKE_TIMEOUT_MS = 10_000;
 const BRIDGE_RECONNECT_BASE_MS = 2_000;
 const BRIDGE_RECONNECT_MAX_MS = 30_000;
+// Chrome suspends an idle extension service worker and drops its timers with it. A paired Bridge
+// keeps this alarm so a suspended worker is woken to reconnect after Morrow restarts. Chrome 116
+// accepts one minute as the shortest period.
+const BRIDGE_RECONNECT_ALARM = "morrow-bridge-reconnect";
 const CANVAS_LIST_CONTINUATIONS_KEY = "canvasListContinuations";
 const CANVAS_LIST_CONTINUATION_SCHEMA = "morrow.canvas-list-continuation.v1";
 const CANVAS_LIST_CONTINUATION_STATE_SCHEMA = "morrow.canvas-list-resume-state.v1";
@@ -2360,6 +2364,7 @@ async function connectBridge() {
   const authorityGeneration = state.courseDataAuthorityGeneration;
   if (!await courseDataAuthorityCurrent(authorityGeneration)) return;
   const stored = await storage();
+  if (stored.token) void chrome.alarms.create(BRIDGE_RECONNECT_ALARM, { periodInMinutes: 1 }).catch(() => undefined);
   if (!stored.token || state.socket?.readyState === WebSocket.OPEN || state.socket?.readyState === WebSocket.CONNECTING) return;
   const api = await catalog();
   if (!await courseDataAuthorityCurrent(authorityGeneration)
@@ -5688,6 +5693,7 @@ async function openSetupGuide() {
 }
 
 async function disconnectConnector() {
+  void chrome.alarms.clear(BRIDGE_RECONNECT_ALARM).catch(() => undefined);
   abortPairingFetches();
   invalidateCourseDataAuthority();
   clearPrivateChat({ answerPending: true });
@@ -5823,7 +5829,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 chrome.permissions.onAdded.addListener((permissions) => { void handleCoursePermissionAdded(permissions.origins).catch(() => {}); });
 chrome.permissions.onRemoved?.addListener(() => { void handleCoursePermissionRemoved().catch(() => {}); });
-chrome.alarms.onAlarm.addListener((alarm) => { if (alarm.name === "morrow-pairing") void pollPairing(); });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === "morrow-pairing") void pollPairing();
+  if (alarm.name === BRIDGE_RECONNECT_ALARM) void connectBridge();
+});
 chrome.tabs.onRemoved.addListener((tabId) => {
   clearItemBankCredentialsForTab(tabId);
   void canvasTabChanged(tabId);
@@ -5847,6 +5856,7 @@ chrome.webNavigation?.onCommitted?.addListener((details) => {
 chrome.storage.onChanged.addListener((changes, areaName) => {
   if (areaName !== "local" || !Object.hasOwn(changes || {}, COURSE_DATA_CONSENT_KEY)
     || hasCourseDataConsent(changes[COURSE_DATA_CONSENT_KEY]?.newValue)) return;
+  void chrome.alarms.clear(BRIDGE_RECONNECT_ALARM).catch(() => undefined);
   abortPairingFetches();
   invalidateCourseDataAuthority();
   clearPrivateChat({ answerPending: true });

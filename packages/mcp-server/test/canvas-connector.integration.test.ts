@@ -703,6 +703,35 @@ describe("Canvas connector gateway path", () => {
       }
     }, CASE_TIMEOUT_MS);
 
+    it("tells the person to reconnect a course whose signed-in Canvas tab no longer proves it", async () => {
+      const writesBefore = writeCommands;
+      bridge!.updateBindings([{ ...binding(), runtimeVerified: false }]);
+      await bindingsApplied();
+      try {
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+        const client = new Client({ name: "morrow-unverified-binding", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+        try {
+          await client.connect(clientTransport);
+          const course = await client.callTool({
+            name: "morrow_capability_read",
+            arguments: { name: "canvas_get_single_course_courses", arguments: { id: "42", _morrow: { source_binding_id: sourceBindingId } } },
+          });
+          expect(course.isError).toBe(true);
+          expect(JSON.stringify(course.structuredContent)).toContain("privacy_browser_binding_unverified");
+          expect(JSON.stringify(course)).toContain("Reconnect this course in Morrow Bridge.");
+          expect(JSON.stringify(course)).not.toContain("learner_roster_binding_unavailable");
+        } finally {
+          await client.close();
+          await server.close();
+        }
+      } finally {
+        bridge!.updateBindings([binding()]);
+        await bindingsApplied();
+      }
+      expect(writeCommands).toBe(writesBefore);
+    }, CASE_TIMEOUT_MS);
+
     it("marks a Canvas list that stopped at its page bound as limited", async () => {
       await bindingsApplied();
       partialQuiz = true;
