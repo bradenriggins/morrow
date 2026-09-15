@@ -100,6 +100,7 @@ async function startedMorrow(options = {}) {
     firstSafeRead: answer("firstSafeRead", undefined),
     openClaudeDesktop: answer("openClaudeDesktop", undefined),
     repair: answer("repair", setupState),
+    restorePreviousBridge: answer("restorePreviousBridge", setupState),
     removeData: answer("removeData", undefined),
     acquireRestartLease: answer("acquireRestartLease", { status: "uncertain" }),
     releaseRestartLease: answer("releaseRestartLease", undefined),
@@ -424,6 +425,7 @@ test("every action that takes no input refuses one, and performs its step only w
     ["installer:run-first-read", "firstSafeRead", null],
     ["installer:open-claude-desktop", "openClaudeDesktop", null],
     ["installer:repair", "repair", null],
+    ["installer:restore-bridge", "restorePreviousBridge", null],
     ["installer:remove-data", "removeData", null]
   ];
   for (const [channel, method, updateMethod] of inputFree) {

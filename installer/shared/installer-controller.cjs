@@ -2081,6 +2081,23 @@ class InstallerController {
     }
   }
 
+  async restorePreviousBridge() {
+    try {
+      await this.withDesktopMutation(async (transaction) => {
+        await transaction.stopRuntime();
+        this.mcpRuntimeVerification = null;
+        await this.ensureRuntime();
+        const installed = await this.readBridgeInstallation();
+        if (installed?.manualChromeReloadRequired !== true) throw errorDetails("bridge_check_failed");
+        await this.rollbackPendingBridgeInstallation(installed);
+      });
+      await this.runtimeSnapshot(await this.effectiveWorkspace()).catch(() => {});
+      return await this.state();
+    } catch (error) {
+      throw reportedError(error);
+    }
+  }
+
   async runRepair() {
     // The payload lives in signed application resources and is never rewritten
     // here, so its file verification runs again from disk rather than reusing
@@ -2138,29 +2155,7 @@ class InstallerController {
     const packagedIsNewer = Boolean(installedVersion && packagedVersion
       && compareChromeVersions(packagedVersion, installedVersion) > 0);
     if (installed?.manualChromeReloadRequired === true) {
-      const monitor = await this.bridgeMonitor();
-      await this.acquireBridgeLease(monitor);
-      try {
-        const restored = await rollbackPendingBridgeUpdate({
-          stateDirectory: this.paths.state,
-          bridgeDirectory: this.paths.bridgeDirectory,
-          expectedExtensionId: BRIDGE_EXTENSION_ID
-        });
-        const resumed = await monitor.bridgeMaintenance({
-          action: "resume",
-          quiesceEpoch: restored.quiesceEpoch,
-          fileLayerRestored: true
-        });
-        if (resumed?.resumed !== true || resumed.extensionId !== restored.extensionId
-          || resumed.manifestVersion !== restored.version || resumed.quiesceEpoch !== restored.quiesceEpoch) {
-          throw new Error("Morrow Bridge rollback resume is unconfirmed");
-        }
-      } finally {
-        await this.releaseBridgeLease();
-      }
-      this.bridgeInitialization = null;
-      this.bridgeInstallation = null;
-      return this.initializeBridgeAtStartup();
+      return this.rollbackPendingBridgeInstallation(installed);
     }
     if (installed?.installed !== true || packagedIsNewer) {
       await this.discardUnusableBridgeInstallation();
@@ -2173,6 +2168,33 @@ class InstallerController {
       expectedExtensionId: BRIDGE_EXTENSION_ID,
       challenge: this.bridgeChallenge()
     });
+    return this.readBridgeInstallation();
+  }
+
+  async rollbackPendingBridgeInstallation(installed) {
+    if (installed?.manualChromeReloadRequired !== true) throw errorDetails("bridge_check_failed");
+    const monitor = await this.bridgeMonitor();
+    await this.acquireBridgeLease(monitor);
+    try {
+      const restored = await rollbackPendingBridgeUpdate({
+        stateDirectory: this.paths.state,
+        bridgeDirectory: this.paths.bridgeDirectory,
+        expectedExtensionId: BRIDGE_EXTENSION_ID
+      });
+      const resumed = await monitor.bridgeMaintenance({
+        action: "resume",
+        quiesceEpoch: restored.quiesceEpoch,
+        fileLayerRestored: true
+      });
+      if (resumed?.resumed !== true || resumed.extensionId !== restored.extensionId
+        || resumed.manifestVersion !== restored.version || resumed.quiesceEpoch !== restored.quiesceEpoch) {
+        throw new Error("Morrow Bridge rollback resume is unconfirmed");
+      }
+    } finally {
+      await this.releaseBridgeLease();
+    }
+    this.bridgeInitialization = null;
+    this.bridgeInstallation = null;
     return this.readBridgeInstallation();
   }
 

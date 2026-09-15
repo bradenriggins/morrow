@@ -886,6 +886,25 @@ test("the repair panel starts the in-app repair and then shows the state repair 
   assert.equal(dom.document.activeElement, dom.element("#action-title"), "a completed step with no primary action focuses its new heading");
 });
 
+test("a staged Bridge update can restore the previous Bridge without repairing assistant settings", async () => {
+  const methods = [];
+  let current = state({ bridgeManualChromeReloadRequired: true });
+  const dom = await load("restore-bridge", async (method) => {
+    methods.push(method);
+    if (method === "installer:restore-bridge") current = state({ bridgeUpdateAvailable: true });
+    return ok(current);
+  });
+
+  const restore = dom.element("#action-body").querySelectorAll("[data-action]")
+    .find((element) => element.dataset.action === "restore-bridge");
+  assert.equal(restore.dataset.action, "restore-bridge");
+  await dom.element("#action-body").dispatch("click", { target: restore });
+  await settle();
+
+  assert.deepEqual(methods, ["installer:get-state", "installer:restore-bridge"]);
+  assert.equal(dom.element("#action-title").textContent, "Update Morrow Bridge.");
+});
+
 test("a completed step whose old action is gone focuses the new primary action", async () => {
   let current = state({ lifecycle: "repair_required", runtimeStatus: "repair_required", assistants: [], selectedAssistantId: null });
   const dom = await load("transition-primary-focus", async (method) => {

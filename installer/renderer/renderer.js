@@ -641,6 +641,12 @@ async function handleAction(event) {
     else render(state);
     return;
   }
+  if (action === "restore-bridge") {
+    const next = await invoke("installer:restore-bridge");
+    if (next) render(next);
+    else render(state);
+    return;
+  }
   if (action === "remove-data") {
     const next = await invoke("installer:remove-data");
     if (next) render(next);

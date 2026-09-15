@@ -125,9 +125,9 @@ test("Chrome must reload a staged Bridge update", () => {
   const view = actionView(current, { chosenAssistantId: "codex" });
   assert.equal(view.title, "Reload Morrow Bridge.");
   assert.match(view.body, /data-action="check-bridge"/);
-  assert.match(view.body, /data-action="repair"/);
+  assert.match(view.body, /data-action="restore-bridge"/);
   assert.match(view.body, />Restore previous Bridge<\/button>/);
-  assert.deepEqual(actions(view.body), ["check-bridge", "repair", "choose-workspace", "remove-assistant"]);
+  assert.deepEqual(actions(view.body), ["check-bridge", "restore-bridge", "choose-workspace", "remove-assistant"]);
   // Numbered instructions name the Chrome menu path. Morrow opens no browser page.
   assert.match(view.body, /<ol class="instructions">/);
   assert.match(view.body, /<strong>Manage Extensions<\/strong>/);

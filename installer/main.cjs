@@ -858,6 +858,15 @@ async function startMorrow(lifecycle) {
       return failed(error);
     }
   });
+  ipcMain.handle("installer:restore-bridge", async (event, ...input) => {
+    trusted(event);
+    try {
+      noInput(input);
+      return envelope(await installer.restorePreviousBridge(), null);
+    } catch (error) {
+      return failed(error);
+    }
+  });
   ipcMain.handle("installer:remove-data", async (event, ...input) => {
     trusted(event);
     try {

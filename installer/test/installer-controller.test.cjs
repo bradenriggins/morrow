@@ -1394,6 +1394,29 @@ test("repair rebuilds a Bridge folder that was removed and re-issues its active-
   assert.equal((await fs.readdir(path.join(stateDirectory, "Backups"))).length, 1, "a Bridge folder that verifies is kept");
 });
 
+test("restoring a staged Bridge does not enter assistant configuration repair", async () => {
+  const root = await temporaryRoot();
+  const installer = controller(root);
+  const calls = [];
+  const finalState = { schema: "morrow.installer-state.v1", lifecycle: "assistant_ready" };
+  installer.withDesktopMutation = async (operation) => operation({
+    stopRuntime: async () => { calls.push("stop-runtime"); }
+  });
+  installer.ensureRuntime = async () => { calls.push("ensure-runtime"); };
+  installer.readBridgeInstallation = async () => {
+    calls.push("read-bridge");
+    return bridgeInstallation({ manualChromeReloadRequired: true });
+  };
+  installer.rollbackPendingBridgeInstallation = async () => { calls.push("rollback-bridge"); };
+  installer.effectiveWorkspace = async () => path.join(root, "UserData", "Materials");
+  installer.runtimeSnapshot = async () => { calls.push("refresh-runtime"); };
+  installer.state = async () => finalState;
+  installer.repairAssistantConfiguration = async () => { calls.push("repair-assistant"); };
+
+  assert.equal(await installer.restorePreviousBridge(), finalState);
+  assert.deepEqual(calls, ["stop-runtime", "ensure-runtime", "read-bridge", "rollback-bridge", "refresh-runtime"]);
+});
+
 test("repair replaces an older app-owned Bridge from the sealed release", async () => {
   const root = await temporaryRoot();
   const manifestSha256 = await completePayload(root, { maintenance: MAINTENANCE_MODULE, runtimeMonitor: RECORDING_MONITOR });

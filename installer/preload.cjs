@@ -20,6 +20,7 @@ const METHODS = new Set([
   "installer:open-claude-desktop",
   "installer:reveal-claude-extension",
   "installer:repair",
+  "installer:restore-bridge",
   "installer:remove-data"
 ]);
 
