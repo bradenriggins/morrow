@@ -448,7 +448,8 @@ Every row stays open until its evidence columns are added and its status becomes
 | 431 | P1 | R7 | The first exposed Bridge rollback reused full setup repair, so an unrelated assistant configuration edit could reject the action and keep the Bridge update fenced. | closure section 431; dedicated Desktop IPC and live installed-app regressions | IMPLEMENTED |
 | 432 | P1 | R7 | Dedicated Bridge rollback stops the local owner before asking that owner for the Bridge maintenance lease, so the control plane needed to resume the fenced worker is unavailable. | closure section 432; controller and live installed-app regressions | IMPLEMENTED |
 | 433 | P2 | R7 | The generic Desktop setup failure tells the user that a newer assistant setting was preserved even when the failure came from an unrelated Bridge or runtime boundary. | closure section 433; public error contract and live installed-app regression | IMPLEMENTED |
-| 434 | P1 | R7 | With exactly one connected course, loopback adds that course as a top-level field to the multi-binding Edit-policy command, so the strict Bridge rejects every native Edit confirmation before any access is saved. | closure section 434; loopback regression and live BT2 retry | IMPLEMENTED |
+| 434 | P1 | R7 | With exactly one connected course, loopback adds that course as a top-level field to the multi-binding Edit-policy command, so the strict Bridge rejects every native Edit confirmation before any access is saved. | closure section 434; loopback regression and live BT2 receipt | VERIFIED |
+| 435 | P0 | R3 | Canvas completes and verifies a course-authoring write, but Morrow replaces the success with a learner-roster privacy error when the response names an instructor outside the student roster. | closure section 435; Canvas connector regression and live BT2 Page receipt | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2913,9 +2914,18 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Root cause: loopback automatically copied the sole connected course's `sourceBindingId` onto every command. `edit_policy_set` already carries its exact course set in `editPolicySet.selections`, and its strict Bridge contract rejects the extra top-level field.
 - Repair: implicit sole-binding selection now applies only to commands whose contract requires one known binding. Multi-binding Edit policy and binding-free maintenance commands carry no invented top-level course field.
 - Regression: the loopback suite authenticates with exactly one course, sends an Edit-policy set for that course, requires no top-level `sourceBindingId`, and verifies the exact nested selection.
-- Status: `IMPLEMENTED`; packaged live retry pending.
+- Live verification: installed package v31 accepted the exact 23-action native MCP confirmation for BT2 course `89585`, advanced the policy revision from 0 to 1, and returned the exact bound 30-minute Edit permission.
+- Status: `VERIFIED`.
 
-### Root-cause patterns for rows 331–434
+### 435: verified Canvas write is reported as a privacy failure
+
+- Verified defect: the first live BT2 Page create reached Canvas, completed one dispatch, passed provider readback, and entered durable state `verified`; the MCP response instead returned `learner_roster_identity_unavailable`.
+- Root cause: course reads may scrub Canvas editor and author identities that are outside the student roster, but the same course-data authority was gated on the tool being read-only. A write response containing Canvas's `last_edited_by` instructor therefore failed both source projection and final MCP egress after the external effect was already complete.
+- Repair: one shared predicate now admits unrostered Canvas identity scrubbing for read-only capabilities and for capabilities whose authoritative data class is `course`. It removes identity fields; learner records and learner-data capabilities retain the strict roster boundary.
+- Regression: the Canvas connector returns a verified course write with an unrostered instructor in `last_edited_by` and a roster learner in free text. Dispatch and operation-scoped MCP egress must succeed while omitting both identities.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### Root-cause patterns for rows 331–435
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -2936,6 +2946,7 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **A guard removes the service needed by its protected transaction:** row 432. Bridge rollback keeps the authenticated owner alive and uses the exact Bridge lease as its guard.
 - **Fallback recovery text names one unrelated cause:** row 433. Generic setup failure now gives only generic recovery; typed failures retain their own fixed guidance.
 - **Convenience inference crosses a stricter command boundary:** row 434. Implicit sole-course selection is limited to commands that require one course; commands with their own multi-course scope retain only that exact scope representation.
+- **The same course-data result gets weaker privacy authority after a write:** row 435. Course author and editor identities use one scrub-only rule at source projection and final egress, independent of whether Canvas produced the object from a read or verified mutation.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.

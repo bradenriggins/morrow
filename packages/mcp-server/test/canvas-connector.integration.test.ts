@@ -296,7 +296,7 @@ describe("Canvas connector gateway path", () => {
                 ? {
                   id: "42",
                   message: "Student Jane Doe added this course to favorites.",
-                  last_edited_by: { id: "9001", name: "Jane Doe", email: "jane.doe@example.edu" },
+                  last_edited_by: { id: "8000", name: "Course Teacher", email: "teacher@example.edu" },
                 }
               : ["canvas_get_single_assignment", "canvas_edit_assignment"].includes(command.toolName)
                 ? assignment
@@ -863,6 +863,8 @@ describe("Canvas connector gateway path", () => {
       const operationScopedEgress = await runtime.redactMcpEgress(dispatched, { operation_id: id }, { bound: false });
       expect(JSON.stringify(operationScopedEgress)).not.toContain("Jane Doe");
       expect(JSON.stringify(operationScopedEgress)).not.toContain("jane.doe@example.edu");
+      expect(JSON.stringify(operationScopedEgress)).not.toContain("Course Teacher");
+      expect(JSON.stringify(operationScopedEgress)).not.toContain("teacher@example.edu");
       expect(JSON.stringify(operationScopedEgress)).toMatch(/Student A[1-9][0-9]*/);
       const operationEgress = await runtime.redactMcpEgress(dispatched, {
         operation_id: id, course_id: "42", _morrow: { source_binding_id: sourceBindingId },

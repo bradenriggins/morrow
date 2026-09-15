@@ -3148,6 +3148,12 @@ export class GatewayRuntime {
     return upstream?.outputPrivacy[mapping.upstreamName] || upstream?.outputPrivacyDefault;
   }
 
+  private allowUnrosteredCanvasIdentities(mapping: CatalogTool): boolean {
+    return mapping.capability?.provider === "canvas"
+      && (mapping.annotations?.readOnlyHint === true
+        || mapping.capability.authority.dataClass === "course");
+  }
+
   private exactString(value: unknown, maximum = 500): string | null {
     if (typeof value !== "string") return null;
     const normalized = value.trim();
@@ -6120,8 +6126,7 @@ export class GatewayRuntime {
     const course = this.requestCourseId(request);
     return {
       descriptor: this.outputPrivacy(mapping),
-      allowUnrosteredCanvasIdentities: mapping.capability?.provider === "canvas"
-        && mapping.annotations?.readOnlyHint === true,
+      allowUnrosteredCanvasIdentities: this.allowUnrosteredCanvasIdentities(mapping),
       learnerVault: this.learnerVault,
       // The Blackboard Learn REST source holds its course roster inside its own
       // process and returns learner tokens, never learner identities. Morrow's
@@ -6513,8 +6518,7 @@ export class GatewayRuntime {
       return this.resultArtifacts.bound(normalized, learner
         ? (value) => redactLearnerEgress(value, {
             ...learner,
-            allowUnrosteredCanvasIdentities: mapping.capability?.provider === "canvas"
-              && mapping.annotations?.readOnlyHint === true,
+            allowUnrosteredCanvasIdentities: this.allowUnrosteredCanvasIdentities(mapping),
           }) as JsonObject
         : undefined);
     } catch (error) {
@@ -6735,7 +6739,7 @@ export class GatewayRuntime {
     if (!context) throw new Error("learner_roster_binding_unavailable");
     return redactLearnerEgress(value, {
       ...context,
-      allowUnrosteredCanvasIdentities: mapping.annotations?.readOnlyHint === true,
+      allowUnrosteredCanvasIdentities: this.allowUnrosteredCanvasIdentities(mapping),
     }) as JsonObject;
   }
 
