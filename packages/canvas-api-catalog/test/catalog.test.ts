@@ -544,7 +544,7 @@ describe("Canvas API catalog", () => {
     ));
     const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
       && /redirect/iu.test(`${operation.summary} ${operation.description}`));
-    expect(held).toHaveLength(426);
+    expect(held).toHaveLength(425);
     expect(admittedWithoutExactReadback).toHaveLength(27);
     expect(unscopedReads).toHaveLength(351);
     const expectedLimited = new Set([
@@ -621,8 +621,7 @@ describe("Canvas API catalog", () => {
       if (/^\/v1\/courses\/\{course_id\}\/discussion_topics\/(?:read_all|\{[^}]+\}(?:\/.*)?)$/.test(path)
         && (path.endsWith("/read_all") || path.includes("/entries") || path.endsWith("/read")
           || path.endsWith("/subscribed") || path.endsWith("/rating")
-          || /\/summaries\/\{[^}]+\}\/feedback$/.test(path)
-          || (method === "DELETE" && /^\/v1\/courses\/\{course_id\}\/discussion_topics\/\{[^}]+\}$/.test(path)))) return "discussion participation";
+          || /\/summaries\/\{[^}]+\}\/feedback$/.test(path))) return "discussion participation";
       if (method === "DELETE" && path === "/v1/courses/{course_id}/custom_gradebook_columns/{id}") return "grades and assessments";
       if (path === "/v1/courses/{course_id}/enqueue_outcome_rollup_calculation") return "learner rollup";
       if (path === "/v1/courses/{course_id}/quizzes/{id}/submission_users/message") return "learner messaging";
@@ -654,7 +653,7 @@ describe("Canvas API catalog", () => {
       "assignment records": 29,
       "course submissions": 3,
       "course lifecycle": 1,
-      "discussion participation": 16,
+      "discussion participation": 15,
       enrollments: 6,
       "grades and assessments": 8,
       "group membership": 3,
@@ -666,7 +665,7 @@ describe("Canvas API catalog", () => {
       "quiz attempts": 7,
       "quiz accommodations": 2,
     });
-    expect(learnerWrites).toHaveLength(91);
+    expect(learnerWrites).toHaveLength(90);
     const courseLearnerHolds = catalog.operations.filter((operation) => {
       const admission = canvasOperationAdmission(operation);
       return admission.courseTarget.kind === "course_path"
@@ -845,7 +844,7 @@ describe("Canvas API catalog", () => {
     // This class admits nothing. It only names the hold that 117 writes already carried.
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
-    expect(admitted).toHaveLength(140);
+    expect(admitted).toHaveLength(141);
     expect(admitted.filter((operation) => accountRoute(operation.path))).toEqual([]);
     const heldForCourseScope = catalog.operations.filter((operation) => {
       const write = canvasOperationAdmission(operation).write;
@@ -921,7 +920,7 @@ describe("Canvas API catalog", () => {
       course_scope_required: 92,
       cross_course_object_requires_resolution: 48,
       duplicate_assignment_exact_readback_unavailable: 1,
-      learner_scope_requires_separate_authority: 125,
+      learner_scope_requires_separate_authority: 124,
       lti_authorization_required: 12,
       multi_course_authority_required: 11,
       multi_step_upload_requires_reviewed_transfer: 5,
@@ -1002,7 +1001,7 @@ describe("Canvas API catalog", () => {
 
     // The admitted set is pinned here as well. Any change needs a reviewed admission reason.
     expect(catalog.operations.filter((operation) => !operation.readOnly
-      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(140);
+      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(141);
   });
 
   // Generic Canvas upload pre-flights cannot carry the remaining transfer steps. The Rubric CSV
@@ -1499,8 +1498,8 @@ describe("Canvas API catalog", () => {
     expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(22);
     expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(5);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(0);
-    expect(admittedWrites).toHaveLength(140);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(113);
+    expect(admittedWrites).toHaveLength(141);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(114);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_delete_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(false);

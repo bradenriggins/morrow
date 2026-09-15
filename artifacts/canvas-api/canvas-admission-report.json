@@ -7,14 +7,14 @@
     "writes": 566
   },
   "admission": {
-    "admitted": 140,
+    "admitted": 141,
     "admittedByCourseTargetKind": {
-      "course_path": 125,
+      "course_path": 126,
       "semantic_course_object": 15
     },
-    "held": 426,
+    "held": 425,
     "heldByReason": {
-      "learner_scope_requires_separate_authority": 125,
+      "learner_scope_requires_separate_authority": 124,
       "account_authority_required": 117,
       "course_scope_required": 92,
       "cross_course_object_requires_resolution": 48,
@@ -27,7 +27,7 @@
     },
     "heldByRouteFamily": {
       "accounts": 105,
-      "courses": 105,
+      "courses": 104,
       "users": 63,
       "groups": 42,
       "sections": 19,
@@ -69,7 +69,7 @@
   },
   "readback": {
     "stateCounts": {
-      "structurally_exact": 113,
+      "structurally_exact": 114,
       "unavailable": 22,
       "blocked": 5,
       "unconfirmed": 0
@@ -81,7 +81,7 @@
       "summary_state_has_no_narrow_reader": 1
     },
     "routeTierCounts": {
-      "exact": 69,
+      "exact": 70,
       "created_child": 28,
       "parent_collection": 3,
       "executor": 12,

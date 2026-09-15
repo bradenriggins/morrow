@@ -210,7 +210,10 @@ function learnerRecordRoute(operation: CanvasApiOperation): boolean {
   // changes their own records and not only the sign-up sheet. The route that changes the sheet
   // itself is admitted above, through the reading that proves the selected course owns it.
   if (operation.method === "DELETE" && /^\/v1\/appointment_groups\/\{[^}]+\}$/.test(operation.path)) return true;
-  if (operation.method === "DELETE" && /^\/v1\/(?:courses\/\{course_id\}\/)?discussion_topics\/\{[^}]+\}$/.test(operation.path)) return true;
+  // Deleting a course discussion topic removes the posts under it with the topic. That is a course
+  // content change the course Edit permission governs, sent as a destructive action with an exact
+  // absence readback. A topic addressed without its course, or through a group, stays held here.
+  if (operation.method === "DELETE" && /^\/v1\/discussion_topics\/\{[^}]+\}$/.test(operation.path)) return true;
   if (operation.method === "DELETE" && /^\/v1\/groups\/\{group_id\}\/discussion_topics\/\{topic_id\}$/.test(operation.path)) return true;
   if (operation.method === "DELETE" && operation.path === "/v1/courses/{course_id}/custom_gradebook_columns/{id}") return true;
   if (operation.method === "DELETE" && operation.path === "/v1/courses/{id}") return true;

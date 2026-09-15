@@ -1510,6 +1510,43 @@ async function probeSiteAnchor(anchor, tab) {
  * - A refusal is never kept. The next caller probes again.
  * - Every write asks with `fresh`, so the fence immediately before a change is one live probe.
  */
+function sameAnchorOrigin(anchor, url) {
+  try { return new URL(url).origin === anchor?.origin; } catch { return false; }
+}
+
+/**
+ * A course connection is anchored to the tab that proved its signed-in account. Chrome gives every
+ * tab a new id when it restarts, and a person may close that tab and open the course again. Another
+ * open tab on the same site is an equal proof when the page names the same signed-in account, so
+ * the anchor moves to that tab instead of leaving every course connection unverified.
+ */
+async function reattachSiteAnchor(anchor) {
+  const authorityGeneration = state.courseDataAuthorityGeneration;
+  if (!anchor?.origin || !anchor.siteAnchorId || !await courseDataAuthorityCurrent(authorityGeneration)) return null;
+  const candidates = await chrome.tabs.query({ url: `${new URL(anchor.origin).origin}/*` }).catch(() => []);
+  const ordered = [...(Array.isArray(candidates) ? candidates : [])]
+    .filter((candidate) => Number.isInteger(candidate?.id) && sameAnchorOrigin(anchor, candidate.url))
+    .sort((left, right) => Number(right.active === true) - Number(left.active === true));
+  for (const candidate of ordered) {
+    const moved = { ...anchor, tabId: candidate.id };
+    if (!await probeSiteAnchor(moved, candidate).catch(() => false)) continue;
+    const saved = await queueStorageMutation(async () => {
+      if (!await courseDataAuthorityCurrent(authorityGeneration)) return null;
+      const stored = await storage();
+      const anchors = storedAnchors(stored.siteAnchors);
+      const index = anchors.findIndex((entry) => entry.siteAnchorId === anchor.siteAnchorId
+        && entry.origin === anchor.origin && entry.principalId === anchor.principalId);
+      if (index < 0) return null;
+      const next = { ...anchors[index], tabId: candidate.id };
+      await chrome.storage.local.set({ siteAnchors: anchors.map((entry, position) => position === index ? next : entry) });
+      return next;
+    });
+    if (!saved) return null;
+    return { anchor: saved, tab: candidate };
+  }
+  return null;
+}
+
 async function siteAnchorMatches(anchor, { fresh = false } = {}) {
   const siteAnchorId = anchor?.siteAnchorId;
   let originPermission;
@@ -1518,10 +1555,16 @@ async function siteAnchorMatches(anchor, { fresh = false } = {}) {
     anchorVerifications.delete(siteAnchorId);
     return false;
   }
-  const tab = await chrome.tabs.get(anchor?.tabId).catch(() => null);
-  if (!tab?.url) {
-    anchorVerifications.delete(siteAnchorId);
-    return false;
+  let tab = await chrome.tabs.get(anchor?.tabId).catch(() => null);
+  if (!tab?.url || !sameAnchorOrigin(anchor, tab.url)) {
+    const reattached = await reattachSiteAnchor(anchor);
+    if (!reattached) {
+      anchorVerifications.delete(siteAnchorId);
+      return false;
+    }
+    // Callers route the next command through the anchor they passed, so it moves with the proof.
+    anchor.tabId = reattached.anchor.tabId;
+    tab = reattached.tab;
   }
   const kept = anchorVerifications.get(siteAnchorId);
   if (kept && kept.url !== tab.url) anchorVerifications.delete(siteAnchorId);
@@ -2570,7 +2613,8 @@ async function bindingFor(id, { fresh = false } = {}) {
   if (!binding) return null;
   const anchor = anchorForBinding(binding, siteAnchors);
   if (!anchor) return { ...binding, runtimeVerified: false };
-  return { ...materializeBinding(binding, anchor), runtimeVerified: binding.runtimeVerified && await siteAnchorMatches(anchor, { fresh }) };
+  const runtimeVerified = binding.runtimeVerified && await siteAnchorMatches(anchor, { fresh });
+  return { ...materializeBinding(binding, anchor), runtimeVerified };
 }
 
 /** The accepted receipts held in this browser session, oldest first, each with the moment its command was prepared. */

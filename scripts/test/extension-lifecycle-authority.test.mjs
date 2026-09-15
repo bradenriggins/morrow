@@ -81,7 +81,7 @@ function connectedState() {
   };
 }
 
-function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbackFetch, tabMessage, failScriptInjection = false } = {}) {
+function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbackFetch, tabMessage, failScriptInjection = false, tabs: tabOverrides = {} } = {}) {
   const local = storageArea(initialLocal);
   const session = storageArea({});
   const runtimeMessages = event();
@@ -180,8 +180,8 @@ function fixture({ initialLocal = connectedState(), holdCatalog = false, loopbac
       onAlarm: alarmFired,
     },
     tabs: {
-      get: async (id) => id === 9 ? { id: 9, windowId: 4, url: `${courseOrigin}/courses/42` } : null,
-      query: async () => [{ id: 9, windowId: 4, url: `${courseOrigin}/courses/42` }],
+      get: tabOverrides.get ?? (async (id) => id === 9 ? { id: 9, windowId: 4, url: `${courseOrigin}/courses/42` } : null),
+      query: tabOverrides.query ?? (async () => [{ id: 9, windowId: 4, url: `${courseOrigin}/courses/42` }]),
       create: async (value) => { createdTabs.push(value); return { id: 70 + createdTabs.length }; },
       remove: async (tabId) => { removedTabs.push(tabId); },
       update: async () => null,
@@ -642,6 +642,51 @@ async function permissionRemovalPublicationScenario() {
   assert.equal(value.local.values.courseFileStorageAccessEnabled, false);
 }
 
+async function restartedTabReattachScenario() {
+  // Chrome restarted: the anchored tab 9 no longer exists, and the course is open again as tab 12.
+  const probedTabs = [];
+  const value = fixture({
+    tabs: {
+      get: async (id) => id === 12 ? { id: 12, windowId: 5, url: `${courseOrigin}/courses/42`, active: true } : null,
+      query: async () => [
+        { id: 11, windowId: 5, url: "https://other.instructure.com/courses/1" },
+        { id: 12, windowId: 5, url: `${courseOrigin}/courses/42`, active: true },
+      ],
+    },
+    tabMessage: async ({ tabId, message }) => {
+      if (message?.type !== "morrow_canvas_probe") return null;
+      probedTabs.push(tabId);
+      return tabId === 12 ? { ok: true, profile: { origin: courseOrigin, id: "7" } } : null;
+    },
+  });
+  await importWorker("restarted-tab-reattach");
+  const socket = await authenticate(value);
+  const hello = socket.sent.find((message) => message.schema === "morrow.bridge.hello.v1");
+  assert.equal(hello.bindings[0].sourceBindingId, bindingId);
+  assert.equal(hello.bindings[0].runtimeVerified, true);
+  assert.equal(value.local.values.siteAnchors[0].tabId, 12);
+  assert.ok(probedTabs.includes(12));
+  assert.ok(!probedTabs.includes(11));
+}
+
+async function restartedTabDifferentAccountScenario() {
+  // The course is open again, but signed in as a different account: the connection stays unverified.
+  const value = fixture({
+    tabs: {
+      get: async () => null,
+      query: async () => [{ id: 12, windowId: 5, url: `${courseOrigin}/courses/42`, active: true }],
+    },
+    tabMessage: async ({ message }) => message?.type === "morrow_canvas_probe"
+      ? { ok: true, profile: { origin: courseOrigin, id: "8" } }
+      : null,
+  });
+  await importWorker("restarted-tab-different-account");
+  const socket = await authenticate(value);
+  const hello = socket.sent.find((message) => message.schema === "morrow.bridge.hello.v1");
+  assert.equal(hello.bindings[0].runtimeVerified, false);
+  assert.equal(value.local.values.siteAnchors[0].tabId, 9);
+}
+
 async function handshakeBackoffScenario() {
   const value = fixture();
   await importWorker("handshake-backoff");
@@ -1083,6 +1128,8 @@ const scenarios = {
   "maintenance-cancel": () => maintenanceMutationScenario("cancel"),
   "maintenance-expiry": () => maintenanceMutationScenario("expiry"),
   "permission-removal-publication": permissionRemovalPublicationScenario,
+  "restarted-tab-reattach": restartedTabReattachScenario,
+  "restarted-tab-different-account": restartedTabDifferentAccountScenario,
   "handshake-backoff": handshakeBackoffScenario,
   "unscoped-canvas-read": unscopedCanvasReadScenario,
   "course-file-deadline": courseFileDeadlineScenario,
@@ -1174,6 +1221,14 @@ test("cancellation fences a Bridge maintenance mutation", async () => {
 
 test("permission removal immediately publishes an unavailable binding", async () => {
   await isolatedScenario("permission-removal-publication");
+});
+
+test("a course connection moves to a restarted tab signed in as the same account", async () => {
+  await isolatedScenario("restarted-tab-reattach");
+});
+
+test("a course connection stays unverified when the reopened tab is a different account", async () => {
+  await isolatedScenario("restarted-tab-different-account");
 });
 
 test("a silent socket hits its client handshake deadline and retries with capped backoff", async () => {

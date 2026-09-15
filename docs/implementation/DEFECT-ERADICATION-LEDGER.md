@@ -460,6 +460,8 @@ Every row stays open until its evidence columns are added and its status becomes
 | 443 | P1 | R3 | A course read on a connection whose signed-in Canvas tab no longer proves it reports `learner_roster_binding_unavailable` instead of telling the person to reconnect the course. | closure section 443; Canvas connector regression; live BT2 read after Chrome restart | IMPLEMENTED |
 | 444 | P1 | R7 | After a staged Bridge update and a Chrome reload, Check Bridge in the Desktop app returned no result and no error and left the update pending until the app restarted. | closure section 444; live Desktop observation on 2026-09-15 | OPEN |
 | 445 | P2 | R3 | Repeating a change request that already verified returns the saved verified operation under the text "Morrow planned." | closure section 445; gateway result regression; live BT2 replay receipt | IMPLEMENTED |
+| 446 | P1 | R7 | Deleting a course discussion topic was held outside course Edit, so a person could not remove a course discussion or announcement through Morrow, including Morrow's own test fixtures. | closure section 446; catalog contract, admission report, and Bridge settings regressions | IMPLEMENTED |
+| 447 | P0 | R7 | A course connection stays unverified after Chrome restarts or its tab closes, even when the same course is open and signed in as the same account, so every course needs a manual reconnect. | closure section 447; extension lifecycle regressions; live BT2 after Chrome restart | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3028,7 +3030,23 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Regression: the gateway result suite requires both sentences and keeps provider text for a first verified dispatch.
 - Status: `IMPLEMENTED`.
 
-### Root-cause patterns for rows 331–445
+### 446: a course discussion topic could not be deleted
+
+- Verified condition: after the v33 live proof, discussion topic `1208433` and announcement `1196885` in BT2 could not be removed through Morrow. `canvas_delete_topic_courses` was held as `learner_scope_requires_separate_authority` because the delete also removes posts under the topic.
+- Product decision: the owner requires that Morrow block nothing a person can do in their course. Removing a course discussion is course content governed by the course Edit permission.
+- Repair: `DELETE /v1/courses/{course_id}/discussion_topics/{topic_id}` is admitted as a course-path write. It is destructive, so it is offered in the destructive Edit group and dispatched only under that permission, and its structural readback proves the topic is gone. A topic addressed without its course, or through a group, stays held because no course ownership proof exists for it yet.
+- Regression: the catalog contract, admission report, readback scope, and Bridge settings suites pin the new split of 425 held and 141 admitted writes, with 114 exact readbacks.
+- Status: `IMPLEMENTED`; live deletion pending.
+
+### 447: a restarted browser leaves every course connection unverified
+
+- Verified defect: after Chrome restarted on 2026-09-15, BT2 binding `g9` stayed `runtimeVerified: false` with BT2 open and signed in. Only a manual reconnect in the Bridge popup produced a verified `g10` binding.
+- Root cause: a site anchor records the id of the tab that proved the signed-in account. Chrome assigns new tab ids on restart, and a closed or navigated tab has none, so verification read a missing tab and failed with no attempt to find the same proof elsewhere.
+- Repair: when the anchored tab is missing or left the course site, the Bridge probes the open tabs on the same site origin, active first. The first tab whose page names the same signed-in account becomes the anchor, saved under the current course-data authority. The caller's anchor moves with it, so the next command runs in that tab. A tab signed in as a different account never matches. Bridge 1.0.10 is sealed with this change.
+- Regression: the extension lifecycle suite restarts with the anchored tab gone and the course open as a new tab, and requires a verified binding with the saved anchor moved to that tab and no probe of another site. A second case with a different signed-in account requires the connection to stay unverified and the saved anchor to stay unchanged.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### Root-cause patterns for rows 331–447
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -3054,6 +3072,7 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - **A completeness field defaults to the reassuring value when evidence is discarded:** row 437. Public completeness is derived from the source result's own bound, so a partial read never presents itself as the whole set.
 - **A long-lived process keeps serving after the files it was built from are replaced:** row 438. Evidence for a build is valid only when the process that produced it started after that build was installed.
 - **A recovery path depends on a timer the platform may discard:** row 442. A connection that must recover after its peer restarts is woken by a platform event that survives suspension.
+- **A proof is tied to an identifier the platform reissues:** row 447. A connection is proved by the signed-in account a page names, and any tab that names it again restores the proof.
 - **One component decides for another it cannot see:** row 440. Write support is one shared decision, and the side that invokes an action decides whether it can be granted.
 - **A sentence names the wrong state or cause:** rows 439, 441, 443, and 445. Each code has its own sentence, and a validated provider outcome is described as that outcome.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.

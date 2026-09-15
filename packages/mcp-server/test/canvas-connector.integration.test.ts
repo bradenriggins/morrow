@@ -637,18 +637,18 @@ describe("Canvas connector gateway path", () => {
       const client = new Client({ name: "morrow-held-capability", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
       try {
         await client.connect(clientTransport);
-        const described = await client.callTool({ name: "morrow_capability_get", arguments: { name: "canvas_delete_topic_courses" } });
-        expect(described.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "capability_unavailable", capability: "canvas_delete_topic_courses" });
+        const described = await client.callTool({ name: "morrow_capability_get", arguments: { name: "canvas_delete_line_item" } });
+        expect(described.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "capability_unavailable", capability: "canvas_delete_line_item" });
         const reason = (described.structuredContent as JsonObject).reason as string;
         expect(typeof reason).toBe("string");
         expect(reason.length).toBeGreaterThan(10);
         expect(described.content).toEqual([{ type: "text", text: `This capability exists but is not available in this Morrow profile. ${reason}` }]);
         const invoked = await client.callTool({
           name: "morrow_capability_change",
-          arguments: { name: "canvas_delete_topic_courses", arguments: { course_id: "42", topic_id: "5", _morrow: { source_binding_id: sourceBindingId } } },
+          arguments: { name: "canvas_delete_line_item", arguments: { course_id: "42", id: "5", _morrow: { source_binding_id: sourceBindingId } } },
         });
         expect(invoked.isError).toBe(true);
-        expect(invoked.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "capability_unavailable", capability: "canvas_delete_topic_courses", reason });
+        expect(invoked.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "capability_unavailable", capability: "canvas_delete_line_item", reason });
         expect(JSON.stringify(invoked)).not.toContain("input is invalid");
         const unknown = await client.callTool({ name: "morrow_capability_get", arguments: { name: "canvas_no_such_capability" } });
         expect(unknown.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "capability_not_found" });
@@ -662,7 +662,7 @@ describe("Canvas connector gateway path", () => {
     }, CASE_TIMEOUT_MS);
 
     it("publishes a Bridge Edit action this gateway cannot invoke for review and refuses to grant it", async () => {
-      const heldAction = { id: "action:canvas:canvas_delete_topic_courses", group: "Canvas actions that remove content", label: "Delete a topic", description: "Delete a discussion topic.", availability: "edit" };
+      const heldAction = { id: "action:canvas:canvas_delete_line_item", group: "Canvas actions that remove content", label: "Delete a line item", description: "Delete an LTI line item.", availability: "edit" };
       const supportedAction = { id: "action:canvas:canvas_update_create_page_courses", group: "Canvas · Pages", label: "Update/create page", description: "Update a page.", availability: "edit" };
       activeEditOptions = [heldAction, supportedAction];
       try {
