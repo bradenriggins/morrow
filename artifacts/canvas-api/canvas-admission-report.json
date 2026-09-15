@@ -7,17 +7,18 @@
     "writes": 566
   },
   "admission": {
-    "admitted": 144,
+    "admitted": 140,
     "admittedByCourseTargetKind": {
-      "course_path": 129,
+      "course_path": 125,
       "semantic_course_object": 15
     },
-    "held": 422,
+    "held": 426,
     "heldByReason": {
       "learner_scope_requires_separate_authority": 125,
       "account_authority_required": 117,
-      "course_scope_required": 100,
+      "course_scope_required": 92,
       "cross_course_object_requires_resolution": 48,
+      "lti_authorization_required": 12,
       "multi_course_authority_required": 11,
       "provider_contract_incomplete": 9,
       "self_scope_not_supported": 6,
@@ -35,6 +36,7 @@
       "global": 7,
       "folders": 5,
       "group_categories": 5,
+      "lti/courses": 4,
       "calendar_events": 3,
       "developer_keys": 3,
       "eportfolios": 3,
@@ -67,8 +69,8 @@
   },
   "readback": {
     "stateCounts": {
-      "structurally_exact": 116,
-      "unavailable": 23,
+      "structurally_exact": 113,
+      "unavailable": 22,
       "blocked": 5,
       "unconfirmed": 0
     },
@@ -79,12 +81,12 @@
       "summary_state_has_no_narrow_reader": 1
     },
     "routeTierCounts": {
-      "exact": 71,
-      "created_child": 29,
+      "exact": 69,
+      "created_child": 28,
       "parent_collection": 3,
       "executor": 12,
       "mismatched": 1,
-      "none": 28
+      "none": 27
     },
     "namedReadbackTools": [
       "canvas_bulk_update_assignment_dates"
@@ -98,7 +100,6 @@
       "canvas_bulk_create_lti_resource_links",
       "canvas_create_or_update_events_directly_for_course_timetable",
       "canvas_create_rubricassociation",
-      "canvas_create_score",
       "canvas_delete_rubricassociation",
       "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis",
       "canvas_disable_summary_courses",

@@ -4,6 +4,7 @@ import {
   closeSync,
   constants,
   openSync,
+  readFileSync,
   realpathSync,
   statSync,
   unlinkSync,
@@ -40,6 +41,7 @@ import type { GatewayConfig } from "./config.js";
 import { createFullMorrowServer } from "./full-server.js";
 import { BoundedHttpServerLifecycle } from "./approval-server.js";
 import { MorrowRuntime } from "./morrow-runtime.js";
+import { mcpRuntimeHealthFromPayload } from "./runtime.js";
 import {
   LOCAL_OWNER_MAINTENANCE_PATH,
   LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA,
@@ -132,12 +134,33 @@ interface ProxyPresence extends ClientPresence {
 }
 
 interface MaintenanceRequest {
-  readonly action: "acquire" | "release" | "commit" | "recover" | "bridge";
+  readonly action: "acquire" | "release" | "commit" | "recover" | "bridge" | "retire";
+  readonly runtimeIdentity?: string;
   readonly holderPid: number;
   readonly monitorProxyPid?: number;
   readonly leaseId?: string;
   readonly leaseToken?: string;
   readonly control?: unknown;
+}
+
+const RUNTIME_IDENTITY = /^(?:source|[a-f0-9]{64})$/;
+
+/**
+ * The build this process runs: the digest of the sealed MCP runtime manifest
+ * beside its payload, or `source` for a checkout without one. The value is
+ * re-read from disk on each call, so an owner can compare the build it started
+ * with against the files now installed at its own path.
+ */
+function localOwnerRuntimeIdentity(): string {
+  if (process.env.MORROW_INSTALLER_TEST_MODE === "1" && process.env.MORROW_LOCAL_OWNER_TEST_RUNTIME_IDENTITY_FILE) {
+    try {
+      const value = readFileSync(process.env.MORROW_LOCAL_OWNER_TEST_RUNTIME_IDENTITY_FILE, "utf8").trim();
+      return RUNTIME_IDENTITY.test(value) ? value : "source";
+    } catch {
+      return "source";
+    }
+  }
+  return mcpRuntimeHealthFromPayload()?.manifestSha256 ?? "source";
 }
 
 function durableJournalPath(config: GatewayConfig): string | null {
@@ -495,11 +518,17 @@ function exactMaintenanceRequest(value: unknown): MaintenanceRequest | null {
   const source = value as Record<string, unknown>;
   const action = source.action;
   const base = source.schema === LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA
-    && (action === "acquire" || action === "release" || action === "commit" || action === "recover" || action === "bridge")
-    && Object.entries(source).every(([key]) => ["schema", "action", "holderPid", "monitorProxyPid", "leaseId", "leaseToken", "control"].includes(key));
+    && (action === "acquire" || action === "release" || action === "commit" || action === "recover" || action === "bridge" || action === "retire")
+    && Object.entries(source).every(([key]) => ["schema", "action", "holderPid", "monitorProxyPid", "leaseId", "leaseToken", "control", "runtimeIdentity"].includes(key));
   const holderPid = exactPid(source.holderPid);
   const monitorProxyPid = exactPid(source.monitorProxyPid);
   if (!base || holderPid === null) return null;
+  if (action === "retire") {
+    if (Object.keys(source).length !== 4 || typeof source.runtimeIdentity !== "string"
+      || !RUNTIME_IDENTITY.test(source.runtimeIdentity)) return null;
+    return { action, holderPid, runtimeIdentity: source.runtimeIdentity };
+  }
+  if (source.runtimeIdentity !== undefined) return null;
   if (action === "acquire") {
     if (Object.keys(source).length !== 4 || monitorProxyPid === null) return null;
     return { action, holderPid, monitorProxyPid };
@@ -703,6 +732,7 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     throw new Error("Morrow local owner is held for authenticated desktop maintenance.");
   }
   const configDigest = ownerConfigDigest(config);
+  const startupRuntimeIdentity = localOwnerRuntimeIdentity();
   const nonce = randomUUID();
   let runtime: MorrowRuntime | null = null;
   let runtimeConnection: Promise<MorrowRuntime | null> | null = null;
@@ -912,6 +942,37 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
     }
     if (!currentOwnerMatches() || !runtime || !descriptor) {
       maintenanceError(response, "local_owner_maintenance_owner_changed");
+      return;
+    }
+    // A client from a newer installed build asks this owner to stand down. It
+    // retires only when its own install path now holds exactly that build and
+    // it started from a different one, and only with no request or effect in
+    // flight. A connected but idle client does not keep an outdated build in
+    // service: it reconnects and starts the current owner.
+    if (input.action === "retire") {
+      const requested = input.runtimeIdentity;
+      if (!requested || requested === "source" || requested === startupRuntimeIdentity
+        || requested !== localOwnerRuntimeIdentity()) {
+        maintenanceError(response, "local_owner_retire_refused");
+        return;
+      }
+      if (maintenanceState !== "open" || localOwnerMaintenanceMarkerPresent(journalPath)) {
+        maintenanceError(response, "local_owner_maintenance_work_active");
+        return;
+      }
+      maintenanceState = "acquiring";
+      runtime.approval.setMaintenanceAdmission(false);
+      if (activeMcpRequests !== 0 || !runtime.maintenanceQuiescent()) {
+        reopenAfterFailedMaintenance();
+        maintenanceError(response, "local_owner_maintenance_work_active");
+        return;
+      }
+      maintenanceState = "held";
+      response.writeHead(202, { "cache-control": "no-store", "content-type": "application/json; charset=utf-8", "x-content-type-options": "nosniff" });
+      response.once("finish", () => {
+        void close().finally(() => process.exit(0));
+      });
+      response.end(JSON.stringify({ schema: "morrow.local-owner-maintenance.v1", status: "retiring" }));
       return;
     }
       if (input.action === "recover") {
@@ -1269,6 +1330,48 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
   }
 }
 
+/**
+ * Asks a live owner whether it is still the build this client was installed
+ * with. `current` means the owner may serve this client; `retiring` means it
+ * accepted and is closing; `busy` means it is an outdated build with work in
+ * flight. An owner that predates this request cannot report its build, so it
+ * keeps its earlier behaviour and is treated as `current`.
+ */
+async function askOwnerToRetireForBuild(
+  descriptor: OwnerDescriptor,
+  runtimeIdentity: string,
+): Promise<"current" | "retiring" | "busy"> {
+  if (runtimeIdentity === "source") return "current";
+  const workspace = currentWorkspaceAdmission();
+  let response: Response;
+  try {
+    response = await fetch(new URL(LOCAL_OWNER_MAINTENANCE_PATH, `http://${LOOPBACK_HOST}:${descriptor.port}`), {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${descriptor.token}`,
+        "content-type": "application/json",
+        [PROXY_PID_HEADER]: String(process.pid),
+        [PROXY_WORKSPACE_HEADER]: workspace.encoded,
+      },
+      body: JSON.stringify({
+        schema: LOCAL_OWNER_MAINTENANCE_REQUEST_SCHEMA,
+        action: "retire",
+        holderPid: process.pid,
+        runtimeIdentity,
+      }),
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch {
+    return "current";
+  }
+  let body: unknown = null;
+  try { body = await response.json(); } catch { body = null; }
+  const record = body && typeof body === "object" ? body as Record<string, unknown> : {};
+  if (response.status === 202 && record.status === "retiring") return "retiring";
+  if (response.status === 409 && record.code === "local_owner_maintenance_work_active") return "busy";
+  return "current";
+}
+
 async function waitForOwner(journalPath: string, configDigest: string): Promise<OwnerDescriptor> {
   const entryPath = process.argv[1];
   if (!entryPath) throw new Error("Morrow cannot locate its local owner entry point.");
@@ -1279,6 +1382,9 @@ async function waitForOwner(journalPath: string, configDigest: string): Promise<
   let launchError: Error | null = null;
   let ready = false;
   const deadline = Date.now() + ownerStartTimeoutMs();
+  const runtimeIdentity = localOwnerRuntimeIdentity();
+  const retirementChecked = new Set<string>();
+  const retiringOwners = new Set<string>();
   try {
     for (;;) {
       if (launchError) throw launchError;
@@ -1292,6 +1398,23 @@ async function waitForOwner(journalPath: string, configDigest: string): Promise<
             "Morrow local owner configuration does not match this client. "
             + "Use the same Morrow upstream configuration for this operation journal.",
           );
+        }
+        if (!retirementChecked.has(descriptor.nonce)) {
+          // An owner that accepted retirement is closing. It is never attached to, even when a
+          // later request to it fails, because the failure would only mean it has begun to close.
+          const build = retiringOwners.has(descriptor.nonce)
+            ? "retiring"
+            : await askOwnerToRetireForBuild(descriptor, runtimeIdentity);
+          if (build === "current") {
+            retirementChecked.add(descriptor.nonce);
+          } else {
+            if (build === "retiring") retiringOwners.add(descriptor.nonce);
+            if (Date.now() >= deadline) {
+              throw new Error("Morrow is finishing work on its previous version. Try again in a moment.");
+            }
+            await new Promise((resolveWait) => setTimeout(resolveWait, build === "busy" ? 250 : 25));
+            continue;
+          }
         }
         if (launchedChild?.pid !== undefined && descriptor.pid !== launchedChild.pid) {
           await terminateLaunchedOwner(launchedChild);

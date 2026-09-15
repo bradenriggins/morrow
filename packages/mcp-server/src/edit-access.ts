@@ -10,6 +10,7 @@ import {
 } from "@modelcontextprotocol/server";
 import { isJsonObject, sha256Json, type JsonObject } from "@morrow/contracts";
 import * as z from "zod/v4";
+import { EditCategoryUnavailableError } from "./runtime.js";
 import type {
   BrowserEditAccessPrepared,
   BrowserEditAccessResult,
@@ -192,7 +193,20 @@ export function registerEditAccessTool(
       let prepared: BrowserEditAccessPrepared;
       try {
         prepared = await runtime.prepareBrowserEditAccess(input.mode, selections(input));
-      } catch {
+      } catch (error) {
+        if (error instanceof EditCategoryUnavailableError) {
+          return {
+            content: [{ type: "text", text: `Morrow cannot grant Edit access for ${error.categoryId}. ${error.reason}` }],
+            isError: true,
+            structuredContent: {
+              schema: "morrow.edit-access.v1",
+              ok: false,
+              code: "edit_access_category_unavailable",
+              category: error.categoryId,
+              reason: error.reason,
+            },
+          };
+        }
         return problem("edit_access_preflight_refused", "Morrow could not verify every selected current course connection.");
       }
       if (input.mode === "plan") {

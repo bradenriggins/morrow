@@ -112,7 +112,22 @@ describe("privacy output boundary", () => {
       providerFailure: { schema: "morrow.canvas-browser-failure.v1", provider: "canvas", sent: true, status: 404 },
       sourceCode: "canvas_request_failed",
     });
+    expect(result.content).toEqual([{ type: "text", text: "Canvas could not find this item (HTTP 404)." }]);
     expect(JSON.stringify(result)).not.toContain("secret learner data");
+    expect(JSON.stringify(result)).not.toContain("unsafe");
+  });
+
+  it("names the provider outcome instead of an unsafe-output refusal for each status class", () => {
+    const text = (providerFailure: Record<string, unknown>) => normalize({
+      isError: true,
+      structuredContent: { schema: "morrow.canvas-connector.result.v1", ok: false, providerFailure },
+    }, { descriptor: learnerDescriptor }).content;
+    const failure = { schema: "morrow.canvas-browser-failure.v1", provider: "canvas", sent: true };
+    expect(text({ ...failure, status: 403 })).toEqual([{ type: "text", text: "Canvas refused this request for the signed-in account (HTTP 403)." }]);
+    expect(text({ ...failure, status: 429 })).toEqual([{ type: "text", text: "Canvas limited the request rate (HTTP 429). Try again later." }]);
+    expect(text({ ...failure, status: 503 })).toEqual([{ type: "text", text: "Canvas reported a server error (HTTP 503)." }]);
+    expect(text({ ...failure, status: 400 })).toEqual([{ type: "text", text: "Canvas rejected this request (HTTP 400)." }]);
+    expect(text({ schema: "morrow.canvas-browser-failure.v1", provider: "moodle", sent: false })).toEqual([{ type: "text", text: "Morrow did not send this request to Moodle." }]);
   });
 
   it("does not retain malformed or extended provider failure records", () => {
@@ -125,6 +140,7 @@ describe("privacy output boundary", () => {
       },
     }, { descriptor: learnerDescriptor });
     expect(result.structuredContent).toEqual({ schema: "morrow.problem.v1", code: "upstream_error_sanitized", recoverable: false });
+    expect(result.content).toEqual([{ type: "text", text: "Morrow refused unsafe upstream output." }]);
   });
 
   it("PRIV-02 tokenizes learner identity and only returns allowed fields", () => {

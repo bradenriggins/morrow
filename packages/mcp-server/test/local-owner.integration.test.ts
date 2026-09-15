@@ -69,6 +69,7 @@ async function connect(
   cwd?: string,
   clientName = "morrow-local-owner-test",
   negotiation: "legacy" | { readonly pin: string } = "legacy",
+  extraEnv: Readonly<Record<string, string>> = {},
 ): Promise<ConnectedClient> {
   const client = new Client(
     { name: clientName, version: "1.0.0" },
@@ -77,7 +78,7 @@ async function connect(
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [entryPath],
-    env: { ...getDefaultEnvironment(), MORROW_UPSTREAMS_FILE: configPath },
+    env: { ...getDefaultEnvironment(), MORROW_UPSTREAMS_FILE: configPath, ...extraEnv },
     stderr: "pipe",
     ...(cwd ? { cwd } : {}),
   });
@@ -626,6 +627,75 @@ describe("Morrow local owner", () => {
       }
       await Promise.all([first?.client.close(), second?.client.close()]);
       await waitFor(() => !existsSync(ownerPath), "workspace local owner cleanup");
+      await removeDirectory(directory);
+    }
+  }, 60_000);
+
+  it("replaces an owner whose installed build changed while an idle client still held it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "morrow-local-owner-build-"));
+    const configPath = join(directory, "morrow.upstreams.json");
+    const journalPath = join(directory, "gateway.sqlite3");
+    const ownerPath = `${journalPath}.local-owner.json`;
+    const identityPath = join(directory, "runtime-identity.txt");
+    const buildA = "a".repeat(64);
+    const buildB = "b".repeat(64);
+    const config = {
+      schema: "morrow.upstreams.v1",
+      profile: "private-full",
+      toolSurface: "full",
+      sourcePolicy: { requireAttestation: false },
+      upstreams: [{
+        id: "morrow-legacy",
+        label: "Fixture",
+        kind: "mcp-stdio",
+        command: process.execPath,
+        args: [fixturePath],
+        env: { FAKE_SOURCE: "morrow-legacy", FAKE_CALL_LOG: join(directory, "calls.log") },
+        priority: 1,
+        required: true,
+        enabled: true,
+        outputPrivacy: {},
+      }],
+      filters: { excludePrefixes: [], excludeNames: [] },
+      operationJournal: { path: journalPath },
+      privacy: {
+        canvasOrigin: "local",
+        account: "local-account",
+        principal: "local-principal",
+        learnerVaultPath: join(directory, "learner-vault.json"),
+      },
+      maxCatalogTools: 20,
+    };
+    await writeFile(configPath, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+    const buildEnv = { MORROW_INSTALLER_TEST_MODE: "1", MORROW_LOCAL_OWNER_TEST_RUNTIME_IDENTITY_FILE: identityPath };
+    await writeFile(identityPath, buildA, "utf8");
+    let oldClient: ConnectedClient | null = null;
+    let sameBuildClient: ConnectedClient | null = null;
+    let newClient: ConnectedClient | null = null;
+    try {
+      oldClient = await connect(configPath, undefined, "morrow-old-build", "legacy", buildEnv);
+      await waitFor(() => existsSync(ownerPath), "owner for the first build");
+      const firstOwner = JSON.parse(await readFile(ownerPath, "utf8")) as { pid: number };
+
+      // A second client of the same build joins the owner already serving.
+      sameBuildClient = await connect(configPath, undefined, "morrow-same-build", "legacy", buildEnv);
+      expect((JSON.parse(await readFile(ownerPath, "utf8")) as { pid: number }).pid).toBe(firstOwner.pid);
+      await sameBuildClient.client.close();
+      sameBuildClient = null;
+
+      // The installed files now hold a different build. The first client is idle but still connected.
+      await writeFile(identityPath, buildB, "utf8");
+      newClient = await connect(configPath, undefined, "morrow-new-build", "legacy", buildEnv);
+      await waitFor(() => !processIsAlive(firstOwner.pid), "the outdated owner to exit");
+      const secondOwner = JSON.parse(await readFile(ownerPath, "utf8")) as { pid: number };
+      expect(secondOwner.pid).not.toBe(firstOwner.pid);
+      const health = await newClient.client.callTool({ name: "morrow_health", arguments: {} });
+      expect(health.isError).not.toBe(true);
+    } finally {
+      await oldClient?.client.close().catch(() => undefined);
+      await sameBuildClient?.client.close().catch(() => undefined);
+      await newClient?.client.close().catch(() => undefined);
+      await waitFor(() => !existsSync(ownerPath), "owner shutdown").catch(() => undefined);
       await removeDirectory(directory);
     }
   }, 60_000);

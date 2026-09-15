@@ -1822,11 +1822,14 @@ describe("New Quizzes and Item Banks end to end conformance", () => {
 
       for (const operation of hidden) {
         const before = writeCommands.length;
+        // A profile-held operation is a known capability with a catalog reason, not an unknown name.
         const capability = await client!.callTool({ name: "morrow_capability_get", arguments: { name: operation.toolName } });
-        expect(structured(capability), operation.toolName).toMatchObject({ code: "capability_not_found" });
+        expect(structured(capability), operation.toolName).toMatchObject({ code: "capability_unavailable", capability: operation.toolName });
+        const reason = structured(capability).reason;
+        expect(typeof reason === "string" && reason.length > 0, operation.toolName).toBe(true);
         const refused = await client!.callTool({ name: "morrow_capability_change", arguments: { name: operation.toolName, arguments: {} } });
         expect(refused.isError, operation.toolName).toBe(true);
-        expect(structured(refused), operation.toolName).toMatchObject({ code: "capability_not_found" });
+        expect(structured(refused), operation.toolName).toMatchObject({ code: "capability_unavailable", capability: operation.toolName, reason });
         expect(writeCommands, `${operation.toolName} reached a write`).toHaveLength(before);
         if (operation.toolName === "canvas_get_items_media_upload_url") {
           provedCatalog.set(operation.toolName, "held_upload_credential_output");

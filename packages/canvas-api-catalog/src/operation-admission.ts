@@ -32,7 +32,7 @@ export type CanvasWriteAdmission =
     readonly reason: "account_authority_required" | "course_scope_required" | "cross_course_object_requires_resolution"
       | "duplicate_assignment_exact_readback_unavailable" | "learner_scope_requires_separate_authority"
       | "multi_course_authority_required" | "multi_step_upload_requires_reviewed_transfer"
-      | "provider_contract_incomplete" | "self_scope_not_supported";
+      | "provider_contract_incomplete" | "self_scope_not_supported" | "lti_authorization_required";
   };
 
 export interface CanvasOperationAdmission {
@@ -277,6 +277,12 @@ export function canvasOperationAdmission(operation: CanvasApiOperation): CanvasO
   if (multiCourseRoute(operation)) {
     return { courseTarget: target, write: { state: "held", reason: "multi_course_authority_required" } };
   }
+  // An LTI service accepts only the tool's own LTI authorization. The signed-in browser session
+  // cannot present it, so a route that otherwise names its course still cannot be sent. Every side
+  // that offers or sends a Canvas write reads this one decision.
+  if (operation.path.startsWith("/lti/")) {
+    return { courseTarget: target, write: { state: "held", reason: "lti_authorization_required" } };
+  }
   if (target.kind === "course_path") return { courseTarget: target, write: { state: "admitted" } };
   // The route names one object, and the catalog knows which read proves the course that owns it.
   // Every enforcement layer refuses this write until that reading is taken and frozen.
@@ -382,6 +388,9 @@ export function canvasAdmissionReason(admission: CanvasWriteAdmission): string |
   }
   if (admission.reason === "duplicate_assignment_exact_readback_unavailable") {
     return "Canvas does not say when a duplicated assignment has finished copying, and the copy carries no documented field that names it as a New Quiz, so Morrow cannot prove it read back the finished copy rather than a half-made one. Duplicate this assignment in Canvas.";
+  }
+  if (admission.reason === "lti_authorization_required") {
+    return "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool.";
   }
   if (admission.reason === "self_scope_not_supported") {
     return "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course.";

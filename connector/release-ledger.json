@@ -8,6 +8,10 @@
     {
       "version": "1.0.7",
       "releaseManifestSha256": "7af28deed94c57c0ffefab52996fea9733d868b2096e406b94c31f05d9bb3f9c"
+    },
+    {
+      "version": "1.0.8",
+      "releaseManifestSha256": "b0b40aaba11910aab64c1b9d5f9f37bc97deefb548262b2339cf14379a6ab464"
     }
   ]
 }

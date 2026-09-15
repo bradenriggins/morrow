@@ -8,7 +8,7 @@ import type { BridgeCommand } from "@morrow/bridge-protocol";
 import { isJsonObject, sha256Json, sha256Text, type JsonObject } from "@morrow/contracts";
 import { parseGatewayConfig } from "../src/config.js";
 import { MorrowRuntime } from "../src/morrow-runtime.js";
-import { GatewayRuntime } from "../src/runtime.js";
+import { EditCategoryUnavailableError, GatewayRuntime } from "../src/runtime.js";
 import { createFullMorrowServer } from "../src/full-server.js";
 import { checkNewQuiz } from "../src/quiz-check.js";
 import { planAssignmentImageAltRepair, planDiscussionImageAltRepair, planPageCorrection, planPageImageAltRepair } from "../src/page-correction.js";
@@ -629,6 +629,80 @@ describe("Canvas connector gateway path", () => {
       expect(writeCommands).toBe(0);
     }, CASE_TIMEOUT_MS);
 
+    it("names a held capability and its catalog reason instead of reporting an unknown name", async () => {
+      await bindingsApplied();
+      const writesBefore = writeCommands;
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client({ name: "morrow-held-capability", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+      try {
+        await client.connect(clientTransport);
+        const described = await client.callTool({ name: "morrow_capability_get", arguments: { name: "canvas_delete_topic_courses" } });
+        expect(described.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "capability_unavailable", capability: "canvas_delete_topic_courses" });
+        const reason = (described.structuredContent as JsonObject).reason as string;
+        expect(typeof reason).toBe("string");
+        expect(reason.length).toBeGreaterThan(10);
+        expect(described.content).toEqual([{ type: "text", text: `This capability exists but is not available in this Morrow profile. ${reason}` }]);
+        const invoked = await client.callTool({
+          name: "morrow_capability_change",
+          arguments: { name: "canvas_delete_topic_courses", arguments: { course_id: "42", topic_id: "5", _morrow: { source_binding_id: sourceBindingId } } },
+        });
+        expect(invoked.isError).toBe(true);
+        expect(invoked.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "capability_unavailable", capability: "canvas_delete_topic_courses", reason });
+        expect(JSON.stringify(invoked)).not.toContain("input is invalid");
+        const unknown = await client.callTool({ name: "morrow_capability_get", arguments: { name: "canvas_no_such_capability" } });
+        expect(unknown.structuredContent).toMatchObject({ schema: "morrow.problem.v1", code: "capability_not_found" });
+        expect(unknown.content).toEqual([{ type: "text", text: "Morrow has no capability with that name. Search the catalog for the tool to use." }]);
+        expect(JSON.stringify(unknown)).not.toContain("Here is the tool");
+      } finally {
+        await client.close();
+        await server.close();
+      }
+      expect(writeCommands).toBe(writesBefore);
+    }, CASE_TIMEOUT_MS);
+
+    it("publishes a Bridge Edit action this gateway cannot invoke for review and refuses to grant it", async () => {
+      const heldAction = { id: "action:canvas:canvas_delete_topic_courses", group: "Canvas actions that remove content", label: "Delete a topic", description: "Delete a discussion topic.", availability: "edit" };
+      const supportedAction = { id: "action:canvas:canvas_update_create_page_courses", group: "Canvas · Pages", label: "Update/create page", description: "Update a page.", availability: "edit" };
+      activeEditOptions = [heldAction, supportedAction];
+      try {
+        const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+        const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+        const client = new Client({ name: "morrow-held-edit-option", version: "1" }, { versionNegotiation: { mode: { pin: "2026-07-28" } } });
+        try {
+          await client.connect(clientTransport);
+          const editOptions = await client.callTool({
+            name: "morrow_capability_read",
+            arguments: { name: "morrow_browser_edit_options", arguments: { source_binding_id: sourceBindingId } },
+          });
+          expect(editOptions.isError, JSON.stringify(editOptions)).not.toBe(true);
+          const options = ((editOptions.structuredContent as JsonObject).data as JsonObject).options as JsonObject[];
+          const held = options.find((option) => option.id === heldAction.id);
+          const supported = options.find((option) => option.id === supportedAction.id);
+          expect(held).toMatchObject({ availability: "review" });
+          expect(typeof held?.reviewReason).toBe("string");
+          expect(supported).toMatchObject({ availability: "edit" });
+          expect(supported).not.toHaveProperty("reviewReason");
+        } finally {
+          await client.close();
+          await server.close();
+        }
+        bridge!.updateBindings([{ ...binding(), courseName: "Biology", editCategories: [
+          { id: heldAction.id, label: heldAction.label, description: heldAction.description },
+          { id: supportedAction.id, label: supportedAction.label, description: supportedAction.description },
+        ] }]);
+        await bindingsApplied();
+        await expect(runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: [heldAction.id] }]))
+          .rejects.toBeInstanceOf(EditCategoryUnavailableError);
+        const prepared = await runtime.prepareBrowserEditAccess("edit", [{ sourceBindingId, enabledCategories: [supportedAction.id] }]);
+        expect(prepared.selections[0]?.enabledCategories.map((category) => category.id)).toEqual([supportedAction.id]);
+      } finally {
+        activeEditOptions = [];
+        bridge!.updateBindings([binding()]);
+        await bindingsApplied();
+      }
+    }, CASE_TIMEOUT_MS);
+
     it("marks a Canvas list that stopped at its page bound as limited", async () => {
       await bindingsApplied();
       partialQuiz = true;
@@ -646,6 +720,7 @@ describe("Canvas connector gateway path", () => {
         const limitations = (listed.structuredContent as JsonObject).limitations as string[];
         expect(limitations).toHaveLength(1);
         expect(limitations[0]).toContain("stops at the page bound");
+        expect(limitations[0]).toContain("_morrow.list_resume");
       } finally {
         partialQuiz = false;
       }

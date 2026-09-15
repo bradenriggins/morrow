@@ -69,6 +69,11 @@ const provenClaims = [
     expected: [report.admission.heldByReason.learner_scope_requires_separate_authority],
   },
   {
+    label: "held for lti_authorization_required",
+    pattern: /, (\d+) call an LTI service that accepts only the LTI tool's own authorization,/,
+    expected: [report.admission.heldByReason.lti_authorization_required],
+  },
+  {
     label: "held for multi_course_authority_required",
     pattern: /, (\d+) can reach another course or account,/,
     expected: [report.admission.heldByReason.multi_course_authority_required],
@@ -270,7 +275,7 @@ test("a document edit that changes a quoted number or breaks an anchor fails lou
   assert.throws(() => assertDocumentClaims(duplicatedAnchor, [heldClaim]), /expected exactly one match/);
 
   const remaining = read(REMAINING);
-  const rewordedSummary = remaining.replace("writes held for semantic scope, learner scope, multi-course scope, personal scope, transfer, provider-contract, or exact-readback reasons", "writes still need work");
+  const rewordedSummary = remaining.replace("writes held for semantic scope, learner scope, multi-course scope, LTI authorization, personal scope, transfer, provider-contract, or exact-readback reasons", "writes still need work");
   assert.notEqual(rewordedSummary, remaining);
   assert.throws(() => assertDocumentClaims(rewordedSummary, remainingClaims), /expected exactly one match/);
 });

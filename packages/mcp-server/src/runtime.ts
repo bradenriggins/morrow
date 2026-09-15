@@ -381,6 +381,29 @@ function blackboardCreateReadbackContract(mapping: CatalogTool): Readonly<{ sche
   return BLACKBOARD_CREATE_READBACK_CONTRACTS[mapping.upstreamName] || null;
 }
 
+/** A selected Edit category names an action this gateway cannot invoke. */
+export class EditCategoryUnavailableError extends Error {
+  constructor(readonly categoryId: string, readonly reason: string) {
+    super("edit_access_category_unavailable");
+  }
+}
+
+/** The fixed person-facing sentence for each capability refusal Morrow raises. */
+export function capabilityProblemText(code: string): string {
+  switch (code) {
+    case "capability_not_found":
+      return "Morrow has no capability with that name. Search the catalog for the tool to use.";
+    case "capability_unavailable":
+      return "This capability exists but is not available in this Morrow profile.";
+    case "capability_mode_mismatch":
+      return "Use morrow_capability_read for a read-only capability and morrow_capability_change for a change.";
+    case "capability_input_invalid":
+      return "Morrow rejected this request because its input is invalid.";
+    default:
+      return "Morrow could not invoke the selected capability.";
+  }
+}
+
 export function isPrivateSourceTool(tool: Pick<CatalogTool, "upstreamName">): boolean {
   return PRIVATE_SOURCE_TOOL_NAMES.has(tool.upstreamName);
 }
@@ -1943,17 +1966,62 @@ export class GatewayRuntime {
     const mapping = this.toolByPublicName.get(name.trim());
     const capability = mapping?.capability;
     if (!capability || (mapping && isPrivateSourceTool(mapping))) {
-      return {
-        schema: "morrow.problem.v1",
-        code: "capability_not_found",
-        profile: this.config.profile,
-      };
+      const unavailableReason = mapping ? null : this.capabilityUnavailableReason(name);
+      return unavailableReason === null
+        ? {
+          schema: "morrow.problem.v1",
+          code: "capability_not_found",
+          profile: this.config.profile,
+        }
+        : {
+          schema: "morrow.problem.v1",
+          code: "capability_unavailable",
+          profile: this.config.profile,
+          capability: name.trim(),
+          reason: unavailableReason,
+        };
     }
     return {
       schema: "morrow.capability-get.v1",
       profile: this.config.profile,
       descriptor: capability,
     };
+  }
+
+  /**
+   * A source tool this profile holds is a known capability with a fixed
+   * reason, not an unknown name. The reason is read from the sealed catalog,
+   * never from a caller, so it is safe to return.
+   */
+  capabilityUnavailableReason(name: string): string | null {
+    const requested = name.trim();
+    if (PRIVATE_SOURCE_TOOL_NAMES.has(requested)) return null;
+    const held = this.catalog.excluded.filter((tool) => (
+      tool.reason === "profile_unavailable" && tool.upstreamName === requested
+    ));
+    if (held.length !== 1) return null;
+    return typeof held[0]!.detail === "string" && held[0]!.detail.length > 0
+      ? held[0]!.detail.slice(0, 500)
+      : `Unavailable in the ${this.config.profile} profile.`;
+  }
+
+  /**
+   * A Bridge build can offer an Edit action this gateway does not run: an older
+   * Bridge that predates a hold, or a newer one that names an action missing
+   * from this catalog. The gateway is the side that must invoke a granted
+   * action, so its catalog decides whether that action can be granted.
+   * Curated categories carry their own rules and are not named here.
+   */
+  browserEditCategoryUnavailableReason(provider: unknown, categoryId: string): string | null {
+    const match = /^action:(canvas|moodle):([A-Za-z0-9_.-]{1,128})$/u.exec(categoryId);
+    if (!match) return null;
+    if (match[1] !== provider) return "This Edit action belongs to a different course provider.";
+    const toolName = match[2]!;
+    if (PRIVATE_SOURCE_TOOL_NAMES.has(toolName)) return null;
+    const mapping = this.toolByPublicName.get(toolName);
+    if (mapping && !isPrivateSourceTool(mapping) && mapping.capability?.provider === provider) return null;
+    return this.capabilityUnavailableReason(toolName)
+      ?? "This Morrow runtime has no capability for this Edit action.";
   }
 
   profileStatus(): JsonObject {
@@ -3007,6 +3075,12 @@ export class GatewayRuntime {
       }
       if (category.availability !== "review") available.set(category.id, { id: category.id, label: category.label, description: category.description });
     }
+    if (mode === "edit") {
+      for (const id of input.enabledCategories ?? []) {
+        const reason = this.browserEditCategoryUnavailableReason(provider, id);
+        if (reason !== null) throw new EditCategoryUnavailableError(id, reason);
+      }
+    }
     const selectedIds = input.enabledCategories ? [...input.enabledCategories] : [];
     if (new Set(selectedIds).size !== selectedIds.length || selectedIds.some((id) => !/^[A-Za-z0-9_.:@-]{1,160}$/.test(id))) {
       throw new Error("The selected Edit categories are invalid.");
@@ -3165,9 +3239,13 @@ export class GatewayRuntime {
     const unread = Number.isSafeInteger(browser.morrow_unread_pages) && Number(browser.morrow_unread_pages) >= 1
       ? Number(browser.morrow_unread_pages)
       : null;
-    return [unread === null
-      ? "This list stops at the page bound for this read. Read the remaining pages before treating these entries as the complete set."
-      : `This list stops at the page bound for this read and leaves ${unread} more provider page${unread === 1 ? "" : "s"} unread. Read the remaining pages before treating these entries as the complete set.`];
+    const bound = unread === null
+      ? "This list stops at the page bound for this read."
+      : `This list stops at the page bound for this read and leaves ${unread} more provider page${unread === 1 ? "" : "s"} unread.`;
+    const next = typeof browser.morrow_next_page === "string" && browser.morrow_next_page.length > 0
+      ? "Repeat this read with _morrow.list_resume.next_page set to the returned morrow_next_page to read the remaining pages."
+      : "Repeat this read with _morrow.list_resume set to {} to receive a continuation for the remaining pages.";
+    return [`${bound} ${next} Do not treat these entries as the complete set until every page is read.`];
   }
 
   private allowUnrosteredCanvasIdentities(mapping: CatalogTool): boolean {
@@ -5767,7 +5845,14 @@ export class GatewayRuntime {
         throw new Error("privacy_edit_options_permission_changed");
       }
     }
-    return options as unknown as JsonObject;
+    return {
+      ...options,
+      options: options.options.map((option) => {
+        if (option.availability !== "edit") return option;
+        const reason = this.browserEditCategoryUnavailableReason(options.provider, option.id);
+        return reason === null ? option : { ...option, availability: "review" as const, reviewReason: reason };
+      }),
+    } as unknown as JsonObject;
   }
 
   private async publicBrowserEditOptions(
@@ -7221,18 +7306,27 @@ export class GatewayRuntime {
         const resultState = problem && ["not_sent", "sent", "unknown"].includes(String(problem.resultState))
           ? String(problem.resultState)
           : null;
+        // An unavailable capability keeps its reason, re-read from the sealed
+        // catalog by name so no caller-supplied text reaches the person.
+        const unavailableCapability = problemCode === "capability_unavailable" && problem && typeof problem.capability === "string"
+          ? problem.capability
+          : null;
+        const unavailableReason = unavailableCapability === null ? null : this.capabilityUnavailableReason(unavailableCapability);
         const refusal: JsonObject = {
           content: [{
             type: "text",
             text: problemCode.startsWith("privacy_")
               ? "Morrow did not return this result because its learner privacy boundary could not be established."
-              : "Morrow rejected this request because its input is invalid.",
+              : problemCode === "capability_unavailable" && unavailableReason !== null
+                ? `${capabilityProblemText(problemCode)} ${unavailableReason}`
+                : capabilityProblemText(problemCode),
           }],
           isError: true,
           structuredContent: {
             schema: "morrow.problem.v1",
             code: problemCode,
             ...(resultState ? { resultState } : {}),
+            ...(unavailableReason !== null ? { capability: unavailableCapability, reason: unavailableReason } : {}),
           },
         };
         if (!envelopedProblem) return finish(refusal);

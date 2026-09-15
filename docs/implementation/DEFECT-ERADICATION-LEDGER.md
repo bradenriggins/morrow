@@ -450,8 +450,12 @@ Every row stays open until its evidence columns are added and its status becomes
 | 433 | P2 | R7 | The generic Desktop setup failure tells the user that a newer assistant setting was preserved even when the failure came from an unrelated Bridge or runtime boundary. | closure section 433; public error contract and live installed-app regression | IMPLEMENTED |
 | 434 | P1 | R7 | With exactly one connected course, loopback adds that course as a top-level field to the multi-binding Edit-policy command, so the strict Bridge rejects every native Edit confirmation before any access is saved. | closure section 434; loopback regression and live BT2 receipt | VERIFIED |
 | 435 | P0 | R3 | Canvas completes and verifies a course-authoring write, but Morrow replaces the success with a learner-roster privacy error when the response names an instructor outside the student roster. | closure section 435; Canvas connector regression and live BT2 Page receipt | IMPLEMENTED |
-| 436 | P0 | R3 | A refusal Morrow raised inside its own canonical result envelope is routed onward to the course-roster egress contract, so every Edit-options failure cause is reported as a learner-privacy failure and the exact cause is destroyed. | closure section 436; Canvas connector regression and live BT2 Edit-options readback | IMPLEMENTED |
+| 436 | P0 | R3 | A refusal Morrow raised inside its own canonical result envelope is routed onward to the course-roster egress contract, so every Edit-options failure cause is reported as a learner-privacy failure and the exact cause is destroyed. | closure section 436; Canvas connector regression | IMPLEMENTED |
 | 437 | P0 | R3 | A Canvas list read that stopped at its own page bound is published with `completeness: "complete"` and no limitation, so a caller treats a partial list as the complete set. | closure section 437; Canvas connector regressions and live BT2 page-list readback | IMPLEMENTED |
+| 438 | P0 | R7 | Replacing the installed application and relaunching it leaves the previous build's gateway owner process serving every request, so a repaired build is not in service and the product reports the old behaviour. | closure section 438; local-owner build-replacement integration regression; live process evidence on 2026-09-15 | IMPLEMENTED |
+| 439 | P1 | R3 | A Canvas 404 read after a verified delete is reported as "Morrow refused unsafe upstream output", so the proof that a delete landed reads as a safety refusal. | closure section 439; gateway privacy regressions; live BT2 absence readback | IMPLEMENTED |
+| 440 | P0 | R7 | The Bridge offers and grants Edit actions the gateway cannot invoke, so a person enables an action that then fails with an unrelated error. | closure section 440; Canvas connector regression; shared admission and catalog contract tests; live BT2 Edit-options diff | IMPLEMENTED |
+| 441 | P2 | R3 | A held capability is reported as an unknown name with the text "input is invalid", and capability lookup says "Here is the tool" for a name it cannot return. | closure section 441; Canvas connector regression | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2929,7 +2933,8 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 
 ### 436: an enveloped refusal is re-reported as a learner-privacy failure
 
-- Verified defect: with a saved Edit permission that the Bridge Edit-options detail still reports and the saved binding no longer carries, `morrow_browser_edit_options` returned `learner_roster_binding_unavailable` instead of its own exact cause. The installed BT2 build reproduced it on three consecutive live reads after the 30-minute Edit permission lapsed, and the Canvas connector harness reproduces it exactly.
+- Verified defect: with a saved Edit permission that the Bridge Edit-options detail still reports and the saved binding no longer carries, `morrow_browser_edit_options` returns `learner_roster_binding_unavailable` instead of its own exact cause. The Canvas connector harness reproduces it exactly, and the same harness case passes on the repaired boundary and fails without it.
+- Live attribution, corrected: a live BT2 `morrow_browser_edit_options` failure carrying this same code was first attributed to this row. That attribution was withdrawn. The live failure was served by a gateway process from an earlier build, and it cleared when that process was replaced, so it does not establish this row. Row 438 records the process condition; this row rests on the harness reproduction alone.
 - Root cause: the MCP egress boundary preserved a Morrow refusal only in its bare `morrow.problem.v1` form. A read that has already named the tool it refused answers inside a `morrow.result.v1` envelope that holds the same problem in `data`. That shape did not match, so the refusal continued to the Canvas roster-scoped native egress. `morrow_browser_edit_options` addresses a binding and intentionally carries no `course_id`, so no learner context could be built and the roster boundary raised its own error over the real one.
 - Repair: the boundary now recognises a Morrow refusal in both forms and keeps its exact code. An enveloped refusal is rebuilt from the envelope's own fixed identity fields, so the caller keeps the shape it was answered in and the precise cause survives.
 - Regression: the Canvas connector harness makes the saved permission and the Edit detail disagree, then requires `privacy_edit_options_binding_changed` inside a failed `morrow.result.v1` envelope and forbids the learner-roster code.
@@ -2943,7 +2948,39 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: the Canvas connector harness reads a list the source marks truncated and requires `limited` with that limitation, and reads the same list untruncated and requires `complete` with no limitation.
 - Status: `IMPLEMENTED`; packaged live verification pending.
 
-### Root-cause patterns for rows 331–437
+### 438: a replaced build keeps serving from the previous gateway owner
+
+- Verified condition: `/Applications/Morrow.app` was replaced with a newly packaged build at 2026-09-15 07:01 and the application was relaunched. The gateway owner process `20229`, started 2026-09-14 22:19:35 from the previous build and reparented to `1`, stayed alive and answered every MCP request for the following eight hours. Twenty-four idle assistant proxies held it open. Stopping `20229` produced owner `73992`, and the same Edit-options read then succeeded.
+- Root cause: a proxy admits an existing owner by `configDigest`, a digest of the gateway configuration only. Two builds installed at the same path with the same configuration share that digest, so a new-build proxy attached to the old-build owner. The owner idles out only when no client is present, and the Desktop restart lease requires the monitor to be the only client, so connected assistants kept the outdated build in service indefinitely.
+- Repair: the owner records the build it started from, the digest of the sealed MCP runtime manifest beside its payload. On attach, a proxy from a packaged build asks the owner to retire for its build. The owner retires only when its own install path now holds exactly that build, it started from a different one, and no request, approval, or effect is in flight. It then closes and its idle clients reconnect to an owner started from the current build. A busy outdated owner is waited on within the owner start deadline, and a client never attaches to it meanwhile. A source checkout reports `source` and never requests retirement. An owner built before this repair cannot answer the request and keeps its earlier behaviour.
+- Regression: the local-owner integration suite starts an owner for one build with an idle client connected, changes the installed build, starts a client of the new build, and requires the outdated owner to exit and a new owner to serve the new client. A second client of the unchanged build must join the existing owner.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### 439: a verified delete's absence readback reads as a safety refusal
+
+- Verified defect: live BT2 page `3447380` was deleted with verified readback. The next `canvas_show_page_courses` returned `providerFailure.status: 404` and the text "Morrow refused unsafe upstream output."
+- Root cause: every upstream error used one privacy-refusal sentence, including provider outcomes whose closed status record had already been validated and retained.
+- Repair: when the provider failure record is validated, the text names the provider outcome by status class: not found, refused for the signed-in account, rate limited, server error, rejected, or not sent. An unvalidated error keeps the refusal sentence.
+- Regression: the gateway privacy suite requires the 404 sentence for the closed Canvas failure record, one sentence per status class, and the refusal sentence for a malformed record.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### 440: the Bridge grants Edit actions the gateway cannot invoke
+
+- Verified defect: live BT2 Edit options offered 146 grantable actions. `morrow_capability_get` returned `capability_not_found` for 27 of them, including `canvas_delete_topic_courses`, which the confirmed 23-action grant contained. Twenty-four came from a Chrome Bridge runtime older than its installed files, which already hold them. Three LTI line-item writes were still offered by the current Bridge source.
+- Root cause: two sides decided write support separately. The gateway held `/lti/` routes with a rule that lived only in its capability profile, while shared admission, which the Bridge reads, admitted four of them. The gateway also accepted any category the Bridge offered, so any Bridge build ahead of or behind the gateway could grant an action the gateway would refuse.
+- Repair: the LTI authorization hold is a shared admission class, `lti_authorization_required`, read by the gateway, the Bridge, and content execution. The gateway publishes any `action:<provider>:<tool>` Edit option it cannot invoke as review-only with the catalog reason, and refuses to grant it with `edit_access_category_unavailable`.
+- Regression: the Canvas connector harness relays a held and a supported action and requires review for the held one, then refuses a grant for it and prepares one for the supported action. Catalog contract tests and the admission report pin the new class and the 426 / 140 / 113 / 22 / 5 split.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### 441: a held capability is reported as unknown
+
+- Verified defect: `morrow_capability_change` for `canvas_delete_topic_courses` returned `capability_not_found` with "Morrow rejected this request because its input is invalid."; `morrow_capability_get` returned the same code under the text "Here is the tool canvas_delete_topic_courses."
+- Root cause: capability lookup treated a profile-held catalog tool the same as an absent name, and one sentence covered every capability refusal.
+- Repair: a profile-held tool returns `capability_unavailable` with its sealed catalog reason, re-read by name at egress. Each capability refusal has its own sentence, and lookup text follows the returned result.
+- Regression: the Canvas connector harness requires the unavailable code, reason, and sentence for lookup and invocation, and the not-found sentence for an unknown name.
+- Status: `IMPLEMENTED`.
+
+### Root-cause patterns for rows 331–441
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -2967,6 +3004,9 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **The same course-data result gets weaker privacy authority after a write:** row 435. Course author and editor identities use one scrub-only rule at source projection and final egress, independent of whether Canvas produced the object from a read or verified mutation.
 - **A refusal carried inside its own envelope is treated as an unclassified payload:** row 436. Morrow's own refusal keeps its exact code in both its bare and enveloped forms, so a control read never borrows the course-roster contract to explain itself.
 - **A completeness field defaults to the reassuring value when evidence is discarded:** row 437. Public completeness is derived from the source result's own bound, so a partial read never presents itself as the whole set.
+- **A long-lived process keeps serving after the files it was built from are replaced:** row 438. Evidence for a build is valid only when the process that produced it started after that build was installed.
+- **One component decides for another it cannot see:** row 440. Write support is one shared decision, and the side that invokes an action decides whether it can be granted.
+- **A refusal sentence names the wrong cause:** rows 439 and 441. Each code has its own sentence, and a validated provider outcome is described as that outcome.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.

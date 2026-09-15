@@ -544,8 +544,8 @@ describe("Canvas API catalog", () => {
     ));
     const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
       && /redirect/iu.test(`${operation.summary} ${operation.description}`));
-    expect(held).toHaveLength(422);
-    expect(admittedWithoutExactReadback).toHaveLength(28);
+    expect(held).toHaveLength(426);
+    expect(admittedWithoutExactReadback).toHaveLength(27);
     expect(unscopedReads).toHaveLength(351);
     const expectedLimited = new Set([
       ...held,
@@ -827,25 +827,31 @@ describe("Canvas API catalog", () => {
       "canvas_update_calendar",
     ]));
 
-    // The class is about account authority, not about the letters "lti" in a route. A course-scoped
-    // LTI write stays an ordinary admitted course write.
-    for (const name of ["canvas_create_line_item", "canvas_create_score", "canvas_update_lti_resource_link"]) {
+    // The class is about account authority, not about the letters "lti" in a route. A course write
+    // that manages an LTI link through the ordinary API stays an admitted course write. A route on
+    // the LTI service itself is still a course route, but it needs the LTI tool's own authorization,
+    // so it carries that hold instead of the account hold.
+    const resourceLink = catalog.operations.find((candidate) => candidate.toolName === "canvas_update_lti_resource_link")!;
+    expect(canvasAccountAuthorityRoute(resourceLink)).toBe(false);
+    expect(canvasOperationAdmission(resourceLink).write).toEqual({ state: "admitted" });
+    expect(tools.find((candidate) => candidate.name === "canvas_update_lti_resource_link")?.capability?.authority.scopeClass).toBe("course");
+    for (const name of ["canvas_create_line_item", "canvas_create_score"]) {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
       expect(canvasAccountAuthorityRoute(operation), name).toBe(false);
-      expect(canvasOperationAdmission(operation).write, name).toEqual({ state: "admitted" });
+      expect(canvasOperationAdmission(operation).write, name).toEqual({ state: "held", reason: "lti_authorization_required" });
       expect(tools.find((candidate) => candidate.name === name)?.capability?.authority.scopeClass, name).toBe("course");
     }
 
     // This class admits nothing. It only names the hold that 117 writes already carried.
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
-    expect(admitted).toHaveLength(144);
+    expect(admitted).toHaveLength(140);
     expect(admitted.filter((operation) => accountRoute(operation.path))).toEqual([]);
     const heldForCourseScope = catalog.operations.filter((operation) => {
       const write = canvasOperationAdmission(operation).write;
       return write.state === "held" && write.reason === "course_scope_required";
     });
-    expect(heldForCourseScope).toHaveLength(100);
+    expect(heldForCourseScope).toHaveLength(92);
   });
 
   it("keeps the single-nickname read bound to one course and produces no other course target kind", () => {
@@ -867,6 +873,7 @@ describe("Canvas API catalog", () => {
       "cross_course_object_requires_resolution",
       "duplicate_assignment_exact_readback_unavailable",
       "learner_scope_requires_separate_authority",
+      "lti_authorization_required",
       "multi_course_authority_required",
       "multi_step_upload_requires_reviewed_transfer",
       "provider_contract_incomplete",
@@ -886,6 +893,7 @@ describe("Canvas API catalog", () => {
       "cross_course_object_requires_resolution",
       "duplicate_assignment_exact_readback_unavailable",
       "learner_scope_requires_separate_authority",
+      "lti_authorization_required",
       "multi_course_authority_required",
       "multi_step_upload_requires_reviewed_transfer",
       "provider_contract_incomplete",
@@ -910,10 +918,11 @@ describe("Canvas API catalog", () => {
 
     expect(Object.fromEntries([...byReason].map(([reason, names]) => [reason, names.length]))).toEqual({
       account_authority_required: 117,
-      course_scope_required: 100,
+      course_scope_required: 92,
       cross_course_object_requires_resolution: 48,
       duplicate_assignment_exact_readback_unavailable: 1,
       learner_scope_requires_separate_authority: 125,
+      lti_authorization_required: 12,
       multi_course_authority_required: 11,
       multi_step_upload_requires_reviewed_transfer: 5,
       provider_contract_incomplete: 9,
@@ -993,7 +1002,7 @@ describe("Canvas API catalog", () => {
 
     // The admitted set is pinned here as well. Any change needs a reviewed admission reason.
     expect(catalog.operations.filter((operation) => !operation.readOnly
-      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(144);
+      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(140);
   });
 
   // Generic Canvas upload pre-flights cannot carry the remaining transfer steps. The Rubric CSV
@@ -1487,11 +1496,11 @@ describe("Canvas API catalog", () => {
   it("derives structural readback metadata from the shared planner", () => {
     const admittedWrites = catalog.operations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "admitted");
     const assessments = admittedWrites.map((operation) => canvasReadbackAssessment(catalog.operations, operation));
-    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(23);
+    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(22);
     expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(5);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(0);
-    expect(admittedWrites).toHaveLength(144);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(116);
+    expect(admittedWrites).toHaveLength(140);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(113);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_delete_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(false);
@@ -1519,7 +1528,7 @@ describe("Canvas API catalog", () => {
   it("refuses a readback whose read route is not the write target's own resource", () => {
     const tools = canvasCatalogTools(catalog);
     const withoutSafeRoute = [
-      "canvas_create_score",
+      "canvas_create_rubricassociation",
       "canvas_delete_rubricassociation",
     ];
     for (const name of withoutSafeRoute) {

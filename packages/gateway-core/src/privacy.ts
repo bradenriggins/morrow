@@ -1059,7 +1059,23 @@ function sanitizedUpstreamError(value: JsonObject): JsonObject {
     ...(resultState === undefined ? {} : { resultState }),
     ...(sourceCode === undefined ? {} : { sourceCode }),
   };
+  // The provider body was dropped, but its validated status is not unsafe
+  // output. A missing item after a delete is the expected readback, so the
+  // text names what the provider answered instead of reporting a refusal.
+  output.content = [{ type: "text", text: providerFailureText(providerFailure) }];
   return output;
+}
+
+function providerFailureText(providerFailure: JsonObject): string {
+  const provider = providerFailure.provider === "moodle" ? "Moodle" : "Canvas";
+  if (providerFailure.sent !== true) return `Morrow did not send this request to ${provider}.`;
+  const status = Number(providerFailure.status);
+  if (!Number.isInteger(status)) return `${provider} did not complete this request.`;
+  if (status === 404 || status === 410) return `${provider} could not find this item (HTTP ${status}).`;
+  if (status === 401 || status === 403) return `${provider} refused this request for the signed-in account (HTTP ${status}).`;
+  if (status === 429) return `${provider} limited the request rate (HTTP 429). Try again later.`;
+  if (status >= 500) return `${provider} reported a server error (HTTP ${status}).`;
+  return `${provider} rejected this request (HTTP ${status}).`;
 }
 
 function exactDescriptor(value: OutputPrivacyDescriptor | undefined): OutputPrivacyDescriptor {

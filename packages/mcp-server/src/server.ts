@@ -19,7 +19,7 @@ import {
   type RequestedByIdentity,
 } from "@morrow/contracts";
 import { GATEWAY_OPERATION_STATES } from "@morrow/operation-journal";
-import { isPrivateSourceTool, type GatewayRuntime } from "./runtime.js";
+import { capabilityProblemText, isPrivateSourceTool, type GatewayRuntime } from "./runtime.js";
 import { registerActivityTool, type ActivityGroups } from "./activity-tools.js";
 import { MORROW_SERVER_INSTRUCTIONS } from "./server-instructions.js";
 import { registerLessonReviewTool, type LessonReviewState } from "./lesson-review.js";
@@ -128,13 +128,28 @@ function publicCapabilityDescriptor(runtime: GatewayRuntime, name: string): Json
   };
 }
 
-function safeCapabilityInvocationFailure(code: "capability_not_found" | "capability_input_invalid" | "capability_mode_mismatch"): CallToolResult {
+function safeCapabilityInvocationFailure(
+  code: "capability_not_found" | "capability_input_invalid" | "capability_mode_mismatch",
+): CallToolResult {
   return {
-    content: [{ type: "text", text: "Morrow could not invoke the selected capability." }],
+    content: [{ type: "text", text: capabilityProblemText(code) }],
     isError: true,
     structuredContent: {
       schema: "morrow.problem.v1",
       code,
+    },
+  };
+}
+
+function capabilityUnavailableFailure(capability: string, reason: string): CallToolResult {
+  return {
+    content: [{ type: "text", text: `${capabilityProblemText("capability_unavailable")} ${reason}` }],
+    isError: true,
+    structuredContent: {
+      schema: "morrow.problem.v1",
+      code: "capability_unavailable",
+      capability,
+      reason,
     },
   };
 }
@@ -428,10 +443,16 @@ export function createMorrowServer(
       inputSchema: z.object({ name: z.string().min(1).max(128) }),
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     },
-    async ({ name }) => textAndStructured(
-      `Here is the tool ${name}.`,
-      publicCapabilityDescriptor(runtime, name),
-    ),
+    async ({ name }) => {
+      const descriptor = publicCapabilityDescriptor(runtime, name);
+      const code = descriptor.schema === "morrow.problem.v1" && typeof descriptor.code === "string" ? descriptor.code : null;
+      const summary = code === null
+        ? `Here is the tool ${name}.`
+        : code === "capability_unavailable" && typeof descriptor.reason === "string"
+          ? `${capabilityProblemText(code)} ${descriptor.reason}`
+          : capabilityProblemText(code);
+      return textAndStructured(summary, descriptor);
+    },
   );
 
   const publicContracts = publicToolContracts(runtime);
@@ -455,7 +476,12 @@ export function createMorrowServer(
       async ({ name: publicName, arguments: argumentsValue }, context: ServerContext): Promise<CallToolResult> => {
         const mapping = runtime.catalog.tools.find((tool) => tool.publicName === publicName && !isPrivateSourceTool(tool));
         const validator = publicContracts.get(publicName)?.validator;
-        if (!mapping || !validator) return safeCapabilityInvocationFailure("capability_not_found");
+        if (!mapping || !validator) {
+          const reason = mapping ? null : runtime.capabilityUnavailableReason(publicName);
+          return reason === null
+            ? safeCapabilityInvocationFailure("capability_not_found")
+            : capabilityUnavailableFailure(publicName.trim(), reason);
+        }
         if ((mapping.annotations?.readOnlyHint === true) !== readOnly) {
           return safeCapabilityInvocationFailure("capability_mode_mismatch");
         }

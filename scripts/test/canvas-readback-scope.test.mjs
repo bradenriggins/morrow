@@ -47,7 +47,7 @@ test("every generic Canvas readback reads the write target's own resource", () =
 // all three steps.
 test("Canvas writes with no same-resource read report an unavailable readback instead of a plan", () => {
   const withoutSafeRoute = [
-    "canvas_create_score",
+    "canvas_create_rubricassociation",
     "canvas_delete_rubricassociation",
   ];
   for (const name of withoutSafeRoute) {
@@ -66,6 +66,12 @@ test("Canvas writes with no same-resource read report an unavailable readback in
     state: "not_applicable",
     reason: "write_held",
   });
+
+  // A score posted through the LTI service needs the tool's own LTI authorization, so it is held
+  // before any readback question arises.
+  const ltiScore = operation("canvas_create_score");
+  assert.deepEqual(canvasOperationAdmission(ltiScore).write, { state: "held", reason: "lti_authorization_required" });
+  assert.deepEqual(canvasReadbackAssessment(catalog.operations, ltiScore), { state: "not_applicable", reason: "write_held" });
 
   const learnerWrite = operation("canvas_grade_or_comment_on_multiple_submissions_courses_submissions");
   assert.deepEqual(canvasOperationAdmission(learnerWrite).write, {
