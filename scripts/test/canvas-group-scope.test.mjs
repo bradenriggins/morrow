@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInThisContext } from "node:vm";
-import { canvasAdmissionReason, canvasOperationAdmission } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { canvasOperationAdmission } from "../../connector/extension/generated/canvas-operation-admission.js";
 import {
   CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS,
   canvasSemanticCourseCollectionState,
@@ -147,11 +147,10 @@ test("only a group's own discussion topics and pages declare a course-ownership 
   };
   for (const toolName of GROUP_COURSE_OWNED_WRITES) {
     assert.deepEqual(target(toolName), groupTarget, toolName);
-    assert.equal(
-      canvasOperationAdmission(operation(toolName)).write.state,
-      toolName === "canvas_delete_topic_groups" ? "held" : "admitted",
-      toolName,
-    );
+    assert.equal(canvasOperationAdmission(operation(toolName)).write.state, "admitted", toolName);
+    // Deleting a group's topic removes the posts under it, so it is a person's record reached through
+    // a group: a site request that Canvas decides with the person's own roles.
+    assert.equal(canvasOperationAdmission(operation(toolName)).authority, toolName === "canvas_delete_topic_groups" ? "site" : "course", toolName);
   }
   const declared = CATALOG.operations
     .filter((entry) => canvasSemanticCourseTarget(entry)?.object === "group")
@@ -169,19 +168,20 @@ test("only a group's own discussion topics and pages declare a course-ownership 
   assert.equal(collection.path, "/v1/courses/{course_id}/groups");
 });
 
-test("every group route about who is in a group stays held with the learner reason", () => {
+test("every group route about who is in a group is a person's record reached through the group", () => {
   const groupWrites = CATALOG.operations
     .filter((entry) => entry.readOnly === false && /^\/v1\/(?:groups|group_categories)(?:\/|$)/.test(entry.path));
   assert.equal(groupWrites.length, 53);
   const grouped = new Map();
   for (const entry of groupWrites) {
-    const write = canvasOperationAdmission(entry).write;
-    const key = write.state === "held" ? write.reason : write.state;
+    const admission = canvasOperationAdmission(entry);
+    const key = admission.write.state === "held" ? admission.write.reason : admission.siteClass || admission.authority;
     grouped.set(key, [...(grouped.get(key) || []), entry.toolName].sort());
   }
-  assert.deepEqual([...grouped.keys()].sort(), ["admitted", "cross_course_object_requires_resolution", "learner_scope_requires_separate_authority"]);
-  assert.deepEqual(grouped.get("admitted"), GROUP_CONTENT_WRITES);
-  assert.deepEqual(grouped.get("learner_scope_requires_separate_authority"), [
+  assert.deepEqual([...grouped.keys()].sort(), ["course", "learner_record", "multi_step_upload_requires_reviewed_transfer", "shared_object"]);
+  assert.deepEqual(grouped.get("course"), GROUP_CONTENT_WRITES);
+  assert.deepEqual(grouped.get("multi_step_upload_requires_reviewed_transfer"), ["canvas_upload_file_v1_groups_group_id_files_post"]);
+  assert.deepEqual(grouped.get("learner_record"), [
     "canvas_assign_unassigned_members",
     "canvas_bulk_delete_memberships_bulk_deletes_memberships_by_providing_array_of_user_ids_or_for_different",
     "canvas_create_membership",
@@ -193,14 +193,10 @@ test("every group route about who is in a group stays held with the learner reas
     "canvas_update_membership_memberships",
     "canvas_update_membership_users",
   ]);
-  assert.equal(
-    canvasAdmissionReason({ state: "held", reason: "learner_scope_requires_separate_authority" }),
-    "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course.",
-  );
-  // A group set can create groups and place students in them, so no group-set write is admitted,
-  // and the group object itself has no declared reading yet.
+  // A group set and the group object itself have no declared course reading, so they are site
+  // requests on a shared object.
   for (const toolName of ["canvas_create_group_group_categories", "canvas_delete_group_category", "canvas_update_group_category", "canvas_delete_group", "canvas_edit_group"]) {
-    assert.deepEqual(canvasOperationAdmission(operation(toolName)).write, { state: "held", reason: "cross_course_object_requires_resolution" }, toolName);
+    assert.deepEqual(canvasOperationAdmission(operation(toolName)), { courseTarget: { kind: "none" }, authority: "site", siteClass: "shared_object", write: { state: "admitted" } }, toolName);
     assert.equal(canvasSemanticCourseTarget(operation(toolName)), undefined, toolName);
   }
 });

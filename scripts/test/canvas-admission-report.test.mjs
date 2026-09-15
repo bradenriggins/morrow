@@ -49,44 +49,9 @@ const provenClaims = [
     expected: [report.admission.held],
   },
   {
-    label: "held for course_scope_required",
-    pattern: /\| (\d+) have no course anywhere in the route,/,
-    expected: [report.admission.heldByReason.course_scope_required],
-  },
-  {
-    label: "held for account_authority_required",
-    pattern: /, (\d+) name a Canvas account, the whole Canvas instance, an LTI registration, or a developer key,/,
-    expected: [report.admission.heldByReason.account_authority_required],
-  },
-  {
-    label: "held for cross_course_object_requires_resolution",
-    pattern: /, (\d+) name a cross-course object that needs its own resolver,/,
-    expected: [report.admission.heldByReason.cross_course_object_requires_resolution],
-  },
-  {
-    label: "held for learner_scope_requires_separate_authority",
-    pattern: /, (\d+) change one learner's enrollment, submission, grade, attempt, override, membership, or progress,/,
-    expected: [report.admission.heldByReason.learner_scope_requires_separate_authority],
-  },
-  {
     label: "held for lti_authorization_required",
-    pattern: /, (\d+) call an LTI service that accepts only the LTI tool's own authorization,/,
+    pattern: /\| (\d+) call an LTI service that accepts only the LTI tool's own authorization,/,
     expected: [report.admission.heldByReason.lti_authorization_required],
-  },
-  {
-    label: "held for multi_course_authority_required",
-    pattern: /, (\d+) can reach another course or account,/,
-    expected: [report.admission.heldByReason.multi_course_authority_required],
-  },
-  {
-    label: "held for provider_contract_incomplete",
-    pattern: /, (\d+) have an incomplete provider contract,/,
-    expected: [report.admission.heldByReason.provider_contract_incomplete],
-  },
-  {
-    label: "held for self_scope_not_supported",
-    pattern: /, (\d+) change a personal bookmark or course nickname,/,
-    expected: [report.admission.heldByReason.self_scope_not_supported],
   },
   {
     label: "held for multi_step_upload_requires_reviewed_transfer",
@@ -99,11 +64,25 @@ const provenClaims = [
     expected: [report.admission.admitted],
   },
   {
-    label: "admitted through a direct course target or proved course object",
-    pattern: /\| (\d+) use a direct course target,[^|]+The other (\d+) use declared course-ownership reads/,
+    label: "admitted course requests through a direct course target or proved course object",
+    pattern: /\| (\d+) are course requests: (\d+) use a direct course target,[^|]+The other (\d+) use declared course-ownership reads/,
     expected: [
-      report.admission.admittedByCourseTargetKind.course_path,
-      report.admission.admittedByCourseTargetKind.semantic_course_object,
+      report.admission.admittedByAuthority.course,
+      report.admission.admittedCourseByCourseTargetKind.course_path,
+      report.admission.admittedCourseByCourseTargetKind.semantic_course_object,
+    ],
+  },
+  {
+    label: "admitted site requests by class",
+    pattern: /(\d+) are site requests: (\d+) account, (\d+) personal, (\d+) shared-object, (\d+) learner-record, (\d+) multi-course, and (\d+) session-credential routes\./,
+    expected: [
+      report.admission.admittedByAuthority.site,
+      report.admission.admittedSiteByClass.account,
+      report.admission.admittedSiteByClass.person,
+      report.admission.admittedSiteByClass.shared_object,
+      report.admission.admittedSiteByClass.learner_record,
+      report.admission.admittedSiteByClass.multi_course,
+      report.admission.admittedSiteByClass.session_credential,
     ],
   },
   {
@@ -113,7 +92,7 @@ const provenClaims = [
   },
   {
     label: "readback route tiers",
-    pattern: /: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, and (\d+) use the named bulk-assignment-date and enrollment-reactivation readbacks/,
+    pattern: /returns a plan for \d+ writes: (\d+) read the same route, (\d+) read the created child, (\d+) read the parent collection, and (\d+) use the named bulk-assignment-date and enrollment-reactivation readbacks/,
     expected: [
       report.readback.routeTierCounts.exact,
       report.readback.routeTierCounts.created_child,
@@ -144,13 +123,13 @@ const provenClaims = [
   },
   {
     label: "readback work that remains, opening count",
-    pattern: /^(\d+) of the (\d+) scope-admitted writes have no exact generic postcondition\./m,
+    pattern: /^(\d+) of the (\d+) admitted writes have no exact generic postcondition\./m,
     expected: [report.readback.admittedWritesWithoutExactReadback.length, report.admission.admitted],
   },
   {
     label: "readback work that remains, split",
-    pattern: /: (\d+) have no safe read route at all, and (\d+) are stopped by a named blocker\./,
-    expected: [report.readback.stateCounts.unavailable, report.readback.stateCounts.blocked],
+    pattern: /: (\d+) have no safe read route at all, (\d+) are stopped by a named blocker, and (\d+) have a read with no exact target or postcondition\./,
+    expected: [report.readback.stateCounts.unavailable, report.readback.stateCounts.blocked, report.readback.stateCounts.unconfirmed],
   },
   {
     label: "Item Bank operation split",
@@ -177,6 +156,7 @@ const BLOCKER_ROWS = Object.freeze({
   favorite_list_is_effective_not_explicit_state: "Favorite list is effective, not explicit, state",
   module_item_reader_mutates_progress: "Module item reader mutates progress",
   module_progression_state_has_no_current_user_reader: "Module progression state has no current user reader",
+  outcome_link_identity_is_nested: "Outcome link identity is nested",
   student_grade_or_submission_state: "Student grade or submission state",
   summary_state_has_no_narrow_reader: "Summary state has no narrow reader",
 });
@@ -192,7 +172,7 @@ for (const [reason, label] of Object.entries(BLOCKER_ROWS)) {
 const remainingClaims = [
   {
     label: "remaining Canvas admission summary",
-    pattern: /The catalog has ([\d,]+) operations, with (\d+) writes held[^.]+\. Of the \d+ scope-admitted writes, (\d+) lack exact generic readback and are profile-limited before provider I\/O\./,
+    pattern: /The catalog has ([\d,]+) operations, with (\d+) writes held[^.]+\. Of the \d+ admitted writes, (\d+) lack exact generic readback and are profile-limited before provider I\/O\./,
     expected: [
       report.totals.operations,
       report.admission.held,
@@ -220,6 +200,9 @@ test("the Canvas admission report accounts for every write exactly once", () => 
   const sum = (counts) => Object.values(counts).reduce((total, value) => total + value, 0);
   assert.equal(report.admission.admitted + report.admission.held, report.totals.writes);
   assert.equal(sum(report.admission.admittedByCourseTargetKind), report.admission.admitted);
+  assert.equal(sum(report.admission.admittedByAuthority), report.admission.admitted);
+  assert.equal(sum(report.admission.admittedCourseByCourseTargetKind), report.admission.admittedByAuthority.course);
+  assert.equal(sum(report.admission.admittedSiteByClass), report.admission.admittedByAuthority.site);
   assert.equal(sum(report.admission.heldByReason), report.admission.held);
   assert.equal(sum(report.admission.heldByRouteFamily), report.admission.held);
   assert.equal(sum(report.readback.stateCounts), report.admission.admitted);
@@ -280,7 +263,7 @@ test("a document edit that changes a quoted number or breaks an anchor fails lou
   assert.throws(() => assertDocumentClaims(duplicatedAnchor, [heldClaim]), /expected exactly one match/);
 
   const remaining = read(REMAINING);
-  const rewordedSummary = remaining.replace("writes held for semantic scope, learner scope, multi-course scope, LTI authorization, personal scope, transfer, provider-contract, or exact-readback reasons", "writes still need work");
+  const rewordedSummary = remaining.replace("writes held for LTI authorization, reviewed file transfer, or duplicate-readback reasons", "writes still need work");
   assert.notEqual(rewordedSummary, remaining);
   assert.throws(() => assertDocumentClaims(rewordedSummary, remainingClaims), /expected exactly one match/);
 });

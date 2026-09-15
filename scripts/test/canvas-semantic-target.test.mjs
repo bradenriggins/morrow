@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { runInThisContext } from "node:vm";
-import { canvasAdmissionReason, canvasOperationAdmission } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { canvasOperationAdmission, canvasSiteAuthorityNote } from "../../connector/extension/generated/canvas-operation-admission.js";
 import {
   CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS,
   canvasLearnerScopeObjectRoute,
@@ -140,21 +140,21 @@ test("the section routes that change the section itself declare a course-ownersh
   assert.equal(canvasSemanticCourseTarget(operation("canvas_get_section_information_sections")), undefined);
 });
 
-test("every section route that carries a learner's own record without its course stays held with its own reason", () => {
+test("every section route that carries a learner's own record without its course is a site request with its own class", () => {
   const sectionWrites = CATALOG.operations.filter((entry) => entry.readOnly === false && entry.path.startsWith("/v1/sections/"));
   assert.equal(sectionWrites.length, 21);
   const grouped = new Map();
   for (const entry of sectionWrites) {
-    const write = canvasOperationAdmission(entry).write;
-    const key = write.state === "held" ? write.reason : write.state;
+    const admission = canvasOperationAdmission(entry);
+    const key = admission.write.state === "held" ? admission.write.reason : admission.siteClass || admission.authority;
     grouped.set(key, [...(grouped.get(key) || []), entry.toolName].sort());
   }
-  assert.deepEqual([...grouped.keys()].sort(), ["admitted", "cross_course_object_requires_resolution", "learner_scope_requires_separate_authority"]);
-  assert.deepEqual(grouped.get("admitted"), ["canvas_delete_section", "canvas_edit_section"]);
-  // Cross-listing moves the section into a second course. The reading proves the course that owns
-  // the section today; nothing proves the course it would move to.
-  assert.deepEqual(grouped.get("cross_course_object_requires_resolution"), ["canvas_cross_list_section", "canvas_de_cross_list_section"]);
-  assert.deepEqual(grouped.get("learner_scope_requires_separate_authority"), [
+  assert.deepEqual([...grouped.keys()].sort(), ["course", "learner_record", "multi_step_upload_requires_reviewed_transfer", "shared_object"]);
+  assert.deepEqual(grouped.get("course"), ["canvas_delete_section", "canvas_edit_section"]);
+  // Cross-listing moves the section into a second course, so it is a site request on a shared object.
+  assert.deepEqual(grouped.get("shared_object"), ["canvas_cross_list_section", "canvas_de_cross_list_section"]);
+  assert.deepEqual(grouped.get("multi_step_upload_requires_reviewed_transfer"), ["canvas_upload_file_sections"]);
+  assert.deepEqual(grouped.get("learner_record"), [
     "canvas_clear_unread_status_for_all_submissions_sections",
     "canvas_create_peer_review_sections",
     "canvas_delete_peer_review_sections",
@@ -171,14 +171,13 @@ test("every section route that carries a learner's own record without its course
     "canvas_mark_submission_as_unread_sections",
     "canvas_mark_submission_item_as_read_sections",
     "canvas_submit_assignment_sections",
-    "canvas_upload_file_sections",
   ]);
   assert.equal(
-    canvasAdmissionReason({ state: "held", reason: "learner_scope_requires_separate_authority" }),
-    "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course.",
+    canvasSiteAuthorityNote("learner_record"),
+    "It changes a person's record through a section, group, quiz attempt or booking rather than through the selected course, so it can reach a course other than the selected one. Canvas decides it with your own roles.",
   );
-  // The learner-object helper recognizes object routes. A section route does not name its course
-  // and stays held; the same record reached through its course is admitted as course work.
+  // The learner-object helper recognizes object routes. A section route does not name its course and
+  // is a site request; the same record reached through its course is course work.
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_grade_or_comment_on_submission_sections")), true);
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_edit_section")), false);
   assert.equal(canvasLearnerScopeObjectRoute(operation("canvas_grade_or_comment_on_submission_courses")), false);

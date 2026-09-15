@@ -24,7 +24,8 @@ export type CanvasReadbackBlocker =
   | "module_progression_state_has_no_current_user_reader"
   | "content_migration_update_has_no_cataloged_fields"
   | "favorite_list_is_effective_not_explicit_state"
-  | "course_delete_or_conclude_is_ambiguous";
+  | "course_delete_or_conclude_is_ambiguous"
+  | "outcome_link_identity_is_nested";
 
 const BLOCKED_READBACKS: Readonly<Record<string, CanvasReadbackBlocker>> = Object.freeze({
   bulk_select_provisional_grades: "student_grade_or_submission_state",
@@ -53,6 +54,14 @@ const BLOCKED_READBACKS: Readonly<Record<string, CanvasReadbackBlocker>> = Objec
   // One route deletes or concludes the whole course by its event field, and the course read cannot
   // tell a concluded course from the saved state a deleted one leaves.
   delete_conclude_course: "course_delete_or_conclude_is_ambiguous",
+  // A group's link list is keyed by the linked outcome, not by the group id the route names, so the
+  // generic collection reading would match the wrong record (ledger row 412).
+  create_link_outcome_accounts: "outcome_link_identity_is_nested",
+  create_link_outcome_accounts_outcome_id: "outcome_link_identity_is_nested",
+  create_link_outcome_courses: "outcome_link_identity_is_nested",
+  create_link_outcome_courses_outcome_id: "outcome_link_identity_is_nested",
+  create_link_outcome_global: "outcome_link_identity_is_nested",
+  create_link_outcome_global_outcome_id: "outcome_link_identity_is_nested",
 });
 
 export function canvasReadbackBlocker(operation: Pick<CanvasReadbackOperation, "nickname"> | null | undefined): CanvasReadbackBlocker | undefined {

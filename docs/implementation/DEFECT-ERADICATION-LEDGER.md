@@ -466,6 +466,8 @@ Every row stays open until its evidence columns are added and its status becomes
 | 449 | P1 | R7 | Every Bridge update requires a person to open Chrome's extensions page and reload Morrow Bridge, and restarting Chrome instead signs Canvas out and closes course tabs. | closure section 449; Bridge maintenance, installer controller, and relay regressions; live Bridge updates on 2026-09-15 | IMPLEMENTED |
 | 450 | P1 | R7 | Every course learner record write, including grades, overrides, enrollments, peer reviews, pacing, and accommodations, was held outside course Edit, so an instructor could not make those course changes through Morrow at all. | closure section 450; catalog, admission report, semantic target, group scope, readback scope, Bridge settings, and browser harness regressions | IMPLEMENTED |
 | 451 | P2 | R7 | The Canvas connector browser harness is not part of the repository gate, so its pinned Edit option counts went stale across rows 440 and 446 without any gate failing. | closure section 451; browser harness run on 2026-09-15 | OPEN |
+| 452 | P1 | R1 | The gateway could not plan any admitted Canvas object write whose route names no course, such as a section edit, a group page, a file rename, or a calendar event update, because its effect lock and binding checks required a course id; every such request answered "Morrow could not freeze this operation plan." | closure section 452; connector gateway integration regression | IMPLEMENTED |
+| 453 | P1 | R7 | 312 Canvas writes that name an account, a person, a shared object, a learner record without its course, more than one course, or a session credential were held because Morrow had only a course authority, and 355 reads without a course were refused, although Canvas itself decides each one with the signed-in person's roles. | closure section 453; catalog, connector runtime, gateway integration, Bridge settings, scope, admission report, and Bridge lifecycle regressions | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3084,7 +3086,24 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Next action: run the Chromium harness in the gate when a browser is available, or make the harness derive its expected counts from the admission report it already reads.
 - Status: `OPEN`.
 
-### Root-cause patterns for rows 331–451
+### 452: object writes that name no course could not be planned
+
+- Verified condition: on 2026-09-15 a gateway probe planned `canvas_edit_section` with `id: "302"` through the connector integration fixture and received `operation_plan_invalid` with the text "Morrow could not freeze this operation plan." `stableEffectTargetIdentity` threw "Morrow needs an exact course identity", `effectBindingScope` required a course id equal to the binding's, and `currentEditAuthorization` compared the same missing course, so all 15 admitted course-object writes were published and Edit-offered but could not be planned.
+- Root cause: the gateway derived every Canvas lock and binding from a course id in the request, while the Bridge proves a course object's course only at dispatch.
+- Repair: a Canvas mapping whose `authority.scopeClass` is `course-object` or `site` locks the object on its site (`scope: "site"`, keyed by the object path, or by the operation key when the route names no object), binds to the verified connection's site, person and session without a course comparison, and resolves learner tokens and egress privacy against the connection's own course roster.
+- Regression: `packages/mcp-server/test/canvas-connector.integration.test.ts` plans a section edit and an account term create, and approves, sends and verifies a planner note that names no course.
+- Status: `IMPLEMENTED`; live object writes pending BT2.
+
+### 453: Canvas site requests were held behind a course-only authority
+
+- Product decision: the owner requires that nothing in Morrow be blocked.
+- Condition: 117 account, 92 no-course, 48 cross-course object, 37 learner-without-course, 11 multi-course, 9 session-credential, and 6 personal writes were held, and 351 reads without a course were refused, although Canvas applies the signed-in person's own roles to every one of them.
+- Repair: admission gives every request an authority. A site request acts on the connected Canvas site as the signed-in person, carries one of six site classes with its own sentence shown before it is granted, is published with `scopeClass: "site"`, and is enforced the same way in the catalog profile, connector runtime, service worker, page executor, Bridge Edit list, and gateway. It needs the verified connection's origin, person and session, is sent only to the bound tab's origin, and removes the identity of anyone outside the selected course's roster from results. Course-object requests that are also site requests skip the course ownership proof. The six OutcomeLink creates gained the readback blocker `outcome_link_identity_is_nested` (row 412) now that no hold covers them. Every upload first step outside a course joins the reviewed-transfer hold, and the LTI hold covers every `/lti/` route. The raw Inbox routes are ordinary site requests beside the private Inbox action. Bridge 1.0.13 is sealed.
+- Split: 26 held and 540 admitted writes (228 course, 312 site), with 315 exact, 184 unavailable, 30 blocked, and 11 unconfirmed readbacks; 311 Canvas Edit actions.
+- Remaining: 16 LTI service writes, 9 upload first steps, 1 Assignment duplicate, and 225 admitted writes without an exact readback.
+- Status: `IMPLEMENTED`; live site writes pending BT2.
+
+### Root-cause patterns for rows 331–453
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

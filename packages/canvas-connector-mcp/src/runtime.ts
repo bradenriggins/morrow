@@ -105,6 +105,8 @@ function exactCourseId(value: unknown): string | undefined {
 
 function courseScope(operation: ConnectorOperation, argumentsValue: JsonObject): {
   readonly scoped: boolean;
+  /** A site request: bound to the connection's site and person, and not narrowed to its course. */
+  readonly site?: true;
   readonly courseId?: string;
   readonly semanticTarget?: CanvasSemanticCourseTarget;
   readonly objectId?: string;
@@ -120,7 +122,9 @@ function courseScope(operation: ConnectorOperation, argumentsValue: JsonObject):
     const courseId = exactCourseId((argumentsValue.morrow_item_bank_guard as JsonObject).course_id);
     return { scoped: true, ...(courseId ? { courseId } : {}) };
   }
-  const target = canvasOperationAdmission(operation).courseTarget;
+  const admission = canvasOperationAdmission(operation);
+  if (admission.authority === "site") return { scoped: true, site: true };
+  const target = admission.courseTarget;
   // The route names one object instead of a course. The course that owns it is proved by the
   // connector, which reads the object in the bound tab immediately before it sends the change, so
   // the only thing this layer can require is one exact object id and one selected course.
@@ -1135,6 +1139,16 @@ export class CanvasConnectorRuntime {
           recoverable: true,
         }, provider);
       }
+    } else if (scopedCourse.site) {
+      const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
+      if (binding?.provider !== provider) {
+        return failedBeforeSend({
+          schema: "morrow.bridge.problem.v1",
+          code: "course_binding_required",
+          message: "This Canvas site action needs one exact current Canvas connection.",
+          recoverable: true,
+        }, provider);
+      }
     } else if (scopedCourse.scoped) {
       const binding = this.bindings().find((entry) => entry.sourceBindingId === split.options.sourceBindingId);
       if (!scopedCourse.courseId || binding?.provider !== provider || binding.courseId !== scopedCourse.courseId) {
@@ -1233,7 +1247,7 @@ export class CanvasConnectorRuntime {
     if (!isCanvasOperation(operation) && operation.provider === "moodle" && operation.readOnly
       && !moodleSourceHistoryAvailable(toolName, operation.dataClass)) return false;
     const scope = courseScope(operation, args);
-    return scope.scoped && scope.courseId === binding.courseId;
+    return scope.site === true || (scope.scoped && scope.courseId === binding.courseId);
   }
 
   async privacyRoster(binding: SourcePrivacyBinding): Promise<readonly LearnerIdentity[]> {

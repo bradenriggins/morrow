@@ -206,35 +206,30 @@ test("only the course calendar event routes and the appointment group update dec
   }
 });
 
-test("every other Canvas calendar and appointment group write stays held with its own reason", () => {
+test("every other Canvas calendar and appointment group write is a site request with its own class", () => {
   const writes = CATALOG.operations.filter((entry) => entry.readOnly === false
     && /^\/v1\/(?:appointment_groups|calendar_events)(?:\/|$)/.test(entry.path));
   assert.equal(writes.length, 9);
   const grouped = new Map();
   for (const entry of writes) {
-    const write = canvasOperationAdmission(entry).write;
-    const key = write.state === "held" ? write.reason : write.state;
+    const admission = canvasOperationAdmission(entry);
+    assert.equal(admission.write.state, "admitted", entry.toolName);
+    const key = admission.siteClass || admission.authority;
     grouped.set(key, [...(grouped.get(key) || []), entry.toolName].sort());
   }
-  assert.deepEqual(grouped.get("admitted"), [...CALENDAR_WRITES, ...APPOINTMENT_GROUP_WRITES].sort());
+  assert.deepEqual(grouped.get("course"), [...CALENDAR_WRITES, ...APPOINTMENT_GROUP_WRITES].sort());
   // Reserving a time slot books it for one person, and deleting an appointment group cancels every
   // slot already booked in it. Both change a person's own record, not course content.
-  assert.deepEqual(grouped.get("learner_scope_requires_separate_authority"), [
+  assert.deepEqual(grouped.get("learner_record"), [
     "canvas_delete_appointment_group",
     "canvas_reserve_time_slot",
     "canvas_reserve_time_slot_participant_id",
   ]);
-  // Creating an appointment group names its courses in the request itself, and nothing proves those
-  // are the selected one, so it keeps the hold it already carried.
-  assert.deepEqual(grouped.get("cross_course_object_requires_resolution"), ["canvas_create_appointment_group"]);
+  // Creating an appointment group names its courses in the request itself.
+  assert.deepEqual(grouped.get("shared_object"), ["canvas_create_appointment_group"]);
   // The enabled account calendars are the signed-in person's own list of calendars to display.
-  assert.deepEqual(grouped.get("course_scope_required"), ["canvas_save_enabled_account_calendars"]);
-  assert.deepEqual([...grouped.keys()].sort(), [
-    "admitted",
-    "course_scope_required",
-    "cross_course_object_requires_resolution",
-    "learner_scope_requires_separate_authority",
-  ]);
+  assert.deepEqual(grouped.get("person"), ["canvas_save_enabled_account_calendars"]);
+  assert.deepEqual([...grouped.keys()].sort(), ["course", "learner_record", "person", "shared_object"]);
 });
 
 test("a reading proves a calendar object only when it names the selected course and no other", () => {

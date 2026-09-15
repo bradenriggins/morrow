@@ -192,38 +192,34 @@ test("only renaming, moving, removing a course file and adding a folder inside o
   }
 });
 
-test("every other Canvas file and folder write stays held, including both copy routes", () => {
+test("every other Canvas file and folder write is a site request, and every upload first step waits for the transfer", () => {
   const writes = CATALOG.operations.filter((entry) => entry.readOnly === false && /^\/v1\/(?:files|folders)(?:\/|$)/.test(entry.path));
   assert.equal(writes.length, 10);
   const grouped = new Map();
   for (const entry of writes) {
-    const write = canvasOperationAdmission(entry).write;
-    const key = write.state === "held" ? write.reason : write.state;
+    const admission = canvasOperationAdmission(entry);
+    const key = admission.write.state === "held" ? admission.write.reason : admission.siteClass || admission.authority;
     grouped.set(key, [...(grouped.get(key) || []), entry.toolName].sort());
   }
-  assert.deepEqual([...grouped.keys()].sort(), ["admitted", "cross_course_object_requires_resolution"]);
-  assert.deepEqual(grouped.get("admitted"), [...FILE_WRITES, ...FOLDER_WRITES].sort());
-  // A copy lands in a second object, and the reading that proves the source proves nothing about
-  // where the copy goes. The folder object itself, the file word count, the link verifier reset and
-  // the folder upload pre-flight have no reading declared for them either.
-  assert.deepEqual(grouped.get("cross_course_object_requires_resolution"), [
+  assert.deepEqual([...grouped.keys()].sort(), ["course", "multi_step_upload_requires_reviewed_transfer", "shared_object"]);
+  assert.deepEqual(grouped.get("course"), [...FILE_WRITES, ...FOLDER_WRITES].sort());
+  // A copy lands in a second object, and the folder object itself, the file word count and the link
+  // verifier reset have no course reading declared, so Canvas decides them with the person's roles.
+  assert.deepEqual(grouped.get("shared_object"), [
     "canvas_copy_file",
     "canvas_copy_folder",
     "canvas_delete_folder",
     "canvas_reset_link_verifier",
     "canvas_update_folder",
     "canvas_update_word_count",
-    "canvas_upload_file_v1_folders_folder_id_files_post",
   ]);
-  // The file routes under an account, a group, or one person keep their own holds.
-  for (const [toolName, reason] of [
-    ["canvas_upload_file_v1_users_user_id_files_post", "course_scope_required"],
-    ["canvas_upload_file_v1_groups_group_id_files_post", "cross_course_object_requires_resolution"],
-    ["canvas_create_folder_accounts", "account_authority_required"],
-    ["canvas_upload_file_sections", "learner_scope_requires_separate_authority"],
-  ]) {
-    assert.deepEqual(canvasOperationAdmission(operation(toolName)).write, { state: "held", reason }, toolName);
+  assert.deepEqual(grouped.get("multi_step_upload_requires_reviewed_transfer"), ["canvas_upload_file_v1_folders_folder_id_files_post"]);
+  for (const toolName of ["canvas_upload_file_v1_users_user_id_files_post", "canvas_upload_file_v1_groups_group_id_files_post", "canvas_upload_file_sections"]) {
+    assert.deepEqual(canvasOperationAdmission(operation(toolName)).write, { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" }, toolName);
   }
+  assert.deepEqual(canvasOperationAdmission(operation("canvas_create_folder_accounts")), {
+    courseTarget: { kind: "none" }, authority: "site", siteClass: "account", write: { state: "admitted" },
+  });
 });
 
 test("a reading proves a file only when a course owns it, it is this file, and the course lists it", () => {

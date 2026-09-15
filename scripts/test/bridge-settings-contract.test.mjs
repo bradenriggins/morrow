@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test, { after } from "node:test";
-import { canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { canvasAdmissionIsBound, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
 import { categoriesForBinding, changedFields, createEditPermission, guardedItemBankUpdate, migrateLegacyEditPermission, validEditPermission } from "../../connector/extension/src/edit-policy.js";
 import { PROBLEM_CODES, problemText } from "../../connector/extension/src/bridge-problem-copy.js";
 import { courseValue, detailText, primaryLabel, statusValue } from "../../connector/extension/popup/popup-view.js";
@@ -328,19 +328,19 @@ const REVIEW_ONLY_ADMITTED_CANVAS_WRITES = new Map([
 
 function supportedEditableCanvasWrites() {
   return canvasOperations.filter((operation) => operation.readOnly === false
-    && canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget)
+    && canvasAdmissionIsBound(canvasOperationAdmission(operation))
     && canvasOperationAdmission(operation).write.state === "admitted"
     && canvasReadbackAssessment(canvasOperations, operation).state === "structurally_exact"
     && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
 }
 
-test("Canvas Edit categories are exactly the scoped admitted writes with exact readback", () => {
+test("Canvas Edit categories are exactly the bound admitted writes with exact readback", () => {
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
   const editable = options.filter((option) => option.availability === "edit" && option.id.startsWith("action:canvas:")).map((option) => option.id).sort();
   const supported = supportedEditableCanvasWrites()
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(supported.length, 145);
+  assert.equal(supported.length, 311);
   assert.deepEqual(editable, supported);
   assert.deepEqual(
     options.filter((option) => option.availability === "review").map((option) => option.id).sort(),
@@ -397,11 +397,11 @@ test("nonexact Canvas writes are absent and every offered Canvas Edit action is 
   const options = categoriesForBinding({ provider: "canvas" }, canvasOperations);
   const supportedWrites = supportedEditableCanvasWrites();
   const nonexact = canvasOperations.filter((operation) => operation.readOnly === false
-    && canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget)
+    && canvasAdmissionIsBound(canvasOperationAdmission(operation))
     && canvasOperationAdmission(operation).write.state === "admitted"
     && !checkableCanvasWrite(operation)
     && !REVIEW_ONLY_ADMITTED_CANVAS_WRITES.has(operation.toolName));
-  assert.equal(nonexact.length, 79);
+  assert.equal(nonexact.length, 225);
   for (const operation of supportedWrites) {
     const option = canvasOption(options, operation.toolName);
     assert.equal(option.availability, "edit", operation.toolName);

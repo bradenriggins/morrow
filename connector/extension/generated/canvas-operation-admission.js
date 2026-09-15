@@ -1,5 +1,9 @@
 import { canvasReadbackBlocker, hasNamedCanvasReadback, planBrowserReadback } from "./canvas-readback-plan.js";
 import { canvasLearnerScopeObjectRoute, canvasSemanticCourseTarget } from "./canvas-semantic-target.js";
+/** True when the request may be sent through the verified connection: to its course, or to its site. */
+export function canvasAdmissionIsBound(admission) {
+    return admission.authority === "site" || canvasCourseTargetIsScoped(admission.courseTarget);
+}
 export function canvasCourseTargetIsScoped(target) {
     return target.kind === "course_path"
         || target.kind === "semantic_course_object"
@@ -8,13 +12,14 @@ export function canvasCourseTargetIsScoped(target) {
 /**
  * Routes whose authority is a Canvas account or the whole Canvas instance: every account route, the
  * global outcome routes, and the developer key routes. The LTI registration routes live under an
- * account, so the account prefix already names them.
+ * account, so the account prefix already names them. Canvas decides each of them with the signed-in
+ * person's account roles, so they are site requests.
  */
 const ACCOUNT_AUTHORITY_ROUTE = /^\/(?:v1|lti)\/accounts(?:\/|$)|^\/v1\/global(?:\/|$)|^\/v1\/developer_keys(?:\/|$)|^\/lti\/developer_key(?:\/|$)/;
 /**
  * True when the route names a Canvas account, the whole Canvas instance, an LTI registration or a
- * developer key. A selected course cannot carry that authority. docs/implementation/CANVAS-ADMISSION-CLASSES.md
- * holds the contract these routes need before any of them can be admitted.
+ * developer key. A selected course cannot carry that authority, so these are site requests.
+ * docs/implementation/CANVAS-ADMISSION-CLASSES.md holds the contract.
  */
 export function canvasAccountAuthorityRoute(operation) {
     const path = String(operation?.path || "");
@@ -41,9 +46,8 @@ const LEARNER_RECORD_ROUTE = Object.freeze([
  * submissions and grades, quiz attempts, enrollments, assignment overrides, group membership, and
  * learner progress.
  *
- * Some routes can act on either course content or a learner depending on request fields. A standing
- * capability cannot inspect those future fields when it is granted, so the raw operation stays held
- * until Morrow has a separate learner authority that can bind the affected people.
+ * The course path binds these to the selected course. The same records reached through a section,
+ * group, quiz attempt or booking name no course, so those forms are site requests.
  */
 const COURSE_LEARNER_RECORD_ROUTE = Object.freeze([
     // Assignment overrides and module overrides can name students, groups, or sections.
@@ -78,7 +82,7 @@ const COURSE_LEARNER_RECORD_ROUTE = Object.freeze([
 /**
  * Writes whose course path names only one part of their effect. Each operation can read from, move,
  * associate, or write another course or account named in its request data. A selected-course grant
- * cannot authorize that second scope.
+ * cannot authorize that second scope, so these are site requests.
  */
 const MULTI_COURSE_ROUTE = Object.freeze([
     /^\/v1\/courses\/\{course_id\}\/blueprint_templates\/\{[^}]+\}\/(?:migrations|update_associations)$/,
@@ -93,17 +97,15 @@ const MULTI_COURSE_ROUTE = Object.freeze([
  * holds the framework that proves the owning course by reading the object immediately before the
  * change is sent; it is declared so far for the two section routes, the group discussion-topic and
  * group page routes, the file rename, file delete and folder create routes, the three course
- * calendar event routes and the appointment group update, so every other route in these families
- * stays held until its reading exists. A group set stays held even though a group
- * set can be read the same way: changing one can create groups and place students in them, which is
- * not a change Morrow makes. Copying a file or a folder stays held for the same kind of reason: the
- * copy lands in a second object that the reading of the first one does not prove.
+ * calendar event routes and the appointment group update. Those stay course requests. Every other
+ * route in these families is a site request: Canvas decides it with the signed-in person's own roles,
+ * wherever the object lives.
  */
 const CROSS_COURSE_OBJECT_ROUTE = /^\/v1\/(?:appointment_groups|calendar_events|files|folders|group_categories|groups|outcomes|sections)(?:\/|$)/;
 /**
  * Writes that ask Canvas for a sign-in token, a session, or a one-time action. Canvas answers with
  * the credential or with nothing at all and keeps no field afterwards that names what changed, so
- * Morrow has no way to read the result back.
+ * Morrow has no way to read the result back. Privacy keeps any returned credential out of results.
  */
 const NO_READABLE_PROVIDER_EFFECT_ROUTE = Object.freeze([
     "/v1/discovery_pages/token",
@@ -119,17 +121,18 @@ const NO_READABLE_PROVIDER_EFFECT_ROUTE = Object.freeze([
 /**
  * The first step of a Canvas file upload. This request creates no file: Canvas answers with an
  * address to send the bytes to, the bytes go there in a second request, and a third request
- * confirms the saved file. Morrow runs all three steps only inside its reviewed course-file
- * transfer, which freezes the exact file and compares the bytes Canvas saved.
+ * confirms the saved file. The same first step exists for a course, a folder, a group, a section
+ * submission and a person. Morrow runs all three steps only inside its reviewed file transfer, which
+ * freezes the exact file and compares the bytes Canvas saved.
  */
-const COURSE_FILE_UPLOAD_PREFLIGHT_ROUTE = /^\/v1\/courses\/\{course_id\}\/(?:[^/]+\/)*files$/;
+const FILE_UPLOAD_PREFLIGHT_ROUTE = /^\/v1\/(?:courses|folders|groups|sections|users)\/\{[^}]+\}\/(?:[^/]+\/)*files$/;
 const COURSE_RUBRIC_CSV_UPLOAD_ROUTE = "/v1/courses/{course_id}/rubrics/upload";
 /**
  * True when the route needs file bytes the generic operation cannot safely carry. This covers the
  * course upload pre-flights and the CSV Rubric import whose generated schema exposes no file input.
  */
 function reviewedFileTransferRoute(operation) {
-    return operation.method === "POST" && (COURSE_FILE_UPLOAD_PREFLIGHT_ROUTE.test(operation.path)
+    return operation.method === "POST" && (FILE_UPLOAD_PREFLIGHT_ROUTE.test(operation.path)
         || operation.path === COURSE_RUBRIC_CSV_UPLOAD_ROUTE);
 }
 function learnerRecordRoute(operation) {
@@ -191,59 +194,49 @@ function courseTarget(operation) {
     }
     return { kind: "none" };
 }
+function siteAuthorityClass(operation, target) {
+    if (operation.service === "item_bank")
+        return undefined;
+    if (canvasAccountAuthorityRoute(operation))
+        return "account";
+    if (learnerRecordRoute(operation) && target.kind !== "course_path")
+        return "learner_record";
+    if (multiCourseRoute(operation))
+        return "multi_course";
+    if (target.kind === "course_path" || target.kind === "semantic_course_object")
+        return undefined;
+    if (target.kind === "self_path")
+        return target.argument === undefined || !operation.readOnly ? "person" : undefined;
+    if (crossCourseObjectRoute(operation))
+        return "shared_object";
+    if (NO_READABLE_PROVIDER_EFFECT_ROUTE.includes(operation.path))
+        return "session_credential";
+    return "person";
+}
 export function canvasOperationAdmission(operation) {
     const target = courseTarget(operation);
+    const siteClass = siteAuthorityClass(operation, target);
+    const scope = siteClass
+        ? { courseTarget: target, authority: "site", siteClass }
+        : { courseTarget: target, authority: "course" };
     if (operation.readOnly)
-        return { courseTarget: target, write: { state: "not_applicable" } };
+        return { ...scope, write: { state: "not_applicable" } };
     if (operation.service === "item_bank")
-        return { courseTarget: target, write: { state: "admitted" } };
-    // An account route needs account authority. The selected course cannot grant it, so the write
-    // stays held even when the same route also names a course.
-    if (canvasAccountAuthorityRoute(operation)) {
-        return { courseTarget: target, write: { state: "held", reason: "account_authority_required" } };
-    }
-    // The course is named, so scope is not what is missing. These routes need file bytes that only a
-    // reviewed transfer may carry. A generic call would either start an unfinished upload or send an
-    // empty CSV import, so the transfer hold runs before the course path can admit it.
+        return { ...scope, write: { state: "admitted" } };
+    // These routes need file bytes that only a reviewed transfer may carry. A generic call would either
+    // start an unfinished upload or send an empty CSV import, so the transfer hold runs first.
     if (reviewedFileTransferRoute(operation)) {
-        return { courseTarget: target, write: { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" } };
+        return { ...scope, write: { state: "held", reason: "multi_step_upload_requires_reviewed_transfer" } };
     }
     if (operation.path === "/v1/courses/{course_id}/assignments/{assignment_id}/duplicate") {
-        return { courseTarget: target, write: { state: "held", reason: "duplicate_assignment_exact_readback_unavailable" } };
+        return { ...scope, write: { state: "held", reason: "duplicate_assignment_exact_readback_unavailable" } };
     }
-    // A learner record reached through its course is course work the course Edit permission governs.
-    // Learner identifiers resolve from Morrow's learner tokens, results stay tokenized, and the write
-    // still needs an exact readback. Only a learner route that does not name its course stays held.
-    if (learnerRecordRoute(operation) && target.kind !== "course_path") {
-        return { courseTarget: target, write: { state: "held", reason: "learner_scope_requires_separate_authority" } };
-    }
-    if (multiCourseRoute(operation)) {
-        return { courseTarget: target, write: { state: "held", reason: "multi_course_authority_required" } };
-    }
-    // An LTI service accepts only the tool's own LTI authorization. The signed-in browser session
-    // cannot present it, so a route that otherwise names its course still cannot be sent. Every side
-    // that offers or sends a Canvas write reads this one decision.
+    // An LTI service, including the account and developer key routes under it, accepts only the tool's
+    // own LTI authorization. The signed-in browser session cannot present it.
     if (operation.path.startsWith("/lti/")) {
-        return { courseTarget: target, write: { state: "held", reason: "lti_authorization_required" } };
+        return { ...scope, write: { state: "held", reason: "lti_authorization_required" } };
     }
-    if (target.kind === "course_path")
-        return { courseTarget: target, write: { state: "admitted" } };
-    // The route names one object, and the catalog knows which read proves the course that owns it.
-    // Every enforcement layer refuses this write until that reading is taken and frozen.
-    if (target.kind === "semantic_course_object")
-        return { courseTarget: target, write: { state: "admitted" } };
-    if (target.kind === "self_path")
-        return { courseTarget: target, write: { state: "held", reason: "self_scope_not_supported" } };
-    // The remaining classes are ordered from the most specific fact about the route to the least: a
-    // person's own record, then an object Canvas can place in any course, then a request with no
-    // readable effect, and last the plain absence of a course.
-    if (crossCourseObjectRoute(operation)) {
-        return { courseTarget: target, write: { state: "held", reason: "cross_course_object_requires_resolution" } };
-    }
-    if (NO_READABLE_PROVIDER_EFFECT_ROUTE.includes(operation.path)) {
-        return { courseTarget: target, write: { state: "held", reason: "provider_contract_incomplete" } };
-    }
-    return { courseTarget: target, write: { state: "held", reason: "course_scope_required" } };
+    return { ...scope, write: { state: "admitted" } };
 }
 function structuralArguments(operation) {
     return Object.fromEntries((operation.parameters || []).map((parameter) => [parameter.inputName, "1"]));
@@ -313,32 +306,36 @@ export function canvasReadbackAssessment(operations, operation, admission = canv
 export function canvasAdmissionReason(admission) {
     if (admission.state !== "held")
         return undefined;
-    if (admission.reason === "account_authority_required") {
-        return "This change affects a whole Canvas account, not one course. Morrow does not yet have an account permission, so it will not send it.";
-    }
     if (admission.reason === "multi_step_upload_requires_reviewed_transfer") {
         return "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload.";
-    }
-    if (admission.reason === "cross_course_object_requires_resolution") {
-        return "Canvas can attach this group, file, folder, calendar item or outcome to any course, and Morrow cannot yet prove that this one belongs to the course you selected. Change it in Canvas, or ask for the same change from inside the course.";
-    }
-    if (admission.reason === "learner_scope_requires_separate_authority") {
-        return "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course.";
-    }
-    if (admission.reason === "multi_course_authority_required") {
-        return "This change can read from or change another Canvas course or account. Morrow only has permission for the course you selected, so it will not send it.";
-    }
-    if (admission.reason === "provider_contract_incomplete") {
-        return "This asks Canvas for a sign-in token, a session or a one-time action, and Canvas keeps nothing afterwards that Morrow can read back to show you what happened. Morrow does not send a change it cannot check, so make this one in Canvas.";
     }
     if (admission.reason === "duplicate_assignment_exact_readback_unavailable") {
         return "Canvas does not say when a duplicated assignment has finished copying, and the copy carries no documented field that names it as a New Quiz, so Morrow cannot prove it read back the finished copy rather than a half-made one. Duplicate this assignment in Canvas.";
     }
-    if (admission.reason === "lti_authorization_required") {
-        return "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool.";
+    return "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool.";
+}
+/**
+ * One plain sentence for each site class, shown before a site action is granted and at approval: what
+ * the change reaches beyond the selected course, and whose Canvas permissions decide it.
+ */
+export function canvasSiteAuthorityNote(siteClass) {
+    if (siteClass === "account") {
+        return "It changes a Canvas account, not one course. Canvas decides it with your own account roles on this Canvas site.";
     }
-    if (admission.reason === "self_scope_not_supported") {
-        return "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course.";
+    if (siteClass === "learner_record") {
+        return "It changes a person's record through a section, group, quiz attempt or booking rather than through the selected course, so it can reach a course other than the selected one. Canvas decides it with your own roles.";
     }
-    return "Morrow only changes things that live inside the one course you selected, and this change is not attached to any course. Make it in Canvas yourself, or ask for the same change on a page, assignment, file or other item inside the course.";
+    if (siteClass === "multi_course") {
+        return "It can read from or change a Canvas course or account besides the selected one. Canvas decides it with your own roles in each of them.";
+    }
+    if (siteClass === "shared_object") {
+        return "Canvas can attach this group, file, folder, calendar item, section or outcome to any course, so the change is not limited to the selected course. Canvas decides it with your own roles.";
+    }
+    if (siteClass === "session_credential") {
+        return "It asks Canvas for a sign-in token, a session or a one-time action. Morrow keeps any credential Canvas returns out of the result, and Canvas keeps no record Morrow can read back.";
+    }
+    if (siteClass === "person") {
+        return "It changes something that belongs to you or another person on this Canvas site, not content in the selected course. Canvas decides it with your own roles.";
+    }
+    return undefined;
 }

@@ -733,11 +733,14 @@ async function suspendedReconnectAlarmScenario() {
 }
 
 async function unscopedCanvasReadScenario() {
-  let providerExecutions = 0;
+  const executed = [];
   const value = fixture({
     tabMessage: async ({ message }) => {
       if (message?.type === "morrow_canvas_probe") return { ok: true, profile: { origin: courseOrigin, id: "7" } };
-      if (message?.type === "morrow_canvas_execute") providerExecutions += 1;
+      if (message?.type === "morrow_canvas_execute") {
+        executed.push(message);
+        return { ok: true, sent: true, status: 200, truncated: false, data: [] };
+      }
       return null;
     },
   });
@@ -762,10 +765,14 @@ async function unscopedCanvasReadScenario() {
   for (const command of commands) {
     socket.receive(command);
     const result = await eventually(() => socket.sent.find((message) => message.schema === "morrow.bridge.result.v1" && message.requestId === command.requestId));
-    assert.equal(result.ok, false);
-    assert.equal(result.problem.code, "course_scope_required");
+    assert.equal(result.ok, true, JSON.stringify(result));
   }
-  assert.equal(providerExecutions, 0);
+  // A read that names no course is a site request: the page receives it marked as one, for the
+  // connection's own tab and signed-in person.
+  assert.deepEqual(executed.map((message) => [message.operation.toolName, message.operation.morrowAuthority, message.principalId]), [
+    ["canvas_activity_stream_summary", "site", "7"],
+    ["canvas_list_bookmarks", "site", "7"],
+  ]);
 }
 
 async function courseFileDeadlineScenario() {
@@ -1239,7 +1246,7 @@ test("a paired Bridge reconnects from its alarm after a suspended worker lost it
   await isolatedScenario("suspended-reconnect-alarm");
 });
 
-test("unscoped Canvas reads are refused without provider execution", async () => {
+test("Canvas reads that name no course reach the page as site requests", async () => {
   await isolatedScenario("unscoped-canvas-read");
 });
 

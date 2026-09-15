@@ -25,6 +25,14 @@ const BLOCKED_READBACKS = Object.freeze({
     // One route deletes or concludes the whole course by its event field, and the course read cannot
     // tell a concluded course from the saved state a deleted one leaves.
     delete_conclude_course: "course_delete_or_conclude_is_ambiguous",
+    // A group's link list is keyed by the linked outcome, not by the group id the route names, so the
+    // generic collection reading would match the wrong record (ledger row 412).
+    create_link_outcome_accounts: "outcome_link_identity_is_nested",
+    create_link_outcome_accounts_outcome_id: "outcome_link_identity_is_nested",
+    create_link_outcome_courses: "outcome_link_identity_is_nested",
+    create_link_outcome_courses_outcome_id: "outcome_link_identity_is_nested",
+    create_link_outcome_global: "outcome_link_identity_is_nested",
+    create_link_outcome_global_outcome_id: "outcome_link_identity_is_nested",
 });
 export function canvasReadbackBlocker(operation) {
     return operation?.nickname ? BLOCKED_READBACKS[operation.nickname] : undefined;

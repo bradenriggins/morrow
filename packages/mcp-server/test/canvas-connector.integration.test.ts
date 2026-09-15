@@ -1074,13 +1074,13 @@ describe("Canvas connector gateway path", () => {
       await bindingsApplied();
       const rawConversation = await runtime.call("canvas_create_conversation", {
         recipients: ["9001"],
-        body: "Raw recipient identifiers must stay outside the public Morrow surface.",
+        body: "A raw Canvas Inbox message is its own site action.",
         _morrow: { source_binding_id: sourceBindingId },
       });
-      expect(rawConversation).toMatchObject({
-        isError: true,
-        structuredContent: { data: { code: "tool_not_found" } },
-      });
+      // The raw Inbox route stays available beside the private Inbox action: it is a site action that
+      // waits for its own approval, and nothing moves it onto the private action.
+      expect(rawConversation.structuredContent).toMatchObject({ status: "awaiting_approval", tool: "canvas_create_conversation" });
+      runtime.cancelOperation(operationId(rawConversation));
       const roster = await runtime.call("canvas_list_users_in_course_users", {
         course_id: "42",
         enrollment_type: ["student"],
@@ -1294,6 +1294,40 @@ describe("Canvas connector gateway path", () => {
       await bindingsApplied();
     }, CASE_TIMEOUT_MS);
 
+    it("plans a Canvas object change and a site change that name no course, and sends the site change once approved", async () => {
+      // A section route names a section, not a course. The Bridge proves the section's course before
+      // the change is sent, so the gateway plans it without a course of its own.
+      const section = await runtime.call("canvas_edit_section", {
+        id: "302", course_section_name: "Section B evening", _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(section.structuredContent).toMatchObject({ status: "awaiting_approval", effectState: "awaiting_approval" });
+      runtime.cancelOperation(operationId(section));
+      // An account route acts on the Canvas site as the signed-in person.
+      const term = await runtime.call("canvas_create_enrollment_term", {
+        account_id: "1", enrollment_term_name: "Fall 2026", _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(term.structuredContent).toMatchObject({ status: "awaiting_approval" });
+      runtime.cancelOperation(operationId(term));
+      const sent: BridgeCommand[] = [];
+      const record = (command: BridgeCommand) => {
+        if (command.kind === "invoke_write" && command.toolName === "canvas_create_planner_note") sent.push(command);
+      };
+      bridge?.onCommand(record);
+      const note = await runtime.call("canvas_create_planner_note", {
+        title: "Grade the lab reports", todo_date: "2026-09-20T12:00:00Z", _morrow: { source_binding_id: sourceBindingId },
+      });
+      const id = operationId(note);
+      expect(note.structuredContent).toMatchObject({ status: "awaiting_approval" });
+      runtime.approveOperation(id);
+      const dispatched = await runtime.dispatchOperation(id);
+      expect(dispatched.structuredContent).toMatchObject({ effectState: "verified", verification: { status: "verified" } });
+      expect(sent).toHaveLength(1);
+      expect(sent[0]!.arguments).toMatchObject({ title: "Grade the lab reports", todo_date: "2026-09-20T12:00:00Z" });
+      expect(sent[0]!.arguments).not.toHaveProperty("course_id");
+      expect(sent[0]!.sourceBindingId).toBe(sourceBindingId);
+      expect(writeCommands).toBe(5);
+    }, CASE_TIMEOUT_MS);
+
     it("refuses a plan with no course connection, and one whose course connection changed", async () => {
       const unbound = await runtime.call("canvas_update_course_settings", {
         course_id: "43",
@@ -1326,7 +1360,7 @@ describe("Canvas connector gateway path", () => {
         structuredContent: { data: { code: "operation_dispatch_refused" } },
       });
       expect(runtime.effects.get(staleId)).toMatchObject({ state: "approved", dispatchAttempt: 0 });
-      expect(writeCommands).toBe(4);
+      expect(writeCommands).toBe(5);
     }, CASE_TIMEOUT_MS);
 
     it("recovers an unresolved historical record after a restart", async () => {
@@ -1381,7 +1415,7 @@ describe("Canvas connector gateway path", () => {
         state: "applied_or_unknown",
         dispatchAttempt: 1,
       });
-      expect(writeCommands).toBe(4);
+      expect(writeCommands).toBe(5);
     }, CASE_TIMEOUT_MS);
   });
 

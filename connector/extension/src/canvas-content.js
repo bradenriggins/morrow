@@ -3165,6 +3165,10 @@
   function checkCourseScope(operation, url, args, expectedCourseId) {
     const exactId = courseId(expectedCourseId);
     if (!exactId) throw new Error("canvas_course_binding_missing");
+    // A site request goes to this signed-in Canvas site as this person, and Canvas applies that
+    // person's own roles to it. The selected course does not narrow it, so there is no course to
+    // compare; the address was already refused above if it left this site.
+    if (operation?.morrowAuthority === "site") return exactId;
     const targetId = courseScope(operation, url, args);
     if (targetId && targetId !== exactId) throw new Error("canvas_course_target_mismatch");
     if (checkSemanticTargetScope(operation, url, args, exactId)) return exactId;

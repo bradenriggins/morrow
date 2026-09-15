@@ -86,6 +86,9 @@ function buildCanvasAdmissionReport(catalog, contract) {
   const operations = catalog.operations;
   const writes = operations.filter((operation) => !operation.readOnly);
   const admittedByCourseTargetKind = {};
+  const admittedByAuthority = {};
+  const admittedSiteByClass = {};
+  const admittedCourseByCourseTargetKind = {};
   const heldByReason = {};
   const heldByRouteFamily = {};
   const readbackStates = {};
@@ -106,6 +109,9 @@ function buildCanvasAdmissionReport(catalog, contract) {
     if (admission.write.state !== "admitted") continue;
     admitted += 1;
     increment(admittedByCourseTargetKind, admission.courseTarget.kind);
+    increment(admittedByAuthority, admission.authority);
+    if (admission.authority === "site") increment(admittedSiteByClass, admission.siteClass);
+    else increment(admittedCourseByCourseTargetKind, admission.courseTarget.kind);
     const assessment = canvasReadbackAssessment(operations, operation, admission);
     increment(readbackStates, assessment.state);
     if (assessment.state === "blocked") increment(readbackBlockers, assessment.reason);
@@ -130,6 +136,9 @@ function buildCanvasAdmissionReport(catalog, contract) {
     admission: {
       admitted,
       admittedByCourseTargetKind: byCountThenName(admittedByCourseTargetKind),
+      admittedByAuthority: withFixedKeys(["course", "site"], admittedByAuthority),
+      admittedCourseByCourseTargetKind: byCountThenName(admittedCourseByCourseTargetKind),
+      admittedSiteByClass: byCountThenName(admittedSiteByClass),
       held,
       heldByReason: byCountThenName(heldByReason),
       heldByRouteFamily: byCountThenName(heldByRouteFamily),

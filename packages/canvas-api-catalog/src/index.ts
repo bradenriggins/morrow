@@ -9,10 +9,10 @@ import {
 } from "node:fs";
 import { resolve } from "node:path";
 import { isJsonObject, sha256Json, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
-import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
+import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
 
-export { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
-export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasReadbackAssessment, CanvasWriteAdmission } from "./operation-admission.js";
+export { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, canvasSiteAuthorityNote } from "./operation-admission.js";
+export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasOperationAuthority, CanvasReadbackAssessment, CanvasSiteAuthorityClass, CanvasWriteAdmission } from "./operation-admission.js";
 export { evaluateBrowserReadback, matchesReadbackAssertions, planBrowserReadback, planCanvasRecoveryDescriptor, readbackFieldValue } from "./readback-plan.js";
 export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
 export { CANVAS_MULTI_CONTEXT_REFUSAL, CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS, canvasContextCodeCourseId, canvasCourseContextCode, canvasLearnerScopeObjectRoute, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "./semantic-target.js";
@@ -260,9 +260,6 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
   const destructive = operation.risk === "destructive";
   const admission = canvasOperationAdmission(operation);
   const readback = canvasReadbackAssessment(catalog.operations, operation, admission);
-  const unscopedReadReason = operation.readOnly && !canvasCourseTargetIsScoped(admission.courseTarget)
-    ? "This Canvas read cannot be bound to the selected course."
-    : undefined;
   const credentialReadReason = operation.toolName === "canvas_get_items_media_upload_url"
     ? "This Canvas read returns a one-time media upload credential. Morrow keeps upload credentials inside its reviewed file transfer."
     : undefined;
@@ -273,7 +270,7 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
     && /redirect/iu.test(`${operation.summary} ${operation.description}`)
     ? "This Canvas route returns a navigation redirect instead of course data, which the Bridge does not follow across origins."
     : undefined;
-  const readAdmissionReason = unscopedReadReason || credentialReadReason;
+  const readAdmissionReason = credentialReadReason;
   const profile = readAdmissionReason
     ? { state: "profile_limited" as const, reason: readAdmissionReason }
     : admission.write.state === "held"
@@ -315,9 +312,12 @@ function capability(catalog: CanvasApiCatalog, operation: CanvasApiOperation): S
       requiresLiveCanvas: true,
     },
       authority: {
-      scopeClass: canvasAccountAuthorityRoute(operation)
-        ? "account"
-        : ["course_path", "semantic_course_object"].includes(admission.courseTarget.kind) ? "course" : "canvas-session",
+      // A site request acts on the connected Canvas site as the signed-in person, so no layer compares
+      // it with the selected course. A course object names no course, and the Bridge proves the course
+      // that owns it before the change is sent.
+      scopeClass: admission.authority === "site"
+        ? "site"
+        : admission.courseTarget.kind === "semantic_course_object" ? "course-object" : "course",
       approvalClass: operation.readOnly ? "none" : destructive ? "destructive" : /(?:grade|score|submission)/i.test(operation.key) ? "grade" : "standard",
       dataClass: /(?:user|student|enrollment|submission|grade)/i.test(operation.key) ? "learner" : "course",
     },

@@ -1,4 +1,4 @@
-import { canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "../generated/canvas-operation-admission.js";
+import { canvasAdmissionIsBound, canvasOperationAdmission, canvasReadbackAssessment, canvasSiteAuthorityNote } from "../generated/canvas-operation-admission.js";
 
 export const EDIT_PERMISSION_SCHEMA = "morrow.bridge.edit-permission.v1";
 export const EDIT_POLICY_SELECTION_LIMIT = 500;
@@ -369,7 +369,7 @@ function operationAvailability(operation, canvasReads) {
   if (provider === "canvas") {
     if (typeof operation.path !== "string") return null;
     const admission = canvasOperationAdmission(operation);
-    if (!canvasCourseTargetIsScoped(admission.courseTarget) || admission.write.state !== "admitted") return null;
+    if (!canvasAdmissionIsBound(admission) || admission.write.state !== "admitted") return null;
     if (canvasReadbackAssessment(canvasReads, operation, admission).state !== "structurally_exact") return null;
     if (NEW_QUIZ_DELETE_TOOL === operation.toolName) return { availability: "review", reviewReason: NEW_QUIZ_DELETE_REVIEW_REASON };
     if (ITEM_BANK_DESTRUCTIVE_TOOLS.has(operation.toolName || "")) return { availability: "review", reviewReason: ITEM_BANK_DESTRUCTIVE_REASON };
@@ -467,7 +467,13 @@ function operationGroup(operation) {
     return moodleGroup(operation);
   }
   if (destructiveOperation(operation)) return CANVAS_DESTRUCTIVE_GROUP;
+  if (canvasSiteOperation(operation)) return `Canvas site · ${String(operation?.resource || "Site actions")}`;
   return `Canvas · ${String(operation?.resource || "Course actions")}`;
+}
+
+function canvasSiteOperation(operation) {
+  return operationProvider(operation) === "canvas" && typeof operation?.path === "string"
+    && canvasOperationAdmission(operation).authority === "site";
 }
 
 function operationSpec(operation, canvasReads) {
@@ -486,6 +492,7 @@ function operationSpec(operation, canvasReads) {
     MOODLE_ENROLMENT_NOTES.get(String(operation?.toolName || "")) || "",
     MOODLE_RESTRICTION_TOOLS.has(String(operation?.toolName || "")) ? MOODLE_RESTRICTION_NOTE : "",
     MOODLE_CALENDAR_TOOLS.has(String(operation?.toolName || "")) ? MOODLE_CALENDAR_NOTE : "",
+    canvasSiteOperation(operation) ? canvasSiteAuthorityNote(canvasOperationAdmission(operation).siteClass) || "" : "",
     requiresFieldSelection ? fieldSelectionNote(fields.length) : "",
   ].filter(Boolean).join(" ");
   const label = (String(operation?.summary || operation?.toolName || "Catalog course action").trim() || "Catalog course action").slice(0, 300);
@@ -520,7 +527,7 @@ function curatedAvailability(spec, operations, canvasReads) {
     const operation = ruleOperation(operations, rule);
     if (!operation || typeof operation.path !== "string" || operation.readOnly !== false) return false;
     const admission = canvasOperationAdmission(operation);
-    return canvasCourseTargetIsScoped(admission.courseTarget)
+    return canvasAdmissionIsBound(admission)
       && admission.write.state === "admitted"
       && operationVerification(operation, canvasReads, rule)?.verification === "checked";
   });

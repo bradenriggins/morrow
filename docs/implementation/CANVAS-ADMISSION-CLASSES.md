@@ -1,61 +1,89 @@
 # Canvas admission classes
 
-Every Canvas write passes one admission contract before anything is sent:
-`packages/canvas-api-catalog/src/operation-admission.ts`. The contract either admits the write or
-holds it with one named reason. The MCP runtime (`packages/canvas-connector-mcp/src/runtime.ts`),
+Every Canvas request passes one admission contract before anything is sent:
+`packages/canvas-api-catalog/src/operation-admission.ts`. The contract gives each request an
+authority, `course` or `site`, and either admits a write or holds it with one named reason. The MCP
+runtime (`packages/mcp-server/src/runtime.ts`), the connector (`packages/canvas-connector-mcp/src/runtime.ts`),
 the service worker (`connector/extension/src/service-worker.js`), and the page executor
 (`connector/extension/src/canvas-content.js`) all enforce the same decision, and the browser copy of
 the contract is generated, never hand-edited (`scripts/sync-canvas-readback-plan.mjs`).
 
-This document names the classes and records what each held class needs before any of it can be
-admitted. It quotes no counts: `artifacts/canvas-api/canvas-admission-report.json` is the generated
-source, and the capability baseline table in [PROVEN-WORKFLOW-REUSE.md](PROVEN-WORKFLOW-REUSE.md)
-quotes it.
+This document names the classes. It quotes no counts: `artifacts/canvas-api/canvas-admission-report.json`
+is the generated source, and the capability baseline table in
+[PROVEN-WORKFLOW-REUSE.md](PROVEN-WORKFLOW-REUSE.md) quotes it.
 
-## The classes
+## Two authorities
+
+A **course request** acts inside the one course the connection was made from. Every layer compares
+the course the request names with that course, or proves the course that owns the named object.
+
+A **site request** acts on the connected Canvas site as the signed-in person. Canvas applies that
+person's own roles to it, so it reaches exactly what they can change in Canvas themselves, and no
+layer narrows it to the selected course. It still needs the verified connection: the same site
+origin, the same signed-in person, and the same session generation. The page executor sends it only
+to the bound tab's own origin. Its effect lock is keyed by the site and the object, or by the route
+when it names no object. A result can name people from any course on the site, so the privacy
+boundary gives tokens to the selected course's learners and removes every other person's identity.
+
+## Course classes
 
 | Class | Route shape | What the person is told |
 | --- | --- | --- |
-| Admitted, course path | `/courses/{course_id}` or `/courses/{id}` anywhere in the route | Nothing: the write is available, and normal approval, Edit scope, binding, and readback rules apply. Deleting a course discussion topic is admitted here as a destructive action: it removes the posts under the topic, and its readback proves the topic is gone. |
-| Admitted, proved section | `PUT` and `DELETE /v1/sections/{id}` | Nothing: the connector reads the section and proves the selected course owns it immediately before it sends the change. |
-| Admitted, proved group | The create and update routes for a group's own discussion topics, and the create, update, and delete routes for pages under `/v1/groups/{group_id}` | Nothing: the connector reads the group, requires Canvas to name a course as its owner, and requires the selected course's own complete list of groups to name that group, immediately before it sends the change. Deleting a group's discussion topic stays learner-held. |
-| Admitted, proved course file or folder | `PUT` and `DELETE /v1/files/{id}`, and `POST /v1/folders/{folder_id}/folders` | Nothing: the connector reads the file or folder, requires Canvas to name a course as its owner, requires the selected course's own complete list of files or folders to name it, freezes the saved version, and only then sends the change. A move is proved for the one destination folder it names. |
-| Admitted, proved course calendar | `POST /v1/calendar_events`, `PUT` and `DELETE /v1/calendar_events/{id}`, and `PUT /v1/appointment_groups/{id}` | Nothing for a new event: the request names the selected course's own calendar, and the event is read back from its own route afterwards. For an existing event or an appointment group, the connector reads the object first and requires Canvas to name that same calendar. A repeat rule, a duplicate count, a series choice and section-level times are refused before anything is sent, because each reaches events the readback cannot check. An appointment group that serves more than one course is refused outright with `multi_context_object_not_supported`: "This Canvas appointment group serves more than one course. Morrow changes one course at a time, so it changed nothing. Change it in Canvas, or use one that belongs to this course alone." |
-| `account_authority_required` | Any route that names an account, the whole Canvas instance, an LTI registration, or a developer key | "This change affects a whole Canvas account, not one course. Morrow does not yet have an account permission, so it will not send it." |
-| `learner_scope_requires_separate_authority` | A route that changes learner work or participation without naming its course: section submissions and grades, quiz submission questions, group memberships, and appointment bookings. The same records reached through `/courses/{course_id}` are admitted as course work, with learner identifiers resolved from Morrow's learner tokens and exact readback still required | "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course." |
-| `multi_course_authority_required` | A course-path route whose request or effect can name another course or account: Blueprint pushes, course copies and migrations, external outcome imports and links, outcome-group deletion, course reset, or a broad course update that can move or conclude the course | "This change can read from or change another Canvas course or account. Morrow only has permission for the course you selected, so it will not send it." |
-| `lti_authorization_required` | Any route on Canvas's LTI service itself, under `/lti/`, that no earlier class holds: line items, scores, asset reports, EULA records, webhook subscriptions, and notice handlers | "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool." |
-| `multi_step_upload_requires_reviewed_transfer` | A `POST` that needs file bytes unavailable to the generic operation: the four course-scoped upload pre-flights and the Rubric CSV import | "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload." |
-| `cross_course_object_requires_resolution` | A route that names a group, group set, file, folder, outcome, a new appointment group, or a section move, for which no course-ownership reading is declared yet | "Canvas can attach this group, file, folder, calendar item or outcome to any course, and Morrow cannot yet prove that this one belongs to the course you selected. Change it in Canvas, or ask for the same change from inside the course." |
-| `provider_contract_incomplete` | A route that asks Canvas for a sign-in token, a session, or a one-time action, and leaves no field behind to read | "This asks Canvas for a sign-in token, a session or a one-time action, and Canvas keeps nothing afterwards that Morrow can read back to show you what happened. Morrow does not send a change it cannot check, so make this one in Canvas." |
-| `self_scope_not_supported` | `/v1/users/self/bookmarks` and `/v1/users/self/course_nicknames` | "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course." |
-| `course_scope_required` | Everything else: a route with no course in it that names no object a course can own: a personal preference, an Inbox conversation, a poll, a planner item, an ePortfolio, a media object, or a person's own account record | "Morrow only changes things that live inside the one course you selected, and this change is not attached to any course. Make it in Canvas yourself, or ask for the same change on a page, assignment, file or other item inside the course." |
+| Course path | `/courses/{course_id}` or `/courses/{id}` anywhere in the route, including course learner records | Nothing: normal approval, Edit scope, binding, and readback rules apply. Learner identifiers resolve from Morrow's learner tokens. Deleting a course discussion topic is a destructive action whose readback proves the topic is gone. |
+| Proved section | `PUT` and `DELETE /v1/sections/{id}` | Nothing: the connector reads the section and proves the selected course owns it immediately before it sends the change. |
+| Proved group | The create and update routes for a group's own discussion topics, and the create, update, and delete routes for pages under `/v1/groups/{group_id}` | Nothing: the connector reads the group, requires Canvas to name a course as its owner, and requires the selected course's own complete list of groups to name that group. |
+| Proved course file or folder | `PUT` and `DELETE /v1/files/{id}`, and `POST /v1/folders/{folder_id}/folders` | Nothing: the connector reads the file or folder, requires the selected course to own and list it, freezes the saved version, and only then sends the change. A move is proved for the one destination folder it names. |
+| Proved course calendar | `POST /v1/calendar_events`, `PUT` and `DELETE /v1/calendar_events/{id}`, and `PUT /v1/appointment_groups/{id}` | Nothing for a new event on the selected course's calendar. For an existing event or an appointment group, the connector reads it first and requires that same calendar. A repeat rule, a duplicate count, a series choice and section-level times are refused before anything is sent. An appointment group that serves more than one course is refused with `multi_context_object_not_supported`. |
 
-`canvasOperationAdmission` reads these classes in order, from the most specific fact about the route
-to the least: account authority, then a route that needs a reviewed file transfer,
-then one person's own record reached without its course, then a multi-course effect, then an LTI service route, then a direct course path, then a personal bookmark or nickname, then an object Canvas can attach
-to any course, then a request with no readable effect, and last the plain absence of a course. The
-order matters where two facts are true of one route: a group membership route names both a person's
-record and a group, and the person's record is what the change actually touches. The upload class is
-read before the course path admits a write, because the course in the route is not what is missing.
-The same first step outside a course, on a section, folder, group, or person, keeps the hold it
-already had: those routes lack proof of the course before they lack the rest of the upload.
+These carry `authority.scopeClass: "course"`, or `"course-object"` for the proved object routes.
 
-The sentence for a held write is published in the tool capability
-(`profiles["public-canvas"].reason` and `evidence.admission.reason`,
-`packages/canvas-api-catalog/src/index.ts`) and shown beside the action in the extension Edit
-permission list (`connector/extension/src/edit-policy.js`, `connector/extension/settings/settings.js`).
+## Site classes
+
+Each site request carries one class. The Edit permission list shows its sentence beside the action
+before it is granted (`canvasSiteAuthorityNote`), and groups the action under `Canvas site · <resource>`,
+or under `Canvas actions that remove content` when it removes something. Site requests carry
+`authority.scopeClass: "site"`.
+
+| Class | Route shape | Sentence shown before it is granted |
+| --- | --- | --- |
+| `account` | Any route that names an account, the whole Canvas instance, an LTI registration, or a developer key (`canvasAccountAuthorityRoute`) | "It changes a Canvas account, not one course. Canvas decides it with your own account roles on this Canvas site." |
+| `learner_record` | A person's record reached without its course: section submissions and grades, quiz submission questions, group memberships and invitations, a group's topic deletion, what-if grades, and appointment bookings and their cancellation | "It changes a person's record through a section, group, quiz attempt or booking rather than through the selected course, so it can reach a course other than the selected one. Canvas decides it with your own roles." |
+| `multi_course` | A course-path route whose request or effect can name another course or account: Blueprint pushes, course copies and migrations, outcome imports and links, outcome-group deletion, course reset, and the broad course update | "It can read from or change a Canvas course or account besides the selected one. Canvas decides it with your own roles in each of them." |
+| `shared_object` | A group, group set, file, folder, outcome, new appointment group, or section cross-list with no declared course reading | "Canvas can attach this group, file, folder, calendar item, section or outcome to any course, so the change is not limited to the selected course. Canvas decides it with your own roles." |
+| `session_credential` | A request for a sign-in token, a session, or a one-time action that leaves no field behind to read | "It asks Canvas for a sign-in token, a session or a one-time action. Morrow keeps any credential Canvas returns out of the result, and Canvas keeps no record Morrow can read back." |
+| `person` | Everything else with no course: bookmarks and course nicknames, Inbox conversations, polls, planner items, ePortfolios, media objects, preferences, and a person's own account record | "It changes something that belongs to you or another person on this Canvas site, not content in the selected course. Canvas decides it with your own roles." |
+
+The raw Inbox routes are ordinary site requests. Morrow's private Inbox action stays available beside
+them for a message sent from learner labels, and nothing moves a request from one to the other.
+
+`canvasOperationAdmission` reads the site classes in order, from the most specific fact about the
+route to the least: account, then a person's record reached without its course, then a multi-course
+effect, then a course path or proved object (a course request), then a personal bookmark or
+nickname, then an object Canvas can attach to any course, then a request with no readable effect,
+and last everything else.
+
+## Held writes
+
+| Reason | Route shape | What the person is told |
+| --- | --- | --- |
+| `lti_authorization_required` | Any route on Canvas's LTI service under `/lti/`, including its account and developer key routes: line items, scores, originality and asset reports, EULA records, webhook subscriptions, notice handlers, and the public JWK update | "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool." |
+| `multi_step_upload_requires_reviewed_transfer` | Every upload first step, for a course, a folder, a group, a section submission, or a person, and the Rubric CSV import | "Adding a file to Canvas needs Morrow's reviewed file transfer, which checks the file and its saved bytes. Morrow will not start a partial upload." |
+| `duplicate_assignment_exact_readback_unavailable` | `POST /v1/courses/{course_id}/assignments/{assignment_id}/duplicate` | "Canvas does not say when a duplicated assignment has finished copying, and the copy carries no documented field that names it as a New Quiz, so Morrow cannot prove it read back the finished copy rather than a half-made one. Duplicate this assignment in Canvas." |
+
+The upload hold runs before the course path, because the course in the route is not what is missing.
+The sentence for a held write is published in the tool capability (`profiles["public-canvas"].reason`
+and `evidence.admission.reason`, `packages/canvas-api-catalog/src/index.ts`).
+
+An admitted write is callable only when its readback is structurally exact. An admitted write
+without one is profile-limited before provider I/O; the readback gaps are listed in
+[PROVEN-WORKFLOW-REUSE.md](PROVEN-WORKFLOW-REUSE.md).
 
 ## Item Bank course targets
 
-Every private Item Bank write carries a selected `course_id`, so
-`canvasOperationAdmission` records a direct course target. The course id is an
-authority control and is not inserted into the private API path. All nine writes
-remain held. Bank creation lacks a recoverable create-and-course-associate
-transaction. Existing-bank changes lack complete downstream reach. The quiz bank
-draw lacks durable recovery after a browser worker or process interruption. The
-incomplete fan-out reader is review context only and never supplies or expands
-authority.
+Every private Item Bank write carries a selected `course_id`, so `canvasOperationAdmission` records a
+direct course target and admits it as a course request. The course id is an authority control and
+is not inserted into the private API path. Each change is reread inside the Item Banks frame. The
+incomplete fan-out reader is review context only and never supplies or expands authority.
 
 ## New Quiz create and delete
 
@@ -79,113 +107,6 @@ requires and `connector/extension/src/canvas-content.js`'s
 `checkNewQuizLifecycleSource` reverifies against a fresh read immediately
 before dispatch, regardless of which caller supplied it.
 
-## The account authority class
-
-`canvasAccountAuthorityRoute` in `packages/canvas-api-catalog/src/operation-admission.ts` decides the
-class from the route alone:
-
-- `/v1/accounts/...` and `/lti/accounts/...`, or any route with an `{account_id}` path parameter.
-  This includes the account LTI registration routes (`.../lti_registrations/...` and `.../apps/...`),
-  the account developer key routes, and `/v1/account_calendars/{account_id}`.
-- `/v1/global/...`, the outcome group routes that belong to the whole Canvas instance.
-- `/v1/developer_keys/...` and `/lti/developer_key/...`, the Canvas API credential routes.
-
-These writes carry `authority.scopeClass: "account"` in their published capability, and so do the
-reads on the same routes. Reads stay available: the class describes the authority a route needs, and
-holding a read would remove information an instructor can already see in Canvas.
-
-Two neighbouring route shapes are deliberately outside the class. The `/lti/...` routes that act as
-an installed tool rather than a registration (`/lti/subscriptions`, `/lti/notice-handlers/...`,
-`/lti/asset_processor_eulas/...`, `/lti/asset_processors/...`) name a tool deployment, and the user
-merge route (`/v1/users/{id}/merge_into/accounts/{destination_account_id}/users/{destination_user_id}`)
-names two people. Both stay held as `course_scope_required`, which is accurate for them: Morrow
-cannot prove one course from either route.
-
-The class is about authority, not about a word in a path. A course-scoped LTI write
-(`/lti/courses/{course_id}/line_items`, `/v1/courses/{course_id}/lti_resource_links`) is an ordinary
-admitted course write with `scopeClass: "course"`. The account rule is applied before the
-course-path rule, so a route that names both an account and a course stays held. In the current
-catalog only one route names both, and it is a read: `GET /v1/accounts/{account_id}/courses/{id}`.
-
-`packages/canvas-api-catalog/test/catalog.test.ts` pins the whole class: its size, its route
-families, the sentence, the scope class, and that it admits nothing.
-
-## What this class needs before any of it is admitted
-
-[MORROW-REMAINING-WORK.md](MORROW-REMAINING-WORK.md) keeps account and administrative workflows in
-the full product scope: the course-only authority model holds them, it does not exclude them.
-Admission needs all five of the following. A course binding satisfies none of them.
-
-1. **Exact current account context.** A fresh reading of the account the change would affect, taken
-   in the connected Canvas session immediately before the change is sent, and frozen into the
-   command record: account id, account name, root account id, and the signed-in person's admin role
-   on that account. The selected course cannot supply it. An account read that is stale, ambiguous,
-   or names a different account refuses the change; it does not fall back to the course.
-2. **Its own approval class.** Account changes are not course changes, so they cannot ride on a
-   course Edit permission. They need a separate account permission that a person grants explicitly,
-   with the account named in the grant, plus a destructive tier for the account routes that delete
-   or deactivate. Granting one account action must not grant the rest.
-3. **Affected subject and data policy.** Before approval, the plan must state who and what the change
-   reaches: how many courses, terms, users, or enrollments are inside its blast radius, and whether
-   any learner record is in it. An account route can change many courses at once
-   (`PUT /v1/accounts/{account_id}/courses` is one call), so an unbounded or uncounted subject list
-   refuses the change. The privacy boundary does not change: no learner names, email addresses,
-   submissions, grades, or verifiers reach an assistant-bound result.
-4. **One explicit dispatch.** One reviewed plan sends one request once. A post-dispatch exception
-   stays outcome-unknown and is not retryable, and the account target stays reserved until a fresh
-   reading resolves it. Nothing in an account workflow may replay a completed step.
-5. **An operation-specific readback.** Each admitted account route needs its own named reader that
-   proves the exact requested postcondition on the object that was written, plus its evaluator and a
-   focused test. The generic planner is not enough here: some of these routes are asynchronous and
-   answer with a `Progress` object (`PUT /v1/accounts/{account_id}/courses` is one), others answer
-   with a new object, and reading the account itself proves nothing about the change. Until a route
-   has that reader, `supportsReadback` stays false and the saved result stays unconfirmed.
-
-Implement one bounded account workflow at a time, with its own document, and only after all five
-parts exist for that workflow. Nothing above has been proved against a live Canvas account; it is a
-contract for future work and is live-unverified.
-
-## What the other held classes need before any of them is admitted
-
-- **`cross_course_object_requires_resolution`.** A course-ownership reading for the object family,
-  declared in `packages/canvas-api-catalog/src/semantic-target.ts` and proved in the connector before
-  dispatch, exactly as the section, group content, and course file and folder routes already work: read the object in the bound tab immediately
-  before the change, require the reading to name the selected course, freeze it into the command
-  record, and refuse on a mismatch, a missing field, or a truncated read. A route also needs its own
-  readback through the same reading. A route whose effect reaches a second course, such as a section
-  cross-list or a file copy into another folder, needs proof for both objects and stays held until
-  that exists.
-- **`learner_scope_requires_separate_authority`.** A course-ownership reading for the section, group,
-  quiz submission, or appointment group the route names, exactly as the section and group content
-  routes already work. Course learner records are already admitted through their course under the
-  course Edit permission, with learner tokens resolved at dispatch and results tokenized at egress.
-- **`multi_course_authority_required`.** Exact authority for every source, destination, associated
-  course, or account the request can reach. The plan must freeze the complete affected set before
-  approval, and each target needs its own post-write reading. A selected-course binding cannot grant
-  authority for a second course or for an account-wide outcome.
-- **`provider_contract_incomplete`.** A route stays held while Canvas leaves nothing behind to read.
-  It can only be admitted if Canvas exposes a reading that names the effect, and Morrow can bind that
-  reading to the change it sent.
-- **`multi_step_upload_requires_reviewed_transfer`.** A normal Canvas file upload is three requests: the
-  catalogued route asks Canvas where to send the bytes, a second request stores them at the address
-  Canvas named, and a third confirms the saved file. Morrow runs all three only in its reviewed
-  course-file transfer (`packages/mcp-server/src/canvas-file-transfer.ts`,
-  `connector/extension/src/canvas-file-transfer.js`), which freezes one workspace file of at most
-  1 MiB, sends the reviewed bytes once, and compares the file Canvas saved, including its bytes.
-  Admitting the first step alone would start an upload nothing finishes. A generic upload route
-  becomes admissible only with those remaining steps, their reviewed dispatch, and a readback of the
-  saved file; the two submission routes and the submission-comment route would also need the learner
-  authority above, because the file lands on a student's own record.
-  The Rubric CSV route stays in this class because its generated operation exposes only the course
-  identifier and cannot carry the required private file. It needs its own reviewed CSV transfer and
-  an exact readback of the imported rubric before it can be admitted.
-- **`course_scope_required`.** A route with no course and no course-owned object has nothing for a
-  course binding to prove. These become admissible only through a different authority class, not
-  through the course permission.
-
-Nothing above is proved against a live Canvas tenant; every part of it is a contract for future work
-and is live-unverified.
-
 ## What a proved course file or folder still cannot show here
 
 The file and folder readings follow Canvas's published shape: `GET /api/v1/files/{id}` and
@@ -197,11 +118,20 @@ proved only in the synthetic estate in `scripts/test/canvas-connector-browser.mj
 live-unverified. Canvas usage rights, which a tenant can require before a file is visible, are not
 part of these three routes and are untested here.
 
+## What the held writes need
+
+- **LTI services.** An LTI access token for a registered developer key, obtained through Canvas's
+  client-credentials grant and presented only to the LTI service routes.
+- **Uploads.** The remaining two upload steps, their reviewed dispatch, and a readback of the saved
+  file and its bytes for each upload context, as the course-file transfer already does
+  (`packages/mcp-server/src/canvas-file-transfer.ts`, `connector/extension/src/canvas-file-transfer.js`).
+  The Rubric CSV route needs its own reviewed CSV transfer and an exact readback of the imported rubric.
+- **Assignment duplicate.** A readback that waits for Canvas to finish the copy and then compares the
+  finished assignment.
+
 ## Status
 
-Nothing in the account authority class is admitted. Course-path admission is subordinate to the
-learner, multi-course, and upload checks, so a course identifier alone does not grant those broader
-effects. The MCP
-runtime refuses a held write with the sentence for its class, and so do the published tool capability
-and the extension Edit permission list. The service worker and the page executor refuse the same writes with
-their own short message.
+Site requests are proved in the synthetic gateway, connector, and Bridge suites. They are
+live-unverified against a Canvas tenant. The MCP runtime refuses a held write with the sentence for
+its class, and so do the published tool capability and the extension Edit permission list. The
+service worker and the page executor refuse the same writes with their own short message.

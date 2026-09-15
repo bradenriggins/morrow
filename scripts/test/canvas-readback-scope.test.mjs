@@ -57,14 +57,18 @@ test("Canvas writes with no same-resource read report an unavailable readback in
     assert.deepEqual(canvasReadbackAssessment(catalog.operations, write), { state: "unavailable", reason: "no_safe_readback_route" }, name);
   }
 
+  // Resetting a course replaces it with a new course, which is a site request. Canvas answers with
+  // the new course, and no read of the old course route proves that replacement.
   const reset = operation("canvas_reset_course");
-  assert.deepEqual(canvasOperationAdmission(reset).write, {
-    state: "held",
-    reason: "multi_course_authority_required",
+  assert.deepEqual(canvasOperationAdmission(reset), {
+    courseTarget: { kind: "course_path", argument: "course_id" },
+    authority: "site",
+    siteClass: "multi_course",
+    write: { state: "admitted" },
   });
   assert.deepEqual(canvasReadbackAssessment(catalog.operations, reset), {
-    state: "not_applicable",
-    reason: "write_held",
+    state: "unavailable",
+    reason: "no_safe_readback_route",
   });
 
   // A score posted through the LTI service needs the tool's own LTI authorization, so it is held

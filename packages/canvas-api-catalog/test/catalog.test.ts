@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { canvasAccountAuthorityRoute, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
+import { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasApiCompatibilityDigest, canvasCatalogTools, canvasSiteAuthorityNote, canvasOperationAdmission, canvasReadbackAssessment, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState, evaluateBrowserReadback, loadCanvasApiCatalog, operationalJsonSchema, parseCanvasApiCatalog, operationArguments, planBrowserReadback } from "../src/index.js";
 import catalogJson from "../../../artifacts/canvas-api/canvas-api-catalog.json";
 
 const catalog = parseCanvasApiCatalog(catalogJson);
@@ -525,7 +525,7 @@ describe("Canvas API catalog", () => {
     }
   });
 
-  it("publishes only exact course-scoped reads and admitted writes", () => {
+  it("publishes every bound read and every admitted write that reads back exactly", () => {
     const tools = canvasCatalogTools(catalog);
     expect(tools).toHaveLength(catalog.counts.totalOperations);
     const writes = catalog.operations.filter((operation) => !operation.readOnly);
@@ -534,36 +534,34 @@ describe("Canvas API catalog", () => {
       canvasOperationAdmission(operation).write.state === "admitted"
       && canvasReadbackAssessment(catalog.operations, operation).state !== "structurally_exact"
     ));
-    const unscopedReads = catalog.operations.filter((operation) => operation.readOnly
-      && !canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget));
+    const siteReads = catalog.operations.filter((operation) => operation.readOnly
+      && canvasOperationAdmission(operation).authority === "site");
     const credentialReads = catalog.operations.filter((operation) => operation.toolName === "canvas_get_items_media_upload_url");
     const incompatibleAuthentication = catalog.operations.filter((operation) => (
       operation.path.startsWith("/lti/")
-      && !(operation.readOnly && !canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget))
       && canvasOperationAdmission(operation).write.state !== "held"
     ));
     const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
       && /redirect/iu.test(`${operation.summary} ${operation.description}`));
-    expect(held).toHaveLength(338);
-    expect(admittedWithoutExactReadback).toHaveLength(79);
-    expect(unscopedReads).toHaveLength(351);
+    expect(held).toHaveLength(26);
+    expect(admittedWithoutExactReadback).toHaveLength(225);
+    expect(siteReads).toHaveLength(355);
+    // Every read is bound: to the selected course, or to the connected Canvas site as the signed-in person.
+    expect(catalog.operations.filter((operation) => operation.readOnly
+      && !canvasAdmissionIsBound(canvasOperationAdmission(operation)))).toEqual([]);
     const expectedLimited = new Set([
       ...held,
       ...admittedWithoutExactReadback,
-      ...unscopedReads,
       ...credentialReads,
       ...catalog.operations.filter((operation) => operation.path.startsWith("/lti/")),
       ...redirectReads,
     ].map((operation) => operation.toolName));
     expect(tools.filter((tool) => tool.capability?.profiles["public-canvas"].state !== "supported"))
       .toHaveLength(expectedLimited.size);
-    for (const operation of unscopedReads) {
+    for (const operation of siteReads.filter((operation) => !expectedLimited.has(operation.toolName))) {
       const tool = tools.find((candidate) => candidate.name === operation.toolName);
-      const reason = "This Canvas read cannot be bound to the selected course.";
-      expect(tool?.capability?.profiles["private-full"], operation.toolName).toEqual({ state: "profile_limited", reason });
-      expect(tool?.capability?.profiles["public-canvas"], operation.toolName).toEqual({ state: "profile_limited", reason });
-      expect(tool?.capability?.profiles["read-only"], operation.toolName).toEqual({ state: "profile_limited", reason });
-      expect(tool?.capability?.evidence?.admission, operation.toolName).toEqual({ state: "blocked", reason });
+      expect(tool?.capability?.profiles["public-canvas"], operation.toolName).toEqual({ state: "supported" });
+      expect(tool?.capability?.authority.scopeClass, operation.toolName).toBe("site");
     }
     for (const operation of admittedWithoutExactReadback) {
       const tool = tools.find((candidate) => candidate.name === operation.toolName);
@@ -587,9 +585,7 @@ describe("Canvas API catalog", () => {
       expect(tool?.capability?.profiles["public-canvas"]).toEqual({ state: "profile_limited", reason });
       expect(tool?.capability?.evidence?.admission).toEqual({ state: "blocked", reason });
     }
-    for (const operation of redirectReads.filter((operation) => (
-      canvasCourseTargetIsScoped(canvasOperationAdmission(operation).courseTarget)
-    ))) {
+    for (const operation of redirectReads) {
       const tool = tools.find((candidate) => candidate.name === operation.toolName);
       const reason = "This Canvas route returns a navigation redirect instead of course data, which the Bridge does not follow across origins.";
       expect(tool?.capability?.profiles["private-full"]).toEqual({ state: "profile_limited", reason });
@@ -668,16 +664,11 @@ describe("Canvas API catalog", () => {
       "quiz accommodations": 2,
     });
     expect(learnerWrites).toHaveLength(90);
-    const courseLearnerHolds = catalog.operations.filter((operation) => {
-      const admission = canvasOperationAdmission(operation);
-      return admission.courseTarget.kind === "course_path"
-        && admission.write.state === "held"
-        && admission.write.reason === "learner_scope_requires_separate_authority";
-    });
-    expect(courseLearnerHolds).toEqual([]);
+    // Every course-path learner record is course work, not a site request.
+    expect(learnerWrites.filter((operation) => canvasOperationAdmission(operation).authority !== "course")).toEqual([]);
   });
 
-  it("holds every body-semantic multi-course write and the group-topic learner cascade", () => {
+  it("admits every body-semantic multi-course write as a site request and names its reach", () => {
     const tools = new Map(canvasCatalogTools(catalog).map((tool) => [tool.name, tool]));
     const multiCourse = [
       "canvas_begin_migration_to_push_to_associated_courses",
@@ -692,59 +683,62 @@ describe("Canvas API catalog", () => {
       "canvas_update_associated_courses",
       "canvas_update_course",
     ];
-    const actual = catalog.operations.filter((operation) => {
-      const write = canvasOperationAdmission(operation).write;
-      return write.state === "held" && write.reason === "multi_course_authority_required";
-    });
+    const actual = catalog.operations.filter((operation) => canvasOperationAdmission(operation).siteClass === "multi_course"
+      && !operation.readOnly);
     expect(actual.map((operation) => operation.toolName).sort()).toEqual(multiCourse);
     for (const operation of actual) {
       const admission = canvasOperationAdmission(operation);
-      const sentence = canvasAdmissionReason(admission.write);
+      // The course path still names one of the courses. The request data can name another, so the
+      // selected course does not narrow it and Canvas decides it with the person's own roles.
       expect(admission.courseTarget.kind, operation.toolName).toBe("course_path");
-      expect(tools.get(operation.toolName)?.capability?.profiles["private-full"], operation.toolName)
-        .toEqual({ state: "profile_limited", reason: sentence });
-      expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"], operation.toolName)
-        .toEqual({ state: "profile_limited", reason: sentence });
+      expect(admission.authority, operation.toolName).toBe("site");
+      expect(admission.write, operation.toolName).toEqual({ state: "admitted" });
+      expect(tools.get(operation.toolName)?.capability?.authority.scopeClass, operation.toolName).toBe("site");
+      const readback = canvasReadbackAssessment(catalog.operations, operation);
+      expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"].state, operation.toolName)
+        .toBe(readback.state === "structurally_exact" ? "supported" : "profile_limited");
     }
+    expect(canvasSiteAuthorityNote("multi_course")).toBe("It can read from or change a Canvas course or account besides the selected one. Canvas decides it with your own roles in each of them.");
+    // Deleting a group's discussion topic removes the posts under it too, so it is a person's record
+    // reached through a group, not group content.
     const groupTopic = catalog.operations.find((operation) => operation.toolName === "canvas_delete_topic_groups")!;
-    expect(canvasOperationAdmission(groupTopic).write).toEqual({
-      state: "held",
-      reason: "learner_scope_requires_separate_authority",
-    });
+    expect(canvasOperationAdmission(groupTopic)).toMatchObject({ authority: "site", siteClass: "learner_record", write: { state: "admitted" } });
   });
 
-  it("admits a direct course route and holds every other write target", () => {
+  it("admits a direct course route as course work and a personal route as a site request", () => {
     const direct = catalog.operations.find((operation) => operation.toolName === "canvas_update_course_settings");
     const nickname = catalog.operations.find((operation) => operation.toolName === "canvas_set_course_nickname");
     const createBank = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_create_bank");
     const existingBank = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_update_item");
     const bankDraw = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_attach_bank_to_quiz");
     const bookmark = catalog.operations.find((operation) => operation.toolName === "canvas_update_bookmark");
-    expect(canvasOperationAdmission(direct!)).toEqual({
-      courseTarget: { kind: "course_path", argument: "course_id" },
-      write: { state: "admitted" },
-    });
+    const course = { courseTarget: { kind: "course_path", argument: "course_id" }, authority: "course", write: { state: "admitted" } };
+    expect(canvasOperationAdmission(direct!)).toEqual(course);
     expect(canvasOperationAdmission(nickname!)).toEqual({
       courseTarget: { kind: "self_path", resource: "course_nickname", argument: "course_id" },
-      write: { state: "held", reason: "self_scope_not_supported" },
+      authority: "site",
+      siteClass: "person",
+      write: { state: "admitted" },
     });
-    expect(canvasOperationAdmission(createBank!)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, write: { state: "admitted" } });
-    expect(canvasOperationAdmission(existingBank!)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, write: { state: "admitted" } });
-    expect(canvasOperationAdmission(bankDraw!)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, write: { state: "admitted" } });
+    expect(canvasOperationAdmission(createBank!)).toEqual(course);
+    expect(canvasOperationAdmission(existingBank!)).toEqual(course);
+    expect(canvasOperationAdmission(bankDraw!)).toEqual(course);
     expect(canvasOperationAdmission(bookmark!)).toEqual({
       courseTarget: { kind: "self_path", resource: "bookmark" },
-      write: { state: "held", reason: "self_scope_not_supported" },
+      authority: "site",
+      siteClass: "person",
+      write: { state: "admitted" },
     });
   });
 
   it("admits Item Bank archive through the guarded private executor", () => {
     const archive = catalog.operations.find((operation) => operation.toolName === "canvas_item_bank_archive_bank")!;
     expect(archive.risk).toBe("destructive");
-    expect(canvasOperationAdmission(archive)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, write: { state: "admitted" } });
+    expect(canvasOperationAdmission(archive)).toEqual({ courseTarget: { kind: "course_path", argument: "course_id" }, authority: "course", write: { state: "admitted" } });
     expect(canvasReadbackAssessment(catalog.operations, archive)).toEqual({ state: "structurally_exact" });
   });
 
-  it("holds every self-scoped bookmark and course-nickname write with one plain-language reason", () => {
+  it("admits every personal bookmark and course-nickname write as a site request with an exact readback", () => {
     const tools = canvasCatalogTools(catalog);
     const selfScoped = [
       "canvas_create_bookmark",
@@ -754,37 +748,32 @@ describe("Canvas API catalog", () => {
       "canvas_remove_course_nickname",
       "canvas_clear_course_nicknames",
     ];
-    const reason = "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course.";
     for (const name of selfScoped) {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name);
       expect(operation, name).toBeTruthy();
       const admission = canvasOperationAdmission(operation!);
       expect(admission.courseTarget.kind, name).toBe("self_path");
-      expect(admission.write, name).toEqual({ state: "held", reason: "self_scope_not_supported" });
-      expect(canvasReadbackAssessment(catalog.operations, operation!), name).toEqual({ state: "not_applicable", reason: "write_held" });
+      expect(admission, name).toMatchObject({ authority: "site", siteClass: "person", write: { state: "admitted" } });
+      expect(canvasReadbackAssessment(catalog.operations, operation!), name).toEqual({ state: "structurally_exact" });
       const tool = tools.find((candidate) => candidate.name === name);
-      expect(tool?.capability?.behavior.supportsReadback, name).toBe(false);
-      expect(tool?.capability?.profiles["public-canvas"], name).toEqual({ state: "profile_limited", reason });
-      expect(tool?.capability?.evidence?.admission, name).toEqual({ state: "blocked", reason });
+      expect(tool?.capability?.behavior.supportsReadback, name).toBe(true);
+      expect(tool?.capability?.profiles["public-canvas"], name).toEqual({ state: "supported" });
+      expect(tool?.capability?.authority.scopeClass, name).toBe("site");
     }
   });
 
-  // Account and administrative workflows stay in the product scope, and
-  // docs/implementation/CANVAS-ADMISSION-CLASSES.md records the contract they need before admission.
-  // Until that contract exists, every route that names an account, the whole Canvas instance, an LTI
-  // registration or a developer key is held with its own reason, and none of them is admitted.
-  it("holds every account, global, LTI registration and developer key write under one account reason", () => {
+  // Account and administrative workflows are site requests. Canvas decides each one with the
+  // signed-in person's own account roles, and docs/implementation/CANVAS-ADMISSION-CLASSES.md records
+  // the contract. The LTI service routes under an account still need the LTI tool's own authorization.
+  it("admits every account, global and developer key write as an account site request", () => {
     const tools = canvasCatalogTools(catalog);
-    const reason = "This change affects a whole Canvas account, not one course. Morrow does not yet have an account permission, so it will not send it.";
     const accountRoute = (path: string) => path.startsWith("/v1/accounts/") || path.startsWith("/lti/accounts/")
       || path.startsWith("/v1/global/") || path.startsWith("/v1/developer_keys/") || path.startsWith("/lti/developer_key/")
       || path.includes("{account_id}");
     const accountWrites = catalog.operations.filter((operation) => !operation.readOnly && accountRoute(operation.path));
-    const heldForAccount = catalog.operations.filter((operation) => {
-      const write = canvasOperationAdmission(operation).write;
-      return write.state === "held" && write.reason === "account_authority_required";
-    });
-    expect(heldForAccount.map((operation) => operation.toolName).sort())
+    const accountClass = catalog.operations.filter((operation) => !operation.readOnly
+      && canvasOperationAdmission(operation).siteClass === "account");
+    expect(accountClass.map((operation) => operation.toolName).sort())
       .toEqual(accountWrites.map((operation) => operation.toolName).sort());
     expect(accountWrites).toHaveLength(117);
 
@@ -801,15 +790,23 @@ describe("Canvas API catalog", () => {
       "v1/global": 7,
     });
 
+    const note = "It changes a Canvas account, not one course. Canvas decides it with your own account roles on this Canvas site.";
+    expect(canvasSiteAuthorityNote("account")).toBe(note);
     for (const operation of accountWrites) {
       const name = operation.toolName;
+      const admission = canvasOperationAdmission(operation);
       expect(canvasAccountAuthorityRoute(operation), name).toBe(true);
-      expect(canvasReadbackAssessment(catalog.operations, operation), name).toEqual({ state: "not_applicable", reason: "write_held" });
+      expect(admission.authority, name).toBe("site");
       const tool = tools.find((candidate) => candidate.name === name);
-      expect(tool?.capability?.authority.scopeClass, name).toBe("account");
-      expect(tool?.capability?.behavior.supportsReadback, name).toBe(false);
-      expect(tool?.capability?.profiles["public-canvas"], name).toEqual({ state: "profile_limited", reason });
-      expect(tool?.capability?.evidence?.admission, name).toEqual({ state: "blocked", reason });
+      expect(tool?.capability?.authority.scopeClass, name).toBe("site");
+      if (operation.path.startsWith("/lti/")) {
+        expect(admission.write, name).toEqual({ state: "held", reason: "lti_authorization_required" });
+        continue;
+      }
+      expect(admission.write, name).toEqual({ state: "admitted" });
+      const readback = canvasReadbackAssessment(catalog.operations, operation);
+      expect(tool?.capability?.behavior.supportsReadback, name).toBe(readback.state === "structurally_exact");
+      expect(tool?.capability?.profiles["public-canvas"].state, name).toBe(readback.state === "structurally_exact" ? "supported" : "profile_limited");
     }
 
     // One named route from each part of the class. `canvas_update_courses` changes every course in
@@ -827,11 +824,10 @@ describe("Canvas API catalog", () => {
 
     // The class is about account authority, not about the letters "lti" in a route. A course write
     // that manages an LTI link through the ordinary API stays an admitted course write. A route on
-    // the LTI service itself is still a course route, but it needs the LTI tool's own authorization,
-    // so it carries that hold instead of the account hold.
+    // the LTI service itself is still a course route, but it needs the LTI tool's own authorization.
     const resourceLink = catalog.operations.find((candidate) => candidate.toolName === "canvas_update_lti_resource_link")!;
     expect(canvasAccountAuthorityRoute(resourceLink)).toBe(false);
-    expect(canvasOperationAdmission(resourceLink).write).toEqual({ state: "admitted" });
+    expect(canvasOperationAdmission(resourceLink)).toMatchObject({ authority: "course", write: { state: "admitted" } });
     expect(tools.find((candidate) => candidate.name === "canvas_update_lti_resource_link")?.capability?.authority.scopeClass).toBe("course");
     for (const name of ["canvas_create_line_item", "canvas_create_score"]) {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
@@ -840,16 +836,10 @@ describe("Canvas API catalog", () => {
       expect(tools.find((candidate) => candidate.name === name)?.capability?.authority.scopeClass, name).toBe("course");
     }
 
-    // This class admits nothing. It only names the hold that 117 writes already carried.
     const admitted = catalog.operations.filter((operation) => !operation.readOnly
       && canvasOperationAdmission(operation).write.state === "admitted");
-    expect(admitted).toHaveLength(228);
-    expect(admitted.filter((operation) => accountRoute(operation.path))).toEqual([]);
-    const heldForCourseScope = catalog.operations.filter((operation) => {
-      const write = canvasOperationAdmission(operation).write;
-      return write.state === "held" && write.reason === "course_scope_required";
-    });
-    expect(heldForCourseScope).toHaveLength(92);
+    expect(admitted).toHaveLength(540);
+    expect(admitted.filter((operation) => accountRoute(operation.path))).toHaveLength(116);
   });
 
   it("keeps the single-nickname read bound to one course and produces no other course target kind", () => {
@@ -857,6 +847,7 @@ describe("Canvas API catalog", () => {
     expect(read?.path).toBe("/v1/users/self/course_nicknames/{course_id}");
     expect(canvasOperationAdmission(read!)).toEqual({
       courseTarget: { kind: "self_path", resource: "course_nickname", argument: "course_id" },
+      authority: "course",
       write: { state: "not_applicable" },
     });
     const kinds = new Set(catalog.operations.map((operation) => canvasOperationAdmission(operation).courseTarget.kind));
@@ -866,40 +857,31 @@ describe("Canvas API catalog", () => {
       .filter((write) => write.state === "held")
       .map((write) => write.reason));
     expect([...heldReasons].sort()).toEqual([
-      "account_authority_required",
-      "course_scope_required",
-      "cross_course_object_requires_resolution",
       "duplicate_assignment_exact_readback_unavailable",
-      "learner_scope_requires_separate_authority",
       "lti_authorization_required",
-      "multi_course_authority_required",
       "multi_step_upload_requires_reviewed_transfer",
-      "provider_contract_incomplete",
-      "self_scope_not_supported",
     ]);
   });
 
-  // One sentence used to stand for every held write, so the person was told the same thing whether
-  // the change named a student's grade, a Canvas account, or a group in another course. This case
-  // walks the whole catalog: every held write carries one reason from the closed set, every class
-  // has its own sentence, and the published capability shows that sentence to the person.
-  it("gives every held write one reason from the closed set and its own plain sentence", () => {
+  // Every held write carries one reason from the closed set with its own sentence, and every site
+  // request carries one site class with its own sentence. This case walks the whole catalog.
+  it("gives every held write one reason and every site request one class, each with its own plain sentence", () => {
     const tools = canvasCatalogTools(catalog);
     const closedSet = [
-      "account_authority_required",
-      "course_scope_required",
-      "cross_course_object_requires_resolution",
       "duplicate_assignment_exact_readback_unavailable",
-      "learner_scope_requires_separate_authority",
       "lti_authorization_required",
-      "multi_course_authority_required",
       "multi_step_upload_requires_reviewed_transfer",
-      "provider_contract_incomplete",
-      "self_scope_not_supported",
     ] as const;
     const byReason = new Map<string, string[]>();
+    const bySiteClass = new Map<string, string[]>();
     for (const operation of catalog.operations) {
-      const write = canvasOperationAdmission(operation).write;
+      const admission = canvasOperationAdmission(operation);
+      if (!operation.readOnly && admission.authority === "site") {
+        expect(admission.siteClass, operation.toolName).toBeTruthy();
+        bySiteClass.set(admission.siteClass!, [...(bySiteClass.get(admission.siteClass!) || []), operation.toolName].sort());
+      }
+      if (admission.authority === "course") expect(admission.siteClass, operation.toolName).toBeUndefined();
+      const write = admission.write;
       if (write.state !== "held") {
         expect(canvasAdmissionReason(write), operation.toolName).toBeUndefined();
         continue;
@@ -915,39 +897,40 @@ describe("Canvas API catalog", () => {
     }
 
     expect(Object.fromEntries([...byReason].map(([reason, names]) => [reason, names.length]))).toEqual({
-      account_authority_required: 117,
-      course_scope_required: 92,
-      cross_course_object_requires_resolution: 48,
       duplicate_assignment_exact_readback_unavailable: 1,
-      learner_scope_requires_separate_authority: 37,
-      lti_authorization_required: 12,
-      multi_course_authority_required: 11,
-      multi_step_upload_requires_reviewed_transfer: 5,
-      provider_contract_incomplete: 9,
-      self_scope_not_supported: 6,
+      lti_authorization_required: 16,
+      multi_step_upload_requires_reviewed_transfer: 9,
     });
     expect([...byReason.keys()].sort()).toEqual([...closedSet]);
+    expect(Object.fromEntries([...bySiteClass].map(([siteClass, names]) => [siteClass, names.length]))).toEqual({
+      account: 117,
+      learner_record: 37,
+      multi_course: 11,
+      person: 106,
+      session_credential: 9,
+      shared_object: 48,
+    });
 
     // No two classes share a sentence, none is empty, and none of them shows the person a route, an
     // internal name, or the word API.
-    const sentences = closedSet.map((reason) => canvasAdmissionReason({ state: "held", reason })!);
-    expect(new Set(sentences).size).toBe(closedSet.length);
+    const sentences = [
+      ...closedSet.map((reason) => canvasAdmissionReason({ state: "held", reason })!),
+      ...[...bySiteClass.keys()].map((siteClass) => canvasSiteAuthorityNote(siteClass as Parameters<typeof canvasSiteAuthorityNote>[0])!),
+    ];
+    expect(new Set(sentences).size).toBe(closedSet.length + bySiteClass.size);
     for (const sentence of sentences) {
       expect(sentence).toMatch(/^[A-Z][^]*\.$/);
       expect(sentence).not.toMatch(/[{}/]|_[a-z]|\bAPI\b/);
     }
 
-    // The two classes this contract adds, named exactly. A Canvas group, file, folder, calendar
-    // item or outcome can belong to any course, so its route proves nothing on its own.
-    const crossCourseFamilies: Record<string, number> = {};
-    for (const name of byReason.get("cross_course_object_requires_resolution")!) {
+    // A Canvas group, file, folder, calendar item, section or outcome can belong to any course, so a
+    // route on one that has no declared course reading is a site request.
+    const sharedFamilies: Record<string, number> = {};
+    for (const name of bySiteClass.get("shared_object")!) {
       const family = catalog.operations.find((operation) => operation.toolName === name)!.path.split("/")[2];
-      crossCourseFamilies[family] = (crossCourseFamilies[family] || 0) + 1;
+      sharedFamilies[family] = (sharedFamilies[family] || 0) + 1;
     }
-    expect(crossCourseFamilies).toEqual({
-      // Creating an appointment group names its courses in the request itself, and nothing proves
-      // those are the selected one. The route that changes an existing group is admitted through
-      // the reading that says which course it serves.
+    expect(sharedFamilies).toEqual({
       appointment_groups: 1,
       files: 2,
       folders: 5,
@@ -956,7 +939,7 @@ describe("Canvas API catalog", () => {
       outcomes: 1,
       sections: 2,
     });
-    expect(byReason.get("provider_contract_incomplete")).toEqual([
+    expect(bySiteClass.get("session_credential")).toEqual([
       "canvas_create_error_report",
       "canvas_create_jwt",
       "canvas_create_observer_pairing_code",
@@ -968,13 +951,11 @@ describe("Canvas API catalog", () => {
       "canvas_start_kaltura_session",
     ]);
 
-    // The learner class is no longer only a section route: a quiz attempt, a what-if grade, an
-    // originality report on submitted work, group membership and a booked time slot are all one
-    // person's own record.
-    expect(byReason.get("learner_scope_requires_separate_authority")!.filter((name) => {
+    // A quiz attempt, a what-if grade, an originality report on submitted work, group membership and a
+    // booked time slot are all one person's own record, reached without its course.
+    expect(bySiteClass.get("learner_record")!.filter((name) => {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
-      return !operation.path.startsWith("/v1/sections/")
-        && canvasOperationAdmission(operation).courseTarget.kind !== "course_path";
+      return !operation.path.startsWith("/v1/sections/");
     })).toEqual([
       "canvas_answering_questions",
       "canvas_assign_unassigned_members",
@@ -1000,7 +981,7 @@ describe("Canvas API catalog", () => {
 
     // The admitted set is pinned here as well. Any change needs a reviewed admission reason.
     expect(catalog.operations.filter((operation) => !operation.readOnly
-      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(228);
+      && canvasOperationAdmission(operation).write.state === "admitted")).toHaveLength(540);
   });
 
   // Generic Canvas upload pre-flights cannot carry the remaining transfer steps. The Rubric CSV
@@ -1017,10 +998,14 @@ describe("Canvas API catalog", () => {
       "canvas_creates_rubric_using_csv_file_courses",
       "canvas_upload_file_courses",
       "canvas_upload_file_quiz_id_submissions_self_files_post",
+      "canvas_upload_file_sections",
       "canvas_upload_file_submissions_user_id_comments_files_post",
       "canvas_upload_file_v1_courses_course_id_files_post",
+      "canvas_upload_file_v1_folders_folder_id_files_post",
+      "canvas_upload_file_v1_groups_group_id_files_post",
+      "canvas_upload_file_v1_users_user_id_files_post",
     ]);
-    for (const operation of transfers) {
+    for (const operation of transfers.filter((candidate) => candidate.path.startsWith("/v1/courses/"))) {
       const name = operation.toolName;
       expect(operation.method, name).toBe("POST");
       if (name === "canvas_creates_rubric_using_csv_file_courses") {
@@ -1042,17 +1027,14 @@ describe("Canvas API catalog", () => {
       expect(tool?.capability?.behavior.supportsReadback, name).toBe(false);
     }
 
-    // The same first step outside a course keeps the hold it already had: what those routes lack
-    // first is proof of the course, not the rest of the upload.
-    expect(catalog.operations.filter((operation) => !operation.readOnly && /files$/.test(operation.path)
-      && !transfers.includes(operation))
-      .map((operation) => [operation.toolName, String(canvasOperationAdmission(operation).write.reason)])
-      .sort((left, right) => left[0].localeCompare(right[0]))).toEqual([
-      ["canvas_upload_file_sections", "learner_scope_requires_separate_authority"],
-      ["canvas_upload_file_v1_folders_folder_id_files_post", "cross_course_object_requires_resolution"],
-      ["canvas_upload_file_v1_groups_group_id_files_post", "cross_course_object_requires_resolution"],
-      ["canvas_upload_file_v1_users_user_id_files_post", "course_scope_required"],
-    ]);
+    // The same first step for a folder, a group, a section submission or a person is a site request,
+    // and it needs the same reviewed transfer before any byte is sent.
+    for (const operation of transfers.filter((candidate) => !candidate.path.startsWith("/v1/courses/"))) {
+      expect(canvasOperationAdmission(operation).authority, operation.toolName).toBe("site");
+      expect(canvasAdmissionReason(canvasOperationAdmission(operation).write), operation.toolName).toBe(sentence);
+    }
+    expect(catalog.operations.filter((operation) => !operation.readOnly && operation.method === "POST" && /files$/.test(operation.path)
+      && !transfers.includes(operation))).toEqual([]);
 
     // The hold is exactly the upload pre-flight. A course-scoped write on a file that already
     // exists is still an ordinary admitted course write.
@@ -1078,14 +1060,13 @@ describe("Canvas API catalog", () => {
     ]);
     for (const operation of outcomeLinks) {
       const admission = canvasOperationAdmission(operation);
-      expect(admission.write.state, operation.toolName).toBe("held");
+      // Admission is a site request now, so the readback itself refuses the nested link identity
+      // (ledger row 412) instead of relying on a hold.
+      expect(admission, operation.toolName).toMatchObject({ authority: "site", write: { state: "admitted" } });
       expect(canvasReadbackAssessment(catalog.operations, operation, admission), operation.toolName)
-        .toEqual({ state: "not_applicable", reason: "write_held" });
-      const reason = canvasAdmissionReason(admission.write)!;
-      expect(tools.get(operation.toolName)?.capability?.profiles["private-full"], operation.toolName)
-        .toEqual({ state: "profile_limited", reason });
-      expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"], operation.toolName)
-        .toEqual({ state: "profile_limited", reason });
+        .toEqual({ state: "blocked", reason: "outcome_link_identity_is_nested" });
+      expect(tools.get(operation.toolName)?.capability?.profiles["private-full"].state, operation.toolName).toBe("profile_limited");
+      expect(tools.get(operation.toolName)?.capability?.profiles["public-canvas"].state, operation.toolName).toBe("profile_limited");
       expect(tools.get(operation.toolName)?.capability?.behavior.supportsReadback, operation.toolName).toBe(false);
     }
 
@@ -1114,6 +1095,7 @@ describe("Canvas API catalog", () => {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
       expect(canvasOperationAdmission(operation), name).toEqual({
         courseTarget: { kind: "semantic_course_object", target: sectionTarget },
+        authority: "course",
         write: { state: "admitted" },
       });
       expect(canvasSemanticCourseTarget(operation), name).toEqual(sectionTarget);
@@ -1121,7 +1103,7 @@ describe("Canvas API catalog", () => {
       const plan = planBrowserReadback(catalog.operations, operation, { id: "302", course_section_name: "Section B" }, { id: "302" });
       expect(plan?.readOperation.toolName, name).toBe("canvas_get_section_information_sections");
       expect(plan?.arguments, name).toEqual({ id: "302" });
-      expect(tools.find((tool) => tool.name === name)?.capability?.authority.scopeClass, name).toBe("course");
+      expect(tools.find((tool) => tool.name === name)?.capability?.authority.scopeClass, name).toBe("course-object");
     }
 
     // The resolver read and the course-side listing the connector needs must both stay addressable
@@ -1135,25 +1117,20 @@ describe("Canvas API catalog", () => {
 
     const sectionWrites = catalog.operations.filter((operation) => !operation.readOnly && operation.path.startsWith("/v1/sections/"));
     expect(sectionWrites).toHaveLength(21);
-    const byReason = new Map<string, string[]>();
+    const byScope = new Map<string, string[]>();
     for (const operation of sectionWrites) {
-      const write = canvasOperationAdmission(operation).write;
-      const key = write.state === "held" ? write.reason : write.state;
-      byReason.set(key, [...(byReason.get(key) || []), operation.toolName].sort());
+      const admission = canvasOperationAdmission(operation);
+      const key = admission.write.state === "held" ? admission.write.reason : admission.siteClass || admission.authority;
+      byScope.set(key, [...(byScope.get(key) || []), operation.toolName].sort());
     }
-    expect(byReason.get("admitted")).toEqual(["canvas_delete_section", "canvas_edit_section"]);
-    // Cross-listing moves the section into a second course. The reading that proves the first course
-    // exists; nothing proves the second, so these two stay with the objects Canvas can move between
-    // courses rather than with the routes that name no course at all.
-    expect(byReason.get("cross_course_object_requires_resolution")).toEqual(["canvas_cross_list_section", "canvas_de_cross_list_section"]);
-    expect(byReason.get("learner_scope_requires_separate_authority")).toHaveLength(17);
-    expect([...byReason.keys()].sort()).toEqual(["admitted", "cross_course_object_requires_resolution", "learner_scope_requires_separate_authority"]);
-    const learnerReason = "Morrow changes a student's record through the course that record belongs to, and this route does not name that course. Ask for the same change from inside the course.";
-    for (const name of byReason.get("learner_scope_requires_separate_authority")!) {
-      const tool = tools.find((candidate) => candidate.name === name);
-      expect(tool?.capability?.profiles["public-canvas"], name).toEqual({ state: "profile_limited", reason: learnerReason });
-      expect(tool?.capability?.behavior.supportsReadback, name).toBe(false);
-    }
+    expect(byScope.get("course")).toEqual(["canvas_delete_section", "canvas_edit_section"]);
+    // Cross-listing moves the section into a second course, so it is a site request on a shared object.
+    expect(byScope.get("shared_object")).toEqual(["canvas_cross_list_section", "canvas_de_cross_list_section"]);
+    // A person's record reached through a section is a site request; its file upload needs the
+    // reviewed transfer.
+    expect(byScope.get("learner_record")).toHaveLength(16);
+    expect(byScope.get("multi_step_upload_requires_reviewed_transfer")).toEqual(["canvas_upload_file_sections"]);
+    expect([...byScope.keys()].sort()).toEqual(["course", "learner_record", "multi_step_upload_requires_reviewed_transfer", "shared_object"]);
   });
 
   it("admits a group's own discussion topics and pages, and holds every route about who is in a group", () => {
@@ -1180,6 +1157,7 @@ describe("Canvas API catalog", () => {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
       expect(canvasOperationAdmission(operation), name).toEqual({
         courseTarget: { kind: "semantic_course_object", target: groupTarget },
+        authority: "course",
         write: { state: "admitted" },
       });
       expect(canvasSemanticCourseTarget(operation), name).toEqual(groupTarget);
@@ -1189,7 +1167,7 @@ describe("Canvas API catalog", () => {
       const plan = planBrowserReadback(catalog.operations, operation, { group_id: "88", topic_id: "9", url_or_id: "week-one", wiki_page_title: "Week one" }, { id: "9", page_id: "9", url: "week-one" });
       expect(plan?.readOperation.path, name).toMatch(/^\/v1\/groups\/\{group_id\}\//);
       expect(plan?.arguments.group_id, name).toBe("88");
-      expect(tools.find((tool) => tool.name === name)?.capability?.authority.scopeClass, name).toBe("course");
+      expect(tools.find((tool) => tool.name === name)?.capability?.authority.scopeClass, name).toBe("course-object");
     }
 
     const resolver = catalog.operations.find((candidate) => candidate.toolName === groupTarget.resolverRead)!;
@@ -1202,16 +1180,17 @@ describe("Canvas API catalog", () => {
 
     const groupWrites = catalog.operations.filter((operation) => !operation.readOnly && /^\/v1\/(?:groups|group_categories)(?:\/|$)/.test(operation.path));
     expect(groupWrites).toHaveLength(53);
-    const byReason = new Map<string, string[]>();
+    const byScope = new Map<string, string[]>();
     for (const operation of groupWrites) {
-      const write = canvasOperationAdmission(operation).write;
-      const key = write.state === "held" ? write.reason : write.state;
-      byReason.set(key, [...(byReason.get(key) || []), operation.toolName].sort());
+      const admission = canvasOperationAdmission(operation);
+      const key = admission.write.state === "held" ? admission.write.reason : admission.siteClass || admission.authority;
+      byScope.set(key, [...(byScope.get(key) || []), operation.toolName].sort());
     }
-    expect([...byReason.keys()].sort()).toEqual(["admitted", "cross_course_object_requires_resolution", "learner_scope_requires_separate_authority"]);
-    expect(byReason.get("admitted")).toEqual(groupContentWrites);
-    // Every route whose purpose is to place, move, or remove people.
-    expect(byReason.get("learner_scope_requires_separate_authority")).toEqual([
+    expect([...byScope.keys()].sort()).toEqual(["course", "learner_record", "multi_step_upload_requires_reviewed_transfer", "shared_object"]);
+    expect(byScope.get("course")).toEqual(groupContentWrites);
+    // Every route whose purpose is to place, move, or remove people is a person's record reached
+    // through a group.
+    expect(byScope.get("learner_record")).toEqual([
       "canvas_assign_unassigned_members",
       "canvas_bulk_delete_memberships_bulk_deletes_memberships_by_providing_array_of_user_ids_or_for_different",
       "canvas_create_membership",
@@ -1223,19 +1202,15 @@ describe("Canvas API catalog", () => {
       "canvas_update_membership_memberships",
       "canvas_update_membership_users",
     ]);
-    // No group set is admitted. Changing one can create groups and place students in them, and
-    // deleting one removes every group in it, so a group set keeps the hold its object family has.
-    for (const name of ["canvas_create_group_group_categories", "canvas_delete_group_category", "canvas_update_group_category"]) {
+    // A group set and a group's own object have no declared course reading, so they are site requests
+    // on a shared object that Canvas decides with the person's own roles.
+    for (const name of ["canvas_create_group_group_categories", "canvas_delete_group_category", "canvas_update_group_category",
+      "canvas_delete_group", "canvas_edit_group", "canvas_set_usage_rights_groups"]) {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
-      expect(canvasOperationAdmission(operation).write, name).toEqual({ state: "held", reason: "cross_course_object_requires_resolution" });
+      expect(canvasOperationAdmission(operation), name).toMatchObject({ authority: "site", siteClass: "shared_object", write: { state: "admitted" } });
       expect(canvasSemanticCourseTarget(operation), name).toBeUndefined();
     }
-    // A group's own object and its files stay held as well: the file routes belong to the reviewed
-    // file contract, and the group object itself has no declared reading yet.
-    for (const name of ["canvas_delete_group", "canvas_edit_group", "canvas_set_usage_rights_groups", "canvas_upload_file_v1_groups_group_id_files_post"]) {
-      const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
-      expect(canvasOperationAdmission(operation).write, name).toEqual({ state: "held", reason: "cross_course_object_requires_resolution" });
-    }
+    expect(byScope.get("multi_step_upload_requires_reviewed_transfer")).toEqual(["canvas_upload_file_v1_groups_group_id_files_post"]);
   });
 
   it("proves a group's course from the group and from the selected course's own listing", () => {
@@ -1284,13 +1259,14 @@ describe("Canvas API catalog", () => {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
       expect(canvasOperationAdmission(operation), name).toEqual({
         courseTarget: { kind: "semantic_course_object", target: fileTarget },
+        authority: "course",
         write: { state: "admitted" },
       });
       expect(canvasReadbackAssessment(catalog.operations, operation), name).toEqual({ state: "structurally_exact" });
       const plan = planBrowserReadback(catalog.operations, operation, { id: "601", name: "Syllabus 2026.pdf" }, { id: "601" });
       expect(plan?.readOperation.toolName, name).toBe("canvas_get_file_files");
       expect(plan?.arguments, name).toEqual({ id: "601" });
-      expect(tools.find((tool) => tool.name === name)?.capability?.authority.scopeClass, name).toBe("course");
+      expect(tools.find((tool) => tool.name === name)?.capability?.authority.scopeClass, name).toBe("course-object");
     }
 
     // A new folder is read back through its own route, where it names the proved parent again. The
@@ -1310,26 +1286,26 @@ describe("Canvas API catalog", () => {
     expect(created?.strategy).toBe("created-resource");
 
     // Copying reaches a second object that the reading of the first one does not prove, and every
-    // other file or folder write has no reading declared for it at all.
+    // other file or folder write has no reading declared for it at all, so those are site requests.
     const fileWrites = catalog.operations.filter((operation) => !operation.readOnly && /^\/v1\/(?:files|folders)(?:\/|$)/.test(operation.path));
     expect(fileWrites).toHaveLength(10);
-    const byReason = new Map<string, string[]>();
+    const byScope = new Map<string, string[]>();
     for (const operation of fileWrites) {
-      const write = canvasOperationAdmission(operation).write;
-      const key = write.state === "held" ? write.reason : write.state;
-      byReason.set(key, [...(byReason.get(key) || []), operation.toolName].sort());
+      const admission = canvasOperationAdmission(operation);
+      const key = admission.write.state === "held" ? admission.write.reason : admission.siteClass || admission.authority;
+      byScope.set(key, [...(byScope.get(key) || []), operation.toolName].sort());
     }
-    expect([...byReason.keys()].sort()).toEqual(["admitted", "cross_course_object_requires_resolution"]);
-    expect(byReason.get("admitted")).toEqual(["canvas_create_folder_folders", "canvas_delete_file", "canvas_update_file"]);
-    expect(byReason.get("cross_course_object_requires_resolution")).toEqual([
+    expect([...byScope.keys()].sort()).toEqual(["course", "multi_step_upload_requires_reviewed_transfer", "shared_object"]);
+    expect(byScope.get("course")).toEqual(["canvas_create_folder_folders", "canvas_delete_file", "canvas_update_file"]);
+    expect(byScope.get("shared_object")).toEqual([
       "canvas_copy_file",
       "canvas_copy_folder",
       "canvas_delete_folder",
       "canvas_reset_link_verifier",
       "canvas_update_folder",
       "canvas_update_word_count",
-      "canvas_upload_file_v1_folders_folder_id_files_post",
     ]);
+    expect(byScope.get("multi_step_upload_requires_reviewed_transfer")).toEqual(["canvas_upload_file_v1_folders_folder_id_files_post"]);
   });
 
   it("proves a course file from its own reading and compares the saved version afterwards", () => {
@@ -1381,7 +1357,7 @@ describe("Canvas API catalog", () => {
       expect(canvasOperationAdmission(operation).courseTarget.kind, name).toBe("semantic_course_object");
       expect(canvasOperationAdmission(operation).write, name).toEqual({ state: "admitted" });
       expect(canvasReadbackAssessment(catalog.operations, operation), name).toEqual({ state: "structurally_exact" });
-      expect(tools.find((tool) => tool.name === name)?.capability?.authority.scopeClass, name).toBe("course");
+      expect(tools.find((tool) => tool.name === name)?.capability?.authority.scopeClass, name).toBe("course-object");
     }
 
     // A change to one event is read back through that event's own route, and the requested fields
@@ -1446,17 +1422,18 @@ describe("Canvas API catalog", () => {
     expect(canvasSemanticCourseCollectionState(eventTarget, { ok: true, data: [] }, "501", "42")).toBe("absent");
     expect(canvasSemanticCourseCollectionState(eventTarget, { ok: true, data: [{ ...saved, id: "601", context_code: "course_43" }] }, "501", "42")).toBe("unreadable");
 
-    // Booking a slot and cancelling a whole sign-up sheet are a person's own record, and creating a
-    // sign-up sheet names its courses in the request itself, which nothing proves.
-    for (const [name, reason] of [
-      ["canvas_reserve_time_slot", "learner_scope_requires_separate_authority"],
-      ["canvas_reserve_time_slot_participant_id", "learner_scope_requires_separate_authority"],
-      ["canvas_delete_appointment_group", "learner_scope_requires_separate_authority"],
-      ["canvas_create_appointment_group", "cross_course_object_requires_resolution"],
-      ["canvas_save_enabled_account_calendars", "course_scope_required"],
+    // Booking a slot and cancelling a whole sign-up sheet are a person's own record, creating a sign-up
+    // sheet names its courses in the request itself, and the enabled account calendars are the
+    // person's own list. Each is a site request.
+    for (const [name, siteClass] of [
+      ["canvas_reserve_time_slot", "learner_record"],
+      ["canvas_reserve_time_slot_participant_id", "learner_record"],
+      ["canvas_delete_appointment_group", "learner_record"],
+      ["canvas_create_appointment_group", "shared_object"],
+      ["canvas_save_enabled_account_calendars", "person"],
     ]) {
       const operation = catalog.operations.find((candidate) => candidate.toolName === name)!;
-      expect(canvasOperationAdmission(operation).write, name).toEqual({ state: "held", reason });
+      expect(canvasOperationAdmission(operation), name).toMatchObject({ authority: "site", siteClass, write: { state: "admitted" } });
     }
   });
 
@@ -1492,11 +1469,11 @@ describe("Canvas API catalog", () => {
   it("derives structural readback metadata from the shared planner", () => {
     const admittedWrites = catalog.operations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "admitted");
     const assessments = admittedWrites.map((operation) => canvasReadbackAssessment(catalog.operations, operation));
-    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(55);
-    expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(24);
-    expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(0);
-    expect(admittedWrites).toHaveLength(228);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(149);
+    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(184);
+    expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(30);
+    expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(11);
+    expect(admittedWrites).toHaveLength(540);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(315);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     // Deleting a gradebook column is course work admitted through its course, and its absence reads back exactly.
@@ -1515,7 +1492,8 @@ describe("Canvas API catalog", () => {
       state: "blocked",
       reason: "No safe exact post-write reader is available: favorite_list_is_effective_not_explicit_state.",
     });
-    expect(tools.find((tool) => tool.name === "canvas_unlink_outcome_courses")?.capability?.behavior.supportsReadback).toBe(false);
+    // Unlinking reads the group's link list back by the linked outcome's own id.
+    expect(tools.find((tool) => tool.name === "canvas_unlink_outcome_courses")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_bulk_update_assignment_dates")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_re_activate_enrollment")?.capability?.behavior.supportsReadback).toBe(true);
     expect(tools.find((tool) => tool.name === "canvas_disable_assignments_currently_enabled_for_grade_export_to_sis")?.capability?.behavior.supportsReadback).toBe(false);

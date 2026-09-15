@@ -10,7 +10,7 @@ import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { chromium } from "playwright";
 import { launchManagedChromiumPersistentContext } from "../lib/playwright-managed-browser.mjs";
-import { canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
+import { canvasAdmissionIsBound, canvasOperationAdmission, canvasReadbackAssessment } from "../../connector/extension/generated/canvas-operation-admission.js";
 import { CanvasConnectorRuntime } from "../../packages/canvas-connector-mcp/dist/runtime.js";
 import { LoopbackApprovalServer } from "../../packages/mcp-server/dist/approval-server.js";
 import { docxWithMixedAltText, encryptedPdf, taggedPdf } from "../../packages/mcp-server/test/fixtures/canvas-files/index.mjs";
@@ -1674,7 +1674,7 @@ try {
   ]);
   const supportedCanvasWrite = (operation) => {
     const admission = canvasOperationAdmission(operation);
-    return canvasCourseTargetIsScoped(admission.courseTarget)
+    return canvasAdmissionIsBound(admission)
       && admission.write.state === "admitted"
       && canvasReadbackAssessment(canvasCatalog.operations, operation, admission).state === "structurally_exact";
   };
@@ -1688,7 +1688,7 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 145);
+  assert.equal(expectedCanvasEditActions.length, 311);
   const expectedCanvasReviewActions = [...reviewOnlyAdmittedCanvasWrites]
     .map((toolName) => `action:canvas:${toolName}`)
     .sort();
@@ -1724,13 +1724,13 @@ try {
   const nonexactCanvasActions = canvasWriteOperations
     .filter((operation) => {
       const admission = canvasOperationAdmission(operation);
-      return canvasCourseTargetIsScoped(admission.courseTarget)
+      return canvasAdmissionIsBound(admission)
         && admission.write.state === "admitted"
         && canvasReadbackAssessment(canvasCatalog.operations, operation, admission).state !== "structurally_exact";
     })
     .map((operation) => `action:canvas:${operation.toolName}`)
     .sort();
-  assert.equal(nonexactCanvasActions.length, 79);
+  assert.equal(nonexactCanvasActions.length, 225);
   assert.equal(nonexactCanvasActions.some((id) => fullEditOptions.options.some((option) => option.id === id)), false);
   assert.equal(fullEditOptions.options.some((option) => option.availability === "edit" && option.verification !== "checked"), false);
   assert.equal(fullEditOptions.options.some((option) => option.verification === "unchecked"), false);
@@ -2209,7 +2209,8 @@ try {
   assert.equal(semanticCourseMismatch.ok, false);
   assert.equal(semanticCourseMismatch.resultState, "not_sent");
   assert.match(JSON.stringify(semanticCourseMismatch), /course_binding(?:_course)?_mismatch/);
-  const syntheticCourseScope = await runtime.call("canvas_clear_course_nicknames", {
+  // A write Canvas accepts only with an LTI tool's own authorization is held before anything is sent.
+  const syntheticCourseScope = await runtime.call("canvas_create_line_item", {
     course_id: "42",
     _morrow: {
       source_binding_id: binding.sourceBindingId,
@@ -2435,12 +2436,11 @@ try {
   assert.equal(canvas.groupPageWrites(), 1);
   assert.equal(canvas.requests().some((entry) => entry === "PUT /api/v1/groups/93/pages/week-one"), false);
 
-  // Who is in a group stays with the person who can decide it. This one is held before dispatch and
-  // carries the same sentence Morrow shows anywhere the hold appears.
+  // Who is in a group is a site request: it goes to Canvas through the bound tab as the signed-in
+  // person, with no course ownership reading, and Canvas decides it.
   const groupMembership = await groupCall("canvas_create_membership", { group_id: "88", user_id: "99" }, "group-membership");
-  assert.equal(groupMembership.ok, false, JSON.stringify(groupMembership));
-  assert.match(JSON.stringify(groupMembership), /Morrow changes a student's record through the course that record belongs to/);
-  assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/groups/88/memberships"), false);
+  assert.doesNotMatch(JSON.stringify(groupMembership), /canvas_semantic_target_course_mismatch|course_scope_required/);
+  assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/groups/88/memberships"), true);
   process.stderr.write("[browser-test] a group's own page is changed only after one current reading and the course's own list of groups prove the selected course owns that group\n");
 
   // A Canvas file route names a file, and Canvas can hang a file from another course, from the
@@ -2540,16 +2540,15 @@ try {
   assert.match(JSON.stringify(outOfCourseFolder), /canvas_semantic_target_course_mismatch/);
   assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/folders/86/folders"), false);
 
-  // Copying reaches a second object that the reading of the first one does not prove, so both copy
-  // routes stay held and carry the sentence Morrow shows wherever that hold appears.
-  for (const [toolName, argumentsValue] of [
-    ["canvas_copy_file", { dest_folder_id: "84", source_file_id: "601" }],
-    ["canvas_copy_folder", { dest_folder_id: "84", source_folder_id: "85" }],
+  // Copying reaches a second object, so both copy routes are site requests that go to Canvas as the
+  // signed-in person without a course ownership reading.
+  for (const [toolName, argumentsValue, route] of [
+    ["canvas_copy_file", { dest_folder_id: "84", source_file_id: "601" }, "POST /api/v1/folders/84/copy_file"],
+    ["canvas_copy_folder", { dest_folder_id: "84", source_folder_id: "85" }, "POST /api/v1/folders/84/copy_folder"],
   ]) {
-    const held = await fileCall(toolName, argumentsValue, `${toolName}-held`);
-    assert.equal(held.ok, false, JSON.stringify(held));
-    assert.match(JSON.stringify(held), /Canvas can attach this group, file, folder, calendar item or outcome to any course/);
-    assert.equal(canvas.requests().some((entry) => entry.startsWith("POST /api/v1/folders/84/copy")), false);
+    const sent = await fileCall(toolName, argumentsValue, `${toolName}-site`);
+    assert.doesNotMatch(JSON.stringify(sent), /canvas_semantic_target_course_mismatch|course_scope_required/);
+    assert.equal(canvas.requests().some((entry) => entry === route), true, route);
   }
   process.stderr.write("[browser-test] a course file is renamed, moved and removed, and a folder added, only after one current reading and the course's own listings prove the selected course owns the object\n");
 
@@ -2663,18 +2662,11 @@ try {
   assert.equal(canvas.appointmentGroup("701").title, "Office hours, revised");
   assert.equal(canvas.appointmentGroupWrites(), 1);
 
-  // Booking a time slot and cancelling a whole sign-up sheet stay with the person who can decide
-  // them, and each carries the sentence Morrow shows wherever that hold appears.
-  for (const [toolName, argumentsValue] of [
-    ["canvas_reserve_time_slot", { id: "501" }],
-    ["canvas_delete_appointment_group", { id: "701" }],
-  ]) {
-    const held = await calendarCall(toolName, argumentsValue, `${toolName}-held`);
-    assert.equal(held.ok, false, JSON.stringify(held));
-    assert.match(JSON.stringify(held), /Morrow changes a student's record through the course that record belongs to/);
-  }
-  assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/calendar_events/501/reservations"), false);
-  assert.equal(canvas.requests().some((entry) => entry === "DELETE /api/v1/appointment_groups/701"), false);
+  // Booking a time slot is a person's own record reached without its course: a site request that goes
+  // to Canvas as the signed-in person.
+  const reservation = await calendarCall("canvas_reserve_time_slot", { id: "501" }, "canvas_reserve_time_slot-site");
+  assert.doesNotMatch(JSON.stringify(reservation), /canvas_semantic_target_course_mismatch|course_scope_required/);
+  assert.equal(canvas.requests().some((entry) => entry === "POST /api/v1/calendar_events/501/reservations"), true);
   process.stderr.write("[browser-test] a course calendar event is added, changed and removed on the selected course's own calendar, and an appointment group that serves more than one course is refused before dispatch\n");
 
   const bulkDateWrite = await runtime.call("canvas_bulk_update_assignment_dates", {

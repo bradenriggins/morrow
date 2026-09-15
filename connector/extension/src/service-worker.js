@@ -2666,7 +2666,7 @@ async function executeCanvas(binding, operation, args, expiresAt) {
     const listResumeState = await claimCanvasListContinuation(binding, operation, args);
     const message = {
       type: "morrow_canvas_execute",
-      operation: { ...operation, morrowCourseTarget: canvasOperationAdmission(operation).courseTarget },
+      operation: { ...operation, morrowCourseTarget: canvasOperationAdmission(operation).courseTarget, morrowAuthority: canvasOperationAdmission(operation).authority },
       arguments: args,
       principalId: binding.principalId,
       expiresAt,
@@ -4359,10 +4359,12 @@ function courseScopeProblem(command, binding, operation, canvasConversation) {
       : problem("course_binding_mismatch", "This request does not match the selected course.", true);
   }
   const admission = canvasOperationAdmission(operation);
-  if (command.kind === "invoke_read"
-    && (admission.courseTarget.kind === "none"
-      || (admission.courseTarget.kind === "self_path" && !admission.courseTarget.argument))) {
-    return problem("course_scope_required", "This read needs one selected course target.", true);
+  // A site request acts on the connected Canvas site as the signed-in person, so the selected course
+  // does not narrow it. The binding already proved that site, that person and that session.
+  if (admission.authority === "site") {
+    return command.kind === "invoke_write" && admission.write.state === "held"
+      ? problem("course_scope_required", "This change needs one selected course target.", true)
+      : null;
   }
   // The Item Bank routes name a bank, never a course, so the guarded repair proves the course
   // through the guard instead of through a path argument. The frame checks the same course again
@@ -4563,8 +4565,10 @@ function canvasOperationList() {
 /** The declared object-to-course binding for one Canvas write, with the object this call names. */
 function canvasSemanticWrite(command, operation) {
   if (command.kind !== "invoke_write" || operation.provider !== "canvas") return null;
-  const courseTarget = canvasOperationAdmission(operation).courseTarget;
-  if (courseTarget.kind !== "semantic_course_object") return null;
+  const admission = canvasOperationAdmission(operation);
+  // A site request is not narrowed to the selected course, so there is no course ownership to prove.
+  if (admission.authority === "site" || admission.courseTarget.kind !== "semantic_course_object") return null;
+  const courseTarget = admission.courseTarget;
   const target = courseTarget.target;
   const args = command.arguments || {};
   return {

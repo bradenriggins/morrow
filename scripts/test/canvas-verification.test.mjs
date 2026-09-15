@@ -212,7 +212,7 @@ test("lossy, broad, private, and stateful Canvas readers do not run as readback"
   }
 });
 
-test("self-scoped Canvas bookmark and course-nickname writes are held before any readback", () => {
+test("personal Canvas bookmark and course-nickname writes are site requests that read back exactly", () => {
   const selfScoped = [
     "canvas_create_bookmark",
     "canvas_update_bookmark",
@@ -225,17 +225,11 @@ test("self-scoped Canvas bookmark and course-nickname writes are held before any
     const write = operation(tool);
     const admission = canvasOperationAdmission(write);
     assert.equal(admission.courseTarget.kind, "self_path", tool);
-    assert.deepEqual(admission.write, { state: "held", reason: "self_scope_not_supported" }, tool);
-    assert.equal(
-      canvasAdmissionReason(admission.write),
-      "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course.",
-      tool,
-    );
-    assert.deepEqual(
-      canvasReadbackAssessment(catalog.operations, write),
-      { state: "not_applicable", reason: "write_held" },
-      tool,
-    );
+    assert.equal(admission.authority, "site", tool);
+    assert.equal(admission.siteClass, "person", tool);
+    assert.deepEqual(admission.write, { state: "admitted" }, tool);
+    assert.equal(canvasAdmissionReason(admission.write), undefined, tool);
+    assert.deepEqual(canvasReadbackAssessment(catalog.operations, write), { state: "structurally_exact" }, tool);
   }
 });
 

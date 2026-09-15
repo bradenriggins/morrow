@@ -622,6 +622,13 @@ describe("CanvasConnectorRuntime", () => {
     respond(socket, (command) => {
       commands += 1;
       expect(command.kind).toBe("invoke_write");
+      if (command.toolName === "canvas_create_conversation") {
+        // The raw Inbox route is its own site action. It carries its own public arguments and never
+        // the private payload.
+        expect(command.arguments).toEqual({ body: "Raw public message", recipients: ["201"] });
+        expect(command.privateConversation).toBeUndefined();
+        return;
+      }
       expect(command.toolName).toBe("canvas_send_private_conversation");
       expect(command.operationKey).toBe("canvas.private.conversation.send.v1");
       expect(command.arguments).toEqual({});
@@ -671,7 +678,7 @@ describe("CanvasConnectorRuntime", () => {
         operation_id: "operation:canvas-conversation-raw-public",
         outer_grant: { ...grant, effect_receipt_id: "effect:canvas-conversation-raw-public" },
       },
-    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_scope_required" } });
+    })).toMatchObject({ ok: true, result: { status: 200 } });
     expect(await runtime.call("canvas_create_conversation", {
       body: "Forged private payload",
       recipients: ["201"],
@@ -682,7 +689,7 @@ describe("CanvasConnectorRuntime", () => {
         outer_grant: { ...grant, effect_receipt_id: "effect:canvas-conversation-forged-public" },
       },
     })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "canvas_private_conversation_refused" } });
-    expect(commands).toBe(1);
+    expect(commands).toBe(2);
   });
 
   it("routes an exact Canvas courses/{id} read through its selected course binding", async () => {
@@ -880,10 +887,10 @@ describe("CanvasConnectorRuntime", () => {
     const runtime = await start();
     const socket = sockets.at(-1)!;
     let commands = 0;
+    const sent: BridgeCommand[] = [];
     respond(socket, (command) => {
       commands += 1;
-      expect(command.toolName).toBe("canvas_create_assignment");
-      expect(command.arguments).toEqual({ course_id: "42", assignment_name: "Connector admission fixture" });
+      sent.push(command);
     });
     const grant = {
       plan_digest: "a".repeat(64),
@@ -897,29 +904,35 @@ describe("CanvasConnectorRuntime", () => {
       assignment_name: "Connector admission fixture",
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: grant },
     })).toMatchObject({ ok: true });
-    // The refusal carries the sentence for the class this write is held in, not one generic line
-    // for every held route.
+    // A person's own nickname is a site request: it is sent through the connection even for a course
+    // other than the selected one, and Canvas decides it with the person's own roles.
     expect(await runtime.call("canvas_set_course_nickname", {
-      course_id: "42",
+      course_id: "7",
       nickname: "Renamed course",
+      _morrow: { source_binding_id: "canvas:test-account", outer_grant: { ...grant, effect_receipt_id: "effect:course-nickname" } },
+    })).toMatchObject({ ok: true });
+    // A held write carries the sentence for its own class, not one generic line for every held route.
+    expect(await runtime.call("canvas_create_line_item", {
+      course_id: "42",
       _morrow: { source_binding_id: "canvas:test-account", outer_grant: grant },
     })).toMatchObject({
       ok: false,
       resultState: "not_sent",
       problem: {
         code: "course_scope_required",
-        message: "Morrow does not change your personal Canvas bookmarks or course nicknames. It only changes content inside a selected course.",
+        message: "Canvas accepts this LTI service only with the LTI tool's own authorization, which your signed-in Canvas session does not hold. Make this change from the LTI tool.",
       },
     });
-    expect(await runtime.call("canvas_clear_course_nicknames", {
-      course_id: "42",
-      _morrow: { source_binding_id: "canvas:test-account", outer_grant: grant },
-    })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_scope_required" } });
+    // The single-nickname read stays bound to the selected course.
     expect(await runtime.call("canvas_get_course_nickname", {
       course_id: "7",
       _morrow: { source_binding_id: "canvas:test-account" },
     })).toMatchObject({ ok: false, resultState: "not_sent", problem: { code: "course_binding_course_mismatch" } });
-    expect(commands).toBe(1);
+    expect(sent.map((command) => [command.toolName, command.arguments])).toEqual([
+      ["canvas_create_assignment", { course_id: "42", assignment_name: "Connector admission fixture" }],
+      ["canvas_set_course_nickname", { course_id: "7", nickname: "Renamed course" }],
+    ]);
+    expect(commands).toBe(2);
   });
 
   it("forwards one exact guarded Assignment image repair only through the current extension", async () => {
@@ -1145,7 +1158,7 @@ describe("CanvasConnectorRuntime", () => {
     respond(socket, (command) => {
       calls += 1;
       expect(command.kind).toBe("invoke_write");
-      expect(command.outerGrant?.effectReceiptId).toBe("effect:connector-test");
+      expect(command.outerGrant?.effectReceiptId).toBe(calls === 1 ? "effect:connector-test" : "effect:connector-site");
     });
     const granted = await runtime.call(write.toolName, {
       course_id: "42",
@@ -1163,31 +1176,36 @@ describe("CanvasConnectorRuntime", () => {
     });
     expect(granted).toMatchObject({ ok: true });
     expect(calls).toBe(1);
-    const unscopedWrite = runtime.catalog.operations.find((operation) => !operation.readOnly && !operation.path.includes("/courses/{course_id}") && !operation.path.includes("/courses/{id}"))!;
-    expect(await runtime.call(unscopedWrite.toolName, {
-      _morrow: {
-        source_binding_id: "canvas:test-account",
-        operation_id: "operation:connector-unscoped",
-        outer_grant: {
-          plan_digest: "a".repeat(64),
-          approval_grant_digest: "b".repeat(64),
-          effect_receipt_id: "effect:connector-unscoped",
-          dispatch_attempt: 1,
-          gateway_process_id: "gateway:connector-test",
-        },
+    // A write that names no course is a site request and is sent once granted, through the named
+    // connection only.
+    const siteWrite = { _morrow: {
+      source_binding_id: "canvas:test-account",
+      operation_id: "operation:connector-site",
+      outer_grant: {
+        plan_digest: "a".repeat(64),
+        approval_grant_digest: "b".repeat(64),
+        effect_receipt_id: "effect:connector-site",
+        dispatch_attempt: 1,
+        gateway_process_id: "gateway:connector-test",
       },
-    })).toMatchObject({ ok: false, problem: { code: "course_scope_required" } });
-    expect(calls).toBe(1);
+    } };
+    expect(await runtime.call("canvas_create_planner_note", { title: "Grade labs", ...siteWrite })).toMatchObject({ ok: true });
+    expect(calls).toBe(2);
+    expect(await runtime.call("canvas_create_planner_note", {
+      title: "Grade labs",
+      _morrow: { ...siteWrite._morrow, source_binding_id: undefined },
+    })).toMatchObject({ ok: false, problem: { code: "course_binding_required" } });
+    expect(calls).toBe(2);
     const held = runtime.catalog.operations.find((operation) => operation.service === "item_bank" && operation.nickname === "update_item")!;
     expect(await runtime.call(held.toolName, { bank_id: "91", item_id: "501", item: { title: "Updated" } }))
       .toMatchObject({ ok: false, problem: { code: "course_binding_required" } });
     const attach = runtime.catalog.operations.find((operation) => operation.service === "item_bank" && operation.nickname === "attach_item")!;
     expect(await runtime.call(attach.toolName, { bank_id: "91", entry_id: "501" }))
       .toMatchObject({ ok: false, problem: { code: "course_binding_required" } });
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
   });
 
-  it("refuses unscoped Canvas reads before Bridge dispatch", async () => {
+  it("sends a Canvas site read through the named connection without a course", async () => {
     const runtime = await start();
     const socket = sockets.at(-1)!;
     let commands = 0;
@@ -1199,12 +1217,8 @@ describe("CanvasConnectorRuntime", () => {
     await expect(runtime.call(unscopedRead.toolName, {
       account_id: "99",
       _morrow: { source_binding_id: "canvas:test-account" },
-    })).resolves.toMatchObject({
-      ok: false,
-      resultState: "not_sent",
-      problem: { code: "course_scope_required" },
-    });
-    expect(commands).toBe(0);
+    })).resolves.toMatchObject({ ok: true, commandKind: "invoke_read" });
+    expect(commands).toBe(1);
   });
 
   it("carries a bounded list resume to the page as a routing control and refuses one on a write", async () => {

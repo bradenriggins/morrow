@@ -783,6 +783,16 @@ function isCanvasConnector(mapping: CatalogTool): boolean {
   return mapping.capability?.route?.backend === "canvas-connector";
 }
 
+/**
+ * A Canvas request that names no course of its own. A site request acts on the connected Canvas site
+ * as the signed-in person, and a course object names an object whose course the Bridge proves before
+ * the change is sent. Neither carries a course to compare with the selected connection here.
+ */
+function canvasCourseFreeScope(mapping: CatalogTool): boolean {
+  const scopeClass = mapping.capability?.authority?.scopeClass;
+  return isCanvasConnector(mapping) && (scopeClass === "site" || scopeClass === "course-object");
+}
+
 function isLmsApiRoute(mapping: CatalogTool): boolean {
   return mapping.capability?.route?.backend === "lms-api";
 }
@@ -1056,6 +1066,20 @@ export function stableEffectTargetIdentity(
     || canonicalTarget.courseId
     // Browser course favorites names the course as `{id}` instead of `course_id`.
     || canonicalTarget.path.find((entry) => entry.resource === "courses")?.id;
+  if (!courseId && canvasCourseFreeScope(mapping)) {
+    // The object, or for a request that names no object the route itself, on this Canvas site. Two
+    // changes to the same object lock each other whichever connection plans them.
+    return sha256Json({
+      schema: "morrow.effect-target.v3",
+      provider: providerScope.provider,
+      origin: providerScope.origin,
+      ...(providerScope.siteUrl ? { siteUrl: providerScope.siteUrl } : {}),
+      scope: "site",
+      entity: canonicalTarget.path.length > 0
+        ? canonicalTarget.path
+        : [{ resource: "operation", id: mappingOperationKey(mapping) || mapping.upstreamName }],
+    });
+  }
   if (!courseId) throw new TypeError("Morrow needs an exact course identity before it can plan a provider effect.");
   // A configured API tenant names the site, so the lock is the tenant, the
   // course, and the object: `{tenantId, courseId, contentId}`, which is the key
@@ -1110,7 +1134,8 @@ function currentEditAuthorization(
     || binding.sourceBindingId !== routing.sourceBindingId
     || binding.runtimeVerified !== true
     || binding.provider !== mapping.capability?.provider
-    || binding.courseId !== (requestCourseId(request) || canonicalProviderTarget(mapping, request).courseId)) return REVIEW_AUTHORIZATION;
+    || (!canvasCourseFreeScope(mapping)
+      && binding.courseId !== (requestCourseId(request) || canonicalProviderTarget(mapping, request).courseId))) return REVIEW_AUTHORIZATION;
   const permission = isJsonObject(binding.editPermission) ? binding.editPermission : null;
   const operationKey = mappingOperationKey(mapping);
   if (!permission
@@ -2901,8 +2926,9 @@ export class GatewayRuntime {
     const sessionGeneration = binding.sessionGeneration;
     if (!sourceBindingId || (provider !== "canvas" && provider !== "moodle" && provider !== "blackboard")
       || mapping.capability?.provider !== provider || binding.sourceBindingId !== sourceBindingId
-      || binding.runtimeVerified !== true || !origin || !expectedCourseId
-      || binding.courseId !== expectedCourseId || !/^[0-9a-f]{64}$/.test(principalFingerprint)
+      || binding.runtimeVerified !== true || !origin
+      || (!canvasCourseFreeScope(mapping) && (!expectedCourseId || binding.courseId !== expectedCourseId))
+      || !/^[0-9a-f]{64}$/.test(principalFingerprint)
       || !Number.isSafeInteger(sessionGeneration) || Number(sessionGeneration) < 1) {
       throw new Error("The selected browser course connection changed. Read current course connections and try again.");
     }
@@ -3258,9 +3284,12 @@ export class GatewayRuntime {
   }
 
   private allowUnrosteredCanvasIdentities(mapping: CatalogTool): boolean {
+    // A site request can return people from any course on the site, and only the selected course's
+    // roster can give them tokens, so everyone else is removed from the result.
     return mapping.capability?.provider === "canvas"
       && (mapping.annotations?.readOnlyHint === true
-        || mapping.capability.authority.dataClass === "course");
+        || mapping.capability.authority.dataClass === "course"
+        || mapping.capability.authority.scopeClass === "site");
   }
 
   private exactString(value: unknown, maximum = 500): string | null {
@@ -6070,7 +6099,8 @@ export class GatewayRuntime {
     if (!isCanvasConnector(mapping) || mapping.capability?.provider !== "canvas") return undefined;
     const sourceBindingId = this.requestSourceBindingId(request);
     const requestedCourseId = this.requestCourseId(request)
-      ?? courseIdFromCourseTarget(mapping, request as JsonObject);
+      ?? courseIdFromCourseTarget(mapping, request as JsonObject)
+      ?? (sourceBindingId && canvasCourseFreeScope(mapping) ? await this.boundCourseId(mapping, request, options) : null);
     if (!sourceBindingId || !requestedCourseId) return undefined;
     const binding = await this.verifiedBrowserBinding(mapping, {
       ...request,
@@ -6083,6 +6113,19 @@ export class GatewayRuntime {
       binding,
       options,
     );
+  }
+
+  /**
+   * The selected course of the named connection. A request that names no course is still made through
+   * one connection, and learner tokens belong to that connection's course roster.
+   */
+  private async boundCourseId(
+    mapping: CatalogTool,
+    request: Readonly<Record<string, unknown>>,
+    options: { readonly signal?: AbortSignal } = {},
+  ): Promise<string | null> {
+    const binding = await this.verifiedBrowserBindingBySource(mapping, request, options);
+    return this.exactString(binding.courseId, 160);
   }
 
   private async canvasLearnerContextForBinding(
@@ -6846,7 +6889,8 @@ export class GatewayRuntime {
     ].find((candidate) => candidate && isCanvasConnector(candidate));
     const mapping = exactMapping || candidates.find((candidate) => candidate.upstreamId === sourceIds[0])!;
     const derivedCourseId = this.requestCourseId(request)
-      ?? courseIdFromCourseTarget(mapping, request as JsonObject);
+      ?? courseIdFromCourseTarget(mapping, request as JsonObject)
+      ?? (canvasCourseFreeScope(mapping) ? await this.boundCourseId(mapping, request, options) : null);
     const bindingRequest = derivedCourseId ? { ...request, course_id: derivedCourseId } : request;
     const binding = await this.verifiedBrowserBinding(mapping, bindingRequest, options);
     const scopedMapping = this.browserProviderMapping(mapping, binding);
