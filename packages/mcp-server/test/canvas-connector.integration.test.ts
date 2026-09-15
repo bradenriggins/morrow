@@ -629,6 +629,40 @@ describe("Canvas connector gateway path", () => {
       expect(writeCommands).toBe(0);
     }, CASE_TIMEOUT_MS);
 
+    it("marks a Canvas list that stopped at its page bound as limited", async () => {
+      await bindingsApplied();
+      partialQuiz = true;
+      try {
+        const listed = await runtime.call("canvas_list_quiz_items", {
+          course_id: "42", assignment_id: "77",
+          _morrow: { source_binding_id: sourceBindingId },
+        });
+        expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+        expect(listed.structuredContent).toMatchObject({
+          schema: "morrow.result.v1",
+          status: "succeeded",
+          completeness: "limited",
+        });
+        const limitations = (listed.structuredContent as JsonObject).limitations as string[];
+        expect(limitations).toHaveLength(1);
+        expect(limitations[0]).toContain("stops at the page bound");
+      } finally {
+        partialQuiz = false;
+      }
+      expect(writeCommands).toBe(0);
+    }, CASE_TIMEOUT_MS);
+
+    it("keeps a Canvas list that read every page complete", async () => {
+      await bindingsApplied();
+      const listed = await runtime.call("canvas_list_quiz_items", {
+        course_id: "42", assignment_id: "77",
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(listed.isError, JSON.stringify(listed)).not.toBe(true);
+      expect(listed.structuredContent).toMatchObject({ completeness: "complete", limitations: [] });
+      expect(writeCommands).toBe(0);
+    }, CASE_TIMEOUT_MS);
+
     it("checks the structure of two New Quizzes and writes nothing", async () => {
       // The report keeps question titles and counts, never a question body.
       expect(repeatedBody.length).toBe(2_107);

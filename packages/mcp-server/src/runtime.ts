@@ -3148,6 +3148,28 @@ export class GatewayRuntime {
     return upstream?.outputPrivacy[mapping.upstreamName] || upstream?.outputPrivacyDefault;
   }
 
+  /**
+   * A browser list read stops at its own page bound and says so on the source
+   * result. Morrow's internal readers already refuse a truncated list, so the
+   * public result must not present the same rows as the complete set.
+   */
+  private sourceListLimitations(raw: JsonObject): readonly string[] {
+    const connector = isJsonObject(raw.structuredContent) ? raw.structuredContent : null;
+    const browser = connector && isJsonObject(connector.result) ? connector.result : null;
+    if (raw.isError === true
+      || connector?.schema !== "morrow.canvas-connector.result.v1"
+      || connector.commandKind !== "invoke_read"
+      || browser?.schema !== "morrow.canvas-browser-result.v1"
+      || browser.ok !== true
+      || browser.truncated !== true) return [];
+    const unread = Number.isSafeInteger(browser.morrow_unread_pages) && Number(browser.morrow_unread_pages) >= 1
+      ? Number(browser.morrow_unread_pages)
+      : null;
+    return [unread === null
+      ? "This list stops at the page bound for this read. Read the remaining pages before treating these entries as the complete set."
+      : `This list stops at the page bound for this read and leaves ${unread} more provider page${unread === 1 ? "" : "s"} unread. Read the remaining pages before treating these entries as the complete set.`];
+  }
+
   private allowUnrosteredCanvasIdentities(mapping: CatalogTool): boolean {
     return mapping.capability?.provider === "canvas"
       && (mapping.annotations?.readOnlyHint === true
@@ -7461,11 +7483,15 @@ export class GatewayRuntime {
         if (!gatewayOperationId) throw new Error("gateway read delivery evidence is unavailable");
         this.journal.recordPublicReadDelivered(gatewayOperationId);
       }
+      const sourceListLimitations = this.sourceListLimitations(raw);
       return canonicalMorrowResult({
         result,
         tool: publicName,
         backend: mapping.upstreamId,
         phase: "read",
+        ...(sourceListLimitations.length
+          ? { completeness: "limited" as const, limitations: sourceListLimitations }
+          : {}),
         verificationStatus: "not_applicable",
       });
     }
