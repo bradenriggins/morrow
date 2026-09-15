@@ -448,6 +448,41 @@ describe("Canvas connector gateway path", () => {
       expect(writeCommands).toBe(0);
     });
 
+    it("names the exact Edit-options refusal when the saved permission and the Edit detail disagree", async () => {
+      activeEditPermission = detailedEditPermission("canvas_page_content");
+      bridge!.updateBindings([binding(false)]);
+      await bindingsApplied();
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+      const server = serveStdio(() => createFullMorrowServer(morrow), { transport: serverTransport });
+      const client = new Client(
+        { name: "morrow-canvas-edit-options-mismatch", version: "1" },
+        { versionNegotiation: { mode: { pin: "2026-07-28" } } },
+      );
+      try {
+        await client.connect(clientTransport);
+        const editOptions = await client.callTool({
+          name: "morrow_capability_read",
+          arguments: { name: "morrow_browser_edit_options", arguments: { source_binding_id: sourceBindingId } },
+        });
+        expect(editOptions.isError).toBe(true);
+        expect(editOptions.structuredContent).toMatchObject({
+          schema: "morrow.result.v1",
+          tool: "morrow_browser_edit_options",
+          status: "failed",
+          phase: "read",
+          data: { schema: "morrow.problem.v1", code: "privacy_edit_options_binding_changed" },
+        });
+        expect(JSON.stringify(editOptions)).not.toContain("learner_roster_binding_unavailable");
+      } finally {
+        await client.close();
+        await server.close();
+        activeEditPermission = detailedEditPermission("canvas_page_content");
+        bridge!.updateBindings([binding()]);
+        await bindingsApplied();
+      }
+      expect(writeCommands).toBe(0);
+    });
+
     it("publishes an oversized live-shape Edit catalog through a final bounded artifact", async () => {
       activeEditPermission = undefined;
       activeEditOptions = Array.from({ length: 150 }, (_, index) => ({

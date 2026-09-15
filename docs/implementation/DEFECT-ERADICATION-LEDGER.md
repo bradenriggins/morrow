@@ -450,6 +450,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 433 | P2 | R7 | The generic Desktop setup failure tells the user that a newer assistant setting was preserved even when the failure came from an unrelated Bridge or runtime boundary. | closure section 433; public error contract and live installed-app regression | IMPLEMENTED |
 | 434 | P1 | R7 | With exactly one connected course, loopback adds that course as a top-level field to the multi-binding Edit-policy command, so the strict Bridge rejects every native Edit confirmation before any access is saved. | closure section 434; loopback regression and live BT2 receipt | VERIFIED |
 | 435 | P0 | R3 | Canvas completes and verifies a course-authoring write, but Morrow replaces the success with a learner-roster privacy error when the response names an instructor outside the student roster. | closure section 435; Canvas connector regression and live BT2 Page receipt | IMPLEMENTED |
+| 436 | P0 | R3 | A refusal Morrow raised inside its own canonical result envelope is routed onward to the course-roster egress contract, so every Edit-options failure cause is reported as a learner-privacy failure and the exact cause is destroyed. | closure section 436; Canvas connector regression and live BT2 Edit-options readback | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2925,7 +2926,15 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: the Canvas connector returns a verified course write with an unrostered instructor in `last_edited_by` and a roster learner in free text. Dispatch and operation-scoped MCP egress must succeed while omitting both identities.
 - Status: `IMPLEMENTED`; packaged live verification pending.
 
-### Root-cause patterns for rows 331–435
+### 436: an enveloped refusal is re-reported as a learner-privacy failure
+
+- Verified defect: with a saved Edit permission that the Bridge Edit-options detail still reports and the saved binding no longer carries, `morrow_browser_edit_options` returned `learner_roster_binding_unavailable` instead of its own exact cause. The installed BT2 build reproduced it on three consecutive live reads after the 30-minute Edit permission lapsed, and the Canvas connector harness reproduces it exactly.
+- Root cause: the MCP egress boundary preserved a Morrow refusal only in its bare `morrow.problem.v1` form. A read that has already named the tool it refused answers inside a `morrow.result.v1` envelope that holds the same problem in `data`. That shape did not match, so the refusal continued to the Canvas roster-scoped native egress. `morrow_browser_edit_options` addresses a binding and intentionally carries no `course_id`, so no learner context could be built and the roster boundary raised its own error over the real one.
+- Repair: the boundary now recognises a Morrow refusal in both forms and keeps its exact code. An enveloped refusal is rebuilt from the envelope's own fixed identity fields, so the caller keeps the shape it was answered in and the precise cause survives.
+- Regression: the Canvas connector harness makes the saved permission and the Edit detail disagree, then requires `privacy_edit_options_binding_changed` inside a failed `morrow.result.v1` envelope and forbids the learner-roster code.
+- Status: `IMPLEMENTED`; packaged live verification pending.
+
+### Root-cause patterns for rows 331–436
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -2947,6 +2956,7 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **Fallback recovery text names one unrelated cause:** row 433. Generic setup failure now gives only generic recovery; typed failures retain their own fixed guidance.
 - **Convenience inference crosses a stricter command boundary:** row 434. Implicit sole-course selection is limited to commands that require one course; commands with their own multi-course scope retain only that exact scope representation.
 - **The same course-data result gets weaker privacy authority after a write:** row 435. Course author and editor identities use one scrub-only rule at source projection and final egress, independent of whether Canvas produced the object from a read or verified mutation.
+- **A refusal carried inside its own envelope is treated as an unclassified payload:** row 436. Morrow's own refusal keeps its exact code in both its bare and enveloped forms, so a control read never borrows the course-roster contract to explain itself.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.

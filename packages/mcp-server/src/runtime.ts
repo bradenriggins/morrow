@@ -7171,10 +7171,25 @@ export class GatewayRuntime {
       ? structuredClone(result)
       : this.resultArtifacts.bound(result);
     try {
+      // A refusal Morrow raised for itself carries no provider payload. It
+      // arrives bare, and inside its own canonical envelope once the read path
+      // has already named the tool it refused. Both forms keep the exact code
+      // here. An enveloped refusal that continues past this point reaches the
+      // course-roster contract instead, which has no course to resolve for a
+      // browser control read, so every distinct cause would be reported as a
+      // learner-privacy failure.
+      const envelopedProblem = value.isError === true && isJsonObject(value.structuredContent)
+        && value.structuredContent.schema === "morrow.result.v1"
+        && isJsonObject(value.structuredContent.data)
+        && value.structuredContent.data.schema === "morrow.problem.v1"
+        ? value.structuredContent
+        : null;
       const problem = value.isError === true && isJsonObject(value.structuredContent)
         && value.structuredContent.schema === "morrow.problem.v1"
         ? value.structuredContent
-        : null;
+        : envelopedProblem && isJsonObject(envelopedProblem.data)
+          ? envelopedProblem.data
+          : null;
       const problemCode = problem && typeof problem.code === "string"
         && /^[a-z0-9_]{1,160}$/u.test(problem.code)
         && /^(?:privacy_|capability_)/u.test(problem.code)
@@ -7184,7 +7199,7 @@ export class GatewayRuntime {
         const resultState = problem && ["not_sent", "sent", "unknown"].includes(String(problem.resultState))
           ? String(problem.resultState)
           : null;
-        return finish({
+        const refusal: JsonObject = {
           content: [{
             type: "text",
             text: problemCode.startsWith("privacy_")
@@ -7197,7 +7212,21 @@ export class GatewayRuntime {
             code: problemCode,
             ...(resultState ? { resultState } : {}),
           },
-        });
+        };
+        if (!envelopedProblem) return finish(refusal);
+        // Rebuild the envelope from its own fixed identity fields so the
+        // refusal keeps the shape the caller was answered in.
+        const refusedOperationId = this.exactString(envelopedProblem.operationId, 160);
+        const refusedEffectState = this.exactString(envelopedProblem.effectState, 40);
+        return finish(canonicalMorrowResult({
+          result: refusal,
+          tool: this.exactString(envelopedProblem.tool, 128) || options.toolName || "morrow",
+          backend: this.exactString(envelopedProblem.backend, 128) || "gateway",
+          phase: this.exactString(envelopedProblem.phase, 40) || "read",
+          ...(refusedOperationId ? { operationId: refusedOperationId } : {}),
+          ...(refusedEffectState ? { effectState: refusedEffectState } : {}),
+          verificationStatus: "not_applicable",
+        }));
       }
       const assertHistoryDictionary = (entry: unknown): void => {
         if (Array.isArray(entry)) { entry.forEach(assertHistoryDictionary); return; }
