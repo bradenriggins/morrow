@@ -298,7 +298,7 @@ function actionPanel(current, { chosenAssistantId = null } = {}) {
     return {
       title: "Reload Morrow Bridge.",
       copy: "Morrow staged a verified Bridge update. Chrome must reload Morrow Bridge before Morrow can check the update.",
-      body: '<ol class="instructions"><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>Find <strong>Morrow Bridge</strong> on that page and select <strong>Reload</strong>.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button></div>',
+      body: '<ol class="instructions"><li>In Chrome, open the <strong>three-dot menu</strong>, select <strong>Extensions</strong>, then <strong>Manage Extensions</strong>.</li><li>Find <strong>Morrow Bridge</strong> on that page and select <strong>Reload</strong>.</li><li>Return here and select <strong>Check Bridge</strong>.</li></ol><div class="inline-actions"><button class="primary-button" type="button" data-action="check-bridge">Check Bridge</button><button class="secondary-button" type="button" data-action="repair">Restore previous Bridge</button></div>',
     };
   }
   if (bridge.updateAvailable === true) {

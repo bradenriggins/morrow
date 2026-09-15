@@ -444,6 +444,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 427 | P1 | R6 | A staged Bridge update retains old bytes but discards the exact prior installation receipt, so Repair cannot restore it safely. | closure section 427; transactional rollback regression | IMPLEMENTED |
 | 428 | P2 | R6 | An unrelated assistant configuration edit makes Desktop report Morrow as unconfigured. | closure section 428; client configuration and Desktop regressions | IMPLEMENTED |
 | 429 | P2 | R6 | A safe Bridge maintenance lease refusal is flattened into a repair instruction. | closure section 429; Desktop controller regression | IMPLEMENTED |
+| 430 | P1 | R7 | A staged Bridge update can be rolled back by the repair controller, but the pending-update screen does not expose that action, so a failed or unavailable Chrome reload has no in-product recovery path. | closure section 430; setup-view and live installed-app regressions | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2870,7 +2871,15 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: a refused restart lease carries the exact typed code and never becomes a repair-required error.
 - Status: `IMPLEMENTED`.
 
-### Root-cause patterns for rows 331–429
+### 430: staged Bridge rollback is unreachable
+
+- Verified defect: the installed app can safely roll back a staged Bridge update, but the pending-update screen exposed only the Chrome reload check. A reload that could not be completed left the user with no in-product recovery action.
+- Root cause: the rollback was implemented in the controller without adding the matching action to the one renderer state that needs it.
+- Repair: the pending-update panel now exposes **Restore previous Bridge** through the existing guarded repair IPC path. The controller verifies both generations, restores the exact previous installation record and bytes, resumes the exact fenced worker, and refreshes setup state.
+- Regression: the setup-view test requires both update confirmation and rollback actions in the pending state. The installed-app proof must use the new control and verify the restored record, worker version, pairing, selected course, and first-read receipt.
+- Status: `IMPLEMENTED`.
+
+### Root-cause patterns for rows 331–430
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -2886,6 +2895,7 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **Release identity split across incompatible boundaries:** rows 402, 424–427. Desktop, packaging, disk maintenance, and the loaded worker now share a monotonic Chrome version plus an exact sealed digest. Pending updates retain both complete installation generations until commit or rollback finishes.
 - **A mutation guard reused as observational truth:** row 428. Whole-file digests guard later writes, while read-only state verifies the exact owned entry and tolerates unrelated settings.
 - **Typed operational refusal erased by sanitization:** rows 403 and 429. Closed error contracts retain enough evidence to name the failed boundary and the correct recovery without exposing provider or runtime details.
+- **A backend recovery without a reachable product action:** row 430. The renderer exposes the exact guarded controller transition in the state where recovery is needed.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.
