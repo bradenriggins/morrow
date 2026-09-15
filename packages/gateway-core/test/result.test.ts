@@ -54,6 +54,19 @@ describe("normalizeUpstreamResult", () => {
     });
   });
 
+  it("describes a repeated request by the state its saved operation already reached", () => {
+    const verified = canonicalMorrowResult({ tool: "canvas_create_page_courses", phase: "planned", effectState: "verified", verificationStatus: "verified", provider: "canvas" });
+    expect(verified.content).toEqual([{ type: "text", text: "Morrow already confirmed this change with a fresh Canvas check. It sent nothing again." }]);
+    expect(JSON.stringify(verified)).not.toContain("Morrow planned.");
+    const closed = canonicalMorrowResult({ tool: "canvas_create_page_courses", phase: "planned", effectState: "closed_by_person", verificationStatus: "not_requested" });
+    expect(closed.content).toEqual([{ type: "text", text: "A person already closed this request after reading the saved item. Morrow sent nothing again." }]);
+    const providerText = canonicalMorrowResult({
+      tool: "canvas_create_page_courses", phase: "verified_readback", effectState: "verified", verificationStatus: "verified",
+      result: { content: [{ type: "text", text: "Morrow confirmed the Canvas change with a fresh Canvas check." }] },
+    });
+    expect(providerText.content).toEqual([{ type: "text", text: "Morrow confirmed the Canvas change with a fresh Canvas check." }]);
+  });
+
   it("uses trusted effect state for indeterminate and unconfirmed Canvas write text", () => {
     const indeterminate = canonicalMorrowResult({
       tool: "canvas_page_update",

@@ -449,15 +449,17 @@ Every row stays open until its evidence columns are added and its status becomes
 | 432 | P1 | R7 | Dedicated Bridge rollback stops the local owner before asking that owner for the Bridge maintenance lease, so the control plane needed to resume the fenced worker is unavailable. | closure section 432; controller and live installed-app regressions | IMPLEMENTED |
 | 433 | P2 | R7 | The generic Desktop setup failure tells the user that a newer assistant setting was preserved even when the failure came from an unrelated Bridge or runtime boundary. | closure section 433; public error contract and live installed-app regression | IMPLEMENTED |
 | 434 | P1 | R7 | With exactly one connected course, loopback adds that course as a top-level field to the multi-binding Edit-policy command, so the strict Bridge rejects every native Edit confirmation before any access is saved. | closure section 434; loopback regression and live BT2 receipt | VERIFIED |
-| 435 | P0 | R3 | Canvas completes and verifies a course-authoring write, but Morrow replaces the success with a learner-roster privacy error when the response names an instructor outside the student roster. | closure section 435; Canvas connector regression and live BT2 Page receipt | IMPLEMENTED |
+| 435 | P0 | R3 | Canvas completes and verifies a course-authoring write, but Morrow replaces the success with a learner-roster privacy error when the response names an instructor outside the student roster. | closure section 435; Canvas connector regression and live BT2 Page receipt | VERIFIED |
 | 436 | P0 | R3 | A refusal Morrow raised inside its own canonical result envelope is routed onward to the course-roster egress contract, so every Edit-options failure cause is reported as a learner-privacy failure and the exact cause is destroyed. | closure section 436; Canvas connector regression | IMPLEMENTED |
-| 437 | P0 | R3 | A Canvas list read that stopped at its own page bound is published with `completeness: "complete"` and no limitation, so a caller treats a partial list as the complete set. | closure section 437; Canvas connector regressions and live BT2 page-list readback | IMPLEMENTED |
+| 437 | P0 | R3 | A Canvas list read that stopped at its own page bound is published with `completeness: "complete"` and no limitation, so a caller treats a partial list as the complete set. | closure section 437; Canvas connector regressions and live BT2 page-list readback | VERIFIED |
 | 438 | P0 | R7 | Replacing the installed application and relaunching it leaves the previous build's gateway owner process serving every request, so a repaired build is not in service and the product reports the old behaviour. | closure section 438; local-owner build-replacement integration regression; live process evidence on 2026-09-15 | IMPLEMENTED |
-| 439 | P1 | R3 | A Canvas 404 read after a verified delete is reported as "Morrow refused unsafe upstream output", so the proof that a delete landed reads as a safety refusal. | closure section 439; gateway privacy regressions; live BT2 absence readback | IMPLEMENTED |
-| 440 | P0 | R7 | The Bridge offers and grants Edit actions the gateway cannot invoke, so a person enables an action that then fails with an unrelated error. | closure section 440; Canvas connector regression; shared admission and catalog contract tests; live BT2 Edit-options diff | IMPLEMENTED |
-| 441 | P2 | R3 | A held capability is reported as an unknown name with the text "input is invalid", and capability lookup says "Here is the tool" for a name it cannot return. | closure section 441; Canvas connector regression | IMPLEMENTED |
-| 442 | P0 | R7 | A paired Bridge has no persistent wake to reconnect, so after Morrow's gateway restarts it can stay disconnected until Chrome restarts. | closure section 442; extension lifecycle regression; live BT2 disconnect on 2026-09-15 | IMPLEMENTED |
+| 439 | P1 | R3 | A Canvas 404 read after a verified delete is reported as "Morrow refused unsafe upstream output", so the proof that a delete landed reads as a safety refusal. | closure section 439; gateway privacy regressions; live BT2 absence readback | VERIFIED |
+| 440 | P0 | R7 | The Bridge offers and grants Edit actions the gateway cannot invoke, so a person enables an action that then fails with an unrelated error. | closure section 440; Canvas connector regression; shared admission and catalog contract tests; live BT2 Edit-options diff | VERIFIED |
+| 441 | P2 | R3 | A held capability is reported as an unknown name with the text "input is invalid", and capability lookup says "Here is the tool" for a name it cannot return. | closure section 441; Canvas connector regression | VERIFIED |
+| 442 | P0 | R7 | A paired Bridge has no persistent wake to reconnect, so after Morrow's gateway restarts it can stay disconnected until Chrome restarts. | closure section 442; extension lifecycle regression; live BT2 disconnect on 2026-09-15 | VERIFIED |
 | 443 | P1 | R3 | A course read on a connection whose signed-in Canvas tab no longer proves it reports `learner_roster_binding_unavailable` instead of telling the person to reconnect the course. | closure section 443; Canvas connector regression; live BT2 read after Chrome restart | IMPLEMENTED |
+| 444 | P1 | R7 | After a staged Bridge update and a Chrome reload, Check Bridge in the Desktop app returned no result and no error and left the update pending until the app restarted. | closure section 444; live Desktop observation on 2026-09-15 | OPEN |
+| 445 | P2 | R3 | Repeating a change request that already verified returns the saved verified operation under the text "Morrow planned." | closure section 445; gateway result regression; live BT2 replay receipt | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -2998,7 +3000,35 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - Regression: the Canvas connector harness publishes the binding unverified and requires the reconnect code and sentence, with no provider write.
 - Status: `IMPLEMENTED`; packaged live verification pending.
 
-### Root-cause patterns for rows 331–443
+### Live verification on 2026-09-15, v33 (commit `144e7c0cf`, Bridge 1.0.9)
+
+Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:5381de17df52cb77eb87:g10:c89585`. Receipt: `output/live-bt2-final-package-v33/live-proof/live-proof-receipt.json`.
+
+- Row 435: `canvas_create_page_courses` returned `verified` with HTTP 200 and the Canvas editor identity scrubbed; no learner-roster refusal.
+- Row 437: on v32, `canvas_list_pages_courses` returned `completeness: limited` with six unread provider pages, and `_morrow.list_resume` continuation read all 306 pages. The v33 limitation text names that continuation input.
+- Row 439: the read after the verified delete returned HTTP 404 with "Canvas could not find this item (HTTP 404)."
+- Row 440: `canvas_delete_topic_courses` appears as review-only with its catalog reason, and `morrow_request_edit_access` refuses it with `edit_access_category_unavailable`. The three Page actions were granted.
+- Row 441: `morrow_capability_get` and `morrow_capability_change` return `capability_unavailable` with the catalog reason for a held tool, and the not-found sentence for an unknown name.
+- Row 442: after the local owner was stopped, the Bridge reconnected in 8 seconds without a Chrome restart and the course stayed verified. The worker was awake in this run, so the alarm path itself is proved by the extension lifecycle regression, not by this observation.
+- Replay: repeating the create with the same operation ID returned the same effect receipt and sent nothing.
+- Not live-proved: rows 436, 438, and 443 rest on their regressions.
+- Cleanup: 62 disposable Morrow Pages were deleted with verified readback. Discussion topic `1208433` and announcement `1196885` (`MORROW_ANN_1783294620574`, published) remain. Morrow correctly holds topic deletion, so they need removal in Canvas.
+
+### 444: Check Bridge returned nothing while an update was pending
+
+- Verified condition: Morrow staged Bridge 1.0.9 at 11:04 and held the maintenance lease. Chrome was restarted and the Bridge answered `manifestVersion: 1.0.9`, `quiescent: true`, and a matching active-folder proof through the owner. Repeated Check Bridge selections showed no success, no problem, and no state change, and the installation record kept `pendingUpdate`. After the Morrow app restarted, the lease was released and the first Check Bridge completed the update.
+- Not yet established: which await in the reconciliation did not settle, or whether a refusal was produced but not shown. The next action is to reproduce it under the Desktop controller with a deadline on every Bridge maintenance call and to render any refusal.
+- Status: `OPEN`.
+
+### 445: a repeated verified request reads as planned
+
+- Verified defect: the live BT2 replay of a verified Page create returned `status: verified` and `effectState: verified` with `phase: planned` and the text "Morrow planned."
+- Root cause: the canonical result gave a sentence for every effect state except `verified` and `closed_by_person`. A repeated request returns the saved operation with no new provider answer, so it fell through to the phase label of the repeated call.
+- Repair: a result for a verified or person-closed operation with no provider content states that Morrow already reached that state and sent nothing again. Provider content, when present, is still returned.
+- Regression: the gateway result suite requires both sentences and keeps provider text for a first verified dispatch.
+- Status: `IMPLEMENTED`.
+
+### Root-cause patterns for rows 331–445
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.
@@ -3025,7 +3055,7 @@ Recorded from the independent Fable 5.1 audit of branch `codex/defect-root-eradi
 - **A long-lived process keeps serving after the files it was built from are replaced:** row 438. Evidence for a build is valid only when the process that produced it started after that build was installed.
 - **A recovery path depends on a timer the platform may discard:** row 442. A connection that must recover after its peer restarts is woken by a platform event that survives suspension.
 - **One component decides for another it cannot see:** row 440. Write support is one shared decision, and the side that invokes an action decides whether it can be granted.
-- **A refusal sentence names the wrong cause:** rows 439, 441, and 443. Each code has its own sentence, and a validated provider outcome is described as that outcome.
+- **A sentence names the wrong state or cause:** rows 439, 441, 443, and 445. Each code has its own sentence, and a validated provider outcome is described as that outcome.
 - **A control result sent through a resource privacy contract:** row 383. Fixed local connection health now has its own closed-schema projector instead of borrowing the course-and-roster egress path.
 - **Provider schema syntax mistaken for provider semantics:** rows 384 and 389. Container shape is resolved before scalar identity, IDs are identified by meaning instead of format alone, and enums constrain array elements rather than the container.
 - **Provider clearing semantics mistaken for omission:** row 385. Explicit `null` remains a reviewed clear operation through the request adapter and becomes the provider's empty form value.

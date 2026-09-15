@@ -92,9 +92,22 @@ function canonicalContent(
       text: "This request did not complete. Ask your assistant to check the existing request.",
     }];
   }
-  return Array.isArray(upstream.content)
-    ? structuredClone(upstream.content) as JsonObject[]
-    : [{ type: "text", text: `Morrow ${input.phase.replaceAll("_", " ")}.` }];
+  if (Array.isArray(upstream.content)) return structuredClone(upstream.content) as JsonObject[];
+  // A repeated request returns the saved operation without a new provider answer. Its sentence
+  // follows the state that operation already reached, not the phase of the repeated call.
+  if (input.effectState === "verified") {
+    return [{
+      type: "text",
+      text: `Morrow already confirmed this change with a fresh ${provider} check. It sent nothing again.`,
+    }];
+  }
+  if (input.effectState === "closed_by_person") {
+    return [{
+      type: "text",
+      text: "A person already closed this request after reading the saved item. Morrow sent nothing again.",
+    }];
+  }
+  return [{ type: "text", text: `Morrow ${input.phase.replaceAll("_", " ")}.` }];
 }
 
 export function canonicalMorrowResult(input: CanonicalMorrowResultInput): JsonObject {
