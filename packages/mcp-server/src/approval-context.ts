@@ -27,6 +27,8 @@ export interface ApprovalReviewContext {
     readonly field: string;
     readonly label: string;
     readonly name: string;
+    /** Canvas answered and does not hold this object any more. */
+    readonly state?: "absent";
     readonly url?: string;
   }[];
   readonly limited?: boolean;
@@ -137,6 +139,19 @@ function planArguments(operation: ApprovalReviewOperation): JsonObject | null {
   const routing = args ? object(args._morrow) : null;
   if (!args || !routing || routing.source_binding_id !== operation.sourceBindingId) return null;
   return args;
+}
+
+/**
+ * Canvas answered this read, whether or not it holds the object. A reading that
+ * never reached Canvas is a different thing from one that did and found nothing,
+ * and the person is told which.
+ */
+function canvasAnswered(result: JsonObject | null): boolean {
+  if (!result || result.isError === true) return false;
+  const content = object(result.structuredContent);
+  if (!content || content.schema !== "morrow.canvas-connector.result.v1" || content.commandKind !== "invoke_read") return false;
+  const browser = object(content.result);
+  return Boolean(browser && browser.sent === true);
 }
 
 function canvasEntity(result: JsonObject): JsonObject | null {
@@ -805,6 +820,9 @@ function resolvedTarget(
     field: target.field,
     label: target.label,
     name: name || "",
+    // Canvas answered and does not hold this object: it was renamed, moved or
+    // removed since the change was prepared. That is not a broken connection.
+    ...(name || !canvasAnswered(result) ? {} : { state: "absent" as const }),
     ...(name && target.urlPath ? { url: safeCanvasUrl(origin, target.urlPath) } : {}),
   };
 }

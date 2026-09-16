@@ -181,11 +181,13 @@ describe("approval review context", () => {
     }, ["canvas_show_planner_note"]);
     expect(note.targets).toEqual([{ field: "id", label: "Planner note", name: "Planner note 2228" }]);
 
-    // A read that answers about a different object names nothing.
+    // A read that answers about a different object names nothing, and Canvas
+    // answering without the object is reported as the object being gone rather
+    // than as a connection Morrow could not use.
     const wrong = await review("canvas_delete_bookmark", "bookmarks", { id: "841" }, {
       canvas_get_bookmark: { id: 999, name: "Someone else" },
     }, ["canvas_get_bookmark"]);
-    expect(wrong.targets).toEqual([{ field: "id", label: "Bookmark", name: "" }]);
+    expect(wrong.targets).toEqual([{ field: "id", label: "Bookmark", name: "", state: "absent" }]);
   });
 
   it("uses the saved binding to resolve exact course and New Quiz names after completion", async () => {
@@ -230,10 +232,13 @@ describe("approval review context", () => {
       },
     });
 
+    // Canvas answered about other objects, so what this change names is not what
+    // Canvas holds. It stays unresolved, and the review says that rather than
+    // sending the person to check a connection that is working.
     expect(context).toEqual({
       targets: [
-        { field: "course_id", label: "Course", name: "" },
-        { field: "assignment_id", label: "Quiz", name: "" },
+        { field: "course_id", label: "Course", name: "", state: "absent" },
+        { field: "assignment_id", label: "Quiz", name: "", state: "absent" },
       ],
     });
   });

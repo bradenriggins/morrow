@@ -484,6 +484,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 467 | P2 | R3 | An operation record said a change failed and never said why, because Morrow's own account was withheld with the provider's content. | closure section 467; batch and connector projection regressions | IMPLEMENTED |
 | 468 | P1 | R7 | The 85 Canvas routes whose subject is the signed-in person refused `self`, and following Canvas's own paginated answer for such a route was refused as a foreign path. | closure section 468; catalog and pagination regressions, live BT2 course 89585 | IMPLEMENTED |
 | 469 | P3 | R7 | Marking every conversation read was sent unchecked although Canvas answers its exact postcondition. | closure section 469; Canvas verification regressions, live BT2 course 89585 | IMPLEMENTED |
+| 470 | P2 | R3 | A change whose item Canvas no longer has told the person to check their Canvas connection, which was working; renaming a Page changes its address, so this was reachable through ordinary use. | closure section 470; approval context and approval page regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3242,7 +3243,15 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Split: 341 admitted writes now read back exactly and 199 remain Review only, down from 340 and 200.
 - Status: `IMPLEMENTED`; proven live in BT2 course 89585.
 
-### Root-cause patterns for rows 331–469
+### 470: a change whose item Canvas no longer has sent the person to fix their connection
+
+- Product decision: a person is told what is true and what to do next.
+- Condition: the review held any change it could not name behind one sentence: "Morrow could not identify the course or a selected item in Canvas. Nothing can be approved here until those details load. Check your Canvas connection, then reload this page." Canvas changes a Page's address when its title changes, so a change prepared against the old address names something Canvas no longer has. The connection was working, reloading changed nothing, and the person was sent to fix something that was not broken. Live BT2 reproduced it: a Page renamed through Morrow, then a deletion against its former address, refused with that sentence.
+- Repair: a reading that reached Canvas and did not find the object marks that target `absent`, which a reading that never reached Canvas does not. The review then says Canvas does not have the item this change names, that it may have been renamed, moved or removed since the change was prepared, and to ask Morrow for a new review against the current content. A connection Morrow could not use still says so.
+- Split: both sentences are pinned by regressions, and live BT2 showed the new one for a renamed Page.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### Root-cause patterns for rows 331–470
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

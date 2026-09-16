@@ -712,6 +712,13 @@ function reviewState(target: ApprovalTarget, snapshot: JsonObject): string {
  * reaches no named object, such as one that only carries content, is shown by
  * its exact request and can be approved.
  */
+/** Canvas answered for every unnamed target and holds none of them. */
+function absentTargets(operations: readonly JsonObject[], contexts: ReadonlyMap<string, ApprovalReviewContext>): boolean {
+  const unnamed = operations.flatMap((operation) => (contexts.get(String(operation.operationId))?.targets || [])
+    .filter((target) => !target.name.trim()));
+  return unnamed.length > 0 && unnamed.every((target) => target.state === "absent");
+}
+
 function namedTargetsMissing(operations: readonly JsonObject[], contexts: ReadonlyMap<string, ApprovalReviewContext>): boolean {
   return operations.some((operation) => {
     const plan = object(operation.plan);
@@ -959,7 +966,11 @@ function html(target: ApprovalTarget, snapshot: JsonObject, nonce: string, conte
   const next = (limited
     ? '<p class="warning">Too many different courses or activities to review at once.</p><p>Return to your assistant and ask Morrow to split this into smaller groups. This page has not approved any changes.</p>'
     : missingNames
-    ? '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
+    ? absentTargets(operations, contexts)
+      // Canvas answered and no longer holds what this change names, so the change
+      // cannot be applied and checking the connection would not help.
+      ? '<p class="warning">Canvas does not have the item this change names. It may have been renamed, moved, or removed since this change was prepared.</p><p>Return to your assistant and ask Morrow to read the latest Canvas content and prepare a new review. This page has not changed anything.</p>'
+      : '<p class="warning">Morrow could not identify the course or a selected item in Canvas.</p><p>Nothing can be approved here until those details load. Check your Canvas connection, then reload this page.</p>'
     : `<p>${batch ? `Morrow will apply all ${plans.length} changes and check each result in Canvas. Searching does not change what you approve.` : addingQuestion ? "Morrow will add this question and check it in Canvas." : "Morrow applies these changes and checks them in Canvas."}</p><p class="keep-open">${keepOpenInstruction(platform)}</p>`).replaceAll("Canvas", platform);
   const approveForm = missingNames ? "" : `<form method="post" action="/${target.kind}/${escapedId}/approve"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="approve" type="submit">${approveLabel}</button></form>`;
   return pageShell(title, `<header class="hero"><h1>${escapeHtml(title)}</h1>${requestedByLine(snapshot, plans)}${batchSummary}${risks.map((risk) => `<p class="warning">${escapeHtml(risk)}</p>`).join("")}</header>${reviewContent}<footer class="decision"><div class="next-step">${next}</div><div class="actions">${approveForm}<form method="post" action="/${target.kind}/${escapedId}/cancel"><input type="hidden" name="nonce" value="${escapeHtml(nonce)}"><button class="cancel" type="submit">Cancel</button></form></div><details><summary>Technical details</summary><p class="details-help">Approval is for this request only and expires at ${escapeHtml(expiresAt)}. Changes are not undone automatically.</p><pre>${summary}</pre></details></footer>`);

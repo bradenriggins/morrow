@@ -615,6 +615,23 @@ describe("outer provider effects", () => {
       const held = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
       expect(held).toContain("Morrow could not identify the course or a selected item in Canvas.");
       expect(held).not.toContain('class="approve"');
+
+      // Canvas answered and no longer holds the item: renaming a Page changes its
+      // Canvas address, so a change prepared against the old one names nothing.
+      // Telling the person to check their connection would send them to fix
+      // something that is not broken.
+      review = { targets: [{ field: "id", label: "Quiz", name: "", state: "absent" }] };
+      const absent = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      expect(absent).toContain("Canvas does not have the item this change names.");
+      expect(absent).toContain("ask Morrow to read the latest Canvas content");
+      expect(absent).not.toContain("Check your Canvas connection");
+      expect(absent).not.toContain('class="approve"');
+
+      // A reading that never reached Canvas still says so.
+      review = { targets: [{ field: "id", label: "Quiz", name: "" }] };
+      const unreadable = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      expect(unreadable).toContain("Check your Canvas connection");
+      expect(unreadable).not.toContain('class="approve"');
     } finally {
       await approval.close();
     }
