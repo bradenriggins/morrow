@@ -3187,8 +3187,9 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 
 - Product decision: every external write is proven by fresh authoritative readback.
 - Condition: the transfer proved its upload by downloading the saved file with `credentials: "omit"` from a URL it required to carry a `verifier`. Canvas gives the signed-in owner a plain `/files/{id}/download` route with no verifier, so the check refused the route outright; and without the session that route answers the sign-in page with HTTP 200, which is not the file. Every course-folder upload in BT2 settled `applied_or_unknown` although Canvas had saved the file exactly.
-- Repair: the proof reads the file back on its own route, derived from the id the readback confirmed, accepting a verifier Canvas supplies and refusing a route that names another file or another site. The read carries the session, because that is what Canvas serves a course file to, and a redirect to the file store carries that store's own signed token rather than this session. An answer that ends at Canvas's sign-in is named `canvas_file_download_session_required` instead of being taken for the file.
-- Status: `IMPLEMENTED`.
+- Repair: the proof reads the file back on its own route, derived from the id the readback confirmed, accepting a verifier Canvas supplies and refusing a route that names another file or another site. The read carries the session, because that is what Canvas serves a course file to, and a redirect to the file store carries that store's own signed token rather than this session. An answer that ends at Canvas's sign-in is named `canvas_file_download_session_required` instead of being taken for the file. A folder upload is carried by the Bridge worker, which reads the saved bytes itself; that read had no executing test at all, which is how the defect survived, and it now has one that runs the worker's own code.
+- Split: live BT2 uploaded one file and settled `verified` on the first answer, with no later check needed.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
 
 ### 464: an upload Canvas saved but Morrow could not confirm could never be settled
 

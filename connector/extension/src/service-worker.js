@@ -4248,8 +4248,13 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
       return { ok: false, sent: true, outcomeUnknown: true, status: uploadStatus, error: "canvas_file_readback_mismatch" };
     }
     if (!commandDeadlineCurrent(deadline)) throw new Error("canvas_file_transfer_timeout");
+    // Canvas serves a course file to the signed-in person, so the saved bytes are
+    // read back with that session. The request is made to Canvas itself, and the
+    // redirect it answers with carries the file store's own signed token rather
+    // than this session. Without the session Canvas answers the sign-in page with
+    // HTTP 200, which is not the file and proves nothing about it.
     const download = await fetch(downloadUrl, {
-      credentials: "omit",
+      credentials: "include",
       cache: "no-store",
       redirect: "follow",
       referrerPolicy: "no-referrer",
@@ -4259,6 +4264,9 @@ async function executeCanvasCourseFileTransfer(binding, args, expiresAt, private
     let finalUrl;
     try { finalUrl = new URL(download.url); } catch { return { ok: false, sent: true, outcomeUnknown: true, status: download.status, error: "canvas_file_download_origin_refused" }; }
     if (finalUrl.protocol !== "https:") return { ok: false, sent: true, outcomeUnknown: true, status: download.status, error: "canvas_file_download_origin_refused" };
+    if (finalUrl.origin === binding.origin && /^\/login(?:\/|$)/.test(finalUrl.pathname)) {
+      return { ok: false, sent: true, outcomeUnknown: true, status: download.status, error: "canvas_file_download_session_required" };
+    }
     const bytes = await boundedResponseBytes(download, MAX_PRIVATE_FILE_BYTES, controller.signal);
     if (bytes.byteLength !== privateAttachment.manifest.size_bytes || await sha256Bytes(bytes) !== privateAttachment.manifest.sha256) {
       return { ok: false, sent: true, outcomeUnknown: true, status: download.status, error: "canvas_file_download_digest_mismatch" };
