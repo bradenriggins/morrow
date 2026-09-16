@@ -66,6 +66,7 @@ import {
   type CanvasRecoveryRead,
   canvasReviewedUploadPath,
   canvasReviewedUploadRoute,
+  canvasUploadListingRead,
 } from "@morrow/canvas-api-catalog";
 import {
   GatewayOperationConflictError,
@@ -1399,6 +1400,35 @@ function canvasRecoveryAssertions(value: unknown): readonly BrowserReadbackAsser
  * Reads the retained read-only comparator back off an operation record. Anything
  * that does not parse exactly leaves the record unresolved; nothing is guessed.
  */
+/**
+ * The comparator for one reviewed file transfer, rebuilt from the request a
+ * person approved. The transfer proves its own upload when it can; when it
+ * cannot, this reads the target's listing for the exact file that was sent, so
+ * an upload Canvas may have saved is settled by a read instead of staying
+ * unresolved and holding every later change to that target.
+ */
+function canvasTransferRecoveryDescriptor(operation: EffectOperationRecord): CanvasRecoveryDescriptor | null {
+  const request = operation.forwardedRequest;
+  const uploadTool = typeof request.upload_tool === "string" ? request.upload_tool : "";
+  const uploadArguments = isJsonObject(request.upload_arguments) ? request.upload_arguments : null;
+  const filename = typeof request.filename === "string" ? request.filename : "";
+  const size = typeof request.size_bytes === "number" && Number.isSafeInteger(request.size_bytes) ? request.size_bytes : null;
+  if (!uploadTool || !uploadArguments || !filename || size === null) return null;
+  const structural = Object.fromEntries(Object.entries(uploadArguments).map(([name, value]) => [name, String(value)]));
+  const listing = canvasUploadListingRead(canvasReviewedUploadPath(canvasReviewedUploadRoute(uploadTool), structural));
+  if (!listing) return null;
+  return canvasRecoveryDescriptorOf({
+    schema: "morrow.canvas-recovery-descriptor.v1",
+    strategy: "collection-contains-target",
+    writeMethod: "POST",
+    assertions: [
+      { inputName: "filename", paths: [["display_name"], ["filename"]], expected: filename },
+      { inputName: "size", paths: [["size"]], expected: size },
+    ],
+    collection: { readTool: listing.readTool, arguments: { ...listing.arguments } },
+  });
+}
+
 function canvasRecoveryDescriptorOf(value: unknown): CanvasRecoveryDescriptor | null {
   if (!isJsonObject(value) || value.schema !== "morrow.canvas-recovery-descriptor.v1"
     || typeof value.strategy !== "string" || typeof value.writeMethod !== "string") return null;
@@ -2109,7 +2139,9 @@ export class GatewayRuntime {
         ),
       });
     } catch {
-      return { targets: [] };
+      // A review that could not be resolved names nothing, and a page that names
+      // nothing approves nothing.
+      return { targets: [], unnamed: true };
     }
   }
 
@@ -8670,14 +8702,33 @@ export class GatewayRuntime {
     };
   }
 
+  /** The current connection scope for one reviewed transfer, in the shape it froze. */
+  private async currentCanvasTransferScope(
+    mapping: CatalogTool,
+    operation: EffectOperationRecord,
+  ): Promise<EffectBindingScope | null> {
+    const request = operation.forwardedRequest;
+    const courseId = typeof request.course_id === "string" ? request.course_id : "";
+    const contentType = typeof request.content_type === "string" ? request.content_type : "";
+    if (!courseId || !contentType || !operation.sourceBindingId) return null;
+    return this.resourceFileEffectScope(
+      await this.currentCanvasFileScope(mapping, operation.sourceBindingId, courseId, contentType),
+    );
+  }
+
   private async canvasRecoveryBindingMatches(mapping: CatalogTool, operation: EffectOperationRecord): Promise<boolean> {
     const frozen = isJsonObject(operation.plan.authority) ? operation.plan.authority : null;
     if (!frozen) return false;
     try {
       // effectBindingScope refuses a binding for another course, so this one
-      // comparison covers course, sign-in principal and session generation.
-      const prepared = await this.currentBrowserEffectAuthority(mapping, operation.plan.arguments as JsonObject);
-      if (!prepared.bindingScope) return false;
+      // comparison covers course, sign-in principal and session generation. A
+      // reviewed file transfer froze the scope its own staged file was bound to,
+      // so its check is rebuilt the same way rather than from the generic shape.
+      const bindingScope = isCanvasCourseFileTransfer(mapping)
+        ? await this.currentCanvasTransferScope(mapping, operation)
+        : (await this.currentBrowserEffectAuthority(mapping, operation.plan.arguments as JsonObject)).bindingScope;
+      if (!bindingScope) return false;
+      const prepared = { bindingScope };
       return sha256Json(prepared.bindingScope) === frozen.providerPrincipalDigest
         && sha256Json({
           account: this.config.privacy.account,
@@ -8784,8 +8835,9 @@ export class GatewayRuntime {
    * terminal-state rule; anything else leaves the record unresolved and locked.
    */
   private async recoverCanvasConnectorOperation(operation: EffectOperationRecord): Promise<JsonObject> {
-    const descriptor = canvasRecoveryDescriptorOf(operation.connectorReadDescriptor);
     const mapping = this.toolByPublicName.get(operation.publicToolName);
+    const descriptor = canvasRecoveryDescriptorOf(operation.connectorReadDescriptor)
+      ?? (mapping && isCanvasCourseFileTransfer(mapping) ? canvasTransferRecoveryDescriptor(operation) : null);
     if (!descriptor || !mapping || !isCanvasConnector(mapping)) {
       return this.effectResult(operation, "reconciliation_requires_provider_evidence", undefined, [
         CONNECTOR_READBACK_RECOVERY_LIMITATION,

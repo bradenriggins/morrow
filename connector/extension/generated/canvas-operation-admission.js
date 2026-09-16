@@ -172,6 +172,27 @@ export function canvasReviewedUploadKind(operation) {
  * route and the ids that name its target, or "" when the ids do not name exactly that route's path
  * inputs. Every id is a positive decimal; a person's own upload may name `self`.
  */
+/**
+ * The Canvas listing that shows a file saved at one upload target. A reviewed
+ * transfer whose own proof could not answer is settled by reading this listing
+ * for the file it sent, so an upload never stays unresolved for want of a check.
+ * A target Canvas offers no listing for, such as a submission comment, has none.
+ */
+export function canvasUploadListingRead(uploadPath) {
+    const listings = [
+        // Canvas routes are named with and without the API prefix, so both forms are read here.
+        [/^(?:\/api)?\/v1\/folders\/([1-9][0-9]{0,18})\/files$/, "canvas_list_files_folders", "id"],
+        [/^(?:\/api)?\/v1\/courses\/([1-9][0-9]{0,18})\/files$/, "canvas_list_files_courses", "course_id"],
+        [/^(?:\/api)?\/v1\/users\/([1-9][0-9]{0,18}|self)\/files$/, "canvas_list_files_users", "user_id"],
+        [/^(?:\/api)?\/v1\/groups\/([1-9][0-9]{0,18})\/files$/, "canvas_list_files_groups", "group_id"],
+    ];
+    for (const [route, readTool, inputName] of listings) {
+        const match = route.exec(String(uploadPath || ""));
+        if (match)
+            return { readTool, arguments: Object.freeze({ [inputName]: match[1] }) };
+    }
+    return null;
+}
 export function canvasReviewedUploadPath(operation, uploadArguments) {
     if (!canvasReviewedUploadKind(operation) || !uploadArguments || typeof uploadArguments !== "object" || Array.isArray(uploadArguments))
         return "";

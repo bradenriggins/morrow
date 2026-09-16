@@ -31,7 +31,7 @@ describe("Canvas API catalog", () => {
   it("separates transport and presentation metadata from operational compatibility", () => {
     const expected = canvasApiCompatibilityDigest(catalog);
     const presentation = structuredClone(catalog);
-    Object.assign(presentation.source, { indexUrl: "https://docs.example.invalid/new-index", lastModified: "tomorrow" });
+    Object.assign(presentation.source, { indexUrl: "https://docs.example.invalid/new-index" });
     Object.assign(presentation.operations[0]!, {
       source: "new-provenance-label",
       resource: "New visible group",

@@ -582,7 +582,7 @@ export async function fetchJson(url, options = {}) {
     }
     let value;
     try { value = JSON.parse(text); } catch { throw new Error(`Canvas documentation returned invalid JSON for ${url}`); }
-    return { value, lastModified: response.headers.get("last-modified") || null };
+    return { value };
   } catch (error) {
     controller.abort(error);
     void reader?.cancel(error).catch(() => undefined);
@@ -921,7 +921,6 @@ async function buildCatalog() {
     apiVersion: String(indexResult.value.apiVersion || ""),
     resourceCount: resources.length,
     sourceDigest,
-    lastModified: indexResult.lastModified,
   }, operations, browser.length, itemBank.length, courseFileContent.length);
 }
 

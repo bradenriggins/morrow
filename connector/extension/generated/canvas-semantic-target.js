@@ -258,6 +258,7 @@ function idText(value) {
 }
 const UNPROVED_CONTEXT = Object.freeze({ state: "unproved" });
 const MULTI_CONTEXT = Object.freeze({ state: "multi_context" });
+const UNNAMED_CONTEXT = Object.freeze({ state: "unnamed_context" });
 function courseOfContextCode(value) {
     const courseId = canvasContextCodeCourseId(value);
     return courseId ? Object.freeze({ state: "course", courseId }) : UNPROVED_CONTEXT;
@@ -281,10 +282,23 @@ export function canvasSemanticObjectContext(target, read, objectId) {
         return UNPROVED_CONTEXT;
     // Canvas names the kind of owner separately from the owner's id. A group a person made for
     // themselves, or one an account owns, is refused here even when the reading also carries a course.
-    if (target.contextField && values[target.contextField] !== target.contextValue)
-        return UNPROVED_CONTEXT;
     const identityText = idText(values.id);
     if (!exactId(identityText) || identityText !== objectId)
+        return UNPROVED_CONTEXT;
+    // An owner Canvas names but does not name as a course is refused outright: a
+    // group a person made for themselves, or one an account owns, is not this
+    // course even when the same reading also carries a course id.
+    if (target.contextField && values[target.contextField] !== undefined
+        && values[target.contextField] !== target.contextValue)
+        return UNPROVED_CONTEXT;
+    // An object that names no owner at all can still be placed by the course's own
+    // complete listing, but only where the target requires that listing anyway.
+    // Every other target keeps proving the course from the object itself.
+    const ownerNamed = (target.contextField === undefined || values[target.contextField] !== undefined)
+        && values[target.courseField] !== undefined;
+    if (!ownerNamed)
+        return target.courseCollectionProof === true ? UNNAMED_CONTEXT : UNPROVED_CONTEXT;
+    if (target.contextField && values[target.contextField] !== target.contextValue)
         return UNPROVED_CONTEXT;
     return courseOfField(target, values[target.courseField]);
 }

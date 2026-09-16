@@ -705,20 +705,22 @@ function reviewState(target: ApprovalTarget, snapshot: JsonObject): string {
     ? "awaiting_approval" : "unavailable";
 }
 
+/**
+ * A review is held when it addresses something it could not name. The review
+ * itself says so: it lists one target for each object the change reaches, and a
+ * review that could not identify them at all is marked unnamed. A change that
+ * reaches no named object, such as one that only carries content, is shown by
+ * its exact request and can be approved.
+ */
 function namedTargetsMissing(operations: readonly JsonObject[], contexts: ReadonlyMap<string, ApprovalReviewContext>): boolean {
   return operations.some((operation) => {
     const plan = object(operation.plan);
     if (!/^(canvas|moodle|blackboard)_/.test(String(plan.tool))) return false;
-    const request = object(plan.arguments);
-    const blackboardCourseCopy = plan.tool === "blackboard_apply_reviewed_course_copy"
-      && typeof request.course_id === "string" && request.course_id.trim().length > 0
-      && typeof request.destination_course_id === "string" && request.destination_course_id.trim().length > 0;
     const context = contexts.get(String(operation.operationId));
-    const targets = context?.targets || [];
-    const source = context?.current?.current_section;
+    if (!context || context.unnamed) return true;
+    const source = context.current?.current_section;
     return (plan.tool === "moodle_move_activity" && operation.state === "awaiting_approval" && (typeof source !== "string" || !source.trim()))
-      || targets.some((item) => !item.name.trim()) || ["id", ...(!blackboardCourseCopy ? ["course_id"] : []), "assignment_id", "quiz_id", "content_id", "connection_id", "topic_id", "file_id", "item_id", "rubric_id", "module_id", "section_id", "target_section_id", "category_id", "grade_item_id", "bank_id", "group_id", "account_id", "url_or_id"].some((field) =>
-      field in request && !targets.some((item) => item.field === field && item.name.trim()));
+      || context.targets.some((item) => !item.name.trim());
   });
 }
 

@@ -4703,7 +4703,12 @@ async function resolveCanvasSemanticTarget(binding, operation, semantic, expires
   );
   const context = canvasSemanticObjectContext(semantic.target, read, semantic.objectId);
   if (context.state === "multi_context") return { failure: multiContext };
-  if (context.state !== "course" || context.courseId !== binding.courseId) return { failure: refused };
+  // Canvas answers for some objects, such as a file, without naming an owner at
+  // all. The selected course's own complete listing naming that object is the
+  // course's own statement that it holds it, so where the object names no owner
+  // and that listing is required anyway, the listing is what proves the course.
+  const listingProves = context.state === "unnamed_context" && semantic.target.courseCollectionProof === true;
+  if (!listingProves && (context.state !== "course" || context.courseId !== binding.courseId)) return { failure: refused };
   if (semantic.target.courseCollectionProof === true) {
     const listing = await canvasSemanticCourseCollection(binding, semantic, expiresAt);
     if (listing.state !== "listed") return { failure: refused };
@@ -4822,8 +4827,13 @@ async function canvasSemanticOwnerBindingState(binding, semantic, expiresAt) {
     expiresAt,
   );
   const context = canvasSemanticObjectContext(semantic.target, read, semantic.objectId);
-  if (context.state !== "course") return read?.ok === true && read.truncated !== true ? "mismatch" : "unconfirmed";
-  if (context.courseId !== binding.courseId) return "mismatch";
+  // An object Canvas names no owner for is bound by the course's own listing,
+  // the same statement the change itself was resolved against.
+  const listingBinds = context.state === "unnamed_context" && semantic.target.courseCollectionProof === true;
+  if (!listingBinds) {
+    if (context.state !== "course") return read?.ok === true && read.truncated !== true ? "mismatch" : "unconfirmed";
+    if (context.courseId !== binding.courseId) return "mismatch";
+  }
   if (semantic.target.courseCollectionProof === true) {
     const listing = await canvasSemanticCourseCollection(binding, semantic, expiresAt);
     if (listing.state === "unreadable") return "unconfirmed";
@@ -5211,6 +5221,18 @@ async function sendExecution(command, binding, operation, privateAttachment, pri
         command.expiresAt,
       );
       verification = evaluateBrowserReadback(plan, readback);
+      // Canvas answers some deletions by still returning the record. The plan's
+      // listing is then the proof, so it is read before the result is reported.
+      if (verification.status !== "verified" && plan.fallback) {
+        const listing = await executeOperation(
+          binding,
+          internalCanvasCourseRead(binding, plan.fallback.readOperation),
+          plan.fallback.arguments,
+          command.expiresAt,
+        );
+        const settled = evaluateBrowserReadback(plan.fallback, listing);
+        if (settled.status === "verified" || verification.status !== "mismatch") verification = settled;
+      }
     } else {
       verification = { schema: "morrow.browser-verification.v1", status: "unconfirmed", reason: "no_safe_readback_route" };
     }

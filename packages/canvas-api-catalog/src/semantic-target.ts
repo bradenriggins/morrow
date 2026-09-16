@@ -393,10 +393,17 @@ function idText(value: unknown): unknown {
 export type CanvasSemanticObjectContext =
   | { readonly state: "course"; readonly courseId: string }
   | { readonly state: "multi_context" }
+  /**
+   * The reading is the object Morrow asked for, and it names no owner at all:
+   * Canvas answers for some objects, such as a file, without any context field.
+   * The object is identified; only its course is still unknown here.
+   */
+  | { readonly state: "unnamed_context" }
   | { readonly state: "unproved" };
 
 const UNPROVED_CONTEXT: CanvasSemanticObjectContext = Object.freeze({ state: "unproved" });
 const MULTI_CONTEXT: CanvasSemanticObjectContext = Object.freeze({ state: "multi_context" });
+const UNNAMED_CONTEXT: CanvasSemanticObjectContext = Object.freeze({ state: "unnamed_context" });
 
 function courseOfContextCode(value: unknown): CanvasSemanticObjectContext {
   const courseId = canvasContextCodeCourseId(value);
@@ -423,9 +430,20 @@ export function canvasSemanticObjectContext(
   if (!values) return UNPROVED_CONTEXT;
   // Canvas names the kind of owner separately from the owner's id. A group a person made for
   // themselves, or one an account owns, is refused here even when the reading also carries a course.
-  if (target.contextField && values[target.contextField] !== target.contextValue) return UNPROVED_CONTEXT;
   const identityText = idText(values.id);
   if (!exactId(identityText) || identityText !== objectId) return UNPROVED_CONTEXT;
+  // An owner Canvas names but does not name as a course is refused outright: a
+  // group a person made for themselves, or one an account owns, is not this
+  // course even when the same reading also carries a course id.
+  if (target.contextField && values[target.contextField] !== undefined
+    && values[target.contextField] !== target.contextValue) return UNPROVED_CONTEXT;
+  // An object that names no owner at all can still be placed by the course's own
+  // complete listing, but only where the target requires that listing anyway.
+  // Every other target keeps proving the course from the object itself.
+  const ownerNamed = (target.contextField === undefined || values[target.contextField] !== undefined)
+    && values[target.courseField] !== undefined;
+  if (!ownerNamed) return target.courseCollectionProof === true ? UNNAMED_CONTEXT : UNPROVED_CONTEXT;
+  if (target.contextField && values[target.contextField] !== target.contextValue) return UNPROVED_CONTEXT;
   return courseOfField(target, values[target.courseField]);
 }
 

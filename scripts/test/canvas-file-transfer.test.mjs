@@ -91,12 +91,12 @@ function fixtureResponses(overrides = {}) {
         filename: "course-material.txt",
         size: bytes.byteLength,
         "content-type": "text/plain",
-        url: CANVAS + "/files/501/download?verifier=opaque-verifier",
+        url: overrides.fileUrl === undefined ? CANVAS + "/files/501/download?verifier=opaque-verifier" : overrides.fileUrl,
       },
     }),
     response({
-      url: STORAGE + "/download/material",
-      headers: { "content-length": String(bytes.byteLength) },
+      url: overrides.downloadUrl || STORAGE + "/download/material",
+      headers: { "content-length": String((overrides.downloadBytes || bytes).byteLength) },
       body: overrides.downloadBytes || bytes,
     }),
   ];
@@ -161,8 +161,44 @@ test("uploads only an existing private attachment and verifies saved Canvas byte
   assert.equal(parts.at(-1)[1] instanceof Blob, true);
   assert.equal(requests[8].url, CANVAS + "/api/v1/files/501");
   assert.equal(requests[9].url, CANVAS + "/files/501/download?verifier=opaque-verifier");
-  assert.equal(requests[9].options.credentials, "omit");
+  // Canvas serves a course file to the signed-in person. Reading it back without
+  // the session answers the sign-in page, which proves nothing about the file.
+  assert.equal(requests[9].options.credentials, "include");
   assert.equal(requests[9].options.redirect, "follow");
+});
+
+test("a saved file Canvas names without a verifier is read back with the session", async () => {
+  const { result, requests } = await run(input(), fixtureResponses({ fileUrl: CANVAS + "/files/501/download?download_frd=1" }));
+  assert.equal(result.ok, true);
+  assert.equal(result.verification.status, "verified");
+  assert.equal(requests[9].url, CANVAS + "/files/501/download?download_frd=1");
+  assert.equal(requests[9].options.credentials, "include");
+});
+
+test("a download route for another file or another site is refused", async () => {
+  for (const url of [CANVAS + "/files/999/download", "https://elsewhere.example/files/501/download", CANVAS + "/files/501/download?verifier=a&verifier=b"]) {
+    const { result } = await run(input(), fixtureResponses({ fileUrl: url }));
+    assert.equal(result.ok, false, url);
+    assert.equal(result.error, "canvas_file_download_url_refused", url);
+  }
+});
+
+test("a saved file Canvas names no route for is read back on its own route", async () => {
+  const { result, requests } = await run(input(), fixtureResponses({ fileUrl: "", downloadUrl: CANVAS + "/files/501/download" }));
+  assert.equal(result.ok, true);
+  assert.equal(result.verification.status, "verified");
+  assert.equal(requests[9].url, CANVAS + "/files/501/download");
+  assert.equal(requests[9].options.credentials, "include");
+});
+
+test("a saved file answered by the sign-in page is never taken for the file", async () => {
+  const { result } = await run(input(), fixtureResponses({
+    downloadUrl: CANVAS + "/login/canvas",
+    downloadBytes: new TextEncoder().encode("<!doctype html><title>Log In to Canvas</title>"),
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error, "canvas_file_download_session_required");
+  assert.equal(result.outcomeUnknown, true);
 });
 
 test("an expired command starts no Canvas file-transfer request", async () => {

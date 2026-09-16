@@ -62,9 +62,13 @@ describe("reviewed Canvas file dispatch", () => {
     let server: ReturnType<typeof serveStdio> | undefined;
     let client: Client | undefined;
     const writes: BridgeCommand[] = [];
+    const unknownBytes = Buffer.from("material whose upload answer is lost");
+    let transferOutcome: "verified" | "unknown" = "verified";
+    let savedFiles: JsonObject[] = [];
     try {
       await mkdir(join(directory, "materials"));
       await writeFile(join(directory, input.material_path), bytes);
+      await writeFile(join(directory, "materials/unknown.txt"), unknownBytes);
       await assertPortListening(port);
       bridge = await connectBridgeTestClient({
         port, token, extensionId, catalogDigest: bridgeDigest,
@@ -80,6 +84,16 @@ describe("reviewed Canvas file dispatch", () => {
           ? {
               schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200,
               truncated: false, data: [],
+            }
+          : command.toolName === "canvas_list_files_folders"
+          ? {
+              schema: "morrow.canvas-browser-result.v1", ok: true, sent: true, status: 200,
+              truncated: false, data: savedFiles,
+            }
+          : command.kind === "invoke_write" && transferOutcome === "unknown"
+          ? {
+              schema: "morrow.canvas-course-file-transfer.v1", ok: false, sent: true, outcomeUnknown: true, status: 201,
+              error: "canvas_file_download_session_required",
             }
           : command.kind === "invoke_write"
           ? {
@@ -157,6 +171,39 @@ describe("reviewed Canvas file dispatch", () => {
         expect(result.isError, JSON.stringify(refused)).toBe(true);
       }
       expect(writes).toHaveLength(2);
+
+      // Canvas may save a file whose own proof cannot answer. The request the
+      // person approved names the file and its target, so a later check reads
+      // that target's listing and settles the change without sending it again.
+      transferOutcome = "unknown";
+      const unknownPlan = await client.callTool({ name: "morrow_plan_canvas_file_upload", arguments: {
+        source_binding_id: sourceBindingId, course_id: 2, folder_id: 71, material_path: "materials/unknown.txt",
+      } });
+      const unknownId = operationId(unknownPlan as unknown as JsonObject);
+      runtime.approveOperation(unknownId);
+      await runtime.dispatchOperation(unknownId);
+      expect(runtime.operationGet(unknownId)).toMatchObject({ state: "awaiting_verification" });
+
+      savedFiles = [{
+        id: "777", folder_id: "71", display_name: "unknown.txt", filename: "unknown.txt",
+        size: unknownBytes.length, created_at: new Date().toISOString(),
+      }];
+      const reconciled = await runtime.reconcileOperation(unknownId);
+      expect(JSON.stringify(reconciled)).toContain("canvas_list_files_folders");
+      expect(runtime.operationGet(unknownId)).toMatchObject({ state: "verified" });
+
+      // The same check reports an upload Canvas never saved as unresolved, and
+      // never as a change that happened.
+      transferOutcome = "unknown";
+      savedFiles = [];
+      const absentPlan = await client.callTool({ name: "morrow_plan_canvas_file_upload", arguments: {
+        source_binding_id: sourceBindingId, course_id: 2, folder_id: 71, material_path: "materials/unknown.txt",
+      } });
+      const absentId = operationId(absentPlan as unknown as JsonObject);
+      runtime.approveOperation(absentId);
+      await runtime.dispatchOperation(absentId);
+      await runtime.reconcileOperation(absentId);
+      expect(runtime.operationGet(absentId)).toMatchObject({ state: "awaiting_verification" });
     } finally {
       await client?.close();
       await server?.close();

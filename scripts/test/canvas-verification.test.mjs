@@ -402,3 +402,34 @@ test("readback comparison refuses coerced values", () => {
   assert.equal(evaluateBrowserReadback(due, { ok: true, status: 200, data: { id: "188", due_at: "Fri Oct 02 2026 17:00:00 GMT+0000" } }).status, "mismatch");
   assert.equal(evaluateBrowserReadback(due, { ok: true, status: 200, data: { id: "188", due_at: "2026-10-02T17:00:00.000Z" } }).status, "verified");
 });
+
+test("a deletion Canvas answers by still returning the record is proved by its listing", () => {
+  const quiz = planBrowserReadback(catalog.operations, operation("canvas_delete_quiz"), { course_id: "89585", id: "338137" }, {});
+  assert.equal(quiz.strategy, "deleted-resource");
+  assert.equal(quiz.readOperation.toolName, "canvas_get_single_quiz");
+  assert.equal(evaluateBrowserReadback(quiz, { ok: false, status: 404 }).status, "verified");
+
+  // Canvas keeps answering for a deleted Classic quiz, and the record it returns
+  // carries no deletion of any kind, so the record alone proves nothing.
+  const returned = evaluateBrowserReadback(quiz, { ok: true, status: 200, data: { id: "338137", title: "MORROW quiz" } });
+  assert.equal(returned.status, "unconfirmed");
+  assert.equal(returned.evidence, "resource_still_returned");
+
+  assert.ok(quiz.fallback, "a deletion whose record route still answers needs its listing");
+  assert.equal(quiz.fallback.readOperation.toolName, "canvas_list_quizzes_in_course");
+  assert.deepEqual(quiz.fallback.arguments, { course_id: "89585" });
+  assert.equal(quiz.fallback.targetId, "338137");
+  assert.equal(evaluateBrowserReadback(quiz.fallback, { ok: true, status: 200, data: [{ id: "334001" }] }).status, "verified");
+  assert.equal(evaluateBrowserReadback(quiz.fallback, { ok: true, status: 200, data: [{ id: "338137" }] }).status, "mismatch");
+  assert.equal(evaluateBrowserReadback(quiz.fallback, { ok: true, status: 200, truncated: true, data: [] }).status, "unconfirmed");
+
+  // Canvas records other deletions on the object itself, which settles it there.
+  const note = planBrowserReadback(catalog.operations, operation("canvas_delete_planner_note"), { id: "2228" }, {});
+  assert.equal(evaluateBrowserReadback(note, { ok: true, status: 200, data: { id: "2228", workflow_state: "deleted" } }).status, "verified");
+  assert.equal(evaluateBrowserReadback(note, { ok: true, status: 200, data: { id: "2228", workflow_state: "active" } }).status, "unconfirmed");
+
+  // A route addressed by anything but a record id is left to its own read: a
+  // listing matched on id cannot answer for a page named by its URL.
+  const page = planBrowserReadback(catalog.operations, operation("canvas_delete_page_courses"), { course_id: "89585", url_or_id: "morrow-page" }, {});
+  assert.equal(page.fallback, undefined);
+});

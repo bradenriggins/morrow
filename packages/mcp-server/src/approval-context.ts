@@ -4,6 +4,7 @@ import {
   type CatalogTool,
   type JsonObject,
 } from "@morrow/contracts";
+import { canvasEntityReadRoutes } from "@morrow/canvas-api-catalog";
 import { BLACKBOARD_CONTENT_PATCH_APPLY_TOOL } from "./blackboard-content-patch.js";
 import { BLACKBOARD_ACTIONS } from "./blackboard-actions.js";
 
@@ -29,6 +30,11 @@ export interface ApprovalReviewContext {
     readonly url?: string;
   }[];
   readonly limited?: boolean;
+  /**
+   * The review addresses objects it could not name. Nothing is approved from a
+   * page that cannot say what it changes, so this holds the decision open.
+   */
+  readonly unnamed?: true;
   readonly current?: JsonObject;
   readonly question?: JsonObject;
 }
@@ -66,6 +72,8 @@ interface TargetSpec {
   readonly entryNameFields?: readonly string[];
   readonly urlPath?: readonly string[];
   readonly courseId?: string;
+  /** Shown when Canvas confirms the object but holds no name for it. */
+  readonly fallbackName?: string;
 }
 
 function object(value: unknown): JsonObject | null {
@@ -345,7 +353,7 @@ async function blackboardApprovalContext(
   review: ApprovalReviewContextInput,
 ): Promise<ApprovalReviewContext> {
   const { operation, tools } = input;
-  if (!operation.sourceBindingId) return { targets: [] };
+  if (!operation.sourceBindingId) return { targets: [], unnamed: true };
   const args = planArguments(operation);
   const courseTool = exactSourceTool(tools, operation.sourceId, "blackboard_read_course", false);
   const contentTool = exactSourceTool(tools, operation.sourceId, "blackboard_read_course_content", false);
@@ -355,10 +363,10 @@ async function blackboardApprovalContext(
   const action = BLACKBOARD_ACTIONS.find((entry) => entry.apply.name === operation.sourceToolName);
   if (action && args && courseTool && courseId && tenantId) {
     const planner = exactSourceTool(tools, operation.sourceId, action.plan.name, false);
-    if (!planner) return { targets: [] };
+    if (!planner) return { targets: [], unnamed: true };
     const { expected_connection: _connection, expected_plan_digest: _digest, _morrow: _routing, ...request } = args;
     const parsed = action.plan.inputSchema.safeParse(request);
-    if (!parsed.success) return { targets: [] };
+    if (!parsed.success) return { targets: [], unnamed: true };
     const [courseRead, planRead] = await Promise.all([
       boundedRead(review, courseTool.publicName, { tenant_id: tenantId, source_binding_id: operation.sourceBindingId, course_id: courseId }),
       boundedRead(review, planner.publicName, parsed.data as JsonObject),
@@ -381,7 +389,7 @@ async function blackboardApprovalContext(
       ...(courseRead.limited || planRead.limited ? { limited: true } : {}),
     };
   }
-  if (!args || !courseTool || !contentTool || !courseId || !contentId || !tenantId) return { targets: [] };
+  if (!args || !courseTool || !contentTool || !courseId || !contentId || !tenantId) return { targets: [], unnamed: true };
   const scope = {
     tenant_id: tenantId,
     source_binding_id: operation.sourceBindingId,
@@ -400,7 +408,7 @@ async function blackboardApprovalContext(
   const item = contentResult && contentResult.contentId === contentId ? object(contentResult.content) : null;
   const courseName = course && course.id === courseId ? exactText(course.name) : null;
   const itemTitle = item && item.id === contentId ? exactText(item.title) : null;
-  if (!item || !courseName || !itemTitle) return { targets: [], ...limited };
+  if (!item || !courseName || !itemTitle) return { targets: [], unnamed: true, ...limited };
   const availability = object(item.availability);
   const current = operation.state === "awaiting_approval" ? {
     title: itemTitle,
@@ -576,6 +584,36 @@ function resourceSpec(
     };
   }
   return null;
+}
+
+const GENERIC_NAME_FIELDS = ["name", "title", "display_name", "short_name", "label", "filename"] as const;
+
+/**
+ * Every object a Canvas write addresses through its route, read back by the GET
+ * route that confirms it. The pairing is generated from the Canvas catalog, so a
+ * review names the same objects Canvas does instead of showing a bare id.
+ */
+function catalogSpecs(mapping: CatalogTool, args: JsonObject): readonly TargetSpec[] {
+  return canvasEntityReadRoutes(mapping.upstreamName).flatMap((route) => {
+    const id = exactId(args[route.field]) || exactText(args[route.field]);
+    if (!id) return [];
+    const readArguments: JsonObject = {};
+    for (const [name, field] of Object.entries(route.arguments)) {
+      const value = exactId(args[field]) || exactText(args[field]);
+      if (!value) return [];
+      readArguments[name] = value;
+    }
+    return [{
+      field: route.field,
+      label: route.label,
+      id,
+      readTool: route.read,
+      readArguments,
+      entityId: (value: JsonObject) => sameId(value.id, id) || value.url === id || sameId(value.page_id, id),
+      nameFields: GENERIC_NAME_FIELDS,
+      fallbackName: `${route.label} ${id}`,
+    } satisfies TargetSpec];
+  });
 }
 
 function moduleItemSpec(mapping: CatalogTool, args: JsonObject, courseId: string | null): TargetSpec | null {
@@ -758,8 +796,10 @@ function resolvedTarget(
   const courseMatches = !target.courseId || entityCourseId === undefined || sameId(entityCourseId, target.courseId);
   const nameSource = entity && target.entryNameFields ? object(entity.entry) : entity;
   const nameFields = target.entryNameFields || target.nameFields;
-  const name = entity && nameSource && courseMatches && target.entityId(entity)
-    ? nameFields.map((field) => exactText(nameSource[field])).find((value): value is string => value !== null)
+  const confirmed = Boolean(entity && nameSource && courseMatches && target.entityId(entity));
+  const name = confirmed
+    ? nameFields.map((field) => exactText(nameSource![field])).find((value): value is string => value !== null)
+      || target.fallbackName
     : null;
   return {
     field: target.field,
@@ -821,19 +861,19 @@ export async function resolveApprovalReviewContext(
   if (blackboardContentPatchTool(operation, tools)) return await blackboardApprovalContext(input, review);
   const browserMapping = operationTool(operation, tools);
   if (browserMapping?.capability?.provider === "moodle") {
-    if (!operation.sourceBindingId) return { targets: [] };
+    if (!operation.sourceBindingId) return { targets: [], unnamed: true };
     const args = planArguments(operation);
     const reviewTool = exactSourceTool(tools, operation.sourceId, browserMapping.capability.route.planBackend || "", false);
     const bindingTool = exactSourceTool(tools, operation.sourceId, "morrow_browser_bindings", false);
     if (!args || !reviewTool || !bindingTool || reviewTool.capability?.route.backend !== "canvas-connector"
-      || reviewTool.capability.provider !== "moodle") return { targets: [] };
+      || reviewTool.capability.provider !== "moodle") return { targets: [], unnamed: true };
     const bindingRead = await boundedRead(review, bindingTool.publicName, {});
     const binding = bindingRead.result ? moodleBinding(bindingRead.result, operation.sourceBindingId) : null;
     if (!binding || ("course_id" in args && moodleCourseId(args.course_id) !== binding.courseId)) {
-      return { targets: [], ...(bindingRead.limited ? { limited: true } : {}) };
+      return { targets: [], unnamed: true, ...(bindingRead.limited ? { limited: true } : {}) };
     }
     if (["moodle_update_grade_category", "moodle_update_grade_item"].includes(browserMapping.upstreamName)) {
-      return (await moodleGradebookApprovalContext(input, review, operation, args, binding, reviewTool)) || { targets: [] };
+      return (await moodleGradebookApprovalContext(input, review, operation, args, binding, reviewTool)) || { targets: [], unnamed: true };
     }
     const properties = object(reviewTool.inputSchema.properties) || {};
     const readArgs = {
@@ -843,7 +883,7 @@ export async function resolveApprovalReviewContext(
     const read = await boundedRead(review, reviewTool.publicName, readArgs);
     const result = read.result ? moodleRead(read.result) : null;
     if (!result || (operation.state === "awaiting_approval" && result.snapshotDigest !== args.expected_digest)) {
-      return { targets: [], ...(read.limited ? { limited: true } : {}) };
+      return { targets: [], unnamed: true, ...(read.limited ? { limited: true } : {}) };
     }
     let targets = [...result.targets];
     let current = operation.state === "awaiting_approval" && !["moodle_create_page", "moodle_create_label", "moodle_create_url", "moodle_create_resource_file", "moodle_create_folder_file", "moodle_create_imscp_package", "moodle_create_scorm_package", "moodle_create_assignment", "moodle_create_quiz", "moodle_create_forum", "moodle_create_choice"].includes(browserMapping.upstreamName)
@@ -884,7 +924,7 @@ export async function resolveApprovalReviewContext(
       const name = chapter ? exactText(chapter.title) : null;
       const hidden = chapter?.hidden;
       const expectedHidden = browserMapping.upstreamName === "moodle_show_book_chapter";
-      if (!chapter || !name || (browserMapping.upstreamName !== "moodle_delete_book_chapter" && hidden !== expectedHidden)) return { targets: [] };
+      if (!chapter || !name || (browserMapping.upstreamName !== "moodle_delete_book_chapter" && hidden !== expectedHidden)) return { targets: [], unnamed: true };
       targets.push({ field: "chapter_id", label: "Chapter", name });
       if (operation.state === "awaiting_approval") {
         const index = chapters.indexOf(matches[0]!);
@@ -892,7 +932,7 @@ export async function resolveApprovalReviewContext(
         if (chapter.subchapter !== true) {
           for (let next = index + 1; next < chapters.length && object(chapters[next])?.subchapter === true; next += 1) {
             const child = object(chapters[next]);
-            if (!child || !exactText(child.title)) return { targets: [] };
+            if (!child || !exactText(child.title)) return { targets: [], unnamed: true };
             affected.push(child);
           }
         }
@@ -927,10 +967,10 @@ export async function resolveApprovalReviewContext(
       ...(read.limited ? { limited: true } : {}),
     };
   }
-  if (!operation.sourceBindingId) return { targets: [] };
+  if (!operation.sourceBindingId) return { targets: [], unnamed: true };
   const args = planArguments(operation);
   const mapping = operationTool(operation, tools);
-  if (!args || !mapping) return { targets: [] };
+  if (!args || !mapping) return { targets: [], unnamed: true };
   const itemBank = itemBankGuardTarget(mapping, args);
   if (itemBank) return await itemBankApprovalContext(input, review, itemBank);
 
@@ -950,7 +990,8 @@ export async function resolveApprovalReviewContext(
   const resource = resourceSpec(mapping, args, courseId);
   const question = questionSpec(mapping, args, courseId);
   const moduleItem = moduleItemSpec(mapping, args, courseId);
-  const expected = [course, resource, question, moduleItem].filter((target): target is TargetSpec => target !== null);
+  const known = [course, resource, question, moduleItem].filter((target): target is TargetSpec => target !== null);
+  const expected = [...known, ...catalogSpecs(mapping, args).filter((target) => !known.some((entry) => entry.field === target.field))];
   const itemBankReach = itemBankObservedReachTarget(mapping, args);
   if (expected.length === 0) return { targets: [] };
 

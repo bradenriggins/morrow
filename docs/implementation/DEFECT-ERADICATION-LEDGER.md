@@ -473,6 +473,12 @@ Every row stays open until its evidence columns are added and its status becomes
 | 456 | P1 | R7 | A file could reach Canvas only in one course folder: every other upload target and both rubric CSV imports had no way in, because their raw routes cannot carry the bytes and the reviewed transfer named only a course folder. | closure section 456; page transfer, connector, gateway transfer, catalog, and browser harness regressions | IMPLEMENTED |
 | 457 | P1 | R7 | 225 admitted Canvas writes with no exact readback were unpublished and could not be sent at all, and 20 of them (discussion read state, subscriptions, entry deletion, copies and reorders) had a safe read Morrow never used. | closure section 457; catalog comparator, readback scope, verification, Bridge settings, admission report, and browser harness regressions | IMPLEMENTED |
 | 458 | P3 | R4 | The catalog published 16 Canvas LTI service writes that only an installed LTI tool can send with its own token, so Morrow listed changes it can never make. | closure section 458; catalog, connector runtime, gateway, readback scope, package, admission report, and browser harness regressions | IMPLEMENTED |
+| 459 | P0 | R7 | The review page withheld Apply whenever a request carried an id it had not named, and it could name only ten Canvas object kinds, so a Classic Quiz, section, bookmark, or planner-note deletion could never be approved by anyone and every approval attempt was refused. | closure section 459; approval context and approval server regressions, live BT2 course 89585 | IMPLEMENTED |
+| 460 | P1 | R7 | A deletion Canvas answers by still returning the record was never confirmed: a deleted planner note and a deleted Classic Quiz both settled awaiting verification although Canvas had removed them. | closure section 460; Canvas verification regressions | IMPLEMENTED |
+| 461 | P2 | R4 | The catalog's identity carried the documentation server's Last-Modified header, so a byte-identical Canvas specification produced a new catalog digest, failed the catalog gate, and would have refused Bridge pairing. | closure section 461; catalog generator determinism and catalog regressions | IMPLEMENTED |
+| 462 | P0 | R7 | Every Canvas file update and deletion was refused before it was sent, because the course resolution read a context field Canvas does not return on a file record. | closure section 462; semantic target regressions, live BT2 course 89585 | IMPLEMENTED |
+| 463 | P1 | R7 | The reviewed file transfer could not prove an upload Canvas had saved: it required a verifier Canvas does not give the signed-in owner and read the file back without the session. | closure section 463; Canvas file transfer regressions | IMPLEMENTED |
+| 464 | P1 | R7 | An upload Canvas saved but Morrow could not confirm could never be settled, and it blocked every later upload in that course until a person attested to it. | closure section 464; Canvas file transfer recovery regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3145,7 +3151,54 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Split: 1,121 operations, 550 writes, 10 held and 540 admitted. Bridge 1.0.17 is sealed.
 - Status: `IMPLEMENTED`.
 
-### Root-cause patterns for rows 331–458
+### 459: the review page could not name most Canvas targets, so their changes could never be approved
+
+- Product decision: the owner requires that nothing in Morrow be blocked.
+- Condition: the approval page withheld Apply whenever the request carried an id field the review had not named, and the review could name only courses, assignments, pages, discussions, files, rubrics, modules, module items, New Quizzes, Item Banks and quiz questions. Every other Canvas write, including a Classic Quiz deletion, a section deletion, a bookmark deletion and a planner-note deletion, reached a page with no Apply control and returned `approval_action_refused` to any approval attempt. Live BT2 confirmed all four families: the page said Morrow could not identify the item, and the operation could not be approved by anyone.
+- Repair: `scripts/generate-canvas-entity-read-routes.mjs` pairs every Canvas write with the GET route that reads each object its own path addresses, from the published catalog, and writes `packages/canvas-api-catalog/src/entity-read-routes.ts` (490 writes, 778 named objects). `catalogSpecs` in `packages/mcp-server/src/approval-context.ts` reads each one, keeping the hand-written specs where they carry a link or the current content. A confirmed record that holds no name of its own is shown as its kind and id rather than held forever. The fail-closed rule now belongs to the review itself: a review says `unnamed` when it could not identify what it addresses, and `namedTargetsMissing` in `packages/mcp-server/src/approval-server.ts` holds the page on that flag or on any target with a blank name, instead of on a fixed list of id fields. A change that reaches no named object, such as one that only carries content, is approved against its exact request.
+- Split: live BT2 on v36 now names and approves the Classic Quiz, section, bookmark and planner-note deletions that were refused on v35.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 460: a deletion Canvas answers by still returning the record was never confirmed
+
+- Product decision: every external write is proven by fresh authoritative readback.
+- Condition: the `deleted-resource` readback verified only on HTTP 404 or 410. Canvas keeps some deleted records readable by id: a deleted planner note still returns 200 with `workflow_state` `deleted`, and a deleted Classic Quiz still returns 200 with no deletion of any kind. Both deletions were dispatched and settled `awaiting_verification`, although BT2 listings showed the objects were gone.
+- Repair: `evaluateBrowserReadback` now accepts Canvas's own record of the deletion (`workflow_state` `deleted`, `deleted`, or `archived`) as proof, and reports `resource_still_returned` when the record comes back without it. `planBrowserReadback` attaches the parent listing as the plan's `fallback` for a deletion addressed by a record id, and the Bridge reads that listing when the record alone cannot settle the question. A route addressed by anything else, such as a Page by its URL, keeps only its own read.
+- Split: 52 of 101 Canvas deletions carry the listing fallback; the rest are settled by their own route.
+- Status: `IMPLEMENTED`.
+
+### 461: the catalog's identity changed when Canvas re-served the same specification
+
+- Product decision: one sealed catalog identity binds Desktop, MCP, and the Bridge.
+- Condition: `source.lastModified` carried the documentation server's `Last-Modified` header into the catalog, and `catalogDigest` covers it. Canvas re-served a byte-identical specification with a new header, so `pnpm catalog:canvas:check` failed with a stale catalog although `sourceDigest` was unchanged, and a rebuild would have changed the digest the Bridge sends to `/pair` and produced `bridge_version_mismatch` for a specification that had not changed.
+- Repair: the generator no longer records the transport header, `CanvasApiCatalog["source"]` no longer carries it, and `connector/extension/src/catalog-compatibility.js` no longer admits it. The catalog's identity is now its content: `sourceDigest` pins the specification and `catalogDigest` pins the delivered catalog. Regeneration against an unchanged specification is byte-identical and the check is deterministic.
+- Split: catalog digest `a95bb6822ea51d7bac6a3f50d704eca6e8b65daf28227c1a0911547152c422c5`, unchanged counts of 1,121 operations, 571 reads and 550 writes.
+- Status: `IMPLEMENTED`.
+
+### 462: every Canvas file change was refused before it was sent
+
+- Product decision: the owner requires that nothing in Morrow be blocked.
+- Condition: `canvas_delete_file` and `canvas_update_file` are semantic course objects whose course is read from the file's own record through `context_id` and `context_type`. Canvas answers `GET /api/v1/files/{id}` with no context field of any kind, so the resolution proved nothing and the Bridge refused every file change before dispatch. The person saw "No change was sent" on a review that had named the exact file, and BT2 could not delete one file Morrow had uploaded.
+- Repair: `canvasSemanticObjectContext` now separates an owner Canvas names from one it does not name at all. A record that is the requested object but carries no owner returns `unnamed_context`, and where the target already requires the selected course's own complete listing (`courseCollectionProof`), that listing is what proves the course, for the change and for its readback. An owner Canvas does name is unchanged: another course, a person's object or an account's object is still refused, and a reading for a different object still proves nothing.
+- Split: live BT2 deleted nine Canvas files through Morrow, each verified, after every earlier attempt failed.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 463: the reviewed file transfer could not prove an upload Canvas had saved
+
+- Product decision: every external write is proven by fresh authoritative readback.
+- Condition: the transfer proved its upload by downloading the saved file with `credentials: "omit"` from a URL it required to carry a `verifier`. Canvas gives the signed-in owner a plain `/files/{id}/download` route with no verifier, so the check refused the route outright; and without the session that route answers the sign-in page with HTTP 200, which is not the file. Every course-folder upload in BT2 settled `applied_or_unknown` although Canvas had saved the file exactly.
+- Repair: the proof reads the file back on its own route, derived from the id the readback confirmed, accepting a verifier Canvas supplies and refusing a route that names another file or another site. The read carries the session, because that is what Canvas serves a course file to, and a redirect to the file store carries that store's own signed token rather than this session. An answer that ends at Canvas's sign-in is named `canvas_file_download_session_required` instead of being taken for the file.
+- Status: `IMPLEMENTED`.
+
+### 464: an upload Canvas saved but Morrow could not confirm could never be settled
+
+- Product decision: nothing in Morrow is blocked, and an unresolved change is settled by reading, never by sending again.
+- Condition: the reviewed transfer was excluded from retained comparators, so an unknown outcome had no read to settle it. The operation held its target lock, every later upload in that course was refused with `provider_effect_target_conflict`, and the only exit was a person's own attestation. Live BT2 reached exactly that dead end. Two shapes of one scope made it permanent: the transfer froze its connection scope through `resourceFileEffectScope`, which carries `siteUrl`, while reconciliation rebuilt it through `effectBindingScope`, which carries `siteUrl` for Moodle only, so a transfer could never match its own frozen authority.
+- Repair: reconciliation rebuilds a transfer's comparator from the request the person approved, reading the target's own file listing for the exact file name and size (`canvasUploadListingRead` pairs each reviewed upload route with that listing), and rebuilds the connection scope the way the transfer froze it. An upload Canvas saved is now settled `verified` by a read; one Canvas never saved stays unresolved and is never called applied.
+- Split: live BT2 settled the operation that had blocked every upload, then uploaded, confirmed and removed proof files.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### Root-cause patterns for rows 331–464
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

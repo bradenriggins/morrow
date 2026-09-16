@@ -38,7 +38,7 @@ const CANVAS_COUNT_KEYS = [
   "browserSessionOperations", "courseFileContentOperations", "itemBankOperations", "newQuizzesOperations",
   "officialOperations", "reads", "totalOperations", "writes",
 ];
-const CANVAS_SOURCE_KEYS = ["apiVersion", "indexUrl", "lastModified", "resourceCount", "sourceDigest", "swaggerVersion"];
+const CANVAS_SOURCE_KEYS = ["apiVersion", "indexUrl", "resourceCount", "sourceDigest", "swaggerVersion"];
 const CANVAS_OPERATION_KEYS = [
   "deprecated", "description", "family", "inputSchema", "key", "method", "nickname", "parameters", "path",
   "readOnly", "resource", "responseType", "risk", "service", "source", "summary", "toolName",

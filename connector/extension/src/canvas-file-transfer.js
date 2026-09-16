@@ -177,9 +177,17 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     if (!text.trim()) throw new Error("canvas_file_upload_confirmation_missing");
     try { return JSON.parse(text); } catch { throw new Error("canvas_file_upload_confirmation_invalid"); }
   };
+  // The saved file's own download route on this Canvas site, built from the id
+  // the readback confirmed. Canvas names that route itself when it has one to
+  // give, with a verifier when the reader needs one, and gives none at all while
+  // the saved file is still settling. The route is the file's identity here, so
+  // it is derived from the confirmed id, and a route Canvas supplies is used only
+  // when it names that same file on this same site.
   const exactDownloadUrl = (value, canvasOrigin, fileId) => {
+    const route = new URL("/files/" + fileId + "/download", canvasOrigin);
+    if (typeof value !== "string" || value === "") return route;
     const url = canvasUrl(value, canvasOrigin, "canvas_file_download_url_refused");
-    if (url.pathname !== "/files/" + fileId + "/download" || url.searchParams.getAll("verifier").length !== 1 || !url.searchParams.get("verifier")) {
+    if (url.pathname !== route.pathname || url.searchParams.getAll("verifier").length > 1) {
       throw new Error("canvas_file_download_url_refused");
     }
     return url;
@@ -389,8 +397,13 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     });
     uploadStatus = uploaded.status;
     const finalized = await finalFile(await uploadResponse(uploaded, canvasOrigin));
+    // Canvas serves a course file to the signed-in person, so the proof reads it
+    // back the same way. The request is same-origin to Canvas, and the redirect it
+    // answers with carries the file store's own signed token, not this session:
+    // cookies never leave the Canvas origin. Without the session Canvas answers
+    // the sign-in page with HTTP 200, which is not the file and proves nothing.
     const download = await fetch(finalized.downloadUrl, {
-      credentials: "omit",
+      credentials: "include",
       cache: "no-store",
       redirect: "follow",
       referrerPolicy: "no-referrer",
@@ -405,6 +418,12 @@ export async function executeCanvasCourseFileTransferInPage(input) {
     if (finalUrl.protocol !== "https:") {
       cancelBody(download.body);
       throw new Error("canvas_file_download_origin_refused");
+    }
+    // A sign-in page answers with the same status as the file, so an answer that
+    // ends at Canvas's own sign-in is named for what it is.
+    if (finalUrl.origin === canvasOrigin && /^\/login(?:\/|$)/.test(finalUrl.pathname)) {
+      cancelBody(download.body);
+      throw new Error("canvas_file_download_session_required");
     }
     const bytes = await boundedBytes(download);
     if (bytes.byteLength !== attachment.size_bytes || await sha256(bytes) !== attachment.sha256) throw new Error("canvas_file_download_digest_mismatch");

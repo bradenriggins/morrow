@@ -103,6 +103,13 @@ export interface BrowserReadbackPlan {
   readonly targetPath?: readonly string[];
   /** For a reorder: the requested ids, in the order the listing must return them. */
   readonly orderedTargets?: readonly string[];
+  /**
+   * A second reviewed read for a deletion Canvas answers by still returning the
+   * object. Canvas keeps some deleted records readable by id and shows the
+   * deletion only by leaving them out of their listing, so the listing settles
+   * what the record alone cannot.
+   */
+  readonly fallback?: BrowserReadbackPlan;
 }
 
 interface ExactReadback {
@@ -386,6 +393,41 @@ function fixedAssertions(
   }));
 }
 
+/**
+ * The listing that proves one deletion when Canvas still answers for the deleted
+ * record by id. It reads the collection the written route belongs to and requires
+ * the target to be gone from it.
+ */
+function deletionListingFallback(
+  operations: readonly CanvasReadbackOperation[],
+  write: CanvasReadbackOperation,
+  args: Readonly<Record<string, unknown>> | undefined,
+): BrowserReadbackPlan | null {
+  const segments = write.path.split("/").filter(Boolean);
+  const parent = normalizedPath(`/${segments.slice(0, -1).join("/")}`);
+  const candidates = operations.filter((candidate) => candidate.readOnly
+    && candidate.service === write.service
+    && normalizedPath(candidate.path) === parent);
+  const listing = candidates.length === 1 ? candidates[0] : undefined;
+  if (!listing) return null;
+  const targetArgument = collectionTargetArgument(write, listing);
+  const target = targetArgument ? args?.[targetArgument] : undefined;
+  // The listing is matched on the record id, so a route addressed by anything
+  // else, such as a page by its URL, is left to its own read.
+  if (!/^[1-9][0-9]{0,18}$/.test(String(target ?? ""))) return null;
+  const argumentsValue = readArguments(listing, args, undefined, undefined, undefined, undefined);
+  if (!argumentsValue) return null;
+  return {
+    schema: "morrow.browser-readback-plan.v1",
+    strategy: "collection-omits-target",
+    readOperation: listing,
+    arguments: argumentsValue,
+    assertions: [],
+    targetId: String(target),
+    targetField: "id",
+  };
+}
+
 export function planBrowserReadback(
   operations: readonly CanvasReadbackOperation[],
   write: CanvasReadbackOperation | null | undefined,
@@ -443,6 +485,12 @@ export function planBrowserReadback(
     strategy: strategy || "updated-resource",
     readOperation: read,
     arguments: argumentsValue,
+    ...(strategy === "deleted-resource"
+      ? (() => {
+        const listing = deletionListingFallback(operations, write, args);
+        return listing ? { fallback: listing } : {};
+      })()
+      : {}),
     assertions: [
       ...requestedAssertions(write, args, [...(override?.ignoredAssertions || []), ...(override?.orderArgument ? [override.orderArgument] : [])], override?.bodyAssertions),
       ...responseAssertions(override?.responseAssertions, writeData),
@@ -558,6 +606,13 @@ function targetRecords(value: unknown, target: unknown, targetField: string, tar
   });
 }
 
+/** Canvas's own record of a deletion, as the read returns it. */
+function deletedStateValue(data: unknown): boolean {
+  return String(valueByKey(data, "workflow_state") ?? "") === "deleted"
+    || valueByKey(data, "deleted") === true
+    || valueByKey(data, "archived") === true;
+}
+
 function verification(
   status: BrowserVerification["status"],
   plan: BrowserReadbackPlan,
@@ -580,6 +635,14 @@ export function evaluateBrowserReadback(
   const absent = readResult.ok === false && [404, 410].includes(Number(readResult.status));
   if (["deleted-resource", "deleted-or-archived-resource"].includes(plan.strategy) && absent) {
     return verification("verified", plan, "fresh_readback_absent");
+  }
+  // Canvas deletes some records softly: the read still answers, and the record
+  // carries the deleted state itself. A record that comes back without that
+  // state proves nothing here, and the plan's listing settles it.
+  if (plan.strategy === "deleted-resource" && readResult.ok === true) {
+    return deletedStateValue(readResult.data)
+      ? verification("verified", plan, "fresh_readback_deleted_state")
+      : verification("unconfirmed", plan, "resource_still_returned");
   }
   if (readResult.ok !== true) {
     return verification("unconfirmed", plan, `fresh_readback_http_${Number(readResult.status || 0)}`);

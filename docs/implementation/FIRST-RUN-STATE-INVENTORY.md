@@ -405,7 +405,7 @@ from the deferred script and only filter what is already on the page.
 | State | What the person sees | Next action | Renders at |
 | --- | --- | --- | --- |
 | `review-awaiting` | A title naming the change, who asked for it, the destination, the requested values, any risk warning, and when approval expires | **Apply this change** (the label names the change; for a group, "Apply all N changes"), or **Cancel** | `packages/mcp-server/src/approval-server.ts:808-816` |
-| `review-missing-names` | "Morrow could not identify the course or a selected item in Canvas." and "Nothing can be approved here until those details load. Check your Canvas connection, then reload this page." | Reload the page after the connection is working. The approve control is absent by design, and the server also refuses an approval in this state (`packages/mcp-server/src/approval-server.ts:982`) | `packages/mcp-server/src/approval-server.ts:812-813`, `packages/mcp-server/src/approval-server.ts:815` |
+| `review-missing-names` | "Morrow could not identify the course or a selected item in Canvas." and "Nothing can be approved here until those details load. Check your Canvas connection, then reload this page." | Reload the page after the connection is working. The approve control is absent by design, and the server also refuses an approval in this state (`packages/mcp-server/src/approval-server.ts:984`) | `packages/mcp-server/src/approval-server.ts:812-813`, `packages/mcp-server/src/approval-server.ts:815` |
 | `review-limited` | "Too many different courses or activities to review at once." and "Return to your assistant and ask Morrow to split this into smaller groups. This page has not approved any changes." | Ask the assistant for smaller groups. See finding F-6 | `packages/mcp-server/src/approval-server.ts:810-811` |
 | `review-expired` | "Review expired" and "Return to the assistant where you started this request and ask Morrow for a new review. Check the new request before approving it." | Ask the assistant for a new review. The page has no control | `packages/mcp-server/src/approval-server.ts:597`, reached at `packages/mcp-server/src/approval-server.ts:698` |
 | `review-unavailable` | "Review unavailable" and "This review may have expired or the request may have changed… Do not repeat the change until Morrow checks the saved result." | Ask the assistant to check the saved result. The page has no control | `packages/mcp-server/src/approval-server.ts:1032` |
@@ -546,15 +546,15 @@ stale name here.
 | `Save Edit access` | Plan and Edit settings | `connector/extension/settings/settings.html:143`, `connector/extension/settings/settings.js:476` |
 | `Keep reviewing` | Plan and Edit settings | `connector/extension/settings/settings.html:152` |
 | `Save Edit access anyway` | Plan and Edit settings | `connector/extension/settings/settings.html:153` |
-| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
-| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
-| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
-| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
-| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:956` |
-| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:963` |
-| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:946` |
-| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:943` |
-| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:945` |
+| `Apply this change` | Review page | `packages/mcp-server/src/approval-server.ts:958` |
+| `Add this question` | Review page | `packages/mcp-server/src/approval-server.ts:958` |
+| `Change this text` | Review page | `packages/mcp-server/src/approval-server.ts:958` |
+| `Add alternative text` | Review page | `packages/mcp-server/src/approval-server.ts:958` |
+| `Mark as decorative` | Review page | `packages/mcp-server/src/approval-server.ts:958` |
+| `Cancel` | Review page | `packages/mcp-server/src/approval-server.ts:965` |
+| `Technical details` | Review page | `packages/mcp-server/src/approval-server.ts:948` |
+| `Find a change` | Review page | `packages/mcp-server/src/approval-server.ts:945` |
+| `Stop remaining changes` | Result page | `packages/mcp-server/src/approval-server.ts:947` |
 
 Names a person reads as landmarks rather than presses:
 

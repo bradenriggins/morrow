@@ -7,6 +7,7 @@ import {
   CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS,
   canvasLearnerScopeObjectRoute,
   canvasSemanticCourseTarget,
+  canvasSemanticObjectContext,
   canvasSemanticResolutionProblem,
   canvasSemanticResolvedCourseId,
 } from "../../connector/extension/generated/canvas-semantic-target.js";
@@ -261,4 +262,28 @@ test("the page still refuses every held section route, proof or not", async () =
     assert.deepEqual(held.result, { ok: false, sent: false, error: "canvas_course_scope_required" }, toolName);
     assert.deepEqual(held.requests, [], toolName);
   }
+});
+
+test("an object Canvas names no owner for is identified, and its course is left to the listing", () => {
+  const fileTarget = canvasSemanticCourseTarget(operation("canvas_delete_file"));
+  assert.ok(fileTarget, "a Canvas file deletion names a semantic course object");
+  assert.equal(fileTarget.courseCollectionProof, true);
+
+  // Canvas answers for a file with no context field of any kind.
+  const file = { ok: true, data: { id: "14113694", folder_id: "1564337", display_name: "guide.txt" } };
+  assert.deepEqual(canvasSemanticObjectContext(fileTarget, file, "14113694"), { state: "unnamed_context" });
+
+  // A reading for another object proves nothing, whatever it names.
+  assert.deepEqual(canvasSemanticObjectContext(fileTarget, file, "999"), { state: "unproved" });
+
+  // An owner Canvas does name is read as that owner: a course binds, and a
+  // person's or an account's object is refused even here.
+  assert.deepEqual(
+    canvasSemanticObjectContext(fileTarget, { ok: true, data: { id: "5", context_type: "Course", context_id: "89585" } }, "5"),
+    { state: "course", courseId: "89585" },
+  );
+  assert.deepEqual(
+    canvasSemanticObjectContext(fileTarget, { ok: true, data: { id: "5", context_type: "User", context_id: "7" } }, "5"),
+    { state: "unproved" },
+  );
 });

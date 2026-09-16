@@ -135,6 +135,59 @@ describe("approval review context", () => {
     expect(context.targets).toEqual([{ field: "id", label: "File", name: "Week 4 study guide.pdf" }]);
   });
 
+  it("names every object a Canvas write addresses, from the catalog's own read routes", async () => {
+    const base = operation();
+    const review = async (
+      publicName: string,
+      family: string,
+      args: JsonObject,
+      reads: Readonly<Record<string, JsonObject>>,
+      readTools: readonly string[],
+    ) => resolveApprovalReviewContext({
+      operation: { ...base, publicToolName: publicName, sourceToolName: publicName, plan: { ...base.plan,
+        tool: publicName, sourceTool: publicName, arguments: { ...args, _morrow: { source_binding_id: sourceBindingId } } } },
+      tools: [...tools, tool(publicName, publicName, false, family), ...readTools.map((name) => tool(name, name, true, family))],
+      read: async (name) => {
+        if (name === "morrow_canvas_bindings") return { structuredContent: { schema: "morrow.canvas-bindings.v1", bindings: [{ sourceBindingId, provider: "canvas", runtimeVerified: true, origin: "https://school.instructure.com" }] } };
+        const data = reads[name];
+        if (!data) throw new Error(`unexpected read ${name}`);
+        return connector(data);
+      },
+    });
+
+    const section = await review("canvas_delete_section", "sections", { id: "95350" }, {
+      canvas_get_section_information_sections: { id: 95350, name: "MORROW section" },
+    }, ["canvas_get_section_information_sections"]);
+    expect(section.targets).toEqual([{ field: "id", label: "Section", name: "MORROW section" }]);
+
+    const bookmark = await review("canvas_delete_bookmark", "bookmarks", { id: "841" }, {
+      canvas_get_bookmark: { id: 841, name: "MORROW bookmark" },
+    }, ["canvas_get_bookmark"]);
+    expect(bookmark.targets).toEqual([{ field: "id", label: "Bookmark", name: "MORROW bookmark" }]);
+
+    const quiz = await review("canvas_delete_quiz", "quizzes", { course_id: "42", id: "338137" }, {
+      canvas_get_single_course_courses: { id: 42, name: "Biology" },
+      canvas_get_single_quiz: { id: 338137, course_id: 42, title: "MORROW quiz" },
+    }, ["canvas_get_single_quiz"]);
+    expect(quiz.targets).toEqual([
+      { field: "course_id", label: "Course", name: "Biology", url: "https://school.instructure.com/courses/42" },
+      { field: "id", label: "Quiz", name: "MORROW quiz" },
+    ]);
+
+    // Canvas confirms the object but holds no name for it, so the review shows
+    // what it is instead of holding the decision open forever.
+    const note = await review("canvas_delete_planner_note", "planner", { id: "2228" }, {
+      canvas_show_planner_note: { id: 2228 },
+    }, ["canvas_show_planner_note"]);
+    expect(note.targets).toEqual([{ field: "id", label: "Planner note", name: "Planner note 2228" }]);
+
+    // A read that answers about a different object names nothing.
+    const wrong = await review("canvas_delete_bookmark", "bookmarks", { id: "841" }, {
+      canvas_get_bookmark: { id: 999, name: "Someone else" },
+    }, ["canvas_get_bookmark"]);
+    expect(wrong.targets).toEqual([{ field: "id", label: "Bookmark", name: "" }]);
+  });
+
   it("uses the saved binding to resolve exact course and New Quiz names after completion", async () => {
     const calls: { publicName: string; args: Readonly<Record<string, unknown>> }[] = [];
     const context = await resolveApprovalReviewContext({
@@ -483,7 +536,7 @@ describe("approval review context", () => {
       targets: [{ field: "course_id", label: "Course", name: "Moodle Biology" }, { field: "category_id", label: "Grade category", name: "Course grade category" }],
       current: { gradebook_current_name: "Course grade category" },
     });
-    await expect(review("moodle_update_grade_item", true)).resolves.toEqual({ targets: [] });
+    await expect(review("moodle_update_grade_item", true)).resolves.toEqual({ targets: [], unnamed: true });
     await expect(review("moodle_update_grade_item", false, "verified")).resolves.toEqual({
       targets: [{ field: "course_id", label: "Course", name: "Moodle Biology" }, { field: "grade_item_id", label: "Manual grade item", name: "Morrow gradebook check" }],
       current: { gradebook_current_name: "Morrow gradebook check" },

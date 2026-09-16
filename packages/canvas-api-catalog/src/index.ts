@@ -11,12 +11,14 @@ import { resolve } from "node:path";
 import { isJsonObject, sha256Json, type JsonObject, type JsonSchema, type SourceCapabilityMetadata, type UpstreamTool } from "@morrow/contracts";
 import { canvasAdmissionReason, canvasOperationAdmission, canvasReadbackAssessment } from "./operation-admission.js";
 
-export { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, CANVAS_REVIEWED_UPLOAD_ROUTES, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasSiteAuthorityNote } from "./operation-admission.js";
+export { canvasAccountAuthorityRoute, canvasAdmissionIsBound, canvasAdmissionReason, canvasCourseTargetIsScoped, canvasOperationAdmission, canvasReadbackAssessment, CANVAS_REVIEWED_UPLOAD_ROUTES, canvasReviewedUploadKind, canvasReviewedUploadPath, canvasReviewedUploadRoute, canvasUploadListingRead, canvasSiteAuthorityNote } from "./operation-admission.js";
 export type { CanvasCourseTarget, CanvasOperationAdmission, CanvasOperationAuthority, CanvasReadbackAssessment, CanvasReviewedUploadKind, CanvasSiteAuthorityClass, CanvasWriteAdmission } from "./operation-admission.js";
 export { evaluateBrowserReadback, hasDeclaredCanvasReadback, matchesReadbackAssertions, planBrowserReadback, planCanvasRecoveryDescriptor, readbackFieldValue } from "./readback-plan.js";
 export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
 export { CANVAS_MULTI_CONTEXT_REFUSAL, CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS, canvasContextCodeCourseId, canvasCourseContextCode, canvasLearnerScopeObjectRoute, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "./semantic-target.js";
 export type { CanvasSemanticContextInputState, CanvasSemanticCourseCollectionState, CanvasSemanticCourseTarget, CanvasSemanticObjectContext, CanvasSemanticOperation, CanvasSemanticResolutionExpectation, CanvasSemanticResolutionProof, CanvasSemanticResolutionRefusal, CanvasSemanticVersionState } from "./semantic-target.js";
+export { canvasEntityReadRoutes } from "./entity-read-routes.js";
+export type { CanvasEntityReadRoute } from "./entity-read-routes.js";
 export { CLASSIC_QUIZ_SUPPORTED_QUESTION_TYPES, classicQuizQuestionContract } from "./classic-quiz-question-contract.js";
 export type { ClassicQuizQuestionContractIssue, ClassicQuizQuestionContractResult, ClassicQuizQuestionRequestAnswer } from "./classic-quiz-question-contract.js";
 
@@ -61,7 +63,6 @@ export interface CanvasApiCatalog {
     readonly apiVersion: string;
     readonly resourceCount: number;
     readonly sourceDigest: string;
-    readonly lastModified: string | null;
   };
   readonly counts: {
     readonly officialOperations: number;

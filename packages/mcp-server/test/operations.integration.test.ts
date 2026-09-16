@@ -9,6 +9,7 @@ import { MorrowRuntime } from "../src/morrow-runtime.js";
 import { GatewayRuntime } from "../src/runtime.js";
 import { LoopbackApprovalServer } from "../src/approval-server.js";
 import type { ApprovalReviewContext } from "../src/approval-context.js";
+import type { ApprovalReviewContext } from "../src/approval-context.js";
 
 const fixturePath = fileURLToPath(new URL("./fixtures/fake-upstream.mjs", import.meta.url));
 
@@ -581,6 +582,44 @@ describe("outer provider effects", () => {
     }
   });
 
+  it("offers approval for every Canvas change whose review names what it touches", async () => {
+    let review: ApprovalReviewContext = { targets: [{ field: "id", label: "Quiz", name: "MORROW quiz" }] };
+    const snapshot: JsonObject = {
+      operationId: "canvas-quiz-delete",
+      state: "awaiting_approval",
+      plan: { tool: "canvas_delete_quiz", risk: { approvalClass: "destructive" }, arguments: { course_id: "89585", id: "338137", _morrow: { source_binding_id: "canvas:demo" } } },
+    };
+    const approval = new LoopbackApprovalServer({
+      operationGet: () => snapshot,
+      operationList: () => ({}),
+      operationReviewContext: async () => review,
+      approveOperation: () => snapshot,
+      runApprovedOperation: async () => undefined,
+      cancelOperation: () => snapshot,
+      setApprovalBaseUrl: () => undefined,
+    });
+    try {
+      const url = await approval.start();
+      const named = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      expect(named).toContain("MORROW quiz");
+      expect(named).toContain('class="approve"');
+
+      // A change that reaches no named object is still the person's to approve:
+      // the page shows the exact request it will send.
+      review = { targets: [] };
+      const plain = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      expect(plain).toContain('class="approve"');
+      expect(plain).toContain("338137");
+
+      review = { targets: [], unnamed: true };
+      const held = await (await fetch(`${url}/operations/canvas-quiz-delete`)).text();
+      expect(held).toContain("Morrow could not identify the course or a selected item in Canvas.");
+      expect(held).not.toContain('class="approve"');
+    } finally {
+      await approval.close();
+    }
+  });
+
   it("renders Moodle browser reviews with formatted content, civil dates, and visibility decisions", async () => {
     const children = [
       {
@@ -697,7 +736,7 @@ describe("outer provider effects", () => {
       expect(review).toContain("does not read or change learner grades or grade values");
       expect(review).toContain('class="approve"');
 
-      context = { targets: [] };
+      context = { targets: [], unnamed: true };
       const blocked = await (await fetch(`${url}/operations/moodle-grade-item`)).text();
       expect(blocked).toContain("Morrow could not identify the course or a selected item in Moodle.");
       expect(blocked).not.toContain('class="approve"');
