@@ -433,3 +433,16 @@ test("a deletion Canvas answers by still returning the record is proved by its l
   const page = planBrowserReadback(catalog.operations, operation("canvas_delete_page_courses"), { course_id: "89585", url_or_id: "morrow-page" }, {});
   assert.equal(page.fallback, undefined);
 });
+
+test("marking every conversation read is proved by the person's own unread listing", () => {
+  const plan = planBrowserReadback(catalog.operations, operation("canvas_mark_all_as_read"), {}, {});
+  assert.ok(plan, "marking all conversations read must have a readback plan");
+  assert.equal(plan.strategy, "collection-empty");
+  assert.equal(plan.readOperation.toolName, "canvas_list_conversations");
+  assert.deepEqual(plan.arguments, { scope: "unread" });
+  assert.equal(evaluateBrowserReadback(plan, { ok: true, status: 200, data: [] }).status, "verified");
+  // One conversation still unread is the change not having happened.
+  assert.equal(evaluateBrowserReadback(plan, { ok: true, status: 200, data: [{ id: "1" }] }).status, "mismatch");
+  // A listing Canvas could not finish proves nothing either way.
+  assert.equal(evaluateBrowserReadback(plan, { ok: true, status: 200, truncated: true, data: [] }).status, "unconfirmed");
+});

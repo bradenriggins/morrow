@@ -57,21 +57,32 @@ Rows 459 to 464 of `DEFECT-ERADICATION-LEDGER.md`:
 - 464: an upload Canvas saved but Morrow could not confirm could never be settled,
   and it blocked every later upload in that course.
 
+## The three findings this handoff opened, now closed
+
+Rows 465 to 469 close them, each proven live:
+
+- A change Morrow could not confirm could only be settled by a person, and it held
+  its target against every later change. Reconciliation now rebuilds a comparator
+  from the contract Morrow has now: all six live records settled themselves, and
+  the journal holds 431 operations with none unresolved.
+- One refusal code stood for four conditions, so a refused Bridge update said
+  nothing useful. Each condition now answers for itself.
+- An operation record said a change failed and never said why. It now carries
+  Morrow's own attention codes, which hold no course or learner content.
+- The person's own Canvas routes refused `self`, the name Canvas uses for them,
+  and following Canvas's own paginated answer for such a route was refused as a
+  foreign path. Both are repaired; a 128-file listing reads as `self` live.
+- Marking every conversation read was sent unchecked although Canvas answers its
+  exact postcondition. It is proved now, so 341 admitted writes read back exactly
+  and 199 remain Review only.
+
 ## Open, with evidence
 
-- Canvas person routes typed `user_id` as a decimal id only, so `self` is refused
-  on 126 routes (`canvas_get_user_profile`, `canvas_list_files_users` and others).
-  The numeric id works and was proven live, so nothing is blocked; accepting
-  Canvas's own `self` spelling would touch the learner-identity resolver and is
-  left for a decision in daylight.
-- The Desktop's own Bridge update path refused with `active_or_uncertain_operations`
-  while an earlier upload was unresolved, and the refusal names no condition, so a
-  person cannot tell which one failed. The Bridge folder was updated through the
-  product's own installation module instead. Worth its own row.
-- Operation records are redacted to local control status
-  (`historical_learner_scope_unavailable`), so a failure's own reason is not
-  visible to the operator who requested it. Every diagnosis here needed the
-  Canvas tab or the Bridge instead.
+- 199 admitted writes still have no exact Canvas postcondition. Each is sent only
+  after its own approval and says so. `readback.admittedWritesWithoutExactReadback`
+  in the generated report lists them. Two reorders (`canvas_reorder_quiz_items`,
+  `canvas_reorder_question_groups`) carry ids of mixed kinds in one argument, so a
+  listing comparator there would report false mismatches; they stay honest instead.
 
 ## Private receipts
 

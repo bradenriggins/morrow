@@ -59,6 +59,18 @@ const PUBLIC_ERRORS = Object.freeze({
     message: "Morrow has work in progress, or cannot confirm that it is idle.",
     recovery: "Wait for the current step to finish, then start that step again."
   },
+  runtime_request_in_flight: {
+    message: "Morrow is answering a request from your assistant right now.",
+    recovery: "Wait for that request to finish, then start this step again."
+  },
+  runtime_change_running: {
+    message: "Morrow is applying a change you approved.",
+    recovery: "Wait for that change to finish, then start this step again."
+  },
+  runtime_other_client_connected: {
+    message: "Another assistant is connected to Morrow.",
+    recovery: "Close the other assistant, then start this step again. Morrow changed nothing."
+  },
   bridge_delivery_unavailable: {
     message: "Morrow Bridge is not available from the Chrome Web Store yet.",
     recovery: "Use the temporary Chrome instructions in Morrow, then return here."

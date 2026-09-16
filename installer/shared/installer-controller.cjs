@@ -8,6 +8,21 @@ const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { pathToFileURL } = require("node:url");
 const { ASSISTANTS, errorDetails, installerState } = require("./contract.cjs");
+
+/**
+ * The public code for one refused restart lease. The runtime names which
+ * condition held it, so the person is told what to wait for; a refusal Morrow
+ * cannot explain keeps the general answer.
+ */
+const RESTART_REFUSALS = Object.freeze({
+  local_owner_request_in_flight: "runtime_request_in_flight",
+  local_owner_approval_running: "runtime_change_running",
+  local_owner_other_client_connected: "runtime_other_client_connected"
+});
+
+function restartRefusalCode(reason) {
+  return (typeof reason === "string" && RESTART_REFUSALS[reason]) || "active_or_uncertain_operations";
+}
 const { DATA_REMOVAL_SCHEMA, freshRecord, insideDirectory, inspectRecord, readPrivateRegularFile, retentionSnapshot } = require("./state-policy.cjs");
 const {
   bridgeInstallationStatus,
@@ -1279,7 +1294,7 @@ class InstallerController {
     }
     const lease = await this.acquireRestartLease();
     if (lease?.status !== "granted" || typeof lease.leaseId !== "string" || this.restartLeases.get(lease.leaseId) !== monitor) {
-      throw errorDetails("active_or_uncertain_operations");
+      throw errorDetails(restartRefusalCode(lease?.reason));
     }
     this.bridgeLeaseId = lease.leaseId;
     return lease.leaseId;
@@ -2401,7 +2416,7 @@ class InstallerController {
     if (this.runtimeMonitor) {
       const active = await this.acquireRestartLease();
       if (active?.status !== "granted" || typeof active.leaseId !== "string") {
-        throw errorDetails("active_or_uncertain_operations");
+        throw errorDetails(restartRefusalCode(active?.reason));
       }
       const activeWorkspace = this.runtimeWorkspace ? await canonicalDirectory(this.runtimeWorkspace) : workspaceRoot;
       return { kind: "owner", leaseId: active.leaseId, journalPath, workspaceRoot: activeWorkspace, module };
@@ -2716,7 +2731,7 @@ class InstallerController {
     const monitor = this.runtimeMonitor;
     if (!monitor) return { status: "uncertain" };
     const result = await monitor.maintenance({ action: "acquire", holderPid: process.pid });
-    if (result?.status !== "held") return { status: "uncertain" };
+    if (result?.status !== "held") return { status: "uncertain", ...(result?.reason ? { reason: result.reason } : {}) };
     const leaseId = crypto.randomUUID();
     this.restartLeases.set(leaseId, monitor);
     return { status: "granted", leaseId };

@@ -1,6 +1,6 @@
 {
   "schema": "morrow.canvas-admission-report.v1",
-  "catalogDigest": "a95bb6822ea51d7bac6a3f50d704eca6e8b65daf28227c1a0911547152c422c5",
+  "catalogDigest": "0b1887bbc961d289d69deee079eeaff0ab7785604413e337fe63b93bb2fc4bdf",
   "totals": {
     "operations": 1121,
     "reads": 571,
@@ -45,8 +45,8 @@
   },
   "readback": {
     "stateCounts": {
-      "structurally_exact": 340,
-      "unavailable": 165,
+      "structurally_exact": 341,
+      "unavailable": 164,
       "blocked": 24,
       "unconfirmed": 11
     },
@@ -64,12 +64,12 @@
     },
     "routeTierCounts": {
       "exact": 216,
-      "created_child": 74,
+      "created_child": 75,
       "parent_collection": 25,
       "declared": 20,
       "executor": 14,
       "mismatched": 2,
-      "none": 189
+      "none": 188
     },
     "namedReadbackTools": [
       "canvas_bulk_update_assignment_dates",
@@ -177,7 +177,6 @@
       "canvas_lock_or_unlock_current_csp_settings_for_sub_accounts_and_courses",
       "canvas_log_users_out_of_all_mobile_apps_id",
       "canvas_log_users_out_of_all_mobile_apps_mobile_sessions",
-      "canvas_mark_all_as_read",
       "canvas_mark_bulk_submissions_as_read_courses",
       "canvas_mark_bulk_submissions_as_read_sections",
       "canvas_mark_document_annotations_as_read_sections",

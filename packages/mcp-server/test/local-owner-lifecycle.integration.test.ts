@@ -190,13 +190,14 @@ describe("local-owner lifecycle", () => {
 
       const slow = monitor.client.callTool({ name: "canvas_page_get", arguments: { course_id: "101" } });
       await waitUntil(async () => (await readLog(callLogPath)).includes("canvas_page_get"), "the active modern request");
+      // Each condition answers for itself, so the person is told what to wait for.
       await expect(requestLocalOwnerMaintenance({
         action: "acquire",
         journalPath,
         holderPid: process.pid,
         monitorProxyPid: monitor.transport.pid!,
         workspaceRoot,
-      })).rejects.toMatchObject({ code: "local_owner_maintenance_work_active" });
+      })).rejects.toMatchObject({ code: "local_owner_request_in_flight" });
       await slow;
       const heldAfterSlow = await requestLocalOwnerMaintenance({
         action: "acquire",
@@ -224,7 +225,7 @@ describe("local-owner lifecycle", () => {
         holderPid: process.pid,
         monitorProxyPid: monitor.transport.pid!,
         workspaceRoot,
-      })).rejects.toMatchObject({ code: "local_owner_maintenance_work_active" });
+      })).rejects.toMatchObject({ code: "local_owner_other_client_connected" });
     } finally {
       await Promise.all([closeClient(peer), closeClient(monitor)]);
       await waitUntil(() => !existsSync(ownerPath), "the modern owner's cleanup");

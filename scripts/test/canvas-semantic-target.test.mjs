@@ -287,3 +287,29 @@ test("an object Canvas names no owner for is identified, and its course is left 
     { state: "unproved" },
   );
 });
+
+test("Canvas names the signed-in person self on their own routes, and Morrow admits it", () => {
+  const profile = operation("canvas_get_user_profile");
+  const pattern = profile.inputSchema.properties.user_id.pattern;
+  assert.equal(pattern, "^([1-9][0-9]*|self)$");
+  assert.equal(new RegExp(pattern).test("self"), true);
+  assert.equal(new RegExp(pattern).test("28206"), true);
+  assert.equal(new RegExp(pattern).test("0"), false);
+  assert.equal(new RegExp(pattern).test("self-other"), false);
+
+  // Every route whose subject is the person themselves reads the same way.
+  const personRoutes = CATALOG.operations.filter((entry) => /^\/v1\/users\/\{user_id\}(?:\/|$)/.test(entry.path));
+  assert.ok(personRoutes.length >= 80, `person routes: ${personRoutes.length}`);
+  for (const entry of personRoutes) {
+    const parameter = entry.parameters.find((value) => value.location === "path" && value.inputName === "user_id");
+    assert.ok(parameter, `${entry.toolName} names no user_id path parameter`);
+    assert.equal(parameter.schema.pattern, "^([1-9][0-9]*|self)$", entry.toolName);
+  }
+
+  // A route about someone else in a course keeps the documented id: who it names
+  // is the whole question there.
+  const courseUser = operation("canvas_get_single_user");
+  const courseParameter = courseUser.parameters.find((value) => value.location === "path" && value.inputName === "id");
+  assert.ok(courseParameter);
+  assert.equal(courseParameter.schema.pattern, "^[1-9][0-9]*$");
+});

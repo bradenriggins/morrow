@@ -1229,6 +1229,8 @@ describe("Canvas connector gateway path", () => {
           ...expectedConversationControl,
           operationId: cancelledConversationId,
           state: "cancelled",
+          // A control-only record still says what happened, in Morrow's own codes.
+          attention: ["cancelled_before_dispatch"],
         });
 
         for (const result of [get, listed, recent, cancelled]) {

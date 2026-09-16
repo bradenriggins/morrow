@@ -17,8 +17,8 @@ export { evaluateBrowserReadback, hasDeclaredCanvasReadback, matchesReadbackAsse
 export type { BrowserReadbackAssertion, BrowserReadbackPlan, BrowserReadbackResult, BrowserVerification, CanvasRecoveryDescriptor, CanvasRecoveryRead, CanvasReadbackOperation } from "./readback-plan.js";
 export { CANVAS_MULTI_CONTEXT_REFUSAL, CANVAS_SEMANTIC_RESOLUTION_MAX_AGE_MS, canvasContextCodeCourseId, canvasCourseContextCode, canvasLearnerScopeObjectRoute, canvasSemanticContextInputState, canvasSemanticCourseCollectionArguments, canvasSemanticCourseCollectionState, canvasSemanticCourseTarget, canvasSemanticObjectContext, canvasSemanticObjectVersion, canvasSemanticResolutionProblem, canvasSemanticResolvedCourseId, canvasSemanticSeriesInput, canvasSemanticVersionState } from "./semantic-target.js";
 export type { CanvasSemanticContextInputState, CanvasSemanticCourseCollectionState, CanvasSemanticCourseTarget, CanvasSemanticObjectContext, CanvasSemanticOperation, CanvasSemanticResolutionExpectation, CanvasSemanticResolutionProof, CanvasSemanticResolutionRefusal, CanvasSemanticVersionState } from "./semantic-target.js";
-export { canvasEntityReadRoutes } from "./entity-read-routes.js";
-export type { CanvasEntityReadRoute } from "./entity-read-routes.js";
+export { canvasDeclaredReadback, canvasEntityReadRoutes, canvasRecordListing } from "./entity-read-routes.js";
+export type { CanvasDeclaredReadback, CanvasEntityReadRoute, CanvasRecordListing } from "./entity-read-routes.js";
 export { CLASSIC_QUIZ_SUPPORTED_QUESTION_TYPES, classicQuizQuestionContract } from "./classic-quiz-question-contract.js";
 export type { ClassicQuizQuestionContractIssue, ClassicQuizQuestionContractResult, ClassicQuizQuestionRequestAnswer } from "./classic-quiz-question-contract.js";
 

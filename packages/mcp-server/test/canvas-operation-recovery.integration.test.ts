@@ -379,4 +379,185 @@ describe("Canvas unresolved-operation recovery", () => {
       rmSync(directory, { recursive: true, force: true });
     }
   }, 60_000);
+
+  it("settles a deletion Canvas still answers for from the collection that held it", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-deletion-recovery-"));
+    const port = await availablePort();
+    const browserCatalogDigest = bridgeCatalogDigestForTests(ROOT);
+    const morrow = await MorrowRuntime.connect(connectorConfig(directory, port), {
+      statePath: join(directory, "gateway.sqlite3"),
+    });
+    const runtime = morrow.gateway;
+    let bridge: BridgeTestClient | undefined;
+
+    // Canvas soft-deletes a Classic Quiz: its own route keeps answering with a
+    // record that carries no deletion of any kind, and only the course's quiz
+    // listing shows that it is gone.
+    const quiz = { id: "338137", course_id: "42", title: "MORROW quiz", published: false };
+    let listedQuizzes: JsonObject[] = [quiz];
+    let writeCommands = 0;
+
+    try {
+      bridge = await connectBridgeTestClient({
+        port,
+        token: TOKEN,
+        extensionId: EXTENSION_ID,
+        catalogDigest: browserCatalogDigest,
+        bindings: [{
+          sourceBindingId: SOURCE_BINDING_ID,
+          provider: "canvas" as const,
+          origin: "https://school.instructure.com",
+          courseId: "42",
+          principalFingerprint: "c".repeat(64),
+          sessionGeneration: 1,
+          catalogDigest: browserCatalogDigest,
+          runtimeVerified: true,
+        }],
+      });
+
+      bridge.onCommand((command) => {
+        if (command.kind === "invoke_write") {
+          writeCommands += 1;
+          // The quiz is removed from the course, and Canvas keeps answering for
+          // its own route. The write itself confirms nothing.
+          listedQuizzes = [];
+          bridge?.respondProblem(command, {
+            schema: "morrow.bridge.problem.v1",
+            code: "write_outcome_unknown",
+            message: "Canvas did not confirm this change.",
+            recoverable: false,
+          }, undefined);
+          return;
+        }
+        const data = command.toolName === "canvas_list_quizzes_in_course"
+          ? listedQuizzes
+          : command.toolName === "canvas_get_single_quiz"
+          ? quiz
+          : { id: "42", name: "Biology" };
+        bridge?.respond(command, {
+          schema: "morrow.canvas-browser-result.v1",
+          ok: true, sent: true, status: 200, truncated: false, data: data as JsonObject,
+        });
+      });
+
+      const planned = await runtime.call("canvas_delete_quiz", {
+        course_id: "42",
+        id: "338137",
+        _morrow: { operation_id: "operation:canvas-quiz-deletion", source_binding_id: SOURCE_BINDING_ID },
+      });
+      const id = operationId(planned as JsonObject);
+      runtime.approveOperation(id);
+      await runtime.dispatchOperation(id);
+      expect(runtime.effects.get(id).state).toBe("applied_or_unknown");
+      expect(writeCommands).toBe(1);
+
+      const settled = await runtime.reconcileOperation(id);
+      expect(JSON.stringify(settled)).toContain("canvas_list_quizzes_in_course");
+      expect(runtime.effects.get(id)).toMatchObject({ state: "verified", verificationStatus: "verified" });
+      // The check only reads. It never sends the deletion again.
+      expect(writeCommands).toBe(1);
+
+      // A record the collection still holds is never called deleted.
+      listedQuizzes = [quiz];
+      const other = await runtime.call("canvas_delete_quiz", {
+        course_id: "42",
+        id: "338137",
+        _morrow: { operation_id: "operation:canvas-quiz-deletion-open", source_binding_id: SOURCE_BINDING_ID },
+      });
+      const openId = operationId(other as JsonObject);
+      runtime.approveOperation(openId);
+      await runtime.dispatchOperation(openId);
+      listedQuizzes = [quiz];
+      await runtime.reconcileOperation(openId);
+      expect(runtime.effects.get(openId).state).toBe("applied_or_unknown");
+    } finally {
+      await bridge?.close();
+      await morrow.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  it("settles a change with no retained comparator from the contract it has now", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "morrow-canvas-declared-recovery-"));
+    const port = await availablePort();
+    const browserCatalogDigest = bridgeCatalogDigestForTests(ROOT);
+    const morrow = await MorrowRuntime.connect(connectorConfig(directory, port), {
+      statePath: join(directory, "gateway.sqlite3"),
+    });
+    const runtime = morrow.gateway;
+    let bridge: BridgeTestClient | undefined;
+
+    // Marking every conversation read has an exact postcondition of its own, and
+    // a build that had no comparator for it retained none with the change.
+    let unread: JsonObject[] = [{ id: "5", subject: "unread" }];
+    let writeCommands = 0;
+
+    try {
+      bridge = await connectBridgeTestClient({
+        port,
+        token: TOKEN,
+        extensionId: EXTENSION_ID,
+        catalogDigest: browserCatalogDigest,
+        bindings: [{
+          sourceBindingId: SOURCE_BINDING_ID,
+          provider: "canvas" as const,
+          origin: "https://school.instructure.com",
+          courseId: "42",
+          principalFingerprint: "c".repeat(64),
+          sessionGeneration: 1,
+          catalogDigest: browserCatalogDigest,
+          runtimeVerified: true,
+        }],
+      });
+
+      bridge.onCommand((command) => {
+        if (command.kind === "invoke_write") {
+          writeCommands += 1;
+          unread = [];
+          bridge?.respondProblem(command, {
+            schema: "morrow.bridge.problem.v1",
+            code: "write_outcome_unknown",
+            message: "Canvas did not confirm this change.",
+            recoverable: false,
+          }, undefined);
+          return;
+        }
+        const data = command.toolName === "canvas_list_conversations" ? unread : { id: "42", name: "Biology" };
+        bridge?.respond(command, {
+          schema: "morrow.canvas-browser-result.v1",
+          ok: true, sent: true, status: 200, truncated: false, data: data as JsonObject,
+        });
+      });
+
+      const planned = await runtime.call("canvas_mark_all_as_read", {
+        _morrow: { operation_id: "operation:canvas-mark-all-read", source_binding_id: SOURCE_BINDING_ID },
+      });
+      const id = operationId(planned as JsonObject);
+      runtime.approveOperation(id);
+      await runtime.dispatchOperation(id);
+      expect(runtime.effects.get(id).state).toBe("applied_or_unknown");
+      expect(runtime.effects.get(id).connectorReadDescriptor).toBe(null);
+
+      const settled = await runtime.reconcileOperation(id);
+      expect(JSON.stringify(settled)).toContain("canvas_list_conversations");
+      expect(runtime.effects.get(id)).toMatchObject({ state: "verified", verificationStatus: "verified" });
+      expect(writeCommands).toBe(1);
+
+      // A conversation still unread is the change not having happened.
+      unread = [{ id: "5", subject: "unread" }];
+      const again = await runtime.call("canvas_mark_all_as_read", {
+        _morrow: { operation_id: "operation:canvas-mark-all-read-open", source_binding_id: SOURCE_BINDING_ID },
+      });
+      const openId = operationId(again as JsonObject);
+      runtime.approveOperation(openId);
+      await runtime.dispatchOperation(openId);
+      unread = [{ id: "5", subject: "unread" }];
+      await runtime.reconcileOperation(openId);
+      expect(runtime.effects.get(openId).state).toBe("applied_or_unknown");
+    } finally {
+      await bridge?.close();
+      await morrow.close();
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }, 60_000);
 });

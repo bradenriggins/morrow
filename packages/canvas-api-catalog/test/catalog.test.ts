@@ -544,7 +544,7 @@ describe("Canvas API catalog", () => {
     const redirectReads = catalog.operations.filter((operation) => operation.readOnly && operation.responseType === "void"
       && /redirect/iu.test(`${operation.summary} ${operation.description}`));
     expect(held).toHaveLength(10);
-    expect(admittedWithoutExactReadback).toHaveLength(200);
+    expect(admittedWithoutExactReadback).toHaveLength(199);
     expect(siteReads).toHaveLength(355);
     // Every read is bound: to the selected course, or to the connected Canvas site as the signed-in person.
     expect(catalog.operations.filter((operation) => operation.readOnly
@@ -1472,11 +1472,11 @@ describe("Canvas API catalog", () => {
   it("derives structural readback metadata from the shared planner", () => {
     const admittedWrites = catalog.operations.filter((operation) => !operation.readOnly && canvasOperationAdmission(operation).write.state === "admitted");
     const assessments = admittedWrites.map((operation) => canvasReadbackAssessment(catalog.operations, operation));
-    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(165);
+    expect(assessments.filter((assessment) => assessment.state === "unavailable")).toHaveLength(164);
     expect(assessments.filter((assessment) => assessment.state === "blocked")).toHaveLength(24);
     expect(assessments.filter((assessment) => assessment.state === "unconfirmed")).toHaveLength(11);
     expect(admittedWrites).toHaveLength(540);
-    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(340);
+    expect(assessments.filter((assessment) => assessment.state === "structurally_exact")).toHaveLength(341);
     const tools = canvasCatalogTools(catalog);
     expect(tools.find((tool) => tool.name === "canvas_update_custom_gradebook_column")?.capability?.behavior.supportsReadback).toBe(true);
     // Deleting a gradebook column is course work admitted through its course, and its absence reads back exactly.

@@ -479,6 +479,11 @@ Every row stays open until its evidence columns are added and its status becomes
 | 462 | P0 | R7 | Every Canvas file update and deletion was refused before it was sent, because the course resolution read a context field Canvas does not return on a file record. | closure section 462; semantic target regressions, live BT2 course 89585 | IMPLEMENTED |
 | 463 | P1 | R7 | The reviewed file transfer could not prove an upload Canvas had saved: it required a verifier Canvas does not give the signed-in owner and read the file back without the session. | closure section 463; Canvas file transfer regressions | IMPLEMENTED |
 | 464 | P1 | R7 | An upload Canvas saved but Morrow could not confirm could never be settled, and it blocked every later upload in that course until a person attested to it. | closure section 464; Canvas file transfer recovery regressions, live BT2 course 89585 | IMPLEMENTED |
+| 465 | P0 | R7 | A change Morrow could not confirm could only be settled by a person's attestation, and until then it blocked every later change to the same target. | closure section 465; Canvas operation recovery regressions, live BT2 course 89585 | IMPLEMENTED |
+| 466 | P2 | R3 | One refusal code stood for four different conditions, so a refused Bridge update told the person nothing about what to wait for. | closure section 466; local owner maintenance regressions | IMPLEMENTED |
+| 467 | P2 | R3 | An operation record said a change failed and never said why, because Morrow's own account was withheld with the provider's content. | closure section 467; batch and connector projection regressions | IMPLEMENTED |
+| 468 | P1 | R7 | The 85 Canvas routes whose subject is the signed-in person refused `self`, and following Canvas's own paginated answer for such a route was refused as a foreign path. | closure section 468; catalog and pagination regressions, live BT2 course 89585 | IMPLEMENTED |
+| 469 | P3 | R7 | Marking every conversation read was sent unchecked although Canvas answers its exact postcondition. | closure section 469; Canvas verification regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3199,7 +3204,45 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Split: live BT2 settled the operation that had blocked every upload, then uploaded, confirmed and removed proof files.
 - Status: `IMPLEMENTED`; proven live in BT2 course 89585.
 
-### Root-cause patterns for rows 331–464
+### 465: a change Morrow could not confirm could only be settled by a person, and it blocked every later change to that target
+
+- Product decision: nothing in Morrow is blocked, and an unresolved change is settled by reading, never by sending again.
+- Condition: reconciliation ran only the comparator retained with the change. A change dispatched by a build whose comparator did not settle it, or that retained none at all, could never be settled by Morrow: the record held its target lock, later changes to that target were refused with `provider_effect_target_conflict`, and the only exit was a person's own attestation. Live BT2 held six such records, five Canvas deletions and one conversation change, and the conversation record blocked every later conversation write.
+- Repair: reconciliation now rebuilds a comparator from the contract Morrow has now, generated from the published catalog. A deletion is settled by the collection that held the record (`canvasRecordListing`, 73 deletions), whether or not the record's own route still answers; a change whose contract declares a comparator needing nothing from the request is settled by that reading (`canvasDeclaredReadback`). Both run the same binding check and the same read-only promise as every recovery: a change Canvas did not make stays unresolved and is never called applied.
+- Split: all six live records settled themselves; the journal holds 431 operations and none unresolved.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 466: one refusal stood for four different conditions, so nobody could tell which
+
+- Product decision: a person is told what to do next, not only that something is wrong.
+- Condition: the owner refused a maintenance lease with `local_owner_maintenance_work_active` whether a request was in flight, an approved change was still running, or another assistant was connected; the monitor then reduced that to `unavailable` and the Desktop showed "Morrow has work in progress, or cannot confirm that it is idle." A Bridge update refused this way told the person nothing about what to wait for, and diagnosing it live took a debugger on the owner process.
+- Repair: the acquire path answers with the condition that held it (`local_owner_request_in_flight`, `local_owner_approval_running`, `local_owner_other_client_connected`), the monitor carries that reason, and the Desktop shows the sentence that fits: the request will finish, the change will finish, or the other assistant has to close. A refusal Morrow cannot explain keeps the general answer.
+- Status: `IMPLEMENTED`.
+
+### 467: an operation record said a change failed and never said why
+
+- Product decision: Morrow's own account of what it did belongs to the person who asked for it.
+- Condition: a record whose learner scope had passed was reduced to state, dispatch attempt and verification status. Every failure read as "Morrow retained only local operation control status", so the reason a change failed was invisible to the person and to anyone helping them; each diagnosis in this delivery had to come from the Canvas tab or the Bridge instead.
+- Repair: the control record carries Morrow's own attention codes, which are its closed vocabulary and hold no course or learner content. A record now says, for example, `readback_did_not_match_frozen_comparator` beside the state it reached.
+- Status: `IMPLEMENTED`.
+
+### 468: the person's own Canvas routes refused the name Canvas gives them
+
+- Product decision: nothing in Morrow is blocked.
+- Condition: Canvas documents every id as a number, and Morrow typed `user_id` accordingly, so the 85 routes whose subject is the signed-in person refused `self`, the name Canvas itself uses. A person had to know their own numeric Canvas id to read their own profile or files. Widening it then exposed a second refusal: Canvas answers a route addressed as `self` with next-page links that name the person by id, and the pagination guard required an identical path, so the person's own files stopped at the first page with `canvas_pagination_origin_refused`.
+- Repair: the person's own routes accept `self` or their id, and a route about someone else in a course keeps the documented id, because who it names is the whole question there. The pagination guard follows a link that differs from the request only where `self` resolved to a decimal id, and refuses every other path, including another person's id in that segment and a different route that happens to carry one.
+- Split: live BT2 read the profile, folders, calendar and a 128-file listing as `self`.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 469: a change Canvas can prove was sent unchecked
+
+- Product decision: every external write is proven by fresh authoritative readback wherever Canvas offers one.
+- Condition: marking every conversation read was published as a Review-only change whose result said Canvas has no read that shows the saved result. Canvas does have one: the person's unread conversations are then none, and `canvas_list_conversations` answers that directly.
+- Repair: the write declares that reading with the `collection-empty` comparator. One unread conversation is a mismatch, and a listing Canvas could not finish proves nothing either way.
+- Split: 341 admitted writes now read back exactly and 199 remain Review only, down from 340 and 200.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### Root-cause patterns for rows 331–469
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

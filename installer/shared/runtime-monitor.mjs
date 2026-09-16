@@ -135,8 +135,10 @@ function safeFirstRead(snapshot) {
   };
 }
 
-function maintenanceResult(action, status) {
-  return { schema: MAINTENANCE_SCHEMA, action, status };
+function maintenanceResult(action, status, reason) {
+  // The reason names which condition refused, so the person is told what to wait
+  // for instead of being told only that something is in progress.
+  return { schema: MAINTENANCE_SCHEMA, action, status, ...(reason ? { reason } : {}) };
 }
 
 function pause(milliseconds) {
@@ -869,12 +871,12 @@ export function createRuntimeMonitor({ nodePath, serverEntryPath, upstreamsPath,
           holderPid,
           monitorProxyPid: proxyPid,
         });
-        if (held.status !== "held") return maintenanceResult(action, "unavailable");
+        if (held.status !== "held") return maintenanceResult(action, "unavailable", held.status);
         maintenanceLease = storedLease(held);
         current.health.canRestart = "yes";
         return maintenanceResult(action, "held");
-      } catch {
-        return maintenanceResult(action, "unavailable");
+      } catch (error) {
+        return maintenanceResult(action, "unavailable", typeof error?.code === "string" ? error.code : undefined);
       }
     }
     if (!maintenanceLease || maintenanceCommitted || maintenanceLease.holderPid !== holderPid) {

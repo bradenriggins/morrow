@@ -793,7 +793,13 @@ async function startMorrow(lifecycle) {
       return respond();
     } catch (error) {
       // A known refusal keeps its own fixed public text; anything else stays generic.
-      return failed(["runtime_repair_required", "active_or_uncertain_operations"].includes(error?.code)
+      return failed([
+        "runtime_repair_required",
+        "active_or_uncertain_operations",
+        "runtime_request_in_flight",
+        "runtime_change_running",
+        "runtime_other_client_connected",
+      ].includes(error?.code)
         ? errorDetails(error.code)
         : errorDetails("bridge_check_failed"));
     }

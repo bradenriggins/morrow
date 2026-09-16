@@ -932,7 +932,13 @@ describe("MorrowRuntime durable batches", () => {
         phase: "cancelled",
         effectState: "cancelled",
       });
-      expect((cancelled.structuredContent as { data?: unknown }).data).toEqual({ ...expectedControl, state: "cancelled" });
+      // A control-only record still says what happened to the change, in Morrow's
+      // own closed codes, which carry no course or learner content.
+      expect((cancelled.structuredContent as { data?: unknown }).data).toEqual({
+        ...expectedControl,
+        state: "cancelled",
+        attention: ["cancelled_before_dispatch"],
+      });
       expect(second.gateway.operationGet(operationId)).toMatchObject({ state: "cancelled", dispatchAttempt: 0 });
 
       // Control-only recovery never asks the current roster to rebind old scope.
@@ -1041,7 +1047,11 @@ describe("MorrowRuntime durable batches", () => {
 
       const cancelled = await client.callTool({ name: "morrow_operation_cancel", arguments: { operation_id: operationId } });
       expect(cancelled.isError, JSON.stringify(cancelled)).not.toBe(true);
-      expect((cancelled.structuredContent as { data?: unknown }).data).toEqual({ ...control, state: "cancelled" });
+      expect((cancelled.structuredContent as { data?: unknown }).data).toEqual({
+        ...control,
+        state: "cancelled",
+        attention: ["cancelled_before_dispatch"],
+      });
       expect(second.gateway.operationGet(operationId)).toMatchObject({ state: "cancelled", dispatchAttempt: 0 });
       expect(rosterReads).toBe(0);
 

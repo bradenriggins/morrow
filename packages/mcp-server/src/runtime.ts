@@ -66,6 +66,8 @@ import {
   type CanvasRecoveryRead,
   canvasReviewedUploadPath,
   canvasReviewedUploadRoute,
+  canvasDeclaredReadback,
+  canvasRecordListing,
   canvasUploadListingRead,
 } from "@morrow/canvas-api-catalog";
 import {
@@ -7001,6 +7003,10 @@ export class GatewayRuntime {
       state: record.state,
       dispatchAttempt: record.dispatchAttempt,
       verification: { status: this.operationVerificationStatus(record) },
+      // Morrow's own account of what happened is Morrow's, not the provider's:
+      // these are its closed codes and they carry no course or learner content.
+      // Without them a person is told a change failed and never told why.
+      ...(record.attention.length ? { attention: [...record.attention] } : {}),
       contentOmittedReason: "historical_learner_scope_unavailable",
     };
   }
@@ -8759,6 +8765,137 @@ export class GatewayRuntime {
     return browser as BrowserReadbackResult;
   }
 
+  /**
+   * Settles one Canvas deletion the record's own route cannot answer. Canvas
+   * keeps some deleted records readable by id and shows the deletion only by
+   * leaving them out of the collection that held them, so that collection is
+   * read here. It is also the only check an operation frozen by an older build
+   * can still be settled by, because it is derived from the request itself
+   * rather than from whatever comparator that build retained.
+   */
+  private async canvasDeletionListingVerdict(
+    operation: EffectOperationRecord,
+  ): Promise<{ readonly readTool: string; readonly verification: JsonObject } | null> {
+    const listing = canvasRecordListing(operation.sourceToolName);
+    if (!listing) return null;
+    const request = operation.forwardedRequest;
+    const target = targetIdentityValue(request[listing.targetField])
+      ?? (typeof request[listing.targetField] === "string" ? String(request[listing.targetField]) : null);
+    if (!target) return null;
+    const argumentsValue: Record<string, string> = {};
+    for (const [name, field] of Object.entries(listing.arguments)) {
+      const value = targetIdentityValue(request[field]);
+      if (!value) return null;
+      argumentsValue[name] = value;
+    }
+    const read = await this.canvasRecoveryRead({ readTool: listing.read, arguments: argumentsValue }, operation.sourceBindingId);
+    const verification = (status: "verified" | "mismatch" | "unconfirmed", evidence: string): JsonObject => ({
+      schema: "morrow.browser-verification.v1",
+      status,
+      strategy: "collection-omits-target",
+      readTool: listing.read,
+      ...(status === "verified" ? { evidence } : { reason: evidence }),
+    });
+    if (!read || read.ok !== true) return { readTool: listing.read, verification: verification("unconfirmed", "collection_readback_unavailable") };
+    if (read.truncated === true) return { readTool: listing.read, verification: verification("unconfirmed", "collection_readback_incomplete") };
+    if (!Array.isArray(read.data)) return { readTool: listing.read, verification: verification("unconfirmed", "collection_readback_shape_invalid") };
+    // Canvas names a record by its id, and a page by the URL its route uses, so
+    // the record this change named is matched on either.
+    const holds = read.data.some((record) => isJsonObject(record)
+      && [record.id, record.page_id, record.url].some((value) => value !== undefined && value !== null && String(value) === target));
+    return {
+      readTool: listing.read,
+      verification: holds
+        ? verification("mismatch", "collection_still_holds_target")
+        : verification("verified", "fresh_collection_omits_target"),
+    };
+  }
+
+  /**
+   * One deletion settled by the collection that held the record, with the same
+   * binding check and the same read-only promise every recovery makes.
+   */
+  private async canvasDeletionByListing(
+    operation: EffectOperationRecord,
+    mapping: CatalogTool,
+  ): Promise<JsonObject | null> {
+    if (!canvasRecordListing(operation.sourceToolName)) return null;
+    if (!await this.canvasRecoveryBindingMatches(mapping, operation)) {
+      return this.effectResult(operation, "reconciliation_refused_binding_changed", undefined, [
+        CONNECTOR_RECOVERY_BINDING_CHANGED_LIMITATION,
+        CONNECTOR_RECOVERY_READ_ONLY_NOTE,
+      ]);
+    }
+    const verdict = await this.canvasDeletionListingVerdict(operation);
+    if (!verdict) return null;
+    const evidence: JsonObject = {
+      schema: "morrow.canvas-operation-recovery.v1",
+      strategy: "collection-omits-target",
+      writeMethod: "DELETE",
+      resentWrite: false,
+      verification: structuredClone(verdict.verification),
+    };
+    const settled = this.effects.recordReadback(
+      operation.operationId,
+      sha256Json(verdict.verification),
+      verdict.verification.status === "verified",
+    );
+    return verdict.verification.status === "verified"
+      ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
+      : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
+        CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,
+        CONNECTOR_RECOVERY_READ_ONLY_NOTE,
+      ]);
+  }
+
+  /**
+   * One change settled by the comparator its own contract declares. It needs
+   * nothing from the request, so a change whose comparator was never retained,
+   * or was retained by a build that had none, is still settled by reading.
+   */
+  private async canvasDeclaredRecovery(
+    operation: EffectOperationRecord,
+    mapping: CatalogTool,
+  ): Promise<JsonObject | null> {
+    const declared = canvasDeclaredReadback(operation.sourceToolName);
+    if (!declared) return null;
+    if (!await this.canvasRecoveryBindingMatches(mapping, operation)) {
+      return this.effectResult(operation, "reconciliation_refused_binding_changed", undefined, [
+        CONNECTOR_RECOVERY_BINDING_CHANGED_LIMITATION,
+        CONNECTOR_RECOVERY_READ_ONLY_NOTE,
+      ]);
+    }
+    const read = await this.canvasRecoveryRead(
+      { readTool: declared.read, arguments: { ...declared.arguments } },
+      operation.sourceBindingId,
+    );
+    const verification = evaluateBrowserReadback({
+      schema: "morrow.browser-readback-plan.v1",
+      strategy: declared.strategy,
+      readOperation: { toolName: declared.read } as unknown as BrowserReadbackPlan["readOperation"],
+      arguments: { ...declared.arguments },
+      assertions: [],
+    }, read) as unknown as JsonObject;
+    const evidence: JsonObject = {
+      schema: "morrow.canvas-operation-recovery.v1",
+      strategy: declared.strategy,
+      writeMethod: "POST",
+      resentWrite: false,
+      verification: structuredClone(verification),
+    };
+    const settled = this.effects.recordReadback(
+      operation.operationId,
+      sha256Json(verification),
+      verification.status === "verified",
+    );
+    return verification.status === "verified"
+      ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
+      : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
+        CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,
+        CONNECTOR_RECOVERY_READ_ONLY_NOTE,
+      ]);
+  }
+
   private canvasRecoveryOutcome(evidence: JsonObject): JsonObject {
     return {
       content: [{ type: "text", text: "Morrow read Canvas again and confirmed the requested result." }],
@@ -8838,8 +8975,18 @@ export class GatewayRuntime {
     const mapping = this.toolByPublicName.get(operation.publicToolName);
     const descriptor = canvasRecoveryDescriptorOf(operation.connectorReadDescriptor)
       ?? (mapping && isCanvasCourseFileTransfer(mapping) ? canvasTransferRecoveryDescriptor(operation) : null);
-    if (!descriptor || !mapping || !isCanvasConnector(mapping)) {
+    if (!mapping || !isCanvasConnector(mapping)) {
       return this.effectResult(operation, "reconciliation_requires_provider_evidence", undefined, [
+        CONNECTOR_READBACK_RECOVERY_LIMITATION,
+      ]);
+    }
+    if (!descriptor) {
+      // A change with no retained comparator is still settled by the contract it
+      // has now: the collection that held a deleted record, or the reading the
+      // write's own contract declares.
+      const settled = await this.canvasDeletionByListing(operation, mapping)
+        ?? await this.canvasDeclaredRecovery(operation, mapping);
+      return settled ?? this.effectResult(operation, "reconciliation_requires_provider_evidence", undefined, [
         CONNECTOR_READBACK_RECOVERY_LIMITATION,
       ]);
     }
@@ -8945,13 +9092,24 @@ export class GatewayRuntime {
         : fresh
         ? evaluateBrowserReadback(this.canvasRecoveryPlan(descriptor), fresh)
         : { schema: "morrow.browser-verification.v1" as const, status: "unconfirmed" as const, reason: "fresh_readback_unavailable" };
-      evidence.verification = structuredClone(verification) as unknown as JsonObject;
+      // Canvas keeps some deleted records readable by id, so a comparator that
+      // reads the record alone cannot settle those deletions, and a comparator an
+      // older build retained cannot either. The collection that held the record
+      // answers both, and it is read only when the retained check did not.
+      const settledByListing = verification.status !== "verified" && descriptor.writeMethod === "DELETE"
+        ? await this.canvasDeletionListingVerdict(operation)
+        : null;
+      const outcome = settledByListing && settledByListing.verification.status === "verified"
+        ? settledByListing.verification as unknown as typeof verification
+        : verification;
+      if (settledByListing) evidence.collectionCheck = structuredClone(settledByListing.verification);
+      evidence.verification = structuredClone(outcome) as unknown as JsonObject;
       const settled = this.effects.recordReadback(
         operation.operationId,
-        sha256Json(verification),
-        verification.status === "verified",
+        sha256Json(outcome),
+        outcome.status === "verified",
       );
-      return verification.status === "verified"
+      return outcome.status === "verified"
         ? this.effectResult(settled, "verified_readback", this.canvasRecoveryOutcome(evidence), [CONNECTOR_RECOVERY_READ_ONLY_NOTE])
         : this.effectResult(settled, "readback_unconfirmed", { structuredContent: evidence }, [
           CONNECTOR_RECOVERY_UNRESOLVED_LIMITATION,

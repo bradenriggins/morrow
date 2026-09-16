@@ -1063,9 +1063,18 @@ export async function runLocalOwner(config: GatewayConfig): Promise<void> {
         .map((session) => processMatchesRecordedLifetimeAsync(session.proxyPid, session.observedAt)));
       const monitorAlive = monitorLifetimes.length > 0
         && monitorLifetimes.every((lifetime) => lifetime === true);
-      if (activeMcpRequests !== 0 || !monitorPresent || !monitorOnly || !monitorAlive || !runtime.maintenanceQuiescent()) {
+      // Each condition has its own answer. One code for all of them leaves the
+      // person, and anyone helping them, with no way to tell which is true.
+      const refusal = activeMcpRequests !== 0
+        ? "local_owner_request_in_flight"
+        : !runtime.maintenanceQuiescent()
+        ? "local_owner_approval_running"
+        : !monitorPresent || !monitorOnly || !monitorAlive
+        ? "local_owner_other_client_connected"
+        : null;
+      if (refusal) {
         reopenAfterFailedMaintenance();
-        maintenanceError(response, "local_owner_maintenance_work_active");
+        maintenanceError(response, refusal);
         return;
       }
       try {

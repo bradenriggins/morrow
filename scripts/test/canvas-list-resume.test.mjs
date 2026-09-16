@@ -15,7 +15,8 @@ function catalogOperation(toolName) {
   const operation = CATALOG.operations.find((entry) => entry.toolName === toolName);
   assert.ok(operation, `missing Canvas operation ${toolName}`);
   // Exactly what connector/extension/src/service-worker.js sends to the page.
-  return { ...operation, morrowCourseTarget: canvasOperationAdmission(operation).courseTarget };
+  const admission = canvasOperationAdmission(operation);
+  return { ...operation, morrowCourseTarget: admission.courseTarget, morrowAuthority: admission.authority };
 }
 
 function jsonResponse(value, headers = {}) {
@@ -277,4 +278,39 @@ test("a resume control on a write is refused before anything is sent", async () 
   assert.equal(result.sent, false);
   assert.equal(result.error, "canvas_pagination_resume_refused");
   assert.deepEqual(requests, []);
+});
+
+test("Canvas resolving self to the person's own id keeps the same list, and nothing else does", async () => {
+  // Canvas answers `/api/v1/users/self/files` with next links that name the
+  // signed-in person by id, because that is who `self` is. Refusing that link
+  // stopped the person from reading their own files past the first page.
+  const selfPath = "/api/v1/users/self/files";
+  const resolved = "/api/v1/users/28206/files";
+  const { result, requests } = await sendListRead(
+    { user_id: "self", morrow_max_pages: 5, morrow_list_resume: {} },
+    pagedCanvas({ path: resolved }),
+    "canvas_list_files_users",
+  );
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.truncated, false);
+  assert.equal(result.pageCount, 3);
+  assert.deepEqual(requests.map((request) => request.pathname), [selfPath, resolved, resolved]);
+
+  // Another person's id in that segment is not this person's list.
+  const other = await sendListRead(
+    { user_id: "28206", morrow_max_pages: 5, morrow_list_resume: {} },
+    pagedCanvas({ path: "/api/v1/users/999/files" }),
+    "canvas_list_files_users",
+  );
+  assert.equal(other.result.ok, false);
+  assert.equal(other.result.error, "canvas_pagination_origin_refused");
+
+  // A different route that happens to carry an id is still refused.
+  const elsewhere = await sendListRead(
+    { user_id: "self", morrow_max_pages: 5, morrow_list_resume: {} },
+    pagedCanvas({ path: "/api/v1/users/28206/folders" }),
+    "canvas_list_files_users",
+  );
+  assert.equal(elsewhere.result.ok, false);
+  assert.equal(elsewhere.result.error, "canvas_pagination_origin_refused");
 });

@@ -1780,3 +1780,119 @@ const ROUTES = Object.freeze<Record<string, readonly CanvasEntityReadRoute[]>>({
 export function canvasEntityReadRoutes(toolName: string): readonly CanvasEntityReadRoute[] {
   return ROUTES[toolName] || [];
 }
+
+export interface CanvasRecordListing {
+  /** The Canvas read that lists the collection holding the deleted record. */
+  readonly read: string;
+  /** The listing's arguments, each taken from the write argument named here. */
+  readonly arguments: Readonly<Record<string, string>>;
+  /** The write argument that carries the deleted record's id. */
+  readonly targetField: string;
+}
+
+const LISTINGS = Object.freeze<Record<string, CanvasRecordListing>>({
+  "canvas_abort_generation_of_report_or_remove_previously_generated_one": { read: "canvas_retrieve_all_quiz_reports", arguments: { "course_id": "course_id", "quiz_id": "quiz_id" }, targetField: "id" },
+  "canvas_close_notification_for_user_destroy_notification_for_admin": { read: "canvas_index_of_active_global_notification_for_user", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_conclude_deactivate_or_delete_enrollment": { read: "canvas_list_enrollments_courses", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_deactivate_role": { read: "canvas_list_roles", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_ai_conversation": { read: "canvas_get_active_conversation", arguments: { "course_id": "course_id", "ai_experience_id": "ai_experience_id" }, targetField: "id" },
+  "canvas_delete_ai_experience": { read: "canvas_list_ai_experiences", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_appointment_group": { read: "canvas_list_appointment_groups", arguments: {  }, targetField: "id" },
+  "canvas_delete_assignment": { read: "canvas_list_assignments_assignments", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_assignment_override": { read: "canvas_list_assignment_overrides", arguments: { "course_id": "course_id", "assignment_id": "assignment_id" }, targetField: "id" },
+  "canvas_delete_authentication_provider": { read: "canvas_list_authentication_providers", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_blackout_date_accounts": { read: "canvas_list_blackout_dates_accounts", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_blackout_date_courses": { read: "canvas_list_blackout_dates_courses", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_bookmark": { read: "canvas_list_bookmarks", arguments: {  }, targetField: "id" },
+  "canvas_delete_calendar_event": { read: "canvas_list_calendar_events", arguments: {  }, targetField: "id" },
+  "canvas_delete_communication_channel_id": { read: "canvas_list_user_communication_channels", arguments: { "user_id": "user_id" }, targetField: "id" },
+  "canvas_delete_conclude_course": { read: "canvas_list_your_courses", arguments: {  }, targetField: "id" },
+  "canvas_delete_context_control": { read: "canvas_list_all_context_controls", arguments: { "account_id": "account_id", "registration_id": "registration_id" }, targetField: "id" },
+  "canvas_delete_conversation": { read: "canvas_list_conversations", arguments: {  }, targetField: "id" },
+  "canvas_delete_custom_gradebook_column": { read: "canvas_list_custom_gradebook_columns", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_enrollment_term": { read: "canvas_list_enrollment_terms", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_entry_courses": { read: "canvas_list_topic_entries_courses", arguments: { "course_id": "course_id", "topic_id": "topic_id" }, targetField: "id" },
+  "canvas_delete_entry_groups": { read: "canvas_list_topic_entries_groups", arguments: { "group_id": "group_id", "topic_id": "topic_id" }, targetField: "id" },
+  "canvas_delete_external_feed_courses": { read: "canvas_list_external_feeds_courses", arguments: { "course_id": "course_id" }, targetField: "external_feed_id" },
+  "canvas_delete_external_feed_groups": { read: "canvas_list_external_feeds_groups", arguments: { "group_id": "group_id" }, targetField: "external_feed_id" },
+  "canvas_delete_external_tool_accounts": { read: "canvas_list_external_tools_accounts", arguments: { "account_id": "account_id" }, targetField: "external_tool_id" },
+  "canvas_delete_external_tool_courses": { read: "canvas_list_external_tools_courses", arguments: { "course_id": "course_id" }, targetField: "external_tool_id" },
+  "canvas_delete_grading_period_accounts": { read: "canvas_list_grading_periods_accounts", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_grading_period_courses": { read: "canvas_list_grading_periods_courses", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_grading_period_set": { read: "canvas_list_grading_period_sets", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_grading_standard_accounts": { read: "canvas_list_grading_standards_available_in_context_accounts", arguments: { "account_id": "account_id" }, targetField: "grading_standard_id" },
+  "canvas_delete_grading_standard_courses": { read: "canvas_list_grading_standards_available_in_context_courses", arguments: { "course_id": "course_id" }, targetField: "grading_standard_id" },
+  "canvas_delete_lti_registration_apps": { read: "canvas_list_lti_registrations_in_account_apps", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_lti_registration_lti_registrations": { read: "canvas_list_lti_registrations_in_account_lti_registrations", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_lti_resource_link": { read: "canvas_list_lti_resource_links", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_module": { read: "canvas_list_modules", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_module_item": { read: "canvas_list_module_items", arguments: { "course_id": "course_id", "module_id": "module_id" }, targetField: "id" },
+  "canvas_delete_new_quiz": { read: "canvas_list_new_quizzes", arguments: { "course_id": "course_id" }, targetField: "assignment_id" },
+  "canvas_delete_outcome_group_accounts": { read: "canvas_get_all_outcome_groups_for_context_accounts", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_outcome_group_courses": { read: "canvas_get_all_outcome_groups_for_context_courses", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_page_courses": { read: "canvas_list_pages_courses", arguments: { "course_id": "course_id" }, targetField: "url_or_id" },
+  "canvas_delete_page_groups": { read: "canvas_list_pages_groups", arguments: { "group_id": "group_id" }, targetField: "url_or_id" },
+  "canvas_delete_planner_note": { read: "canvas_list_planner_notes", arguments: {  }, targetField: "id" },
+  "canvas_delete_planner_override": { read: "canvas_list_planner_overrides", arguments: {  }, targetField: "id" },
+  "canvas_delete_poll": { read: "canvas_list_polls", arguments: {  }, targetField: "id" },
+  "canvas_delete_poll_choice": { read: "canvas_list_poll_choices_in_poll", arguments: { "poll_id": "poll_id" }, targetField: "id" },
+  "canvas_delete_poll_session": { read: "canvas_list_poll_sessions_for_poll", arguments: { "poll_id": "poll_id" }, targetField: "id" },
+  "canvas_delete_question_group": { read: "canvas_list_question_groups_in_quiz", arguments: { "course_id": "course_id", "quiz_id": "quiz_id" }, targetField: "id" },
+  "canvas_delete_quiz": { read: "canvas_list_quizzes_in_course", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_quiz_item": { read: "canvas_list_quiz_items", arguments: { "course_id": "course_id", "assignment_id": "assignment_id" }, targetField: "item_id" },
+  "canvas_delete_quiz_question": { read: "canvas_list_questions_in_quiz_or_submission", arguments: { "course_id": "course_id", "quiz_id": "quiz_id" }, targetField: "id" },
+  "canvas_delete_report": { read: "canvas_index_of_reports", arguments: { "account_id": "account_id", "report": "report" }, targetField: "id" },
+  "canvas_delete_single": { read: "canvas_list_rubrics_courses", arguments: { "course_id": "course_id" }, targetField: "id" },
+  "canvas_delete_sub_account": { read: "canvas_get_sub_accounts_of_account", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_temporary_enrollment_pairing": { read: "canvas_list_temporary_enrollment_pairings", arguments: { "account_id": "account_id" }, targetField: "id" },
+  "canvas_delete_topic_courses": { read: "canvas_list_discussion_topics_courses", arguments: { "course_id": "course_id" }, targetField: "topic_id" },
+  "canvas_delete_topic_groups": { read: "canvas_list_discussion_topics_groups", arguments: { "group_id": "group_id" }, targetField: "topic_id" },
+  "canvas_delete_user_from_root_account": { read: "canvas_list_users_in_account", arguments: { "account_id": "account_id" }, targetField: "user_id" },
+  "canvas_delete_user_login": { read: "canvas_list_user_logins_users", arguments: { "user_id": "user_id" }, targetField: "id" },
+  "canvas_destroy_assignment_group": { read: "canvas_list_assignment_groups", arguments: { "course_id": "course_id" }, targetField: "assignment_group_id" },
+  "canvas_hide_stream_item": { read: "canvas_list_activity_stream_self", arguments: {  }, targetField: "id" },
+  "canvas_item_bank_archive_bank": { read: "canvas_item_bank_list_banks", arguments: {  }, targetField: "bank_id" },
+  "canvas_item_bank_delete_entry": { read: "canvas_item_bank_list_entries", arguments: { "bank_id": "bank_id" }, targetField: "bank_entry_id" },
+  "canvas_leave_group_memberships": { read: "canvas_list_group_memberships_v1_groups_group_id_memberships_get", arguments: { "group_id": "group_id" }, targetField: "membership_id" },
+  "canvas_leave_group_users": { read: "canvas_list_group_s_users", arguments: { "group_id": "group_id" }, targetField: "user_id" },
+  "canvas_remove_account_admin": { read: "canvas_list_account_admins", arguments: { "account_id": "account_id" }, targetField: "user_id" },
+  "canvas_remove_course_from_favorites": { read: "canvas_list_favorite_courses", arguments: {  }, targetField: "id" },
+  "canvas_remove_course_nickname": { read: "canvas_list_course_nicknames", arguments: {  }, targetField: "course_id" },
+  "canvas_remove_group_from_favorites": { read: "canvas_list_favorite_groups", arguments: {  }, targetField: "id" },
+  "canvas_remove_observee": { read: "canvas_list_linked_observees", arguments: { "user_id": "user_id" }, targetField: "observee_id" },
+  "canvas_unlink_outcome_accounts": { read: "canvas_list_linked_outcomes_accounts", arguments: { "account_id": "account_id", "id": "id" }, targetField: "outcome_id" },
+  "canvas_unlink_outcome_courses": { read: "canvas_list_linked_outcomes_courses", arguments: { "course_id": "course_id", "id": "id" }, targetField: "outcome_id" },
+  "canvas_unlink_outcome_global": { read: "canvas_list_linked_outcomes_global", arguments: { "id": "id" }, targetField: "outcome_id" },
+});
+
+/**
+ * The listing that settles one Canvas deletion the record's own route cannot
+ * answer, because Canvas keeps some deleted records readable by id. A deletion
+ * addressed by anything but a record id, or one whose collection Canvas does not
+ * list, has none.
+ */
+export function canvasRecordListing(toolName: string): CanvasRecordListing | null {
+  return LISTINGS[toolName] || null;
+}
+
+export interface CanvasDeclaredReadback {
+  /** The Canvas read that proves this change. */
+  readonly read: string;
+  /** The read's fixed arguments, which need nothing from the request. */
+  readonly arguments: Readonly<Record<string, string>>;
+  /** How the reading is compared. */
+  readonly strategy: string;
+}
+
+const DECLARED = Object.freeze<Record<string, CanvasDeclaredReadback>>({
+  "canvas_mark_all_as_read": { read: "canvas_list_conversations", arguments: { "scope": "unread" }, strategy: "collection-empty" },
+});
+
+/**
+ * The comparator one Canvas write declares that needs nothing from the request.
+ * A later check rebuilds it from the current contract, so a change whose own
+ * comparator was never retained is still settled by reading Canvas.
+ */
+export function canvasDeclaredReadback(toolName: string): CanvasDeclaredReadback | null {
+  return DECLARED[toolName] || null;
+}

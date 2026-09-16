@@ -117,6 +117,10 @@ const EXACT_READBACKS = Object.freeze({
     duplicate_discussion_topic_courses: { read: "get_single_topic_courses", dynamic: { topic_id: "id" }, targetField: "id", strategy: "created-resource" },
     duplicate_discussion_topic_groups: { read: "get_single_topic_groups", dynamic: { topic_id: "id" }, targetField: "id", strategy: "created-resource" },
     // A reorder is proved by the complete listing returning the requested ids in the requested order.
+    // Marking every conversation read has an exact postcondition of its own: the
+    // person's unread conversations are then none. Canvas answers that listing
+    // directly, so this change is proved instead of being sent unchecked.
+    mark_all_as_read: { read: "list_conversations", fixedArguments: { scope: "unread" }, strategy: "collection-empty" },
     reorder_custom_columns: { read: "list_custom_gradebook_columns", fixedArguments: { include_hidden: "true" }, orderArgument: "order", targetField: "id", strategy: "collection-order" },
     reorder_pinned_topics_courses: { read: "list_discussion_topics_courses", fixedArguments: { order_by: "position" }, orderArgument: "order", targetField: "id", strategy: "collection-order" },
     reorder_pinned_topics_groups: { read: "list_discussion_topics_groups", fixedArguments: { order_by: "position" }, orderArgument: "order", targetField: "id", strategy: "collection-order" },

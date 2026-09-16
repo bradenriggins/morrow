@@ -1754,7 +1754,7 @@ try {
     .map((option) => option.id)
     .sort();
   assert.deepEqual(publishedCanvasEditActions, expectedCanvasEditActions);
-  assert.equal(expectedCanvasEditActions.length, 336);
+  assert.equal(expectedCanvasEditActions.length, 337);
   // A bound write with no exact readback is offered for approval one change at a time.
   const nonexactCanvasActions = canvasWriteOperations
     .filter((operation) => {

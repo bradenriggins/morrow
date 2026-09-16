@@ -2033,6 +2033,23 @@
   // next link refuses the read instead of silently reading somewhere else. Real
   // Canvas Link header shapes are live-unverified, so a Canvas deployment that
   // paginates onto a different path would stop here rather than be followed.
+  // Canvas answers a route Morrow addressed as `self` with links that name the
+  // signed-in person by id, because that is who `self` resolved to. The route is
+  // the same one, so a link that differs only in that one segment is followed;
+  // any other path is still refused.
+  function samePersonPath(candidate, pathname) {
+    const wanted = pathname.split("/");
+    const offered = candidate.split("/");
+    if (wanted.length !== offered.length) return false;
+    let resolvedSelf = false;
+    for (const [index, segment] of wanted.entries()) {
+      if (segment === offered[index]) continue;
+      if (segment !== "self" || !/^[1-9][0-9]{0,18}$/.test(offered[index])) return false;
+      resolvedSelf = true;
+    }
+    return resolvedSelf;
+  }
+
   function linkHeaderUrls(value, origin, pathname, requested) {
     const links = new Map();
     const raw = String(value || "");
@@ -2042,7 +2059,7 @@
       if (!match) throw new Error("canvas_pagination_header_refused");
       const relation = match[2].toLowerCase();
       const url = new URL(match[1]);
-      if (url.origin !== origin || url.pathname !== pathname) {
+      if (url.origin !== origin || (url.pathname !== pathname && !samePersonPath(url.pathname, pathname))) {
         if (relation === "next") throw new Error("canvas_pagination_origin_refused");
         continue;
       }

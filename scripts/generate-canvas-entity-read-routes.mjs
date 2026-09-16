@@ -42,6 +42,72 @@ function label(segment) {
   return [words[0][0].toUpperCase() + words[0].slice(1), ...words.slice(1)].join(" ");
 }
 
+/**
+ * The listing that holds the record one write addresses, for a route addressed by
+ * that record's own id. A later check reads it to settle a deletion the record's
+ * own route cannot answer, because Canvas keeps some deleted records readable.
+ */
+export function recordListings(catalog) {
+  const reads = new Map();
+  for (const operation of catalog.operations) {
+    if (operation.method !== "GET") continue;
+    const key = shape(operation.path);
+    if (!reads.has(key)) reads.set(key, []);
+    reads.get(key).push(operation);
+  }
+  const listings = {};
+  for (const operation of catalog.operations) {
+    if (operation.method !== "DELETE") continue;
+    const segments = operation.path.split("/").filter(Boolean);
+    const last = PLACEHOLDER.exec(segments.at(-1) || "");
+    if (!last) continue;
+    const targetField = inputNameFor(operation, last[1]);
+    const parentKey = `/${segments.slice(0, -1).map((value) => (PLACEHOLDER.test(value) ? "{}" : value)).join("/")}`;
+    const candidates = reads.get(parentKey) || [];
+    if (!targetField || candidates.length !== 1) continue;
+    const listing = candidates[0];
+    const listingSegments = listing.path.split("/").filter(Boolean);
+    const args = {};
+    let exact = true;
+    for (const [position, segment] of listingSegments.entries()) {
+      const placeholder = PLACEHOLDER.exec(segment);
+      if (!placeholder) continue;
+      const listingField = inputNameFor(listing, placeholder[1]);
+      const writePlaceholder = PLACEHOLDER.exec(segments[position]);
+      const writeField = writePlaceholder ? inputNameFor(operation, writePlaceholder[1]) : null;
+      if (!listingField || !writeField) { exact = false; break; }
+      args[listingField] = writeField;
+    }
+    if (!exact) continue;
+    listings[operation.toolName] = { read: listing.toolName, arguments: args, targetField };
+  }
+  return listings;
+}
+
+/**
+ * The comparator a write's own contract declares, when it needs no argument from
+ * the request. A later check can rebuild it from the catalog alone, so a change
+ * whose comparator was never retained, or was retained by an older build, is
+ * still settled by reading rather than by asking a person to confirm it.
+ */
+export function declaredReadbacks(catalog, planBrowserReadback) {
+  const declared = {};
+  for (const operation of catalog.operations) {
+    if (operation.readOnly) continue;
+    const inputs = (operation.parameters || []).filter((parameter) => parameter.location === "path");
+    if (inputs.length !== 0) continue;
+    let plan = null;
+    try { plan = planBrowserReadback(catalog.operations, operation, {}, {}); } catch { plan = null; }
+    if (!plan || plan.strategy !== "collection-empty" || plan.assertions.length !== 0) continue;
+    declared[operation.toolName] = {
+      read: plan.readOperation.toolName,
+      arguments: { ...plan.arguments },
+      strategy: plan.strategy,
+    };
+  }
+  return declared;
+}
+
 export function entityReadRoutes(catalog) {
   const reads = new Map();
   for (const operation of catalog.operations) {
@@ -89,7 +155,15 @@ export function entityReadRoutes(catalog) {
   return routes;
 }
 
-function serialize(routes) {
+function serialize(routes, listings, declared) {
+  const declaredLines = Object.keys(declared).sort().map((tool) => {
+    const entry = declared[tool];
+    return `  ${JSON.stringify(tool)}: { read: ${JSON.stringify(entry.read)}, arguments: { ${Object.entries(entry.arguments).map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }, strategy: ${JSON.stringify(entry.strategy)} },`;
+  }).join("\n");
+  const listingLines = Object.keys(listings).sort().map((tool) => {
+    const entry = listings[tool];
+    return `  ${JSON.stringify(tool)}: { read: ${JSON.stringify(entry.read)}, arguments: { ${Object.entries(entry.arguments).map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} }, targetField: ${JSON.stringify(entry.targetField)} },`;
+  }).join("\n");
   const lines = Object.keys(routes).sort().map((tool) => {
     const entries = routes[tool].map((target) => `{ field: ${JSON.stringify(target.field)}, label: ${JSON.stringify(target.label)}, read: ${JSON.stringify(target.read)}, arguments: { ${Object.entries(target.arguments).map(([name, value]) => `${JSON.stringify(name)}: ${JSON.stringify(value)}`).join(", ")} } }`);
     return `  ${JSON.stringify(tool)}: [\n${entries.map((entry) => `    ${entry},`).join("\n")}\n  ],`;
@@ -120,12 +194,58 @@ ${lines.join("\n")}
 export function canvasEntityReadRoutes(toolName: string): readonly CanvasEntityReadRoute[] {
   return ROUTES[toolName] || [];
 }
+
+export interface CanvasRecordListing {
+  /** The Canvas read that lists the collection holding the deleted record. */
+  readonly read: string;
+  /** The listing's arguments, each taken from the write argument named here. */
+  readonly arguments: Readonly<Record<string, string>>;
+  /** The write argument that carries the deleted record's id. */
+  readonly targetField: string;
+}
+
+const LISTINGS = Object.freeze<Record<string, CanvasRecordListing>>({
+${listingLines}
+});
+
+/**
+ * The listing that settles one Canvas deletion the record's own route cannot
+ * answer, because Canvas keeps some deleted records readable by id. A deletion
+ * addressed by anything but a record id, or one whose collection Canvas does not
+ * list, has none.
+ */
+export function canvasRecordListing(toolName: string): CanvasRecordListing | null {
+  return LISTINGS[toolName] || null;
+}
+
+export interface CanvasDeclaredReadback {
+  /** The Canvas read that proves this change. */
+  readonly read: string;
+  /** The read's fixed arguments, which need nothing from the request. */
+  readonly arguments: Readonly<Record<string, string>>;
+  /** How the reading is compared. */
+  readonly strategy: string;
+}
+
+const DECLARED = Object.freeze<Record<string, CanvasDeclaredReadback>>({
+${declaredLines}
+});
+
+/**
+ * The comparator one Canvas write declares that needs nothing from the request.
+ * A later check rebuilds it from the current contract, so a change whose own
+ * comparator was never retained is still settled by reading Canvas.
+ */
+export function canvasDeclaredReadback(toolName: string): CanvasDeclaredReadback | null {
+  return DECLARED[toolName] || null;
+}
 `;
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const catalog = JSON.parse(await readFile(CATALOG, "utf8"));
-  const text = serialize(entityReadRoutes(catalog));
+  const { planBrowserReadback } = await import("../packages/canvas-api-catalog/dist/readback-plan.js");
+  const text = serialize(entityReadRoutes(catalog), recordListings(catalog), declaredReadbacks(catalog, planBrowserReadback));
   if (argv.includes("--check")) {
     const current = await readFile(OUTPUT, "utf8").catch(() => "");
     if (current !== text) {

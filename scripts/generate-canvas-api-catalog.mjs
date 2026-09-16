@@ -816,6 +816,32 @@ function applyClassicQuizAnswerParameters(operations) {
   }
 }
 
+/**
+ * Canvas names the signed-in person `self` on their own routes, and documents
+ * every id as a number. Morrow speaks for that person, so `self` is admitted
+ * where Canvas accepts it: the routes whose subject is the user themselves. A
+ * route about someone else in a course keeps the documented id, because who it
+ * names is the whole question there.
+ */
+function applySelfPersonRoutes(operations) {
+  const pattern = "^([1-9][0-9]*|self)$";
+  let widened = 0;
+  for (const operation of operations) {
+    if (!/^\/v1\/users\/\{user_id\}(?:\/|$)/.test(operation.path)) continue;
+    for (const parameter of operation.parameters) {
+      if (parameter.location !== "path" || parameter.inputName !== "user_id") continue;
+      if (parameter.schema?.pattern !== "^[1-9][0-9]*$") continue;
+      parameter.schema = { ...parameter.schema, pattern };
+      widened += 1;
+    }
+    const property = operation.inputSchema?.properties?.user_id;
+    if (property && property.pattern === "^[1-9][0-9]*$") {
+      operation.inputSchema.properties.user_id = { ...property, pattern };
+    }
+  }
+  if (widened === 0) throw new Error("Canvas person routes are required.");
+}
+
 function applyDocumentedReadInputContracts(operations) {
   const requireFields = (toolName, fields) => {
     const operation = operations.find((candidate) => candidate.toolName === toolName);
@@ -907,6 +933,7 @@ async function buildCatalog() {
   applyClassicQuizUpdateParameters(official);
   applyClassicQuizAnswerParameters(official);
   applyDocumentedReadInputContracts(official);
+  applySelfPersonRoutes(official);
   const itemBank = itemBankOperations();
   const courseFileContent = [courseFileTextOperation()];
   const browser = [...itemBank, ...courseFileContent];
