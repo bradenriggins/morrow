@@ -6,7 +6,7 @@
 - Checkout: `/Users/Braden/Projects/.morrow-worktrees/desktop-mcp-bridge-triple-check-20260914`.
 - Branch: `codex/desktop-mcp-bridge-triple-check-20260914`, pushed at `ac00b2d7aaca8f7eb64df28d8a52c7fb3c3a1d3f` with exact remote readback.
 - Canvas tenant: `https://chcp.instructure.com`. Live course: `BIOL 101: General Biology`, id `89585`.
-- Installed build: `output/live-bt2-final-package-v44`, Bridge 1.0.24, paired, course verified. Signed in throughout; Chrome was never restarted.
+- Installed build: `output/live-bt2-final-package-v51`, Bridge 1.0.27, paired, course verified. Signed in throughout; Chrome was never restarted.
 - Live exclusions without separate exact authority: grades and learner messages.
 
 ## What was blocked yesterday and is proven today
@@ -57,14 +57,14 @@ Rows 459 to 464 of `DEFECT-ERADICATION-LEDGER.md`:
 - 464: an upload Canvas saved but Morrow could not confirm could never be settled,
   and it blocked every later upload in that course.
 
-## The three findings this handoff opened, now closed
+## The findings this handoff opened, now closed
 
 Rows 465 to 469 close them, each proven live:
 
 - A change Morrow could not confirm could only be settled by a person, and it held
   its target against every later change. Reconciliation now rebuilds a comparator
   from the contract Morrow has now: all six live records settled themselves, and
-  the journal holds 431 operations with none unresolved.
+  the journal holds 530 operations with none unresolved.
 - One refusal code stood for four conditions, so a refused Bridge update said
   nothing useful. Each condition now answers for itself.
 - An operation record said a change failed and never said why. It now carries
@@ -75,6 +75,18 @@ Rows 465 to 469 close them, each proven live:
 - Marking every conversation read was sent unchecked although Canvas answers its
   exact postcondition. It is proved now, so 341 admitted writes read back exactly
   and 199 remain Review only.
+
+Pressing further on ordinary use found three more, each repaired and proven live
+(rows 470 to 472):
+
+- Renaming a Page changes its Canvas address, so a change prepared against the
+  old one named something Canvas no longer has. The review told the person to
+  check a Canvas connection that was working. It now says Canvas does not have
+  the item and to ask for a new review.
+- A request naming a course other than the connected one was reported as a
+  learner-privacy failure. It now names the real cause.
+- An invalid request never said which input was wrong. It now names the inputs it
+  refused, from Morrow's own published schema.
 
 ## Open, with evidence
 
