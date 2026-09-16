@@ -19,7 +19,7 @@ import {
   type RequestedByIdentity,
 } from "@morrow/contracts";
 import { GATEWAY_OPERATION_STATES } from "@morrow/operation-journal";
-import { capabilityProblemText, isPrivateSourceTool, type GatewayRuntime } from "./runtime.js";
+import { capabilityInputRefusalText, capabilityProblemText, isPrivateSourceTool, type GatewayRuntime } from "./runtime.js";
 import { registerActivityTool, type ActivityGroups } from "./activity-tools.js";
 import { MORROW_SERVER_INSTRUCTIONS } from "./server-instructions.js";
 import { registerLessonReviewTool, type LessonReviewState } from "./lesson-review.js";
@@ -130,13 +130,18 @@ function publicCapabilityDescriptor(runtime: GatewayRuntime, name: string): Json
 
 function safeCapabilityInvocationFailure(
   code: "capability_not_found" | "capability_input_invalid" | "capability_mode_mismatch",
+  inputs: readonly string[] = [],
 ): CallToolResult {
+  // The names come from Morrow's own published schema for this capability, never
+  // from the caller and never from a value, so naming them tells the person what
+  // to correct without repeating anything they sent.
   return {
-    content: [{ type: "text", text: capabilityProblemText(code) }],
+    content: [{ type: "text", text: capabilityInputRefusalText(code, inputs) }],
     isError: true,
     structuredContent: {
       schema: "morrow.problem.v1",
       code,
+      ...(inputs.length ? { inputs: [...inputs] } : {}),
     },
   };
 }
@@ -154,13 +159,44 @@ function capabilityUnavailableFailure(capability: string, reason: string): CallT
   };
 }
 
+/**
+ * The inputs one validation refused, named from Morrow's own published schema for
+ * that capability. A name is used only when the schema publishes it, so nothing a
+ * caller sent, and no value, ever reaches the person through this sentence.
+ */
+function refusedInputNames(result: unknown, inputSchema: JsonObject): readonly string[] {
+  const properties = isJsonObject(inputSchema.properties) ? inputSchema.properties : {};
+  const issues = isJsonObject(result) && Array.isArray(result.issues) ? result.issues : [];
+  const names = new Set<string>();
+  for (const issue of issues) {
+    const path = isJsonObject(issue) && Array.isArray(issue.path) ? issue.path : [];
+    const first = path[0];
+    const fromPath = typeof first === "string"
+      ? first
+      : isJsonObject(first) && typeof first.key === "string" ? first.key : "";
+    // This validator reports the input inside its message: `data/<input>` for a
+    // value it refused, and `required property '<input>'` for one left out.
+    const message = isJsonObject(issue) && typeof issue.message === "string" ? issue.message : "";
+    const fromMessage = /^data\/([A-Za-z][A-Za-z0-9_]{0,63})\b/.exec(message)?.[1] ?? "";
+    const fromRequired = /required property '([A-Za-z][A-Za-z0-9_]{0,63})'/.exec(message)?.[1] ?? "";
+    for (const name of [fromPath, fromMessage, fromRequired]) {
+      if (name && Object.hasOwn(properties, name)) names.add(name);
+    }
+    if (names.size >= 8) break;
+  }
+  return [...names].sort();
+}
+
 async function validatePublicCapabilityInput(
   validator: PublicInputValidator,
+  inputSchema: JsonObject,
   value: unknown,
-): Promise<Record<string, unknown> | undefined> {
+): Promise<{ readonly input?: Record<string, unknown>; readonly refused: readonly string[] }> {
   const result = await validator["~standard"].validate(value);
-  if (!isJsonObject(result) || !isJsonObject(result.value)) return undefined;
-  return result.value as Record<string, unknown>;
+  if (!isJsonObject(result) || !isJsonObject(result.value)) {
+    return { refused: refusedInputNames(result, inputSchema) };
+  }
+  return { input: result.value as Record<string, unknown>, refused: [] };
 }
 
 type PublicToolHandler = (input: unknown, context: ServerContext) => Promise<CallToolResult> | CallToolResult;
@@ -475,8 +511,9 @@ export function createMorrowServer(
       },
       async ({ name: publicName, arguments: argumentsValue }, context: ServerContext): Promise<CallToolResult> => {
         const mapping = runtime.catalog.tools.find((tool) => tool.publicName === publicName && !isPrivateSourceTool(tool));
-        const validator = publicContracts.get(publicName)?.validator;
-        if (!mapping || !validator) {
+        const contract = publicContracts.get(publicName);
+        const validator = contract?.validator;
+        if (!mapping || !validator || !contract) {
           const reason = mapping ? null : runtime.capabilityUnavailableReason(publicName);
           return reason === null
             ? safeCapabilityInvocationFailure("capability_not_found")
@@ -485,9 +522,9 @@ export function createMorrowServer(
         if ((mapping.annotations?.readOnlyHint === true) !== readOnly) {
           return safeCapabilityInvocationFailure("capability_mode_mismatch");
         }
-        const input = await validatePublicCapabilityInput(validator, argumentsValue);
-        if (!input) return safeCapabilityInvocationFailure("capability_input_invalid");
-        const result = await runtime.call(publicName, input, { signal: context.mcpReq.signal });
+        const validated = await validatePublicCapabilityInput(validator, contract.inputSchema as JsonObject, argumentsValue);
+        if (!validated.input) return safeCapabilityInvocationFailure("capability_input_invalid", validated.refused);
+        const result = await runtime.call(publicName, validated.input, { signal: context.mcpReq.signal });
         return result as unknown as CallToolResult;
       },
     );

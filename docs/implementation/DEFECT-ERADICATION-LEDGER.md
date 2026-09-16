@@ -485,6 +485,8 @@ Every row stays open until its evidence columns are added and its status becomes
 | 468 | P1 | R7 | The 85 Canvas routes whose subject is the signed-in person refused `self`, and following Canvas's own paginated answer for such a route was refused as a foreign path. | closure section 468; catalog and pagination regressions, live BT2 course 89585 | IMPLEMENTED |
 | 469 | P3 | R7 | Marking every conversation read was sent unchecked although Canvas answers its exact postcondition. | closure section 469; Canvas verification regressions, live BT2 course 89585 | IMPLEMENTED |
 | 470 | P2 | R3 | A change whose item Canvas no longer has told the person to check their Canvas connection, which was working; renaming a Page changes its address, so this was reachable through ordinary use. | closure section 470; approval context and approval page regressions, live BT2 course 89585 | IMPLEMENTED |
+| 471 | P2 | R3 | A request naming a course other than the connected one was reported as a learner-privacy failure, which was not the problem and gave the person nothing to act on. | closure section 471; Canvas connector regressions, live BT2 course 89585 | IMPLEMENTED |
+| 472 | P3 | R3 | An invalid request never said which input was wrong, because the closed refusal projection rebuilt the answer from the code alone. | closure section 472; protocol regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3251,7 +3253,21 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Split: both sentences are pinned by regressions, and live BT2 showed the new one for a renamed Page.
 - Status: `IMPLEMENTED`; proven live in BT2 course 89585.
 
-### Root-cause patterns for rows 331–470
+### 471: a request naming another course was reported as a privacy-boundary failure
+
+- Product decision: a person is told what is true and what to do next.
+- Condition: asking for a change in a course other than the connected one answered "Morrow did not return this result because its learner privacy boundary could not be established." The connection was working and carried a different course. The sentence named the privacy boundary, which was not the problem, and gave the person nothing to act on. Live BT2 reproduced it with an ordinary request.
+- Repair: a working connection that carries another course is told apart from one Morrow cannot use. It answers `canvas_course_not_connected`: this request names a course that is not the one this connection carries, and the person can connect that course or ask for the change in the connected one. A connection Morrow genuinely cannot use keeps its own sentence.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 472: an invalid request never said which input was wrong
+
+- Product decision: a person is told what to correct.
+- Condition: every refused input answered "Morrow rejected this request because its input is invalid." and named nothing, whether one id had the wrong shape or a required input was missing. The closed refusal projection rebuilt the answer from the code alone, so even a name the validator knew was dropped before the person saw it.
+- Repair: the refusal names the inputs it refused, taken from Morrow's own published schema for that capability: a name is used only when that schema publishes it, and the shape is checked again at egress, so nothing a caller sent and no value ever reaches the person through this sentence. It says, for example, "Check this input: wiki_page_title."
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### Root-cause patterns for rows 331–472
 
 - **Authority checked before an await, then used after it:** rows 338–339, 355–358, and 415. Each repair binds work to an exact generation, inode, or provider owner, rechecks it at commit, and preserves a concurrent replacement instead of writing over it.
 - **A deadline carried as data instead of enforced as admission:** rows 335–336, 342–343, 359, 361, 366, and 414. Each repair owns a fixed settlement bound, checks it immediately before new I/O, aborts work that supports cancellation, and quarantines late completions.

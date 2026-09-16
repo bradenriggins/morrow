@@ -398,9 +398,30 @@ const LEARNER_PRIVACY_REFUSAL_TEXT = "Morrow did not return this result because 
 
 /** The fixed person-facing sentence for a privacy-boundary refusal. */
 export function privacyProblemText(code: string): string {
-  return code === "privacy_browser_binding_unverified"
-    ? "Reconnect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection."
-    : LEARNER_PRIVACY_REFUSAL_TEXT;
+  if (code === "privacy_browser_binding_unverified") {
+    return "Reconnect this course in Morrow Bridge. Its signed-in Canvas tab is closed, has changed, or is signed out, so Morrow cannot confirm the course connection.";
+  }
+  // The connection is working and carries another course, so this names what is
+  // true instead of pointing at the privacy boundary.
+  if (code === "canvas_course_not_connected") {
+    return "This request names a course that is not the one this Morrow connection carries. Connect that course in Morrow Bridge, or ask for this change in the connected course.";
+  }
+  return LEARNER_PRIVACY_REFUSAL_TEXT;
+}
+
+/** Published input names a refusal may carry, in Morrow's own vocabulary. */
+export function refusedCapabilityInputs(value: unknown): readonly string[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 8) return [];
+  const names = value.filter((name): name is string => typeof name === "string" && /^[a-z][a-z0-9_]{0,63}$/.test(name));
+  return names.length === value.length ? [...new Set(names)].sort() : [];
+}
+
+/** The refusal sentence, naming the inputs it refused when it knows them. */
+export function capabilityInputRefusalText(code: string, inputs: readonly string[]): string {
+  const text = capabilityProblemText(code);
+  return inputs.length === 0
+    ? text
+    : `${text} Check ${inputs.length === 1 ? "this input" : "these inputs"}: ${inputs.join(", ")}.`;
 }
 
 /** The fixed person-facing sentence for each capability refusal Morrow raises. */
@@ -6030,6 +6051,13 @@ export class GatewayRuntime {
       // The named connection exists but its signed-in Canvas tab no longer proves it, which is the
       // state after Chrome restarts or the tab closes. That is a reconnect step, not a roster fault.
       const named = bindings.filter((binding) => binding.sourceBindingId === sourceBindingId && binding.courseId === courseId);
+      // The connection is working and is for another course. Saying anything
+      // about a privacy boundary here sends the person to the wrong thing: the
+      // request names a course this connection does not carry.
+      const connection = bindings.filter((binding) => binding.sourceBindingId === sourceBindingId);
+      if (named.length === 0 && connection.length === 1 && connection[0]!.runtimeVerified === true) {
+        throw new Error("canvas_course_not_connected");
+      }
       throw new Error(named.length === 1 && named[0]!.runtimeVerified !== true
         ? "privacy_browser_binding_unverified"
         : "learner_roster_binding_unavailable");
@@ -6389,7 +6417,7 @@ export class GatewayRuntime {
   }
 
   private privacyFailure(error: unknown): JsonObject {
-    const code = error instanceof Error && /^[a-z0-9_]{1,160}$/u.test(error.message) && (/^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_/u.test(error.message))
+    const code = error instanceof Error && /^[a-z0-9_]{1,160}$/u.test(error.message) && (/^canvas_course_not_connected$|^learner_roster_|^learner_token_|^privacy_|^moodle_assignment_submission_summary_|^moodle_quiz_attempt_summary_|^moodle_quiz_attempt_|^moodle_quiz_manual_grading_queue_|^moodle_quiz_regrade_report_|^moodle_forum_activity_summary_|^moodle_scorm_attempt_summary_|^moodle_scorm_learner_report_|^moodle_grade_report_summary_|^moodle_learner_grade_report_|^moodle_course_participants_|^moodle_enrolment_methods_|^moodle_participant_enrolment_|^moodle_question_bank_impact_scope_|^moodle_course_activity_report_|^moodle_course_participation_report_|^moodle_course_completion_report_|^moodle_course_log_summary_|^moodle_course_dates_report_/u.test(error.message))
       ? error.message
       : "privacy_output_refused";
     return {
@@ -7452,6 +7480,12 @@ export class GatewayRuntime {
           ? problem.capability
           : null;
         const unavailableReason = unavailableCapability === null ? null : this.capabilityUnavailableReason(unavailableCapability);
+        // The names of the inputs a validation refused are Morrow's own, taken
+        // from the published schema for that capability before they reach here.
+        // They are checked again for shape, so nothing a caller sent can pass.
+        const refusedInputs = problemCode === "capability_input_invalid" && problem
+          ? refusedCapabilityInputs(problem.inputs)
+          : [];
         const refusal: JsonObject = {
           content: [{
             type: "text",
@@ -7459,13 +7493,14 @@ export class GatewayRuntime {
               ? privacyProblemText(problemCode)
               : problemCode === "capability_unavailable" && unavailableReason !== null
                 ? `${capabilityProblemText(problemCode)} ${unavailableReason}`
-                : capabilityProblemText(problemCode),
+                : capabilityInputRefusalText(problemCode, refusedInputs),
           }],
           isError: true,
           structuredContent: {
             schema: "morrow.problem.v1",
             code: problemCode,
             ...(resultState ? { resultState } : {}),
+            ...(refusedInputs.length ? { inputs: refusedInputs } : {}),
             ...(unavailableReason !== null ? { capability: unavailableCapability, reason: unavailableReason } : {}),
           },
         };

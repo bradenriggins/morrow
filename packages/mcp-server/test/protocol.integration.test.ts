@@ -315,7 +315,11 @@ describe("Morrow public stdio protocol", () => {
         arguments: { name: "canvas_page_get", arguments: { course_id: 101 } },
       });
       expect(invalid.isError).toBe(true);
-      expect(invalid.structuredContent).toMatchObject({ code: "capability_input_invalid" });
+      // The refusal names the published input that was refused, so the person is
+      // told what to correct. It never repeats the value they sent.
+      expect(invalid.structuredContent).toMatchObject({ code: "capability_input_invalid", inputs: ["course_id"] });
+      expect(JSON.stringify(invalid)).toContain("Check this input: course_id.");
+      expect(JSON.stringify(invalid)).not.toContain("101");
       expect(await readLog(callLog)).toBe("");
     } finally {
       await client.close();

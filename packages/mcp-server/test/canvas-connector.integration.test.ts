@@ -1356,6 +1356,20 @@ describe("Canvas connector gateway path", () => {
       });
       expect(unbound).toMatchObject({ isError: true, structuredContent: { data: { code: "operation_plan_invalid" } } });
 
+      // A working connection that carries another course is told apart from a
+      // connection Morrow cannot use: pointing at the privacy boundary here
+      // would send the person to fix something that is not broken.
+      const otherCourse = await runtime.call("canvas_list_users_in_course_users", {
+        course_id: "43",
+        _morrow: { source_binding_id: sourceBindingId },
+      });
+      expect(otherCourse).toMatchObject({
+        isError: true,
+        structuredContent: { code: "canvas_course_not_connected" },
+      });
+      expect(JSON.stringify(otherCourse)).toContain("names a course that is not the one this Morrow connection carries");
+      expect(JSON.stringify(otherCourse)).not.toContain("learner privacy boundary");
+
       const stalePlan = await runtime.call("canvas_update_course_settings", {
         course_id: "42",
         hide_final_grades: true,
