@@ -499,6 +499,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 482 | P2 | R3 | A saved change whose course connection is gone was reported without naming the capability it used, so a person could not tell which item to read before settling it. | closure section 482; operations regressions, live BT2 course 89585 | IMPLEMENTED |
 | 483 | P1 | R7 | A credential name inside a longer identifier refused the whole reading, so a Canvas course whose random uuid happened to contain `csrf` made an account audit unreadable. | closure section 483; gateway privacy regressions, live BT2 course 89585 | IMPLEMENTED |
 | 484 | P1 | R3 | A change whose Canvas route states no readable result could never be settled, so the first use of such a route held its collection for good and every later change to it waited on a reading that does not exist. | closure section 484; operation journal and operations regressions, live BT2 course 89585 | IMPLEMENTED |
+| 485 | P2 | R7 | Installing an external tool the way Canvas documents was impossible, because an input Canvas offers as a replacement for the rest of the request was published as a requirement. | closure section 485; catalog regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3362,6 +3363,13 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Product decision: the exit Morrow offers a person is one they can take.
 - Condition: an unresolved change is closed by the person against a fresh Morrow reading of the same item. Some Canvas routes state no readable result at all, such as marking a topic read, setting a timetable or starting an export, so Morrow froze no comparator for them and no reading could ever match. Those changes stayed unresolved for good, and because an unresolved change holds its target, the first use of such a route held its collection against every later change to it. In BT2 the ledger reached 217 unresolved records this way, and later changes to those collections were refused one after another.
 - Repair: a change Morrow can read back still needs that reading. A change whose route states no readable result is closed on the person's own confirmation, because their check is the only evidence that exists, and the record says so: `no_readable_provider_result` beside the person's close. Morrow still confirms nothing and still never sends it again.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
+
+### 485: an alternative input was published as a requirement
+
+- Product decision: an operation Morrow publishes can be called the way its provider documents.
+- Condition: Canvas describes `client_id` on the external tool routes as "If supplied all other parameters are unnecessary and will be ignored", and its own specification marks it required. Morrow published that requirement, so installing a tool with its own key and secret, which is the documented way and the only way without a developer key, was refused before anything was sent.
+- Repair: an input whose own description says it replaces the rest of the request is published as an alternative, not a requirement. The rule reads Canvas's text, so it covers both external tool routes and any later one Canvas describes the same way.
 - Status: `IMPLEMENTED`; proven live in BT2 course 89585.
 
 ### Root-cause patterns for rows 331–472

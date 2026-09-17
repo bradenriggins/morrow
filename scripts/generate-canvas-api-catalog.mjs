@@ -827,6 +827,30 @@ function applyClassicQuizAnswerParameters(operations) {
  * `/folders/by_path/*full_path`. The Canvas documentation lists no parameter for
  * it, so without this the address would be sent with the splat still in it.
  */
+/**
+ * Canvas documents a few inputs as a replacement for the rest of the request:
+ * "If supplied all other parameters are unnecessary and will be ignored". Such
+ * an input is an alternative, not a requirement, and requiring it made the
+ * documented way of calling the route impossible: an external tool installed
+ * with its own key and secret has no developer key id to give.
+ */
+function applyAlternativeInputs(operations) {
+  for (const operation of operations) {
+    for (const parameter of operation.parameters || []) {
+      if (!parameter.required) continue;
+      if (!/if supplied all other parameters are unnecessary/i.test(String(parameter.schema?.description || ""))) continue;
+      parameter.required = false;
+      const required = operation.inputSchema?.required;
+      if (Array.isArray(required)) {
+        operation.inputSchema = {
+          ...operation.inputSchema,
+          required: required.filter((name) => name !== parameter.inputName),
+        };
+      }
+    }
+  }
+}
+
 function applySplatPathInputs(operations) {
   for (const operation of operations) {
     const match = /\/\*([A-Za-z0-9_]+)$/.exec(operation.path);
@@ -966,6 +990,7 @@ async function buildCatalog() {
   applyDocumentedReadInputContracts(official);
   applySelfPersonRoutes(official);
   applySplatPathInputs(official);
+  applyAlternativeInputs(official);
   const itemBank = itemBankOperations();
   const courseFileContent = [courseFileTextOperation()];
   const browser = [...itemBank, ...courseFileContent];
