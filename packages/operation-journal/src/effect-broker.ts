@@ -1212,10 +1212,17 @@ export class ProviderEffectBroker {
    * beside the other attention codes: without it a person is told a change failed
    * and never told what to correct.
    */
-  settleFailure(operationIdValue: string, detail: unknown, mayHaveApplied: boolean, reason?: string): EffectOperationRecord {
+  settleFailure(
+    operationIdValue: string,
+    detail: unknown,
+    mayHaveApplied: boolean,
+    reason?: string,
+    providerStatus?: string,
+  ): EffectOperationRecord {
     const operationId = identifier(operationIdValue, "operation id");
     const now = this.instant();
     const named = typeof reason === "string" && /^[a-z][a-z0-9_]{0,99}$/u.test(reason) ? reason : null;
+    const status = typeof providerStatus === "string" && /^provider_status_[1-5][0-9][0-9]$/u.test(providerStatus) ? providerStatus : null;
     return this.transaction(() => {
       const current = this.get(operationId);
       if (current.state !== "dispatching") throw new Error(`operation cannot fail from ${current.state}`);
@@ -1224,6 +1231,7 @@ export class ProviderEffectBroker {
       const attention = [
         mayHaveApplied ? "provider_effect_may_have_landed" : "dispatch_failed_before_send",
         ...(named ? [named] : []),
+        ...(status ? [status] : []),
         sha256Json(detail),
       ];
       this.database.prepare(`

@@ -455,6 +455,18 @@ function sourceRefusalOf(result: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * What the provider answered, as Morrow's own closed code. A change Canvas
+ * rejected and one Canvas refused are different things to a person, and the
+ * status is the only part of that answer Morrow keeps.
+ */
+function providerStatusCode(result: unknown): string | undefined {
+  const structured = isJsonObject(result) && isJsonObject(result.structuredContent) ? result.structuredContent : undefined;
+  const failure = isJsonObject(structured?.providerFailure) ? structured.providerFailure : undefined;
+  const status = failure?.status ?? (isJsonObject(structured?.data) ? (structured.data as JsonObject).status : undefined);
+  return Number.isInteger(status) && Number(status) >= 100 && Number(status) <= 599 ? `provider_status_${status}` : undefined;
+}
+
 export function isPrivateSourceTool(tool: Pick<CatalogTool, "upstreamName">): boolean {
   return PRIVATE_SOURCE_TOOL_NAMES.has(tool.upstreamName);
 }
@@ -8450,7 +8462,13 @@ export class GatewayRuntime {
         || innerOperation?.sourceResultState === "not_sent";
       const settled = options.signal?.aborted && definitelyNotSent
         ? this.effects.settleCancelledBeforeSend(reserved.operationId)
-        : this.effects.settleFailure(reserved.operationId, result, !definitelyNotSent, sourceRefusalOf(result));
+        : this.effects.settleFailure(
+          reserved.operationId,
+          result,
+          !definitelyNotSent,
+          sourceRefusalOf(result),
+          providerStatusCode(result),
+        );
       const unresolved = settled.state === "applied_or_unknown" && usesEmbeddedReadback(mapping)
         ? connectorReadDescriptor(mapping, this.resolveResultArtifact(result))
         : null;
