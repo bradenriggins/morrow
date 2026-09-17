@@ -497,6 +497,7 @@ Every row stays open until its evidence columns are added and its status becomes
 | 480 | P1 | R3 | A person who connected their course again could never settle an earlier unresolved change, because the evidence had to come through the exact connection that change was made with. | closure section 480; operation journal regressions, live BT2 course 89585 | IMPLEMENTED |
 | 481 | P2 | R7 | The file-text read refused every Canvas file whose record carries no verifier, which is every file the signed-in session can already read. | closure section 481; Canvas file content regressions, live BT2 course 89585 | IMPLEMENTED |
 | 482 | P2 | R3 | A saved change whose course connection is gone was reported without naming the capability it used, so a person could not tell which item to read before settling it. | closure section 482; operations regressions, live BT2 course 89585 | IMPLEMENTED |
+| 483 | P1 | R7 | A credential name inside a longer identifier refused the whole reading, so a Canvas course whose random uuid happened to contain `csrf` made an account audit unreadable. | closure section 483; gateway privacy regressions, live BT2 course 89585 | IMPLEMENTED |
 
 ## Identifier accounting
 
@@ -3347,6 +3348,13 @@ Installed Morrow v33 with Bridge 1.0.9 on BT2 course `89585`, binding `canvas:53
 - Condition: a change made through a course connection that has since been made again is reported from local control state alone. That state named the change's id, its state and Morrow's own attention codes, but not the capability it used, so neither the person nor their assistant could tell which item to read before settling it. The one exit Morrow offers was unusable for want of a name Morrow already holds.
 - Repair: the control state names the capability. It is a name from Morrow's own catalog and carries no course or learner content.
 - Status: `IMPLEMENTED`; proven live in BT2 course 89585, where it settled six changes that could not be settled before.
+
+### 483: four letters inside a course id refused a whole reading
+
+- Product decision: Morrow refuses credentials, not text that happens to contain their names.
+- Condition: the credential test matched `csrf` anywhere in a reading. Canvas gives every course a random uuid, and one in BT2's account reads `99bncSRfVsDh50b9zPj57ChlNCeslsiW4od4Q3TG`. Those four letters refused the entire account audit reading, and no part of it could be read. `bearer` had the same shape: the words "bearer of" in a course page would have taken the page with them.
+- Repair: each credential name has to stand on its own, and `bearer` has to be followed by something that looks like a credential. A name inside a longer run of letters and digits is part of that identifier. `csrf_token=`, `"csrf":`, `X-CSRF-Token`, `Bearer secret-token`, a `data:` image and a hidden element are all still refused.
+- Status: `IMPLEMENTED`; proven live in BT2 course 89585.
 
 ### Root-cause patterns for rows 331–472
 

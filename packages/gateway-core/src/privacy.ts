@@ -1318,7 +1318,13 @@ function containsSensitiveText(value: string): boolean {
   // Redaction preserves non-learner source bytes, including HTML entities and
   // URL escapes. Inspect the same canonical match view so encoded credentials
   // remain refused without rewriting a safe URL.
-  return /(?:data:[^,;]{0,200};base64,|bearer\s+|cookie=|csrf|token=|<[^>]+(?:hidden|display\s*:\s*none))/i
+  //
+  // Each name here has to stand on its own. `csrf` inside a longer run of
+  // letters and digits is part of an identifier, not a credential: Canvas gives
+  // every course a random uuid, and one of them reading `99bncSRfVsDh...`
+  // refused an entire account audit. `bearer` likewise needs a credential after
+  // it, or the words "bearer of" in a course page would take the page with them.
+  return /(?:data:[^,;]{0,200};base64,|(?<![a-z0-9])bearer\s+[A-Za-z0-9._~+/-]{8,}|(?<![a-z0-9])cookie=|(?<![a-z0-9])csrf(?![a-z0-9])|(?<![a-z0-9])token=|<[^>]+(?:hidden|display\s*:\s*none))/i
     .test(normalizedIdentityTextView(value).text);
 }
 

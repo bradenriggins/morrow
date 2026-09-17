@@ -381,6 +381,17 @@ describe("privacy output boundary", () => {
     }
     expect(redactLearnerEgress({ note: "Submitted by unknown.person@school.test" }, context))
       .toEqual({ note: "Submitted by [address removed]" });
+
+    // A credential name inside a longer identifier is part of that identifier.
+    // Canvas gives every course a random uuid, and one of them reading
+    // `99bncSRfVsDh...` refused an entire account audit reading.
+    expect(redactLearnerEgress({ uuid: "99bncSRfVsDh50b9zPj57ChlNCeslsiW4od4Q3TG" }, context))
+      .toEqual({ uuid: "99bncSRfVsDh50b9zPj57ChlNCeslsiW4od4Q3TG" });
+    expect(redactLearnerEgress({ note: "the bearer of this card" }, context))
+      .toEqual({ note: "the bearer of this card" });
+    // The same names still refuse when they stand on their own.
+    expect(() => redactLearnerEgress({ note: "csrf_token=abc123" }, context)).toThrow("privacy_sensitive_text_refused");
+    expect(() => redactLearnerEgress({ note: "Bearer secret-token" }, context)).toThrow("privacy_sensitive_text_refused");
   });
 
   it("redacts roster identities under measure keys in projected output too", () => {
