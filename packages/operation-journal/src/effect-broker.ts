@@ -1313,6 +1313,38 @@ export class ProviderEffectBroker {
     });
   }
 
+  /**
+   * Closes one unresolved change that Morrow has no way to read back. Its route
+   * states no readable result, so no reading can be required of the person:
+   * their own check of the saved state is the only evidence that exists. The
+   * caller decides that from the capability itself; a change Morrow can read
+   * back goes through `closeAfterPersonCheck` and keeps its reading rule.
+   */
+  closeWithoutReadableResult(operationIdValue: string, observedStateDigestValue: string): EffectOperationRecord {
+    const operationId = identifier(operationIdValue, "operation id");
+    const observedStateDigest = digest(observedStateDigestValue, "observed state digest");
+    const now = this.instant();
+    return this.transaction(() => {
+      const current = this.get(operationId);
+      if (!UNRESOLVED_STATES.includes(current.state)) {
+        throw new Error(`operation cannot be closed by a person from ${current.state}`);
+      }
+
+      this.database.prepare(`
+        UPDATE provider_effect_operations
+        SET state='closed_by_person', person_observed_state_digest=?, attention_json=?,
+            updated_at=?, terminal_at=? WHERE operation_id=?
+      `).run(
+        observedStateDigest,
+        JSON.stringify(["closed_after_person_checked_saved_state", "no_readable_provider_result"]),
+        now,
+        now,
+        operationId,
+      );
+      return this.get(operationId);
+    });
+  }
+
   recordReadback(
     operationIdValue: string,
     readbackDigestValue: string,

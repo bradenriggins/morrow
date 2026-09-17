@@ -7066,6 +7066,15 @@ export class GatewayRuntime {
    * A persisted browser operation may outlive its authenticated learner scope.
    * This recovery shape intentionally contains only durable control state.
    */
+  /**
+   * True when Morrow can check this capability's saved result at all. A Canvas
+   * route that states no readable result has nothing for a person to read, so
+   * their own check is the only evidence a close can carry.
+   */
+  private capabilityReadsBack(name: string): boolean {
+    return this.toolByPublicName.get(name)?.capability?.behavior?.supportsReadback !== false;
+  }
+
   /** True when this capability is one an MCP client can discover and call. */
   private publicCapabilityName(name: string): boolean {
     const mapping = this.toolByPublicName.get(name);
@@ -8769,6 +8778,25 @@ export class GatewayRuntime {
         "This request is already settled, so there is nothing to close.",
         { effectState: operation.state },
       );
+    }
+    // A change whose route states no readable result has no reading to offer the
+    // person: Morrow froze no comparator for it and never could. Their own check
+    // is the only evidence that exists, so it is what closes the change. Every
+    // change Morrow can read back still needs that reading.
+    if (!this.capabilityReadsBack(operation.publicToolName)) {
+      const closedWithoutRead = this.effects.closeWithoutReadableResult(operation.operationId, observedState);
+      return this.effectResult(closedWithoutRead, "closed_by_person", {
+        content: [{
+          type: "text",
+          text: "Morrow closed this request because you checked the saved state yourself. This change has no result Morrow can read, so Morrow confirmed nothing, and it will not send it again.",
+        }],
+        structuredContent: {
+          schema: "morrow.operation-person-close.v1",
+          observedState,
+          readTool: null,
+          resentWrite: false,
+        },
+      });
     }
     const evidence = this.freshReadEvidence(operation, observedState);
     if (!evidence) {
